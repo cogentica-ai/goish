@@ -1093,6 +1093,56 @@ pub struct __ServerState {
     on_shutdown: Mutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
 }
 
+// go: sdk 1.25.5 net/http/server.go:2456-2466 htmlReplacer
+//
+/// The escaper Redirect's HTML body and dirList's link text go
+/// through. Go's own comments explain two choices: `&#34;` is shorter
+/// than `&quot;`, and `&#39;` is shorter than `&apos;` — which was not
+/// in HTML until HTML5.
+///
+/// Quoting `'` and `"` is not optional: both goish callers
+/// interpolate into an href ATTRIBUTE, where a bare quote escapes it.
+pub fn htmlReplacer() -> crate::strings::Replacer {
+    return crate::strings::NewReplacer(crate::goslice::slice::__from_vec(alloc::vec![
+        string("&"), string("&amp;"),
+        string("<"), string("&lt;"),
+        string(">"), string("&gt;"),
+        string("\""), string("&#34;"),
+        string("'"), string("&#39;"),
+    ]));
+}
+
+// go: sdk 1.25.5 net/http/server.go:834-834 copyBufPool
+//
+// Go pools fixed [copyBufPoolSize]byte ARRAYS, not slices, which is
+// why putCopyBuf can reject a re-sliced buffer by length.
+pub fn copyBufPool() -> &'static crate::sync::Pool<crate::goslice::slice<crate::types::byte>> {
+    static POOL: crate::lazy::Lazy<crate::sync::Pool<crate::goslice::slice<crate::types::byte>>> =
+        crate::lazy::Lazy::new(|| {
+            crate::sync::Pool::new(|| {
+                crate::goslice::slice::__from_vec(alloc::vec![0u8; copyBufPoolSize as usize])
+            })
+        });
+    return POOL.get();
+}
+
+// go: sdk 1.25.5 net/http/server.go:836-838 getCopyBuf
+pub fn getCopyBuf() -> crate::goslice::slice<crate::types::byte> {
+    return copyBufPool().Get();
+}
+
+// go: sdk 1.25.5 net/http/server.go:840-845 putCopyBuf
+//
+/// Go PANICS on a wrong-sized buffer rather than accepting it: the
+/// pool holds fixed arrays, and a short buffer returned to it would
+/// later be handed out as if it were full length.
+pub fn putCopyBuf(b: crate::goslice::slice<crate::types::byte>) {
+    if crate::len(&b) != copyBufPoolSize {
+        panic!("trying to put back buffer of the wrong size in the copyBufPool");
+    }
+    copyBufPool().Put(b);
+}
+
 // go: sdk 1.25.5 net/http/server.go:1808-1810 closeWriter
 //
 /// Go: "closeWriter is an interface that implements CloseWrite." The

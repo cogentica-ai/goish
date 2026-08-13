@@ -30,7 +30,7 @@ use goish::net::http::server::{
     debugServerConnections, errTooLarge, extraHeaderKeys, maxPostHandlerReadBytes,
     nextProtoUnencryptedHTTP2, rstAvoidanceDelay, shutdownPollIntervalMax, ConnStateString,
     StateActive, StateClosed, StateHijacked, StateIdle, StateNew, TrailerPrefix, badRequestError,
-    statusError,
+    getCopyBuf, htmlReplacer, putCopyBuf, statusError,
 };
 use goish::errors::ErrorTrait;
 use goish::errors;
@@ -263,11 +263,57 @@ fn main() {
         check!("[9] statusError / badRequestError vs Go", bad);
     }
 
+    // 10. htmlReplacer — the escaper Redirect's body and dirList's
+    //     link text share. Quoting `'` and `"` is NOT optional: both
+    //     callers interpolate into an href ATTRIBUTE, where a bare
+    //     quote escapes it. The last case is the one that shows why:
+    //     a script tag with a quoted attribute inside is fully
+    //     neutralised.
+    {
+        let cases: &[(&str, &str)] = &[
+            ("<a>", "&lt;a&gt;"),
+            ("a&b", "a&amp;b"),
+            ("a\"b", "a&#34;b"),
+            ("a'b", "a&#39;b"),
+            ("plain", "plain"),
+            ("", ""),
+            (
+                "<script>alert(\"x&y\")</script>",
+                "&lt;script&gt;alert(&#34;x&amp;y&#34;)&lt;/script&gt;",
+            ),
+        ];
+        let r = htmlReplacer();
+        let mut bad = 0;
+        for (input, want) in cases {
+            let got = r.Replace(string(*input));
+            if got != *want {
+                fmt::Println!("     htmlReplacer(", *input, ") = ", got);
+                bad += 1;
+            }
+        }
+        check!("[10] htmlReplacer, 7 cases vs Go", bad);
+    }
+
+    // 11. The copy-buffer pool hands out a full-size buffer and
+    //     REJECTS a short one on return — Go panics rather than
+    //     accepting it, because the pool holds fixed arrays and a
+    //     short buffer would later be handed out as if full length.
+    {
+        let b = getCopyBuf();
+        let mut bad = 0;
+        if b.Len() != copyBufPoolSize {
+            fmt::Println!("     getCopyBuf len=", b.Len());
+            bad += 1;
+        }
+        putCopyBuf(b);
+        check!("[11] getCopyBuf/putCopyBuf round trip", bad);
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 9/9");
+        fmt::Println!("ok 11/11");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL ", failed, " of 9");
+        fmt::Println!("FAIL ", failed, " of 11");
         syscall::Exit(1);
     }
 }
