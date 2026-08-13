@@ -1,296 +1,369 @@
-// net/http/sniff — DetectContentType per https://mimesniff.spec.whatwg.org/.
+// go: package net/http
 //
-// Line-by-line port of Go 1.25 src/net/http/sniff.go (304 LOC).
-// Each match function annotated with the corresponding Go source line.
+// go: file net/http/sniff.go decls: DetectContentType, isWS, isTT, exactSig.match, maskedSig.match, htmlSig.match, mp4Sig.match, textSig.match
+//
+// Go: "DetectContentType implements the algorithm described at
+// https://mimesniff.spec.whatwg.org/ to determine the Content-Type of
+// the given data."
+//
+// The previous port flattened Go's `sniffSignatures` table of sniffSig
+// values into a hand-written if-chain. That reads fine and it was very
+// nearly right — but a table you cannot line up against Go's is a table
+// whose entries can go missing without anyone noticing, and one had:
+// the 34-NULL-bytes-then-"LP" signature for
+// application/vnd.ms-fontobject was absent, so an embedded OpenType
+// font sniffed as application/octet-stream. The table is a table again.
+//
+// `match` is a Rust keyword, hence `r#match`; it is Go's method name.
 
 #![allow(non_snake_case)]
+#![allow(non_camel_case_types)]
 #![allow(dead_code)]
 
-extern crate alloc;
-
-use alloc::vec::Vec;
-
 use crate::goslice::slice;
-use crate::string;
-use crate::types::byte;
+use crate::gostring::string;
+use crate::types::{byte, int};
 
-/// Maximum number of bytes consulted by `DetectContentType`.
-/// Mirrors Go's `sniffLen` (sniff.go:13).
-const SNIFF_LEN: usize = 512;
+// go: sdk 1.25.5 net/http/sniff.go:13-13 sniffLen
+/// Go: "The algorithm uses at most sniffLen bytes to make its
+/// decision."
+const sniffLen: int = 512;
 
-/// `http.DetectContentType(data) -> string` (sniff.go:20).
-///
-/// WhatWG MIME sniffing algorithm, slim port. Returns
-/// "application/octet-stream" if no signature matches.
+// go: sdk 1.25.5 net/http/sniff.go:21-38 DetectContentType
+/// Go: "DetectContentType implements the algorithm described at
+/// https://mimesniff.spec.whatwg.org/ to determine the Content-Type of
+/// the given data. It considers at most the first 512 bytes of data.
+/// DetectContentType always returns a valid MIME type: if it cannot
+/// determine a more specific one, it returns
+/// "application/octet-stream"."
 pub fn DetectContentType(data: slice<byte>) -> string {
-    // Go: if len(data) > sniffLen { data = data[:sniffLen] }
-    let n = core::cmp::min(data.Len() as usize, SNIFF_LEN);
-    let view: &[byte] = &(*data)[..n];
+    let mut n = data.Len();
+    if n > sniffLen {
+        n = sniffLen;
+    }
+    let data: &[byte] = &(*data)[..crate::builtin::__make_size(n)];
 
-    // Go: index of the first non-whitespace byte.
-    let mut first_non_ws: usize = 0;
-    while first_non_ws < view.len() && is_ws(view[first_non_ws]) {
-        first_non_ws += 1;
+    // Go: "Index of the first non-whitespace byte in data."
+    let mut firstNonWS: int = 0;
+    while firstNonWS < crate::int(data.len()) && isWS(data[crate::builtin::__make_size(firstNonWS)])
+    {
+        firstNonWS += 1;
     }
 
-    // Go: for _, sig := range sniffSignatures { … }
-    if let Some(ct) = match_signatures(view, first_non_ws) {
-        return string(ct);
-    }
-    string("application/octet-stream")
-}
-
-/// `isWS` (sniff.go:43) — whitespace per the WhatWG terminology.
-fn is_ws(b: byte) -> bool {
-    matches!(b, b'\t' | b'\n' | 0x0c | b'\r' | b' ')
-}
-
-/// `isTT` (sniff.go:52) — tag-terminating byte for HTML signatures.
-fn is_tt(b: byte) -> bool {
-    matches!(b, b' ' | b'>')
-}
-
-/// `exactSig.match` (sniff.go:202) — bytes::HasPrefix-style.
-fn match_exact(data: &[byte], sig: &[byte]) -> bool {
-    if data.len() < sig.len() {
-        return false;
-    }
-    &data[..sig.len()] == sig
-}
-
-/// `maskedSig.match` (sniff.go:215) — masked prefix match. `data`
-/// has already had `firstNonWS` accounted for if `skip_ws` is true.
-fn match_masked(data: &[byte], pat: &[byte], mask: &[byte]) -> bool {
-    if pat.len() != mask.len() || data.len() < pat.len() {
-        return false;
-    }
-    for i in 0..pat.len() {
-        if (data[i] & mask[i]) != pat[i] {
-            return false;
+    for sig in sniffSignatures.iter() {
+        let ct = sig.r#match(data, firstNonWS);
+        if !ct.is_empty() {
+            return string::from_static(ct);
         }
     }
-    true
+
+    // fallback
+    return string::from_static("application/octet-stream");
 }
 
-/// `htmlSig.match` (sniff.go:239) — case-insensitive prefix match
-/// followed by a tag-terminating byte.
-fn match_html(data: &[byte], sig: &[byte]) -> bool {
-    if data.len() < sig.len() + 1 {
-        return false;
-    }
-    for i in 0..sig.len() {
-        let mut db = data[i];
-        let b = sig[i];
-        if (b'A'..=b'Z').contains(&b) {
-            db &= 0xDF;
-        }
-        if b != db {
-            return false;
-        }
-    }
-    is_tt(data[sig.len()])
+// go: sdk 1.25.5 net/http/sniff.go:42-48 isWS
+/// Go: "isWS reports whether the provided byte is a whitespace byte
+/// (0xWS) as defined in https://mimesniff.spec.whatwg.org/#terminology."
+fn isWS(b: byte) -> bool {
+    return matches!(b, b'\t' | b'\n' | 0x0c | b'\r' | b' ');
 }
 
-/// `mp4Sig.match` (sniff.go:265) — MP4 box-prefixed video.
-fn match_mp4(data: &[byte]) -> bool {
-    if data.len() < 12 {
-        return false;
+// go: sdk 1.25.5 net/http/sniff.go:52-58 isTT
+/// Go: "isTT reports whether the provided byte is a tag-terminating
+/// byte (0xTT) as defined in
+/// https://mimesniff.spec.whatwg.org/#terminology."
+fn isTT(b: byte) -> bool {
+    return matches!(b, b' ' | b'>');
+}
+
+// go: sdk 1.25.5 net/http/sniff.go:60-63 sniffSig
+trait sniffSig: Sync {
+    /// Go: "match returns the MIME type of the data, or "" if unknown."
+    fn r#match(&self, data: &[byte], firstNonWS: int) -> &'static str;
+}
+
+// ─── the signature types ────────────────────────────────────────────
+
+// go: sdk 1.25.5 net/http/sniff.go:197-200 exactSig
+struct exactSig {
+    sig: &'static [byte],
+    ct: &'static str,
+}
+
+impl sniffSig for exactSig {
+    // go: sdk 1.25.5 net/http/sniff.go:202-207 exactSig.match
+    fn r#match(&self, data: &[byte], _firstNonWS: int) -> &'static str {
+        if data.len() >= self.sig.len() && &data[..self.sig.len()] == self.sig {
+            return self.ct;
+        }
+        return "";
     }
-    // Go: boxSize := binary.BigEndian.Uint32(data[:4])
-    let box_size = (data[0] as usize) << 24
-        | (data[1] as usize) << 16
-        | (data[2] as usize) << 8
-        | (data[3] as usize);
-    if data.len() < box_size || box_size % 4 != 0 {
-        return false;
+}
+
+// go: sdk 1.25.5 net/http/sniff.go:209-213 maskedSig
+struct maskedSig {
+    mask: &'static [byte],
+    pat: &'static [byte],
+    skipWS: bool,
+    ct: &'static str,
+}
+
+impl sniffSig for maskedSig {
+    // go: sdk 1.25.5 net/http/sniff.go:215-235 maskedSig.match
+    /// Go: "pattern matching algorithm section 6
+    /// https://mimesniff.spec.whatwg.org/#pattern-matching-algorithm"
+    fn r#match(&self, data: &[byte], firstNonWS: int) -> &'static str {
+        let data = if self.skipWS {
+            &data[crate::builtin::__make_size(firstNonWS)..]
+        } else {
+            data
+        };
+        if self.pat.len() != self.mask.len() {
+            return "";
+        }
+        if data.len() < self.pat.len() {
+            return "";
+        }
+        for (i, pb) in self.pat.iter().enumerate() {
+            let maskedData = data[i] & self.mask[i];
+            if maskedData != *pb {
+                return "";
+            }
+        }
+        return self.ct;
     }
-    if &data[4..8] != b"ftyp" {
-        return false;
+}
+
+// go: sdk 1.25.5 net/http/sniff.go:237-237 htmlSig
+struct htmlSig(&'static [byte]);
+
+impl sniffSig for htmlSig {
+    // go: sdk 1.25.5 net/http/sniff.go:239-258 htmlSig.match
+    fn r#match(&self, data: &[byte], firstNonWS: int) -> &'static str {
+        let data = &data[crate::builtin::__make_size(firstNonWS)..];
+        let h = self.0;
+        if data.len() < h.len() + 1 {
+            return "";
+        }
+        for (i, b) in h.iter().enumerate() {
+            let mut db = data[i];
+            if b'A' <= *b && *b <= b'Z' {
+                db &= 0xDF;
+            }
+            if *b != db {
+                return "";
+            }
+        }
+        // Go: "Next byte must be a tag-terminating byte(0xTT)."
+        if !isTT(data[h.len()]) {
+            return "";
+        }
+        return "text/html; charset=utf-8";
     }
-    let mut st = 8;
-    while st < box_size {
-        if st == 12 {
-            // Ignore "major brand" version bytes
+}
+
+// go: sdk 1.25.5 net/http/sniff.go:260-260 mp4ftype
+static mp4ftype: &[byte] = b"ftyp";
+// go: sdk 1.25.5 net/http/sniff.go:261-261 mp4
+static mp4: &[byte] = b"mp4";
+
+// go: sdk 1.25.5 net/http/sniff.go:263-263 mp4Sig
+struct mp4Sig;
+
+impl sniffSig for mp4Sig {
+    // go: sdk 1.25.5 net/http/sniff.go:265-288 mp4Sig.match
+    /// Go: "https://mimesniff.spec.whatwg.org/#signature-for-mp4, c.f.
+    /// section 6.2.1"
+    fn r#match(&self, data: &[byte], _firstNonWS: int) -> &'static str {
+        if data.len() < 12 {
+            return "";
+        }
+        // Go: boxSize := int(binary.BigEndian.Uint32(data[:4]))
+        let boxSize = crate::int(crate::encoding::binary::BigEndian.Uint32(&data[..4]));
+        if crate::int(data.len()) < boxSize || boxSize % 4 != 0 {
+            return "";
+        }
+        if &data[4..8] != mp4ftype {
+            return "";
+        }
+        let mut st: int = 8;
+        while st < boxSize {
+            if st == 12 {
+                // Go: "Ignores the four bytes that correspond to the
+                // version number of the "major brand"."
+                st += 4;
+                continue;
+            }
+            // boxSize is a multiple of 4 and st <= boxSize-4, so
+            // st+3 < boxSize <= len(data); Go indexes unguarded here
+            // for the same reason.
+            let s = crate::builtin::__make_size(st);
+            if &data[s..s + 3] == mp4 {
+                return "video/mp4";
+            }
             st += 4;
-            continue;
         }
-        if st + 3 <= data.len() && &data[st..st + 3] == b"mp4" {
-            return true;
-        }
-        st += 4;
+        return "";
     }
-    false
 }
 
-/// `textSig.match` (sniff.go:292) — plain-text fallback.
-fn match_text(data: &[byte], first_non_ws: usize) -> bool {
-    for &b in &data[first_non_ws..] {
-        if b <= 0x08 || b == 0x0B || (0x0E..=0x1A).contains(&b) || (0x1C..=0x1F).contains(&b) {
-            return false;
+// go: sdk 1.25.5 net/http/sniff.go:290-290 textSig
+struct textSig;
+
+impl sniffSig for textSig {
+    // go: sdk 1.25.5 net/http/sniff.go:292-304 textSig.match
+    /// Go: "c.f. section 5, step 4."
+    fn r#match(&self, data: &[byte], firstNonWS: int) -> &'static str {
+        for b in data[crate::builtin::__make_size(firstNonWS)..].iter() {
+            let b = *b;
+            if b <= 0x08 || b == 0x0B || (0x0E <= b && b <= 0x1A) || (0x1C <= b && b <= 0x1F) {
+                return "";
+            }
         }
+        return "text/plain; charset=utf-8";
     }
-    true
 }
 
-/// Walk the table from sniff.go:66 and return the first match.
-fn match_signatures(data: &[byte], first_non_ws: usize) -> Option<&'static str> {
-    // Skip leading whitespace for HTML / "<?xml" matches (sniff.go:67-88).
-    let trimmed = &data[first_non_ws..];
+// ─── the table ──────────────────────────────────────────────────────
 
-    // HTML signatures.
-    let html_sigs: [&[byte]; 17] = [
-        b"<!DOCTYPE HTML",
-        b"<HTML",
-        b"<HEAD",
-        b"<SCRIPT",
-        b"<IFRAME",
-        b"<H1",
-        b"<DIV",
-        b"<FONT",
-        b"<TABLE",
-        b"<A",
-        b"<STYLE",
-        b"<TITLE",
-        b"<B",
-        b"<BODY",
-        b"<BR",
-        b"<P",
-        b"<!--",
-    ];
-    for sig in html_sigs.iter() {
-        if match_html(trimmed, sig) {
-            return Some("text/html; charset=utf-8");
-        }
-    }
+/// Go: "34 NULL bytes followed by the string "LP"".
+static eotPat: &[byte] =
+    b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00LP";
+/// Go: "34 NULL bytes followed by \xF\xF".
+static eotMask: &[byte] =
+    b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xFF\xFF";
 
-    // <?xml — masked, whitespace-skipping.
-    if match_masked(trimmed, b"<?xml", b"\xFF\xFF\xFF\xFF\xFF") {
-        return Some("text/xml; charset=utf-8");
-    }
-
-    // PDF / PostScript — exact prefix.
-    if match_exact(data, b"%PDF-") {
-        return Some("application/pdf");
-    }
-    if match_exact(data, b"%!PS-Adobe-") {
-        return Some("application/postscript");
-    }
-
+// go: sdk 1.25.5 net/http/sniff.go:66-195 sniffSignatures
+/// Go: "Data matching the table in section 6."
+///
+/// Order is load-bearing twice over: the audio/video block carries a
+/// comment in Go saying so, and textSig must stay last because it
+/// matches almost anything printable.
+static sniffSignatures: &[&dyn sniffSig] = &[
+    &htmlSig(b"<!DOCTYPE HTML"),
+    &htmlSig(b"<HTML"),
+    &htmlSig(b"<HEAD"),
+    &htmlSig(b"<SCRIPT"),
+    &htmlSig(b"<IFRAME"),
+    &htmlSig(b"<H1"),
+    &htmlSig(b"<DIV"),
+    &htmlSig(b"<FONT"),
+    &htmlSig(b"<TABLE"),
+    &htmlSig(b"<A"),
+    &htmlSig(b"<STYLE"),
+    &htmlSig(b"<TITLE"),
+    &htmlSig(b"<B"),
+    &htmlSig(b"<BODY"),
+    &htmlSig(b"<BR"),
+    &htmlSig(b"<P"),
+    &htmlSig(b"<!--"),
+    &maskedSig {
+        mask: b"\xFF\xFF\xFF\xFF\xFF",
+        pat: b"<?xml",
+        skipWS: true,
+        ct: "text/xml; charset=utf-8",
+    },
+    &exactSig { sig: b"%PDF-", ct: "application/pdf" },
+    &exactSig { sig: b"%!PS-Adobe-", ct: "application/postscript" },
     // UTF BOMs.
-    if match_masked(data, b"\xFE\xFF\x00\x00", b"\xFF\xFF\x00\x00") {
-        return Some("text/plain; charset=utf-16be");
-    }
-    if match_masked(data, b"\xFF\xFE\x00\x00", b"\xFF\xFF\x00\x00") {
-        return Some("text/plain; charset=utf-16le");
-    }
-    if match_masked(data, b"\xEF\xBB\xBF\x00", b"\xFF\xFF\xFF\x00") {
-        return Some("text/plain; charset=utf-8");
-    }
-
+    &maskedSig {
+        mask: b"\xFF\xFF\x00\x00",
+        pat: b"\xFE\xFF\x00\x00",
+        skipWS: false,
+        ct: "text/plain; charset=utf-16be",
+    },
+    &maskedSig {
+        mask: b"\xFF\xFF\x00\x00",
+        pat: b"\xFF\xFE\x00\x00",
+        skipWS: false,
+        ct: "text/plain; charset=utf-16le",
+    },
+    &maskedSig {
+        mask: b"\xFF\xFF\xFF\x00",
+        pat: b"\xEF\xBB\xBF\x00",
+        skipWS: false,
+        ct: "text/plain; charset=utf-8",
+    },
     // Image types.
-    if match_exact(data, b"\x00\x00\x01\x00") || match_exact(data, b"\x00\x00\x02\x00") {
-        return Some("image/x-icon");
-    }
-    if match_exact(data, b"BM") {
-        return Some("image/bmp");
-    }
-    if match_exact(data, b"GIF87a") || match_exact(data, b"GIF89a") {
-        return Some("image/gif");
-    }
-    if match_masked(
-        data,
-        b"RIFF\x00\x00\x00\x00WEBPVP",
-        b"\xFF\xFF\xFF\xFF\x00\x00\x00\x00\xFF\xFF\xFF\xFF\xFF\xFF",
-    ) {
-        return Some("image/webp");
-    }
-    if match_exact(data, b"\x89PNG\x0D\x0A\x1A\x0A") {
-        return Some("image/png");
-    }
-    if match_exact(data, b"\xFF\xD8\xFF") {
-        return Some("image/jpeg");
-    }
-
-    // Audio / video.
-    if match_masked(
-        data,
-        b"FORM\x00\x00\x00\x00AIFF",
-        b"\xFF\xFF\xFF\xFF\x00\x00\x00\x00\xFF\xFF\xFF\xFF",
-    ) {
-        return Some("audio/aiff");
-    }
-    if match_masked(data, b"ID3", b"\xFF\xFF\xFF") {
-        return Some("audio/mpeg");
-    }
-    if match_masked(data, b"OggS\x00", b"\xFF\xFF\xFF\xFF\xFF") {
-        return Some("application/ogg");
-    }
-    if match_masked(data, b"MThd\x00\x00\x00\x06", b"\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF") {
-        return Some("audio/midi");
-    }
-    if match_masked(
-        data,
-        b"RIFF\x00\x00\x00\x00AVI ",
-        b"\xFF\xFF\xFF\xFF\x00\x00\x00\x00\xFF\xFF\xFF\xFF",
-    ) {
-        return Some("video/avi");
-    }
-    if match_masked(
-        data,
-        b"RIFF\x00\x00\x00\x00WAVE",
-        b"\xFF\xFF\xFF\xFF\x00\x00\x00\x00\xFF\xFF\xFF\xFF",
-    ) {
-        return Some("audio/wave");
-    }
-    if match_mp4(data) {
-        return Some("video/mp4");
-    }
-    if match_exact(data, b"\x1A\x45\xDF\xA3") {
-        return Some("video/webm");
-    }
-
-    // Fonts.
-    if match_exact(data, b"\x00\x01\x00\x00") {
-        return Some("font/ttf");
-    }
-    if match_exact(data, b"OTTO") {
-        return Some("font/otf");
-    }
-    if match_exact(data, b"ttcf") {
-        return Some("font/collection");
-    }
-    if match_exact(data, b"wOFF") {
-        return Some("font/woff");
-    }
-    if match_exact(data, b"wOF2") {
-        return Some("font/woff2");
-    }
-
-    // Archives.
-    if match_exact(data, b"\x1F\x8B\x08") {
-        return Some("application/x-gzip");
-    }
-    if match_exact(data, b"PK\x03\x04") {
-        return Some("application/zip");
-    }
-    if match_exact(data, b"Rar!\x1A\x07\x00") || match_exact(data, b"Rar!\x1A\x07\x01\x00") {
-        return Some("application/x-rar-compressed");
-    }
-    if match_exact(data, b"\x00\x61\x73\x6D") {
-        return Some("application/wasm");
-    }
-
-    // textSig last.
-    if match_text(data, first_non_ws) {
-        return Some("text/plain; charset=utf-8");
-    }
-
-    None
-}
-
-// Suppress unused-import warnings for `Vec` in case future tweaks
-// drop the local helper.
-#[allow(dead_code)]
-fn _unused() {
-    let _: Vec<u8> = Vec::new();
-}
+    //
+    // Go: "For posterity, we originally returned
+    // "image/vnd.microsoft.icon" ... but that has since been replaced
+    // with "image/x-icon" in Section 6.2 of
+    // https://mimesniff.spec.whatwg.org/#matching-an-image-type-pattern"
+    &exactSig { sig: b"\x00\x00\x01\x00", ct: "image/x-icon" },
+    &exactSig { sig: b"\x00\x00\x02\x00", ct: "image/x-icon" },
+    &exactSig { sig: b"BM", ct: "image/bmp" },
+    &exactSig { sig: b"GIF87a", ct: "image/gif" },
+    &exactSig { sig: b"GIF89a", ct: "image/gif" },
+    &maskedSig {
+        mask: b"\xFF\xFF\xFF\xFF\x00\x00\x00\x00\xFF\xFF\xFF\xFF\xFF\xFF",
+        pat: b"RIFF\x00\x00\x00\x00WEBPVP",
+        skipWS: false,
+        ct: "image/webp",
+    },
+    &exactSig { sig: b"\x89PNG\x0D\x0A\x1A\x0A", ct: "image/png" },
+    &exactSig { sig: b"\xFF\xD8\xFF", ct: "image/jpeg" },
+    // Audio and Video types.
+    //
+    // Go: "Enforce the pattern match ordering as prescribed in
+    // https://mimesniff.spec.whatwg.org/#matching-an-audio-or-video-type-pattern"
+    &maskedSig {
+        mask: b"\xFF\xFF\xFF\xFF\x00\x00\x00\x00\xFF\xFF\xFF\xFF",
+        pat: b"FORM\x00\x00\x00\x00AIFF",
+        skipWS: false,
+        ct: "audio/aiff",
+    },
+    &maskedSig { mask: b"\xFF\xFF\xFF", pat: b"ID3", skipWS: false, ct: "audio/mpeg" },
+    &maskedSig {
+        mask: b"\xFF\xFF\xFF\xFF\xFF",
+        pat: b"OggS\x00",
+        skipWS: false,
+        ct: "application/ogg",
+    },
+    &maskedSig {
+        mask: b"\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF",
+        pat: b"MThd\x00\x00\x00\x06",
+        skipWS: false,
+        ct: "audio/midi",
+    },
+    &maskedSig {
+        mask: b"\xFF\xFF\xFF\xFF\x00\x00\x00\x00\xFF\xFF\xFF\xFF",
+        pat: b"RIFF\x00\x00\x00\x00AVI ",
+        skipWS: false,
+        ct: "video/avi",
+    },
+    &maskedSig {
+        mask: b"\xFF\xFF\xFF\xFF\x00\x00\x00\x00\xFF\xFF\xFF\xFF",
+        pat: b"RIFF\x00\x00\x00\x00WAVE",
+        skipWS: false,
+        ct: "audio/wave",
+    },
+    // 6.2.0.2. video/mp4
+    &mp4Sig,
+    // 6.2.0.3. video/webm
+    &exactSig { sig: b"\x1A\x45\xDF\xA3", ct: "video/webm" },
+    // Font types.
+    &maskedSig {
+        pat: eotPat,
+        mask: eotMask,
+        skipWS: false,
+        ct: "application/vnd.ms-fontobject",
+    },
+    &exactSig { sig: b"\x00\x01\x00\x00", ct: "font/ttf" },
+    &exactSig { sig: b"OTTO", ct: "font/otf" },
+    &exactSig { sig: b"ttcf", ct: "font/collection" },
+    &exactSig { sig: b"wOFF", ct: "font/woff" },
+    &exactSig { sig: b"wOF2", ct: "font/woff2" },
+    // Archive types.
+    &exactSig { sig: b"\x1F\x8B\x08", ct: "application/x-gzip" },
+    &exactSig { sig: b"PK\x03\x04", ct: "application/zip" },
+    // Go: "RAR's signatures are incorrectly defined by the MIME spec as
+    // per https://github.com/whatwg/mimesniff/issues/63. However, RAR
+    // Labs correctly defines it at
+    // https://www.rarlab.com/technote.htm#rarsign, so we use the
+    // definition from RAR Labs."
+    &exactSig { sig: b"Rar!\x1A\x07\x00", ct: "application/x-rar-compressed" }, // RAR v1.5-v4.0
+    &exactSig { sig: b"Rar!\x1A\x07\x01\x00", ct: "application/x-rar-compressed" }, // RAR v5+
+    &exactSig { sig: b"\x00\x61\x73\x6D", ct: "application/wasm" },
+    &textSig, // should be last
+];

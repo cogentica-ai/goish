@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 12718,
+ "total": 12704,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -748,8 +748,7 @@
    "GOISH023": 13
   },
   "src/net/http/sniff.rs": {
-   "GOISH014": 10,
-   "GOISH023": 9
+   "GOISH014": 5
   },
   "src/net/http/url.rs": {
    "GOISH005": 1,
