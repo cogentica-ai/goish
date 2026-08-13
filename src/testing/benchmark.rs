@@ -1,4 +1,4 @@
-// go: file testing/benchmark.go decls: B.add, B.trimOutput, B.SetParallelism, durationOrCountFlag.String, durationOrCountFlag.Set, B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
+// go: file testing/benchmark.go decls: B.RunParallel, PB.Next, B.add, B.trimOutput, B.SetParallelism, durationOrCountFlag.String, durationOrCountFlag.Set, B.StartTimer, B.StopTimer, B.ResetTimer, B.SetBytes, B.ReportAllocs, B.Elapsed, B.ReportMetric, BenchmarkResult.NsPerOp, BenchmarkResult.mbPerSec, BenchmarkResult.AllocsPerOp, BenchmarkResult.AllocedBytesPerOp, BenchmarkResult.String, BenchmarkResult.MemString, prettyPrint, benchmarkName, predictN
 //
 // testing/benchmark.go — the result type a benchmark reports, its
 // derived per-operation metrics, and the column formatting `go test
@@ -20,8 +20,8 @@
 // Everything in this file is reachable without either: pure arithmetic
 // over a BenchmarkResult a caller filled in, plus the formatting.
 //
-// goishlint:ignore GOISH018 Benchmark, Loop, Next, RunParallel, SetParallelism, RunBenchmarks, benchmarkName, doBench, launch, loopSlowPath, runN, run, run1, stopOrScaleBLoop, processBench, checkParallel, Write, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
-// goishlint:ignore GOISH021 PB, benchState, loopPoisonMask, loopPoisonTimer, loopPoisonN, benchTime, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
+// goishlint:ignore GOISH018 Benchmark, Loop, Next, RunParallel, SetParallelism, RunBenchmarks, benchmarkName, doBench, launch, loopSlowPath, runN, run, run1, stopOrScaleBLoop, processBench, checkParallel, Write, Next, initBenchmarkFlags, trimOutput — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
+// goishlint:ignore GOISH021 benchState, loopPoisonMask, loopPoisonTimer, loopPoisonN, benchTime, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
 
 #![allow(non_snake_case)]
 
@@ -288,7 +288,6 @@ pub fn predictN(goalns: int64, prevIters: int64, prevns: int64, last: int64) -> 
 ///     `result` — read only by `run1`/`launch`/`doBench`. Carried as
 ///     dead fields they would imply a runner that is not there, so
 ///     they arrive with it.
-#[derive(Default)]
 pub struct B {
     /// Go: "The number of iterations."
     pub N: int,
@@ -317,6 +316,43 @@ pub struct B {
     parallelism: int,
     /// Go: `B.output []byte` — what the benchmark logged.
     output: Vec<crate::types::byte>,
+    /// Go: `B` embeds `common`, which is where Failed/Fatal/Log live.
+    /// goish's `T` holds its common as `Arc<TState>` rather than
+    /// embedding it; `B` now does the same, so RunParallel's final
+    /// check reads the real failure state instead of a private flag.
+    pub(crate) state: alloc::sync::Arc<crate::testing::TState>,
+    /// Go: "number of iterations in the previous run".
+    previousN: int,
+    /// Go: "total duration of the previous run".
+    previousDuration: crate::time::Duration,
+}
+
+impl Default for B {
+    // go: none — goish idiom: `B` used to derive Default; the
+    // `Arc<TState>` it now holds is not Default, so the derive is
+    // written out. Every other field keeps its zero value.
+    fn default() -> Self {
+        return B {
+            N: 0,
+            bytes: 0,
+            timerOn: false,
+            showAllocResult: false,
+            startAllocs: 0,
+            startBytes: 0,
+            netAllocs: 0,
+            netBytes: 0,
+            extra: crate::map::new(),
+            start: crate::time::Time::default(),
+            duration: crate::time::Duration(0),
+            result: BenchmarkResult::default(),
+            missingBytes: false,
+            parallelism: 1,
+            output: Vec::new(),
+            state: alloc::sync::Arc::new(crate::testing::TState::new()),
+            previousN: 0,
+            previousDuration: crate::time::Duration(0),
+        };
+    }
 }
 
 impl B {
@@ -584,6 +620,134 @@ impl B {
     pub fn SetParallelism(&mut self, p: int) {
         if p >= 1 {
             self.parallelism = p;
+        }
+    }
+}
+
+// ─── RunParallel ─────────────────────────────────────────────────────
+
+// go: sdk 1.25.5 testing/benchmark.go:909-914 PB
+/// Go: "A PB is used by RunParallel for running parallel benchmarks."
+///
+/// The grain is why this type exists: workers claim iterations from the
+/// shared counter in BATCHES, so the atomic is touched once per grain
+/// rather than once per iteration.
+#[allow(non_snake_case)]
+pub struct PB {
+    /// Go: "shared between all worker goroutines iteration counter".
+    pub(crate) globalN: alloc::sync::Arc<core::sync::atomic::AtomicU64>,
+    /// Go: "acquire that many iterations from globalN at once".
+    pub(crate) grain: crate::types::uint64,
+    /// Go: "local cache of acquired iterations".
+    pub(crate) cache: crate::types::uint64,
+    /// Go: "total number of iterations to execute (b.N)".
+    pub(crate) bN: crate::types::uint64,
+}
+
+#[allow(non_snake_case)]
+impl PB {
+    // go: sdk 1.25.5 testing/benchmark.go:917-930 PB.Next
+    /// Go: "Next reports whether there are more iterations to execute."
+    ///
+    /// The middle branch is the one that is easy to drop: when a batch
+    /// would overshoot b.N, the worker takes the PARTIAL remainder
+    /// rather than giving up. Without it the last `grain-1` iterations
+    /// are never run and the benchmark quietly measures fewer
+    /// operations than it reports.
+    pub fn Next(&mut self) -> bool {
+        if self.cache == 0 {
+            let n = self
+                .globalN
+                .fetch_add(self.grain, core::sync::atomic::Ordering::AcqRel)
+                + self.grain;
+            if n <= self.bN {
+                self.cache = self.grain;
+            } else if n < self.bN + self.grain {
+                self.cache = self.bN + self.grain - n;
+            } else {
+                return false;
+            }
+        }
+        self.cache -= 1;
+        return true;
+    }
+}
+
+#[allow(non_snake_case)]
+impl B {
+    // go: none — goish idiom: Go's `B` embeds `common`, so `b.Failed()`
+    // resolves to common.Failed through embedding. goish's `B` holds
+    // its common as `Arc<TState>` (the same shape `T` uses), so the
+    // delegation is written out. The port of common.Failed itself lives
+    // in testing.rs.
+    pub fn Failed(&self) -> bool {
+        return self.state.failed.load(core::sync::atomic::Ordering::Acquire);
+    }
+
+    // go: sdk 1.25.5 testing/benchmark.go:945-984 B.RunParallel
+    /// Go: "RunParallel runs a benchmark in parallel. It creates
+    /// multiple goroutines and distributes b.N iterations among them."
+    ///
+    /// The grain is computed from the PREVIOUS run's rate so a batch is
+    /// about 100µs of work: enough to amortise the atomic, short enough
+    /// that a slow worker cannot hold the tail of the benchmark. It is
+    /// clamped at both ends — below 1 it would spin on the atomic,
+    /// above 1e4 one worker could hold 100µs/10ns of work while the
+    /// others idle.
+    pub fn RunParallel<F>(&mut self, body: F)
+    where
+        F: Fn(&mut PB) + Send + Sync + 'static,
+    {
+        if self.N == 0 {
+            // Go: "Nothing to do when probing."
+            return;
+        }
+        // Go: "Calculate grain size as number of iterations that take
+        // ~100µs."
+        let mut grain: crate::types::uint64 = 0;
+        if self.previousN > 0 && self.previousDuration > crate::time::Duration(0) {
+            grain = 100000 * crate::uint64(self.previousN)
+                / crate::uint64(self.previousDuration.0);
+        }
+        if grain < 1 {
+            grain = 1;
+        }
+        if grain > 10000 {
+            grain = 10000;
+        }
+
+        let n = alloc::sync::Arc::new(core::sync::atomic::AtomicU64::new(0));
+        let numProcs = self.parallelism * crate::runtime::GOMAXPROCS(0);
+        let wg = alloc::sync::Arc::new(crate::sync::WaitGroup::new());
+        let bN = crate::uint64(self.N);
+        let body = alloc::sync::Arc::new(body);
+
+        for _p in 0..numProcs {
+            let n = n.clone();
+            let wg2 = wg.clone();
+            let body = body.clone();
+            wg.Add(1);
+            crate::go!(stack(64 * 1024), move || {
+                let mut pb = PB {
+                    globalN: n,
+                    grain,
+                    cache: 0,
+                    bN,
+                };
+                body(&mut pb);
+                wg2.Done();
+            });
+        }
+        wg.Wait();
+
+        // Go: a body that returned before Next() said stop has measured
+        // fewer iterations than b.N claims, so the result would be a
+        // lie. Fatal rather than a warning.
+        if n.load(core::sync::atomic::Ordering::Acquire) <= bN && !self.Failed() {
+            self.state
+                .failed
+                .store(true, core::sync::atomic::Ordering::Release);
+            crate::fmt::Println!("RunParallel: body exited without pb.Next() == false");
         }
     }
 }
