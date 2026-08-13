@@ -32,7 +32,7 @@ use super::server::{Handler, NotFound};
 use crate::delete;
 use crate::io::fs;
 use super::header::{ParseTime, TimeFormat};
-use super::status::StatusNotModified;
+use super::status::{StatusNotModified, StatusPreconditionFailed};
 use crate::go;
 use crate::len;
 use crate::nil;
@@ -570,14 +570,14 @@ pub fn checkIfModifiedSince(r: nilable![&Request], mut modtime: time::Time) -> c
 }
 
 // go: sdk 1.25.5 net/http/fs.go:621-625 setLastModified
-pub fn setLastModified(w: impl ResponseWriter + 'static, modtime: time::Time) {
+pub fn setLastModified(w: &(dyn ResponseWriter + Send + Sync + 'static), modtime: time::Time) {
     if !isZeroTime(modtime) {
         w.Header().Set(string("Last-Modified"), modtime.UTC().Format(TimeFormat));
     }
 }
 
 // go: sdk 1.25.5 net/http/fs.go:627-641 writeNotModified
-pub fn writeNotModified(w: impl ResponseWriter + 'static) {
+pub fn writeNotModified(w: &(dyn ResponseWriter + Send + Sync + 'static)) {
     let mut h = w.Header();
     h.Del(string("Content-Type"));
     h.Del(string("Content-Length"));
@@ -600,3 +600,147 @@ pub const condNone: condResult = condResult(0);
 pub const condTrue: condResult = condResult(1);
 // go: sdk 1.25.5 net/http/fs.go:477-481 condFalse
 pub const condFalse: condResult = condResult(2);
+
+// go: sdk 1.25.5 net/http/fs.go:483-511 checkIfMatch
+pub fn checkIfMatch(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nilable![&Request]) -> condResult {
+    let mut im = r.Must().Header.Get(string("If-Match"));
+    if im == "" {
+        return condNone;
+    }
+    loop {
+        im = textproto::TrimString(im);
+        if len(&im) == 0 {
+            break;
+        }
+        if im[0] == 44 /*','*/ {
+            im = im.slice(1, len(&im));
+            continue;
+        }
+        if im[0] == 42 /*'*'*/ {
+            return condTrue;
+        }
+        let (etag, remain) = scanETag(im.clone());
+        if etag == "" {
+            break;
+        }
+        if etagStrongMatch(etag, w.Header().Get(string("Etag"))) {
+            return condTrue;
+        }
+        im = remain;
+    }
+    return condFalse;
+}
+
+// go: sdk 1.25.5 net/http/fs.go:513-530 checkIfUnmodifiedSince
+pub fn checkIfUnmodifiedSince(r: nilable![&Request], mut modtime: time::Time) -> condResult {
+    let ius = r.Must().Header.Get(string("If-Unmodified-Since"));
+    if ius == "" || isZeroTime(modtime) {
+        return condNone;
+    }
+    let (t, err) = ParseTime(ius);
+    if err != nil {
+        return condNone;
+    }
+    modtime = modtime.Truncate(time::Second);
+    {
+        let ret = modtime.Compare(t);
+        if ret <= 0 {
+            return condTrue;
+        }
+    }
+    return condFalse;
+}
+
+// go: sdk 1.25.5 net/http/fs.go:532-560 checkIfNoneMatch
+pub fn checkIfNoneMatch(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nilable![&Request]) -> condResult {
+    let inm = r.Must().Header.Get(string("If-None-Match"));
+    if inm == "" {
+        return condNone;
+    }
+    let mut buf = inm;
+    loop {
+        buf = textproto::TrimString(buf);
+        if len(&buf) == 0 {
+            break;
+        }
+        if buf[0] == 44 /*','*/ {
+            buf = buf.slice(1, len(&buf));
+            continue;
+        }
+        if buf[0] == 42 /*'*'*/ {
+            return condFalse;
+        }
+        let (etag, remain) = scanETag(buf.clone());
+        if etag == "" {
+            break;
+        }
+        if etagWeakMatch(etag, w.Header().Get(string("Etag"))) {
+            return condFalse;
+        }
+        buf = remain;
+    }
+    return condTrue;
+}
+
+// go: sdk 1.25.5 net/http/fs.go:583-612 checkIfRange
+pub fn checkIfRange(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nilable![&Request], modtime: time::Time) -> condResult {
+    if r.Must().Method != "GET" && r.Must().Method != "HEAD" {
+        return condNone;
+    }
+    let ir = r.Must().Header.Get(string("If-Range"));
+    if ir == "" {
+        return condNone;
+    }
+    let (etag, _) = scanETag(ir.clone());
+    if etag != "" {
+        if etagStrongMatch(etag, w.Header().Get(string("Etag"))) {
+            return condTrue;
+        } else {
+            return condFalse;
+        }
+    }
+    if modtime.IsZero() {
+        return condFalse;
+    }
+    let (t, err) = ParseTime(ir);
+    if err != nil {
+        return condFalse;
+    }
+    if t.Unix() == modtime.Unix() {
+        return condTrue;
+    }
+    return condFalse;
+}
+
+// go: sdk 1.25.5 net/http/fs.go:645-676 checkPreconditions
+pub fn checkPreconditions(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nilable![&Request], modtime: time::Time) -> (bool, string) {
+    #[allow(unused_mut)]
+    let mut rangeHeader: string = Default::default();
+    let mut ch = checkIfMatch(w, r);
+    if ch == condNone {
+        ch = checkIfUnmodifiedSince(r, modtime);
+    }
+    if ch == condFalse {
+        w.WriteHeader(StatusPreconditionFailed);
+        return (true, string(""));
+    }
+    if checkIfNoneMatch(w, r) == condFalse {
+        if r.Must().Method == "GET" || r.Must().Method == "HEAD" {
+            writeNotModified(w);
+            return (true, string(""));
+        } else {
+            w.WriteHeader(StatusPreconditionFailed);
+            return (true, string(""));
+        }
+    } else if checkIfNoneMatch(w, r) == condNone {
+        if checkIfModifiedSince(r, modtime) == condFalse {
+            writeNotModified(w);
+            return (true, string(""));
+        }
+    }
+    rangeHeader = r.Must().Header.Get(string("Range"));
+    if rangeHeader != "" && checkIfRange(w, r, modtime) == condFalse {
+        rangeHeader = string("");
+    }
+    return (false, rangeHeader);
+}
