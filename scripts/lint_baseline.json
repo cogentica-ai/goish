@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 12704,
+ "total": 12658,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -680,8 +680,8 @@
   },
   "src/net/http/cookie.rs": {
    "GOISH005": 20,
-   "GOISH014": 37,
-   "GOISH023": 34
+   "GOISH014": 1,
+   "GOISH023": 24
   },
   "src/net/http/cookiejar/mod.rs": {
    "GOISH016": 1

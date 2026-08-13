@@ -56,7 +56,7 @@ use crate::time;
 use crate::types::{byte, int};
 use crate::{append, make};
 
-use super::cookie::{read_set_cookies, Cookie};
+use super::cookie::{readSetCookies, Cookie};
 use super::header::Header;
 use super::request::Request;
 use super::url::URL;
@@ -358,7 +358,7 @@ impl Response {
     /// `(*Response).Cookies()` — parse Set-Cookie headers.
     /// Mirrors response.go:125.
     pub fn Cookies(&self) -> slice<Cookie> {
-        read_set_cookies(&self.Header)
+        readSetCookies(&self.Header)
     }
 
     /// `(*Response).ProtoAtLeast(major, minor)` (response.go:224) —

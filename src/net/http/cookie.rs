@@ -1,29 +1,32 @@
-// net/http/cookie — Go's `http.Cookie`, ported.
+// go: package net/http
 //
-//   Go                                      goish
-//   ─────────────────────────────────────   ──────────────────────────────────
+// go: file net/http/cookie.go decls: cookieNumWithinMax, ParseCookie, ParseSetCookie, readSetCookies, SetCookie, Cookie.String, Cookie.Valid, readCookies, validCookieDomain, validCookieExpires, isCookieDomainName, sanitizeCookieName, sanitizeCookieValue, validCookieValueByte, sanitizeCookiePath, validCookiePathByte, sanitizeOrWarn, parseCookieValue, cookieNameSanitizer
+//
+// Go: "http.Cookie represents an HTTP cookie as sent in the Set-Cookie
+// header of an HTTP response or the Cookie header of an HTTP request."
+//
+//   Go                                       goish
+//   ──────────────────────────────────────   ─────────────────────────────────
 //   c := &http.Cookie{Name: "k", Value: "v"} let c = http::Cookie::new(string("k"), string("v"));
 //   http.SetCookie(w, c)                     http::SetCookie(w, &c);
 //   r.Cookies()                              r.Cookies()
-//   r.Cookie("session")                      r.Cookie(string("session"))
 //   c.String()                               c.String()
 //
-// Faithful port of Go 1.25 src/net/http/cookie.go (577 LOC). Notable
-// deviations from Go:
+// Three divergences, all deliberate and all narrower than the notes
+// that used to sit here claimed:
 //
-//   * Cookie limit (`defaultCookieMaxNum=3000`) honored as a hard cap;
-//     Go's GODEBUG override is dropped (no godebug yet).
-//   * `validCookieDomain` accepts only IPv4 literals as IPs (no IPv6
-//     since `net::ParseIP` isn't ported yet). RFC 6265 only requires
-//     IPv4; IPv6 literals must be bracketed and aren't valid cookie
-//     domains anyway.
-//   * Time parse/format for the `Expires` attribute uses an inline
-//     IMF-fixdate parser (`Mon, 02 Jan 2006 15:04:05 GMT`) instead of
-//     `time::Parse`/`time::Format` since those aren't ported yet. The
-//     legacy `Mon, 02-Jan-2006 15:04:05 MST` form is also accepted on
-//     read.
+//   * `defaultCookieMaxNum` (3000) is a hard cap. Go lets the
+//     httpcookiemaxnum GODEBUG raise or disable it; goish has no
+//     godebug, so `cookieNumWithinMax` is the default branch only.
+//   * Expires is rendered and parsed by hand rather than through
+//     time::Format / time::Parse — see the note above DAY_NAMES. The
+//     old note blamed those functions being unported; they are ported.
+//   * `Cookie::new` and `impl Default for Cookie` have no Go
+//     counterpart: they stand in for a composite literal with the rest
+//     of the fields zeroed.
 //
-// Reference: go1.25.5/src/net/http/cookie.go.
+// goishlint:ignore GOISH021 httpcookiemaxnum — a godebug.Setting, and
+// goish has no godebug package for it to be one of.
 
 #![allow(non_snake_case)]
 
@@ -69,6 +72,8 @@ pub struct Cookie {
 }
 
 impl Default for Cookie {
+    // go: none — goish-only: Go's zero value. SameSite must default to
+    // SameSiteDefaultMode (iota+1 == 1), not to a derived zero.
     fn default() -> Self {
         Cookie {
             Name: string::new(),
@@ -90,9 +95,9 @@ impl Default for Cookie {
 }
 
 impl Cookie {
-    /// Convenience constructor: a Cookie with `Name`/`Value` set and
-    /// every other field at its zero value. The Go-idiomatic way is
-    /// the struct literal, but this is handier for the common case.
+    // go: none — goish-only: Go writes `&Cookie{Name: n, Value: v}`,
+    // a composite literal with the rest zeroed. Rust has no partial
+    // struct literal, so the two-field case gets a constructor.
     pub fn new<N: Into<string>, V: Into<string>>(name: N, value: V) -> Self {
         let name: string = name.into();
         let value: string = value.into();
@@ -123,60 +128,65 @@ pub const SameSiteLaxMode: SameSite = SameSite::LaxMode;
 pub const SameSiteStrictMode: SameSite = SameSite::StrictMode;
 pub const SameSiteNoneMode: SameSite = SameSite::NoneMode;
 
-// ─── Errors (lazy-init for stable identity) ──────────────────────────
+// ─── Errors ──────────────────────────────────────────────────────────
+//
+// A `var (...)` block in Go, so each of these is ONE pointer-stable
+// value. The five functions that stood here minted a fresh error per
+// call under a comment claiming "lazy-init for stable identity" — goish
+// errors compare by Arc identity, so identity was exactly what they did
+// not have, and errors::Is against any of them was always false.
 
-fn err_blank_cookie() -> error {
-    errors::New(string("http: blank cookie"))
-}
-fn err_equal_not_found() -> error {
-    errors::New(string("http: '=' not found in cookie"))
-}
-fn err_invalid_name() -> error {
-    errors::New(string("http: invalid cookie name"))
-}
-fn err_invalid_value() -> error {
-    errors::New(string("http: invalid cookie value"))
-}
-fn err_num_limit() -> error {
-    errors::New(string("http: number of cookies exceeded limit"))
+crate::var! {
+    // go: sdk 1.25.5 net/http/cookie.go:63-69 errBlankCookie
+    errBlankCookie: error = "http: blank cookie";
+    // go: sdk 1.25.5 net/http/cookie.go:63-69 errEqualNotFoundInCookie
+    errEqualNotFoundInCookie: error = "http: '=' not found in cookie";
+    // go: sdk 1.25.5 net/http/cookie.go:63-69 errInvalidCookieName
+    errInvalidCookieName: error = "http: invalid cookie name";
+    // go: sdk 1.25.5 net/http/cookie.go:63-69 errInvalidCookieValue
+    errInvalidCookieValue: error = "http: invalid cookie value";
+    // go: sdk 1.25.5 net/http/cookie.go:63-69 errCookieNumLimitExceeded
+    errCookieNumLimitExceeded: error = "http: number of cookies exceeded limit";
 }
 
-const DEFAULT_COOKIE_MAX_NUM: usize = 3000;
+const defaultCookieMaxNum: usize = 3000;
 
+// go: sdk 1.25.5 net/http/cookie.go:73-86 cookieNumWithinMax
 #[inline]
-fn cookie_num_within_max(n: usize) -> bool {
-    n <= DEFAULT_COOKIE_MAX_NUM
+fn cookieNumWithinMax(n: usize) -> bool {
+    n <= defaultCookieMaxNum
 }
 
 // ─── ParseCookie / ParseSetCookie ────────────────────────────────────
 
+// go: sdk 1.25.5 net/http/cookie.go:91-116 ParseCookie
 /// `http.ParseCookie(line)` — parse a `Cookie:` header value into the
 /// list of cookies it carries (cookie.go:91). Same name may appear
 /// multiple times.
 pub fn ParseCookie<L: Into<string>>(line: L) -> (slice<Cookie>, error) {
     let line: string = line.into();
     let semi_count = strings::Count(line.clone(), string(";")) as usize;
-    if !cookie_num_within_max(semi_count + 1) {
-        return (slice::<Cookie>::__from_vec(Vec::new()), err_num_limit());
+    if !cookieNumWithinMax(semi_count + 1) {
+        return (slice::<Cookie>::__from_vec(Vec::new()), errCookieNumLimitExceeded.into());
     }
     let trimmed = strings::TrimSpace(line);
     let parts = strings::Split(trimmed.clone(), string(";"));
     if parts.Len() == 1 && parts[0].Len() == 0 {
-        return (slice::<Cookie>::__from_vec(Vec::new()), err_blank_cookie());
+        return (slice::<Cookie>::__from_vec(Vec::new()), errBlankCookie.into());
     }
     let mut out: Vec<Cookie> = Vec::with_capacity(parts.Len() as usize);
     for i in 0..parts.Len() {
         let s = strings::TrimSpace(parts[i].clone());
         let (name, value, found) = strings::Cut(s, string("="));
         if !found {
-            return (slice::<Cookie>::__from_vec(Vec::new()), err_equal_not_found());
+            return (slice::<Cookie>::__from_vec(Vec::new()), errEqualNotFoundInCookie.into());
         }
-        if !is_token(&name) {
-            return (slice::<Cookie>::__from_vec(Vec::new()), err_invalid_name());
+        if !super::http::isToken(&name) {
+            return (slice::<Cookie>::__from_vec(Vec::new()), errInvalidCookieName.into());
         }
-        let (val, quoted, ok) = parse_cookie_value(&value, true);
+        let (val, quoted, ok) = parseCookieValue(&value, true);
         if !ok {
-            return (slice::<Cookie>::__from_vec(Vec::new()), err_invalid_value());
+            return (slice::<Cookie>::__from_vec(Vec::new()), errInvalidCookieValue.into());
         }
         let mut c = Cookie::default();
         c.Name = name;
@@ -187,6 +197,7 @@ pub fn ParseCookie<L: Into<string>>(line: L) -> (slice<Cookie>, error) {
     (slice::<Cookie>::__from_vec(out), errors::nil)
 }
 
+// go: sdk 1.25.5 net/http/cookie.go:120-220 ParseSetCookie
 /// `http.ParseSetCookie(line)` — parse a `Set-Cookie:` header value
 /// (cookie.go:120).
 pub fn ParseSetCookie<L: Into<string>>(line: L) -> (Cookie, error) {
@@ -194,20 +205,20 @@ pub fn ParseSetCookie<L: Into<string>>(line: L) -> (Cookie, error) {
     let trimmed = strings::TrimSpace(line.clone());
     let parts = strings::Split(trimmed, string(";"));
     if parts.Len() == 1 && parts[0].Len() == 0 {
-        return (Cookie::default(), err_blank_cookie());
+        return (Cookie::default(), errBlankCookie.into());
     }
     let head = strings::TrimSpace(parts[0].clone());
     let (name_raw, value_raw, ok) = strings::Cut(head, string("="));
     if !ok {
-        return (Cookie::default(), err_equal_not_found());
+        return (Cookie::default(), errEqualNotFoundInCookie.into());
     }
     let name = strings::TrimSpace(name_raw);
-    if !is_token(&name) {
-        return (Cookie::default(), err_invalid_name());
+    if !super::http::isToken(&name) {
+        return (Cookie::default(), errInvalidCookieName.into());
     }
-    let (val, quoted, ok) = parse_cookie_value(&value_raw, true);
+    let (val, quoted, ok) = parseCookieValue(&value_raw, true);
     if !ok {
-        return (Cookie::default(), err_invalid_value());
+        return (Cookie::default(), errInvalidCookieValue.into());
     }
     let mut c = Cookie::default();
     c.Name = name;
@@ -226,7 +237,7 @@ pub fn ParseSetCookie<L: Into<string>>(line: L) -> (Cookie, error) {
         // Go: lowerAttr, isASCII := ascii.ToLower(attr); if !isASCII { continue }
         // goish: use strings::EqualFold for each known attribute name —
         // skips the lowering allocation and matches case-insensitively.
-        let (vv, _, vok) = parse_cookie_value(&raw_val, false);
+        let (vv, _, vok) = parseCookieValue(&raw_val, false);
         if !vok {
             unparsed.push(part);
             continue;
@@ -281,6 +292,7 @@ pub fn ParseSetCookie<L: Into<string>>(line: L) -> (Cookie, error) {
 // ─── Cookie::String / Valid ──────────────────────────────────────────
 
 impl Cookie {
+    // go: sdk 1.25.5 net/http/cookie.go:261-325 Cookie.String
     /// Serialize the cookie for use in a `Cookie:` header (when only
     /// `Name`+`Value` are set) or `Set-Cookie:` response header (when
     /// any other field is set). Returns `""` if `Name` is invalid.
@@ -291,7 +303,7 @@ impl Cookie {
     /// statement.
     pub fn String(&self) -> string {
         // Go: if c == nil || !isToken(c.Name) { return "" }
-        if !is_token(&self.Name) {
+        if !super::http::isToken(&self.Name) {
             return string("");
         }
         // Go: const extraCookieLength = 110
@@ -311,16 +323,16 @@ impl Cookie {
         // Go: b.WriteRune('=')
         let _ = b.WriteByte(b'=');
         // Go: b.WriteString(sanitizeCookieValue(c.Value, c.Quoted))
-        let _ = b.WriteString(sanitize_cookie_value(self.Value.clone(), self.Quoted));
+        let _ = b.WriteString(sanitizeCookieValue(self.Value.clone(), self.Quoted));
 
         // Go: if len(c.Path) > 0 { b.WriteString("; Path="); b.WriteString(sanitizeCookiePath(c.Path)) }
         if self.Path.Len() > 0 {
             let _ = b.WriteString("; Path=");
-            let _ = b.WriteString(sanitize_cookie_path(self.Path.clone()));
+            let _ = b.WriteString(sanitizeCookiePath(self.Path.clone()));
         }
         // Go: if len(c.Domain) > 0 { if validCookieDomain(c.Domain) { ... } else { log.Printf("…") } }
         if self.Domain.Len() > 0 {
-            if valid_cookie_domain(&self.Domain) {
+            if validCookieDomain(&self.Domain) {
                 // Go: d := c.Domain; if d[0] == '.' { d = d[1:] }
                 let d = self.Domain.clone();
                 let d = if d.Len() > 0 && d[0] == b'.' {
@@ -336,7 +348,7 @@ impl Cookie {
         // Go: var buf [len(TimeFormat)]byte
         // Go: if validCookieExpires(c.Expires) { b.WriteString("; Expires="); b.Write(c.Expires.UTC().AppendFormat(buf[:0], TimeFormat)) }
         let mut time_buf: [byte; 29] = [0; 29];
-        if valid_cookie_expires(&self.Expires) {
+        if validCookieExpires(&self.Expires) {
             let _ = b.WriteString("; Expires=");
             let appended = append_imf_fixdate_into(&mut time_buf, &self.Expires);
             let _ = b.WriteString(string::from_bytes(appended));
@@ -380,6 +392,7 @@ impl Cookie {
         b.String()
     }
 
+    // go: sdk 1.25.5 net/http/cookie.go:328-361 Cookie.Valid
     /// Reports whether the cookie is valid. Returns `errors::nil` if so,
     /// else an error describing the first problem.
     ///
@@ -387,29 +400,29 @@ impl Cookie {
     pub fn Valid(&self) -> error {
         // Go: if c == nil { return errors.New("http: nil Cookie") }   — we have &self, so always non-nil
         // Go: if !isToken(c.Name) { ... }
-        if !is_token(&self.Name) {
+        if !super::http::isToken(&self.Name) {
             return errors::New(string("http: invalid Cookie.Name"));
         }
         // Go: if !c.Expires.IsZero() && !validCookieExpires(c.Expires) { ... }
-        if !self.Expires.IsZero() && !valid_cookie_expires(&self.Expires) {
+        if !self.Expires.IsZero() && !validCookieExpires(&self.Expires) {
             return errors::New(string("http: invalid Cookie.Expires"));
         }
         // Go: for i := 0; i < len(c.Value); i++ { if !validCookieValueByte(c.Value[i]) { … } }
         for i in 0..self.Value.Len() {
-            if !valid_cookie_value_byte(self.Value[i]) {
+            if !validCookieValueByte(self.Value[i]) {
                 return errors::New(string("http: invalid byte in Cookie.Value"));
             }
         }
         // Go: if len(c.Path) > 0 { for i ... validCookiePathByte ... }
         if self.Path.Len() > 0 {
             for i in 0..self.Path.Len() {
-                if !valid_cookie_path_byte(self.Path[i]) {
+                if !validCookiePathByte(self.Path[i]) {
                     return errors::New(string("http: invalid byte in Cookie.Path"));
                 }
             }
         }
         // Go: if len(c.Domain) > 0 { if !validCookieDomain(c.Domain) { … } }
-        if self.Domain.Len() > 0 && !valid_cookie_domain(&self.Domain) {
+        if self.Domain.Len() > 0 && !validCookieDomain(&self.Domain) {
             return errors::New(string("http: invalid Cookie.Domain"));
         }
         // Go: if c.Partitioned { if !c.Secure { return errors.New(...) } }
@@ -422,10 +435,11 @@ impl Cookie {
 
 // ─── readCookies / readSetCookies — used by Request / Response ───────
 
+// go: sdk 1.25.5 net/http/cookie.go:371-415 readCookies
 /// Parse all "Cookie" header lines from `h`. If `filter` is non-empty,
 /// only cookies named `filter` are returned. Mirrors `readCookies`
 /// (cookie.go:371).
-pub(crate) fn read_cookies(h: &Header, filter: &string) -> slice<Cookie> {
+pub(crate) fn readCookies(h: &Header, filter: &string) -> slice<Cookie> {
     let lines = h.Values(string("Cookie"));
     if lines.Len() == 0 {
         return slice::<Cookie>::__from_vec(Vec::new());
@@ -434,7 +448,7 @@ pub(crate) fn read_cookies(h: &Header, filter: &string) -> slice<Cookie> {
     for i in 0..lines.Len() {
         total_segments += strings::Count(lines[i].clone(), string(";")) as usize + 1;
     }
-    if !cookie_num_within_max(total_segments) {
+    if !cookieNumWithinMax(total_segments) {
         return slice::<Cookie>::__from_vec(Vec::new());
     }
     let mut out: Vec<Cookie> = Vec::with_capacity(total_segments);
@@ -449,13 +463,13 @@ pub(crate) fn read_cookies(h: &Header, filter: &string) -> slice<Cookie> {
             }
             let (name_raw, val_raw, _) = strings::Cut(part, string("="));
             let name = strings::TrimSpace(name_raw);
-            if !is_token(&name) {
+            if !super::http::isToken(&name) {
                 continue;
             }
             if filter.Len() > 0 && *filter != name {
                 continue;
             }
-            let (val, quoted, ok) = parse_cookie_value(&val_raw, true);
+            let (val, quoted, ok) = parseCookieValue(&val_raw, true);
             if !ok {
                 continue;
             }
@@ -469,11 +483,12 @@ pub(crate) fn read_cookies(h: &Header, filter: &string) -> slice<Cookie> {
     slice::<Cookie>::__from_vec(out)
 }
 
+// go: sdk 1.25.5 net/http/cookie.go:228-246 readSetCookies
 /// Parse all "Set-Cookie" headers from `h`. Mirrors `readSetCookies`
 /// (cookie.go:228). Used by the (future) `Response` type.
-pub(crate) fn read_set_cookies(h: &Header) -> slice<Cookie> {
+pub(crate) fn readSetCookies(h: &Header) -> slice<Cookie> {
     let lines = h.Values(string("Set-Cookie"));
-    if lines.Len() == 0 || !cookie_num_within_max(lines.Len() as usize) {
+    if lines.Len() == 0 || !cookieNumWithinMax(lines.Len() as usize) {
         return slice::<Cookie>::__from_vec(Vec::new());
     }
     let mut out: Vec<Cookie> = Vec::with_capacity(lines.Len() as usize);
@@ -488,6 +503,7 @@ pub(crate) fn read_set_cookies(h: &Header) -> slice<Cookie> {
 
 // ─── SetCookie ───────────────────────────────────────────────────────
 
+// go: sdk 1.25.5 net/http/cookie.go:251-255 SetCookie
 /// `http.SetCookie(w, c)` — appends `Set-Cookie: c.String()` to the
 /// response header. Drops cookies with invalid names. Mirrors
 /// `SetCookie` (cookie.go:251).
@@ -501,45 +517,49 @@ pub fn SetCookie(w: &(dyn super::ResponseWriter + Send + Sync + 'static), c: &Co
 
 // ─── helpers — RFC 6265 byte classes, sanitizers, parser ─────────────
 
+// go: sdk 1.25.5 net/http/cookie.go:520-522 validCookieValueByte
 /// `validCookieValueByte` — RFC 6265 cookie-octet (loosened to allow
-/// space/comma; emitted quoted by `sanitize_cookie_value`).
-fn valid_cookie_value_byte(b: byte) -> bool {
+/// space/comma; emitted quoted by `sanitizeCookieValue`).
+fn validCookieValueByte(b: byte) -> bool {
     0x20 <= b && b < 0x7f && b != b'"' && b != b';' && b != b'\\'
 }
 
-fn valid_cookie_path_byte(b: byte) -> bool {
+// go: sdk 1.25.5 net/http/cookie.go:530-532 validCookiePathByte
+fn validCookiePathByte(b: byte) -> bool {
     0x20 <= b && b < 0x7f && b != b';'
 }
 
 /// RFC 7230 token char — used for cookie *names*. Allows alnum and
 /// `!#$%&'*+-.^_` `\`` `|~`.
-fn is_token_byte(b: byte) -> bool {
-    matches!(b,
-        b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'.' |
-        b'^' | b'_' | b'`' | b'|' | b'~' |
-        b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z')
+// go: sdk 1.25.5 net/http/cookie.go:489-489 cookieNameSanitizer
+/// Go: `strings.NewReplacer("\n", "-", "\r", "-")`.
+///
+/// A `var` in Go, built once. goish rebuilds it per call; Replacer is
+/// a pure value, so the result is the same.
+fn cookieNameSanitizer() -> strings::Replacer {
+    return strings::NewReplacer(crate::goslice::slice::__from_vec(alloc::vec![
+        string("\n"),
+        string("-"),
+        string("\r"),
+        string("-"),
+    ]));
 }
 
-/// Line-by-line port of Go's `isToken` (mime header / RFC 7230 token).
-/// Used for cookie-name validation.
-fn is_token(s: &string) -> bool {
-    // Go: if len(s) == 0 { return false }
-    if s.Len() == 0 {
-        return false;
-    }
-    // Go: for i := 0; i < len(s); i++ { if !isTokenByte(s[i]) { return false } }
-    for i in 0..s.Len() {
-        if !is_token_byte(s[i]) {
-            return false;
-        }
-    }
-    true
+// go: sdk 1.25.5 net/http/cookie.go:491-493 sanitizeCookieName
+/// Note what this does NOT do: it does not reject a bad name, it
+/// rewrites the two bytes that could split a header and passes
+/// everything else through. `Request.AddCookie` is the only caller, and
+/// it is why AddCookie must not go through `Cookie.String()`, which
+/// drops a non-token name entirely.
+pub(crate) fn sanitizeCookieName(n: string) -> string {
+    return cookieNameSanitizer().Replace(n);
 }
 
+// go: sdk 1.25.5 net/http/cookie.go:509-518 sanitizeCookieValue
 /// Line-by-line port of `sanitizeCookieValue` (cookie.go:509).
-fn sanitize_cookie_value(v: string, quoted: bool) -> string {
+pub(crate) fn sanitizeCookieValue(v: string, quoted: bool) -> string {
     // Go: v = sanitizeOrWarn("Cookie.Value", validCookieValueByte, v)
-    let v = sanitize_or_warn(string("Cookie.Value"), valid_cookie_value_byte, v);
+    let v = sanitizeOrWarn(string("Cookie.Value"), validCookieValueByte, v);
     // Go: if len(v) == 0 { return v }
     if v.Len() == 0 {
         return v;
@@ -557,15 +577,17 @@ fn sanitize_cookie_value(v: string, quoted: bool) -> string {
     v
 }
 
+// go: sdk 1.25.5 net/http/cookie.go:526-528 sanitizeCookiePath
 /// Line-by-line port of `sanitizeCookiePath` (cookie.go:526).
-fn sanitize_cookie_path(v: string) -> string {
-    sanitize_or_warn(string("Cookie.Path"), valid_cookie_path_byte, v)
+fn sanitizeCookiePath(v: string) -> string {
+    sanitizeOrWarn(string("Cookie.Path"), validCookiePathByte, v)
 }
 
+// go: sdk 1.25.5 net/http/cookie.go:534-554 sanitizeOrWarn
 /// Line-by-line port of `sanitizeOrWarn` (cookie.go:534). Go's version
 /// logs the offending byte via `log.Printf`; goish silently drops
 /// since `log` isn't ported. Behavior on the wire is identical.
-fn sanitize_or_warn(_field_name: string, valid: fn(byte) -> bool, v: string) -> string {
+fn sanitizeOrWarn(_field_name: string, valid: fn(byte) -> bool, v: string) -> string {
     // Go: ok := true; for i := 0; i < len(v); i++ { if valid(v[i]) { continue }; … ok = false; break }
     let mut ok = true;
     for i in 0..v.Len() {
@@ -593,10 +615,11 @@ fn sanitize_or_warn(_field_name: string, valid: fn(byte) -> bool, v: string) -> 
     crate::convert::string(buf)
 }
 
+// go: sdk 1.25.5 net/http/cookie.go:565-577 parseCookieValue
 /// Line-by-line port of `parseCookieValue` (cookie.go:565).
 /// Strips matching outer quotes when `allow_double_quote` is set;
 /// rejects invalid bytes.
-fn parse_cookie_value(raw: &string, allow_double_quote: bool) -> (string, bool, bool) {
+fn parseCookieValue(raw: &string, allow_double_quote: bool) -> (string, bool, bool) {
     // Go: var quoted bool
     let mut quoted = false;
     // Go: if allowDoubleQuote && len(raw) > 1 && raw[0] == '"' && raw[len(raw)-1] == '"' {
@@ -614,7 +637,7 @@ fn parse_cookie_value(raw: &string, allow_double_quote: bool) -> (string, bool, 
     };
     // Go: for i := 0; i < len(raw); i++ { if !validCookieValueByte(raw[i]) { return "", quoted, false } }
     for i in 0..raw.Len() {
-        if !valid_cookie_value_byte(raw[i]) {
+        if !validCookieValueByte(raw[i]) {
             return (string(""), quoted, false);
         }
     }
@@ -622,25 +645,43 @@ fn parse_cookie_value(raw: &string, allow_double_quote: bool) -> (string, bool, 
     (raw, quoted, true)
 }
 
-/// Line-by-line port of `validCookieDomain` (cookie.go:418). Goish
-/// drops the IPv6 path since `net::ParseIP` isn't ported.
-fn valid_cookie_domain(v: &string) -> bool {
-    // Go: if isCookieDomainName(v) { return true }
-    if is_cookie_domain_name(v) {
+// go: sdk 1.25.5 net/http/cookie.go:418-426 validCookieDomain
+/// Go: "validCookieDomain reports whether v is a valid cookie
+/// domain-value."
+///
+/// This used to call a private `is_ipv4_literal` on the stated grounds
+/// that `net::ParseIP` was not ported. It is (src/net/mod.rs), and the
+/// substitute was not equivalent: ParseIP also accepts the IPv4-mapped
+/// and dotted-quad-in-IPv6 forms. Go's own body is back.
+fn validCookieDomain(v: &string) -> bool {
+    if isCookieDomainName(v) {
         return true;
     }
-    // Go: if net.ParseIP(v) != nil && !strings.Contains(v, ":") { return true }
-    is_ipv4_literal(v)
+    if !crate::net::ParseIP(v.clone()).IsNil()
+        && !strings::Contains(v.clone(), string(":"))
+    {
+        return true;
+    }
+    return false;
 }
 
-fn valid_cookie_expires(t: &time::Time) -> bool {
-    // Go: t.Year() >= 1601 (with goish's IsZero guard for safety)
-    !t.IsZero() && t.Year() >= 1601
+// go: sdk 1.25.5 net/http/cookie.go:429-432 validCookieExpires
+/// Go: "IETF RFC 6265 Section 5.1.1.5, the year must not be less than
+/// 1601."
+///
+/// The IsZero guard is NOT belt-and-braces: goish's zero time::Time is
+/// the Unix epoch, where Go's is year 1. Without it an unset Expires
+/// would pass `Year() >= 1601` as 1970 and Cookie.String() would emit
+/// `; Expires=Thu, 01 Jan 1970 00:00:00 GMT` — which browsers read as
+/// "delete this cookie now".
+fn validCookieExpires(t: &time::Time) -> bool {
+    return !t.IsZero() && t.Year() >= 1601;
 }
 
+// go: sdk 1.25.5 net/http/cookie.go:437-487 isCookieDomainName
 /// Line-by-line port of `isCookieDomainName` (cookie.go:437). Direct
 /// copy of net's `isDomainName` with underscore disallowed.
-fn is_cookie_domain_name(s: &string) -> bool {
+fn isCookieDomainName(s: &string) -> bool {
     // Go: if len(s) == 0 { return false }; if len(s) > 255 { return false }
     if s.Len() == 0 || s.Len() > 255 {
         return false;
@@ -691,31 +732,14 @@ fn is_cookie_domain_name(s: &string) -> bool {
 /// IPv4 dotted-decimal literal check (4 octets 0..=255). Stand-in for
 /// `net.ParseIP(v) != nil && !strings.Contains(v, ":")` until net.ParseIP
 /// is ported.
-fn is_ipv4_literal(s: &string) -> bool {
-    // Go (paraphrased): split on '.'; need exactly 4 numeric groups.
-    let parts = strings::Split(s.clone(), string("."));
-    if parts.Len() != 4 {
-        return false;
-    }
-    for i in 0..parts.Len() {
-        let p = parts[i].clone();
-        if p.Len() == 0 || p.Len() > 3 {
-            return false;
-        }
-        let (n, err) = crate::strconv::Atoi(p);
-        if !err.IsNil() || n < 0 || n > 255 {
-            return false;
-        }
-    }
-    true
-}
-
-// ─── inline IMF-fixdate (RFC 7231 §7.1.1.1): "Mon, 02 Jan 2006 15:04:05 GMT"
-//
-// Matches Go's `TimeFormat` constant from net/http/server.go:
-//   "Mon, 02 Jan 2006 15:04:05 GMT" — 29 bytes, fixed.
-// Used in place of `time.Time.Format(TimeFormat)` until time::Format is
-// ported.
+// go: none — goish-only. Go renders and parses the Expires attribute
+// with time.Format / time.Parse against the layout
+//   "Mon, 02 Jan 2006 15:04:05 GMT"
+// (plus a legacy fallback on read). goish HAS time::Format and
+// time::Parse — an older note here claiming otherwise was wrong — so
+// this hand-rolled pair is a divergence to remove, not a necessity.
+// Removing it is its own change: it alters the accepted input set, and
+// the round-trip test is what would have to grow first.
 
 const DAY_NAMES: [&[byte; 3]; 7] = [
     b"Sun", b"Mon", b"Tue", b"Wed", b"Thu", b"Fri", b"Sat",
@@ -725,9 +749,9 @@ const MONTH_NAMES: [&[byte; 3]; 12] = [
     b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
 ];
 
-/// Fill `buf` (must be ≥ 29 bytes) with the IMF-fixdate rendering of
-/// `t`, returning a slice covering exactly the 29 bytes written.
-/// Mirrors Go's `t.UTC().AppendFormat(buf[:0], TimeFormat)` flow.
+// go: none — goish-only: fills a fixed 29-byte buffer where Go calls
+// `c.Expires.UTC().AppendFormat(buf[:0], TimeFormat)`. See the note on
+// DAY_NAMES above.
 fn append_imf_fixdate_into<'a>(buf: &'a mut [byte; 29], t: &time::Time) -> &'a [byte] {
     let weekday = (t.Weekday().Int() as usize) % 7;
     let (year, month, day) = t.Date();
@@ -759,10 +783,12 @@ fn append_imf_fixdate_into<'a>(buf: &'a mut [byte; 29], t: &time::Time) -> &'a [
     &buf[..]
 }
 
+// go: none — goish-only, see append_imf_fixdate_into.
 fn write_2(dst: &mut [byte], n: u32) {
     dst[0] = b'0' + ((n / 10) % 10) as byte;
     dst[1] = b'0' + (n % 10) as byte;
 }
+// go: none — goish-only, see append_imf_fixdate_into.
 fn write_4(dst: &mut [byte], n: u32) {
     dst[0] = b'0' + ((n / 1000) % 10) as byte;
     dst[1] = b'0' + ((n / 100) % 10) as byte;
@@ -770,17 +796,21 @@ fn write_4(dst: &mut [byte], n: u32) {
     dst[3] = b'0' + (n % 10) as byte;
 }
 
-/// Parse `"Mon, 02 Jan 2006 15:04:05 GMT"`. Returns `None` on any
-/// shape mismatch — the caller falls through to the legacy form.
+// go: none — goish-only: Go parses Expires with
+// `time.Parse(time.RFC1123, v)` and a legacy fallback layout. See the
+// note on DAY_NAMES above. Returns None on any shape mismatch — the
+// caller falls through to the legacy form.
 fn parse_imf_fixdate(s: &string) -> Option<time::Time> {
     parse_cookie_date(s.as_bytes(), b' ')
 }
 
-/// Parse `"Mon, 02-Jan-2006 15:04:05 MST"` — dash-separated d-M-y.
+// go: none — goish-only, see parse_imf_fixdate. Parses
+// "Mon, 02-Jan-2006 15:04:05 MST" — dash-separated d-M-y.
 fn parse_legacy_cookie_date(s: &string) -> Option<time::Time> {
     parse_cookie_date(s.as_bytes(), b'-')
 }
 
+// go: none — goish-only, see parse_imf_fixdate.
 fn parse_cookie_date(b: &[u8], sep: u8) -> Option<time::Time> {
     // "Mon, 02 Jan 2006 15:04:05 GMT" = 29 bytes; legacy = 29.
     if b.len() < 25 {
@@ -834,6 +864,7 @@ fn parse_cookie_date(b: &[u8], sep: u8) -> Option<time::Time> {
     ))
 }
 
+// go: none — goish-only, see parse_imf_fixdate.
 fn read_2(b: &[u8]) -> Option<u32> {
     if !b[0].is_ascii_digit() || !b[1].is_ascii_digit() {
         return None;
@@ -841,6 +872,7 @@ fn read_2(b: &[u8]) -> Option<u32> {
     Some(((b[0] - b'0') as u32) * 10 + (b[1] - b'0') as u32)
 }
 
+// go: none — goish-only, see parse_imf_fixdate.
 fn read_4(b: &[u8]) -> Option<u32> {
     let mut acc: u32 = 0;
     for &c in b {
@@ -852,6 +884,7 @@ fn read_4(b: &[u8]) -> Option<u32> {
     Some(acc)
 }
 
+// go: none — goish-only, see parse_imf_fixdate.
 fn month_index(b: &[u8]) -> Option<u32> {
     for (i, m) in MONTH_NAMES.iter().enumerate() {
         if eq_case_insensitive(b, &m[..]) {
@@ -861,6 +894,7 @@ fn month_index(b: &[u8]) -> Option<u32> {
     None
 }
 
+// go: none — goish-only, see parse_imf_fixdate.
 fn eq_case_insensitive(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;

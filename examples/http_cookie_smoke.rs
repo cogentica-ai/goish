@@ -264,11 +264,74 @@ fn main() {
         }
     }
 
+    // 11. Request.AddCookie sends NAME=VALUE and NOTHING ELSE.
+    //
+    //     goish used to build the header with Cookie.String(), which is
+    //     the Set-Cookie serialisation — it appends Path, Domain,
+    //     Expires, Max-Age, HttpOnly, Secure and SameSite. A request
+    //     carrying an attribute-bearing cookie therefore went out as
+    //       Cookie: sid=abc; Path=/admin; HttpOnly
+    //     and the server on the far end parsed phantom cookies named
+    //     "Path" and "HttpOnly". Ground truth from go1.25.5 for exactly
+    //     this cookie is the bare "sid=abc".
+    {
+        let (mut r, err) = http::NewRequest(string("GET"), string("http://example.com/"), ());
+        let mut c = Cookie::new(string("sid"), string("abc"));
+        c.Path = string("/admin");
+        c.Domain = string("example.com");
+        c.HttpOnly = true;
+        c.Secure = true;
+        c.MaxAge = 60;
+        c.SameSite = SameSite::StrictMode;
+        r.AddCookie(&c);
+        let got = r.Header.Get(string("Cookie"));
+        if err.IsNil() && got == "sid=abc" {
+            fmt::Println!("[11] AddCookie drops attrs     PASS");
+        } else {
+            fmt::Println!("[11] AddCookie drops attrs     FAIL got=", got);
+            failed += 1;
+        }
+    }
+
+    // 12. Two AddCookie calls share ONE header line, joined by "; ".
+    //     Go: "Per RFC 6265 section 5.4, AddCookie does not attach more
+    //     than one Cookie header field."
+    {
+        let (mut r, _) = http::NewRequest(string("GET"), string("http://example.com/"), ());
+        r.AddCookie(&Cookie::new(string("a"), string("1")));
+        r.AddCookie(&Cookie::new(string("b"), string("2")));
+        let got = r.Header.Get(string("Cookie"));
+        if got == "a=1; b=2" {
+            fmt::Println!("[12] AddCookie joins with ;    PASS");
+        } else {
+            fmt::Println!("[12] AddCookie joins with ;    FAIL got=", got);
+            failed += 1;
+        }
+    }
+
+    // 13. A name containing CR/LF is SANITISED and still sent — the two
+    //     bytes that could split a header become '-'. goish dropped the
+    //     cookie entirely instead, because Cookie.String() returns ""
+    //     for a non-token name. go1.25.5 gives "ev-il=xy" for this
+    //     input (the value's newline is dropped by the value
+    //     sanitiser, which is a different rule).
+    {
+        let (mut r, _) = http::NewRequest(string("GET"), string("http://example.com/"), ());
+        r.AddCookie(&Cookie::new(string("ev\nil"), string("x\ny")));
+        let got = r.Header.Get(string("Cookie"));
+        if got == "ev-il=xy" {
+            fmt::Println!("[13] AddCookie sanitises name  PASS");
+        } else {
+            fmt::Println!("[13] AddCookie sanitises name  FAIL got=", got);
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 10/10");
+        fmt::Println!("ok 13/13");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL {} of 10", failed);
+        fmt::Println!("FAIL", failed, "of 13");
         syscall::Exit(1);
     }
 }

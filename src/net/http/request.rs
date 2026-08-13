@@ -137,7 +137,7 @@ impl Request {
     /// `r.Cookies()` — parse all `Cookie:` request headers. Mirrors
     /// `(*Request).Cookies()` (request.go:404).
     pub fn Cookies(&self) -> slice<super::cookie::Cookie> {
-        super::cookie::read_cookies(&self.Header, &string::new())
+        super::cookie::readCookies(&self.Header, &string::new())
     }
 
     /// `r.CookiesNamed(name)` (request.go:434) — return all request
@@ -149,14 +149,14 @@ impl Request {
             return slice::<super::cookie::Cookie>::__from_vec(Vec::new());
         }
         // Go: return readCookies(r.Header, name)
-        super::cookie::read_cookies(&self.Header, &name)
+        super::cookie::readCookies(&self.Header, &name)
     }
 
     /// `r.Cookie(name)` — return the named cookie, or
     /// `(Cookie::default(), ErrNoCookie)` if absent. Mirrors
     /// `(*Request).Cookie(name)` (request.go:418).
     pub fn Cookie<S: Into<string>>(&self, name: S) -> (super::cookie::Cookie, error) {
-        let matches = super::cookie::read_cookies(&self.Header, &name.into());
+        let matches = super::cookie::readCookies(&self.Header, &name.into());
         if matches.Len() > 0 {
             return (matches[0].clone(), errors::nil);
         }
@@ -388,10 +388,27 @@ impl Request {
     /// per RFC 6265 the request only has a single `Cookie:` line, so
     /// repeat calls fold into one space+`; `-separated value.
     pub fn AddCookie(&mut self, c: &super::cookie::Cookie) {
-        let s = c.String();
-        if s.Len() == 0 {
-            return;
-        }
+        // Go: fmt.Sprintf("%s=%s", sanitizeCookieName(c.Name),
+        //                          sanitizeCookieValue(c.Value, c.Quoted))
+        //
+        // NAME=VALUE and nothing else. This used to call c.String(),
+        // which is the Set-Cookie serialisation: it appends Path,
+        // Domain, Expires, Max-Age, HttpOnly, Secure and SameSite, so a
+        // request carrying an attribute-bearing Cookie sent
+        //   Cookie: sid=abc; Path=/admin; HttpOnly
+        // where Go sends `Cookie: sid=abc`, and the server on the other
+        // end parses phantom cookies named Path and HttpOnly.
+        // c.String() also returns "" for a name that is not a token, so
+        // AddCookie silently dropped such cookies; Go rewrites \n and
+        // \r to '-' and sends them.
+        let name = super::cookie::sanitizeCookieName(c.Name.clone());
+        let value = super::cookie::sanitizeCookieValue(c.Value.clone(), c.Quoted);
+        let mut s: Vec<u8> = Vec::with_capacity((name.Len() + value.Len()) as usize + 1);
+        s.extend_from_slice(name.as_bytes());
+        s.push(b'=');
+        s.extend_from_slice(value.as_bytes());
+        let s = string::from_bytes(&s);
+
         let existing = self.Header.Get(string("Cookie"));
         if existing.Len() == 0 {
             self.Header.Set(string("Cookie"), s);
