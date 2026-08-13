@@ -973,6 +973,9 @@ pub struct Server {
 #[doc(hidden)]
 pub struct __ServerState {
     in_shutdown: AtomicBool,
+    /// Go's `Server.disableKeepAlives atomic.Bool` (server.go:3092),
+    /// flipped by SetKeepAlivesEnabled and read by doKeepAlives.
+    disable_keep_alives: AtomicBool,
     active_conns: AtomicUsize,
     /// Bounded semaphore for `MaxConcurrentConns`. `None` until Serve
     /// initializes it; capacity = `MaxConcurrentConns`. Each accepted
@@ -1119,6 +1122,7 @@ impl Default for __ServerState {
     fn default() -> Self {
         __ServerState {
             in_shutdown: AtomicBool::new(false),
+            disable_keep_alives: AtomicBool::new(false),
             active_conns: AtomicUsize::new(0),
             tracked_listeners: Mutex::new(Vec::new()),
             conn_sem: Mutex::new(None),
@@ -1127,6 +1131,13 @@ impl Default for __ServerState {
         }
     }
 }
+
+// go: sdk 1.25.5 net/http/server.go:928-931 DefaultMaxHeaderBytes
+//
+// DefaultMaxHeaderBytes is the maximum permitted size of the headers
+// in an HTTP request.
+// This can be overridden by setting [Server.MaxHeaderBytes].
+pub const DefaultMaxHeaderBytes: crate::types::int = 1 << 20; // 1 MB
 
 impl Server {
     /// Convenience constructor — equivalent to `Server::default()` with
@@ -1383,6 +1394,73 @@ impl Server {
     /// `Close` begins.
     pub fn RegisterOnShutdown(&self, f: Arc<dyn Fn() + Send + Sync>) {
         self.__state.on_shutdown.Lock().push(f);
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:933-938 Server.maxHeaderBytes
+    pub fn maxHeaderBytes(&self) -> crate::types::int {
+        if self.MaxHeaderBytes > 0 {
+            return self.MaxHeaderBytes;
+        }
+        return DefaultMaxHeaderBytes;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:940-942 Server.initialReadLimitSize
+    pub fn initialReadLimitSize(&self) -> crate::types::int64 {
+        return self.maxHeaderBytes() + 4096; // bufio slop
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:944-964 Server.tlsHandshakeTimeout
+    //
+    // Go ranges a `[...]time.Duration{…}` array literal; goish walks the
+    // same three fields in the same order, which is what fixes the
+    // result when two are equal.
+    pub fn tlsHandshakeTimeout(&self) -> time::Duration {
+        let mut ret = time::Duration(0);
+        for v in [
+            self.ReadHeaderTimeout,
+            self.ReadTimeout,
+            self.WriteTimeout,
+        ] {
+            if v <= time::Duration(0) {
+                continue;
+            }
+            if ret == time::Duration(0) || v < ret {
+                ret = v;
+            }
+        }
+        return ret;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:3636-3641 Server.idleTimeout
+    //
+    // Go falls back to ReadTimeout, NOT to ReadHeaderTimeout. goish's
+    // own accept loop uses a separate v1 fallback documented on the
+    // IdleTimeout field; this method is the Go-faithful one and is not
+    // wired into that path.
+    pub fn idleTimeout(&self) -> time::Duration {
+        if self.IdleTimeout != time::Duration(0) {
+            return self.IdleTimeout;
+        }
+        return self.ReadTimeout;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:3643-3648 Server.readHeaderTimeout
+    pub fn readHeaderTimeout(&self) -> time::Duration {
+        if self.ReadHeaderTimeout != time::Duration(0) {
+            return self.ReadHeaderTimeout;
+        }
+        return self.ReadTimeout;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:3654-3656 Server.shuttingDown
+    pub fn shuttingDown(&self) -> bool {
+        return self.__state.in_shutdown.load(Ordering::Acquire);
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:3650-3652 Server.doKeepAlives
+    pub fn doKeepAlives(&self) -> bool {
+        return !self.__state.disable_keep_alives.load(Ordering::Acquire)
+            && !self.shuttingDown();
     }
 
     /// Kick tracked connections so their parked reads return — the
