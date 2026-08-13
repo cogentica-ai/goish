@@ -180,7 +180,7 @@ impl URL {
     /// Special-cases `*` (Issue 11202) which is left unescaped.
     pub fn EscapedPath(&self) -> string {
         // Go: if u.RawPath != "" && validEncoded(u.RawPath, encodePath) {
-        if self.RawPath.Len() != 0 && valid_encoded(self.RawPath.clone(), EncodingMode::Path) {
+        if self.RawPath.Len() != 0 && validEncoded(self.RawPath.clone(), EncodingMode::Path) {
             // Go: p, err := unescape(u.RawPath, encodePath)
             //     if err == nil && p == u.Path { return u.RawPath }
             let (p, err) = unescape(self.RawPath.clone(), false);
@@ -303,7 +303,7 @@ impl URL {
     /// `(u *URL).Hostname()` (url.go line 1208) — return u.Host with the
     /// optional `:port` suffix removed. IPv6 brackets are stripped.
     pub fn Hostname(&self) -> string {
-        let (host, _) = split_host_port(self.Host.clone());
+        let (host, _) = splitHostPort(self.Host.clone());
         host
     }
 
@@ -312,7 +312,7 @@ impl URL {
     /// `(u *URL).Port()` (url.go line 1216) — return the numeric port from
     /// u.Host (without the leading colon), or "" if absent or invalid.
     pub fn Port(&self) -> string {
-        let (_, port) = split_host_port(self.Host.clone());
+        let (_, port) = splitHostPort(self.Host.clone());
         port
     }
 
@@ -904,7 +904,7 @@ fn parse(raw_url: string, via_request: bool) -> (URL, error) {
     }
 
     // Go: url.Scheme, rest, err = getScheme(rawURL); url.Scheme = strings.ToLower(...)
-    let (scheme, rest) = match get_scheme(raw_url.clone()) {
+    let (scheme, rest) = match getScheme(raw_url.clone()) {
         Ok(t) => t,
         Err(e) => return (URL::empty(), e),
     };
@@ -994,9 +994,11 @@ fn parse(raw_url: string, via_request: bool) -> (URL, error) {
     (u, errors::nil)
 }
 
+// go: sdk 1.25.5 net/url/url.go:449-471 getScheme
+//
 /// Line-by-line port of `getScheme` (url.go line 209). Returns
 /// `(scheme, rest)` where `scheme` is lowercase and may be empty.
-fn get_scheme(raw_url: string) -> Result<(string, string), error> {
+fn getScheme(raw_url: string) -> Result<(string, string), error> {
     // Go: for i := 0; i < len(rawURL); i++ { ... }
     let mut i: int = 0;
     while i < raw_url.Len() {
@@ -1187,7 +1189,7 @@ fn escape(s: string, mode: EncodingMode) -> string {
     let mut i: int = 0;
     while i < s.Len() {
         let c: byte = s[i];
-        if should_escape(c, mode) {
+        if shouldEscape(c, mode) {
             if c == b' ' && mode == EncodingMode::QueryComponent {
                 space_count += 1;
             } else {
@@ -1228,7 +1230,7 @@ fn escape(s: string, mode: EncodingMode) -> string {
         let c: byte = s[i];
         if c == b' ' && mode == EncodingMode::QueryComponent {
             t.push(b'+');
-        } else if should_escape(c, mode) {
+        } else if shouldEscape(c, mode) {
             t.push(b'%');
             t.push(upperhex[(c >> 4) as usize]);
             t.push(upperhex[(c & 15) as usize]);
@@ -1240,9 +1242,11 @@ fn escape(s: string, mode: EncodingMode) -> string {
     string::from_bytes(&t)
 }
 
+// go: sdk 1.25.5 net/url/url.go:107-182 shouldEscape
+//
 /// Line-by-line port of `shouldEscape` (url.go line 107). Slim mode set
 /// matches `EncodingMode`.
-fn should_escape(c: byte, mode: EncodingMode) -> bool {
+fn shouldEscape(c: byte, mode: EncodingMode) -> bool {
     // Go: §2.3 Unreserved characters (alphanum)
     if (b'a' <= c && c <= b'z') || (b'A' <= c && c <= b'Z') || (b'0' <= c && c <= b'9') {
         return false;
@@ -1272,12 +1276,14 @@ fn should_escape(c: byte, mode: EncodingMode) -> bool {
     true
 }
 
+// go: sdk 1.25.5 net/url/url.go:760-781 validEncoded
+//
 /// Line-by-line port of `validEncoded` (url.go line 760).
 ///
 /// Reports whether `s` is a valid encoded path, according to `mode`.
 /// Sub-delims, `[`, `]`, `%` are accepted directly; everything else is
-/// validated via `should_escape`.
-fn valid_encoded(s: string, mode: EncodingMode) -> bool {
+/// validated via `shouldEscape`.
+fn validEncoded(s: string, mode: EncodingMode) -> bool {
     // Go: for i := 0; i < len(s); i++ { ... }
     let mut i: int = 0;
     while i < s.Len() {
@@ -1291,7 +1297,7 @@ fn valid_encoded(s: string, mode: EncodingMode) -> bool {
             // Go: case '%': // ok — percent encoded, will decode
             b'%' => { /* ok */ }
             _ => {
-                if should_escape(c, mode) {
+                if shouldEscape(c, mode) {
                     return false;
                 }
             }
@@ -1310,7 +1316,7 @@ fn unescape(s: string, query_mode: bool) -> (string, error) {
         let c: byte = s[i];
         if c == b'%' {
             n += 1;
-            if i + 2 >= s.Len() || !is_hex(s[i + 1]) || !is_hex(s[i + 2]) {
+            if i + 2 >= s.Len() || !ishex(s[i + 1]) || !ishex(s[i + 2]) {
                 return (string::new(), errors::New(string("invalid URL escape")));
             }
             i += 3;
@@ -1346,12 +1352,16 @@ fn unescape(s: string, query_mode: bool) -> (string, error) {
     (crate::convert::string(out), errors::nil)
 }
 
-fn is_hex(c: byte) -> bool {
+// go: sdk 1.25.5 net/url/url.go:53-63 ishex
+//
+fn ishex(c: byte) -> bool {
     (c >= b'0' && c <= b'9') || (c >= b'a' && c <= b'f') || (c >= b'A' && c <= b'F')
 }
 
+// go: sdk 1.25.5 net/url/url.go:1224-1237 splitHostPort
+//
 /// Line-by-line port of `splitHostPort` (url.go line 1224).
-fn split_host_port(host_port: string) -> (string, string) {
+fn splitHostPort(host_port: string) -> (string, string) {
     // Go: host = hostPort
     let mut host: string = host_port;
     let mut port: string = string::new();
@@ -1361,7 +1371,7 @@ fn split_host_port(host_port: string) -> (string, string) {
     if colon != -1 {
         // Go: if validOptionalPort(host[colon:]) { ... }
         let suffix = string::from_bytes(&host.as_bytes()[colon as usize..]);
-        if valid_optional_port(suffix.clone()) {
+        if validOptionalPort(suffix.clone()) {
             // Go: host, port = host[:colon], host[colon+1:]
             let pre = string::from_bytes(&host.as_bytes()[..colon as usize]);
             let post =
@@ -1382,9 +1392,11 @@ fn split_host_port(host_port: string) -> (string, string) {
     (host, port)
 }
 
+// go: sdk 1.25.5 net/url/url.go:819-832 validOptionalPort
+//
 /// Line-by-line port of `validOptionalPort` (url.go line 819). Reports
 /// whether `port` is "" or matches `:\d*`.
-fn valid_optional_port(port: string) -> bool {
+fn validOptionalPort(port: string) -> bool {
     // Go: if port == "" { return true }
     if port.Len() == 0 {
         return true;
