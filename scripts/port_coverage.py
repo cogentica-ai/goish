@@ -76,6 +76,23 @@ def decl_key(recv, name):
 # invisible to coverage no matter how faithfully they were ported.
 RSFN = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?(?:extern\s+\"[^\"]*\"\s+)?fn\s+(?:r#)?([A-Za-z_]\w*)", re.M)
 ANCHOR = re.compile(r"^\s*//\s*go:", re.M)
+# A declaration goishc translated but nobody has reviewed. goishc stamps
+# every declaration it emits with its anchor and, directly beneath it,
+# `// go: draft goishc — machine-translated, unreviewed`.
+#
+# This has to be subtracted, not merely displayed. Anchors are what this
+# script counts, so without it one `goishc pkg` run would take a package
+# to "100% ported, fully anchored" the instant it was transpiled — the
+# squatter problem (see is_squatter) arriving by the front door, and at
+# the scale of a whole package rather than one file. A draft is not a
+# port: it is a claim about provenance with no claim about correctness.
+#
+# Promotion is deletion. Diff the block against the Go source its anchor
+# cites, fix what the transpiler could not express, drop the draft line.
+DRAFT_LINE = re.compile(r"^\s*//\s*go:\s*draft\b", re.M)
+DRAFT_SYM = re.compile(
+    r"//\s*go:\s*sdk\s+\S+\s+\S+\.go:\d+(?:-\d+)?\s+"
+    r"((?:\(\*?\w+\)|\w+)(?:\.\w+)?)[^\n]*\n\s*//\s*go:\s*draft\b")
 # A Go declaration that goish deliberately resolves somewhere else, so it
 # will never have a same-named counterpart here. The motivating case is a
 # `//go:linkname` pair: Go declares the body on one side and a bodyless
@@ -424,10 +441,23 @@ def anchored_decl_keys(src):
 
 def _facts(paths):
     idents, loc, anchors, cited, unanchored = set(), 0, 0, set(), set()
-    waived = set()
+    waived, drafts = set(), set()
     for p in paths:
         src = open(p, errors="replace").read()
         waived |= {norm(w) for w in WAIVED.findall(src)}
+        # Both spellings of a drafted method. Default mode matches Go
+        # decls against bare Rust fn names, so a draft keyed only as
+        # `ClientTrace.compose` would leak through as ported against
+        # Go's bare `compose` — two of httptrace's four did exactly
+        # that. --by-decl compares `Recv.Method` keys, where the
+        # qualified form is the one that matches; the bare form is
+        # withheld there so a drafted method cannot suppress a
+        # genuinely verified free function of the same name.
+        for s in DRAFT_SYM.findall(src):
+            key = re.sub(r"^\(\*?(\w+)\)", r"\1", s)
+            drafts.add(norm(key))
+            if not BY_DECL and "." in key:
+                drafts.add(norm(key.split(".", 1)[1]))
         mine = rust_decl_idents(src) if BY_DECL else set(RSFN.findall(src))
         if BY_DECL:
             # Credit anchored Recv.Method keys whose method exists in this
@@ -438,7 +468,9 @@ def _facts(paths):
             mine |= {k for k in anchored_decl_keys(src)
                      if "." in k and k.split(".", 1)[1] in fns}
         idents |= mine
-        n = len(ANCHOR.findall(src))
+        # The draft line is itself a `// go:` comment, so it would
+        # otherwise inflate the anchor count by one per draft.
+        n = len(ANCHOR.findall(src)) - len(DRAFT_LINE.findall(src))
         anchors += n
         # A goish file with NO provenance anchor at all is where invented
         # code lives. Its fn names still match Go's by string, so they
@@ -453,7 +485,7 @@ def _facts(paths):
         loc += src.count("\n")
     return {"idents": {norm(i) for i in idents}, "loc": loc,
             "nfiles": len(paths), "anchors": anchors, "cited": cited,
-            "unanchored": unanchored, "waived": waived}
+            "unanchored": unanchored, "waived": waived, "drafts": drafts}
 
 
 
@@ -581,8 +613,13 @@ def build(subtree, gr):
         wv = r["waived"] if r else set()
         waived = sorted(f for f in want if norm(f) in wv)
         want = [f for f in want if norm(f) not in wv]
-        hit = [f for f in want if norm(f) in have]
-        missing = sorted(set(want) - set(hit))
+        # A draft is present in the tree but unreviewed, so it counts as
+        # neither ported nor missing-entirely: it is its own state, and
+        # it stays OUT of the percentage. See DRAFT_LINE.
+        dr = r["drafts"] if r else set()
+        draft = sorted(f for f in want if norm(f) in dr)
+        hit = [f for f in want if norm(f) in have and norm(f) not in dr]
+        missing = sorted(set(want) - set(hit) - set(draft))
         # Split the gap: what is left to *write in goish* versus what is
         # left to write in assembly. Ranking on the raw gap has misled
         # three times — see asm_decls.
@@ -596,6 +633,7 @@ def build(subtree, gr):
             "missing": missing,
             "missing_asm": missing_asm,
             "waived": waived,
+            "draft": draft,
             "gap_portable": len(missing) - len(missing_asm),
             "unanchored": sorted(f for f in hit
                                  if r and norm(f) in r["unanchored"]),
@@ -621,6 +659,13 @@ def main():
                       f"{r['go_files']} .go / {r['rs_files']} .rs, {r['anchors']} anchors")
                 print(f"  gap {len(r['missing'])} = {r['gap_portable']} portable "
                       f"+ {len(r['missing_asm'])} assembly")
+                if r["draft"]:
+                    print(f"  DRAFT {len(r['draft'])} decl(s) are goishc output "
+                          f"nobody has reviewed. They are anchored but NOT "
+                          f"counted as ported. Diff each against the Go source "
+                          f"its anchor cites, then delete the `// go: draft` "
+                          f"line to promote it:")
+                    print(f"    {' '.join(r['draft'])}")
                 if r["waived"]:
                     print(f"  WAIVED {len(r['waived'])} decl(s) resolved "
                           f"elsewhere by design, out of the denominator: "
@@ -648,7 +693,15 @@ def main():
     tport = sum(r["gap_portable"] for r in rows)
     tun = sum(len(r["unanchored"]) for r in rows)
     twv = sum(len(r["waived"]) for r in rows)
+    tdr = sum(len(r["draft"]) for r in rows)
     split = f"{tf - tp} left = {tport} portable + {tasm} assembly"
+    # Printed before the waiver and unverified notes: an unreviewed
+    # draft is the loudest thing on the row. A tree full of machine
+    # output that compiles is worse than an honest gap, because it
+    # looks finished.
+    if tdr:
+        split += (f"; {tdr} DRAFT (goishc output, unreviewed, "
+                  f"NOT counted as ported)")
     if twv:
         split += (f"; {twv} decl(s) WAIVED out of the denominator "
                   f"(resolved elsewhere by design)")
