@@ -25,8 +25,9 @@
 //      registered is a SILENT miss, so this case exists specifically
 //      to prove the success branch is reachable, not just compiled.
 //
-// NOT covered: ioFile.ReadDir/Readdir, which still take the miss
-// branch — MapFS's open file does not implement fs::ReadDirFile.
+//   7. ioFile.Readdir over a directory. MapFS's directory handle does
+//      implement fs::ReadDirFile and is registered for cast!, so this
+//      is the success branch, not the errMissingReadDir one.
 
 #![no_std]
 #![no_main]
@@ -161,6 +162,26 @@ fn main() {
                 fmt::Println!("[6] ioFile.Seek reaches the file  PASS");
             } else {
                 fmt::Println!("[6] ioFile.Seek  FAIL pos=", pos, " got=", got, " err=", serr);
+                failed += 1;
+            }
+        }
+    }
+
+    // 7. Readdir over the FS root.
+    n += 1;
+    {
+        let (d, err) = hfs.Open(string("/"));
+        if err != goish::nil {
+            fmt::Println!("[7] Open(/)  FAIL err=", err);
+            failed += 1;
+        } else {
+            let (infos, rerr) = d.Readdir(-1);
+            // MapFS holds hello.txt and sub/deep.txt, so the root has
+            // two entries: the file and the synthesized "sub" dir.
+            if rerr == goish::nil && infos.Len() == 2 {
+                fmt::Println!("[7] ioFile.Readdir lists the root  PASS");
+            } else {
+                fmt::Println!("[7] ioFile.Readdir  FAIL n=", infos.Len(), " err=", rerr);
                 failed += 1;
             }
         }
