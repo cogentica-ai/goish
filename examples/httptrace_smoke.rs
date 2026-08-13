@@ -18,6 +18,7 @@ use goish::net::http::httptrace::{
     self, ClientTrace, ContextClientTrace, DNSDoneInfo, DNSStartInfo, WithClientTrace,
     WroteRequestInfo,
 };
+use goish::crypto::tls;
 use goish::{string, syscall};
 
 #[goish::main]
@@ -181,7 +182,13 @@ fn main() {
             }
         }));
         trace.DNSDone = Some(Arc::new(|info: DNSDoneInfo| {
-            if info.Coalesced && info.Err.IsNil() {
+            // Addrs is Go's []net.IPAddr — an address WITH its zone, not
+            // a bare IP. Reading both halves back is what keeps the
+            // element type honest.
+            let ok = goish::builtin::len(&info.Addrs) == 1
+                && info.Addrs[0].IP.String() == "127.0.0.1"
+                && info.Addrs[0].Zone == "";
+            if info.Coalesced && info.Err.IsNil() && ok {
                 GOT_HOST.fetch_add(10, Ordering::SeqCst);
             }
         }));
@@ -194,7 +201,12 @@ fn main() {
         }
         if let Some(h) = &t.DNSDone {
             h(DNSDoneInfo {
-                Addrs: goish::goslice::slice::<goish::net::IP>::__from_vec(alloc::vec![]),
+                Addrs: goish::goslice::slice::<goish::net::LookupIPAddr>::__from_vec(
+                    alloc::vec![goish::net::LookupIPAddr {
+                        IP: goish::net::IPv4(127, 0, 0, 1),
+                        Zone: string(""),
+                    }],
+                ),
                 Err: errors::nil,
                 Coalesced: true,
             });
@@ -287,13 +299,66 @@ fn main() {
             failed += 1;
         }
     }
+    // 13. The two TLS hooks. goish's ClientTrace omitted them entirely
+    //     on the grounds that "goish v1 does not implement crypto/tls"
+    //     — true when the file was written, false since crypto/tls
+    //     reached 100%. A tracer watching an HTTPS request would have
+    //     silently seen nothing at handshake time.
+    //
+    //     Composing them is the part worth asserting: TLSHandshakeDone
+    //     carries a tls.ConnectionState, so it is the one hook whose
+    //     compose arm could not be shared with any other shape.
+    {
+        static ORDER: AtomicI64 = AtomicI64::new(0);
+        let mut old = ClientTrace::default();
+        old.TLSHandshakeStart = Some(Arc::new(|| {
+            ORDER.fetch_add(1, Ordering::SeqCst);
+        }));
+        old.TLSHandshakeDone = Some(Arc::new(|cs: tls::ConnectionState, e: goish::error| {
+            if cs.Version == tls::VersionTLS13 && e.IsNil() {
+                // Old runs LAST, so it lands on a value the new hook
+                // has already multiplied.
+                ORDER.fetch_add(100, Ordering::SeqCst);
+            }
+        }));
+        let mut new = ClientTrace::default();
+        new.TLSHandshakeStart = Some(Arc::new(|| {
+            ORDER.fetch_add(1, Ordering::SeqCst);
+        }));
+        new.TLSHandshakeDone = Some(Arc::new(|cs: tls::ConnectionState, _e: goish::error| {
+            if cs.Version == tls::VersionTLS13 {
+                ORDER.fetch_add(10, Ordering::SeqCst);
+            }
+        }));
+
+        let ctx = WithClientTrace(context::Background(), old);
+        let ctx = WithClientTrace(ctx, new);
+        let t = ContextClientTrace(&ctx).unwrap();
+
+        t.TLSHandshakeStart.as_ref().unwrap()();
+        let mut cs = tls::ConnectionState::default();
+        cs.Version = tls::VersionTLS13;
+        t.TLSHandshakeDone.as_ref().unwrap()(cs, errors::nil);
+
+        // 2 from the composed Start (both halves ran), 110 from Done.
+        if ORDER.load(Ordering::SeqCst) == 112 {
+            fmt::Println!("[13] TLS hooks compose         PASS");
+        } else {
+            fmt::Println!(
+                "[13] TLS hooks compose         FAIL got",
+                ORDER.load(Ordering::SeqCst)
+            );
+            failed += 1;
+        }
+    }
+
     let _ = httptrace::ContextClientTrace;
 
     if failed == 0 {
-        fmt::Println!("ok 12/12");
+        fmt::Println!("ok 13/13");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 13");
         syscall::Exit(1);
     }
 }

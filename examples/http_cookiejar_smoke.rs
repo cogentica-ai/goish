@@ -14,7 +14,7 @@ extern crate goish;
 
 use goish::fmt;
 use goish::net::http::cookiejar::{self, New, Options};
-use goish::net::http::{Cookie, ParseURL};
+use goish::net::http::{Cookie, CookieJar, ParseURL};
 use goish::{string, syscall};
 
 #[goish::main]
@@ -39,8 +39,8 @@ fn main() {
         let (u, _) = ParseURL(string("http://example.com/"));
         let mut c = Cookie::new(string("k"), string("v"));
         c.Path = string("/");
-        let cookies: alloc::vec::Vec<Cookie> = alloc::vec![c];
-        jar.SetCookies(&u, &cookies);
+        let cookies = goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c]);
+        jar.SetCookies(&u, cookies);
         let got = jar.Cookies(&u);
         if got.len() == 1 && got[0].Name == "k" && got[0].Value == "v" {
             fmt::Println!("[ 2] Set then Cookies          PASS");
@@ -56,8 +56,8 @@ fn main() {
         let (u, _) = ParseURL(string("ftp://example.com/"));
         let mut c = Cookie::new(string("k"), string("v"));
         c.Path = string("/");
-        let cookies: alloc::vec::Vec<Cookie> = alloc::vec![c];
-        jar.SetCookies(&u, &cookies);
+        let cookies = goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c]);
+        jar.SetCookies(&u, cookies);
         let (u2, _) = ParseURL(string("http://example.com/"));
         let got = jar.Cookies(&u2);
         if got.is_empty() {
@@ -74,8 +74,8 @@ fn main() {
         let (u1, _) = ParseURL(string("http://example.com/"));
         let mut c = Cookie::new(string("k"), string("v"));
         c.Path = string("/");
-        let cookies: alloc::vec::Vec<Cookie> = alloc::vec![c];
-        jar.SetCookies(&u1, &cookies);
+        let cookies = goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c]);
+        jar.SetCookies(&u1, cookies);
         let (u2, _) = ParseURL(string("http://other.com/"));
         let got = jar.Cookies(&u2);
         if got.is_empty() {
@@ -93,8 +93,8 @@ fn main() {
         let mut c = Cookie::new(string("k"), string("v"));
         c.Path = string("/");
         c.Domain = string("example.com");
-        let cookies: alloc::vec::Vec<Cookie> = alloc::vec![c];
-        jar.SetCookies(&u_set, &cookies);
+        let cookies = goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c]);
+        jar.SetCookies(&u_set, cookies);
 
         // Same-host (www.example.com) should match.
         let (u_get, _) = ParseURL(string("http://www.example.com/"));
@@ -113,8 +113,8 @@ fn main() {
         let (u_set, _) = ParseURL(string("http://example.com/foo"));
         let mut c = Cookie::new(string("k"), string("v"));
         c.Path = string("/foo");
-        let cookies: alloc::vec::Vec<Cookie> = alloc::vec![c];
-        jar.SetCookies(&u_set, &cookies);
+        let cookies = goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c]);
+        jar.SetCookies(&u_set, cookies);
 
         let (u_in, _) = ParseURL(string("http://example.com/foo/bar"));
         let in_got = jar.Cookies(&u_in);
@@ -140,12 +140,12 @@ fn main() {
         let (u, _) = ParseURL(string("http://example.com/"));
         let mut c1 = Cookie::new(string("k"), string("v"));
         c1.Path = string("/");
-        jar.SetCookies(&u, &[c1]);
+        jar.SetCookies(&u, goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c1]));
 
         let mut c2 = Cookie::new(string("k"), string("ignored"));
         c2.Path = string("/");
         c2.MaxAge = -1;
-        jar.SetCookies(&u, &[c2]);
+        jar.SetCookies(&u, goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c2]));
 
         let got = jar.Cookies(&u);
         if got.is_empty() {
@@ -163,7 +163,7 @@ fn main() {
         let mut c = Cookie::new(string("k"), string("v"));
         c.Path = string("/");
         c.Secure = true;
-        jar.SetCookies(&u_set, &[c]);
+        jar.SetCookies(&u_set, goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c]));
 
         let (u_http, _) = ParseURL(string("http://example.com/"));
         let http_got = jar.Cookies(&u_http);
@@ -193,7 +193,7 @@ fn main() {
         c2.Path = string("/a");
         let mut c3 = Cookie::new(string("longest"), string("3"));
         c3.Path = string("/a/b");
-        jar.SetCookies(&u, &[c1, c2, c3]);
+        jar.SetCookies(&u, goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c1, c2, c3]));
 
         let got = jar.Cookies(&u);
         if got.len() == 3 && got[0].Name == "longest" && got[1].Name == "long" && got[2].Name == "short" {
@@ -208,7 +208,7 @@ fn main() {
     {
         let (jar, _) = New(None);
         let (u, _) = ParseURL(string("http://example.com/"));
-        jar.SetCookies(&u, &[]);
+        jar.SetCookies(&u, goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![]));
         let got = jar.Cookies(&u);
         if got.is_empty() {
             fmt::Println!("[10] empty Set noop            PASS");
@@ -235,7 +235,7 @@ fn main() {
         if err.IsNil() && s == "xn--bcher-kva.example.com" {
             fmt::Println!("[12] toASCII IDN encode        PASS");
         } else {
-            fmt::Println!("[12] toASCII IDN encode        FAIL got {}", s);
+            fmt::Println!("[12] toASCII IDN encode        FAIL got ", s);
             failed += 1;
         }
     }
@@ -253,11 +253,97 @@ fn main() {
         }
     }
 
+    // 14. A Jar is usable through http.CookieJar. Go's package doc
+    //     opens by saying Jar implements that interface, and goish had
+    //     neither the interface nor the impl — so the sentence was
+    //     unbacked and Client could never have been handed a jar.
+    {
+        let (jar, _) = New(None);
+        let asJar: alloc::sync::Arc<dyn CookieJar> = jar;
+        let (u, _) = ParseURL(string("http://example.com/"));
+        let mut c = Cookie::new(string("via"), string("iface"));
+        c.Path = string("/");
+        asJar.SetCookies(
+            &u,
+            goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c]),
+        );
+        let got = asJar.Cookies(&u);
+        if goish::builtin::len(&got) == 1 && got[0].Value == "iface" {
+            fmt::Println!("[14] usable as http.CookieJar  PASS");
+        } else {
+            fmt::Println!("[14] usable as http.CookieJar  FAIL");
+            failed += 1;
+        }
+    }
+
+    // 15. A cookie whose Domain does not domain-match the host is
+    //     dropped (errIllegalDomain). This is the security property the
+    //     package exists for: evil.example.net must not be able to set
+    //     a cookie for bank.example.com.
+    {
+        let (jar, _) = New(None);
+        let (u, _) = ParseURL(string("http://evil.example.net/"));
+        let mut c = Cookie::new(string("stolen"), string("1"));
+        c.Path = string("/");
+        c.Domain = string("bank.example.com");
+        jar.SetCookies(
+            &u,
+            goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c]),
+        );
+        let (victim, _) = ParseURL(string("http://bank.example.com/"));
+        let at_victim = jar.Cookies(&victim);
+        let at_self = jar.Cookies(&u);
+        if goish::builtin::len(&at_victim) == 0 && goish::builtin::len(&at_self) == 0 {
+            fmt::Println!("[15] cross-domain set refused  PASS");
+        } else {
+            fmt::Println!("[15] cross-domain set refused  FAIL");
+            failed += 1;
+        }
+    }
+
+    // 16. A trailing dot in the domain attribute is malformed and
+    //     rejected (errMalformedDomain), where the SAME name without
+    //     the dot is accepted. Asserting both halves is what separates
+    //     "rejects the dot" from "rejects everything".
+    {
+        let (jar, _) = New(None);
+        let (u, _) = ParseURL(string("http://example.com/"));
+
+        let mut bad = Cookie::new(string("bad"), string("1"));
+        bad.Path = string("/");
+        bad.Domain = string("example.com.");
+        jar.SetCookies(
+            &u,
+            goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![bad]),
+        );
+        let after_bad = goish::builtin::len(&jar.Cookies(&u));
+
+        let mut good = Cookie::new(string("good"), string("1"));
+        good.Path = string("/");
+        good.Domain = string("example.com");
+        jar.SetCookies(
+            &u,
+            goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![good]),
+        );
+        let after_good = goish::builtin::len(&jar.Cookies(&u));
+
+        if after_bad == 0 && after_good == 1 {
+            fmt::Println!("[16] trailing-dot domain bad   PASS");
+        } else {
+            fmt::Println!(
+                "[16] trailing-dot domain bad   FAIL",
+                after_bad,
+                after_good
+            );
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 13/13");
+        fmt::Println!("ok 16/16");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 13");
+        fmt::Println!("FAIL", failed, "of 16");
         syscall::Exit(1);
     }
 }

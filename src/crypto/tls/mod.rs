@@ -147,6 +147,7 @@ pub fn defaults_defaultCipherSuites(
 // Re-export common.go's protocol enumerations at the package root, the
 // way Go has them in package tls.
 pub use common::{
+    ConnectionState,
     NewLRUClientSessionCache,
     ClientAuthType, CurveID,
     SignatureScheme, VersionName, CurveP256, CurveP384, CurveP521, ECDSAWithP256AndSHA256,

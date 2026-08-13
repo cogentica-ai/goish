@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 12893,
+ "total": 12756,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -672,11 +672,6 @@
    "GOISH016": 1,
    "GOISH023": 150
   },
-  "src/net/http/chunked.rs": {
-   "GOISH005": 6,
-   "GOISH014": 21,
-   "GOISH023": 20
-  },
   "src/net/http/client.rs": {
    "GOISH005": 1,
    "GOISH014": 65,
@@ -689,17 +684,7 @@
    "GOISH023": 34
   },
   "src/net/http/cookiejar/mod.rs": {
-   "GOISH008": 1,
-   "GOISH014": 21,
-   "GOISH015": 1,
-   "GOISH016": 1,
-   "GOISH022": 1,
-   "GOISH023": 19
-  },
-  "src/net/http/cookiejar/punycode.rs": {
-   "GOISH005": 8,
-   "GOISH014": 4,
-   "GOISH023": 3
+   "GOISH016": 1
   },
   "src/net/http/csrf.rs": {
    "GOISH014": 13,
@@ -724,20 +709,14 @@
    "GOISH023": 2
   },
   "src/net/http/httptrace/mod.rs": {
-   "GOISH014": 8,
-   "GOISH015": 1,
-   "GOISH016": 1,
-   "GOISH023": 3
+   "GOISH016": 1
   },
   "src/net/http/httputil.rs": {
    "GOISH014": 8,
    "GOISH023": 7
   },
   "src/net/http/internal/ascii/mod.rs": {
-   "GOISH014": 5,
-   "GOISH015": 1,
-   "GOISH016": 1,
-   "GOISH023": 5
+   "GOISH016": 1
   },
   "src/net/http/internal/mod.rs": {
    "GOISH016": 1
@@ -1239,10 +1218,9 @@
    "GOISH023": 11
   },
   "src/testing/mod.rs": {
-   "GOISH005": 2,
-   "GOISH014": 10,
+   "GOISH014": 6,
    "GOISH016": 1,
-   "GOISH023": 5
+   "GOISH023": 2
   },
   "src/text/language.rs": {
    "GOISH005": 5,

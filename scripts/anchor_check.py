@@ -26,6 +26,11 @@ Checks per anchor:
   BARE         Symbol names a method without its receiver, so it cannot
                be told apart from same-named methods on other types
                (reported by --strict only; 80% of the tree is like this)
+  UNFIXABLE    --fix computed the range the anchor already had. Happens
+               for a member of a grouped `var (` / `const (` block: the
+               member resolves to its own line, but the BLOCK is the
+               declaration, so the tight range is rejected and rewriting
+               it changes nothing. Anchor the whole block instead.
 
 Usage:
   scripts/anchor_check.py                 # check src/, exit 1 on any error
@@ -263,11 +268,23 @@ def main():
                         if fix and len(hits) == 1:
                             s = hits[0]
                             e = decl_end(gofile, s)
-                            lines[idx] = (line[:m.start()] + m.group(1) +
-                                          f"{gofile}:{s}-{e}" + m.group(5) + sym +
-                                          line[m.end():])
-                            changed = True
-                            stats["fixed"] += 1
+                            new = (line[:m.start()] + m.group(1) +
+                                   f"{gofile}:{s}-{e}" + m.group(5) + sym +
+                                   line[m.end():])
+                            # A member of a grouped `var (`/`const (`
+                            # block resolves to its own line, but the
+                            # block is the declaration, so the rewrite
+                            # lands right back on the range that was
+                            # already rejected. Counting that as a fix
+                            # made --fix report work it had not done and
+                            # left the next run reporting the same
+                            # error; say nothing rather than lie.
+                            if new != line:
+                                lines[idx] = new
+                                changed = True
+                                stats["fixed"] += 1
+                            else:
+                                stats["UNFIXABLE"] += 1
                         continue
                     s = inside[0]
                     e = decl_end(gofile, s)
@@ -287,7 +304,7 @@ def main():
 
     print(f"anchor_check: {stats['total']} anchors under {', '.join(roots)}")
     for k in ("ok", "RANGE_WRONG", "RANGE_FAT", "END_SHORT", "NOT_FOUND",
-              "MISSING_FILE", "BARE", "fixed"):
+              "MISSING_FILE", "BARE", "fixed", "UNFIXABLE"):
         if stats[k]:
             print(f"  {k:12s} {stats[k]}")
 

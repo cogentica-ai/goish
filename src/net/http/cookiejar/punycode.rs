@@ -1,12 +1,14 @@
-// net/http/cookiejar/punycode — RFC 3492 + IDNA toASCII
+// go: package net/http/cookiejar
 //
-// Line-by-line port of:
-//   go1.25.5/src/
-//     net/http/cookiejar/punycode.go
+// go: file net/http/cookiejar/punycode.go decls: encode, encodeDigit, adapt, toASCII
 //
-// All computation is done with int32s, so overflow behaviour is identical
-// regardless of whether the host int is 32-bit or 64-bit (Go comment at
-// punycode.go:18-19).
+// Go: "This file implements the Punycode algorithm from RFC 3492."
+//
+// Go: "All computation is done with int32s, so that overflow behavior
+// is identical regardless of whether int is 32-bit or 64-bit." goish
+// keeps that: every intermediate below is `int32`, and the two places
+// Go relies on signed overflow to detect a hostile label use wrapping
+// arithmetic explicitly rather than Rust's debug-build panic.
 
 #![allow(non_snake_case)]
 
@@ -16,198 +18,171 @@ use alloc::vec::Vec;
 use crate::error;
 use crate::gostring::string;
 use crate::strings;
-use crate::types::{byte, int};
+use crate::types::{byte, int, int32};
+use crate::unicode::utf8;
 
 use super::super::internal::ascii;
 
-// Go: punycode.go:20-28 — RFC 3492 §5 parameter values.
-const base: i32 = 36;
-const damp: i32 = 700;
-const initialBias: i32 = 72;
-const initialN: i32 = 128;
-const skew: i32 = 38;
-const tmax: i32 = 26;
-const tmin: i32 = 1;
+// go: sdk 1.25.5 net/http/cookiejar/punycode.go:20-28 base
+/// Go: "These parameter values are specified in section 5."
+const base: int32 = 36;
+// go: sdk 1.25.5 net/http/cookiejar/punycode.go:20-28 damp
+const damp: int32 = 700;
+// go: sdk 1.25.5 net/http/cookiejar/punycode.go:20-28 initialBias
+const initialBias: int32 = 72;
+// go: sdk 1.25.5 net/http/cookiejar/punycode.go:20-28 initialN
+const initialN: int32 = 128;
+// go: sdk 1.25.5 net/http/cookiejar/punycode.go:20-28 skew
+const skew: int32 = 38;
+// go: sdk 1.25.5 net/http/cookiejar/punycode.go:20-28 tmax
+const tmax: int32 = 26;
+// go: sdk 1.25.5 net/http/cookiejar/punycode.go:20-28 tmin
+const tmin: int32 = 1;
 
-// Go: punycode.go:131
+// go: sdk 1.25.5 net/http/cookiejar/punycode.go:131-131 acePrefix
+/// Go: "acePrefix is the ASCII Compatible Encoding prefix."
 const acePrefix: &str = "xn--";
 
-// Go: punycode.go:35 — encode a single label (no dots).
-//
-//   func encode(prefix, s string) (string, error)
-//
-// The "while h < length(input)" line in the spec becomes "for remaining != 0"
-// in Go because len(s) is in bytes not runes.
+// go: sdk 1.25.5 net/http/cookiejar/punycode.go:35-99 encode
+/// Go: "encode encodes a string as specified in section 6.3 and
+/// prepends prefix to the result. The "while h < length(input)" line in
+/// the specification becomes "for remaining != 0" in the Go code,
+/// because len(s) in Go is in bytes, not runes."
 pub fn encode(prefix: &string, s: &string) -> (string, error) {
-    // Go: output := make([]byte, len(prefix), len(prefix)+1+2*len(s))
-    let mut output: Vec<byte> = Vec::with_capacity(
-        crate::builtin::len(prefix) as usize + 1 + 2 * crate::builtin::len(s) as usize,
-    );
-    // Go: copy(output, prefix)
     let prefix_bytes = crate::gostring::__crate_as_bytes(prefix);
+    let mut output: Vec<byte> = Vec::with_capacity(
+        prefix_bytes.len() + 1 + 2 * crate::gostring::__crate_as_bytes(s).len(),
+    );
     output.extend_from_slice(prefix_bytes);
 
-    // Go: delta, n, bias := int32(0), initialN, initialBias
-    let mut delta: i32 = 0;
-    let mut n: i32 = initialN;
-    let mut bias: i32 = initialBias;
+    let mut delta: int32 = 0;
+    let mut n: int32 = initialN;
+    let mut bias: int32 = initialBias;
 
-    // Go: b, remaining := int32(0), int32(0)
-    let mut b: i32 = 0;
-    let mut remaining: i32 = 0;
-
-    // Go: for _, r := range s { ... } — first pass: emit basic (ASCII) runes
-    // verbatim; count rest.
+    let mut b: int32 = 0;
+    let mut remaining: int32 = 0;
     for (_, r) in crate::range!(s.clone()) {
-        // Go: if r < utf8.RuneSelf
-        if (r as u32) < 0x80 {
+        if r < crate::int32(utf8::RuneSelf) {
             b += 1;
-            output.push(r as byte);
+            output.push(crate::byte(r));
         } else {
             remaining += 1;
         }
     }
-
-    // Go: h := b
-    let mut h: i32 = b;
-    // Go: if b > 0 { output = append(output, '-') }
+    let mut h: int32 = b;
     if b > 0 {
         output.push(b'-');
     }
-
-    // Go: for remaining != 0
     while remaining != 0 {
-        // Go: m := int32(0x7fffffff)
-        let mut m: i32 = 0x7fffffff;
-        // Go: for _, r := range s { if m > r && r >= n { m = r } }
+        let mut m: int32 = 0x7fffffff;
         for (_, r) in crate::range!(s.clone()) {
-            let r32 = r as i32;
-            if m > r32 && r32 >= n {
-                m = r32;
+            if m > r && r >= n {
+                m = r;
             }
         }
-        // Go: delta += (m - n) * (h + 1)
+        // Go leans on int32 overflow going negative to reject a label
+        // that would need more than 2^31 steps; wrapping keeps that in
+        // a debug build, where Rust would otherwise panic first.
         delta = delta.wrapping_add(m.wrapping_sub(n).wrapping_mul(h + 1));
-        // Go: if delta < 0 { return "", fmt.Errorf("cookiejar: invalid label %q", s) }
         if delta < 0 {
-            return (
-                string::new(),
-                crate::errors::New(string::from_static("cookiejar: invalid label")),
-            );
+            return (string::new(), invalidLabel(s));
         }
         n = m;
-        // Go: for _, r := range s
         for (_, r) in crate::range!(s.clone()) {
-            let r32 = r as i32;
-            // Go: if r < n { delta++; if delta < 0 { ...err }; continue }
-            if r32 < n {
+            if r < n {
                 delta = delta.wrapping_add(1);
                 if delta < 0 {
-                    return (
-                        string::new(),
-                        crate::errors::New(string::from_static("cookiejar: invalid label")),
-                    );
+                    return (string::new(), invalidLabel(s));
                 }
                 continue;
             }
-            // Go: if r > n { continue }
-            if r32 > n {
+            if r > n {
                 continue;
             }
-            // Go: q := delta
-            let mut q: i32 = delta;
-            // Go: for k := base; ; k += base
-            let mut k: i32 = base;
+            let mut q: int32 = delta;
+            let mut k: int32 = base;
             loop {
-                // Go: t := k - bias; clamp to [tmin, tmax]
-                let mut t: i32 = k - bias;
+                let mut t: int32 = k - bias;
                 if t < tmin {
                     t = tmin;
                 } else if t > tmax {
                     t = tmax;
                 }
-                // Go: if q < t { break }
                 if q < t {
                     break;
                 }
-                // Go: output = append(output, encodeDigit(t+(q-t)%(base-t)))
                 output.push(encodeDigit(t + (q - t) % (base - t)));
-                // Go: q = (q - t) / (base - t)
                 q = (q - t) / (base - t);
                 k += base;
             }
-            // Go: output = append(output, encodeDigit(q))
             output.push(encodeDigit(q));
-            // Go: bias = adapt(delta, h+1, h == b)
             bias = adapt(delta, h + 1, h == b);
-            // Go: delta = 0; h++; remaining--
             delta = 0;
             h += 1;
             remaining -= 1;
         }
-        // Go: delta++; n++
         delta = delta.wrapping_add(1);
         n = n.wrapping_add(1);
     }
-
-    // Go: return string(output), nil
-    (string::__from_vec(output), crate::errors::nil)
+    return (string::__from_vec(output), crate::errors::nil);
 }
 
-// Go: punycode.go:101 — encodeDigit
-fn encodeDigit(digit: i32) -> byte {
-    // Go: case 0 <= digit && digit < 26: return byte(digit + 'a')
-    if (0..26).contains(&digit) {
-        return (digit + b'a' as i32) as byte;
+// go: none — goish-only: Go writes `fmt.Errorf("cookiejar: invalid
+// label %q", s)` inline at both call sites. Named here because the two
+// sites are inside a loop that already borrows `s`.
+fn invalidLabel(s: &string) -> error {
+    return crate::fmt::Errorf!("cookiejar: invalid label %q", s.clone());
+}
+
+// go: sdk 1.25.5 net/http/cookiejar/punycode.go:101-109 encodeDigit
+fn encodeDigit(digit: int32) -> byte {
+    if 0 <= digit && digit < 26 {
+        return crate::byte(digit + crate::int32(b'a'));
     }
-    // Go: case 26 <= digit && digit < 36: return byte(digit + ('0' - 26))
-    if (26..36).contains(&digit) {
-        return (digit + (b'0' as i32 - 26)) as byte;
+    if 26 <= digit && digit < 36 {
+        return crate::byte(digit + (crate::int32(b'0') - 26));
     }
-    // Go: panic("cookiejar: internal error in punycode encoding")
     panic!("cookiejar: internal error in punycode encoding");
 }
 
-// Go: punycode.go:111 — adapt is the bias adaptation function (RFC 3492 §6.1).
-fn adapt(mut delta: i32, numPoints: i32, firstTime: bool) -> i32 {
-    // Go: if firstTime { delta /= damp } else { delta /= 2 }
+// go: sdk 1.25.5 net/http/cookiejar/punycode.go:112-125 adapt
+/// Go: "adapt is the bias adaptation function specified in section
+/// 6.1."
+fn adapt(mut delta: int32, numPoints: int32, firstTime: bool) -> int32 {
     if firstTime {
         delta /= damp;
     } else {
         delta /= 2;
     }
-    // Go: delta += delta / numPoints
     delta += delta / numPoints;
-    // Go: k := int32(0)
-    let mut k: i32 = 0;
-    // Go: for delta > ((base - tmin) * tmax) / 2
+    let mut k: int32 = 0;
     while delta > ((base - tmin) * tmax) / 2 {
         delta /= base - tmin;
         k += base;
     }
-    // Go: return k + (base-tmin+1)*delta/(delta+skew)
-    k + (base - tmin + 1) * delta / (delta + skew)
+    return k + (base - tmin + 1) * delta / (delta + skew);
 }
 
-// Go: punycode.go:136 — toASCII converts a domain (or single label) to its
-// ASCII form via Punycode/IDNA.
-//
-//   toASCII("bücher.example.com") == "xn--bcher-kva.example.com"
-//   toASCII("golang")             == "golang"
+// Go: "Strictly speaking, the remaining code below deals with IDNA (RFC
+// 5890 and friends) and not Punycode (RFC 3492) per se."
+
+// go: sdk 1.25.5 net/http/cookiejar/punycode.go:136-151 toASCII
+/// Go: "toASCII converts a domain or domain label to its ASCII form.
+/// For example, toASCII("bücher.example.com") is
+/// "xn--bcher-kva.example.com", and toASCII("golang") is "golang"."
 pub fn toASCII<S: Into<string>>(s: S) -> (string, error) {
     let s: string = s.into();
-    // Go: if ascii.Is(s) { return s, nil }
     if ascii::Is(s.clone()) {
         return (s, crate::errors::nil);
     }
-    // Go: labels := strings.Split(s, ".")
     let labels = strings::Split(s.clone(), string::from_static("."));
-    let mut out: alloc::vec::Vec<string> = alloc::vec::Vec::with_capacity(labels.Len() as usize);
-    // Go: for i, label := range labels
+    // Go assigns back into `labels[i]`; goish's slice indexing does not
+    // hand out a place expression, so the rewritten labels accumulate
+    // here and Join reads this instead.
+    let mut out: Vec<string> = Vec::with_capacity(crate::builtin::__make_size(labels.Len()));
     let mut i: int = 0;
     while i < labels.Len() {
         let label = labels[i].clone();
-        // Go: if !ascii.Is(label) { a, err := encode(acePrefix, label); ... labels[i] = a }
         if !ascii::Is(label.clone()) {
             let (a, err) = encode(&string::from_static(acePrefix), &label);
             if !err.IsNil() {
@@ -219,9 +194,8 @@ pub fn toASCII<S: Into<string>>(s: S) -> (string, error) {
         }
         i += 1;
     }
-    // Go: return strings.Join(labels, "."), nil
-    (
+    return (
         strings::Join(crate::goslice::slice::__from_vec(out), string::from_static(".")),
         crate::errors::nil,
-    )
+    );
 }

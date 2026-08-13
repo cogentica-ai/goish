@@ -26,6 +26,7 @@ pub mod httptest;
 pub mod httptrace;
 pub mod httputil;
 pub mod internal;
+pub mod jar;
 pub mod method;
 pub mod pattern;
 pub mod protocols;
@@ -51,6 +52,7 @@ pub use csrf::{
 };
 pub use fs::{Dir, FileServer, HttpRange, NewDir, ParseRange, ServeFile};
 pub use header::{CanonicalHeaderKey, Header, ParseTime, TimeFormat};
+pub use jar::CookieJar;
 pub use method::{
     MethodConnect, MethodDelete, MethodGet, MethodHead, MethodOptions, MethodPatch, MethodPost,
     MethodPut, MethodTrace,
