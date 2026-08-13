@@ -44,7 +44,14 @@ struct reverseProxyHandler {
 /// Hop-by-hop headers (RFC 7230). Stripped before forwarding the
 /// request and before relaying the response back to the original
 /// client. Mirrors Go's `hopHeaders` (reverseproxy.go:307).
-const HOP_HEADERS: &[&str] = &[
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:307-317 hopHeaders
+//
+// Go: "Hop-by-hop headers. These are removed when sent to the backend.
+// As of RFC 7230, hop-by-hop headers are required to appear in the
+// Connection header field. These are the headers defined by the
+// obsoleted RFC 2616 (section 13.5.1) and are used for backward
+// compatibility."
+const hopHeaders: &[&str] = &[
     "Connection",
     "Proxy-Connection",
     "Keep-Alive",
@@ -59,7 +66,7 @@ const HOP_HEADERS: &[&str] = &[
 // go: none — goish-only helper. Go tests membership inline against
 // the `hopHeaders` slice at each call site; this names the check.
 fn isHopHeader(name: &string) -> bool {
-    for h in HOP_HEADERS.iter() {
+    for h in hopHeaders.iter() {
         if crate::strings::EqualFold(name.clone(), string(*h)) {
             return true;
         }
@@ -186,4 +193,91 @@ impl super::super::server::Handler for reverseProxyHandler {
 // this module can register it. See AGENTS.md §9b.
 pub(crate) fn register_httputil_impls() {
     super::super::server::__goish_register_Handler_impl::<reverseProxyHandler>();
+}
+
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:222-232 singleJoiningSlash
+//
+/// Join two path halves with exactly one '/' between them: a trailing
+/// slash on `a` and a leading one on `b` collapse to one, and neither
+/// having one inserts one.
+pub fn singleJoiningSlash<A: Into<string>, B: Into<string>>(a: A, b: B) -> string {
+    let a: string = a.into();
+    let b: string = b.into();
+    let aslash = strings::HasSuffix(a.clone(), string("/"));
+    let bslash = strings::HasPrefix(b.clone(), string("/"));
+    if aslash && bslash {
+        return a + b.slice(1, b.Len());
+    }
+    if !aslash && !bslash {
+        return a + "/" + b;
+    }
+    return a + b;
+}
+
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:294-300 copyHeader
+//
+/// Append every value of `src` onto `dst`, key by key. Go uses `Add`,
+/// not `Set`, so a key present in both ends up with BOTH sets of
+/// values rather than dst's being replaced.
+pub fn copyHeader(dst: &mut super::super::header::Header, src: &super::super::header::Header) {
+    for (k, vv) in src.__inner().__iter() {
+        let n = crate::len(vv);
+        let mut i: crate::types::int = 0;
+        while i < n {
+            dst.Add(k.clone(), vv[i].clone());
+            i += 1;
+        }
+    }
+}
+
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:877-887 ishex
+pub fn ishex(c: crate::types::byte) -> bool {
+    if b'0' <= c && c <= b'9' {
+        return true;
+    }
+    if b'a' <= c && c <= b'f' {
+        return true;
+    }
+    if b'A' <= c && c <= b'F' {
+        return true;
+    }
+    return false;
+}
+
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:588-605 removeHopByHopHeaders
+//
+/// Strip hop-by-hop headers before forwarding to a backend.
+///
+/// Two passes, and the ORDER matters: RFC 7230 §6.1 says the
+/// Connection header itself lists the hop-by-hop names, so those are
+/// removed first — while the Connection header is still present to be
+/// read. Only then is the fixed RFC 2616 §13.5.1 list removed, which
+/// includes Connection itself. Doing it the other way round would
+/// delete Connection before reading it and leak whatever it named.
+pub fn removeHopByHopHeaders(h: &mut super::super::header::Header) {
+    // Go: remove headers listed in the "Connection" header.
+    let conn = h.Values(string("Connection"));
+    let cn = crate::len(&conn);
+    let mut ci: crate::types::int = 0;
+    let mut doomed: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+    while ci < cn {
+        let parts = strings::Split(conn[ci].clone(), string(","));
+        ci += 1;
+        let pn = crate::len(&parts);
+        let mut pi: crate::types::int = 0;
+        while pi < pn {
+            let sf = crate::net::textproto::TrimString(parts[pi].clone());
+            pi += 1;
+            if sf != "" {
+                doomed.push(sf);
+            }
+        }
+    }
+    for k in doomed.iter() {
+        h.Del(k.clone());
+    }
+    // Go: remove the known hop-by-hop set, for backwards compatibility.
+    for f in hopHeaders.iter() {
+        h.Del(string(*f));
+    }
 }

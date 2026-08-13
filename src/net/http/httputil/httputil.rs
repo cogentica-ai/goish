@@ -30,6 +30,13 @@ pub fn NewChunkedWriter<W: Writer>(w: W) -> ChunkedWriter<W> {
     return super::super::internal::chunked::NewChunkedWriter(w);
 }
 
+// goishlint:ignore GOISH021 ErrLineTooLong — Go writes
+// `var ErrLineTooLong = internal.ErrLineTooLong`, an ALIAS of the
+// internal sentinel, not a second one. goish spells that as a
+// `pub use`, which GOISH021 does not see as a declaration. Declaring
+// it locally instead would mint a SECOND error value and break
+// `errors::Is(err, ErrLineTooLong)` for anything comparing against
+// the internal one — goish's errors match by Arc::ptr_eq.
 // go: sdk 1.25.5 net/http/httputil/httputil.go:41-41 ErrLineTooLong
 /// `httputil.ErrLineTooLong` (httputil.go:43) — re-export of
 /// `chunked::ErrLineTooLong`. Same Arc identity.

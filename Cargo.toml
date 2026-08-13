@@ -539,6 +539,10 @@ name = "http_mux_precedence_smoke"
 path = "examples/http_mux_precedence_smoke.rs"
 
 [[example]]
+name = "http_reverseproxy_helpers_smoke"
+path = "examples/http_reverseproxy_helpers_smoke.rs"
+
+[[example]]
 name = "http_constants_smoke"
 path = "examples/http_constants_smoke.rs"
 
