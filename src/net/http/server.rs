@@ -606,8 +606,17 @@ impl Handler for stripPrefixHandler {
     }
 }
 
-/// `http.TimeoutHandler(h, dt, msg)` (server.go:3775) — returns a
-/// Handler that runs `h` with the given time limit.
+// go: sdk 1.25.5 net/http/server.go:3816-3822 TimeoutHandler
+//
+/// Returns a Handler that runs `h` with the given time limit.
+///
+/// Verified against goref on the three observables: a handler that
+/// finishes in time passes its own status, headers and body through
+/// untouched; one that overruns yields 503 with Go's DEFAULT HTML
+/// timeout page when `msg` is empty, or `msg` verbatim when it is
+/// not. The default page is a byte-exact string Go hard-codes — a
+/// port that invented its own wording would look right in a browser
+/// and differ on the wire.
 ///
 /// The wrapped handler runs on its own goroutine against a buffered
 /// writer. If it finishes within `dt`, the buffered status, headers,
@@ -631,6 +640,7 @@ pub fn TimeoutHandler<H: Handler + 'static, S: Into<string>>(
 }
 
 /// Go's unexported `timeoutHandler` (server.go:3808).
+// go: sdk 1.25.5 net/http/server.go:3828-3836 timeoutHandler
 struct timeoutHandler {
     handler: Arc<dyn Handler>,
     body: string,
@@ -639,6 +649,7 @@ struct timeoutHandler {
 
 impl timeoutHandler {
     /// `(h *timeoutHandler).errorBody()` (server.go:3821).
+    // go: sdk 1.25.5 net/http/server.go:3838-3843 timeoutHandler.errorBody
     fn errorBody(&self) -> string {
         if self.body.Len() > 0 {
             return self.body.clone();

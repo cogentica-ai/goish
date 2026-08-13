@@ -579,6 +579,10 @@ name = "http_statusline_smoke"
 path = "examples/http_statusline_smoke.rs"
 
 [[example]]
+name = "http_timeouthandler_smoke"
+path = "examples/http_timeouthandler_smoke.rs"
+
+[[example]]
 name = "http_server_pure_smoke"
 path = "examples/http_server_pure_smoke.rs"
 
