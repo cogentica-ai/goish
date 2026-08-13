@@ -599,6 +599,10 @@ name = "http_proxy_xff_smoke"
 path = "examples/http_proxy_xff_smoke.rs"
 
 [[example]]
+name = "http_redirect_semantics_smoke"
+path = "examples/http_redirect_semantics_smoke.rs"
+
+[[example]]
 name = "http_server_pure_smoke"
 path = "examples/http_server_pure_smoke.rs"
 

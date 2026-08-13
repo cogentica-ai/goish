@@ -1051,7 +1051,12 @@ impl Client {
             current = current.WithContext(ctx);
             _cancel_guard.0 = Some(cancel);
         }
-        for _step in 0..=MAX_REDIRECTS {
+        // Go's defaultCheckRedirect errors when the `via` list has
+        // reached 10, i.e. BEFORE issuing an 11th request — so a
+        // redirect loop causes exactly MAX_REDIRECTS requests, not
+        // MAX_REDIRECTS + 1. `0..=MAX_REDIRECTS` issued eleven,
+        // measured against Go's ten with a self-redirecting server.
+        for _step in 0..MAX_REDIRECTS {
             let (resp, err) = self.Transport.RoundTrip(&current);
             if !err.IsNil() {
                 return (resp, err);
@@ -1069,14 +1074,25 @@ impl Client {
                     }
                     // Go: the hop's body is closed before following.
                     let _ = resp.Body.__close_shared();
-                    let next_method = if resp.StatusCode == 303 {
-                        // 303 → GET
-                        string("GET")
-                    } else if resp.StatusCode == 301 || resp.StatusCode == 302 {
-                        // 301/302 → POST becomes GET (matching Go)
-                        if current.Method.as_bytes() == b"POST"
-                            || current.Method.as_bytes() == b"PUT"
-                        {
+                    // Go's redirectBehavior (client.go):
+                    //
+                    //   301, 302, 303: redirectMethod = reqMethod, but
+                    //     "if reqMethod != GET && reqMethod != HEAD
+                    //      { redirectMethod = GET }" — ANY other
+                    //     method becomes GET. includeBody = false.
+                    //   307, 308: method and body both preserved.
+                    //
+                    // goish special-cased only POST and PUT, so a
+                    // DELETE or PATCH followed a 302 UNCHANGED. That
+                    // is the dangerous shape: whoever controls the
+                    // redirect target gets a destructive method
+                    // re-issued against a URL of their choosing.
+                    // Converting to GET is exactly what prevents it.
+                    let next_method = if resp.StatusCode == 301
+                        || resp.StatusCode == 302
+                        || resp.StatusCode == 303
+                    {
+                        if current.Method != "GET" && current.Method != "HEAD" {
                             string("GET")
                         } else {
                             current.Method.clone()
