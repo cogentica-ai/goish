@@ -235,6 +235,8 @@ impl Request {
         self.path_values = m;
     }
 
+    // go: sdk 1.25.5 net/http/request.go:1327-1360 Request.ParseForm
+    //
     /// `r.ParseForm()` — populate `r.Form` and `r.PostForm`.
     ///
     /// Line-by-line port of `(*Request).ParseForm()` (request.go:1327).
@@ -284,6 +286,33 @@ impl Request {
 
     /// `r.FormValue(key)` — first form value for `key`, or empty.
     /// Mirrors `(*Request).FormValue(key)` (request.go:1419).
+    // go: none — goish-only accessor for Go's `Request.Form` FIELD
+    // (request.go:80). goish keeps the parsed values in a
+    // mutex-guarded cell so ParseForm can populate them through a
+    // `&self` receiver, and a Rust field cannot be handed out from
+    // behind a lock — so the field becomes a method returning a
+    // snapshot, exactly as `httptest::Server::URL` does.
+    //
+    // Without this, only the SCALAR `FormValue` was reachable and
+    // Go's multi-value semantics — `Form["a"] == ["9","1"]` when a
+    // query and a POST body both set `a` — could not be observed at
+    // all, let alone tested.
+    pub fn Form(&self) -> crate::gomap::map<string, slice<string>> {
+        return self.form_state.Lock().form.clone();
+    }
+
+    // go: none — goish-only accessor for Go's `Request.PostForm`
+    // FIELD (request.go:88); see `Form` above.
+    pub fn PostForm(&self) -> crate::gomap::map<string, slice<string>> {
+        return self.form_state.Lock().post_form.clone();
+    }
+
+    // go: sdk 1.25.5 net/http/request.go:1419-1427 Request.FormValue
+    //
+    /// First value for `key` across query and POST body, or empty.
+    ///
+    /// Verified against goref: with `?a=1` and a POST body `a=9`, Go
+    /// merges POST FIRST, so this returns "9", not "1".
     pub fn FormValue<S: Into<string>>(&self, key: S) -> string {
         // Go: if r.Form == nil { r.ParseMultipartForm(defaultMaxMemory) }
         if !self.form_state.Lock().parsed {
@@ -298,8 +327,10 @@ impl Request {
         string::new()
     }
 
+    // go: sdk 1.25.5 net/http/request.go:1434-1442 Request.PostFormValue
+    //
     /// `r.PostFormValue(key)` — first POST form value for `key`, or
-    /// empty. Mirrors request.go:1434.
+    /// empty.
     pub fn PostFormValue<S: Into<string>>(&self, key: S) -> string {
         if !self.form_state.Lock().post_parsed {
             let _ = self.ParseForm();
