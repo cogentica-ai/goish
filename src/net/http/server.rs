@@ -115,15 +115,10 @@ struct MuxState {
     /// to step 4". Under that scheme two patterns Go orders by
     /// specificity dispatched by REGISTRATION ORDER instead.
     tree: super::routing_tree::routingNode,
-    /// The pattern strings registered so far.
-    ///
-    /// Go keeps `ServeMux.index routingIndex` and reports a conflict
-    /// through `registerErr`; goish detects only the exact-duplicate
-    /// case here, which is what `routingNode::set` would otherwise
-    /// hit as `panic!("non-nil leaf fields")` — an unhelpful message
-    /// for a common mistake. Full overlap detection wants
-    /// routing_index's `possiblyConflictingPatterns`, already ported.
-    registered: Vec<string>,
+    /// Go's `ServeMux.index routingIndex` (server.go:2501) — narrows
+    /// the conflict check to patterns that could possibly overlap, so
+    /// registration stays sub-quadratic.
+    index: super::routing_index::routingIndex,
 }
 
 
@@ -132,7 +127,7 @@ impl ServeMux {
         ServeMux {
             state: Arc::new(Mutex::new(MuxState {
                 tree: super::routing_tree::routingNode::default(),
-                registered: Vec::new(),
+                index: super::routing_index::routingIndex::default(),
             })),
         }
     }
@@ -154,27 +149,67 @@ impl ServeMux {
     /// Internal: stores an already-arced handler. Used by `Handle`,
     /// `HandleFunc`, and other internal callers that already hold an
     /// `Arc<dyn Handler>`.
+    // go: sdk 1.25.5 net/http/server.go:2915-2956 ServeMux.registerErr
+    //
+    /// Register `handler` for `pattern`, or return the reason it
+    /// cannot be.
+    ///
+    /// The conflict check is the substance. Go rejects two patterns
+    /// that both match some path where NEITHER is more specific —
+    /// "/q/" and "/{a}/{b}" both match "/q/b", so registering both is
+    /// an ERROR rather than a silent precedence coin-flip. goish
+    /// previously kept a list of pattern strings and caught only the
+    /// exact duplicate, so a genuine overlap was accepted and then
+    /// resolved arbitrarily.
+    ///
+    /// Divergence: Go decorates each pattern with `runtime.Caller(3)`
+    /// so the message names both registration SITES. goish has no
+    /// caller introspection here, so the message carries the two
+    /// patterns and the conflict description without file:line.
+    fn registerErr(&self, patstr: string, h: Arc<dyn Handler>) -> error {
+        if patstr == "" {
+            return errors::New(string("http: invalid pattern"));
+        }
+        let (pat, perr) = super::pattern::parsePattern(patstr.clone());
+        if !perr.IsNil() {
+            return crate::fmt::Errorf!("parsing %q: %v", patstr, perr);
+        }
+        let mut st = self.state.Lock();
+        // Go: check for conflict.
+        let conflict = {
+            let patref = &pat;
+            let mut probe = |pat2: &super::pattern::pattern| -> error {
+                if patref.conflictsWith(pat2) {
+                    let d = super::pattern::describeConflict(patref, pat2);
+                    return crate::fmt::Errorf!(
+                        "pattern %q conflicts with pattern %q:\n%v",
+                        patref.str.clone(),
+                        pat2.str.clone(),
+                        d
+                    );
+                }
+                return errors::nil;
+            };
+            st.index.possiblyConflictingPatterns(patref, &mut probe)
+        };
+        if !conflict.IsNil() {
+            return conflict;
+        }
+        st.tree.addPattern(&pat, h);
+        st.index.addPattern(&pat);
+        return errors::nil;
+    }
+
     // go: sdk 1.25.5 net/http/server.go:2909-2913 ServeMux.register
     //
-    // Go's `register` calls `registerErr` and PANICS on its error;
-    // goish detects the exact-duplicate case and panics with the same
-    // shape of message. A pattern that fails to parse is dropped
-    // silently, as before — `Handle` has no error return, and Go
-    // panics there too, but changing that is a separate decision from
-    // this swap.
+    // Go panics on registerErr's error, and so does this — a
+    // conflicting or malformed pattern is a programming mistake that
+    // Handle has no way to report.
     fn handle_arc(&self, pattern: string, h: Arc<dyn Handler>) {
-        let (p, err) = super::pattern::parsePattern(pattern.clone());
+        let err = self.registerErr(pattern, h);
         if !err.IsNil() {
-            return;
+            panic!("{}", err.Error());
         }
-        let mut s = self.state.Lock();
-        for r in s.registered.iter() {
-            if *r == pattern {
-                panic!("http: multiple registrations for a pattern");
-            }
-        }
-        s.registered.push(pattern);
-        s.tree.addPattern(&p, h);
     }
 
     /// `mux.HandleFunc(pattern, fn)` — register a closure handler.

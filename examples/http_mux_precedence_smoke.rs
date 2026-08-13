@@ -165,11 +165,48 @@ fn main() {
         }
     }
 
+    // 4. Pattern conflicts. Go rejects two patterns that both match
+    //    some path where NEITHER is more specific, because the choice
+    //    between them would otherwise be arbitrary. These four are the
+    //    accept cases, verified against Go: disjoint literals, a
+    //    specific pattern alongside a general one (specificity
+    //    resolves it), and the same path split by method.
+    //
+    //    The REJECT case is "/{a}/{b}" with "/q/" — both match "/q/b",
+    //    neither is more specific. goish now panics there with Go's
+    //    description verbatim ("/q/ and /{a}/{b} both match some
+    //    paths, like \"/q/b\"." ...), which is not asserted here only
+    //    because a panic ends the example.
+    {
+        let sets: &[&[&'static str]] = &[
+            &["/a", "/b"],
+            &["/{a}/{b}", "/p/{b}"],
+            &["GET /x", "POST /x"],
+        ];
+        let mut bad = 0;
+        for pats in sets {
+            let m = http::NewServeMux();
+            for p in pats.iter() {
+                m.HandleFunc(
+                    string(*p),
+                    |_w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &http::Request| {},
+                );
+            }
+            // Reaching here without a panic is the assertion.
+            bad += 0;
+        }
+        if bad == 0 {
+            fmt::Println!("[4] non-conflicting pattern sets all register  PASS");
+        } else {
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 3/3");
+        fmt::Println!("ok 4/4");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL ", failed, " of 3");
+        fmt::Println!("FAIL ", failed, " of 4");
         syscall::Exit(1);
     }
 }
