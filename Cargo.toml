@@ -1567,3 +1567,7 @@ path = "examples/http_servemux121_smoke.rs"
 [[example]]
 name = "http_trailer_smoke"
 path = "examples/http_trailer_smoke.rs"
+
+[[example]]
+name = "http_connectmethod_smoke"
+path = "examples/http_connectmethod_smoke.rs"

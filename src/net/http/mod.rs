@@ -48,6 +48,7 @@ pub mod sniff;
 pub mod socks_bundle;
 pub mod status;
 pub mod transfer;
+pub mod transport;
 pub mod url;
 
 pub use client::{

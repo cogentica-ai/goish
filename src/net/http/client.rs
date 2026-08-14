@@ -608,6 +608,13 @@ pub type DialContextFn = alloc::sync::Arc<dyn Fn() + Send + Sync>;
 /// today, the rest are inert metadata until the connection-pool layer
 /// lands.
 pub struct Transport {
+    /// Go's `altProto atomic.Value` holding `map[string]RoundTripper`
+    /// (transport.go:307), populated by `RegisterProtocol`. goish uses
+    /// a Mutex-guarded map — the atomic.Value dance exists to make the
+    /// read path lock-free, which goish's v1 does not need.
+    pub(crate) __alt_proto: crate::sync::Mutex<
+        crate::gomap::map<string, Option<alloc::sync::Arc<dyn RoundTripper>>>,
+    >,
     /// Maximum time `RoundTrip` will spend on the entire request
     /// (dial + write + read). Zero ≡ no timeout.
     pub Timeout: time::Duration,
@@ -645,6 +652,7 @@ pub struct Transport {
 impl Default for Transport {
     fn default() -> Self {
         Transport {
+            __alt_proto: crate::sync::Mutex::new(crate::gomap::map::new()),
             Timeout: time::Duration(0),
             DisableCompression: false,
             Proxy: None,
