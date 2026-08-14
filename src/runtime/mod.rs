@@ -26,6 +26,7 @@ mod mem;
 pub mod netpoll;
 pub mod note;
 pub mod pkginit;
+pub mod pprof;
 pub mod preempt;
 pub mod rand;
 pub mod rt_section;
@@ -35,6 +36,7 @@ pub mod signal;
 pub mod symbolize;
 pub mod spin;
 pub mod sysmon;
+pub mod trace;
 pub use debug::{NumCPU, NumGoroutine, GOMAXPROCS};
 pub use heap::{alloc, free, mheap_alloc_pages, mheap_capacity_pages, mheap_free_pages, realloc};
 

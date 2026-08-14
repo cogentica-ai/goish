@@ -11,4 +11,7 @@
 
 pub mod pprof;
 
-pub use pprof::{serveError, Cmdline};
+pub use pprof::{
+    handler, indexTmplExecute, profileEntry, serveError, Cmdline, Handler, Index, Profile,
+    Symbol, Trace,
+};

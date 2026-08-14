@@ -35,6 +35,8 @@ use goish::net::http::httptest;
 use goish::net::http::pprof::pprof;
 use goish::time;
 use goish::{context, string};
+use goish::io::Closer;
+use goish::runtime::pprof as rpprof;
 
 static PASSED: AtomicUsize = AtomicUsize::new(0);
 static FAILED: AtomicUsize = AtomicUsize::new(0);
@@ -76,6 +78,27 @@ fn check(name: &'static str, ok: bool, detail: goish::string) {
         fmt::Printf!("FAIL: %s — %s\n", name, detail);
     }
 }
+
+fn get(client: &http::Client, url: goish::string) -> (goish::int, goish::string) {
+    let (mut resp, err) = client.Do(&{
+        let (r, _) = http::NewRequest(string("GET"), url, goish::nil);
+        r
+    });
+    if !err.IsNil() {
+        return (0, fmt::Sprintf!("err=%v", err));
+    }
+    let (b, _) = goish::io::ReadAll(&mut resp.Body);
+    let _ = resp.Body.Close();
+    (resp.StatusCode, goish::string::from_bytes(&b))
+}
+
+/// A named function whose PC the Symbol test resolves, and inside
+/// which the profile stack is captured so debug=1 output must name it.
+#[inline(never)]
+fn capture_site(p: &Arc<rpprof::Profile>, value: usize) {
+    p.Add(value, 0);
+}
+
 
 #[goish::main]
 fn main() {
@@ -248,6 +271,161 @@ fn run() -> ! {
     }
 
     let p = PASSED.load(Ordering::Relaxed);
+    // ── registry: a profile with two real stacks ──
+    let prof = rpprof::NewProfile(string("goish_conns"));
+    let v1: usize = 0x1001;
+    let v2: usize = 0x1002;
+    capture_site(&prof, v1);
+    capture_site(&prof, v2);
+    check(
+        "registry Count sees both stacks",
+        prof.Count() == 2 && rpprof::Lookup(string("goish_conns")).is_some(),
+        fmt::Sprintf!("count=%d", prof.Count()),
+    );
+
+    // ── the HTTP surface ──
+    let mux = http::ServeMux::new();
+    mux.HandleFunc(string("/debug/pprof/"), |w, r| http::pprof::Index(w, r));
+    mux.HandleFunc(string("/debug/pprof/symbol"), |w, r| http::pprof::Symbol(w, r));
+    mux.HandleFunc(string("/debug/pprof/profile"), |w, r| http::pprof::Profile(w, r));
+    mux.HandleFunc(string("/debug/pprof/trace"), |w, r| http::pprof::Trace(w, r));
+    mux.HandleFunc(string("/debug/pprof/cmdline"), |w, r| http::pprof::Cmdline(w, r));
+    let ts = http::httptest::NewServer(Arc::new(mux));
+    let client = http::Client::default();
+    let base = ts.URL();
+
+    // 1. Handler?debug=1: Go text format + live-symbolized frame.
+    {
+        let (code, body) = get(
+            &client,
+            base.clone() + string("/debug/pprof/goish_conns?debug=1"),
+        );
+        let bv: &str = body.as_ref();
+        check(
+            "profile renders in Go's text format with a symbolized frame",
+            code == 200
+                && bv.contains("goish_conns profile: total 2")
+                && bv.contains("@ 0x")
+                && bv.contains("capture_site"),
+            fmt::Sprintf!("code=%d body=%q", code, body.clone()),
+        );
+    }
+
+    // 2. Index lists it (count included) + the package-local four.
+    {
+        let (code, body) = get(&client, base.clone() + string("/debug/pprof/"));
+        let bv: &str = body.as_ref();
+        check(
+            "Index lists the registered profile and the built-in four",
+            code == 200
+                && bv.contains("goish_conns")
+                && bv.contains("<td>2</td>")
+                && bv.contains("cmdline")
+                && bv.contains("symbol")
+                && bv.contains("full goroutine stack dump"),
+            fmt::Sprintf!("code=%d", code),
+        );
+    }
+
+    // 3. Symbol resolves this binary's own PC.
+    {
+        // An in-function PC (entry+1): pprof clients send sampled PCs
+        // from inside function bodies, and the symbolizer's pc-1
+        // return-address convention expects that.
+        let pc = capture_site as fn(&Arc<rpprof::Profile>, usize) as usize + 1;
+        let (code, body) = get(
+            &client,
+            fmt::Sprintf!("%s/debug/pprof/symbol?0x%x", base, pc as u64),
+        );
+        let bv: &str = body.as_ref();
+        check(
+            "Symbol maps a live PC to its function name",
+            code == 200 && bv.starts_with("num_symbols: 1") && bv.contains("capture_site"),
+            fmt::Sprintf!("code=%d body=%q", code, body.clone()),
+        );
+    }
+
+    // 4. Unknown profile → Go's 404.
+    {
+        let (code, body) = get(&client, base.clone() + string("/debug/pprof/nonesuch"));
+        check(
+            "unknown profile 404s with Go's message",
+            code == 404 && (body.as_ref() as &str).contains("Unknown profile"),
+            fmt::Sprintf!("code=%d body=%q", code, body),
+        );
+    }
+
+    // 5. Profile / Trace: the honest unsupported arms.
+    {
+        let (code, body) = get(
+            &client,
+            base.clone() + string("/debug/pprof/profile?seconds=1"),
+        );
+        check(
+            "CPU profile serves Go's could-not-enable arm",
+            code == 500 && (body.as_ref() as &str).contains("Could not enable CPU profiling"),
+            fmt::Sprintf!("code=%d body=%q", code, body),
+        );
+        let (code, body) = get(&client, base.clone() + string("/debug/pprof/trace?seconds=1"));
+        check(
+            "trace serves Go's could-not-enable arm",
+            code == 500 && (body.as_ref() as &str).contains("Could not enable tracing"),
+            fmt::Sprintf!("code=%d body=%q", code, body),
+        );
+    }
+
+    // 6. ?seconds= on a registry profile → Go's delta validation.
+    {
+        let (code, body) = get(
+            &client,
+            base.clone() + string("/debug/pprof/goish_conns?seconds=1"),
+        );
+        check(
+            "delta on a non-builtin profile takes Go's 400 arm",
+            code == 400
+                && (body.as_ref() as &str)
+                    .contains("not supported for this profile type"),
+            fmt::Sprintf!("code=%d body=%q", code, body),
+        );
+    }
+
+    // 7. Remove drains it.
+    {
+        prof.Remove(v1);
+        prof.Remove(v2);
+        let (code, body) = get(
+            &client,
+            base.clone() + string("/debug/pprof/goish_conns?debug=1"),
+        );
+        check(
+            "Remove empties the profile",
+            code == 200 && (body.as_ref() as &str).contains("goish_conns profile: total 0"),
+            fmt::Sprintf!("code=%d body=%q", code, body),
+        );
+    }
+
+    // 8. Cmdline still serves (the original four's representative).
+    {
+        let (code, _body) = get(&client, base.clone() + string("/debug/pprof/cmdline"));
+        check("cmdline serves 200", code == 200, fmt::Sprintf!("code=%d", code));
+    }
+
+    ts.Close();
+
+    // ── init registers the five on the DefaultServeMux ──
+    {
+        http::pprof::pprof::init();
+        let ts2 = httptest::NewServer(http::DefaultServeMux());
+        let (code, _b) = get(&client, ts2.URL() + string("/debug/pprof/cmdline"));
+        let (code2, body2) = get(&client, ts2.URL() + string("/debug/pprof/"));
+        check(
+            "init wires the handlers into the DefaultServeMux",
+            code == 200 && code2 == 200 && (body2.as_ref() as &str).contains("goish_conns"),
+            fmt::Sprintf!("cmdline=%d index=%d", code, code2),
+        );
+        ts2.Close();
+    }
+
     let f = FAILED.load(Ordering::Relaxed);
     fmt::Printf!("\n%d passed, %d failed\n", p as i64, f as i64);
     if f == 0 {
