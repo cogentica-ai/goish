@@ -400,6 +400,19 @@ impl Body {
         (out, errors::nil)
     }
 
+    // go: none — goish-only: Go's readTrackingBody.didRead, answered
+    // by the Body's own cursor: an Eager body reports whether any
+    // byte was taken; conn-backed and Closed framings count as read
+    // (conservative, like a wrapper that saw a Read call).
+    pub(crate) fn __was_read(&self) -> bool {
+        let g = self.inner.Lock();
+        let out = match &g.framing {
+            FramedBody::Eager { off, .. } => *off > 0,
+            _ => true,
+        };
+        return out;
+    }
+
     // go: none — goish-only: install the bodyEOFSignal bank-back (see
     // BodyState.reuse_fn).
     pub(crate) fn __set_reuse(&self, f: alloc::boxed::Box<dyn FnOnce(ConnSrc) + Send>) {
@@ -1014,6 +1027,10 @@ impl RoundTripper for Transport {
                 onlyH1: false,
             };
 
+            // Go (roundTrip, transport.go:598): req = setupRewindBody(req)
+            // — the retry path below must be able to replay a consumed
+            // body via GetBody (rewindBody), never resend it empty.
+            let mut rt_req = super::transport::setupRewindBody(req);
             // Retry loop — Go's transport.roundTrip: a request that
             // failed on a REUSED conn (the server may have closed it
             // while idle) is retried once on a fresh dial
@@ -1067,7 +1084,7 @@ impl RoundTripper for Transport {
 
                 // Write the request: head, then stream the body (see
                 // the TLS arm above).
-                let (head, mut tw, serr) = serialize_request_head(req, &host, false);
+                let (head, mut tw, serr) = serialize_request_head(&rt_req, &host, false);
                 if !serr.IsNil() {
                     stop_cancel_watch(watch);
                     let _ = src.close_conn();
@@ -1086,13 +1103,31 @@ impl RoundTripper for Transport {
                     // Go (writeLoop): a request whose FIRST write got
                     // nothing onto a reused conn maps to
                     // nothingWrittenError, which shouldRetryRequest
-                    // always retries.
+                    // always retries. An EPIPE/ECONNRESET mid-write on
+                    // a REUSED conn is the same event seen later — Go's
+                    // concurrent readLoop peek reports it as
+                    // errServerClosedIdle before the writer notices;
+                    // sequential goish maps the write error itself
+                    // (text-matched: the net package has no typed
+                    // errors, same substitution isCommonNetReadError
+                    // makes).
                     let mapped = if pc_reused && head_failed {
                         super::transport::errNothingWritten.into()
+                    } else if pc_reused
+                        && ((werr.Error().as_ref() as &str).contains("broken pipe")
+                            || (werr.Error().as_ref() as &str).contains("connection reset"))
+                    {
+                        super::transport::errServerClosedIdle.into()
                     } else {
                         werr.clone()
                     };
-                    if super::transport::shouldRetryRequest(req, mapped, pc_reused) {
+                    if super::transport::shouldRetryRequest(&rt_req, mapped, pc_reused) {
+                        // Go (roundTrip retry): req, err = rewindBody(req)
+                        let (rw, rwerr) = super::transport::rewindBody(&rt_req);
+                        if !rwerr.IsNil() {
+                            return (Response::default(), rwerr);
+                        }
+                        rt_req = rw;
                         continue;
                     }
                     return (Response::default(), ctx_err_or(&ctx, werr));
@@ -1101,25 +1136,42 @@ impl RoundTripper for Transport {
                 // Read the response head; the src moves onward into
                 // resp.Body, which streams until the caller Closes it.
                 let (mut resp, kind, rerr) = match &mut src {
-                    ConnSrc::Tcp(br) => read_response_head(br, Some(req.clone())),
+                    ConnSrc::Tcp(br) => read_response_head(br, Some(rt_req.clone())),
                     ConnSrc::Tls(_) => unreachable!("plain arm"),
                 };
                 if !rerr.IsNil() {
                     stop_cancel_watch(watch);
+                    // Go (readLoop): a failed peek where the response
+                    // head should be goes through
+                    // readLoopPeekFailLocked — an unsolicited 408 or a
+                    // bare EOF on a reused conn maps to
+                    // errServerClosedIdle (retried); anything else is
+                    // wrapped and terminal. The classification lands
+                    // in pc.closed, read back for the retry gate.
+                    let buffered = match &mut src {
+                        ConnSrc::Tcp(br) => {
+                            let n = br.Buffered();
+                            if n > 0 {
+                                br.Peek(n).0
+                            } else {
+                                slice::<byte>::__from_vec(Vec::new())
+                            }
+                        }
+                        ConnSrc::Tls(_) => slice::<byte>::__from_vec(Vec::new()),
+                    };
                     let _ = src.close_conn();
-                    // Go (readLoopPeekFailLocked, transport.go:2270):
-                    // an EOF where the response head should be, on a
-                    // REUSED conn, is "an unfortunate keep-alive
-                    // timeout" — errServerClosedIdle, retried.
-                    let mapped = if pc_reused
-                        && (errors::Is(rerr.clone(), io::EOF)
-                            || errors::Is(rerr.clone(), io::ErrUnexpectedEOF))
-                    {
-                        super::transport::errServerClosedIdle.into()
+                    let mapped = if pc_reused {
+                        pc.readLoopPeekFailLocked(rerr.clone(), &buffered);
+                        pc.__closed_reason()
                     } else {
                         rerr.clone()
                     };
-                    if super::transport::shouldRetryRequest(req, mapped, pc_reused) {
+                    if super::transport::shouldRetryRequest(&rt_req, mapped, pc_reused) {
+                        let (rw, rwerr) = super::transport::rewindBody(&rt_req);
+                        if !rwerr.IsNil() {
+                            return (resp, rwerr);
+                        }
+                        rt_req = rw;
                         continue;
                     }
                     return (resp, ctx_err_or(&ctx, rerr));
@@ -1136,6 +1188,7 @@ impl RoundTripper for Transport {
                         let idle = self.__idle.clone();
                         let cfg = self.__bank_cfg();
                         let pc2 = pc.clone();
+                        let idle_timeout = self.IdleConnTimeout;
                         Some(alloc::boxed::Box::new(move |mut s: ConnSrc| {
                             // Clear the per-request deadline before the
                             // conn waits idle.
@@ -1145,6 +1198,19 @@ impl RoundTripper for Transport {
                             if !e.IsNil() {
                                 // Pool refused (full/closed): release.
                                 pc2.close(e);
+                                return;
+                            }
+                            // Go: pc.idleTimer = time.AfterFunc(
+                            // t.IdleConnTimeout, pc.closeConnIfStillIdle)
+                            // — armed per idle cycle, stopped when the
+                            // conn is taken (__take_src).
+                            if idle_timeout.0 > 0 {
+                                let pc3 = pc2.clone();
+                                let idle3 = idle.clone();
+                                let t = crate::time::AfterFunc(idle_timeout, move || {
+                                    pc3.closeConnIfStillIdle(&idle3);
+                                });
+                                pc2.__arm_idle_timer(t);
                             }
                         }))
                     } else {

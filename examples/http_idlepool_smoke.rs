@@ -53,9 +53,9 @@ fn run() {
         let e = t.tryPutIdleConn(&pc);
         check("a healthy conn is pooled and marked reused",
               e.IsNil() && pc.isReused(), fmt::Sprintf!("%v", e));
-        check("and can then be removed", t.removeIdleConnLocked(&pc), string(""));
+        check("and can then be removed", t.removeIdleConn(&pc), string(""));
         check("removing it twice reports false the second time",
-              !t.removeIdleConnLocked(&pc), string(""));
+              !t.removeIdleConn(&pc), string(""));
     }
 
     // Each rejection is a distinct named error.

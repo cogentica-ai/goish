@@ -81,9 +81,45 @@ fn spawn_backend() -> goish::int {
                         let _ = c.Close();
                         return;
                     }
-                    let _ = c.Write(bytes(
-                        "HTTP/1.1 200 OK\r\nContent-Length: 22\r\n\r\nthis is the reply body",
-                    ));
+                    // A request body (Content-Length) is read and
+                    // ECHOED — the rewind tripwire below asserts the
+                    // replayed body arrived intact on the retry conn.
+                    let hs = goish::string::from_bytes(&head);
+                    let hv: &str = hs.as_ref();
+                    let mut req_body: Vec<u8> = Vec::new();
+                    if let Some(ci) = hv.to_ascii_lowercase().find("content-length:") {
+                        let cl: usize = hv[ci + 15..]
+                            .trim_start()
+                            .chars()
+                            .take_while(|c| c.is_ascii_digit())
+                            .collect::<alloc::string::String>()
+                            .parse()
+                            .unwrap_or(0);
+                        let delim = hv.find("\r\n\r\n").map(|i| i + 4).unwrap_or(head.len());
+                        req_body.extend_from_slice(&head[delim..]);
+                        while req_body.len() < cl {
+                            let mut b = goish::make!([]goish::byte, 256);
+                            let (n, re) = c.Read(&mut b);
+                            for i in 0..n {
+                                req_body.push(b[i]);
+                            }
+                            if !re.IsNil() || n == 0 {
+                                break;
+                            }
+                        }
+                    }
+                    if req_body.is_empty() {
+                        let _ = c.Write(bytes(
+                            "HTTP/1.1 200 OK\r\nContent-Length: 22\r\n\r\nthis is the reply body",
+                        ));
+                    } else {
+                        let reply = fmt::Sprintf!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n%s",
+                            req_body.len() as i64,
+                            goish::string::from_bytes(&req_body)
+                        );
+                        let _ = c.Write(goish::convert::bytes(reply));
+                    }
                     if CLOSE_AFTER_ONE.load(Ordering::SeqCst) {
                         let _ = c.Close();
                         return;
@@ -195,6 +231,48 @@ fn run() -> ! {
         } else {
             check(
                 "a server-closed idle conn is retried transparently",
+                false,
+                fmt::Sprintf!("%v", err),
+            );
+        }
+    }
+
+    // ── 3b. a retried request REPLAYS its body (rewindBody/GetBody) ──
+    {
+        let client = http::Client::default();
+        // Prime a pooled conn, then have the server kill it after the
+        // next response: the POST-shaped follow-up lands on a dead
+        // conn, retries, and must resend the FULL body — a client
+        // that reuses the consumed body sends an empty one and the
+        // echo comes back short (or the write errors on
+        // ContentLength/body mismatch).
+        CLOSE_AFTER_ONE.store(true, Ordering::SeqCst);
+        let (mut resp, err) = client.Do(&{
+            let (r, _) = http::NewRequest(string("GET"), url.clone(), goish::nil);
+            r
+        });
+        if err.IsNil() {
+            let (_b, _) = goish::io::ReadAll(&mut resp.Body);
+            let _ = resp.Body.Close();
+        }
+        CLOSE_AFTER_ONE.store(false, Ordering::SeqCst);
+        time::Sleep(time::Duration(100 * 1_000_000));
+        // GET so shouldRetryRequest's isReplayable arm passes; the
+        // body still exercises the rewind (GetBody replay).
+        let (req, _) =
+            http::NewRequest(string("GET"), url.clone(), bytes("replay-me-exactly"));
+        let (mut resp, err) = client.Do(&req);
+        if err.IsNil() {
+            let (body, _) = goish::io::ReadAll(&mut resp.Body);
+            let _ = resp.Body.Close();
+            check(
+                "a retried request replays its body via GetBody",
+                goish::string::from_bytes(&body) == "replay-me-exactly",
+                fmt::Sprintf!("echo=%q", goish::string::from_bytes(&body)),
+            );
+        } else {
+            check(
+                "a retried request replays its body via GetBody",
                 false,
                 fmt::Sprintf!("%v", err),
             );

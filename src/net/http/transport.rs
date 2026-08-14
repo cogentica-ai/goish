@@ -527,6 +527,18 @@ impl<T: PartialEq> connLRU<T> {
         return;
     }
 
+    // go: none — goish-only: Go tests membership via the `m` map
+    // (`_, ok := t.idleLRU.m[pc]` in closeConnIfStillIdle); the
+    // collapsed Vec answers the same question by scan.
+    pub fn contains(&self, pc: &T) -> bool {
+        for v in self.ll.iter() {
+            if v == pc {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // go: sdk 1.25.5 net/http/transport.go:3139-3142 connLRU.len
     pub fn len(&self) -> int {
         return crate::int(crate::int64(self.ll.len()));
@@ -684,6 +696,9 @@ pub struct persistConn {
     /// the conn is IDLE in the pool; taken out for the request in
     /// flight (the response Body owns it until the bank-back).
     src: crate::sync::Mutex<Option<super::client::ConnSrc>>,
+    /// Go: `idleTimer *time.Timer` — the IdleConnTimeout reaper for
+    /// the CURRENT idle cycle; stopped when the conn is taken.
+    idleTimer: crate::sync::Mutex<Option<crate::time::Timer>>,
 }
 
 // go: none — goish-only: the payload of Go's `mu sync.Mutex`, i.e. the
@@ -724,6 +739,7 @@ impl persistConn {
         return persistConn {
             cacheKey,
             src: crate::sync::Mutex::new(None),
+            idleTimer: crate::sync::Mutex::new(None),
             state: crate::sync::Mutex::new(pcState {
                 reused: false,
                 broken: false,
@@ -747,9 +763,92 @@ impl persistConn {
         return;
     }
 
-    // go: none — see __put_src.
+    // go: none — see __put_src. Also retires the idle timer: a conn
+    // taken for a request must not be reaped by a stale
+    // IdleConnTimeout firing (Go Stops pc.idleTimer on delivery).
     pub(crate) fn __take_src(&self) -> Option<super::client::ConnSrc> {
+        if let Some(t) = self.idleTimer.Lock().take() {
+            t.Stop();
+        }
         return self.src.Lock().take();
+    }
+
+    // go: none — goish-only: Go's `pc.idleTimer.Reset(...)` slot; one
+    // AfterFunc per idle cycle, stopped when the conn is taken.
+    pub(crate) fn __arm_idle_timer(&self, t: crate::time::Timer) {
+        let old = self.idleTimer.Lock().replace(t);
+        if let Some(old) = old {
+            old.Stop();
+        }
+        return;
+    }
+
+    // go: none — goish-only: the close reason `closeLocked` recorded;
+    // Go's roundTrip reads `pc.closed` directly under mu.
+    pub(crate) fn __closed_reason(&self) -> error {
+        return self.state.Lock().closed.clone();
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:2420-2439 persistConn.readLoopPeekFailLocked
+    // goishlint:ignore GOISH020 readLoopPeekFailLocked — Go's receiver
+    // reads pc.br; goish's src is out with the request in flight, so
+    // the caller peeks its own bufio and passes the bytes.
+    /// Classify a failed peek where a response head should be: an
+    /// unsolicited 408 or a bare EOF on the idle channel is Go's
+    /// "server closed idle connection" (retryable); anything else is
+    /// wrapped and terminal. The reason lands in `closed` via
+    /// closeLocked, exactly like Go — read it back with
+    /// `__closed_reason`.
+    pub(crate) fn readLoopPeekFailLocked(&self, peekErr: error, buffered: &slice<crate::types::byte>) {
+        if !self.state.Lock().closed.IsNil() {
+            return;
+        }
+        if buffered.Len() > 0 {
+            if is408Message(buffered) {
+                self.closeLocked(errServerClosedIdle.into());
+                return;
+            }
+            // Go: log.Printf("Unsolicited response received on idle
+            // HTTP channel starting with %q; err=%v", buf, peekErr) —
+            // goish has no default transport logger; fall through to
+            // the wrapped close below.
+        }
+        if errors::Is(peekErr.clone(), crate::io::EOF)
+            || errors::Is(peekErr.clone(), crate::io::ErrUnexpectedEOF)
+        {
+            // Go: "common case."
+            self.closeLocked(errServerClosedIdle.into());
+        } else {
+            self.closeLocked(errors::New(crate::fmt::Sprintf!(
+                "readLoopPeekFailLocked: %v",
+                peekErr
+            )));
+        }
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:2167-2177 persistConn.closeConnIfStillIdle
+    // goishlint:ignore GOISH020 closeConnIfStillIdle — Go reaches the
+    // pool through pc.t; goish's persistConn carries no Transport
+    // back-pointer, so the Arc'd pool is a parameter.
+    /// The IdleConnTimeout reaper: if this conn is STILL in the idle
+    /// pool when the timer fires, evict and close it; a conn that was
+    /// taken (or re-banked, which re-arms a fresh timer) is left
+    /// alone.
+    pub(crate) fn closeConnIfStillIdle(
+        self: &Arc<Self>,
+        idle: &Arc<crate::sync::Mutex<idlePool>>,
+    ) {
+        {
+            let mut pool = idle.Lock();
+            if !pool.idleLRU.contains(self) {
+                // Go: "Not idle."
+                return;
+            }
+            __removeIdleConnLocked(&mut pool, self);
+        }
+        self.close(errIdleConnTimeout.into());
+        return;
     }
 
     // go: none — goish-only: read/stamp Go's `idleAt` field.
@@ -1271,10 +1370,11 @@ impl Transport {
         return;
     }
 
-    // go: sdk 1.25.5 net/http/transport.go:1242-1273 Transport.removeIdleConnLocked
-    /// Go: "removes pconn from the idle list." Returns whether it was
+    // go: sdk 1.25.5 net/http/transport.go:1235-1240 Transport.removeIdleConn
+    /// Go: "removes pconn from the idle list." Locks the pool, then
+    /// delegates to the assumes-held body. Returns whether it was
     /// found there.
-    pub fn removeIdleConnLocked(&self, pconn: &Arc<persistConn>) -> bool {
+    pub fn removeIdleConn(&self, pconn: &Arc<persistConn>) -> bool {
         let mut pool = self.__idle.Lock();
         return __removeIdleConnLocked(&mut pool, pconn);
     }
@@ -1435,6 +1535,40 @@ pub(crate) fn __try_put_idle(
         }
     }
     return errors::nil;
+}
+
+// go: sdk 1.25.5 net/http/transport.go:773-784 setupRewindBody
+/// Go wraps the body in a readTrackingBody so rewindBody can tell
+/// whether anything was consumed. goish's `Body` tracks its own
+/// cursor (`__was_read`), so the setup is the identity — kept as the
+/// roundTrip entry seam Go routes through.
+pub(crate) fn setupRewindBody(req: &Request) -> Request {
+    return req.clone();
+}
+
+// go: sdk 1.25.5 net/http/transport.go:786-806 rewindBody
+/// Go: "returns a new request with the body rewound. It returns req
+/// unmodified if the body does not need rewinding." A consumed body
+/// is replayable only through GetBody; without it the retry must
+/// fail (errCannotRewind) rather than resend an empty body.
+pub(crate) fn rewindBody(req: &Request) -> (Request, error) {
+    // Go: req.Body == nil || req.Body == NoBody || !didRead — an
+    // untouched body needs nothing.
+    if !req.Body.__was_read() {
+        return (req.clone(), errors::nil);
+    }
+    let _ = req.Body.__close_shared();
+    let gb = match &req.GetBody {
+        None => return (req.clone(), errCannotRewind.into()),
+        Some(gb) => gb.clone(),
+    };
+    let (body, err) = gb();
+    if !err.IsNil() {
+        return (req.clone(), err);
+    }
+    let mut newReq = req.clone();
+    newReq.Body = body;
+    return (newReq, errors::nil);
 }
 
 // go: sdk 1.25.5 net/http/transport.go:806-852 persistConn.shouldRetryRequest
