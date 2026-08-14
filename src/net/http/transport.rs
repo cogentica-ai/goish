@@ -1004,6 +1004,47 @@ impl persistConn {
         return;
     }
 
+    // go: sdk 1.25.5 net/http/transport.go:2529-2546 persistConn.waitForContinue
+    // goishlint:ignore GOISH020 waitForContinue — ExpectContinueTimeout
+    // lives on the Transport; Go reaches it through pc.t, goish's pc
+    // carries no Transport back-pointer, so it arrives as a param.
+    /// Go: "waitForContinue returns the function to block until any
+    /// response, timeout or connection close. After any of them, the
+    /// function returns a bool which indicates if the body should be
+    /// sent." A nil continueCh (no Expect header) answers None, Go's
+    /// nil func.
+    ///
+    /// goish deviations, both sequential-model: Go's readLoop CLOSES
+    /// the channel for "final response arrived, skip the body" —
+    /// goish's feeder sends the bool explicitly (the select macro's
+    /// Recv arm binds the value, not the comma-ok). And Go's third
+    /// arm watches pc.closech (the readLoop dying); with no
+    /// concurrent closer, a conn already recorded broken answers
+    /// false up front.
+    pub(crate) fn waitForContinue(
+        &self,
+        t: &Transport,
+        continueCh: Option<crate::gochan::chan<bool>>,
+    ) -> Option<alloc::boxed::Box<dyn FnOnce() -> bool>> {
+        let ch = match continueCh {
+            None => return None,
+            Some(c) => c,
+        };
+        if self.isBroken() {
+            return Some(alloc::boxed::Box::new(|| false));
+        }
+        let timeout = t.ExpectContinueTimeout;
+        return Some(alloc::boxed::Box::new(move || {
+            let timer = crate::time::NewTimer(timeout);
+            let out = crate::select! {
+                let v = ch.Recv() => v,
+                let _ = (timer.C).Recv() => true,
+            };
+            timer.Stop();
+            return out;
+        }));
+    }
+
     // go: sdk 1.25.5 net/http/transport.go:2187-2235 persistConn.mapRoundTripError
     // goishlint:ignore GOISH020 mapRoundTripError — Go's middle param
     // is startBytesWritten for the nwrite comparison; the sequential

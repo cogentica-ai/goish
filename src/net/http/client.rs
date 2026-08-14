@@ -708,6 +708,22 @@ pub(crate) fn read_response_head<R: Reader>(
     return (resp, kind, errors::nil);
 }
 
+// go: none — goish-only: the readLoop half of the 100-continue dance
+// (Go reads the interim head inside readResponse's 1xx loop): consume
+// the interim status line and its terminating blank line, leaving the
+// real response buffered.
+fn __consume_interim<R: Reader>(br: &mut bufio::Reader<R>) -> error {
+    loop {
+        let line = match read_crlf_line(br) {
+            Ok(l) => l,
+            Err(e) => return e,
+        };
+        if line.Len() == 0 {
+            return errors::nil;
+        }
+    }
+}
+
 /// Read until EOF into `body`, returning the appended slice and any
 /// non-EOF error. Mirrors Go's `io.ReadAll` loop — only exits on error
 /// (including io.EOF). A (0, nil) return is treated as "keep reading",
@@ -1111,12 +1127,81 @@ impl RoundTripper for Transport {
                     return (Response::default(), serr);
                 }
                 let (_, head_werr) = src.write(head);
-                let (werr, head_failed) = if head_werr.IsNil() {
+                // Go (writeLoop → Request.write → waitForContinue):
+                // an "Expect: 100-continue" request holds its body
+                // until the server answers. The sequential feeder
+                // plays readLoop's half: peek for an interim response
+                // under ExpectContinueTimeout — a 100 (consumed) means
+                // send, a FINAL head (left buffered for the normal
+                // read below) means skip, a quiet wire means send
+                // after the timeout, all fed through the verbatim
+                // waitForContinue closure.
+                let mut skip_body = false;
+                if head_werr.IsNil()
+                    && tw.Body.is_some()
+                    && rt_req.expectsContinue()
+                {
+                    let continue_ch: crate::gochan::chan<bool> = crate::make!(chan bool, 1);
+                    let ect = self.ExpectContinueTimeout;
+                    if ect.0 > 0 {
+                        let _ = src.__set_deadline(time::Now().Add(ect));
+                        let sniff = match &mut src {
+                            ConnSrc::Tcp(br) => br.Peek(12).0,
+                            ConnSrc::Tls(br) => br.Peek(12).0,
+                            ConnSrc::Dyn(br) => br.Peek(12).0,
+                        };
+                        if sniff.Len() >= 12 {
+                            let raw: &[u8] = &sniff;
+                            if &raw[9..12] == b"100" {
+                                // Interim 100: consume its lines
+                                // through the blank terminator.
+                                let consumed = match &mut src {
+                                    ConnSrc::Tcp(br) => __consume_interim(br),
+                                    ConnSrc::Tls(br) => __consume_interim(br),
+                                    ConnSrc::Dyn(br) => __consume_interim(br),
+                                };
+                                let _ = consumed;
+                                let _ = continue_ch.Send(true);
+                            } else {
+                                // A final response before any body
+                                // byte: Go's readLoop closes the
+                                // channel — skip the body.
+                                let _ = continue_ch.Send(false);
+                            }
+                        } else {
+                            // Quiet wire (deadline hit): Go's timer
+                            // outcome — send the body.
+                            let _ = continue_ch.Send(true);
+                        }
+                        // Restore the request deadline.
+                        let dl = self.effective_deadline(&ctx);
+                        let _ = src.__set_deadline(if dl.IsZero() {
+                            time::Time::default()
+                        } else {
+                            dl
+                        });
+                    } else {
+                        // Go: a zero ExpectContinueTimeout fires the
+                        // closure's timer immediately — body sent.
+                        let _ = continue_ch.Send(true);
+                    }
+                    if let Some(wait) = pc.waitForContinue(self, Some(continue_ch)) {
+                        if !wait() {
+                            skip_body = true;
+                        }
+                    }
+                }
+                let (werr, head_failed) = if !head_werr.IsNil() {
+                    (head_werr, true)
+                } else if skip_body {
+                    // The body stays unsent; its closer still runs
+                    // (Go's Request.write defer).
+                    tw.__abort_body();
+                    (errors::nil, false)
+                } else {
                     let mut cw = ConnSrcWriter(&mut src);
                     let mut cw: &mut dyn crate::io::Writer = &mut cw;
                     (tw.writeBody(&mut cw), false)
-                } else {
-                    (head_werr, true)
                 };
                 if !werr.IsNil() {
                     stop_cancel_watch(watch);

@@ -858,6 +858,17 @@ impl transferWriter {
         return errors::nil;
     }
 
+    // go: none — goish-only: the skip-body arm of Go's Request.write
+    // (a waitForContinue answering false) still closes the
+    // BodyCloser; writeBody's own close never runs on that path.
+    pub(crate) fn __abort_body(&mut self) {
+        self.Body = None;
+        if let Some(bc) = self.BodyCloser.take() {
+            let _ = bc.__close_shared();
+        }
+        return;
+    }
+
     // go: sdk 1.25.5 net/http/transfer.go:413-422 transferWriter.doBodyCopy
     /// Go: "wraps a copy operation, with any resulting error also
     /// being saved in bodyReadError. This function is only intended

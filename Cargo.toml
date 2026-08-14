@@ -1707,3 +1707,7 @@ path = "examples/http_connreader_limit_smoke.rs"
 [[example]]
 name = "http_client_reuse_smoke"
 path = "examples/http_client_reuse_smoke.rs"
+
+[[example]]
+name = "http_expect_continue_smoke"
+path = "examples/http_expect_continue_smoke.rs"
