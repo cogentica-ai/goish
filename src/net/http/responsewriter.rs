@@ -261,6 +261,7 @@ fn register_response_impls() {
         __goish_register_Flusher_impl::<response>();
         __goish_register___RequestTooLarge_impl::<response>();
         __goish_register_CloseNotifier_impl::<response>();
+        __goish_register_Hijacker_impl::<response>();
     });
     let _ = REGISTER.get();
 }
@@ -303,6 +304,12 @@ struct closeNotifyState {
     ch: Option<crate::gochan::chan<bool>>,
     triggered: bool,
     handlerDone: bool,
+    /// Go's `conn.hijackedv` (server.go:280). It lives in this shared
+    /// cell rather than on the response because the serve loop's
+    /// panic guard must read it WITHOUT holding the response — a
+    /// handler that hijacks and then panics must not have its new
+    /// connection closed out from under it.
+    hijacked: bool,
 }
 
 impl closeNotifyCell {
@@ -313,6 +320,7 @@ impl closeNotifyCell {
                 ch: None,
                 triggered: false,
                 handlerDone: false,
+                hijacked: false,
             }),
         };
     }
@@ -330,6 +338,24 @@ impl closeNotifyCell {
         if let Some(ch) = g.ch.as_ref() {
             let _ = ch.__try_send(true);
         }
+        return;
+    }
+
+    // go: none — goish-only: read the handlerDone flag, for Hijack's
+    // late-call panic.
+    pub fn __is_handler_done(&self) -> bool {
+        return self.st.lock().handlerDone;
+    }
+
+    /// `(*conn).hijacked()` (server.go:308).
+    pub fn __is_hijacked(&self) -> bool {
+        return self.st.lock().hijacked;
+    }
+
+    // go: none — goish-only: set by Hijack, read by the serve loop and
+    // by its panic guard.
+    pub fn __set_hijacked(&self) {
+        self.st.lock().hijacked = true;
         return;
     }
 
@@ -460,6 +486,67 @@ impl response {
     pub fn closeNotify(&self) {
         self.cnc.closeNotify();
         return;
+    }
+
+    /// `(*response).Hijack()` (server.go:2237) folded together with
+    /// `(*conn).hijackLocked()` (server.go:315).
+    ///
+    /// Prose, not an anchor: this file holds part of server.go and the
+    /// rest lives in server.rs.
+    ///
+    /// The ownership transfer is the whole point. Go hands the caller
+    /// `c.rwc` and stops using it — the server never closes a hijacked
+    /// conn, and its serve loop returns immediately. goish takes the
+    /// fd OUT of this response's conn (leaving that one dead, so its
+    /// Close is a no-op), which gives the fd exactly one closer on
+    /// either side of the handover.
+    ///
+    /// Deadlines are cleared, as Go does: they were the server's
+    /// policy for serving a request, and the new owner never agreed to
+    /// them. A websocket that inherited a 5-second read deadline would
+    /// die on its first idle moment.
+    ///
+    /// Slim: Go also returns a `*bufio.ReadWriter` holding whatever it
+    /// had already buffered off the conn. goish's `Hijacker` returns
+    /// the conn alone — the serve loop reads a request at a time and
+    /// hands back the buffer, so there is no pre-read remainder to
+    /// pass on.
+    pub fn Hijack(&self) -> (TCPConn, error) {
+        if self.cnc.__is_handler_done() {
+            // Go panics: "Hijack called after ServeHTTP finished".
+            panic!("net/http: Hijack called after ServeHTTP finished");
+        }
+        if self.cnc.__is_hijacked() {
+            return (TCPConn::dead(), super::server::ErrHijacked.into());
+        }
+        let mut g = self.inner.lock();
+        // Go: `if w.wroteHeader { w.cw.flush() }` — whatever the
+        // handler already wrote must reach the client before the new
+        // owner starts writing its own bytes.
+        if g.wrote_header && !g.flushed {
+            drop(g);
+            let _ = self.flush();
+            g = self.inner.lock();
+        }
+        self.cnc.__set_hijacked();
+        g.canWriteContinue = false;
+        let rwc = g.conn.__take_over();
+        // Go: `rwc.SetDeadline(time.Time{})`.
+        let _ = rwc.SetReadDeadline(crate::time::Time::default());
+        let _ = rwc.SetWriteDeadline(crate::time::Time::default());
+        return (rwc, crate::errors::nil);
+    }
+
+    /// `(*conn).hijacked()` (server.go:308) — read by the serve loop
+    /// so it stops touching a connection it no longer owns.
+    pub fn __hijacked(&self) -> bool {
+        return self.cnc.__is_hijacked();
+    }
+
+    // go: none — goish-only: the serve loop's panic guard needs the
+    // flag without holding the response.
+    pub fn __cnc(&self) -> Arc<closeNotifyCell> {
+        return self.cnc.clone();
     }
 
     // go: none — goish-only: the serve loop marks the handler done so
@@ -846,6 +933,13 @@ impl __RequestTooLarge for response {
     fn requestTooLarge(&self) {
         response::requestTooLarge(self);
         return;
+    }
+}
+
+impl Hijacker for response {
+    /// `(*response).Hijack()` — see the inherent method.
+    fn Hijack(&self) -> (TCPConn, error) {
+        return response::Hijack(self);
     }
 }
 

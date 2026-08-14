@@ -352,6 +352,28 @@ impl TCPConn {
         }
     }
 
+    // go: none — goish-only: Go's Hijack hands the caller `c.rwc` and
+    // the server simply stops using it. goish's conn owns its fd, so
+    // the transfer is explicit.
+    /// Internal: hand this conn's fd to a new owner, leaving this one
+    /// dead. `Close` on a dead conn is a no-op, so the fd has exactly
+    /// one closer either side of the transfer.
+    ///
+    /// pub(crate) for `net/http`'s Hijack, which is precisely an
+    /// ownership transfer out of the serve loop.
+    pub(crate) fn __take_over(&mut self) -> TCPConn {
+        let fd = self.fd;
+        let out = TCPConn {
+            fd,
+            local: self.local.clone(),
+            remote: self.remote.clone(),
+            pd: AtomicPtr::new(self.pd.load(core::sync::atomic::Ordering::Acquire)),
+        };
+        self.fd = -1;
+        self.pd.store(ptr::null_mut(), core::sync::atomic::Ordering::Release);
+        return out;
+    }
+
     /// Wrap a freshly-accepted fd. The fd is already SOCK_NONBLOCK
     /// (the Accept4 caller passed the flag).
     fn from_accepted(fd: i32, local: TCPAddr, remote: TCPAddr) -> Self {

@@ -2701,6 +2701,11 @@ impl Server {
             // distinguishes the panic path from normal exit so the fd
             // survives for keep-alive reuse on success.
             let fd = w.__conn_fd();
+            // Go's deferred close is `if !c.hijacked() { c.close() }`
+            // (server.go:1975): a handler that hijacked and then
+            // panicked has handed the conn on, and closing it here
+            // would kill a connection someone else now owns.
+            let panic_cnc = w.__cnc();
             let panic_remote = req.RemoteAddr.clone();
             let panic_srv = self.clone();
             let panic_track = track.clone();
@@ -2716,7 +2721,9 @@ impl Server {
                         panic_remote,
                         pv
                     ));
-                    let _ = crate::syscall::Close(fd);
+                    if !panic_cnc.__is_hijacked() {
+                        let _ = crate::syscall::Close(fd);
+                    }
                     // goish panic recovery longjmps to the goroutine
                     // entry without running Rust drops, so the
                     // ActiveGuard above never fires on this path —
@@ -2752,6 +2759,16 @@ impl Server {
             // finishing (Go cancels it right below anyway).
             if !watch_pd.is_null() {
                 crate::runtime::netpoll::disarm_watch(unsafe { &*watch_pd });
+            }
+
+            // Go: `if c.hijacked() { return }` right after ServeHTTP
+            // (server.go:2149). The connection belongs to the handler
+            // now — the server must not flush, close, or read from it,
+            // and `w.__take_conn()` below would flush.
+            if w.__hijacked() {
+                track.setState(CONN_STATE_HIJACKED);
+                (req_cancel)();
+                return;
             }
 
             // Capture the post-handler close decision BEFORE the
