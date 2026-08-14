@@ -57,6 +57,17 @@ fn run() {
         let _ = w.Write(goish::bytes("ok"));
     });
     mux.HandleFunc("/ping", |w, _r| { let _ = w.Write(goish::bytes("pong")); });
+    // MaxBytesHandler is the ergonomic form — and the one that closes
+    // the conn, because it threads `w` through to MaxBytesReader.
+    mux.Handle(
+        "/wrapped",
+        http::MaxBytesHandler(
+            Arc::new(http::HandlerFunc(|w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request| {
+                let _ = w.Write(goish::convert::bytes(fmt::Sprintf!("got %d", r.Body.Len())));
+            })),
+            8,
+        ),
+    );
 
     let srv = Arc::new(http::Server {
         Handler: Arc::new(mux),
@@ -98,6 +109,41 @@ fn run() {
     let _ = c.Close();
     check("the connection is closed, so no second request is served",
           !sr.contains("pong"), ss);
+
+    // ── MaxBytesHandler caps the body and closes the conn ──
+    {
+        let (mut c2, e2) = net::Dial(string("tcp"), fmt::Sprintf!("127.0.0.1:%d", port as i64));
+        if !e2.IsNil() {
+            check("dial 2", false, fmt::Sprintf!("%v", e2));
+            finish();
+        }
+        let _ = c2.SetReadDeadline(time::Now().Add(time::Duration(5 * 1_000_000_000)));
+        let mut rq: Vec<u8> =
+            b"POST /wrapped HTTP/1.1\r\nHost: x\r\nContent-Length: 64\r\n\r\n".to_vec();
+        rq.extend_from_slice(&[b'y'; 64]);
+        let _ = c2.Write(goish::slice::<goish::byte>::__from_vec(rq));
+        let mut bb = goish::make!([]goish::byte, 4096);
+        let (n, _) = c2.Read(&mut bb);
+        let mut v: Vec<u8> = Vec::new();
+        for i in 0..n { v.push(bb[i]); }
+        let rs = goish::string::from_bytes(&v);
+        let r: &str = rs.as_ref();
+        check("MaxBytesHandler truncates the body to the cap",
+              r.contains("got 8"), rs.clone());
+        check("and forces Connection: close like the manual form",
+              r.contains("Connection: close"), rs);
+        let _ = c2.Write(goish::slice::<goish::byte>::__from_vec(
+            b"GET /ping HTTP/1.1\r\nHost: x\r\n\r\n".to_vec()));
+        let mut b3 = goish::make!([]goish::byte, 4096);
+        let (n3, _) = c2.Read(&mut b3);
+        let mut v3: Vec<u8> = Vec::new();
+        for i in 0..n3 { v3.push(b3[i]); }
+        let s3 = goish::string::from_bytes(&v3);
+        let t3: &str = s3.as_ref();
+        let _ = c2.Close();
+        check("so no second request is served on that conn either",
+              !t3.contains("pong"), s3);
+    }
 
     finish();
 }

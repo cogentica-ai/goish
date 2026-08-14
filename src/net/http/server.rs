@@ -517,6 +517,67 @@ pub fn NotFound(w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request) 
     Error(w, string("404 page not found"), super::status::StatusNotFound);
 }
 
+// go: sdk 1.25.5 net/http/server.go:4095-4101 MaxBytesHandler
+/// Go: "MaxBytesHandler returns a Handler that runs h with its
+/// ResponseWriter and Request.Body wrapped by a MaxBytesReader."
+///
+/// This is the ergonomic form of the body cap — and the one that
+/// actually closes the connection when the limit is hit, because it
+/// passes `w` through to MaxBytesReader. Hand-rolling
+/// `MaxBytesReader(None, …)` does not.
+///
+/// goish's Request owns its body as `slice<byte>` rather than an
+/// io.ReadCloser, so the wrap TRUNCATES eagerly and reports the same
+/// MaxBytesError to the handler on over-limit, instead of deferring it
+/// to the handler's first Read. Same cap, same 413-shaped outcome,
+/// same conn close; the difference is when the error surfaces.
+pub fn MaxBytesHandler(h: Arc<dyn Handler>, n: crate::types::int) -> Arc<dyn Handler> {
+    return Arc::new(HandlerFunc(
+        move |w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request| {
+            let n = if n < 0 { 0 } else { n };
+            let mut r2 = r.clone();
+            if r2.Body.Len() > n {
+                // Over the cap: truncate and tell the writer, which is
+                // what forces the connection closed.
+                let raw: &[u8] = &r2.Body;
+                let cut = crate::builtin::__make_size(n);
+                r2.Body = crate::goslice::slice::<crate::types::byte>::__from_vec(
+                    raw[..cut].to_vec(),
+                );
+                if let (rt, true) = crate::cast!(w, super::responsewriter::__RequestTooLarge) {
+                    rt.requestTooLarge();
+                }
+            }
+            h.ServeHTTP(w, &r2);
+        },
+    ));
+}
+
+// go: sdk 1.25.5 net/http/server.go:1915-1926 isCommonNetReadError
+/// Go: whether a read error is the ordinary end-of-connection kind,
+/// worth ignoring rather than logging. EOF, a timeout, or an OpError
+/// whose Op is "read".
+///
+/// goish has no typed net.Error/net.OpError to assert on — the port
+/// matches on the error TEXT the net package produces, which is the
+/// same substitution header.rs makes for httpguts.
+pub fn isCommonNetReadError(err: crate::errors::error) -> bool {
+    if err.IsNil() {
+        return false;
+    }
+    if crate::errors::Is(err.clone(), crate::io::EOF) {
+        return true;
+    }
+    let msg = err.Error();
+    let m: &str = msg.as_ref();
+    if m.contains("i/o timeout") {
+        return true;
+    }
+    if m.starts_with("read") || m.contains("read:") {
+        return true;
+    }
+    return false;
+}
 // go: sdk 1.25.5 net/http/server.go:2362-2362 NotFoundHandler
 /// `http.NotFoundHandler()` (server.go:2362) — returns a Handler that
 /// replies to every request with a 404 not-found error. Faithfully
