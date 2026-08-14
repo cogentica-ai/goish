@@ -625,3 +625,23 @@ fn __copyToResponse<R: crate::io::Reader>(
 pub(crate) fn register_cgi_impls() {
     super::super::server::__goish_register_Handler_impl::<Handler>();
 }
+
+// ── cgi_main.go ──────────────────────────────────────────────────────
+//
+// Go compiles cgi_main.go into the package, but every declaration in
+// it is a CGI CHILD PROGRAM: `cgiMain` dispatches on SCRIPT_NAME,
+// `testCGI` and `childCGIProcess` are the two child binaries the
+// package's own host_test/integration_test re-exec themselves as, and
+// `neverEnding.Read` is the infinite body one of them streams.
+//
+// goish has no test binary to re-exec — its tests are examples, and
+// `examples/http_cgi_serve_smoke.rs` spawns `/bin/sh -c` as the child
+// instead, which exercises the same host-side code paths (env, header
+// parse, Status/Location handling, body copy) without needing a Go
+// test harness to impersonate. Porting these four would produce four
+// functions that nothing in the tree can call.
+//
+// go: waived cgiMain — CGI child program for the package's own tests; goish spawns /bin/sh instead.
+// go: waived testCGI — CGI child program for the package's own tests; see cgiMain.
+// go: waived childCGIProcess — CGI child program for the package's own tests; see cgiMain.
+// go: waived Read — `neverEnding.Read`, the infinite body childCGIProcess streams; no caller without it.
