@@ -82,6 +82,9 @@ const EINPROGRESS: i32 = 115;
 /// `EINTR` (Linux: 4). Syscall interrupted by signal — caller retries
 /// the syscall directly without parking.
 const EINTR: i32 = 4;
+/// `EBADF` (Linux: 9). Surfaces when Close races an in-flight retry
+/// loop; paired with the `closed` flag it maps to `ErrClosed`.
+const EBADF: i32 = 9;
 
 // ─── Listener ────────────────────────────────────────────────────────
 
@@ -152,9 +155,21 @@ impl Listener {
                 match netpoll::block(unsafe { &*pd }, b'r') {
                     BlockResult::Ready | BlockResult::Aborted => continue,
                     BlockResult::Timedout => {
+                        // A real deadline and a Close-eviction both
+                        // surface as Timedout; `closed` says which.
+                        // Go: Accept on a closed listener returns
+                        // ErrClosed (net.go:747).
+                        if self.closed.load(Ordering::Acquire) {
+                            return (TCPConn::dead(), ErrClosed.into(), false);
+                        }
                         return (TCPConn::dead(), timeout_error("accept"), false);
                     }
                 }
+            }
+            if errno == EBADF && self.closed.load(Ordering::Acquire) {
+                // The fd was closed under us mid-loop (Close raced the
+                // retry) — same contract as the parked case.
+                return (TCPConn::dead(), ErrClosed.into(), false);
             }
             let temporary = errno == EMFILE
                 || errno == ENFILE
@@ -167,6 +182,14 @@ impl Listener {
     /// `(*TCPListener).Close` — stop listening and drop the fd.
     /// Idempotent: a second call is a no-op (mirrors Go's
     /// `onceCloseListener` server-side wrapper).
+    ///
+    /// Wakes any goroutine parked in `Accept` first — Go's Close does
+    /// this via `pd.evict()` (internal/poll/fd_mutex.go), and without
+    /// it a ported teardown hangs forever at `wg.Wait()` with every
+    /// assertion already green: kernel `close(2)` drops the fd from
+    /// epoll's interest set without delivering anything to existing
+    /// parkers. The woken Accept observes `closed` and returns
+    /// `ErrClosed`, as Go's does.
     pub fn Close(&self) -> error {
         if self.closed.swap(true, Ordering::AcqRel) {
             return errors::nil;
@@ -177,6 +200,16 @@ impl Listener {
             // Arc::into_raw, then hand to netpoll::close which
             // releases the slab's clone and drops the caller's Arc.
             let arc = unsafe { Arc::from_raw(pd_raw as *const PollDesc) };
+            // Force-expire the read deadline: unblocks a parked
+            // Accept with Timedout, which the accept path converts to
+            // ErrClosed via the `closed` flag. Same wake `Shutdown`
+            // has always done through `__wake_accept`; folded into
+            // Close so every caller gets Go's semantics. (The woken
+            // parker's post-resume reads of the PollDesc race the
+            // free below exactly as the pre-existing __wake_accept →
+            // Close sequence did — the pd-lifetime hardening is
+            // tracked separately.)
+            netpoll::set_deadline(&arc, -1, b'r');
             netpoll::close(arc);
         }
         let r = syscall::Close(self.fd);
@@ -587,6 +620,13 @@ impl io::Closer for TCPConn {
             // via Arc::into_raw, then hand to netpoll::close (which
             // unregisters from the slab and drops the caller's Arc).
             let arc = unsafe { Arc::from_raw(pd_raw as *const PollDesc) };
+            // Wake any goroutine parked on this conn in Read or Write
+            // (possible through shared handles, e.g. the http server's
+            // per-conn reader) — Go's Close evicts them with
+            // ErrNetClosing; without the wake they park forever, since
+            // kernel close(2) delivers nothing to existing parkers.
+            netpoll::set_deadline(&arc, -1, b'r');
+            netpoll::set_deadline(&arc, -1, b'w');
             netpoll::close(arc);
         }
         let r = syscall::Close(self.fd);
