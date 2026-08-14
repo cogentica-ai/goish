@@ -1329,17 +1329,15 @@ pub fn parseBasicAuth(auth: string) -> (string, string, bool) {
 /// parsed as the next keep-alive request. Still Reader-only rather
 /// than io.ReadCloser.
 ///
-/// KNOWN GAP: a handler cannot yet PASS a `w` here. goish's
-/// `Handler::ServeHTTP` receives `&dyn ResponseWriter`, a borrow, and
-/// this needs an owned handle to hold across reads. Every caller
-/// therefore passes `None` today and the close does not fire. The
-/// parameter, the `__RequestTooLarge` interface and
-/// `response::requestTooLarge` are all in place; what is missing is a
-/// way to obtain an owned ResponseWriter from a handler — the same
-/// question `Hijacker` will ask. Do not remove the parameter again to
-/// "simplify": that is how the gap was hidden the first time.
-pub struct MaxBytesReader<R: io::Reader> {
-    w: Option<alloc::sync::Arc<dyn super::responsewriter::ResponseWriter + Send + Sync>>,
+/// `w` is a BORROW with a lifetime, not an owned handle. That is the
+/// whole trick: the reader is created and consumed inside the
+/// handler's body, so `&dyn ResponseWriter` — which is all
+/// `ServeHTTP` hands out — outlives it comfortably. I first wrote
+/// this taking an `Arc`, concluded a handler could never supply one,
+/// and documented it as a known gap; the gap was my choice of
+/// ownership, not the signature.
+pub struct MaxBytesReader<'w, R: io::Reader> {
+    w: Option<&'w (dyn super::responsewriter::ResponseWriter + Send + Sync + 'static)>,
     r: R,
     i: int,
     n: int,
@@ -1496,11 +1494,11 @@ crate::var! {
 // goish names the CONSTRUCTOR `NewMaxBytesReader` because
 // `MaxBytesReader` is taken by the struct — Go has a func and an
 // unexported `maxBytesReader` type, Rust cannot share the name.
-pub fn NewMaxBytesReader<R: io::Reader>(
-    w: Option<alloc::sync::Arc<dyn super::responsewriter::ResponseWriter + Send + Sync>>,
+pub fn NewMaxBytesReader<'w, R: io::Reader>(
+    w: Option<&'w (dyn super::responsewriter::ResponseWriter + Send + Sync + 'static)>,
     r: R,
     n: int,
-) -> MaxBytesReader<R> {
+) -> MaxBytesReader<'w, R> {
     // Go: if n < 0 { n = 0 }
     let n = if n < 0 { 0 } else { n };
     MaxBytesReader {
@@ -1512,7 +1510,7 @@ pub fn NewMaxBytesReader<R: io::Reader>(
     }
 }
 
-impl<R: io::Reader> io::Reader for MaxBytesReader<R> {
+impl<'w, R: io::Reader> io::Reader for MaxBytesReader<'w, R> {
     // go: sdk 1.25.5 net/http/request.go:1211-1251 maxBytesReader.Read
     //
     /// Verified against goref across the boundary that matters. Go
@@ -1562,8 +1560,8 @@ impl<R: io::Reader> io::Reader for MaxBytesReader<R> {
         // (request.go:1241). This is what closes the connection so the
         // unread remainder of the body cannot be read as the next
         // keep-alive request.
-        if let Some(w) = self.w.as_ref() {
-            if let (r, true) = crate::cast!(w.as_ref(), super::responsewriter::__RequestTooLarge) {
+        if let Some(w) = self.w {
+            if let (r, true) = crate::cast!(w, super::responsewriter::__RequestTooLarge) {
                 r.requestTooLarge();
             }
         }

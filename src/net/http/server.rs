@@ -2532,6 +2532,9 @@ impl Server {
                 crate::runtime::netpoll::disarm_watch(unsafe { &*watch_pd });
             }
 
+            // Capture the post-handler close decision BEFORE the
+            // writer is consumed for its conn.
+            let close_after_reply = w.__close_after_reply();
             conn = w.__take_conn();
             // Response finished → cancel the request context (Go
             // finishRequest → w.cancelCtx(), server.go:1683).
@@ -2541,7 +2544,14 @@ impl Server {
                 let _ = conn.SetWriteDeadline(time::Time::default());
             }
 
-            if !keep_alive {
+            // Go's `w.shouldReuseConnection()` (server.go:1725) is
+            // consulted AFTER the handler, not before: the handler —
+            // or MaxBytesReader hitting its limit — can set
+            // closeAfterReply mid-request. Deciding from the request
+            // alone leaves the conn open with an unread body still
+            // arriving, which the next keep-alive read would then
+            // parse as a request.
+            if !keep_alive || close_after_reply {
                 let _ = conn.Close();
                 return;
             }

@@ -102,6 +102,13 @@ impl tlsResponse {
         self.inner.lock().keep_alive = ka;
     }
 
+    /// Mirrors `response::__close_after_reply` on the plaintext path:
+    /// the handler may force the conn closed after keep-alive was
+    /// decided.
+    fn close_after_reply(&self) -> bool {
+        return !self.inner.lock().keep_alive;
+    }
+
     fn set_head(&self, is_head: bool) {
         self.inner.lock().is_head = is_head;
     }
@@ -434,7 +441,10 @@ fn serve_tls_conn(
         handler.ServeHTTP(&w, &req);
         let _ = w.flush();
 
-        if !keep_alive {
+        // Same post-handler check as the plaintext loop: the handler
+        // may have set closeAfterReply (e.g. MaxBytesReader hitting
+        // its limit) after keep_alive was computed.
+        if !keep_alive || w.close_after_reply() {
             let mut c = conn.Lock();
             let _ = c.Close();
             return;
