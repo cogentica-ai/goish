@@ -499,6 +499,74 @@ impl ReverseProxy {
         return;
     }
 
+    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:324-329 ReverseProxy.getErrorHandler
+    /// Go returns `p.ErrorHandler` when set, else the bound
+    /// `p.defaultErrorHandler`. goish cannot return a bound method as
+    /// a value, so this reports WHICH to use and `handleError` below
+    /// dispatches — same two outcomes, one indirection fewer.
+    pub fn getErrorHandler(
+        &self,
+    ) -> Option<
+        alloc::sync::Arc<
+            dyn Fn(
+                    &(dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static),
+                    &super::super::request::Request,
+                    crate::errors::error,
+                ) + Send
+                + Sync,
+        >,
+    > {
+        return self.ErrorHandler.clone();
+    }
+
+    // go: none — goish-only: the call half of getErrorHandler. Go
+    // writes `p.getErrorHandler()(rw, req, err)`; a bound method value
+    // has no Rust equivalent, so the fallback lives here.
+    pub fn handleError(
+        &self,
+        rw: &(dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static),
+        req: &super::super::request::Request,
+        err: crate::errors::error,
+    ) {
+        match self.getErrorHandler() {
+            Some(h) => {
+                h(rw, req, err);
+            }
+            None => {
+                self.defaultErrorHandler(rw, req, err);
+            }
+        }
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:333-344 ReverseProxy.modifyResponse
+    /// Run the caller's ModifyResponse hook. Reports whether to
+    /// CONTINUE proxying.
+    ///
+    /// On error Go closes the response body BEFORE invoking the error
+    /// handler — the backend conn is finished with either way, and
+    /// skipping the close leaks it on every rejected response.
+    pub fn modifyResponse(
+        &self,
+        rw: &(dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static),
+        res: &mut super::super::response::Response,
+        req: &super::super::request::Request,
+    ) -> bool {
+        let f = match self.ModifyResponse.as_ref() {
+            None => {
+                return true;
+            }
+            Some(f) => f.clone(),
+        };
+        let err = f(res);
+        if !err.IsNil() {
+            let _ = res.Body.__close_shared();
+            self.handleError(rw, req, err);
+            return false;
+        }
+        return true;
+    }
+
     // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:607-624 ReverseProxy.flushInterval
     /// Two cases force IMMEDIATE flushing regardless of the configured
     /// interval, and both are streams that never end: a

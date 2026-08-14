@@ -190,6 +190,9 @@ impl<T> Mutex<T> {
         self.unlock();
     }
 
+    // go: none — goish-only. Go's `sync.Mutex` guards fields that sit
+    // BESIDE it, so there is nothing to hand out; goish's Mutex owns
+    // its value, and this is how a manually-locked holder reaches it.
     /// The missing half of the Go-shape manual lock/unlock pair:
     /// access the guarded value while the lock is held via
     /// `LockManual` / `TryLockManual` rather than a guard.
@@ -213,9 +216,6 @@ impl<T> Mutex<T> {
     /// Prefer `Lock()` and its guard wherever lock and unlock can sit
     /// in one scope; this exists for the cases where Go's shape says
     /// they cannot.
-    // go: none — goish-only. Go's `sync.Mutex` guards fields that sit
-    // BESIDE it, so there is nothing to hand out; goish's Mutex owns
-    // its value, and this is how a manually-locked holder reaches it.
     #[inline]
     #[doc(hidden)]
     #[allow(clippy::mut_from_ref)]

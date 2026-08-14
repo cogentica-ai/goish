@@ -128,6 +128,88 @@ fn run() {
               rp.flushInterval(&sse2) == goish::time::Duration(-1), string(""));
     }
 
+    // ── modifyResponse / getErrorHandler ──
+    {
+        use core::sync::atomic::AtomicUsize as AU;
+        static CLOSED_OK: AU = AU::new(0);
+        // No hook: proxying continues untouched.
+        let plain = ReverseProxy::default();
+        let mut res = goish::net::http::Response::default();
+        let (req, _) = goish::net::http::NewRequest(
+            string("GET"), string("http://x/"), slice::new());
+        let w = goish::net::http::httptest::NewRecorder();
+        check("modifyResponse with no hook continues",
+              plain.modifyResponse(&w, &mut res, &req), string(""));
+
+        // A hook that succeeds also continues, and can mutate.
+        let ok_rp = ReverseProxy {
+            ModifyResponse: Some(alloc::sync::Arc::new(
+                |r: &mut goish::net::http::Response| {
+                    r.Header.Set(string("X-Touched"), string("1"));
+                    goish::errors::nil
+                },
+            )),
+            ..Default::default()
+        };
+        let mut res2 = goish::net::http::Response::default();
+        let cont = ok_rp.modifyResponse(&w, &mut res2, &req);
+        check("a successful hook continues and its mutation sticks",
+              cont && res2.Header.Get(string("X-Touched")) == "1", string(""));
+
+        // A failing hook STOPS proxying and routes to the error
+        // handler — which must be the custom one when set.
+        let fail_rp = ReverseProxy {
+            ModifyResponse: Some(alloc::sync::Arc::new(
+                |_r: &mut goish::net::http::Response| {
+                    goish::errors::New(string("nope"))
+                },
+            )),
+            ErrorHandler: Some(alloc::sync::Arc::new(
+                |_w: &(dyn goish::net::http::ResponseWriter + Send + Sync + 'static),
+                 _r: &goish::net::http::Request,
+                 _e: goish::error| {
+                    CLOSED_OK.fetch_add(1, Ordering::Relaxed);
+                },
+            )),
+            ..Default::default()
+        };
+        let mut res3 = goish::net::http::Response {
+            Body: goish::net::http::Body::from(goish::bytes("payload")),
+            ..Default::default()
+        };
+        let cont3 = fail_rp.modifyResponse(&w, &mut res3, &req);
+        check("a failing hook stops proxying and calls the CUSTOM error handler",
+              !cont3 && CLOSED_OK.load(Ordering::Relaxed) == 1,
+              fmt::Sprintf!("cont=%v calls=%d", cont3, CLOSED_OK.load(Ordering::Relaxed) as i64));
+
+        // Go closes the body BEFORE the error handler runs; the
+        // backend conn is finished with either way. A body left open
+        // here leaks one conn per rejected response, so read it back:
+        // a closed goish Body reports so rather than returning bytes.
+        let mut sink = goish::make!([]goish::byte, 16);
+        let (n3, e3) = goish::io::Reader::Read(&mut res3.Body, &mut sink);
+        check("the rejected response's Body is closed, not leaked",
+              n3 == 0 && !e3.IsNil(),
+              fmt::Sprintf!("n=%d err=%v", n3 as i64, e3));
+
+        // With no ErrorHandler set, getErrorHandler reports none and
+        // handleError falls back to the 502 default.
+        let w2 = goish::net::http::httptest::NewRecorder();
+        let mut res4 = goish::net::http::Response::default();
+        let fail_default = ReverseProxy {
+            ModifyResponse: Some(alloc::sync::Arc::new(
+                |_r: &mut goish::net::http::Response| {
+                    goish::errors::New(string("nope"))
+                },
+            )),
+            ..Default::default()
+        };
+        let _ = fail_default.modifyResponse(&w2, &mut res4, &req);
+        check("with no ErrorHandler the default answers 502",
+              fail_default.getErrorHandler().is_none() && w2.Code() == 502,
+              fmt::Sprintf!("code=%d", w2.Code()));
+    }
+
     let p = PASSED.load(Ordering::Relaxed);
     let f = FAILED.load(Ordering::Relaxed);
     fmt::Printf!("\n%d passed, %d failed\n", p as i64, f as i64);
