@@ -281,6 +281,40 @@ fn run() {
         }
     }
 
+    // ── 1c. the HTTP/1-only gate applies over TLS too ──
+    //
+    // A TLS conn is exactly where an HTTP/2 preface arrives, so this
+    // is the half of the gate that matters. Wire format from
+    // scripts/goref.sh against Go 1.25.5.
+    {
+        let (resp, _) = tls_request(
+            port,
+            b"GET /tlsinfo HTTP/2.0\r\nHost: localhost\r\n\r\n",
+            8192,
+        );
+        let s: &str = resp.as_ref();
+        if s.starts_with("HTTP/1.1 505 HTTP Version Not Supported") && !s.contains("tls=") {
+            pass("an HTTP/2.0 request line over TLS is refused with 505");
+        } else {
+            fail(fmt::Sprintf!("505 over TLS: got %s", resp));
+        }
+    }
+
+    // ── 1d. OPTIONS * reaches globalOptionsHandler over TLS ──
+    {
+        let (resp, _) = tls_request(
+            port,
+            b"OPTIONS * HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            8192,
+        );
+        let s: &str = resp.as_ref();
+        if s.starts_with("HTTP/1.1 200") {
+            pass("OPTIONS * is answered by the global options handler over TLS");
+        } else {
+            fail(fmt::Sprintf!("OPTIONS * over TLS: got %s", resp));
+        }
+    }
+
     // ── 2. ReadHeaderTimeout closes a silent post-handshake conn ──
 
     // THE TRIPWIRE: before the fix this blocks forever, because the

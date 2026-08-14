@@ -1625,5 +1625,9 @@ name = "http_servercontext_smoke"
 path = "examples/http_servercontext_smoke.rs"
 
 [[example]]
+name = "http_protoversion_smoke"
+path = "examples/http_protoversion_smoke.rs"
+
+[[example]]
 name = "http_persist_smoke"
 path = "examples/http_persist_smoke.rs"

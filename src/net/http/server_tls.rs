@@ -273,7 +273,10 @@ impl Flusher for tlsResponse {
 fn serve_tls_conn(
     srv: Arc<Server>,
     tls_conn: tls::Conn,
-    handler: Arc<dyn Handler>,
+    // Dispatch goes through `serverHandler` (which reads srv.Handler),
+    // so this is kept only to mirror Go's `c.server.Handler` reaching
+    // the conn goroutine.
+    _handler: Arc<dyn Handler>,
     raw_fd: i32,
     pd_addr: usize,
 ) {
@@ -402,6 +405,22 @@ fn serve_tls_conn(
             let _ = c.Close();
             return;
         }
+        // Same HTTP/1-only gate the plaintext loop applies
+        // (server.go:1113 / :2069). A TLS conn is exactly where an
+        // HTTP/2 preface arrives, so leaving it out here is the half
+        // that matters.
+        if !super::server::http1ServerSupportsRequest(&req) {
+            let mut c = conn.Lock();
+            let _ = crate::io::Writer::Write(
+                &mut *c,
+                crate::convert::bytes(super::server::__status_error_response(
+                    super::status::StatusHTTPVersionNotSupported,
+                    string("unsupported protocol version"),
+                )),
+            );
+            let _ = c.Close();
+            return;
+        }
         {
             let c = conn.Lock();
             let _ = c.SetReadDeadline(time::Time::default());
@@ -461,7 +480,9 @@ fn serve_tls_conn(
                 panic_srv.trackConn(&panic_track, false);
             }
         }
-        handler.ServeHTTP(&w, &req);
+        // Through serverHandler, as the plaintext loop does — the
+        // `OPTIONS *` route lives there (server.go:3331).
+        super::server::serverHandler { srv: srv.clone() }.ServeHTTP(&w, &req);
         let _ = w.flush();
 
         // Same post-handler check as the plaintext loop: the handler

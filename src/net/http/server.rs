@@ -478,7 +478,20 @@ impl ServeMux {
 }
 
 impl Handler for ServeMux {
+    // go: sdk 1.25.5 net/http/server.go:2847-2862 ServeMux.ServeHTTP
     fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
+        // Go answers the asterisk-form request-target with 400 before
+        // routing anything (server.go:2848). Without this it reaches
+        // cleanPath, which turns "*" into "/*" and answers a 301 to a
+        // path that cannot exist. `OPTIONS *` never gets here — the
+        // serverHandler routes it to globalOptionsHandler first.
+        if r.RequestURI == "*" {
+            if r.ProtoAtLeast(1, 1) {
+                w.Header().Set(string("Connection"), string("close"));
+            }
+            w.WriteHeader(super::status::StatusBadRequest);
+            return;
+        }
         let (h, bindings) = self.match_handler(r);
         if bindings.Len() == 0 {
             h.ServeHTTP(w, r);
@@ -1453,6 +1466,46 @@ impl crate::errors::ErrorTrait for statusError {
     }
 }
 
+// go: sdk 1.25.5 net/http/server.go:1113-1126 http1ServerSupportsRequest
+/// Whether an HTTP/1 server should serve this request at all.
+///
+/// The `PRI * HTTP/2.0` exemption is not decoration: that is the
+/// HTTP/2 connection preface, and Go lets it through so a Handler can
+/// wire up its own upgrade. Everything else above 1.x is rejected —
+/// an HTTP/2 frame stream is not ASCII, so parsing it as HTTP/1 would
+/// be reading attacker-shaped bytes as a request line.
+pub(crate) fn http1ServerSupportsRequest(req: &Request) -> bool {
+    if req.ProtoMajor == 1 {
+        return true;
+    }
+    // Go: "Accept 'PRI * HTTP/2.0' upgrade requests, so Handlers can
+    // wire up their own HTTP/2 upgrades."
+    if req.ProtoMajor == 2 && req.ProtoMinor == 0 && req.Method == "PRI" && req.RequestURI == "*"
+    {
+        return true;
+    }
+    // Go: "Reject HTTP/0.x, and all other HTTP/2+ requests (which
+    // aren't encoded in ASCII anyway)."
+    return false;
+}
+
+// go: none — goish-only: the wire rendering conn.serve gives a
+// statusError (server.go:2069). Go writes it with one Fprintf; the
+// status text appears TWICE, once in the status line and once as the
+// body, and there is no Content-Length — `Connection: close` is what
+// delimits it.
+pub(crate) fn __status_error_response(code: int, text: string) -> string {
+    let publicErr = super::status::StatusText(code) + ": " + text;
+    return string("HTTP/1.1 ")
+        + crate::strconv::Itoa(code)
+        + string(" ")
+        + publicErr.clone()
+        + string("\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n")
+        + crate::strconv::Itoa(code)
+        + string(" ")
+        + publicErr;
+}
+
 // go: sdk 1.25.5 net/http/server.go:1894-1894 badRequestError
 pub fn badRequestError<E: Into<string>>(e: E) -> error {
     return errors::New(
@@ -1482,7 +1535,7 @@ impl Handler for globalOptionsHandler {
     }
 }
 
-// go: sdk 1.25.5 net/http/server.go:244-244 ServerContextKey
+// go: sdk 1.25.5 net/http/server.go:239-251 ServerContextKey
 /// Go: "ServerContextKey is a context key. It can be used in HTTP
 /// handlers with Context.Value to access the server that started the
 /// handler. The associated value will be of type *Server."
@@ -1493,7 +1546,7 @@ impl Handler for globalOptionsHandler {
 /// convention rather than by identity.
 pub const ServerContextKey: &str = "http-server";
 
-// go: sdk 1.25.5 net/http/server.go:250-250 LocalAddrContextKey
+// go: sdk 1.25.5 net/http/server.go:239-251 LocalAddrContextKey
 /// Go: "LocalAddrContextKey is a context key. It can be used in HTTP
 /// handlers with Context.Value to access the local address the
 /// connection arrived on. The associated value will be of type
@@ -2527,6 +2580,20 @@ impl Server {
                 let _ = conn.Close();
                 return;
             }
+            // Go's readRequest rejects anything an HTTP/1 server has
+            // no business parsing (server.go:1113), and conn.serve
+            // renders the statusError it returns (:2069).
+            if !http1ServerSupportsRequest(&req) {
+                let _ = crate::io::Writer::Write(
+                    &mut conn,
+                    crate::convert::bytes(__status_error_response(
+                        super::status::StatusHTTPVersionNotSupported,
+                        string("unsupported protocol version"),
+                    )),
+                );
+                let _ = conn.Close();
+                return;
+            }
             // Clear the read deadline once headers are parsed.
             let _ = conn.SetReadDeadline(time::Time::default());
             // Request in flight — Go's `c.setState(StateActive)`
@@ -2625,7 +2692,12 @@ impl Server {
                         .fetch_sub(1, Ordering::AcqRel);
                 }
             }
-            self.Handler.ServeHTTP(&w, &req);
+            // Go dispatches through serverHandler, not through
+            // srv.Handler directly (server.go:2199) — that wrapper is
+            // what routes `OPTIONS *` to globalOptionsHandler. It was
+            // ported and then never called from here, so the general
+            // OPTIONS handler could not fire.
+            serverHandler { srv: self.clone() }.ServeHTTP(&w, &req);
 
             // Handler done — disarm the disconnect watch before
             // touching the conn's read side again (Go
