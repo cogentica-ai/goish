@@ -303,7 +303,7 @@ fn serve_tls_conn(
     // plaintext serve loop.
     //
     // Go bounds the handshake with `Server.tlsHandshakeTimeout()`
-    // (server.go:3571) — the smallest positive of ReadHeaderTimeout /
+    // (server.go:1961) — the smallest positive of ReadHeaderTimeout /
     // ReadTimeout / WriteTimeout — so a peer that completes the TCP
     // connect and then stalls mid-handshake cannot pin the conn.
     let (remote_addr, tls_state) = {
@@ -320,7 +320,7 @@ fn serve_tls_conn(
             let _ = c.SetDeadline(time::Time::default());
         }
         // Go snapshots the state ONCE after the handshake
-        // (`c.tlsState = new(tls.ConnectionState)`, server.go:1966)
+        // (`c.tlsState = new(tls.ConnectionState)`, server.go:1987)
         // and readRequest copies the pointer onto every request
         // (:1123). Post-handshake it does not change, so one Arc is
         // shared by every request on this conn.
@@ -389,10 +389,10 @@ fn serve_tls_conn(
             }
         }
         // Request in flight — Go's `c.setState(StateActive)`
-        // (server.go:2043): shutdown's idle-kick skips us now.
+        // (server.go:2034): shutdown's idle-kick skips us now.
         track.setState(super::server::CONN_STATE_ACTIVE);
         // Go readRequest stamps the conn's TLS state onto every
-        // request served over TLS (server.go:1123).
+        // request served over TLS (server.go:1079).
         req.TLS = Some(tls_state.clone());
         // Go conn.serve stamps `c.remoteAddr` at entry and readRequest
         // copies it onto every request (server.go:2076 / :1120).
@@ -439,7 +439,7 @@ fn serve_tls_conn(
             return;
         }
         // Waiting on the next keep-alive request — Go's
-        // `c.setState(StateIdle)` (server.go:2131), which is what
+        // `c.setState(StateIdle)` (server.go:2124), which is what
         // makes this conn eligible for Shutdown's idle kick.
         track.setState(super::server::CONN_STATE_IDLE);
     }
