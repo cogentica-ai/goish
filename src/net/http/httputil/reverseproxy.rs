@@ -118,12 +118,21 @@ impl super::super::server::Handler for reverseProxyHandler {
         // Drop the original Host so URL.Host wins on serialization.
         outreq.Host = string::new();
 
+        // Go (reverseproxy.go:369-372): capture the upgrade type BEFORE
+        // the hop-by-hop strip removes Connection/Upgrade, then add
+        // both back — "necessary for protocol negotiation". Without
+        // the re-add, no upgrade request can traverse the proxy.
+        let reqUpType = upgradeType(&outreq.Header);
         // Go: removeHopByHopHeaders(outreq.Header)
         let inner = outreq.Header.__inner().clone();
         for (k, _) in inner.__iter() {
             if isHopHeader(k) {
                 outreq.Header.Del(k.clone());
             }
+        }
+        if reqUpType.Len() != 0 {
+            outreq.Header.Set(string("Connection"), string("Upgrade"));
+            outreq.Header.Set(string("Upgrade"), reqUpType);
         }
 
         // Go: append the client IP to X-Forwarded-For
@@ -170,6 +179,20 @@ impl super::super::server::Handler for reverseProxyHandler {
                 string("Bad Gateway"),
                 super::super::status::StatusBadGateway,
             );
+            return;
+        }
+
+        // Go: "Deal with 101 Switching Protocols responses: (WebSocket,
+        // h2c, etc)" (reverseproxy.go:479) — the conn is handed over,
+        // nothing below (header copy / body pump) applies.
+        if resp.StatusCode == super::super::status::StatusSwitchingProtocols {
+            upgrade_response_impl(w, &outreq, &mut resp, &|e| {
+                super::super::server::Error(
+                    w,
+                    e.Error(),
+                    super::super::status::StatusBadGateway,
+                );
+            });
             return;
         }
 
@@ -330,6 +353,104 @@ pub fn upgradeType(h: &super::super::header::Header) -> string {
         return string::new();
     }
     return h.Get(string("Upgrade"));
+}
+
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:820-823 switchProtocolCopier
+//
+/// Go: "switchProtocolCopier exists so goroutines proxying data back
+/// and forth have nice names in stacks." Go's two fields are shared
+/// io.ReadWriter interface values, one struct copy per goroutine;
+/// Rust ownership splits each conn into a read half and a dup(2)'d
+/// write half (see `TCPConn::__dup_handle` / `ConnSrc::
+/// split_for_upgrade`), and each copier method takes the pair it
+/// owns.
+struct switchProtocolCopier {
+    /// The hijacked user conn (read half; its dup'd write half rides
+    /// beside it into the opposite copier).
+    user: crate::net::TCPConn,
+    /// The upgraded backend carrier (read half).
+    backend: super::super::client::ConnSrc,
+}
+
+impl switchProtocolCopier {
+    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:825-838 switchProtocolCopier.copyFromBackend
+    // goishlint:ignore GOISH020 copyFromBackend — Go's receiver carries
+    // the shared conns; goish passes each goroutine its owned halves.
+    //
+    /// backend → user. On clean backend EOF, Go propagates a
+    /// CloseWrite to the user conn (the FIN is how the switched
+    /// protocol's peer learns the stream is over) and reports the
+    /// half-close's error; otherwise errCopyDone.
+    fn copyFromBackend(
+        mut backend_r: super::super::client::ConnSrc,
+        user_w: crate::net::TCPConn,
+        errc: crate::gochan::chan<crate::errors::error>,
+    ) {
+        let mut user_w = user_w;
+        loop {
+            let mut buf = crate::make!([]byte, 32 * 1024);
+            let (n, rerr) = crate::io::Reader::Read(&mut backend_r, &mut buf);
+            if n > 0 {
+                let (_, werr) =
+                    crate::io::Writer::Write(&mut user_w, buf.slice(0, n));
+                if !werr.IsNil() {
+                    errc.Send(werr);
+                    return;
+                }
+            }
+            if !rerr.IsNil() {
+                if !crate::errors::Is(rerr.clone(), crate::io::EOF) {
+                    errc.Send(rerr);
+                    return;
+                }
+                // Go: c.user.(interface{ CloseWrite() error })
+                errc.Send(user_w.CloseWrite());
+                return;
+            }
+            if n == 0 {
+                errc.Send(user_w.CloseWrite());
+                return;
+            }
+        }
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:840-853 switchProtocolCopier.copyToBackend
+    // goishlint:ignore GOISH020 copyToBackend — same owned-halves
+    // adaptation as copyFromBackend above.
+    //
+    /// user → backend, with the mirror-image CloseWrite propagation.
+    fn copyToBackend(
+        user_r: crate::net::TCPConn,
+        backend_w: crate::net::TCPConn,
+        errc: crate::gochan::chan<crate::errors::error>,
+    ) {
+        let mut user_r = user_r;
+        let mut backend_w = backend_w;
+        loop {
+            let mut buf = crate::make!([]byte, 32 * 1024);
+            let (n, rerr) = crate::io::Reader::Read(&mut user_r, &mut buf);
+            if n > 0 {
+                let (_, werr) =
+                    crate::io::Writer::Write(&mut backend_w, buf.slice(0, n));
+                if !werr.IsNil() {
+                    errc.Send(werr);
+                    return;
+                }
+            }
+            if !rerr.IsNil() {
+                if !crate::errors::Is(rerr.clone(), crate::io::EOF) {
+                    errc.Send(rerr);
+                    return;
+                }
+                errc.Send(backend_w.CloseWrite());
+                return;
+            }
+            if n == 0 {
+                errc.Send(backend_w.CloseWrite());
+                return;
+            }
+        }
+    }
 }
 
 // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:856-874 cleanQueryParams
@@ -668,6 +789,144 @@ pub struct ReverseProxy {
     >,
 }
 
+// go: none — goish-only: the shared body of
+// ReverseProxy.handleUpgradeResponse, split out so the slim
+// `reverseProxyHandler` (the wired serve path) speaks the same
+// upgrade protocol with its own error reporting.
+fn upgrade_response_impl(
+    rw: &(dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static),
+    req: &super::super::request::Request,
+    res: &mut super::super::response::Response,
+    report: &dyn Fn(crate::errors::error),
+) {
+        let reqUpType = upgradeType(&req.Header);
+        let resUpType = upgradeType(&res.Header);
+        // Go: !ascii.IsPrint(resUpType) → invalid protocol error.
+        if !super::super::internal::ascii::IsPrint(resUpType.clone()) {
+            report(
+                crate::errors::New(crate::fmt::Sprintf!(
+                    "backend tried to switch to invalid protocol %q",
+                    resUpType
+                )),
+            );
+            return;
+        }
+        // Go: !ascii.EqualFold(reqUpType, resUpType) → mismatch error.
+        if !super::super::internal::ascii::EqualFold(reqUpType.clone(), resUpType.clone()) {
+            report(
+                crate::errors::New(crate::fmt::Sprintf!(
+                    "backend tried to switch protocol %q when %q was requested",
+                    resUpType,
+                    reqUpType
+                )),
+            );
+            return;
+        }
+
+        // Go: backConn, ok := res.Body.(io.ReadWriteCloser)
+        let back = match res.Body.__take_upgraded() {
+            Some(b) => b,
+            None => {
+                report(
+                    crate::errors::New(string(
+                        "internal error: 101 switching protocols response with non-writable body",
+                    )),
+                );
+                return;
+            }
+        };
+        let (split, splerr) = back.split_for_upgrade();
+        if !splerr.IsNil() {
+            report(splerr);
+            return;
+        }
+        let (backend_r, backend_w) = split.unwrap();
+
+        // Go: rc := http.NewResponseController(rw); conn, brw, err := rc.Hijack()
+        // goish: the controller is Arc-shaped and a borrowed handler
+        // writer cannot become one; the cast IS what rc.Hijack does.
+        let (hj, can_hijack) = crate::cast!(rw, super::super::responsewriter::Hijacker);
+        if !can_hijack {
+            report(crate::errors::New(string(
+                "can't switch protocols using non-Hijacker ResponseWriter",
+            )));
+            return;
+        }
+        let (conn, hijackErr) = hj.Hijack();
+        if !hijackErr.IsNil() {
+            report(
+                crate::errors::New(crate::fmt::Sprintf!(
+                    "Hijack failed on protocol switch: %v",
+                    hijackErr
+                )),
+            );
+            return;
+        }
+        let (user_w, duperr) = conn.__dup_handle();
+        if !duperr.IsNil() {
+            report(duperr);
+            return;
+        }
+        let user_r = conn;
+
+        // Go: res.Body = nil; res.Write(brw) — replay the 101 head to
+        // the user verbatim (status line + the backend's headers).
+        {
+            let mut head: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+            head.extend_from_slice(b"HTTP/1.1 101 ");
+            let text = super::super::status::StatusText(res.StatusCode);
+            if text.Len() != 0 {
+                head.extend_from_slice(text.as_bytes());
+            } else {
+                head.extend_from_slice(b"Switching Protocols");
+            }
+            head.extend_from_slice(b"\r\n");
+            let mut hb = crate::bytes::Buffer::new();
+            let _ = res.Header.WriteSubset(
+                &mut hb,
+                &crate::gomap::map::<string, bool>::new(),
+            );
+            head.extend_from_slice(&hb.Bytes());
+            head.extend_from_slice(b"\r\n");
+            let mut uw = user_w;
+            let (_, werr) = crate::io::Writer::Write(
+                &mut uw,
+                crate::goslice::slice::<byte>::__from_vec(head),
+            );
+            if !werr.IsNil() {
+                report(
+                    crate::errors::New(crate::fmt::Sprintf!("response write: %v", werr)),
+                );
+                return;
+            }
+            // Go: errc := make(chan error, 1)
+            //     spc := switchProtocolCopier{user: conn, backend: backConn}
+            //     go spc.copyToBackend(errc); go spc.copyFromBackend(errc)
+            // Go copies the interface-holding struct into both
+            // goroutines; goish destructures it and sends each copier
+            // the halves it owns.
+            let spc = switchProtocolCopier {
+                user: user_r,
+                backend: backend_r,
+            };
+            let switchProtocolCopier { user, backend } = spc;
+            let errc: crate::gochan::chan<crate::errors::error> =
+                crate::make!(chan crate::errors::error, 1);
+            let e1 = errc.clone();
+            let e2 = errc.clone();
+            crate::go!(stack(256 * crate::KB), move || {
+                switchProtocolCopier::copyToBackend(user, backend_w, e1);
+            });
+            crate::go!(stack(256 * crate::KB), move || {
+                switchProtocolCopier::copyFromBackend(backend, uw, e2);
+            });
+            // Go: <-errc — first finisher decides; both conns drop
+            // (and close) when this frame and the copiers unwind.
+            let _ = errc.Recv();
+        }
+        return;
+    }
+
 impl ReverseProxy {
     // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:684-692 ReverseProxy.logf
     /// Go's signature is `logf(format string, args ...any)`; goish has
@@ -750,6 +1009,30 @@ impl ReverseProxy {
                 self.defaultErrorHandler(rw, req, err);
             }
         }
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:750-816 ReverseProxy.handleUpgradeResponse
+    //
+    /// The 101 Switching Protocols path: verify the backend switched
+    /// to the protocol the client asked for, hijack the user side,
+    /// replay the 101 head, then pump bytes both ways until either
+    /// side finishes. Adaptations, stated:
+    ///  * Go type-asserts `res.Body.(io.ReadWriteCloser)`; goish's
+    ///    comma-ok is `Body::__take_upgraded` (the client attaches the
+    ///    conn on 101 via newReadWriteCloserBody).
+    ///  * Go's req.Context-cancel watcher goroutine closes the backend
+    ///    (issue 35559); goish's request context carries no Done chan
+    ///    on this path — teardown rides the copier errc instead, and
+    ///    both conns close when this function returns.
+    ///  * A TLS backend refuses the split (see split_for_upgrade).
+    pub fn handleUpgradeResponse(
+        &self,
+        rw: &(dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static),
+        req: &super::super::request::Request,
+        res: &mut super::super::response::Response,
+    ) {
+        upgrade_response_impl(rw, req, res, &|e| self.handleError(rw, req, e));
         return;
     }
 

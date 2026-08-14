@@ -385,6 +385,32 @@ impl TCPConn {
         }
     }
 
+    // go: none — goish-only: full-duplex sharing for protocol-switch
+    // pumps (httputil's switchProtocolCopier). Go hands ONE net.Conn
+    // interface value to two goroutines; Rust ownership wants two
+    // OWNED handles. F_DUPFD_CLOEXEC shares the open socket
+    // description — reads, writes and shutdown(2) act on the same
+    // socket (O_NONBLOCK lives on the description, so the new handle
+    // is non-blocking too), each handle lazily registers its own fd
+    // with the netpoller, and the socket dies when the LAST handle
+    // closes.
+    pub(crate) fn __dup_handle(&self) -> (TCPConn, error) {
+        const F_DUPFD_CLOEXEC: i32 = 1030;
+        let nfd = syscall::Fcntl(self.fd, F_DUPFD_CLOEXEC, 0);
+        if nfd < 0 {
+            return (TCPConn::dead(), errno_error("dup", -nfd));
+        }
+        return (
+            TCPConn {
+                fd: nfd,
+                local: self.local.clone(),
+                remote: self.remote.clone(),
+                pd: AtomicPtr::new(ptr::null_mut()),
+            },
+            errors::nil,
+        );
+    }
+
     // go: none — goish-only: Go's Hijack hands the caller `c.rwc` and
     // the server simply stops using it. goish's conn owns its fd, so
     // the transfer is explicit.

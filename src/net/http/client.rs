@@ -74,7 +74,7 @@ use super::url::URL;
 /// Which conn a streaming body reads from. The bufio layer is the one
 /// `read_response_head` parsed the head through — its buffer may
 /// already hold the first body bytes.
-enum ConnSrc {
+pub(crate) enum ConnSrc {
     Tcp(bufio::Reader<crate::net::TCPConn>),
     Tls(bufio::Reader<crate::crypto::tls::Conn>),
 }
@@ -95,6 +95,49 @@ impl ConnSrc {
             ConnSrc::Tls(br) => br.__rd_mut().Close(),
         }
     }
+
+    // go: none — goish-only: the write half of the upgraded-body
+    // carrier (see newReadWriteCloserBody). Reads drain the bufio
+    // remainder first; writes go straight to the conn beneath it.
+    pub(crate) fn write(&mut self, p: slice<byte>) -> (int, error) {
+        let out = match self {
+            ConnSrc::Tcp(br) => crate::io::Writer::Write(br.__rd_mut(), p),
+            ConnSrc::Tls(br) => {
+                let raw: &[u8] = &p;
+                br.__rd_mut().Write(raw)
+            }
+        };
+        return out;
+    }
+
+    // go: none — goish-only: split the carrier for a full-duplex pump.
+    // Go's two copier goroutines share one io.ReadWriteCloser
+    // interface value; goish hands the READ side (bufio remainder +
+    // conn) to one goroutine and a dup(2)'d WRITE handle to the other.
+    // A TLS backend cannot be split this way (the record layer's
+    // cipher state is one object), so it reports its unsupportedness
+    // instead of corrupting a stream.
+    pub(crate) fn split_for_upgrade(
+        self,
+    ) -> (Option<(ConnSrc, crate::net::TCPConn)>, error) {
+        let out = match self {
+            ConnSrc::Tcp(mut br) => {
+                let (w, e) = br.__rd_mut().__dup_handle();
+                if !e.IsNil() {
+                    (None, e)
+                } else {
+                    (Some((ConnSrc::Tcp(br), w)), errors::nil)
+                }
+            }
+            ConnSrc::Tls(_) => (
+                None,
+                errors::New(string(
+                    "httputil: protocol switch over a TLS backend is not supported",
+                )),
+            ),
+        };
+        return out;
+    }
 }
 
 /// Wire framing of a body-in-progress. Mirrors Go's transfer.go body
@@ -113,6 +156,12 @@ enum FramedBody {
     /// no connection behind them, such as `io.Pipe`'s read half in
     /// filetransport.go.
     Piped { r: alloc::boxed::Box<dyn crate::io::ReadCloser + Send + Sync> },
+    /// A 101 Switching Protocols response: the connection itself IS
+    /// the body (Go: newReadWriteCloserBody, transport.go:2548).
+    /// Reads drain any bytes the peer sent past the head (still in
+    /// the bufio buffer), then the conn; the proxy extracts the whole
+    /// carrier with `__take_upgraded` to pump both directions.
+    Upgraded { src: ConnSrc },
     Closed,
 }
 
@@ -173,6 +222,7 @@ fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
         }
         FramedBody::Chunked { cr } => cr.Read(p),
         FramedBody::UntilEof { src } => src.Read(p),
+        FramedBody::Upgraded { src } => src.Read(p),
         FramedBody::Piped { r } => r.Read(p),
         FramedBody::Closed => (
             0,
@@ -199,7 +249,9 @@ fn close_locked(st: &mut BodyState) -> error {
         stop_cancel_watch(Some(w));
     }
     let err = match &mut st.framing {
-        FramedBody::Cl { src, .. } | FramedBody::UntilEof { src } => src.close_conn(),
+        FramedBody::Cl { src, .. }
+        | FramedBody::UntilEof { src }
+        | FramedBody::Upgraded { src } => src.close_conn(),
         FramedBody::Chunked { cr } => cr.__bufio_mut().__rd_mut().close_conn(),
         FramedBody::Piped { r } => r.Close(),
         _ => errors::nil,
@@ -305,6 +357,32 @@ impl Body {
     pub(crate) fn __close_shared(&self) -> error {
         let mut g = self.inner.Lock();
         close_locked(&mut g)
+    }
+}
+
+// go: none — goish-only body of transport.rs's newReadWriteCloserBody
+// (the anchor lives there, with transport.go's other decls): a 101
+// response's connection becomes the body. Go pairs (bufio remainder,
+// conn); goish's `ConnSrc` is already that pair.
+pub(crate) fn __new_upgraded_body(src: ConnSrc) -> Body {
+    return Body::from_parts(FramedBody::Upgraded { src }, None, None);
+}
+
+impl Body {
+    // go: none — goish-only: Go's caller type-asserts
+    // `res.Body.(io.ReadWriteCloser)`; goish's Body is a closed enum,
+    // so the comma-ok is an extraction. Leaves the body Closed.
+    pub(crate) fn __take_upgraded(&self) -> Option<ConnSrc> {
+        let mut g = self.inner.Lock();
+        if !matches!(g.framing, FramedBody::Upgraded { .. }) {
+            return None;
+        }
+        match core::mem::replace(&mut g.framing, FramedBody::Closed) {
+            FramedBody::Upgraded { src } => {
+                return Some(src);
+            }
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -919,6 +997,15 @@ fn attach_stream_body(
     ctx: Option<Arc<dyn crate::context::Context>>,
     watch: Option<(crate::gochan::chan<()>, crate::gochan::chan<()>)>,
 ) {
+    // Go (transport.go:2306): a 101 Switching Protocols response's
+    // body IS the connection — attach it un-framed and detach the
+    // cancel watch (the switched protocol is caller-owned; the
+    // client's per-request timeout has no say over its lifetime).
+    if resp.StatusCode == super::status::StatusSwitchingProtocols {
+        stop_cancel_watch(watch);
+        resp.Body = super::transport::newReadWriteCloserBody(src);
+        return;
+    }
     match kind {
         BodyKind::Empty => {
             stop_cancel_watch(watch);

@@ -1537,6 +1537,20 @@ impl Transport {
     }
 }
 
+// go: sdk 1.25.5 net/http/transport.go:2548-2554 newReadWriteCloserBody
+// goishlint:ignore GOISH020 newReadWriteCloserBody — Go takes the pair
+// (br *bufio.Reader, body io.ReadWriteCloser); goish's ConnSrc IS that
+// pair (bufio remainder + conn), so one parameter carries both.
+//
+/// Go: "newReadWriteCloserBody wraps a io.ReadWriteCloser as the
+/// http.Response.Body … for the caller to speak the switched protocol
+/// on" — a 101 response, where the connection becomes the body.
+pub(crate) fn newReadWriteCloserBody(
+    src: super::client::ConnSrc,
+) -> super::client::Body {
+    return super::client::__new_upgraded_body(src);
+}
+
 // go: none — goish-only: silences an unused-import warning for the
 // slice type, which the rest of transport.go's port will use.
 #[allow(dead_code)]
