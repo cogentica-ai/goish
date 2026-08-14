@@ -224,6 +224,9 @@ pub struct wantConn {
 // go: none — goish-only: the payload of Go's `mu sync.Mutex` on
 // wantConn, i.e. `done` plus the delivered result.
 struct wantConnState {
+    /// Go: `key connectMethodKey` — which pool bucket this waiter
+    /// wants a conn from.
+    key: connectMethodKey,
     done: bool,
     delivered: Option<Arc<persistConn>>,
     /// Go carries this in the delivered `connOrError`; goish keeps it
@@ -236,11 +239,26 @@ impl wantConn {
     pub fn __new() -> wantConn {
         return wantConn {
             state: crate::sync::Mutex::new(wantConnState {
+                key: connectMethodKey::default(),
                 done: false,
                 delivered: None,
                 idleAt: crate::time::Time::default(),
             }),
         };
+    }
+
+    // go: none — goish-only: set the pool bucket this waiter wants.
+    // Go assigns `w.key` at the getConn call site.
+    pub fn __set_key(&self, k: connectMethodKey) {
+        self.state.Lock().key = k;
+        return;
+    }
+
+    // go: none — goish-only: read `w.key` while the idle pool lock is
+    // already held, so queueForIdleConn does not re-enter it.
+    #[allow(dead_code)]
+    pub fn __cache_key_for(&self, _pool: &idlePool) -> string {
+        return self.state.Lock().key.String();
     }
 
     // go: sdk 1.25.5 net/http/transport.go:1323-1329 wantConn.waiting
@@ -653,6 +671,9 @@ struct pcState {
     /// Go: "set non-nil if the connection was closed due to
     /// CancelRequest or due to context cancellation"
     canceledErr: error,
+    /// Go: `idleAt time.Time` — when this conn entered the idle pool.
+    /// goish stores CLOCK_MONOTONIC ns; 0 means "never idled".
+    idleAt: i64,
 }
 
 // go: none — goish-only. Go's pool compares `*persistConn` values,
@@ -680,6 +701,7 @@ impl persistConn {
                 broken: false,
                 closed: errors::nil,
                 canceledErr: errors::nil,
+                idleAt: 0,
             }),
         };
     }
@@ -687,6 +709,17 @@ impl persistConn {
     // go: sdk 1.25.5 net/http/transport.go:2134-2139 persistConn.isBroken
     pub fn isBroken(&self) -> bool {
         return !self.state.Lock().closed.IsNil();
+    }
+
+    // go: none — goish-only: read/stamp Go's `idleAt` field.
+    pub fn __idle_at(&self) -> i64 {
+        return self.state.Lock().idleAt;
+    }
+
+    // go: none — see the note above.
+    pub fn __set_idle_at(&self, ns: i64) {
+        self.state.Lock().idleAt = ns;
+        return;
     }
 
     // go: sdk 1.25.5 net/http/transport.go:2141-2147 persistConn.canceled
@@ -935,6 +968,9 @@ pub struct idlePool {
     pub idleLRU: connLRU<Arc<persistConn>>,
     /// Go: "user has requested to close all idle conns"
     pub closeIdle: bool,
+    /// Go: `idleConnWait map[connectMethodKey]wantConnQueue` —
+    /// waiters registered for the NEXT conn that becomes idle.
+    pub idleConnWait: crate::gomap::map<string, wantConnQueue<Arc<wantConn>>>,
 }
 
 impl idlePool {
@@ -944,6 +980,7 @@ impl idlePool {
             idleConn: crate::gomap::map::<string, Vec<Arc<persistConn>>>::new(),
             idleLRU: connLRU::new(),
             closeIdle: false,
+            idleConnWait: crate::gomap::map::<string, wantConnQueue<Arc<wantConn>>>::new(),
         };
     }
 }
@@ -997,6 +1034,95 @@ impl Transport {
             }
         }
         return errors::nil;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:1148-1231 Transport.queueForIdleConn
+    /// Try to satisfy `w` from the idle pool; if nothing suitable is
+    /// there, register it for the next conn that becomes idle.
+    /// Reports whether a connection was delivered.
+    ///
+    /// I had claimed this was untestable until Client.Do is rewired.
+    /// It is not: it is pool lookup plus delivery over structures
+    /// already ported, and every branch below is observable.
+    ///
+    /// Three details that are not obvious:
+    ///
+    ///   - it scans from the END of the list, i.e. MOST recently used
+    ///     first, so a warm conn is preferred over a cold one;
+    ///   - a broken or too-old conn is SKIPPED and popped, and the
+    ///     scan continues — Go's readLoop may have marked it broken
+    ///     before removeIdleConn got to it;
+    ///   - it clears `closeIdle`, undoing CloseIdleConnections, "we
+    ///     might want one".
+    ///
+    /// Staged: Go launches `pconn.closeConnIfStillIdle()` on a
+    /// goroutine for the too-old case, and has an `alt` branch that
+    /// leaves an HTTP/2 conn in the list. Neither exists yet; a
+    /// too-old conn is dropped from the list here and closed by the
+    /// caller that owns it.
+    pub fn queueForIdleConn(&self, w: &Arc<wantConn>) -> bool {
+        if self.DisableKeepAlives {
+            return false;
+        }
+        let mut pool = self.__idle.Lock();
+        // Go: "Stop closing connections that become idle - we might
+        // want one. (That is, undo the effect of
+        // t.CloseIdleConnections.)"
+        pool.closeIdle = false;
+
+        // Go: "If IdleConnTimeout is set, calculate the oldest
+        // persistConn.idleAt time we're willing to use."
+        let old_ns: i64 = if self.IdleConnTimeout > crate::time::Duration(0) {
+            crate::runtime::sysmon::monotonic_ns()
+                .wrapping_sub(self.IdleConnTimeout.Nanoseconds())
+        } else {
+            0
+        };
+
+        let k = w.__cache_key_for(&pool);
+        if pool.idleConn.Get(k.clone()).1 {
+            let mut list = pool.idleConn.Get(k.clone()).0;
+            let mut delivered = false;
+            // Go: "Look for most recently-used idle connection."
+            while !list.is_empty() {
+                let pconn = list[list.len() - 1].clone();
+                let tooOld = old_ns != 0 && pconn.__idle_at() != 0 && pconn.__idle_at() < old_ns;
+                if pconn.isBroken() || tooOld {
+                    // Go: "If either persistConn.readLoop has marked
+                    // the connection broken, but
+                    // Transport.removeIdleConn has not yet removed it
+                    // from the idle list, or if this persistConn is
+                    // too old […] then ignore it and look for
+                    // another."
+                    list.pop();
+                    pool.idleLRU.remove(&pconn);
+                    continue;
+                }
+                delivered = w.tryDeliver(Some(pconn.clone()), errors::nil, crate::time::Time::default());
+                if delivered {
+                    // Go: "HTTP/1: only one client can use pconn.
+                    // Remove it from the list."
+                    pool.idleLRU.remove(&pconn);
+                    list.pop();
+                }
+                break;
+            }
+            if !list.is_empty() {
+                pool.idleConn.Set(k.clone(), list);
+            } else {
+                pool.idleConn.Delete(k.clone());
+            }
+            if delivered {
+                return true;
+            }
+        }
+
+        // Go: "Register to receive next connection that becomes idle."
+        let mut q = pool.idleConnWait.Get(k.clone()).0;
+        q.cleanFrontNotWaiting();
+        q.pushBack(w.clone());
+        pool.idleConnWait.Set(k, q);
+        return false;
     }
 
     // go: sdk 1.25.5 net/http/transport.go:1034-1038 Transport.putOrCloseIdleConn

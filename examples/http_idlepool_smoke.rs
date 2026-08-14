@@ -16,7 +16,7 @@ use alloc::sync::Arc;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::fmt;
-use goish::net::http::transport::{connectMethod, persistConn};
+use goish::net::http::transport::{connectMethod, persistConn, wantConn};
 use goish::net::http::{ParseURL, Transport};
 use goish::{errors, string};
 
@@ -106,6 +106,57 @@ fn run() {
         let e = t.tryPutIdleConn(&conn("a.com"));
         check("and newly idle conns are refused afterwards",
               !e.IsNil() && e.Error() == "http: putIdleConn: CloseIdleConnections was called", fmt::Sprintf!("%v", e));
+    }
+
+    // ── queueForIdleConn ──
+    {
+        let t = Transport::default();
+        let pc = conn("a.com");
+        let _ = t.tryPutIdleConn(&pc);
+        let w = Arc::new(wantConn::__new());
+        w.__set_key(pc.cacheKey.clone());
+        let got = t.queueForIdleConn(&w);
+        check("a waiter is satisfied from the idle pool",
+              got && !w.waiting()
+                  && w.__delivered().map(|d| Arc::ptr_eq(&d, &pc)).unwrap_or(false),
+              string(""));
+        // Delivered means REMOVED: a second waiter finds nothing and
+        // is queued instead. Leaving it in the list would hand one
+        // HTTP/1 conn to two requests.
+        let w2 = Arc::new(wantConn::__new());
+        w2.__set_key(pc.cacheKey.clone());
+        check("the delivered conn is removed, so the next waiter queues",
+              !t.queueForIdleConn(&w2) && w2.waiting(), string(""));
+    }
+    {
+        // A BROKEN conn in the list is skipped, not handed out.
+        let t = Transport::default();
+        let bad = conn("a.com");
+        let _ = t.tryPutIdleConn(&bad);
+        bad.close(errors::New(string("readLoop marked it broken")));
+        let w = Arc::new(wantConn::__new());
+        w.__set_key(bad.cacheKey.clone());
+        check("a broken idle conn is skipped rather than delivered",
+              !t.queueForIdleConn(&w) && w.waiting(), string(""));
+    }
+    {
+        // queueForIdleConn undoes CloseIdleConnections — Go: "we might
+        // want one".
+        let t = Transport::default();
+        t.CloseIdleConnections();
+        let w = Arc::new(wantConn::__new());
+        let _ = t.queueForIdleConn(&w);
+        let e = t.tryPutIdleConn(&conn("a.com"));
+        check("queueForIdleConn clears closeIdle, so pooling resumes",
+              e.IsNil(), fmt::Sprintf!("%v", e));
+    }
+    {
+        // DisableKeepAlives short-circuits before touching the pool.
+        let mut t = Transport::default();
+        t.DisableKeepAlives = true;
+        let w = Arc::new(wantConn::__new());
+        check("DisableKeepAlives refuses without consulting the pool",
+              !t.queueForIdleConn(&w) && w.waiting(), string(""));
     }
 
     let p = PASSED.load(Ordering::Relaxed);

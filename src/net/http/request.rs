@@ -1354,6 +1354,7 @@ impl __ErrNotSupported {
     /// one ProtocolError matches. goish reaches the same result
     /// through the Unwrap chain already on this type; `Is` is spelled
     /// out so the rule is greppable under its Go name.
+    #[allow(dead_code)]
     pub fn Is(&self, err: crate::errors::error) -> bool {
         return crate::errors::Is(err, crate::errors::ErrUnsupported);
     }
