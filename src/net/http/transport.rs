@@ -203,6 +203,7 @@ impl connectMethodKey {
 // go: sdk 1.25.5 net/http/transport.go:1317-1321 connOrError
 /// The value a waiter receives: exactly one of `pc` and `err` is set,
 /// which `tryDeliver` enforces with a panic.
+#[derive(Clone, Default)]
 pub struct connOrError {
     pub pc: Option<Arc<persistConn>>,
     pub err: error,
@@ -219,6 +220,11 @@ pub struct connOrError {
 /// connection that's not yet delivered)."
 pub struct wantConn {
     state: crate::sync::Mutex<wantConnState>,
+    /// Go: `result chan connOrError` — BUFFERED with cap 1, which is
+    /// what lets `tryDeliver` complete without a receiver already
+    /// parked. getConn relies on that: an idle-pool hit delivers and
+    /// is picked up by the same goroutine a moment later.
+    result: crate::gochan::chan<connOrError>,
 }
 
 // go: none — goish-only: the payload of Go's `mu sync.Mutex` on
@@ -238,6 +244,7 @@ impl wantConn {
     // go: none — goish-only: Go zero-values wantConn in queueForIdleConn.
     pub fn __new() -> wantConn {
         return wantConn {
+            result: crate::make!(chan connOrError, 1),
             state: crate::sync::Mutex::new(wantConnState {
                 key: connectMethodKey::default(),
                 done: false,
@@ -295,7 +302,11 @@ impl wantConn {
         }
         st.done = true;
         st.idleAt = idleAt;
-        st.delivered = pc;
+        st.delivered = pc.clone();
+        // Go: `w.result <- connOrError{…}` then `close(w.result)`.
+        // The send cannot block — cap 1, and `done` guards against a
+        // second delivery ever reaching here.
+        self.result.Send(connOrError { pc, err, idleAt });
         return true;
     }
 
@@ -615,6 +626,10 @@ crate::var! {
     // its FIN in flight with already-written POST body bytes from the
     // client." (golang/go#19943)
     pub errServerClosedIdle: error = "http: server closed idle connection";
+    // go: none — goish-only: getConn returns this instead of blocking
+    // on a dial that cannot happen yet. Not a Go sentinel; it exists
+    // only while dialConn is unported and disappears with it.
+    pub errNoIdleConn: error = "http: no idle connection available (dial not yet ported)";
     // go: sdk 1.25.5 net/http/transport.go:751 errCannotRewind
     pub errCannotRewind: error = "net/http: cannot rewind body after connection loss";
     // go: sdk 1.25.5 net/http/transport.go:2729 errRequestCanceled
@@ -1034,6 +1049,43 @@ impl Transport {
             }
         }
         return errors::nil;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:1487-1561 Transport.getConn
+    /// Obtain a connection for `cm`: try the idle pool, else queue for
+    /// a dial, then wait for whichever answers.
+    ///
+    /// The idle-HIT path completes with no dialing at all, because
+    /// `w.result` is buffered (cap 1): queueForIdleConn -> tryDeliver
+    /// sends without a receiver parked, and the receive below picks it
+    /// up immediately. That is what makes this testable now.
+    ///
+    /// Staged: on a MISS this queues the waiter and returns
+    /// `errNoIdleConn` rather than blocking, because
+    /// startDialConnForLocked / dialConn are not ported — a real wait
+    /// would hang forever. Go blocks in a `select` on the result
+    /// channel and the request context. The waiter IS left on the
+    /// queue, so a later putOrCloseIdleConn can still find it.
+    pub fn getConn(&self, cm: &connectMethod) -> (Option<Arc<persistConn>>, error) {
+        let w = Arc::new(wantConn::__new());
+        w.__set_key(cm.key());
+
+        if !self.queueForIdleConn(&w) {
+            if !self.__take_conn_slot(&cm.key()) {
+                self.__queue_for_slot(&cm.key(), w.clone());
+            }
+            return (None, errNoIdleConn.into());
+        }
+
+        // Go: `case r := <-w.result:` — already buffered by tryDeliver.
+        let (r, ok) = w.result.Recv();
+        if !ok {
+            return (None, errNoIdleConn.into());
+        }
+        if !r.err.IsNil() {
+            return (None, r.err);
+        }
+        return (r.pc, errors::nil);
     }
 
     // go: sdk 1.25.5 net/http/transport.go:1148-1231 Transport.queueForIdleConn

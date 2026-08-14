@@ -159,6 +159,35 @@ fn run() {
               !t.queueForIdleConn(&w) && w.waiting(), string(""));
     }
 
+    // ── getConn ── the idle-HIT path, end to end, no dialing
+    {
+        let t = Transport::default();
+        let pc = conn("a.com");
+        let _ = t.tryPutIdleConn(&pc);
+        let (u, _) = ParseURL(string("http://a.com/"));
+        let cm = connectMethod {
+            proxyURL: None,
+            targetScheme: string("http"),
+            targetAddr: goish::net::http::transport::canonicalAddr(&u),
+            onlyH1: false,
+        };
+        let (got, e) = t.getConn(&cm);
+        check("getConn returns the pooled conn without dialing",
+              e.IsNil() && got.map(|g| Arc::ptr_eq(&g, &pc)).unwrap_or(false),
+              fmt::Sprintf!("%v", e));
+        // Second call: pool is empty now, so it queues and reports
+        // that no idle conn was available.
+        let (got2, e2) = t.getConn(&cm);
+        check("a second getConn finds nothing and queues instead",
+              got2.is_none() && !e2.IsNil(), string(""));
+        // The waiter really is queued: freeing a conn now satisfies it.
+        let fresh = conn("a.com");
+        let _ = t.tryPutIdleConn(&fresh);
+        let (got3, e3) = t.getConn(&cm);
+        check("and a newly pooled conn is handed out on the next call",
+              e3.IsNil() && got3.is_some(), fmt::Sprintf!("%v", e3));
+    }
+
     let p = PASSED.load(Ordering::Relaxed);
     let f = FAILED.load(Ordering::Relaxed);
     fmt::Printf!("\n%d passed, %d failed\n", p as i64, f as i64);
