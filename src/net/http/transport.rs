@@ -173,6 +173,47 @@ pub(crate) fn maxWriteWaitBeforeConnReuse() -> crate::time::Duration {
     return crate::time::Duration(50 * 1_000_000);
 }
 
+// go: sdk 1.25.5 net/http/transport.go:2736-2736 nop
+/// Go: `func nop() {}` — setRequestCancel's no-op stopTimer.
+pub fn nop() {
+    return;
+}
+
+crate::var! {
+    // go: none — goish-only sentinel: Go type-asserts
+    // `err.(tlsHandshakeTimeoutError)`; goish's typed errors chain to
+    // a sentinel via Unwrap so errors::Is can match (the
+    // unsupportedTEError pattern).
+    pub errTLSHandshakeTimeout: error = "net/http: TLS handshake timeout";
+}
+
+// go: sdk 1.25.5 net/http/transport.go:3071-3071 tlsHandshakeTimeoutError
+/// Go: the error addTLS reports when TLSHandshakeTimeout expires
+/// mid-handshake; net.Error-shaped (Timeout/Temporary both true).
+pub struct tlsHandshakeTimeoutError;
+
+impl errors::ErrorTrait for tlsHandshakeTimeoutError {
+    // go: sdk 1.25.5 net/http/transport.go:3075-3075 tlsHandshakeTimeoutError.Error
+    fn Error(&self) -> crate::gostring::string {
+        return crate::string("net/http: TLS handshake timeout");
+    }
+    // go: none — goish-only: the Is-chain to the sentinel above.
+    fn Unwrap(&self) -> error {
+        return errTLSHandshakeTimeout.into();
+    }
+}
+
+impl tlsHandshakeTimeoutError {
+    // go: sdk 1.25.5 net/http/transport.go:3073-3073 tlsHandshakeTimeoutError.Timeout
+    pub fn Timeout(&self) -> bool {
+        return true;
+    }
+    // go: sdk 1.25.5 net/http/transport.go:3074-3074 tlsHandshakeTimeoutError.Temporary
+    pub fn Temporary(&self) -> bool {
+        return true;
+    }
+}
+
 // go: sdk 1.25.5 net/http/transport.go:2673-2679 responseAndError
 /// Go: "how the goroutine reading from an HTTP/1 server communicates
 /// with the goroutine doing the RoundTrip."
@@ -1039,6 +1080,15 @@ impl persistConn {
         let herr = tls_conn.Handshake();
         if !herr.IsNil() {
             let _ = tls_conn.Close();
+            // Go's AfterFunc race reports tlsHandshakeTimeoutError
+            // when the timer beat the handshake; goish's deadline
+            // form recognizes the same event by the timeout error
+            // under an armed TLSHandshakeTimeout.
+            if t.TLSHandshakeTimeout.0 > 0
+                && (herr.Error().as_ref() as &str).contains("timeout")
+            {
+                return errors::Wrap(tlsHandshakeTimeoutError);
+            }
             return herr;
         }
         let _ = tls_conn.SetDeadline(crate::time::Time::default());

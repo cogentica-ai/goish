@@ -1389,6 +1389,13 @@ pub(crate) struct readResult {
     pub b: crate::types::byte,
 }
 
+// go: waived badServeHTTP — a bodyless `//go:linkname` alias of
+// serverHandler.ServeHTTP (server.go:3343) that exists so the vet
+// builtin can name it; there is no function body to port.
+// go: waived BaseContext — the one-line ctx accessor on the two
+// HTTP/2 conn-wrapper request types (unencryptedHTTP2Request,
+// initALPNRequest); the receivers cannot exist without the HTTP/2
+// stack the h2c waivers below describe.
 // go: waived maybeServeUnencryptedHTTP2 — routes a conn whose first
 // bytes are the h2 preface into the HTTP/2 server; goish has no
 // HTTP/2 stack (the omithttp2 stubs), so there is no serving path for

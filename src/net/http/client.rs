@@ -1921,14 +1921,14 @@ pub(crate) fn setRequestCancel(
     let af: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(|| alwaysFalse());
     if deadline.IsZero() {
         // Go: return nop, alwaysFalse
-        return (alloc::boxed::Box::new(|| {}), af);
+        return (alloc::boxed::Box::new(super::transport::nop), af);
     }
     let _ = knownRoundTripperImpl(rt, req);
     let oldCtx = req.Context();
     // Go: "If they already had a Request.Context that's expiring
     // sooner, do nothing."
     if !timeBeforeContextDeadline(deadline.clone(), &oldCtx) {
-        return (alloc::boxed::Box::new(|| {}), af);
+        return (alloc::boxed::Box::new(super::transport::nop), af);
     }
     let until = deadline.clone().Sub(crate::time::Now());
     let (ctx, cancelCtx) = crate::context::WithTimeout(oldCtx, until);
