@@ -273,11 +273,11 @@ fn serve_tls_conn(
     // requests are still in flight and never kicks an idle HTTPS
     // keep-alive conn. Go gets this for free: plaintext and TLS conns
     // share `conn.serve` (server.go:2039).
-    let track = srv.__register_conn(pd_addr);
+    let track = srv.trackConn(None, true, pd_addr).unwrap();
     // Releases the slot on every ordinary exit path. The panic path
     // cannot rely on it — goish recovery skips Rust drops — so the
     // deferred recover below unregisters explicitly, and
-    // `__unregister_conn` is idempotent so the double call is safe.
+    // `trackConn(_, false)` is idempotent so the double call is safe.
     struct TrackGuard<'a> {
         srv: &'a Arc<Server>,
         track: Arc<super::server::ConnTrack>,
@@ -287,7 +287,7 @@ fn serve_tls_conn(
         // conn.serve; goish needs an explicit guard because the
         // HTTPS loop is a separate function.
         fn drop(&mut self) {
-            self.srv.__unregister_conn(&self.track);
+            self.srv.trackConn(Some(&self.track), false, 0);
         }
     }
     let _track_guard = TrackGuard {
@@ -428,7 +428,7 @@ fn serve_tls_conn(
                 // The TrackGuard above never fires on this path, so
                 // release the conn accounting here or Shutdown waits
                 // on a ghost conn forever.
-                panic_srv.__unregister_conn(&panic_track);
+                panic_srv.trackConn(Some(&panic_track), false, 0);
             }
         }
         handler.ServeHTTP(&w, &req);
@@ -470,7 +470,7 @@ impl Server {
         // performs at entry (Go routes ServeTLS through Serve, which
         // tracks the listener; server.go:3540 → :3405).
         let ln = Arc::new(ln);
-        if !self.__track_listener(ln.clone()) {
+        if !self.trackListener(&ln, true) {
             return super::server::ErrServerClosed.into();
         }
         let handler = self.Handler.clone();
@@ -490,7 +490,7 @@ impl Server {
                 // Fatal accept error — remove this loop's listener
                 // from the shutdown-tracked set (Go's deferred
                 // `trackListener(&l, false)`).
-                self.__untrack_listener(&ln);
+                self.trackListener(&ln, false);
                 return err;
             }
             // Grab the raw fd BEFORE the conn moves into the TLS

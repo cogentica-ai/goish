@@ -1566,6 +1566,17 @@ pub(crate) struct ConnTrack {
 impl ConnTrack {
     // go: sdk 1.25.5 net/http/server.go:1865-1884 conn.setState
     //
+    // go: sdk 1.25.5 net/http/server.go:1886-1889 conn.getState
+    /// Go packs `(unixtime<<8 | state)` into one atomic and unpacks it
+    /// here; goish keeps the two in separate atomics, so this is the
+    /// pair read. The nanosecond stamp is CLOCK_MONOTONIC, not unix
+    /// seconds — only differences are ever consulted.
+    pub(crate) fn getState(&self) -> (u8, i64) {
+        let st = self.state.load(Ordering::Acquire);
+        let since = self.since_ns.load(Ordering::Relaxed);
+        return (st, since);
+    }
+
     pub(crate) fn setState(&self, st: u8) {
         self.since_ns
             .store(crate::runtime::sysmon::monotonic_ns(), Ordering::Relaxed);
@@ -1915,7 +1926,7 @@ impl Server {
                     // Shutdown already drained tracked_listeners;
                     // untrack is a no-op here but kept for the
                     // deferred-trackListener(false) shape.
-                    self.__untrack_listener(&ln);
+                    self.trackListener(&ln, false);
                     return ErrServerClosed.into();
                 }
                 if temporary {
@@ -1939,7 +1950,7 @@ impl Server {
                 // remove its listener so a later Shutdown doesn't
                 // close a dead (possibly kernel-reused) fd (Go's
                 // `defer srv.trackListener(&l, false)`).
-                self.__untrack_listener(&ln);
+                self.trackListener(&ln, false);
                 return err;
             }
             temp_delay_ns = 0;
@@ -1997,10 +2008,7 @@ impl Server {
         // netpoll::block returns Timedout and the goroutine
         // resumes), then close the fd (so the next Accept4 retry
         // returns EBADF).
-        for ln in listeners {
-            ln.__wake_accept();
-            let _ = ln.Close();
-        }
+        let _ = self.closeListenersLocked(&listeners);
 
         // Spawn RegisterOnShutdown callbacks, each on its own
         // goroutine (Go server.go:3184-3186).
@@ -2019,8 +2027,12 @@ impl Server {
         // read deadline over our slam.
         let mut sleep_ns: i64 = 1_000_000; // 1ms
         loop {
-            self.kick_tracked_conns(false);
-            if self.__state.active_conns.load(Ordering::Acquire) == 0 {
+            // Go's Shutdown loop is `if s.closeIdleConns() { return
+            // lnerr }` (server.go:3202) — the quiescence verdict, not
+            // a counter, is what ends the wait. goish also checks the
+            // counter, since a conn can be tracked-but-not-yet-idle.
+            let quiescent = self.closeIdleConns();
+            if quiescent && self.__state.active_conns.load(Ordering::Acquire) == 0 {
                 return errors::nil;
             }
             match &wait {
@@ -2052,10 +2064,7 @@ impl Server {
             self.__state.in_shutdown.store(true, Ordering::Release);
             core::mem::take(&mut *tracked)
         };
-        for ln in listeners {
-            ln.__wake_accept();
-            let _ = ln.Close();
-        }
+        let _ = self.closeListenersLocked(&listeners);
         {
             let hooks: Vec<Arc<dyn Fn() + Send + Sync>> =
                 self.__state.on_shutdown.Lock().clone();
@@ -2172,42 +2181,6 @@ impl Server {
     /// out-of-band `close(2)`: the owning serve_conn sees the timeout
     /// error and closes the fd itself, keeping single-owner fd
     /// discipline (no close/reuse race with an in-flight read).
-    /// Register a connection with the shutdown / idle-kick machinery
-    /// and bump `active_conns`, returning its tracking record.
-    ///
-    /// goish-only plumbing: Go needs no equivalent because plaintext
-    /// and TLS conns both flow through the single `conn.serve`, whereas
-    /// goish's HTTPS loop lives in server_tls.rs. Without this an
-    /// HTTPS conn is invisible to `Shutdown`, which then returns while
-    /// requests are still in flight.
-    pub(crate) fn __register_conn(&self, pd_addr: usize) -> Arc<ConnTrack> {
-        self.__state.active_conns.fetch_add(1, Ordering::AcqRel);
-        let track = Arc::new(ConnTrack {
-            state: AtomicU8::new(CONN_STATE_NEW),
-            since_ns: AtomicI64::new(crate::runtime::sysmon::monotonic_ns()),
-            pd_addr: AtomicUsize::new(pd_addr),
-        });
-        self.__state.tracked_conns.Lock().push(track.clone());
-        return track;
-    }
-
-    /// Drop a connection's tracking record and release its slot in
-    /// `active_conns`. Idempotent per record: `retain` is a no-op the
-    /// second time, and the counter is only decremented when the
-    /// record was still present.
-    pub(crate) fn __unregister_conn(&self, track: &Arc<ConnTrack>) {
-        let removed = {
-            let mut g = self.__state.tracked_conns.Lock();
-            let before = g.len();
-            g.retain(|t| !Arc::ptr_eq(t, track));
-            before != g.len()
-        };
-        if removed {
-            self.__state.active_conns.fetch_sub(1, Ordering::AcqRel);
-        }
-        return;
-    }
-
     fn kick_tracked_conns(&self, all: bool) {
         let now = crate::runtime::sysmon::monotonic_ns();
         let conns: Vec<Arc<ConnTrack>> = self.__state.tracked_conns.Lock().clone();
@@ -2474,22 +2447,114 @@ impl Server {
     /// Returns `false` if shutdown already began (caller must return
     /// `ErrServerClosed` without accepting). Go: `trackListener(ln,
     /// true)` (server.go:3253).
-    pub(crate) fn __track_listener(&self, ln: Arc<net::Listener>) -> bool {
+    // go: sdk 1.25.5 net/http/server.go:3604-3621 Server.trackListener
+    /// Go: "trackListener adds or removes a net.Listener to the set of
+    /// tracked listeners. Returns false if the server is shutting down."
+    ///
+    /// Was split into `__track_listener` / `__untrack_listener`, which
+    /// no name-level check could match against Go. One function with
+    /// Go's `add` flag, as Go writes it.
+    ///
+    /// goish has no `listenerGroup sync.WaitGroup`: Shutdown polls
+    /// `active_conns` instead of waiting on a group, so the Add(1) /
+    /// Done() pair has no counterpart.
+    pub(crate) fn trackListener(&self, ln: &Arc<net::Listener>, add: bool) -> bool {
         let mut tracked = self.__state.tracked_listeners.Lock();
-        if self.__state.in_shutdown.load(Ordering::Acquire) {
-            return false;
+        if add {
+            if self.__state.in_shutdown.load(Ordering::Acquire) {
+                return false;
+            }
+            tracked.push(ln.clone());
+        } else {
+            tracked.retain(|t| !Arc::ptr_eq(t, ln));
         }
-        tracked.push(ln);
-        true
+        return true;
     }
 
-    /// Remove a listener from the shutdown-tracked set — Go's
-    /// `trackListener(ln, false)`, run deferred when a Serve loop
-    /// exits, so a later Shutdown never closes a fd the kernel may
-    /// have reused. No-op if Shutdown already drained the set.
-    pub(crate) fn __untrack_listener(&self, ln: &Arc<net::Listener>) {
-        let mut tracked = self.__state.tracked_listeners.Lock();
-        tracked.retain(|t| !Arc::ptr_eq(t, ln));
+    // go: sdk 1.25.5 net/http/server.go:3623-3634 Server.trackConn
+    /// Go: "trackConn adds or removes a conn from the set of active
+    /// connections." Go's `add` case allocates the record; goish
+    /// returns it, since the caller needs the handle for setState.
+    /// The remove case is idempotent — `retain` is a no-op the second
+    /// time, and `active_conns` only drops when the record was still
+    /// present, which the panic path relies on.
+    pub(crate) fn trackConn(&self, track: Option<&Arc<ConnTrack>>, add: bool, pd_addr: usize) -> Option<Arc<ConnTrack>> {
+        if add {
+            self.__state.active_conns.fetch_add(1, Ordering::AcqRel);
+            let t = Arc::new(ConnTrack {
+                state: AtomicU8::new(CONN_STATE_NEW),
+                since_ns: AtomicI64::new(crate::runtime::sysmon::monotonic_ns()),
+                pd_addr: AtomicUsize::new(pd_addr),
+            });
+            self.__state.tracked_conns.Lock().push(t.clone());
+            return Some(t);
+        }
+        if let Some(t) = track {
+            let removed = {
+                let mut g = self.__state.tracked_conns.Lock();
+                let before = g.len();
+                g.retain(|x| !Arc::ptr_eq(x, t));
+                before != g.len()
+            };
+            if removed {
+                self.__state.active_conns.fetch_sub(1, Ordering::AcqRel);
+            }
+        }
+        return None;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:3254-3263 Server.closeListenersLocked
+    /// Close every tracked listener, returning the FIRST error and
+    /// still closing the rest — Go's `if cerr != nil && err == nil`.
+    pub(crate) fn closeListenersLocked(&self, listeners: &[Arc<net::Listener>]) -> error {
+        let mut err: error = errors::nil;
+        for ln in listeners.iter() {
+            // goish-only, and load-bearing: Go closes the fd and the
+            // kernel wakes the blocked Accept. goish's Accept parks on
+            // the netpoller, so it must be woken FIRST or the
+            // goroutine sleeps through the close.
+            ln.__wake_accept();
+            let cerr = ln.Close();
+            if !cerr.IsNil() && err.IsNil() {
+                err = cerr;
+            }
+        }
+        return err;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:3230-3252 Server.closeIdleConns
+    /// Go: "closeIdleConns closes all idle connections and reports
+    /// whether the server is quiescent."
+    ///
+    /// Go closes `c.rwc` outright. goish slams the read deadline into
+    /// the past instead and lets the owning serve loop observe the
+    /// timeout and close its own fd, so an fd always has exactly one
+    /// closer — see kick_tracked_conns. The QUIESCENCE verdict is
+    /// Go's, including issue 22682: a StateNew conn older than 5s
+    /// counts as idle.
+    pub(crate) fn closeIdleConns(&self) -> bool {
+        let now = crate::runtime::sysmon::monotonic_ns();
+        let mut quiescent = true;
+        let conns: Vec<Arc<ConnTrack>> = self.__state.tracked_conns.Lock().clone();
+        for t in conns.iter() {
+            let (mut st, since) = t.getState();
+            // Go issue 22682: "treat StateNew connections as if they're
+            // idle if we haven't read the first request's header in
+            // over 5 seconds."
+            if st == CONN_STATE_NEW && now.wrapping_sub(since) > 5_000_000_000 {
+                st = CONN_STATE_IDLE;
+            }
+            if st != CONN_STATE_IDLE || since == 0 {
+                quiescent = false;
+                continue;
+            }
+            let pd_addr = t.pd_addr.load(Ordering::Acquire);
+            if pd_addr != 0 {
+                let pd = unsafe { &*(pd_addr as *const crate::runtime::netpoll::PollDesc) };
+                crate::runtime::netpoll::set_deadline(pd, -1, b'r');
+            }
+        }
+        return quiescent;
     }
 
     /// `(*Server).logf` (server.go:3691): route a message through
