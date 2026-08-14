@@ -1637,5 +1637,9 @@ name = "http_connstate_smoke"
 path = "examples/http_connstate_smoke.rs"
 
 [[example]]
+name = "http_pprof_smoke"
+path = "examples/http_pprof_smoke.rs"
+
+[[example]]
 name = "http_persist_smoke"
 path = "examples/http_persist_smoke.rs"

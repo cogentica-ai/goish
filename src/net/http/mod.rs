@@ -27,6 +27,7 @@ pub mod fs;
 pub mod header;
 pub mod http;
 pub mod httptest;
+pub mod pprof;
 pub mod httptrace;
 pub mod httputil;
 pub mod internal;
