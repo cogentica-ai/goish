@@ -2669,18 +2669,25 @@ impl Server {
             // goroutine cost ~15% of server CPU in newproc/goexit
             // alone and its join added a wakeup round-trip per
             // request.
+            // The same watch drives CloseNotify: Go's
+            // `handleReadErrorLocked` cancels the context AND calls
+            // `res.closeNotify()` (server.go:769-776), so the two
+            // signals fire together or not at all.
+            let cnc = Arc::new(super::responsewriter::closeNotifyCell::new());
             let (_, watch_pd) = conn.__disconnect_watch_parts();
             if !watch_pd.is_null() {
-                // `Arc<CancelFunc>` (`CancelFunc = Box<dyn Fn()…>`)
-                // unsizes straight to `Arc<dyn Fn()…>` — no extra
-                // wrapper closure allocation per request.
-                let hook: Arc<dyn Fn() + Send + Sync> = req_cancel.clone();
+                let cancel = req_cancel.clone();
+                let cell = cnc.clone();
+                let hook: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+                    cancel();
+                    cell.closeNotify();
+                });
                 crate::runtime::netpoll::arm_watch(unsafe { &*watch_pd }, hook);
             }
 
             let keep_alive = request_keep_alive(&mut req)
                 && !self.__state.in_shutdown.load(Ordering::Acquire);
-            let w = response::new(conn);
+            let w = response::__new_with_cnc(conn, cnc);
             w.__set_keep_alive(keep_alive);
             // HEAD: handler writes are eaten by the response writer
             // (Go's `isHEAD` at server.go:1302, eat-writes at :1339).
@@ -2732,6 +2739,10 @@ impl Server {
             // ported and then never called from here, so the general
             // OPTIONS handler could not fire.
             serverHandler { srv: self.clone() }.ServeHTTP(&w, &req);
+            // Go sets `handlerDone` here (server.go:2143, via
+            // finishRequest); a CloseNotify after this point can never
+            // fire, so Go panics rather than hand back a dead channel.
+            w.__set_handler_done();
 
             // Handler done — disarm the disconnect watch before
             // touching the conn's read side again (Go

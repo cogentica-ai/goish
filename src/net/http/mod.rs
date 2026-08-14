@@ -83,8 +83,7 @@ pub use request::{
 };
 pub use responsecontroller::{NewResponseController, ResponseController};
 pub use response::{ErrNoLocation, ReadResponse, Response};
-pub use responsewriter::{
-    AsWriter,
+pub use responsewriter::{CloseNotifier, AsWriter,
     Flusher, HeaderHandle, Hijacker, ResponseWriter,
 };
 pub use httputil::NewSingleHostReverseProxy;

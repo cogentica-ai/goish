@@ -123,6 +123,19 @@ pub fn AsWriter<'a>(
     return writerOf(w);
 }
 
+/// `http.CloseNotifier` (server.go:217) — Go: "the CloseNotifier
+/// interface is implemented by ResponseWriters which allow detecting
+/// when the underlying connection has gone away."
+///
+/// Go: "CloseNotify returns a channel that receives at most a single
+/// value (true) when the client connection has gone away." Deprecated
+/// there in favour of the request context — which goish cancels from
+/// the same disconnect watch that fires this.
+#[goish::interface] // goishlint:ignore GOISH022 - `goish::interface`, not `goish::int`
+pub trait CloseNotifier {
+    fn CloseNotify(&self) -> crate::gochan::chan<bool>;
+}
+
 /// `http.Flusher` (server.go:135) — implemented by ResponseWriters
 /// that allow an HTTP handler to flush buffered data to the client.
 #[goish::interface]
@@ -247,6 +260,7 @@ fn register_response_impls() {
         __goish_register_ResponseWriter_impl::<response>();
         __goish_register_Flusher_impl::<response>();
         __goish_register___RequestTooLarge_impl::<response>();
+        __goish_register_CloseNotifier_impl::<response>();
     });
     let _ = REGISTER.get();
 }
@@ -274,8 +288,85 @@ fn register_response_impls() {
 ///     with `Transfer-Encoding: chunked` and every subsequent `Write`
 ///     emits one chunk. The closing `0\r\n\r\n` terminator is sent by
 ///     the final `flush()`.
+/// `response.closeNotifyCh` / `closeNotifyTriggered` (server.go:493),
+/// lifted into their own cell.
+///
+/// Go keeps both on the response and reaches them from the conn's
+/// read side through `curReq`. goish's disconnect watch is armed with
+/// a plain closure BEFORE the response exists, so the cell is what
+/// the two share — the watch triggers it, `CloseNotify` reads it.
+pub struct closeNotifyCell {
+    st: SpinLock<closeNotifyState>,
+}
+
+struct closeNotifyState {
+    ch: Option<crate::gochan::chan<bool>>,
+    triggered: bool,
+    handlerDone: bool,
+}
+
+impl closeNotifyCell {
+    // go: none — goish-only: the cell above.
+    pub fn new() -> closeNotifyCell {
+        return closeNotifyCell {
+            st: SpinLock::new(closeNotifyState {
+                ch: None,
+                triggered: false,
+                handlerDone: false,
+            }),
+        };
+    }
+
+    /// `response.closeNotify` (server.go:2275). Go: "already
+    /// triggered" is a no-op, and the send only happens if someone
+    /// asked for the channel — the buffered cap-1 chan is what keeps
+    /// this from blocking the reader that calls it.
+    pub fn closeNotify(&self) {
+        let mut g = self.st.lock();
+        if g.triggered {
+            return;
+        }
+        g.triggered = true;
+        if let Some(ch) = g.ch.as_ref() {
+            let _ = ch.__try_send(true);
+        }
+        return;
+    }
+
+    // go: none — goish-only: Go sets `handlerDone` on the response;
+    // the flag lives here so CloseNotify can panic on a late call
+    // without the response having to outlive the handler.
+    pub fn __set_handler_done(&self) {
+        self.st.lock().handlerDone = true;
+        return;
+    }
+
+    /// `response.CloseNotify` (server.go:2260).
+    pub fn CloseNotify(&self) -> crate::gochan::chan<bool> {
+        let mut g = self.st.lock();
+        if g.handlerDone {
+            // Go panics here: a channel handed out after ServeHTTP
+            // returned can never fire, so a caller waiting on it would
+            // wait forever.
+            panic!("net/http: CloseNotify called after ServeHTTP finished");
+        }
+        if g.ch.is_none() {
+            let ch: crate::gochan::chan<bool> = crate::make!(chan bool, 1);
+            if g.triggered {
+                // Go: "action prior closeNotify call".
+                let _ = ch.__try_send(true);
+            }
+            g.ch = Some(ch);
+        }
+        return g.ch.as_ref().unwrap().clone();
+    }
+}
+
 pub struct response {
     inner: SpinLock<respInner>,
+    /// The close-notify cell this response shares with the conn's
+    /// disconnect watch.
+    cnc: Arc<closeNotifyCell>,
     /// Response headers — shared with every `HeaderHandle` handed out
     /// by `Header()`.
     header: Arc<SpinLock<Header>>,
@@ -347,7 +438,35 @@ impl response {
                 trailers: Vec::new(),
             }),
             header: Arc::new(SpinLock::new(h)),
+            cnc: Arc::new(closeNotifyCell::new()),
         }
+    }
+
+    // go: none — goish-only: build a response that shares an existing
+    // close-notify cell with the conn's disconnect watch, which is
+    // armed before the response exists.
+    pub fn __new_with_cnc(conn: TCPConn, cnc: Arc<closeNotifyCell>) -> Self {
+        let mut r = response::new(conn);
+        r.cnc = cnc;
+        return r;
+    }
+
+    /// `response.CloseNotify` (server.go:2260) — see closeNotifyCell.
+    pub fn CloseNotify(&self) -> crate::gochan::chan<bool> {
+        return self.cnc.CloseNotify();
+    }
+
+    /// `response.closeNotify` (server.go:2275) — see closeNotifyCell.
+    pub fn closeNotify(&self) {
+        self.cnc.closeNotify();
+        return;
+    }
+
+    // go: none — goish-only: the serve loop marks the handler done so
+    // a late CloseNotify panics as Go's does.
+    pub fn __set_handler_done(&self) {
+        self.cnc.__set_handler_done();
+        return;
     }
 
     /// `response.sendExpectationFailed` (server.go:2217).
@@ -727,6 +846,13 @@ impl __RequestTooLarge for response {
     fn requestTooLarge(&self) {
         response::requestTooLarge(self);
         return;
+    }
+}
+
+impl CloseNotifier for response {
+    /// `(*response).CloseNotify()` (server.go:2260).
+    fn CloseNotify(&self) -> crate::gochan::chan<bool> {
+        return response::CloseNotify(self);
     }
 }
 
