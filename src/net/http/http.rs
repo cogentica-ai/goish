@@ -466,3 +466,22 @@ pub fn ValidTrailerHeader(name: &crate::gostring::string) -> bool {
     }
     return true;
 }
+
+// go: none — goish-only: `httpguts.ValidHeaderFieldValue`
+// (httplex.go:303), relocated like the other httpguts helpers here.
+// Go: reject any CTL byte that is not linear whitespace, i.e. every
+// byte < 0x20 except TAB, plus DEL. This is the check that stops a
+// header value carrying a raw CR or LF onto the wire.
+pub fn ValidHeaderFieldValue(v: &crate::gostring::string) -> bool {
+    let b = v.as_bytes();
+    let mut i: usize = 0;
+    while i < b.len() {
+        let c = b[i];
+        // isCTL(b) && !isLWS(b)
+        if (c < 0x20 || c == 0x7f) && c != b'\t' {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}

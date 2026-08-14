@@ -1571,3 +1571,7 @@ path = "examples/http_trailer_smoke.rs"
 [[example]]
 name = "http_connectmethod_smoke"
 path = "examples/http_connectmethod_smoke.rs"
+
+[[example]]
+name = "http_transport_opts_smoke"
+path = "examples/http_transport_opts_smoke.rs"

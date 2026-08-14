@@ -596,7 +596,9 @@ pub trait RoundTripper: Send + Sync {
 /// can be assigned in via the `Transport.Proxy` field. The function
 /// shape is left as `Arc<dyn Fn>` rather than a typed closure so we
 /// don't need a public URL type in the surface.
-pub type ProxyResolver = alloc::sync::Arc<dyn Fn() + Send + Sync>;
+pub type ProxyResolver = alloc::sync::Arc<
+    dyn Fn(&Request) -> (super::url::URL, error) + Send + Sync,
+>;
 /// Type alias for the dial-context closure. Same opaque shape as
 /// `ProxyResolver` — the real signature would carry `(Context, network,
 /// addr) -> (Conn, error)` but those are inert in v1.
@@ -608,6 +610,11 @@ pub type DialContextFn = alloc::sync::Arc<dyn Fn() + Send + Sync>;
 /// today, the rest are inert metadata until the connection-pool layer
 /// lands.
 pub struct Transport {
+    /// Go's `WriteBufferSize` (transport.go:298) — bytes of write
+    /// buffer per connection. Zero means 4 KiB.
+    pub WriteBufferSize: int,
+    /// Go's `ReadBufferSize` (transport.go:304). Zero means 4 KiB.
+    pub ReadBufferSize: int,
     /// Go's `altProto atomic.Value` holding `map[string]RoundTripper`
     /// (transport.go:307), populated by `RegisterProtocol`. goish uses
     /// a Mutex-guarded map — the atomic.Value dance exists to make the
@@ -652,6 +659,8 @@ pub struct Transport {
 impl Default for Transport {
     fn default() -> Self {
         Transport {
+            WriteBufferSize: 0,
+            ReadBufferSize: 0,
             __alt_proto: crate::sync::Mutex::new(crate::gomap::map::new()),
             Timeout: time::Duration(0),
             DisableCompression: false,
@@ -676,7 +685,13 @@ impl Default for Transport {
 /// what produces the resolver value in goish; Go callers assigning the
 /// bare identifier go through `From<>` under the hood).
 pub fn ProxyFromEnvironment() -> ProxyResolver {
-    alloc::sync::Arc::new(|| {})
+    // goish has no `httpproxy.FromEnvironment`; until it lands this
+    // resolves to "no proxy", which is what Go returns when none of
+    // HTTP_PROXY/HTTPS_PROXY/NO_PROXY is set. The signature is now
+    // Go's, so a real implementation drops in without touching callers.
+    alloc::sync::Arc::new(|_r: &Request| -> (super::url::URL, error) {
+        return (super::url::URL::empty(), errors::nil);
+    })
 }
 
 // Polymorphic-nil for Transport. Go's `transport *http.Transport`
@@ -1244,6 +1259,21 @@ impl headersCopier {
         }
         return;
     }
+}
+
+// go: sdk 1.25.5 net/http/client.go:422-425 basicAuth
+/// Go: "See 2 (end of page 4)
+/// https://www.ietf.org/rfc/rfc2617.txt \"To receive authorization,
+/// the client sends the userid and password, separated by a single
+/// colon (\":\") character, within a base64 encoded string in the
+/// credentials.\""
+pub fn basicAuth(username: string, password: string) -> string {
+    let mut creds = crate::strings::Builder::new();
+    let _ = creds.WriteString(username);
+    let _ = creds.WriteByte(b':');
+    let _ = creds.WriteString(password);
+    return crate::encoding::base64::StdEncoding
+        .EncodeToString(crate::convert::bytes(creds.String()).as_ref());
 }
 
 const MAX_REDIRECTS: usize = 10;

@@ -365,9 +365,138 @@ impl<T: PartialEq> connLRU<T> {
     }
 }
 
+// go: sdk 1.25.5 net/http/transport.go:50 DefaultMaxIdleConnsPerHost
+/// Go: "DefaultMaxIdleConnsPerHost is the default value of
+/// Transport's MaxIdleConnsPerHost."
+pub const DefaultMaxIdleConnsPerHost: int = 2;
+
+// go: sdk 1.25.5 net/http/transport.go:2444-2452 is408Message
+/// Go: whether `buf` starts an `HTTP/1.x 408` status line. Used to
+/// tell a real 408 from a connection the server closed, so a request
+/// is retried rather than surfaced as an error.
+///
+/// The offsets are Go's and are not obvious: bytes 0..7 must be
+/// `"HTTP/1."` — byte 7 (the minor version) is skipped — and bytes
+/// 8..12 must be `" 408"`.
+pub fn is408Message(buf: &slice<crate::types::byte>) -> bool {
+    if buf.Len() < 12 {
+        return false;
+    }
+    let b: &[u8] = buf;
+    if &b[..7] != b"HTTP/1." {
+        return false;
+    }
+    return &b[8..12] == b" 408";
+}
+
+// go: sdk 1.25.5 net/http/transport.go:503-509 ProxyURL
+/// Go: "ProxyURL returns a proxy function (for use in a Transport)
+/// that always returns the same URL."
+pub fn ProxyURL(
+    fixedURL: URL,
+) -> Arc<dyn Fn(&Request) -> (URL, crate::errors::error) + Send + Sync> {
+    return Arc::new(move |_r: &Request| -> (URL, crate::errors::error) {
+        return (fixedURL.clone(), crate::errors::nil);
+    });
+}
+
+// go: sdk 1.25.5 net/http/transport.go:565-579 validateHeaders
+/// Returns a description of the FIRST invalid header, or "" when all
+/// are well-formed. Go deliberately omits the offending VALUE from the
+/// message — "it may be sensitive" — and this port keeps that.
+pub fn validateHeaders(hdrs: &super::header::Header) -> string {
+    for (k, vv) in crate::range!(hdrs) {
+        if !super::http::isToken(k) {
+            return crate::fmt::Sprintf!("field name %q", k.clone());
+        }
+        for i in 0..vv.Len() {
+            if !super::http::ValidHeaderFieldValue(&vv[i]) {
+                // Go: "Don't include the value in the error, because
+                // it may be sensitive."
+                return crate::fmt::Sprintf!("field value for %q", k.clone());
+            }
+        }
+    }
+    return string::new();
+}
+
+impl connectMethod {
+    // go: sdk 1.25.5 net/http/transport.go:986-996 connectMethod.proxyAuth
+    /// Go: "proxyAuth returns the Proxy-Authorization header to set on
+    /// requests, if applicable."
+    ///
+    /// Always empty in goish today: `url::URL` has no `User` field —
+    /// Parse discards userinfo — so a proxy URL can never carry
+    /// credentials. Ported under its Go name so the rule lands in one
+    /// place when URL.User arrives; see the note on refererForURL.
+    pub fn proxyAuth(&self) -> string {
+        if self.proxyURL.is_none() {
+            return string::new();
+        }
+        return string::new();
+    }
+}
+
 // ─── registered protocols ───────────────────────────────────────────
 
 impl Transport {
+    // go: sdk 1.25.5 net/http/transport.go:314-319 Transport.writeBufferSize
+    pub fn writeBufferSize(&self) -> int {
+        if self.WriteBufferSize > 0 {
+            return self.WriteBufferSize;
+        }
+        return 4 << 10;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:321-326 Transport.readBufferSize
+    pub fn readBufferSize(&self) -> int {
+        if self.ReadBufferSize > 0 {
+            return self.ReadBufferSize;
+        }
+        return 4 << 10;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:385-387 Transport.hasCustomTLSDialer
+    /// goish's Transport has no DialTLS/DialTLSContext fields yet, so
+    /// this is constant false. Named now so the TLS dial path has a
+    /// hook to fill rather than a condition to invent.
+    pub fn hasCustomTLSDialer(&self) -> bool {
+        return false;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:1040-1045 Transport.maxIdleConnsPerHost
+    /// Note the test is `!= 0`, not `> 0`: Go treats a NEGATIVE
+    /// MaxIdleConnsPerHost as "no pool for this host", so it must pass
+    /// through rather than fall back to the default.
+    pub fn maxIdleConnsPerHost(&self) -> int {
+        let v = self.MaxIdleConnsPerHost;
+        if v != 0 {
+            return v;
+        }
+        return DefaultMaxIdleConnsPerHost;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:974-982 Transport.connectMethodForRequest
+    /// Build the pool key inputs for a request. Go takes a
+    /// `*transportRequest`; goish has no such wrapper yet, so it takes
+    /// the Request directly — the wrapper only adds extra headers and
+    /// an error cell, neither of which this reads.
+    pub fn connectMethodForRequest(&self, req: &Request) -> (connectMethod, crate::errors::error) {
+        let mut cm = connectMethod::default();
+        cm.targetScheme = req.URL.Scheme.clone();
+        cm.targetAddr = canonicalAddr(&req.URL);
+        let mut err = crate::errors::nil;
+        if let Some(p) = self.Proxy.as_ref() {
+            let (u, e) = p(req);
+            err = e;
+            if err.IsNil() && u.Host.Len() > 0 {
+                cm.proxyURL = Some(Arc::new(u));
+            }
+        }
+        cm.onlyH1 = req.requiresHTTP1();
+        return (cm, err);
+    }
+
     // go: sdk 1.25.5 net/http/transport.go:541-552 Transport.useRegisteredProtocol
     /// Go: "reports whether an alternate protocol (as registered with
     /// Transport.RegisterProtocol) should be respected for this
