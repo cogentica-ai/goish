@@ -487,6 +487,141 @@ crate::var! {
     pub errTransportReadFromServer: error = "http: transport read from server";
 }
 
+// ─── persistConn ────────────────────────────────────────────────────
+
+// goishlint:ignore GOISH019 persistConn — Go's persistConn carries 24
+// fields, most of them the goroutine machinery this slice deliberately
+// stops short of: closech/writech/reqch channels, the bufio pair, the
+// idleTimer, sawEOF/readLimit. What lands here is the STATE the pure
+// methods below read, behind one Mutex because goish has no
+// `mu sync.Mutex` + bare fields idiom.
+// go: sdk 1.25.5 net/http/transport.go:2068-2109 persistConn
+/// Go: "persistConn wraps a connection, usually a persistent one (but
+/// may be used for non-keep-alive requests as well)."
+///
+/// Staged: the fields the connection POOL needs to reason about a
+/// connection — is it reused, is it broken, why was it closed — with
+/// the transport goroutines still to come. Nothing constructs one yet.
+pub struct persistConn {
+    /// Go: `cacheKey connectMethodKey` — which pool bucket this is in.
+    pub cacheKey: connectMethodKey,
+    state: crate::sync::Mutex<pcState>,
+}
+
+// go: none — goish-only: the payload of Go's `mu sync.Mutex`, i.e. the
+// persistConn fields its comment marks as "guarded by mu".
+struct pcState {
+    /// Go: "whether conn has been used for a request/response"
+    reused: bool,
+    /// Go: "an error to which writes/reads should fail"
+    broken: bool,
+    /// Go: "set non-nil when conn is closed, before closech is closed"
+    closed: error,
+    /// Go: "set non-nil if the connection was closed due to
+    /// CancelRequest or due to context cancellation"
+    canceledErr: error,
+}
+
+impl persistConn {
+    // go: none — goish-only: Go zero-values persistConn inside
+    // dialConn; that function is not ported yet, so the pool-facing
+    // state needs an explicit constructor to be testable.
+    pub fn __new(cacheKey: connectMethodKey) -> persistConn {
+        return persistConn {
+            cacheKey,
+            state: crate::sync::Mutex::new(pcState {
+                reused: false,
+                broken: false,
+                closed: errors::nil,
+                canceledErr: errors::nil,
+            }),
+        };
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:2134-2139 persistConn.isBroken
+    pub fn isBroken(&self) -> bool {
+        return !self.state.Lock().closed.IsNil();
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:2141-2147 persistConn.canceled
+    /// Go: "canceled returns non-nil if the connection was closed due
+    /// to CancelRequest or due to context cancellation."
+    pub fn canceled(&self) -> error {
+        return self.state.Lock().canceledErr.clone();
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:2150-2155 persistConn.isReused
+    /// Whether this conn has already carried a request/response. This
+    /// is the flag `shouldRetryRequest` turns on: a FRESH conn never
+    /// retries.
+    pub fn isReused(&self) -> bool {
+        return self.state.Lock().reused;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:2898-2903 persistConn.markReused
+    /// Go: "marks this connection as having been successfully used for
+    /// a request and response."
+    pub fn markReused(&self) {
+        self.state.Lock().reused = true;
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:2911-2915 persistConn.close
+    /// Go: "The provided err is only for testing and debugging; in
+    /// normal circumstances it should never be seen by users."
+    pub fn close(&self, err: error) {
+        self.closeLocked(err);
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:2917-2935 persistConn.closeLocked
+    /// Go PANICS on a nil error, and this port keeps that: a
+    /// close-without-reason means the caller lost track of why, and
+    /// `closed` doubles as the is-broken flag, so nil would silently
+    /// leave the conn readable.
+    ///
+    /// Only the FIRST close records its reason — Go guards on
+    /// `pc.closed == nil` — so a later close cannot overwrite the
+    /// error that actually explains the failure.
+    pub fn closeLocked(&self, err: error) {
+        if err.IsNil() {
+            panic!("nil error");
+        }
+        let mut st = self.state.Lock();
+        st.broken = true;
+        if st.closed.IsNil() {
+            st.closed = err;
+        }
+        return;
+    }
+
+    // go: none — goish-only: Go reads `pc.closed` directly under
+    // `pc.mu` from inside the package. goish's field is behind the
+    // state Mutex, so the read needs a name.
+    pub fn __closed_err(&self) -> error {
+        return self.state.Lock().closed.clone();
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:2157-2162 persistConn.cancelRequest
+    pub fn cancelRequest(&self, err: error) {
+        self.state.Lock().canceledErr = err;
+        self.closeLocked(errRequestCanceled.into());
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:2111-2116 persistConn.maxHeaderResponseSize
+    /// Go's default is 10 MiB — "conservative default; same as http2".
+    /// The test is `!= 0`, like maxIdleConnsPerHost, so a negative
+    /// MaxResponseHeaderBytes passes through rather than falling back.
+    pub fn maxHeaderResponseSize(t: &Transport) -> i64 {
+        let v = t.MaxResponseHeaderBytes;
+        if v != 0 {
+            return v;
+        }
+        return 10 << 20;
+    }
+}
+
 // ─── retry decision ─────────────────────────────────────────────────
 
 // go: sdk 1.25.5 net/http/transport.go:806-852 persistConn.shouldRetryRequest

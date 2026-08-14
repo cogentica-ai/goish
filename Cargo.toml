@@ -1579,3 +1579,7 @@ path = "examples/http_transport_opts_smoke.rs"
 [[example]]
 name = "http_retry_smoke"
 path = "examples/http_retry_smoke.rs"
+
+[[example]]
+name = "http_persistconn_smoke"
+path = "examples/http_persistconn_smoke.rs"

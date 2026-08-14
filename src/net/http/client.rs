@@ -610,6 +610,10 @@ pub type DialContextFn = alloc::sync::Arc<dyn Fn() + Send + Sync>;
 /// today, the rest are inert metadata until the connection-pool layer
 /// lands.
 pub struct Transport {
+    /// Go's `MaxResponseHeaderBytes` (transport.go:288) — cap on the
+    /// response head. Zero means Go's 10 MiB default; NEGATIVE passes
+    /// through, like MaxIdleConnsPerHost.
+    pub MaxResponseHeaderBytes: i64,
     /// Go's `WriteBufferSize` (transport.go:298) — bytes of write
     /// buffer per connection. Zero means 4 KiB.
     pub WriteBufferSize: int,
@@ -659,6 +663,7 @@ pub struct Transport {
 impl Default for Transport {
     fn default() -> Self {
         Transport {
+            MaxResponseHeaderBytes: 0,
             WriteBufferSize: 0,
             ReadBufferSize: 0,
             __alt_proto: crate::sync::Mutex::new(crate::gomap::map::new()),
