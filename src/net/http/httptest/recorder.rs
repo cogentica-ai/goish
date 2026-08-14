@@ -348,51 +348,15 @@ fn parseContentLength(cl: string) -> int {
     return crate::int(n);
 }
 
-// go: none — goish-only: `TrailerPrefix` is declared in net/http's
-// server.go, which is not ported yet. The constant is one string and
-// Result() cannot work without it; it moves to server.rs with that
-// port.
-const TrailerPrefix: &str = "Trailer:";
+// TrailerPrefix and ValidTrailerHeader both live in net/http proper
+// now — the former in server.rs (server.go:512), the latter in
+// http.rs beside the other relocated httpguts helpers. This file used
+// to carry private copies of both; server.go's declareTrailer needs
+// them too, and two copies of a security-relevant deny-list is one
+// too many.
+use super::super::http::ValidTrailerHeader;
+use super::super::server::TrailerPrefix;
 
-// go: none — goish-only: golang.org/x/net/http/httpguts is not ported.
-// This is ValidTrailerHeader with its badTrailer table relocated entry
-// for entry — the same treatment httpguts' token table gets in http.rs.
-// RFC 7230 §4.1.2 is the authority for the list.
-fn ValidTrailerHeader(name: &string) -> bool {
-    let name = super::super::header::CanonicalHeaderKey(name.clone());
-    if strings::HasPrefix(name.clone(), string::from_static("If-")) {
-        return false;
-    }
-    let bad: [&str; 21] = [
-        "Authorization",
-        "Cache-Control",
-        "Connection",
-        "Content-Encoding",
-        "Content-Length",
-        "Content-Range",
-        "Content-Type",
-        "Expect",
-        "Host",
-        "Keep-Alive",
-        "Max-Forwards",
-        "Pragma",
-        "Proxy-Authenticate",
-        "Proxy-Authorization",
-        "Proxy-Connection",
-        "Range",
-        "Realm",
-        "Te",
-        "Trailer",
-        "Transfer-Encoding",
-        "Www-Authenticate",
-    ];
-    for b in bad.iter() {
-        if name == *b {
-            return false;
-        }
-    }
-    return true;
-}
 
 // go: none — goish-only: silences the unused-import warning for the
 // bytes package, which Go's recorder uses for its *bytes.Buffer body

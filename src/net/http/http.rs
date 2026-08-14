@@ -422,3 +422,47 @@ pub struct HTTP2Config {
 }
 
 extern crate alloc;
+
+// go: none — goish-only: golang.org/x/net/http/httpguts is not ported.
+// This is `httpguts.ValidTrailerHeader` (guts.go:20) with its
+// `badTrailer` table relocated entry for entry — the same treatment
+// httpguts' token table gets above. RFC 7230 §4.1.2 is the authority.
+//
+// Was a private copy in httptest/recorder.rs; server.go's
+// declareTrailer needs it too, so it lives here rather than being
+// duplicated.
+pub fn ValidTrailerHeader(name: &crate::gostring::string) -> bool {
+    let name = super::header::CanonicalHeaderKey(name.clone());
+    if crate::strings::HasPrefix(name.clone(), crate::string("If-")) {
+        return false;
+    }
+    let bad: [&str; 21] = [
+        "Authorization",
+        "Cache-Control",
+        "Connection",
+        "Content-Encoding",
+        "Content-Length",
+        "Content-Range",
+        "Content-Type",
+        "Expect",
+        "Host",
+        "Keep-Alive",
+        "Max-Forwards",
+        "Pragma",
+        "Proxy-Authenticate",
+        "Proxy-Authorization",
+        "Proxy-Connection",
+        "Range",
+        "Realm",
+        "Te",
+        "Trailer",
+        "Transfer-Encoding",
+        "Www-Authenticate",
+    ];
+    for b in bad.iter() {
+        if name == *b {
+            return false;
+        }
+    }
+    return true;
+}

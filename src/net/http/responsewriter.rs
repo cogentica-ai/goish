@@ -292,6 +292,10 @@ struct respInner {
     /// never emitted — Go's `chunkWriter.Write` "Eat writes."
     /// (server.go:1339).
     is_head: bool,
+    /// Go's `response.trailers []string` (server.go:214) — trailer
+    /// keys declared via the `Trailer` response header before the
+    /// head is written. Populated by `declareTrailer`.
+    trailers: Vec<string>,
 }
 
 impl response {
@@ -312,6 +316,7 @@ impl response {
                 chunked: false,
                 keep_alive: false,
                 is_head: false,
+                trailers: Vec::new(),
             }),
             header: Arc::new(SpinLock::new(h)),
         }
@@ -354,6 +359,21 @@ impl response {
             return errors::nil;
         }
         g.chunked = true;
+        // Go's chunkWriter.writeHeader calls declareTrailer for each
+        // element of the `Trailer` response header as the head is
+        // written (server.go:1470-1476). Doing it here is what makes a
+        // handler's `w.Header().Set("Trailer", "X-Sum")` actually
+        // produce a trailer at the end.
+        {
+            let decls = self.header.lock().Values(string("Trailer"));
+            drop(g);
+            for i in 0..decls.Len() {
+                super::server::foreachHeaderElement(decls[i].clone(), |k: string| {
+                    self.declareTrailer(k);
+                });
+            }
+            g = self.inner.lock();
+        }
         // A HEAD response has no body at all — no Transfer-Encoding,
         // no chunks, no terminator (Go's chunkWriter eats the writes;
         // TE is only set when a body follows, server.go:1442-1461).
@@ -389,6 +409,72 @@ impl response {
     /// Render the response onto the wire. Idempotent — calling twice
     /// is a no-op. After `flush`, the underlying connection holds
     /// only the kept-alive read buffer (if any) and may be reused.
+    // `response.declareTrailer` — net/http/server.go line 551.
+    //
+    // NOT a `// go:` anchor: this file holds `response` while server.rs
+    // holds the rest of server.go, and GOISH018/021 are per-FILE — one
+    // anchor here made the rule demand all 153 of server.go's
+    // declarations in this file (+209 false findings, measured). Same
+    // split-file limitation as server_tls.rs.
+    /// Go: "declareTrailer is called for each Trailer header when the
+    /// response header is written. It notes that a header will need to
+    /// be written in the trailers at the end of the response."
+    ///
+    /// The `ValidTrailerHeader` gate is a security control, not a
+    /// nicety: RFC 7230 §4.1.2 forbids these in trailers precisely
+    /// because a proxy that has already acted on the head must not see
+    /// them changed afterwards.
+    pub fn declareTrailer(&self, k: string) {
+        let k = super::header::CanonicalHeaderKey(k);
+        if !super::http::ValidTrailerHeader(&k) {
+            // Go: "Forbidden by RFC 7230, section 4.1.2"
+            return;
+        }
+        self.inner.lock().trailers.push(k);
+        return;
+    }
+
+    // `response.finalTrailers` — net/http/server.go line 529. Prose,
+    // not an anchor; see declareTrailer above.
+    /// The trailer set to emit after the last chunk: keys the handler
+    /// declared up front via the `Trailer` header, plus any header it
+    /// set under the `Trailer:` magic prefix while writing the body.
+    /// Empty Header (Go's nil) when there are none.
+    pub fn finalTrailers(&self) -> Header {
+        let mut t = Header::new();
+        let h = self.header.lock();
+        for (k, vv) in crate::range!(&*h) {
+            let ks: &str = k.as_ref();
+            if let Some(kk) = ks.strip_prefix(super::server::TrailerPrefix) {
+                t.__set_values(
+                    super::header::CanonicalHeaderKey(string::from_bytes(kk.as_bytes())),
+                    vv.clone(),
+                );
+            }
+        }
+        let g = self.inner.lock();
+        for k in g.trailers.iter() {
+            let vals = h.Values(k.clone());
+            for i in 0..vals.Len() {
+                t.Add(k.clone(), vals[i].clone());
+            }
+        }
+        return t;
+    }
+
+    // `response.bodyAllowed` — net/http/server.go line 1613. Prose,
+    // not an anchor; see declareTrailer above.
+    /// Go: "bodyAllowed reports whether a Write is allowed for this
+    /// response type. It's illegal to call this before the header has
+    /// been flushed." Go panics on that misuse; so does this.
+    pub fn bodyAllowed(&self) -> bool {
+        let g = self.inner.lock();
+        if !g.wrote_header {
+            panic!("");
+        }
+        return bodyAllowedForStatus(g.status);
+    }
+
     pub fn flush(&self) -> error {
         let mut g = self.inner.lock();
         if g.flushed {
@@ -405,10 +491,26 @@ impl response {
                 // were sent — a terminator would itself be a body.
                 return errors::nil;
             }
-            // Streaming mode: emit the "0\r\n\r\n" terminator.
-            let (_, err) = g.conn.Write(slice::<byte>::__from_vec(alloc::vec![
-                b'0', b'\r', b'\n', b'\r', b'\n'
-            ]));
+            // Streaming mode: "0\r\n", then the trailer block, then
+            // the final CRLF. Go writes the trailers between the
+            // zero-length chunk and the blank line (chunkWriter.close,
+            // server.go:1650); a bare "0\r\n\r\n" drops them silently.
+            let trailers = {
+                drop(g);
+                let t = self.finalTrailers();
+                g = self.inner.lock();
+                t
+            };
+            let mut out: Vec<u8> = alloc::vec![b'0', b'\r', b'\n'];
+            if trailers.Len() > 0 {
+                // Same key-sorted, CRLF-terminated rendering the head
+                // uses — build_head's second half, reused so a trailer
+                // cannot bypass the header sanitiser.
+                let tb = build_trailer_block(&trailers);
+                out.extend_from_slice(&tb);
+            }
+            out.extend_from_slice(b"\r\n");
+            let (_, err) = g.conn.Write(slice::<byte>::__from_vec(out));
             return err;
         }
 
@@ -519,6 +621,16 @@ impl Flusher for response {
 
 /// Build the response head (status line + headers + final CRLF).
 /// Shared between buffered and streaming modes.
+// go: none — goish-only: the trailer block after the terminating
+// chunk. Routed through the SAME `WriteSubset` the head uses, so a
+// trailer value carrying CRLF cannot inject a header — the exact
+// defect a third hand-rolled key:value loop caused on the head path.
+fn build_trailer_block(trailers: &Header) -> Vec<u8> {
+    let mut hb = crate::bytes::Buffer::new();
+    let _ = trailers.WriteSubset(&mut hb, &crate::gomap::map::<string, bool>::new());
+    return hb.Bytes().as_ref().to_vec();
+}
+
 pub(crate) fn build_head(status: int, header: &Header) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::with_capacity(256);
     // Go's writeStatusLine (server.go:1596), ported in server.rs.

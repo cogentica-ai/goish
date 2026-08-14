@@ -1564,8 +1564,6 @@ pub(crate) struct ConnTrack {
 }
 
 impl ConnTrack {
-    // go: sdk 1.25.5 net/http/server.go:1865-1884 conn.setState
-    //
     // go: sdk 1.25.5 net/http/server.go:1886-1889 conn.getState
     /// Go packs `(unixtime<<8 | state)` into one atomic and unpacks it
     /// here; goish keeps the two in separate atomics, so this is the
@@ -1577,6 +1575,7 @@ impl ConnTrack {
         return (st, since);
     }
 
+    // go: sdk 1.25.5 net/http/server.go:1865-1884 conn.setState
     pub(crate) fn setState(&self, st: u8) {
         self.since_ns
             .store(crate::runtime::sysmon::monotonic_ns(), Ordering::Relaxed);
@@ -1998,17 +1997,15 @@ impl Server {
         // observed an empty vec and proceeded — leaving a fd open
         // with no wakeup. Go: `closeListenersLocked` under
         // `s.mu` (server.go:3195/3272).
-        let listeners = {
-            let mut tracked = self.__state.tracked_listeners.Lock();
+        {
+            // The flag must be set under the SAME lock the listener
+            // set is drained behind, or a Serve that has not reached
+            // its trackListener yet could install after Shutdown saw
+            // an empty set — leaving a fd open with no wakeup.
+            let _tracked = self.__state.tracked_listeners.Lock();
             self.__state.in_shutdown.store(true, Ordering::Release);
-            core::mem::take(&mut *tracked)
-        };
-
-        // Order matters per listener: wake first (so Accept's
-        // netpoll::block returns Timedout and the goroutine
-        // resumes), then close the fd (so the next Accept4 retry
-        // returns EBADF).
-        let _ = self.closeListenersLocked(&listeners);
+        }
+        let _ = self.closeListenersLocked();
 
         // Spawn RegisterOnShutdown callbacks, each on its own
         // goroutine (Go server.go:3184-3186).
@@ -2059,12 +2056,13 @@ impl Server {
     /// for graceful drain). In-flight handlers observe read/write
     /// errors on their next conn operation.
     pub fn Close(self: Arc<Self>) -> error {
-        let listeners = {
-            let mut tracked = self.__state.tracked_listeners.Lock();
+        {
+            // Same lock-ordering requirement as Shutdown: flag first,
+            // under the listener lock, then drain.
+            let _tracked = self.__state.tracked_listeners.Lock();
             self.__state.in_shutdown.store(true, Ordering::Release);
-            core::mem::take(&mut *tracked)
-        };
-        let _ = self.closeListenersLocked(&listeners);
+        }
+        let _ = self.closeListenersLocked();
         {
             let hooks: Vec<Arc<dyn Fn() + Send + Sync>> =
                 self.__state.on_shutdown.Lock().clone();
@@ -2478,18 +2476,14 @@ impl Server {
     /// The remove case is idempotent — `retain` is a no-op the second
     /// time, and `active_conns` only drops when the record was still
     /// present, which the panic path relies on.
-    pub(crate) fn trackConn(&self, track: Option<&Arc<ConnTrack>>, add: bool, pd_addr: usize) -> Option<Arc<ConnTrack>> {
+    pub(crate) fn trackConn(&self, track: &Arc<ConnTrack>, add: bool) {
         if add {
             self.__state.active_conns.fetch_add(1, Ordering::AcqRel);
-            let t = Arc::new(ConnTrack {
-                state: AtomicU8::new(CONN_STATE_NEW),
-                since_ns: AtomicI64::new(crate::runtime::sysmon::monotonic_ns()),
-                pd_addr: AtomicUsize::new(pd_addr),
-            });
-            self.__state.tracked_conns.Lock().push(t.clone());
-            return Some(t);
+            self.__state.tracked_conns.Lock().push(track.clone());
+            return;
         }
-        if let Some(t) = track {
+        {
+            let t = track;
             let removed = {
                 let mut g = self.__state.tracked_conns.Lock();
                 let before = g.len();
@@ -2500,14 +2494,33 @@ impl Server {
                 self.__state.active_conns.fetch_sub(1, Ordering::AcqRel);
             }
         }
-        return None;
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:634-643 Server.newConn
+    /// Go: "Create new connection from rwc." Go's `conn` carries the
+    /// server, the rwc and the per-conn state; goish's per-conn record
+    /// is `ConnTrack`, so this builds that. `pd_addr` is the read-side
+    /// PollDesc the shutdown kick needs — Go reaches `c.rwc` instead.
+    pub(crate) fn newConn(&self, pd_addr: usize) -> Arc<ConnTrack> {
+        return Arc::new(ConnTrack {
+            state: AtomicU8::new(CONN_STATE_NEW),
+            since_ns: AtomicI64::new(crate::runtime::sysmon::monotonic_ns()),
+            pd_addr: AtomicUsize::new(pd_addr),
+        });
     }
 
     // go: sdk 1.25.5 net/http/server.go:3254-3263 Server.closeListenersLocked
     /// Close every tracked listener, returning the FIRST error and
     /// still closing the rest — Go's `if cerr != nil && err == nil`.
-    pub(crate) fn closeListenersLocked(&self, listeners: &[Arc<net::Listener>]) -> error {
+    pub(crate) fn closeListenersLocked(&self) -> error {
         let mut err: error = errors::nil;
+        // Go iterates `s.listeners` under `s.mu`; goish drains the set
+        // so a racing Serve cannot re-install into a half-closed list.
+        let listeners: Vec<Arc<net::Listener>> = {
+            let mut tracked = self.__state.tracked_listeners.Lock();
+            core::mem::take(&mut *tracked)
+        };
         for ln in listeners.iter() {
             // goish-only, and load-bearing: Go closes the fd and the
             // kernel wakes the blocked Accept. goish's Accept parks on
