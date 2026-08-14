@@ -44,6 +44,7 @@ pub mod server;
 pub mod server_tls;
 pub mod sniff;
 pub mod status;
+pub mod transfer;
 pub mod url;
 
 pub use client::{

@@ -161,6 +161,15 @@ impl Header {
     /// Internal: the backing map for iteration. Used by the response
     /// writer to serialize headers onto the wire.
     #[doc(hidden)]
+    /// Raw map assignment, bypassing canonicalisation and the
+    /// one-value-per-Add shape. Go writes `h[key] = vals` (and
+    /// `h[key] = nil`) directly in transfer.go's fixTrailer and
+    /// mergeSetHeader; `Set`/`Add` cannot express an empty value list.
+    /// The caller is responsible for passing a canonical key.
+    pub(crate) fn __set_values(&mut self, key: string, vals: slice<string>) {
+        self.inner.Set(key, vals);
+    }
+
     pub fn __inner(&self) -> &map<string, slice<string>> {
         &self.inner
     }

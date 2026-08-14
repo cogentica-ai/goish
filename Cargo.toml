@@ -1539,3 +1539,7 @@ path = "examples/slog_resolve_smoke.rs"
 [[example]]
 name = "https_server_smoke"
 path = "examples/https_server_smoke.rs"
+
+[[example]]
+name = "http_transfer_smoke"
+path = "examples/http_transfer_smoke.rs"

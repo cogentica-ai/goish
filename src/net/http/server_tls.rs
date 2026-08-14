@@ -48,7 +48,8 @@ use crate::go;
 use crate::net;
 use crate::types::{byte, int};
 
-use super::responsewriter::{body_allowed_for_status, build_head, push_hex};
+use super::responsewriter::{build_head, push_hex};
+use super::transfer::bodyAllowedForStatus;
 use super::responsewriter::{Flusher, HeaderHandle, ResponseWriter};
 use super::request::{ReadRequestWithLimit, Request};
 use super::server::request_keep_alive_pub;
@@ -114,7 +115,7 @@ impl tlsResponse {
         g.flushed = true;
         g.wrote_header = true;
 
-        let suppress_body = g.is_head || !body_allowed_for_status(g.status);
+        let suppress_body = g.is_head || !bodyAllowedForStatus(g.status);
         if g.chunked {
             if suppress_body {
                 return errors::nil;
@@ -127,7 +128,7 @@ impl tlsResponse {
 
         let buf = {
             let mut h = self.header.lock();
-            if body_allowed_for_status(g.status)
+            if bodyAllowedForStatus(g.status)
                 && h.Get(string("Content-Length")).Len() == 0
             {
                 h.Set(
@@ -159,7 +160,7 @@ impl tlsResponse {
             return errors::nil;
         }
         g.chunked = true;
-        let suppress_body = g.is_head || !body_allowed_for_status(g.status);
+        let suppress_body = g.is_head || !bodyAllowedForStatus(g.status);
         let head = {
             let mut h = self.header.lock();
             if !suppress_body {
@@ -217,7 +218,7 @@ impl ResponseWriter for tlsResponse {
     fn Write(&self, p: slice<byte>) -> (int, error) {
         let mut g = self.inner.lock();
         g.wrote_header = true;
-        if p.len() > 0 && !body_allowed_for_status(g.status) {
+        if p.len() > 0 && !bodyAllowedForStatus(g.status) {
             return (0, super::server::ErrBodyNotAllowed.into());
         }
         if g.chunked {

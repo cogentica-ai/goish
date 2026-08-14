@@ -59,6 +59,7 @@ use crate::runtime::spin::SpinLock;
 use crate::string;
 use crate::types::{byte, int};
 
+use super::transfer::bodyAllowedForStatus;
 use super::header::Header;
 
 // ─── The interfaces ─────────────────────────────────────────────────
@@ -293,18 +294,6 @@ struct respInner {
     is_head: bool,
 }
 
-/// `bodyAllowedForStatus` (transfer.go:461) — whether a response
-/// status permits a body: false for 1xx, 204, and 304.
-pub(crate) fn body_allowed_for_status(status: int) -> bool {
-    if (100..=199).contains(&status) {
-        return false;
-    }
-    if status == 204 || status == 304 {
-        return false;
-    }
-    true
-}
-
 impl response {
     /// Build a fresh `response` over `conn`. Connection is closed
     /// after the response unless the server flips `__set_keep_alive`
@@ -368,7 +357,7 @@ impl response {
         // A HEAD response has no body at all — no Transfer-Encoding,
         // no chunks, no terminator (Go's chunkWriter eats the writes;
         // TE is only set when a body follows, server.go:1442-1461).
-        let suppress_body = g.is_head || !body_allowed_for_status(g.status);
+        let suppress_body = g.is_head || !bodyAllowedForStatus(g.status);
         // Build the head: set Transfer-Encoding, clear any user-set
         // Content-Length (mutually exclusive per RFC 7230 §3.3.2).
         let head = {
@@ -409,7 +398,7 @@ impl response {
         if !g.wrote_header {
             g.wrote_header = true;
         }
-        let suppress_body = g.is_head || !body_allowed_for_status(g.status);
+        let suppress_body = g.is_head || !bodyAllowedForStatus(g.status);
         if g.chunked {
             if suppress_body {
                 // No Transfer-Encoding was advertised and no chunks
@@ -429,7 +418,7 @@ impl response {
             // HEAD still advertises the GET-equivalent length; 1xx/
             // 204/304 must not carry an auto Content-Length at all
             // (Go omits it for bodyless statuses, server.go:1533).
-            if body_allowed_for_status(g.status)
+            if bodyAllowedForStatus(g.status)
                 && h.Get(string("Content-Length")).Len() == 0
             {
                 h.Set(string("Content-Length"), int_to_string(g.body.len() as i64));
@@ -481,7 +470,7 @@ impl ResponseWriter for response {
         }
         // `(*response).write` (server.go:1686): a status that forbids
         // a body rejects handler writes with ErrBodyNotAllowed.
-        if p.len() > 0 && !body_allowed_for_status(g.status) {
+        if p.len() > 0 && !bodyAllowedForStatus(g.status) {
             return (0, super::server::ErrBodyNotAllowed.into());
         }
         // HEAD: eat writes (server.go:1339) — report success so the
