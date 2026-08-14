@@ -17,7 +17,7 @@
 pub mod child;
 pub mod fcgi;
 
-pub use child::{addFastCGIEnvToContext, filterOutUsedEnvVars, newRequest, request};
+pub use child::{newChild, ProcessEnv, Serve, addFastCGIEnvToContext, filterOutUsedEnvVars, newRequest, request};
 pub use fcgi::{
     bufWriter, conn, newConn, newWriter, record, streamWriter, writePairs, ReadWriteCloser,
     encodeSize, readSize, readString, recType, typeAbortRequest, typeBeginRequest, typeData,

@@ -1645,5 +1645,9 @@ name = "http_multipart_form_smoke"
 path = "examples/http_multipart_form_smoke.rs"
 
 [[example]]
+name = "http_fcgi_child_smoke"
+path = "examples/http_fcgi_child_smoke.rs"
+
+[[example]]
 name = "http_persist_smoke"
 path = "examples/http_persist_smoke.rs"

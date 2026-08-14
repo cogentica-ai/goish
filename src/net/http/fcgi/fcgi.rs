@@ -203,6 +203,17 @@ pub fn newConn(rwc: alloc::boxed::Box<dyn ReadWriteCloser + Send + Sync>) -> all
 }
 
 impl conn {
+    // go: none — goish-only: Go's serve loop reads the transport
+    // directly as `rec.read(c.conn.rwc)`, WITHOUT taking the conn
+    // mutex, which guards writes only. goish's `rwc` lives inside that
+    // mutex, so the read is a method on conn and the lock is released
+    // before the record is handled — see child::serve for why nothing
+    // is writing while this is reading.
+    pub fn __read_record(&self, rec: &mut record) -> error {
+        let mut g = self.st.Lock();
+        return rec.read(&mut *g.rwc);
+    }
+
     // go: sdk 1.25.5 net/http/fcgi/fcgi.go:117-125 conn.Close
     //
     /// Closes the conn if it is not already closed.

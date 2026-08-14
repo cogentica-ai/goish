@@ -3069,6 +3069,7 @@ pub fn register_http_impls() {
     super::csrf::register_csrf_impls();
     super::httputil::register_httputil_impls();
     super::cgi::host::register_cgi_impls();
+    super::fcgi::child::register_fcgi_impls();
     super::client::register_client_impls();
 }
 
