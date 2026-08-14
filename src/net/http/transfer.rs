@@ -145,6 +145,273 @@ impl transferReader {
     }
 }
 
+// go: none — goish-only: the mutable counterpart of TransferMsg —
+// readTransfer writes its unified output back through these.
+pub(crate) enum TransferMsgMut<'a> {
+    Req(&'a mut super::Request),
+    Resp(&'a mut super::Response),
+}
+
+// go: sdk 1.25.5 net/http/transfer.go:491-607 readTransfer
+/// Go: unify a Request/Response into a transferReader, make the
+/// framing decisions (STRICT Transfer-Encoding parse, fixLength's
+/// smuggling hardening, HEAD's Content-Length, fixTrailer, and the
+/// RFC 7230 §3.3 unbounded-response rule), then write the results
+/// back onto the message.
+///
+/// goish deviation, mechanical: Go also constructs `t.Body` here over
+/// the shared *bufio.Reader. goish's conn-backed body construction
+/// needs ownership of the reader, which lives at the two call sites
+/// (attach_stream_body / the server's eager decode), so this returns
+/// the decided `BodyKind` for the caller to build from. Every
+/// DECISION is this function's.
+// goishlint:ignore GOISH020 readTransfer — Go's second param is the
+// *bufio.Reader it builds t.Body over; goish returns the BodyKind and
+// the call sites build the body (documented deviation above).
+pub(crate) fn readTransfer(msg: TransferMsgMut) -> (super::client::BodyKind, error) {
+    // Go: t := &transferReader{RequestMethod: "GET"}
+    let mut t = transferReader {
+        Header: Header::new(),
+        StatusCode: 0,
+        RequestMethod: string("GET"),
+        ProtoMajor: 0,
+        ProtoMinor: 0,
+        Body: None,
+        ContentLength: 0,
+        Chunked: false,
+        Close: false,
+        Trailer: Header::new(),
+    };
+
+    // Go: "Unify input". Go's t.Header aliases the message's map, so
+    // parseTransferEncoding/fixLength/fixTrailer mutate it in place;
+    // goish maps clone deep, so the header is MOVED in and put back
+    // at the end.
+    let mut msg = msg;
+    let isResponse;
+    match &mut msg {
+        TransferMsgMut::Resp(rr) => {
+            t.Header = core::mem::replace(&mut rr.Header, Header::new());
+            t.StatusCode = rr.StatusCode;
+            t.ProtoMajor = rr.ProtoMajor;
+            t.ProtoMinor = rr.ProtoMinor;
+            isResponse = true;
+            if !rr.Request.IsNil() {
+                t.RequestMethod = rr.Request.Must().Method.clone();
+            }
+        }
+        TransferMsgMut::Req(rr) => {
+            t.Header = core::mem::replace(&mut rr.Header, Header::new());
+            t.RequestMethod = rr.Method.clone();
+            t.ProtoMajor = rr.ProtoMajor;
+            t.ProtoMinor = rr.ProtoMinor;
+            // Go: "Transfer semantics for Requests are exactly like
+            // those for Responses with status code 200, responding to
+            // a GET method"
+            t.StatusCode = 200;
+            t.Close = rr.Close;
+            isResponse = false;
+        }
+    }
+    if isResponse {
+        t.Close = shouldClose(t.ProtoMajor, t.ProtoMinor, &mut t.Header, true);
+    }
+
+    // Go: "Default to HTTP/1.1"
+    if t.ProtoMajor == 0 && t.ProtoMinor == 0 {
+        t.ProtoMajor = 1;
+        t.ProtoMinor = 1;
+    }
+
+    // Go: "Transfer-Encoding: chunked, and overriding Content-Length."
+    let terr = t.parseTransferEncoding();
+    if !terr.IsNil() {
+        put_header_back(msg, t.Header);
+        return (super::client::BodyKind::Empty, terr);
+    }
+
+    let (realLength, flerr) = fixLength(
+        isResponse,
+        t.StatusCode,
+        t.RequestMethod.clone(),
+        &mut t.Header,
+        t.Chunked,
+    );
+    if !flerr.IsNil() {
+        put_header_back(msg, t.Header);
+        return (super::client::BodyKind::Empty, flerr);
+    }
+    if isResponse && t.RequestMethod == "HEAD" {
+        let cls = t.Header.Values(string("Content-Length"));
+        let (n, perr) = parseContentLength(&cls);
+        if !perr.IsNil() {
+            put_header_back(msg, t.Header);
+            return (super::client::BodyKind::Empty, perr);
+        }
+        t.ContentLength = n;
+    } else {
+        t.ContentLength = realLength;
+    }
+
+    // Go: "Trailer"
+    let (tr, fterr) = fixTrailer(&mut t.Header, t.Chunked);
+    if !fterr.IsNil() {
+        put_header_back(msg, t.Header);
+        return (super::client::BodyKind::Empty, fterr);
+    }
+    t.Trailer = tr;
+
+    // Go: "If there is no Content-Length or chunked Transfer-Encoding
+    // on a *Response and the status is not 1xx, 204 or 304, then the
+    // body is unbounded. See RFC 7230, section 3.3."
+    if isResponse && realLength == -1 && !t.Chunked && bodyAllowedForStatus(t.StatusCode) {
+        // Go: "Unbounded body."
+        t.Close = true;
+    }
+
+    // Go: "Prepare body reader" — decided here, built by the caller.
+    let kind = if t.Chunked {
+        if isResponse
+            && (noResponseBodyExpected(t.RequestMethod.clone())
+                || !bodyAllowedForStatus(t.StatusCode))
+        {
+            super::client::BodyKind::Empty
+        } else {
+            super::client::BodyKind::Chunked
+        }
+    } else if realLength == 0 {
+        super::client::BodyKind::Empty
+    } else if realLength > 0 {
+        super::client::BodyKind::Cl(realLength)
+    } else if t.Close {
+        // Go: "Close semantics (i.e. HTTP/1.0)"
+        super::client::BodyKind::UntilEof
+    } else {
+        // Go: "Persistent connection (i.e. HTTP/1.1)" — NoBody.
+        super::client::BodyKind::Empty
+    };
+
+    // Go: "Unify output"
+    match msg {
+        TransferMsgMut::Req(rr) => {
+            rr.Header = t.Header;
+            rr.ContentLength = t.ContentLength;
+            if t.Chunked {
+                rr.TransferEncoding =
+                    slice::<string>::__from_vec(alloc::vec![string("chunked")]);
+            }
+            rr.Close = t.Close;
+            rr.Trailer = t.Trailer;
+        }
+        TransferMsgMut::Resp(rr) => {
+            rr.Header = t.Header;
+            rr.ContentLength = t.ContentLength;
+            if t.Chunked {
+                rr.TransferEncoding =
+                    slice::<string>::__from_vec(alloc::vec![string("chunked")]);
+            }
+            rr.Close = t.Close;
+            rr.Trailer = t.Trailer;
+        }
+    }
+
+    return (kind, errors::nil);
+}
+
+// go: none — goish-only: error-path counterpart of Go's header
+// aliasing — the moved-out header goes back where it came from.
+fn put_header_back(msg: TransferMsgMut, hdr: Header) {
+    match msg {
+        TransferMsgMut::Req(rr) => rr.Header = hdr,
+        TransferMsgMut::Resp(rr) => rr.Header = hdr,
+    }
+    return;
+}
+
+crate::var! {
+    // go: sdk 1.25.5 net/http/transfer.go:909 errTrailerEOF
+    pub errTrailerEOF: error = "http: unexpected EOF reading trailer";
+}
+
+// go: sdk 1.25.5 net/http/transfer.go:911-951 body.readTrailer
+/// Go: after the chunked reader reports EOF the trailer block is
+/// still sitting in the buffered reader — either a bare CRLF ("The
+/// common case, since nobody uses trailers") or MIME headers, guarded
+/// by seeUpcomingDoubleCRLF so an unbounded trailer can't DoS the
+/// server, then merged into the message's Trailer via mergeSetHeader.
+///
+/// goish shape: a free function over the borrowed bufio (Go's method
+/// receiver `body` owns b.r/b.hdr; the server's eager decode has them
+/// as locals). textproto::NewReader takes the bufio by value, so the
+/// header lines are parsed in place — trailer blocks are flat
+/// `Key: value` lines, no continuations expected from a conformant
+/// chunked encoder.
+// goishlint:ignore GOISH020 readTrailer — Go's receiver `body` carries
+// b.r and b.hdr; the free-fn shape takes them as the two params
+// (bufio + destination Trailer), no third thing dropped or added.
+pub(crate) fn readTrailer<R: crate::io::Reader>(
+    r: &mut crate::bufio::Reader<R>,
+    dst_trailer: &mut Header,
+) -> error {
+    // Go: buf, err := b.r.Peek(2); if bytes.Equal(buf, singleCRLF) …
+    let (buf, perr) = r.Peek(2);
+    if buf.Len() == 2 && buf[int(0)] == b'\r' && buf[int(1)] == b'\n' {
+        let _ = r.Discard(2);
+        return errors::nil;
+    }
+    if buf.Len() < 2 {
+        return errTrailerEOF.into();
+    }
+    if !perr.IsNil() {
+        return perr;
+    }
+
+    // Go: "Make sure there's a header terminator coming up, to
+    // prevent a DoS with an unbounded size Trailer."
+    if !seeUpcomingDoubleCRLF(r) {
+        return errors::New(string(
+            "http: suspiciously long trailer after chunked body",
+        ));
+    }
+
+    // Go: textproto.NewReader(b.r).ReadMIMEHeader()
+    let mut hdr = Header::new();
+    loop {
+        let mut line: Vec<u8> = Vec::new();
+        loop {
+            let mut one = crate::make!([]byte, 1);
+            let (n, e) = r.Read(&mut one);
+            if n == 0 || !e.IsNil() {
+                return errTrailerEOF.into();
+            }
+            line.push(one[int(0)]);
+            if line.ends_with(b"\r\n") {
+                line.truncate(line.len() - 2);
+                break;
+            }
+        }
+        if line.is_empty() {
+            break;
+        }
+        let colon = match line.iter().position(|&b| b == b':') {
+            Some(i) => i,
+            None => {
+                return errors::New(string("http: malformed trailer line"));
+            }
+        };
+        let name = string::from_bytes(&line[..colon]);
+        let mut vs = colon + 1;
+        while vs < line.len() && (line[vs] == b' ' || line[vs] == b'\t') {
+            vs += 1;
+        }
+        hdr.Add(name, string::from_bytes(&line[vs..]));
+    }
+
+    // Go: switch rr := b.hdr.(type) { … mergeSetHeader(&rr.Trailer, hdr) }
+    mergeSetHeader(dst_trailer, hdr);
+    return errors::nil;
+}
+
 // ─── transferWriter ─────────────────────────────────────────────────
 
 use super::server::readResult;

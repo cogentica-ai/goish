@@ -1173,82 +1173,92 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         }
     }
 
-    // Body framing — Transfer-Encoding: chunked takes precedence over
-    // Content-Length per RFC 7230 §3.3.3.
-    let te = req.Header.Get(string("Transfer-Encoding"));
-    let chunked = is_chunked(te.as_bytes());
-    if chunked {
-        // Decode chunked body into a Vec, then drop into req.Body.
-        // ContentLength = -1 ("unknown") matches Go's convention.
-        req.ContentLength = -1;
-        let mut buf: Vec<u8> = Vec::new();
-        // ChunkedReader sits over `br` directly via a small adapter:
-        // we hand it ownership of a &mut bufio::Reader-like surface.
-        // Simplest: drain the bufio::Reader's Buffered() bytes plus
-        // any future reads through the chunked decoder. Since
-        // `ChunkedReader<R>` wraps its own bufio::Reader, we feed it
-        // a thin `BufioPassthrough` that delegates to the existing
-        // `br`.
-        let mut cr = super::internal::chunked::NewChunkedReader(BufioPassthrough { inner: br });
-        loop {
-            let mut tmp = slice::<byte>::__from_vec(alloc::vec![0u8; 4096]);
-            let (n_read, err) = cr.Read(&mut tmp);
-            if n_read > 0 {
-                let n_us = n_read as usize;
-                if buf.len() + n_us > MAX_BODY {
-                    return (req, errors::New(string("net/http: chunked body too large")));
-                }
-                for i in 0..n_us {
-                    buf.push(tmp[i as int]);
-                }
-            }
-            if !err.IsNil() {
-                if errors::Is(err.clone(), io::EOF) {
-                    break;
-                }
-                return (req, err);
-            }
-            if n_read == 0 {
-                break;
-            }
-        }
-        req.Body = super::Body::from_bytes(slice::<byte>::__from_vec(buf));
-        return (req, errors::nil);
+    // Go (ReadRequest → readTransfer, transfer.go:491): the framing
+    // decisions — STRICT Transfer-Encoding parse (a second TE header
+    // or a non-chunked coding is an unsupportedTEError, where the
+    // old hand-rolled check silently ignored it: a request-smuggling
+    // surface), fixLength's multiple/invalid Content-Length
+    // hardening, Close semantics, and the Trailer announcement.
+    let (kind, terr) = super::transfer::readTransfer(super::transfer::TransferMsgMut::Req(&mut req));
+    if !terr.IsNil() {
+        return (req, terr);
     }
 
-    // Content-Length → bounded body.
-    let cl_str = req.Header.Get(string("Content-Length"));
-    let n: int = if cl_str.as_bytes().is_empty() {
-        0
-    } else {
-        match parse_dec(cl_str.as_bytes()) {
-            Some(n) if n >= 0 && (n as usize) <= MAX_BODY => n,
-            _ => return (req, errors::New(string("net/http: invalid Content-Length"))),
-        }
-    };
-    req.ContentLength = n;
-
-    if n > 0 {
-        let want = n as usize;
-        let mut buf: Vec<u8> = Vec::with_capacity(want);
-        let mut got: usize = 0;
-        while got < want {
-            let chunk = (want - got).min(4096);
-            let scratch_vec: Vec<u8> = alloc::vec![0u8; chunk];
-            let mut scratch = slice::<byte>::__from_vec(scratch_vec);
-            let (n_read, err) = br.Read(&mut scratch);
-            if n_read > 0 {
-                let n_us = n_read as usize;
-                let v: Vec<u8> = scratch.__into_vec();
-                buf.extend_from_slice(&v[..n_us]);
-                got += n_us;
-            } else if !err.IsNil() {
-                return (req, err);
-            } else {
-                return (req, errors::New(string("net/http: read returned 0 bytes")));
+    match kind {
+        super::client::BodyKind::Chunked => {
+            // Decode the chunked body into a Vec (the server buffers
+            // an inbound body before the handler runs), then read the
+            // trailer block the decoder leaves behind.
+            let mut buf: Vec<u8> = Vec::new();
+            // ChunkedReader wraps its own bufio::Reader; feed it a
+            // thin `BufioPassthrough` that delegates to `br`.
+            let mut cr =
+                super::internal::chunked::NewChunkedReader(BufioPassthrough { inner: br });
+            loop {
+                let mut tmp = slice::<byte>::__from_vec(alloc::vec![0u8; 4096]);
+                let (n_read, err) = cr.Read(&mut tmp);
+                if n_read > 0 {
+                    let n_us = n_read as usize;
+                    if buf.len() + n_us > MAX_BODY {
+                        return (req, errors::New(string("net/http: chunked body too large")));
+                    }
+                    for i in 0..n_us {
+                        buf.push(tmp[i as int]);
+                    }
+                }
+                if !err.IsNil() {
+                    if errors::Is(err.clone(), io::EOF) {
+                        break;
+                    }
+                    return (req, err);
+                }
+                if n_read == 0 {
+                    break;
+                }
             }
+            // Go (body.Close → readTrailer): the terminal 0-chunk's
+            // trailer block — bare CRLF or MIME headers — is still in
+            // the CHUNKED READER'S internal bufio (its read-ahead may
+            // have pulled it out of `br` already), so the trailer is
+            // read from there and merged into req.Trailer.
+            let trerr = super::transfer::readTrailer(cr.__bufio_mut(), &mut req.Trailer);
+            if !trerr.IsNil() {
+                return (req, trerr);
+            }
+            req.Body = super::Body::from_bytes(slice::<byte>::__from_vec(buf));
+            return (req, errors::nil);
         }
-        req.Body = super::Body::from_bytes(slice::<byte>::__from_vec(buf));
+        super::client::BodyKind::Cl(n) => {
+            // goish-only cap, unchanged: the server buffers the body,
+            // so an absurd Content-Length is refused up front.
+            if (n as usize) > MAX_BODY {
+                return (req, errors::New(string("net/http: invalid Content-Length")));
+            }
+            let want = n as usize;
+            let mut buf: Vec<u8> = Vec::with_capacity(want);
+            let mut got: usize = 0;
+            while got < want {
+                let chunk = (want - got).min(4096);
+                let scratch_vec: Vec<u8> = alloc::vec![0u8; chunk];
+                let mut scratch = slice::<byte>::__from_vec(scratch_vec);
+                let (n_read, err) = br.Read(&mut scratch);
+                if n_read > 0 {
+                    let n_us = n_read as usize;
+                    let v: Vec<u8> = scratch.__into_vec();
+                    buf.extend_from_slice(&v[..n_us]);
+                    got += n_us;
+                } else if !err.IsNil() {
+                    return (req, err);
+                } else {
+                    return (req, errors::New(string("net/http: read returned 0 bytes")));
+                }
+            }
+            req.Body = super::Body::from_bytes(slice::<byte>::__from_vec(buf));
+        }
+        // Requests never get UntilEof from readTransfer (fixLength
+        // answers 0 for a request without Content-Length); Empty
+        // leaves the default empty body.
+        _ => {}
     }
 
     (req, errors::nil)

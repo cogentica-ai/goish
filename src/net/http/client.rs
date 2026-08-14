@@ -571,75 +571,21 @@ pub(crate) fn read_response_head<R: Reader>(
         resp.Header.Add(name, value);
     }
 
-    // Go: if connHdr := resp.Header.Get("Connection"); … { resp.Close = … }
-    let conn_hdr = resp.Header.Get(string("Connection"));
-    if strings::EqualFold(conn_hdr.clone(), string("close")) {
-        resp.Close = true;
-    } else if resp.ProtoMajor == 1 && resp.ProtoMinor == 0 {
-        resp.Close = !strings::EqualFold(conn_hdr, string("keep-alive"));
+    // Go (ReadResponse → readTransfer, transfer.go:491): every
+    // framing decision — Connection-close via shouldClose, STRICT
+    // Transfer-Encoding parse (a second TE or a non-chunked coding is
+    // an unsupportedTEError, not silently ignored), fixLength's
+    // smuggling hardening, HEAD's Content-Length, trailer capture
+    // into resp.Trailer, and RFC 7230 §3.3: a response with no CL,
+    // no TE and an allowed-body status is UNBOUNDED (read to EOF,
+    // Close=true) — the hand-rolled block this replaces treated that
+    // as an empty body and silently dropped such responses.
+    let (kind, terr) =
+        super::transfer::readTransfer(super::transfer::TransferMsgMut::Resp(&mut resp));
+    if !terr.IsNil() {
+        return (resp, BodyKind::Empty, terr);
     }
-
-    // Go: body framing — Transfer-Encoding takes precedence over Content-Length.
-    let te = resp.Header.Get(string("Transfer-Encoding"));
-    let chunked = is_chunked_te(&te);
-    let cl_str = resp.Header.Get(string("Content-Length"));
-
-    // Go: HEAD / 1xx / 204 / 304 → empty body, regardless of CL/TE.
-    let head_only = match resp.Request.Try() {
-        Some(r) => r.Method == "HEAD",
-        None => false,
-    };
-    let no_body = head_only
-        || (resp.StatusCode >= 100 && resp.StatusCode < 200)
-        || resp.StatusCode == 204
-        || resp.StatusCode == 304;
-
-    if no_body {
-        resp.ContentLength = 0;
-        return (resp, BodyKind::Empty, errors::nil);
-    }
-    if chunked {
-        // Go (transfer.go, fixTransferEncoding):
-        //   resp.TransferEncoding = []string{"chunked"}
-        //   resp.ContentLength = -1
-        //
-        // The comment here already said so; only the ContentLength
-        // half was ever written. `Response.TransferEncoding` was added
-        // earlier today when GOISH019 reported it missing from the
-        // struct, and then nothing populated it — so a chunked
-        // response decoded correctly but reported an empty
-        // TransferEncoding, and any caller branching on it (Go's own
-        // `chunked(r.TransferEncoding)` helper, for one) saw the wrong
-        // framing.
-        resp.TransferEncoding =
-            crate::goslice::slice::<string>::__from_vec(alloc::vec![string("chunked")]);
-        resp.ContentLength = -1;
-        return (resp, BodyKind::Chunked, errors::nil);
-    }
-    if cl_str.Len() > 0 {
-        // Go: cl, err := strconv.ParseInt(cls, 10, 64)
-        let (n, perr) = crate::strconv::Atoi(cl_str);
-        if !perr.IsNil() || n < 0 {
-            return (
-                resp,
-                BodyKind::Empty,
-                errors::New(string("http: invalid Content-Length")),
-            );
-        }
-        resp.ContentLength = n;
-        if n == 0 {
-            return (resp, BodyKind::Empty, errors::nil);
-        }
-        return (resp, BodyKind::Cl(n), errors::nil);
-    }
-    if resp.Close {
-        // Go: no CL, no TE, Connection: close → body runs to conn EOF.
-        resp.ContentLength = -1;
-        return (resp, BodyKind::UntilEof, errors::nil);
-    }
-    // Go: no CL, no TE, no close — body is empty.
-    resp.ContentLength = 0;
-    (resp, BodyKind::Empty, errors::nil)
+    return (resp, kind, errors::nil);
 }
 
 /// Read until EOF into `body`, returning the appended slice and any

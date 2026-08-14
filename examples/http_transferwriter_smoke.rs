@@ -36,7 +36,7 @@ use alloc::sync::Arc;
 use core::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
 use goish::fmt;
-use goish::io::{self, Closer};
+use goish::io::{self, Closer, Writer};
 use goish::net::http;
 use goish::sync::Mutex;
 use goish::time;
@@ -227,6 +227,78 @@ fn run() -> ! {
                 && tail.contains("X-Checksum: abc123"),
             wire.clone(),
         );
+    }
+
+    // ── 6b. trailer VALUES reach the handler through a live server ──
+    {
+        let seen_trailer = Arc::new(Mutex::new(goish::string::new()));
+        let mux = http::ServeMux::new();
+        {
+            let t_h = seen_trailer.clone();
+            mux.HandleFunc(string("/tr"), move |w, r| {
+                // The server buffers the chunked body before the
+                // handler runs, so the trailer merge (readTrailer →
+                // mergeSetHeader) has already happened.
+                *t_h.Lock() = r.Trailer.Get(string("X-Checksum"));
+                let _ = w.Write(bytes("ok"));
+            });
+        }
+        let ts = http::httptest::NewServer(Arc::new(mux));
+        let (mut req, _) =
+            http::NewRequest(string("POST"), ts.URL() + string("/tr"), bytes("payload"));
+        req.TransferEncoding =
+            goish::slice::<goish::string>::__from_vec(alloc::vec![string("chunked")]);
+        req.ContentLength = 0;
+        req.Trailer = http::Header::new();
+        req.Trailer.Set(string("X-Checksum"), string("abc123"));
+        let client = http::Client::default();
+        let (mut resp, err) = client.Do(&req);
+        check(
+            "chunked request trailer VALUE arrives at the handler",
+            err.IsNil() && (*seen_trailer.Lock()).clone() == "abc123",
+            fmt::Sprintf!("err=%v trailer=%q", err, (*seen_trailer.Lock()).clone()),
+        );
+        if err.IsNil() {
+            let _ = resp.Body.Close();
+        }
+        ts.Close();
+    }
+
+    // ── 6c. a second Transfer-Encoding is REFUSED, not ignored ──
+    {
+        // The old hand-rolled server parse read only the first TE
+        // header; a smuggler pairing "chunked" with a second coding
+        // relies on exactly that laxness. readTransfer refuses it.
+        let mux = http::ServeMux::new();
+        mux.HandleFunc(string("/x"), |w, _r| {
+            let _ = w.Write(bytes("SHOULD NOT RUN"));
+        });
+        let ts = http::httptest::NewServer(Arc::new(mux));
+        let addr = goish::strings::TrimPrefix(ts.URL(), string("http://"));
+        let (mut c, e) = goish::net::Dial(string("tcp"), addr);
+        check("dial for TE-smuggle probe", e.IsNil(), fmt::Sprintf!("%v", e));
+        let _ = c.SetReadDeadline(time::Now().Add(time::Duration(5_000_000_000)));
+        let _ = c.Write(bytes(
+            "POST /x HTTP/1.1
+Host: x
+Transfer-Encoding: chunked
+Transfer-Encoding: gzip
+
+0
+
+",
+        ));
+        let mut b = goish::make!([]goish::byte, 512);
+        let (n, _) = goish::io::Reader::Read(&mut c, &mut b);
+        let got = goish::string::from_bytes(&b.slice(0, n));
+        let gv: &str = got.as_ref();
+        check(
+            "double Transfer-Encoding gets an error status, never the handler",
+            (n == 0 || gv.contains("400") || gv.contains("501")) && !gv.contains("SHOULD NOT RUN"),
+            got.clone(),
+        );
+        let _ = c.Close();
+        ts.Close();
     }
 
     // ── 7. Response.Write probes a zero-ContentLength body ──
