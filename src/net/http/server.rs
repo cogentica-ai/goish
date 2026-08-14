@@ -886,17 +886,32 @@ impl ResponseWriter for timeoutWriter {
     }
 
     fn WriteHeader(&self, statusCode: int) {
+        // Go: tw.mu.Lock(); defer Unlock; tw.writeHeaderLocked(code)
         let mut g = self.state.lock();
-        // Go: if tw.err != nil || tw.wroteHeader { return }
-        if g.timed_out || g.wrote_header {
-            return;
-        }
-        g.wrote_header = true;
-        g.code = statusCode;
+        self.writeHeaderLocked(&mut g, statusCode);
     }
 
     fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
         Some(self)
+    }
+}
+
+impl timeoutWriter {
+    // go: sdk 1.25.5 net/http/server.go:3933-3948 timeoutWriter.writeHeaderLocked
+    // goishlint:ignore GOISH020 writeHeaderLocked — Go's `Locked`
+    // suffix means tw.mu is held; goish passes the guarded payload in
+    // rather than siblings-beside-a-mutex.
+    /// Go: an error (timeout) or a prior header wins; Go logs the
+    /// superfluous WriteHeader against tw.req — goish's slim
+    /// timeoutWriter carries no request to log against.
+    fn writeHeaderLocked(&self, g: &mut twState, code: int) {
+        // Go: checkWriteHeaderCode(code) panics on out-of-range —
+        // the outer writer repeats the check when the buffer replays.
+        if g.timed_out || g.wrote_header {
+            return;
+        }
+        g.wrote_header = true;
+        g.code = code;
     }
 }
 

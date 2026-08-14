@@ -886,6 +886,15 @@ impl transferWriter {
     }
 }
 
+// go: waived readLocked — `body`'s read-under-mu; goish integrates
+// body's mutex payload as client.rs BodyState, and read_locked THERE
+// is this function (framing-dispatched read while the lock is held,
+// EOF bookkeeping included). A second copy here would be the
+// two-implementations drift this codebase keeps getting bitten by.
+// go: waived unreadDataSizeLocked — "number of bytes of unread
+// input"; goish's Cl framing carries it as `remaining`, consulted by
+// close_locked's clean-boundary test (the bodyEOFSignal bank gate) —
+// the same consumer Go wires it to.
 // go: waived unwrapNopCloser — reflect.TypeOf against the two
 // io.NopCloser shapes; goish's Body is a closed enum that carries no
 // nopCloser wrapping to detect, so unwrapBody above is already the

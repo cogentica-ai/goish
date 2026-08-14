@@ -1,5 +1,11 @@
 // net/http/transport — the connection-pool addressing layer.
 //
+// goishlint:ignore GOISH019 — one finding, on `transportRequest`: Go
+// embeds *Request anonymously (Rust must name it) and carries
+// trace/ctx/cancel/mu for the loops phase, documented on the struct;
+// the rule has no line-scoped form. The other structs in this file
+// pass the field check and stay covered by review.
+//
 // FIRST SLICE of Go 1.25.5 net/http/transport.go, ported deliberately
 // unwired: `Client.Do` still uses the existing dial-per-request path
 // in client.rs, which has the whole example suite behind it. Rewiring
@@ -96,10 +102,16 @@ pub fn canonicalAddr(url: &URL) -> string {
 ///     http://proxy.com|https|foo.com    http proxy, then CONNECT
 ///     http://proxy.com|http             http proxy, http anywhere after
 ///     socks5://proxy.com|http|foo.com   socks5, then http
+// go: waived prepareTransportCancel — wraps the request's
+// CancelCause into the reqCanceler map so the DEPRECATED
+// Request.Cancel channel and pre-1.5 CancelRequest keep working.
+// goish's Request carries no Cancel channel by design (see
+// setRequestCancel) and context.CancelCause is unported; the direct
+// CancelRequest path (cancelRequest) IS ported.
+// go: waived awaitLegacyCancel — the goroutine that watches the
+// deprecated Request.Cancel channel; same absent-by-design field.
+
 // go: sdk 1.25.5 net/http/transport.go:514-524 transportRequest
-// goishlint:ignore GOISH019 transportRequest — Go embeds *Request and
-// carries trace/ctx/cancel for the loops phase; what lands is the
-// request plus the two guarded cells its ported methods touch.
 /// Go: "transportRequest is a wrapper around a *Request that adds
 /// extra headers to write and stores any error to return from
 /// roundTrip."

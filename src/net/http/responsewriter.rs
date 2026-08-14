@@ -1,4 +1,4 @@
-// go: file net/http/server.go decls: conn.hijacked, conn.hijackLocked, response.finishRequest, response.shouldReuseConnection, response.CloseNotify, response.closeNotify, response.Hijack, response.sendExpectationFailed, response.requestTooLarge, response.disableWriteContinue, response.closedRequestBodyEarly, response.declareTrailer, response.finalTrailers, response.bodyAllowed, response.Header, response.Write, response.WriteHeader
+// go: file net/http/server.go decls: response.ReadFrom, conn.hijacked, conn.hijackLocked, response.finishRequest, response.shouldReuseConnection, response.CloseNotify, response.closeNotify, response.Hijack, response.sendExpectationFailed, response.requestTooLarge, response.disableWriteContinue, response.closedRequestBodyEarly, response.declareTrailer, response.finalTrailers, response.bodyAllowed, response.Header, response.Write, response.WriteHeader
 // goishlint:ignore GOISH015 — this file is the `response`/ResponseWriter
 // half of server.go, split out for size the same way server_tls.rs holds
 // its ServeTLS third; the decls manifest above carries the traceability
@@ -9,6 +9,9 @@
 // suppression hides is missing from that ledger.
 // goishlint:ignore GOISH021 — same split-file reasoning as GOISH018;
 // server.go's consts/types are anchored in server.rs.
+// goishlint:ignore GOISH019 — one finding, on `writerOnly`: Go's field
+// is an ANONYMOUS io.Writer embed, which Rust must name (`w`); the
+// rule has no line-scoped form. Other structs here pass the check.
 // net/http/response — the ResponseWriter interface + its v1 concrete
 // implementation, `response`.
 //
@@ -465,6 +468,40 @@ struct respInner {
     /// keys declared via the `Trailer` response header before the
     /// head is written. Populated by `declareTrailer`.
     trailers: Vec<string>,
+}
+
+// go: sdk 1.25.5 net/http/server.go:582-584 writerOnly
+/// Go: "writerOnly hides an io.Writer value's optional ReadFrom
+/// method from io.Copy" — here it adapts the shared-handle response
+/// (`&self` writes) to the `&mut`-shaped io::Writer CopyBuffer wants.
+struct writerOnly<'a> {
+    w: &'a response,
+}
+
+impl crate::io::Writer for writerOnly<'_> {
+    fn Write(&mut self, p: slice<byte>) -> (int, crate::errors::error) {
+        return ResponseWriter::Write(self.w, p);
+    }
+}
+
+impl response {
+    // go: sdk 1.25.5 net/http/server.go:589-627 response.ReadFrom
+    // goishlint:ignore GOISH020 ReadFrom — Go's src is io.Reader; the
+    // trait-object spelling is the same arity.
+    /// Go: "ReadFrom is here to optimize copying from an *os.File
+    /// regular file to a *net.TCPConn with sendfile". goish's TCPConn
+    /// carries no ReadFrom/sendfile yet, so this is Go's `rf, ok :=
+    /// w.conn.rwc.(io.ReaderFrom); if !ok` arm, verbatim: CopyBuffer
+    /// through the response writer over the pooled copy buffer (the
+    /// header-sniff preamble and the sendfile handoff activate when a
+    /// TCPConn ReaderFrom exists to hand off to).
+    pub fn ReadFrom(&self, src: &mut dyn crate::io::Reader) -> (i64, crate::errors::error) {
+        let buf = super::server::getCopyBuf();
+        let mut wo = writerOnly { w: self };
+        let (n, err) = crate::io::CopyBuffer(&mut wo, src, buf.clone());
+        super::server::putCopyBuf(buf);
+        return (n, err);
+    }
 }
 
 impl response {
