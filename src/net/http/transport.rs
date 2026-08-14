@@ -198,6 +198,117 @@ impl connectMethodKey {
     }
 }
 
+// ─── wantConn ───────────────────────────────────────────────────────
+
+// go: sdk 1.25.5 net/http/transport.go:1317-1321 connOrError
+/// The value a waiter receives: exactly one of `pc` and `err` is set,
+/// which `tryDeliver` enforces with a panic.
+pub struct connOrError {
+    pub pc: Option<Arc<persistConn>>,
+    pub err: error,
+    pub idleAt: crate::time::Time,
+}
+
+// goishlint:ignore GOISH019 wantConn — Go's wantConn carries
+// `ctx context.Context` and `result chan connOrError` alongside the
+// mutex-guarded `done`. The channel is the delivery half, which
+// belongs with getConn/queueForIdleConn and is not ported yet; what
+// lands here is the STATE machine those two coordinate through.
+// go: sdk 1.25.5 net/http/transport.go:1300-1315 wantConn
+/// Go: "A wantConn records state about a wanted connection (that is, a
+/// connection that's not yet delivered)."
+pub struct wantConn {
+    state: crate::sync::Mutex<wantConnState>,
+}
+
+// go: none — goish-only: the payload of Go's `mu sync.Mutex` on
+// wantConn, i.e. `done` plus the delivered result.
+struct wantConnState {
+    done: bool,
+    delivered: Option<Arc<persistConn>>,
+    /// Go carries this in the delivered `connOrError`; goish keeps it
+    /// beside the conn until the `result` channel lands with getConn.
+    idleAt: crate::time::Time,
+}
+
+impl wantConn {
+    // go: none — goish-only: Go zero-values wantConn in queueForIdleConn.
+    pub fn __new() -> wantConn {
+        return wantConn {
+            state: crate::sync::Mutex::new(wantConnState {
+                done: false,
+                delivered: None,
+                idleAt: crate::time::Time::default(),
+            }),
+        };
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:1323-1329 wantConn.waiting
+    /// Go: "waiting reports whether w is still waiting for an answer
+    /// (connection or error)."
+    pub fn waiting(&self) -> bool {
+        return !self.state.Lock().done;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:1339-1357 wantConn.tryDeliver
+    /// Go: "tryDeliver attempts to deliver pc, err to w and reports
+    /// whether it succeeded."
+    ///
+    /// The `(pc == nil) == (err == nil)` panic is Go's, and it is a
+    /// real invariant rather than a debug aid: a delivery with both
+    /// set would leak the conn (the waiter takes the error path and
+    /// nobody returns it to the pool), and one with neither would hang
+    /// the waiter.
+    ///
+    /// Idempotent by design — a second delivery returns false, which
+    /// is what lets several dials race for one waiter.
+    pub fn tryDeliver(
+        &self,
+        pc: Option<Arc<persistConn>>,
+        err: error,
+        idleAt: crate::time::Time,
+    ) -> bool {
+        let mut st = self.state.Lock();
+        if st.done {
+            return false;
+        }
+        if pc.is_none() == err.IsNil() {
+            panic!("net/http: internal error: misuse of tryDeliver");
+        }
+        st.done = true;
+        st.idleAt = idleAt;
+        st.delivered = pc;
+        return true;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:1359-1381 wantConn.cancel
+    /// Go: "cancel marks w as no longer wanting a result (for example,
+    /// due to cancellation). If a connection has been delivered
+    /// already, cancel returns it with t.putOrCloseIdleConn."
+    ///
+    /// That hand-back is the point: cancelling AFTER a dial completed
+    /// must not drop the connection on the floor.
+    pub fn cancel(&self, t: &Transport) {
+        let pc = {
+            let mut st = self.state.Lock();
+            let pc = if st.done { st.delivered.take() } else { None };
+            st.done = true;
+            pc
+        };
+        if let Some(pc) = pc {
+            t.putOrCloseIdleConn(&pc);
+        }
+        return;
+    }
+
+    // go: none — goish-only: Go's waiter reads its result off the
+    // `result` channel. That channel arrives with getConn; until then
+    // the delivered conn is read directly.
+    pub fn __delivered(&self) -> Option<Arc<persistConn>> {
+        return self.state.Lock().delivered.clone();
+    }
+}
+
 // ─── wantConnQueue ──────────────────────────────────────────────────
 
 // go: sdk 1.25.5 net/http/transport.go:1384-1398 wantConnQueue
@@ -207,14 +318,23 @@ impl connectMethodKey {
 ///
 /// The element type is a placeholder until `wantConn` lands with the
 /// dial machinery; the QUEUE DISCIPLINE is what this slice ports, and
-/// it is pure. `Waiter` stands in for the one method the queue calls
-/// on its elements, so `cleanFrontNotWaiting` keeps Go's arity instead
-/// of taking the predicate as an extra parameter.
-// go: none — goish-only: Go calls `w.waiting()` on the concrete
-// *wantConn. That type lands with the dial machinery; until then the
-// queue is generic over anything that answers the same question.
+/// it is pure. `Waiter` is the one method the queue calls on its
+/// elements, so `cleanFrontNotWaiting` keeps Go's arity instead of
+/// taking the predicate as an extra parameter.
+// go: none — goish-only: Go's queue holds `*wantConn` concretely.
+// goish keeps it generic over `Waiter` so the queue stays testable
+// without the dial machinery; `wantConn` above is the real
+// implementation and the only one in the tree.
 pub trait Waiter {
     fn waiting(&self) -> bool;
+}
+
+impl Waiter for Arc<wantConn> {
+    // go: none — goish-only: forwards to wantConn.waiting so the
+    // queue's generic bound is satisfied by the real type.
+    fn waiting(&self) -> bool {
+        return wantConn::waiting(self);
+    }
 }
 
 #[derive(Default)]
