@@ -1374,6 +1374,17 @@ pub(crate) struct readResult {
     pub b: crate::types::byte,
 }
 
+// go: waived maybeServeUnencryptedHTTP2 — routes a conn whose first
+// bytes are the h2 preface into the HTTP/2 server; goish has no
+// HTTP/2 stack (the omithttp2 stubs), so there is no serving path for
+// the detection to hand the conn to. Lands with an h2 port, not
+// before.
+// go: waived unencryptedTLSConn — the tls.Conn wrapper the h2c path
+// fabricates so http2.ServeConn sees a *tls.Conn; same no-HTTP/2
+// blocker as maybeServeUnencryptedHTTP2.
+// go: waived UnencryptedNetConn — the accessor tests use to unwrap
+// the fabricated conn above; carried by the same waiver.
+
 // go: sdk 1.25.5 net/http/server.go:834-834 copyBufPool
 //
 // Go pools fixed [copyBufPoolSize]byte ARRAYS, not slices, which is
@@ -1573,7 +1584,7 @@ pub trait closeWriter {
     fn CloseWrite(&self) -> error;
 }
 
-// go: waived conn.finalFlush — Go's finalFlush flushes and pool-returns
+// go: waived finalFlush — Go's conn.finalFlush flushes and pool-returns
 // the CONN-LEVEL bufio reader/writer (c.bufr/c.bufw). goish's response
 // renders directly onto the conn (no conn-level writer to flush), and
 // the pooled request reader is already returned per request inside the
@@ -3453,7 +3464,7 @@ impl Server {
             // (server.go:2149). The connection belongs to the handler
             // now — the server must not flush, close, or read from it,
             // and `w.__take_conn()` below would flush.
-            if w.__hijacked() {
+            if w.hijacked() {
                 track.setState(CONN_STATE_HIJACKED);
                 (req_cancel)();
                 return;

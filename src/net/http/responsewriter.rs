@@ -586,7 +586,7 @@ impl response {
     /// Read by the serve loop so it stops touching a connection it no
     /// longer owns. Go guards the flag with c.mu; goish's flag lives
     /// in the closeNotifyCell's lock.
-    pub fn __hijacked(&self) -> bool {
+    pub fn hijacked(&self) -> bool {
         return self.cnc.__is_hijacked();
     }
 
@@ -1063,7 +1063,7 @@ impl ResponseWriter for response {
         // handler, not net/http. Go routes through c.server.logf;
         // goish's response carries no server pointer, so the package
         // log fallback (what logf does with no ErrorLog) is used.
-        if self.__hijacked() {
+        if self.hijacked() {
             let caller = super::server::relevantCaller();
             crate::log::Printf!(
                 "http: response.WriteHeader on hijacked connection from %s (%s:%d)",

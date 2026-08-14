@@ -1003,7 +1003,7 @@ impl persistConn {
                 // Go: "Not idle."
                 return;
             }
-            __removeIdleConnLocked(&mut pool, self);
+            removeIdleConnLocked(&mut pool, self);
         }
         self.close(errIdleConnTimeout.into());
         return;
@@ -1612,7 +1612,7 @@ impl Transport {
     /// found there.
     pub fn removeIdleConn(&self, pconn: &Arc<persistConn>) -> bool {
         let mut pool = self.__idle.Lock();
-        return __removeIdleConnLocked(&mut pool, pconn);
+        return removeIdleConnLocked(&mut pool, pconn);
     }
 
     // go: sdk 1.25.5 net/http/transport.go:329-373 Transport.Clone
@@ -1692,7 +1692,7 @@ impl Transport {
 // already-locked pool so tryPutIdleConn can call it without
 // re-entering a non-reentrant Mutex. Go relies on `idleMu` already
 // being held by the caller, which the `Locked` suffix announces.
-fn __removeIdleConnLocked(pool: &mut idlePool, pconn: &Arc<persistConn>) -> bool {
+fn removeIdleConnLocked(pool: &mut idlePool, pconn: &Arc<persistConn>) -> bool {
     pool.idleLRU.remove(pconn);
     let key = pconn.cacheKey.String();
     let pconns = pool.idleConn.Get(key.clone()).0;
@@ -1767,7 +1767,7 @@ pub(crate) fn __try_put_idle(
     if cfg.max_idle_conns != 0 && crate::int(crate::int64(pool.idleLRU.len())) > cfg.max_idle_conns {
         if let Some(oldest) = pool.idleLRU.removeOldest() {
             oldest.close(errTooManyIdle.into());
-            __removeIdleConnLocked(&mut pool, &oldest);
+            removeIdleConnLocked(&mut pool, &oldest);
         }
     }
     return errors::nil;

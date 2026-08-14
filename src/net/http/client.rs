@@ -259,6 +259,10 @@ fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
     (n, err)
 }
 
+// go: waived condfn — bodyEOFSignal's fire-once guard (fn nil-check
+// + clear); goish integrates the signal into BodyState, where
+// `reuse_fn` is an FnOnce TAKEN by close_locked below — the once-ness
+// is the type system's, with nothing left to guard.
 fn close_locked(st: &mut BodyState) -> error {
     // Watcher first — it holds a raw PollDesc pointer into the conn.
     if let Some(w) = st.watch.take() {
