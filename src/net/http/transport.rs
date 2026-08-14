@@ -522,6 +522,19 @@ struct pcState {
     canceledErr: error,
 }
 
+// go: none — goish-only. Go's pool compares `*persistConn` values,
+// i.e. POINTER identity — `v != pconn` in removeIdleConnLocked and
+// `exist == pconn` in tryPutIdleConn are both address comparisons, not
+// field comparisons. Two distinct conns to the same host must NOT
+// compare equal, so this is `ptr::eq` and nothing else.
+impl PartialEq for persistConn {
+    // go: none — see the note above: Go compares *persistConn by
+    // address, so this is ptr::eq.
+    fn eq(&self, other: &persistConn) -> bool {
+        return core::ptr::eq(self, other);
+    }
+}
+
 impl persistConn {
     // go: none — goish-only: Go zero-values persistConn inside
     // dialConn; that function is not ported yet, so the pool-facing
@@ -620,6 +633,159 @@ impl persistConn {
         }
         return 10 << 20;
     }
+}
+
+// ─── the idle pool ──────────────────────────────────────────────────
+
+// go: none — goish-only: the payload of Go's `idleMu sync.Mutex`, i.e.
+// the four Transport fields its comment groups under it
+// (transport.go:270-276). Go can key `idleConn` by the
+// connectMethodKey STRUCT; goish has no struct-keyed map, so the key
+// is `connectMethodKey.String()` — which is exactly what Go's own
+// doc-comment table describes, and what its String() exists for.
+pub struct idlePool {
+    pub idleConn: crate::gomap::map<string, Vec<Arc<persistConn>>>,
+    pub idleLRU: connLRU<Arc<persistConn>>,
+    /// Go: "user has requested to close all idle conns"
+    pub closeIdle: bool,
+}
+
+impl idlePool {
+    // go: none — goish-only constructor; Go zero-values the fields.
+    pub fn new() -> idlePool {
+        return idlePool {
+            idleConn: crate::gomap::map::<string, Vec<Arc<persistConn>>>::new(),
+            idleLRU: connLRU::new(),
+            closeIdle: false,
+        };
+    }
+}
+
+impl Transport {
+    // go: sdk 1.25.5 net/http/transport.go:1052-1143 Transport.tryPutIdleConn
+    /// Go: "adds pconn to the list of idle persistent connections
+    /// awaiting a new request. If pconn is no longer needed or not in
+    /// a good state, tryPutIdleConn returns an error explaining why it
+    /// wasn't registered."
+    ///
+    /// Every rejection is a NAMED error, and that is the point: a
+    /// silent `return` here leaks the connection instead of closing
+    /// it, because `putOrCloseIdleConn` closes exactly when this
+    /// returns non-nil.
+    ///
+    /// Staged: Go's HTTP/2 `pconn.alt` branch and the IdleConnTimeout
+    /// timer are not ported — both need machinery that is not here.
+    pub fn tryPutIdleConn(&self, pconn: &Arc<persistConn>) -> error {
+        if self.DisableKeepAlives || self.maxIdleConnsPerHost() < 0 {
+            return errKeepAlivesDisabled.into();
+        }
+        if pconn.isBroken() {
+            return errConnBroken.into();
+        }
+        pconn.markReused();
+
+        let mut pool = self.__idle.Lock();
+        if pool.closeIdle {
+            return errCloseIdle.into();
+        }
+        let key = pconn.cacheKey.String();
+        let idles = pool.idleConn.Get(key.clone()).0;
+        if crate::int(crate::int64(idles.len())) >= self.maxIdleConnsPerHost() {
+            return errTooManyIdleHost.into();
+        }
+        for exist in idles.iter() {
+            if Arc::ptr_eq(exist, pconn) {
+                // Go: log.Fatalf("dup idle pconn %p in freelist").
+                panic!("dup idle pconn in freelist");
+            }
+        }
+        let mut idles = idles;
+        idles.push(pconn.clone());
+        pool.idleConn.Set(key, idles);
+        pool.idleLRU.add(pconn.clone());
+        if self.MaxIdleConns != 0 && pool.idleLRU.len() > self.MaxIdleConns {
+            if let Some(oldest) = pool.idleLRU.removeOldest() {
+                oldest.close(errTooManyIdle.into());
+                __removeIdleConnLocked(&mut pool, &oldest);
+            }
+        }
+        return errors::nil;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:1034-1038 Transport.putOrCloseIdleConn
+    /// The only correct way to hand a finished conn back: if the pool
+    /// refuses it, it is CLOSED rather than dropped.
+    pub fn putOrCloseIdleConn(&self, pconn: &Arc<persistConn>) {
+        let err = self.tryPutIdleConn(pconn);
+        if !err.IsNil() {
+            pconn.close(err);
+        }
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:1242-1273 Transport.removeIdleConnLocked
+    /// Go: "removes pconn from the idle list." Returns whether it was
+    /// found there.
+    pub fn removeIdleConnLocked(&self, pconn: &Arc<persistConn>) -> bool {
+        let mut pool = self.__idle.Lock();
+        return __removeIdleConnLocked(&mut pool, pconn);
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:887-910 Transport.CloseIdleConnections
+    /// Go: "closes any connections which were previously connected
+    /// from previous requests but are now sitting idle in a
+    /// \"keep-alive\" state. It does not interrupt any connections
+    /// currently in use."
+    ///
+    /// `closeIdle` stays set, so conns finishing AFTER this call are
+    /// closed rather than pooled — Go's comment: "close newly idle
+    /// connections".
+    pub fn CloseIdleConnections(&self) {
+        let conns: Vec<Arc<persistConn>> = {
+            let mut pool = self.__idle.Lock();
+            let mut all: Vec<Arc<persistConn>> = Vec::new();
+            for (_, v) in crate::range!(&pool.idleConn) {
+                for pc in v.iter() {
+                    all.push(pc.clone());
+                }
+            }
+            pool.idleConn = crate::gomap::map::<string, Vec<Arc<persistConn>>>::new();
+            pool.closeIdle = true;
+            pool.idleLRU = connLRU::new();
+            all
+        };
+        for pc in conns.iter() {
+            pc.close(errCloseIdleConns.into());
+        }
+        return;
+    }
+}
+
+// go: none — goish-only: the body of removeIdleConnLocked, taking the
+// already-locked pool so tryPutIdleConn can call it without
+// re-entering a non-reentrant Mutex. Go relies on `idleMu` already
+// being held by the caller, which the `Locked` suffix announces.
+fn __removeIdleConnLocked(pool: &mut idlePool, pconn: &Arc<persistConn>) -> bool {
+    pool.idleLRU.remove(pconn);
+    let key = pconn.cacheKey.String();
+    let pconns = pool.idleConn.Get(key.clone()).0;
+    let mut removed = false;
+    let mut kept: Vec<Arc<persistConn>> = Vec::new();
+    for v in pconns.iter() {
+        if !removed && Arc::ptr_eq(v, pconn) {
+            // Go slides the tail down, "keeping most recently-used
+            // conns at the end"; rebuilding in order preserves that.
+            removed = true;
+            continue;
+        }
+        kept.push(v.clone());
+    }
+    if kept.is_empty() {
+        pool.idleConn.Delete(key);
+    } else {
+        pool.idleConn.Set(key, kept);
+    }
+    return removed;
 }
 
 // ─── retry decision ─────────────────────────────────────────────────

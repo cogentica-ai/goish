@@ -610,6 +610,12 @@ pub type DialContextFn = alloc::sync::Arc<dyn Fn() + Send + Sync>;
 /// today, the rest are inert metadata until the connection-pool layer
 /// lands.
 pub struct Transport {
+    /// The idle-connection pool: Go's `idleMu` + `idleConn` +
+    /// `idleLRU` + `closeIdle` (transport.go:270-276), which its own
+    /// comments mark as guarded together. Keyed by
+    /// `connectMethodKey.String()` because goish has no struct-keyed
+    /// map. STAGED — nothing puts a conn in it yet.
+    pub(crate) __idle: crate::sync::Mutex<super::transport::idlePool>,
     /// Go's `MaxResponseHeaderBytes` (transport.go:288) — cap on the
     /// response head. Zero means Go's 10 MiB default; NEGATIVE passes
     /// through, like MaxIdleConnsPerHost.
@@ -663,6 +669,7 @@ pub struct Transport {
 impl Default for Transport {
     fn default() -> Self {
         Transport {
+            __idle: crate::sync::Mutex::new(super::transport::idlePool::new()),
             MaxResponseHeaderBytes: 0,
             WriteBufferSize: 0,
             ReadBufferSize: 0,

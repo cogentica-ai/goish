@@ -1583,3 +1583,7 @@ path = "examples/http_retry_smoke.rs"
 [[example]]
 name = "http_persistconn_smoke"
 path = "examples/http_persistconn_smoke.rs"
+
+[[example]]
+name = "http_idlepool_smoke"
+path = "examples/http_idlepool_smoke.rs"
