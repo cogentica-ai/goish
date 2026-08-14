@@ -347,7 +347,7 @@ crate::var! {
     pub ErrConnClosed: error = "fcgi: connection to web server closed";
 }
 
-// go: sdk 1.25.5 net/http/fcgi/child.go:182-182 emptyBody
+// go: sdk 1.25.5 net/http/fcgi/child.go:183-183 emptyBody
 /// Go: `io.NopCloser(strings.NewReader(""))` — the body a request
 /// with no stdin content gets. goish's request carries its body as
 /// bytes, so the empty body is the empty slice; this exists so the

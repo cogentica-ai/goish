@@ -103,6 +103,37 @@ fn main() {
             fmt::Println!("[+] DumpResponse               FAIL");
             failed += 1;
         }
+
+        // drainBody's contract: the body is STILL READABLE afterwards.
+        // Go returns two equivalent ReadClosers and assigns the second
+        // back to resp.Body precisely so the caller is not left with a
+        // drained one. A dump that consumed the body would be a trap.
+        let (again, _) = goish::io::ReadAll(&mut resp.Body.clone());
+        if goish::string::from_bytes(&again) == "brew\n" {
+            fmt::Println!("[+] DumpResponse leaves body   PASS");
+        } else {
+            fmt::Println!("[+] DumpResponse leaves body   FAIL");
+            failed += 1;
+        }
+
+        // And the two copies drainBody hands back are independent:
+        // reading one must not consume the other. A FRESH body, because
+        // the one above has been read to EOF — goish's Body clone
+        // shares its offset through an Arc, exactly as Go's *Body
+        // pointer does.
+        let fresh = http::Body::from(bytes("brew\n"));
+        let (mut c1, mut c2, derr) = http::httputil::dump::drainBody(&fresh);
+        let (b1, _) = goish::io::ReadAll(&mut c1);
+        let (b2, _) = goish::io::ReadAll(&mut c2);
+        if derr == goish::nil
+            && goish::string::from_bytes(&b1) == "brew\n"
+            && goish::string::from_bytes(&b2) == "brew\n"
+        {
+            fmt::Println!("[+] drainBody two copies       PASS");
+        } else {
+            fmt::Println!("[+] drainBody two copies       FAIL");
+            failed += 1;
+        }
     }
 
     if failed == 0 {

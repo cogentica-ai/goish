@@ -13,6 +13,45 @@ use crate::types::byte;
 use super::super::response::Response;
 use super::super::request::Request;
 
+// go: sdk 1.25.5 net/http/httputil/dump.go:25-38 drainBody
+/// Go: "drainBody reads all of b to memory and then returns two
+/// equivalent ReadClosers yielding the same bytes."
+///
+/// Go's comment continues: "It returns an error if the initial slurp
+/// of all bytes fails. It does not attempt to make the returned
+/// ReadClosers have equal error-matching behavior." That last
+/// sentence is the contract — a caller must not expect the copies to
+/// reproduce the original's failure modes, only its bytes.
+///
+/// This is what lets DumpResponse show a body the caller can still
+/// read afterwards. It drains a STREAMING body off the connection
+/// (releasing the conn), which is why it returns an error at all.
+pub fn drainBody(
+    b: &super::super::client::Body,
+) -> (
+    super::super::client::Body,
+    super::super::client::Body,
+    error,
+) {
+    let (buf, err) = b.__drain_remainder();
+    if !err.IsNil() {
+        return (
+            super::super::client::Body::from_bytes(slice::<byte>::__from_vec(
+                alloc::vec::Vec::new(),
+            )),
+            super::super::client::Body::from_bytes(slice::<byte>::__from_vec(
+                alloc::vec::Vec::new(),
+            )),
+            err,
+        );
+    }
+    return (
+        super::super::client::Body::from_bytes(buf.clone()),
+        super::super::client::Body::from_bytes(buf),
+        errors::nil,
+    );
+}
+
 // go: sdk 1.25.5 net/http/httputil/dump.go:218-286 DumpRequest
 /// `httputil.DumpRequest(req, body) -> ([]byte, error)` — render a
 /// Request in HTTP/1.x wire format. Line-by-line port of Go 1.25
@@ -124,11 +163,23 @@ pub fn DumpResponse(resp: &Response, body: bool) -> (slice<byte>, error) {
     // drained off the conn here (and the conn released).
     let mut body_bytes = slice::<byte>::__from_vec(alloc::vec::Vec::new());
     if body {
-        let (bb, derr) = resp.Body.__drain_remainder();
+        // Go: `save, resp.Body, err = drainBody(resp.Body)` — the
+        // dumped copy and the one the caller keeps reading.
+        let (mut save, restored, derr) = drainBody(&resp.Body);
         if !derr.IsNil() {
             return (slice::<byte>::__from_vec(alloc::vec::Vec::new()), derr);
         }
+        let (bb, rerr) = crate::io::ReadAll(&mut save);
+        if !rerr.IsNil() {
+            return (slice::<byte>::__from_vec(alloc::vec::Vec::new()), rerr);
+        }
         body_bytes = bb;
+        // Go assigns the second copy back: `resp.Body = restored`.
+        // goish's drain leaves the ORIGINAL body re-readable in place
+        // (it becomes an eager copy of what it drained), so the second
+        // copy is what a caller holding only the Response would have
+        // got — the assignment has already happened.
+        let _ = restored;
     }
 
     let mut b = strings::Builder::new();
