@@ -300,7 +300,10 @@ fn serve_tls_conn(
     // requests are still in flight and never kicks an idle HTTPS
     // keep-alive conn. Go gets this for free: plaintext and TLS conns
     // share `conn.serve` (server.go:2039).
-    let track = { let t = srv.newConn(pd_addr); srv.trackConn(&t, true); t };
+    let track = { let t = srv.newConn(pd_addr, raw_fd); srv.trackConn(&t, true); t };
+    // Go reports StateNew as the conn is registered (server.go:1961);
+    // the plaintext loop does the same.
+    track.setState(super::server::CONN_STATE_NEW);
     // Releases the slot on every ordinary exit path. The panic path
     // cannot rely on it — goish recovery skips Rust drops — so the
     // deferred recover below unregisters explicitly, and
@@ -314,6 +317,13 @@ fn serve_tls_conn(
         // conn.serve; goish needs an explicit guard because the
         // HTTPS loop is a separate function.
         fn drop(&mut self) {
+            // Go's last transition for a conn is StateClosed, from the
+            // deferred close in conn.serve (server.go:1975). The
+            // plaintext loop fires it from ActiveGuard; without it
+            // here, a ConnState hook counting conns (httptest does)
+            // never sees an HTTPS conn go away, and its Close waits
+            // forever.
+            self.track.setState(super::server::CONN_STATE_CLOSED);
             self.srv.trackConn(&self.track, false);
         }
     }

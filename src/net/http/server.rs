@@ -1119,6 +1119,12 @@ pub type ConnContextFn = Arc<
         + Sync,
 >;
 
+/// `Server.ConnState`'s function shape (server.go:3266). Go's takes a
+/// `net.Conn`; goish passes the connection's FD, because the hook has
+/// to be able to outlive the call — httptest keeps a set of live
+/// conns and closes them later, which a borrowed conn cannot express.
+pub type ConnStateHook = Arc<dyn Fn(int, ConnState) + Send + Sync>;
+
 pub struct Server {
     /// `host:port` to listen on. Empty = ":80".
     pub Addr: string,
@@ -1162,6 +1168,15 @@ pub struct Server {
     /// the per-connection context derived from the base context;
     /// called once per accepted connection.
     pub ConnContext: Option<ConnContextFn>,
+    /// `Server.ConnState` (server.go:3266) — Go: "specifies an
+    /// optional callback function that is called when a client
+    /// connection changes state."
+    ///
+    /// Go assigns this field directly (`s.Config.ConnState = f`);
+    /// through goish's `Arc<Server>` that needs a mutex, so it is set
+    /// with `SetConnState` and may be changed after the server is
+    /// shared. See [`ConnStateHook`] for the argument divergence.
+    pub ConnState: Mutex<Option<ConnStateHook>>,
     /// `Server.ErrorLog` (server.go:3053) — optional logger for
     /// accept errors and handler panics. `None` → the `log` package's
     /// standard logger (stderr).
@@ -1690,6 +1705,10 @@ pub fn ConnStateString(c: ConnState) -> string {
 pub(crate) const CONN_STATE_NEW: u8 = 0; // StateNew
 pub(crate) const CONN_STATE_ACTIVE: u8 = 1; // StateActive
 pub(crate) const CONN_STATE_IDLE: u8 = 2; // StateIdle
+#[allow(dead_code)] // no Hijacker yet; the value is here so the five
+// states stay adjacent and a divergence from Go's numbering is visible.
+pub(crate) const CONN_STATE_HIJACKED: u8 = 3; // StateHijacked
+pub(crate) const CONN_STATE_CLOSED: u8 = 4; // StateClosed
 
 /// Per-connection tracking record — goish's rendering of Go's
 /// `conn.curState` packed atomic (server.go:299,
@@ -1829,6 +1848,12 @@ pub(crate) struct ConnTrack {
     /// serve_conn observes the timeout error and closes the fd
     /// itself, so the fd always has exactly one closer.
     pd_addr: AtomicUsize,
+    /// The conn's fd — the identity goish's `ConnState` hook reports,
+    /// standing in for Go's `net.Conn` argument.
+    fd: i32,
+    /// The server's `ConnState` hook, cloned in at registration so
+    /// `setState` can fire it without reaching back for the Server.
+    hook: Option<ConnStateHook>,
 }
 
 impl ConnTrack {
@@ -1844,10 +1869,16 @@ impl ConnTrack {
     }
 
     // go: sdk 1.25.5 net/http/server.go:1865-1884 conn.setState
+    /// Go's `runHooks` parameter is not carried: its only `skipHooks`
+    /// caller is the HTTP/2 handoff, which goish does not have, so
+    /// every transition here is one Go would also report.
     pub(crate) fn setState(&self, st: u8) {
         self.since_ns
             .store(crate::runtime::sysmon::monotonic_ns(), Ordering::Relaxed);
         self.state.store(st, Ordering::Release);
+        if let Some(h) = self.hook.as_ref() {
+            h(crate::types::int::from(self.fd), st as ConnState);
+        }
     }
 }
 
@@ -1927,6 +1958,7 @@ impl Default for Server {
             ConnContext: None,
             ErrorLog: None,
             TLSConfig: None,
+            ConnState: Mutex::new(None),
             __state: __ServerState::default(),
         }
     }
@@ -2492,6 +2524,10 @@ impl Server {
         }
         impl Drop for ActiveGuard<'_> {
             fn drop(&mut self) {
+                // Go's last transition for a conn is
+                // `c.setState(c.rwc, StateClosed, runHooks)` in the
+                // deferred close (server.go:1975).
+                self.track.setState(CONN_STATE_CLOSED);
                 self.server
                     .tracked_conns
                     .Lock()
@@ -2503,12 +2539,11 @@ impl Server {
         // Register the conn for shutdown kicks — Go's
         // `c.setState(StateNew)` + activeConn insert (server.go:3457).
         let (_, watch_pd_early) = conn.__disconnect_watch_parts();
-        let track = Arc::new(ConnTrack {
-            state: AtomicU8::new(CONN_STATE_NEW),
-            since_ns: AtomicI64::new(crate::runtime::sysmon::monotonic_ns()),
-            pd_addr: AtomicUsize::new(watch_pd_early as usize),
-        });
+        let track = self.newConn(watch_pd_early as usize, conn.__fd());
         self.__state.tracked_conns.Lock().push(track.clone());
+        // Go reports StateNew as the conn is registered
+        // (server.go:1961 `c.setState(c.rwc, StateNew, runHooks)`).
+        track.setState(CONN_STATE_NEW);
         let _guard = ActiveGuard {
             count: &self.__state.active_conns,
             server: &self.__state,
@@ -2804,16 +2839,33 @@ impl Server {
         return;
     }
 
+    // go: none — goish-only: Go writes `s.ConnState = f` on a plain
+    // field. goish's Server is used through an `Arc`, so the field is
+    // a Mutex and this is the assignment. Set it BEFORE Serve — the
+    // hook is cloned into each conn's record as the conn is
+    // registered, so a later change does not reach live conns, which
+    // is also true of Go's field in practice.
+    pub fn SetConnState(&self, f: Option<ConnStateHook>) {
+        *self.ConnState.Lock() = f;
+        return;
+    }
+
+    // goishlint:ignore GOISH020 newConn — Go's `newConn(rwc net.Conn)`
+    // gets the fd and the PollDesc from the conn it is handed; goish's
+    // ConnTrack is built beside the conn rather than from it, so both
+    // arrive as parameters.
     // go: sdk 1.25.5 net/http/server.go:634-643 Server.newConn
     /// Go: "Create new connection from rwc." Go's `conn` carries the
     /// server, the rwc and the per-conn state; goish's per-conn record
     /// is `ConnTrack`, so this builds that. `pd_addr` is the read-side
     /// PollDesc the shutdown kick needs — Go reaches `c.rwc` instead.
-    pub(crate) fn newConn(&self, pd_addr: usize) -> Arc<ConnTrack> {
+    pub(crate) fn newConn(&self, pd_addr: usize, fd: i32) -> Arc<ConnTrack> {
         return Arc::new(ConnTrack {
             state: AtomicU8::new(CONN_STATE_NEW),
             since_ns: AtomicI64::new(crate::runtime::sysmon::monotonic_ns()),
             pd_addr: AtomicUsize::new(pd_addr),
+            fd,
+            hook: self.ConnState.Lock().clone(),
         });
     }
 

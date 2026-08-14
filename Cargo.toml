@@ -1633,5 +1633,9 @@ name = "http_cgi_serve_smoke"
 path = "examples/http_cgi_serve_smoke.rs"
 
 [[example]]
+name = "http_connstate_smoke"
+path = "examples/http_connstate_smoke.rs"
+
+[[example]]
 name = "http_persist_smoke"
 path = "examples/http_persist_smoke.rs"

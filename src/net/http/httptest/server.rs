@@ -81,6 +81,13 @@ pub struct Server {
     /// Guards `closed`.
     mu: sync::Mutex<bool>,
 
+    /// Go's `conns map[net.Conn]http.ConnState`. goish's ConnState
+    /// hook reports the connection's FD rather than the conn itself
+    /// (a borrowed conn cannot outlive the callback), so the fd is the
+    /// key — it is the same identity for as long as the conn is open,
+    /// which is exactly the window this map covers.
+    conns: sync::Mutex<crate::gomap::map<crate::types::int, super::super::server::ConnState>>,
+
     /// Configured for use with the server.
     client: Arc<super::super::Client>,
 }
@@ -153,6 +160,7 @@ pub fn NewUnstartedServer(handler: Arc<dyn super::super::Handler>) -> Arc<Server
         }),
         wg: sync::WaitGroup::new(),
         mu: sync::Mutex::new(false),
+        conns: sync::Mutex::new(crate::gomap::map::new()),
         client: Arc::new(super::super::Client::default()),
     });
 }
@@ -174,7 +182,180 @@ impl Server {
             }
             *u = crate::fmt::Sprintf!("http://%s", self.Listener.Addr().String());
         }
+        self.clone().wrap();
         self.goServe();
+    }
+
+    // go: sdk 1.25.5 net/http/httptest/server.go:317-373 Server.wrap
+    /// Install the `ConnState` hook that maintains `conns`.
+    ///
+    /// Go panics on an invalid transition; that is a real assertion
+    /// about the server's own state machine, so it is kept. The
+    /// waitgroup accounting is the load-bearing half: `Close` waits on
+    /// `wg`, so a conn that is added and never removed hangs Close
+    /// forever, and one removed twice makes Close return early with
+    /// requests still in flight.
+    pub fn wrap(self: Arc<Self>) {
+        let oldHook = self.Config.ConnState.Lock().clone();
+        let me = self.clone();
+        self.Config.SetConnState(Some(alloc::sync::Arc::new(
+            move |fd: crate::types::int, cs: super::super::server::ConnState| {
+                {
+                    // Go has ONE mutex guarding both `closed` and
+                    // `conns`; goish has two, so the ORDER matters —
+                    // `Close` takes mu then conns, and taking them the
+                    // other way round here deadlocks the pair. (It
+                    // did: http_httptest_server_smoke hung.)
+                    let closed = *me.mu.Lock();
+                    let mut conns = me.conns.Lock();
+                    if cs == super::super::server::StateNew {
+                        let (_, exists) = conns.Get(fd);
+                        if exists {
+                            panic!("invalid state transition");
+                        }
+                        // Go: add c to the tracked set and increment
+                        // the waitgroup.
+                        me.wg.Add(1);
+                        conns.Set(fd, cs);
+                        if closed {
+                            // Go: "Probably just a socket-late-binding
+                            // dial from the default transport that lost
+                            // the race (and thus this connection is now
+                            // idle and will never be used)."
+                            me.closeConn(fd);
+                        }
+                    } else if cs == super::super::server::StateActive {
+                        let (oldState, ok) = conns.Get(fd);
+                        if ok {
+                            if oldState != super::super::server::StateNew
+                                && oldState != super::super::server::StateIdle
+                            {
+                                panic!("invalid state transition");
+                            }
+                            conns.Set(fd, cs);
+                        }
+                    } else if cs == super::super::server::StateIdle {
+                        let (oldState, ok) = conns.Get(fd);
+                        if ok {
+                            if oldState != super::super::server::StateActive {
+                                panic!("invalid state transition");
+                            }
+                            conns.Set(fd, cs);
+                        }
+                        if closed {
+                            me.closeConn(fd);
+                        }
+                    } else if cs == super::super::server::StateHijacked
+                        || cs == super::super::server::StateClosed
+                    {
+                        // Go: remove from the tracked set and decrement
+                        // the waitgroup, "unless it was previously
+                        // removed".
+                        let (_, ok) = conns.Get(fd);
+                        if ok {
+                            conns.Delete(fd);
+                            me.wg.Done();
+                        }
+                    }
+                }
+                if let Some(h) = oldHook.as_ref() {
+                    h(fd, cs);
+                }
+            },
+        )));
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/httptest/server.go:377-377 Server.closeConn
+    /// Go: "closeConn closes c. s.mu must be held." goish closes the
+    /// fd directly — the conn value itself belongs to the serve loop.
+    fn closeConn(&self, fd: crate::types::int) {
+        self.closeConnChan(fd, None);
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/httptest/server.go:381-386 Server.closeConnChan
+    /// Go: "like closeConn, but takes an optional channel to receive a
+    /// value when the goroutine closing c is done."
+    fn closeConnChan(&self, fd: crate::types::int, done: Option<crate::gochan::chan<()>>) {
+        // Go closes the conn, and its netpoller wakes the goroutine
+        // parked reading it. goish's does not — closing an fd drops
+        // queued epoll events but fires no EPOLLHUP at an existing
+        // parker, the same wall `Listener.Close` hits above. shutdown(2)
+        // DOES wake a blocked reader (it returns EOF), and leaves the
+        // fd's single owner — the serve loop — to do the close, so
+        // there is no double-close race.
+        //
+        // SHUT_RDWR
+        let _ = crate::syscall::Shutdown(crate::int32(fd), 2);
+        if let Some(ch) = done {
+            let _ = ch.__try_send(());
+        }
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/httptest/server.go:254-263 Server.logCloseHangDebugInfo
+    /// Go dumps each stuck conn's type, pointer, remote address and
+    /// state. goish's tracked identity is the fd, so that is what is
+    /// printed — the state is the part that says WHY Close is stuck.
+    fn logCloseHangDebugInfo(&self) {
+        let conns = self.conns.Lock();
+        let mut buf = crate::strings::Builder::new();
+        let _ = buf.WriteString(string(
+            "httptest.Server blocked in Close after 5 seconds, waiting for connections:\n",
+        ));
+        let keys = conns.Keys();
+        for i in 0..keys.len() {
+            let fd = keys[i];
+            let (st, _) = conns.Get(fd);
+            let _ = buf.WriteString(crate::fmt::Sprintf!(
+                "  fd %d in state %s\n",
+                crate::int64(fd),
+                super::super::server::ConnStateString(st)
+            ));
+        }
+        crate::log::Printf!("%s", buf.String());
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/httptest/server.go:266-291 Server.CloseClientConnections
+    /// Go: "closes any open HTTP connections to the test Server."
+    ///
+    /// The five-second bound is Go's, and its comment explains why it
+    /// exists rather than waiting forever: "Out of paranoia for making
+    /// a late change in Go 1.6 […] golang.org/issue/14291 isn't fully
+    /// understood yet."
+    pub fn CloseClientConnections(&self) {
+        let nconn = {
+            let conns = self.conns.Lock();
+            let keys = conns.Keys();
+            let ch: crate::gochan::chan<()> = crate::make!(chan (), crate::int64(keys.len()));
+            for i in 0..keys.len() {
+                let _ = self.closeConnChan(keys[i], Some(ch.clone()));
+            }
+            (keys.len(), ch)
+        };
+        let (n, ch) = nconn;
+        // Go waits on the close goroutines with a 5s timer; goish
+        // closes inline, so the sends are already queued on a buffered
+        // chan and this drains them without ever blocking.
+        let deadline = crate::time::Now().Add(crate::time::Duration(5 * 1_000_000_000));
+        let mut i = 0;
+        while i < n {
+            match ch.__try_recv() {
+                Some(_) => {
+                    i += 1;
+                }
+                None => {
+                    if crate::time::Now().After(deadline) {
+                        // Go: "Too slow. Give up."
+                        return;
+                    }
+                    crate::runtime::sched::Gosched();
+                }
+            }
+        }
+        return;
     }
 
     // go: none — goish-only accessor for the `URL` field, which is
@@ -188,10 +369,13 @@ impl Server {
     // Shuts down the server and blocks until all outstanding requests
     // on this server have completed.
     //
-    // The `conns` force-close loop and the 5-second
-    // `logCloseHangDebugInfo` timer are omitted with the ConnState
-    // half above; `SetKeepAlivesEnabled(false)` still runs, so idle
-    // conns are not held open by keep-alive after Close begins.
+    // Go arms `time.AfterFunc(5*time.Second, s.logCloseHangDebugInfo)`
+    // and stops it on return. goish does not: a stopped AfterFunc
+    // still holds its sleeper goroutine for the full duration, and
+    // the runtime waits for every goroutine at exit, so every test
+    // that closes an httptest server would take five extra seconds.
+    // The wait loop below checks the same deadline itself and logs
+    // once — same diagnostic, no leaked sleeper.
     //
     // **`__wake_accept` is load-bearing, and is why this is not a
     // transcription of Go's two lines.** Go's `s.Listener.Close()`
@@ -211,9 +395,36 @@ impl Server {
                 self.Listener.__wake_accept();
                 let _ = self.Listener.Close();
                 self.Config.SetKeepAlivesEnabled(false);
+                // Go: "Force-close any idle connections (those between
+                // requests) and new connections (those which connected
+                // but never sent a request). […] We only close
+                // StateIdle and StateNew because they're not doing
+                // anything."
+                let conns = self.conns.Lock();
+                let keys = conns.Keys();
+                for i in 0..keys.len() {
+                    let fd = keys[i];
+                    let (st, _) = conns.Get(fd);
+                    if st == super::super::server::StateIdle
+                        || st == super::super::server::StateNew
+                    {
+                        self.closeConn(fd);
+                    }
+                }
             }
         }
-        self.wg.Wait();
+        // Go: "If this server doesn't shut down in 5 seconds, tell the
+        // user why." See the note above on why this is a poll rather
+        // than an AfterFunc.
+        let deadline = crate::time::Now().Add(crate::time::Duration(5 * 1_000_000_000));
+        let mut logged = false;
+        while !self.wg.__try_wait() {
+            if !logged && crate::time::Now().After(deadline) {
+                self.logCloseHangDebugInfo();
+                logged = true;
+            }
+            crate::runtime::sched::Gosched();
+        }
     }
 
     // go: sdk 1.25.5 net/http/httptest/server.go:303-305 Server.Client
@@ -267,6 +478,7 @@ impl Server {
             let mut u = self.URL.Lock();
             *u = crate::fmt::Sprintf!("https://%s", self.Listener.Addr().String());
         }
+        self.clone().wrap();
         self.goServeTLS(cfg);
         return;
     }

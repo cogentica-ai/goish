@@ -88,6 +88,21 @@ impl WaitGroup {
         self.Add(-1);
     }
 
+    // go: none — goish-only, for the reason in the doc below.
+    /// goish-only: a non-blocking read of "is the counter zero yet?".
+    ///
+    /// `Wait` parks on the semaphore, which is the right thing when
+    /// there is nothing else to do. A caller that must ALSO do
+    /// something on a deadline (httptest's Close logs why it is stuck
+    /// after five seconds) cannot park, and Go reaches for
+    /// `time.AfterFunc` there — which in goish holds a sleeper
+    /// goroutine the runtime waits for at exit.
+    #[inline]
+    pub fn __try_wait(&self) -> bool {
+        let state = self.state.load(Ordering::Acquire);
+        return crate::int64(state >> 32) == 0;
+    }
+
     /// Wait blocks until the counter reaches zero. Mirrors
     /// `WaitGroup.Wait` (waitgroup.go:160).
     pub fn Wait(&self) {
