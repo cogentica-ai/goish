@@ -1711,3 +1711,7 @@ path = "examples/http_client_reuse_smoke.rs"
 [[example]]
 name = "http_expect_continue_smoke"
 path = "examples/http_expect_continue_smoke.rs"
+
+[[example]]
+name = "http_transport_loops_smoke"
+path = "examples/http_transport_loops_smoke.rs"

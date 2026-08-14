@@ -73,7 +73,8 @@ use super::url::URL;
 /// Which conn a streaming body reads from. The bufio layer is the one
 /// `read_response_head` parsed the head through — its buffer may
 /// already hold the first body bytes.
-pub(crate) enum ConnSrc {
+#[doc(hidden)]
+pub enum ConnSrc {
     Tcp(bufio::Reader<crate::net::TCPConn>),
     Tls(bufio::Reader<crate::crypto::tls::Conn>),
     /// A caller-supplied connection (Transport.DialTLS/DialTLSContext
@@ -86,7 +87,8 @@ pub(crate) enum ConnSrc {
 // go: none — goish-only: the io-trait bridge over a caller-supplied
 // `dyn net::Conn` (the net::Conn trait spells Read/Write/Close as its
 // own methods, not the io traits bufio wants).
-pub(crate) struct DynConn(pub(crate) alloc::boxed::Box<dyn crate::net::Conn>);
+#[doc(hidden)]
+pub struct DynConn(pub(crate) alloc::boxed::Box<dyn crate::net::Conn>);
 
 impl Reader for DynConn {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
@@ -236,12 +238,14 @@ enum FramedBody {
 
 struct BodyState {
     framing: FramedBody,
-    /// Go's bodyEOFSignal `fn` (transport.go:2978), goish-shaped: on
-    /// Close/Drop of a CLEANLY-FINISHED conn-backed body, the ConnSrc
-    /// is handed back for pool reuse instead of closed. An early
-    /// Close with unread framing falls through to the close (Go's
-    /// earlyCloseFn arm: the conn cannot be reused mid-message).
-    reuse_fn: Option<alloc::boxed::Box<dyn FnOnce(ConnSrc) + Send>>,
+    /// Go's bodyEOFSignal `fn`/`earlyCloseFn` pair (transport.go:
+    /// 2978), goish-shaped: on Close/Drop of a CLEANLY-FINISHED
+    /// conn-backed body the ConnSrc is handed back (Some) for pool
+    /// reuse instead of closed; an early Close with unread framing
+    /// closes the conn and signals None — a loop-mode reader must
+    /// learn the conn died or it waits forever (Go's waitForBodyRead
+    /// false arm).
+    reuse_fn: Option<alloc::boxed::Box<dyn FnOnce(Option<ConnSrc>) + Send>>,
     /// Request ctx — a Read kicked out by the cancel watcher maps its
     /// wire error to ctx.Err(), like `ctx_err_or` on the head path.
     ctx: Option<Arc<dyn crate::context::Context>>,
@@ -339,13 +343,16 @@ fn close_locked(st: &mut BodyState) -> error {
             if let FramedBody::Cl { src, .. } =
                 core::mem::replace(&mut st.framing, FramedBody::Closed)
             {
-                bank(src);
+                bank(Some(src));
                 if let Some(c) = st.cancel.take() {
                     c();
                 }
                 return errors::nil;
             }
         }
+        // Dirty close: the conn is unusable — close it below and tell
+        // the bank so (Go's earlyCloseFn / waitForBodyRead false).
+        st.reuse_fn = Some(bank);
     }
     // An in-memory (Eager) body is Go's NopCloser shape — NewRequest
     // wraps *bytes.Reader/*strings.Reader in io.NopCloser, so Close is
@@ -367,6 +374,9 @@ fn close_locked(st: &mut BodyState) -> error {
         _ => errors::nil,
     };
     st.framing = FramedBody::Closed;
+    if let Some(bank) = st.reuse_fn.take() {
+        bank(None);
+    }
     // Release the Client.Timeout timer, if we carry one.
     if let Some(c) = st.cancel.take() {
         c();
@@ -478,7 +488,7 @@ impl Body {
 
     // go: none — goish-only: install the bodyEOFSignal bank-back (see
     // BodyState.reuse_fn).
-    pub(crate) fn __set_reuse(&self, f: alloc::boxed::Box<dyn FnOnce(ConnSrc) + Send>) {
+    pub(crate) fn __set_reuse(&self, f: alloc::boxed::Box<dyn FnOnce(Option<ConnSrc>) + Send>) {
         self.inner.Lock().reuse_fn = Some(f);
         return;
     }
@@ -706,6 +716,49 @@ pub(crate) fn read_response_head<R: Reader>(
         return (resp, BodyKind::Empty, terr);
     }
     return (resp, kind, errors::nil);
+}
+
+// go: none — goish-only: readLoop's body attachment — like
+// attach_stream_body's bank arm, but the hand-back ALWAYS fires
+// (Some on a clean Content-Length boundary, None when the body
+// closed the conn), which is what lets readLoop block on it safely.
+// Framings with no clean end in the sequential model (chunked,
+// UntilEof, 101) attach owning the conn and answer None on close.
+pub(crate) fn __attach_loop_body(
+    resp: &mut Response,
+    kind: BodyKind,
+    src: ConnSrc,
+    done: alloc::boxed::Box<dyn FnOnce(Option<ConnSrc>) + Send>,
+) {
+    match kind {
+        BodyKind::Empty => {
+            resp.Body = Body::default();
+            done(None);
+        }
+        BodyKind::Cl(n) => {
+            resp.Body = Body::from_parts(
+                FramedBody::Cl { src, remaining: n },
+                None,
+                None,
+            );
+            resp.Body.__set_reuse(done);
+        }
+        BodyKind::Chunked => {
+            resp.Body = Body::from_parts(
+                FramedBody::Chunked {
+                    cr: super::internal::chunked::NewChunkedReader(src),
+                },
+                None,
+                None,
+            );
+            resp.Body.__set_reuse(done);
+        }
+        BodyKind::UntilEof => {
+            resp.Body = Body::from_parts(FramedBody::UntilEof { src }, None, None);
+            resp.Body.__set_reuse(done);
+        }
+    }
+    return;
 }
 
 // go: none — goish-only: the readLoop half of the 100-continue dance
@@ -1185,7 +1238,7 @@ impl RoundTripper for Transport {
                         // closure's timer immediately — body sent.
                         let _ = continue_ch.Send(true);
                     }
-                    if let Some(wait) = pc.waitForContinue(self, Some(continue_ch)) {
+                    if let Some(wait) = pc.waitForContinue(self.ExpectContinueTimeout, Some(continue_ch)) {
                         if !wait() {
                             skip_body = true;
                         }
@@ -1307,7 +1360,7 @@ impl RoundTripper for Transport {
                 // Go's bodyEOFSignal bank-back: reusable when the
                 // server didn't ask to close and the framing has a
                 // clean end (Empty now, Content-Length at body Close).
-                let bank: Option<alloc::boxed::Box<dyn FnOnce(ConnSrc) + Send>> =
+                let bank: Option<alloc::boxed::Box<dyn FnOnce(Option<ConnSrc>) + Send>> =
                     if !self.DisableKeepAlives
                         && !resp.Close
                         && matches!(kind, BodyKind::Empty | BodyKind::Cl(_))
@@ -1316,7 +1369,13 @@ impl RoundTripper for Transport {
                         let cfg = self.__bank_cfg();
                         let pc2 = pc.clone();
                         let idle_timeout = self.IdleConnTimeout;
-                        Some(alloc::boxed::Box::new(move |mut s: ConnSrc| {
+                        Some(alloc::boxed::Box::new(move |s: Option<ConnSrc>| {
+                            let mut s = match s {
+                                Some(s) => s,
+                                // Dirty close: the conn died with the
+                                // body; nothing to bank.
+                                None => return,
+                            };
                             // Clear the per-request deadline before the
                             // conn waits idle.
                             let _ = s.__set_deadline(time::Time::default());
@@ -1362,7 +1421,7 @@ fn attach_stream_body(
     mut src: ConnSrc,
     ctx: Option<Arc<dyn crate::context::Context>>,
     watch: Option<(crate::gochan::chan<()>, crate::gochan::chan<()>)>,
-    bank: Option<alloc::boxed::Box<dyn FnOnce(ConnSrc) + Send>>,
+    bank: Option<alloc::boxed::Box<dyn FnOnce(Option<ConnSrc>) + Send>>,
 ) {
     // Go (transport.go:2306): a 101 Switching Protocols response's
     // body IS the connection — attach it un-framed and detach the
@@ -1377,7 +1436,7 @@ fn attach_stream_body(
         BodyKind::Empty => {
             stop_cancel_watch(watch);
             match bank {
-                Some(b) => b(src),
+                Some(b) => b(Some(src)),
                 None => {
                     let _ = src.close_conn();
                 }
@@ -2659,7 +2718,7 @@ pub(crate) fn serialize_request_proxy(
 /// close, Content-Length or Transfer-Encoding: chunked, Trailer), and
 /// the user headers. Returns the transferWriter so the caller can
 /// stream the body next; its decisions (probe included) are made here.
-pub(crate) fn serialize_request_head(
+pub fn serialize_request_head(
     req: &Request,
     host: &string,
     using_proxy: bool,

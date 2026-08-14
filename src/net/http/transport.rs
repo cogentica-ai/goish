@@ -166,6 +166,92 @@ impl transportRequest {
     }
 }
 
+// go: sdk 1.25.5 net/http/transport.go:2641-2641 maxWriteWaitBeforeConnReuse
+/// Go: "how long a Transport RoundTrip will wait to see the Request's
+/// Body.Write result after getting a response from the server."
+pub(crate) fn maxWriteWaitBeforeConnReuse() -> crate::time::Duration {
+    return crate::time::Duration(50 * 1_000_000);
+}
+
+// go: sdk 1.25.5 net/http/transport.go:2673-2679 responseAndError
+/// Go: "how the goroutine reading from an HTTP/1 server communicates
+/// with the goroutine doing the RoundTrip."
+#[doc(hidden)]
+pub struct responseAndError {
+    pub res: Option<super::Response>,
+    pub err: error,
+}
+
+impl Default for responseAndError {
+    // go: none — chan zero value (Recv on a closed channel).
+    fn default() -> Self {
+        return responseAndError {
+            res: None,
+            err: errors::nil,
+        };
+    }
+}
+
+// go: sdk 1.25.5 net/http/transport.go:2681-2698 requestAndChan
+/// goish subset: `treq` collapses to the Option<Request> the head
+/// parser wants (HEAD/1xx handling); addedGzip (no transparent gzip)
+/// and callerGone (roundTrip integration staged) have no carriers yet.
+#[doc(hidden)]
+pub struct requestAndChan {
+    pub req: Option<super::Request>,
+    pub ch: crate::gochan::chan<responseAndError>,
+    /// Go: "If the server responds 100 Continue, readLoop send a
+    /// value to writeLoop via this chan."
+    pub continueCh: Option<crate::gochan::chan<bool>>,
+}
+
+impl Default for requestAndChan {
+    // go: none — chan zero value.
+    fn default() -> Self {
+        return requestAndChan {
+            req: None,
+            ch: crate::gochan::chan::nil(),
+            continueCh: None,
+        };
+    }
+}
+
+// go: sdk 1.25.5 net/http/transport.go:2704-2712 writeRequest
+/// goish shape: the head is pre-serialized and the transferWriter
+/// rides along (Go sends the *transportRequest and runs Request.write
+/// inside writeLoop; goish's serialize_request_head runs in the
+/// caller, so the writer receives wire-ready parts).
+#[doc(hidden)]
+pub struct writeRequest {
+    pub head: crate::goslice::slice<crate::types::byte>,
+    pub tw: super::transfer::transferWriter,
+    pub ch: crate::gochan::chan<error>,
+    pub continueCh: Option<crate::gochan::chan<bool>>,
+}
+
+impl Default for writeRequest {
+    // go: none — chan zero value.
+    fn default() -> Self {
+        return writeRequest {
+            head: crate::goslice::slice::__from_vec(alloc::vec::Vec::new()),
+            tw: super::transfer::transferWriter::default(),
+            ch: crate::gochan::chan::nil(),
+            continueCh: None,
+        };
+    }
+}
+
+// go: none — goish-only: the channel bundle __spawn_loops hands back
+// (Go's are pc fields; goish's pc stays free of loop state until the
+// roundTrip integration lands).
+#[doc(hidden)]
+pub struct pcLoops {
+    pub writech: crate::gochan::chan<writeRequest>,
+    pub reqch: crate::gochan::chan<requestAndChan>,
+    pub closech: crate::gochan::chan<()>,
+    pub writeErrCh: crate::gochan::chan<error>,
+}
+
 #[derive(Clone, Default)]
 pub struct connectMethod {
     /// Go: "nil for no proxy, else full proxy URL"
@@ -888,7 +974,7 @@ impl persistConn {
     // go: none — goish-only: Go's pc.conn/pc.br live as bare fields
     // read by the loops; goish moves the pair in and out around each
     // request (the Body owns it mid-flight).
-    pub(crate) fn __put_src(&self, src: super::client::ConnSrc) {
+    pub fn __put_src(&self, src: super::client::ConnSrc) {
         *self.src.Lock() = Some(src);
         return;
     }
@@ -896,7 +982,7 @@ impl persistConn {
     // go: none — see __put_src. Also retires the idle timer: a conn
     // taken for a request must not be reaped by a stale
     // IdleConnTimeout firing (Go Stops pc.idleTimer on delivery).
-    pub(crate) fn __take_src(&self) -> Option<super::client::ConnSrc> {
+    pub fn __take_src(&self) -> Option<super::client::ConnSrc> {
         if let Some(t) = self.idleTimer.Lock().take() {
             t.Stop();
         }
@@ -962,7 +1048,7 @@ impl persistConn {
 
     // go: none — goish-only: the close reason `closeLocked` recorded;
     // Go's roundTrip reads `pc.closed` directly under mu.
-    pub(crate) fn __closed_reason(&self) -> error {
+    pub fn __closed_reason(&self) -> error {
         return self.state.Lock().closed.clone();
     }
 
@@ -1004,10 +1090,339 @@ impl persistConn {
         return;
     }
 
+    // go: sdk 1.25.5 net/http/transport.go:2242-2418 persistConn.readLoop
+    // goishlint:ignore GOISH020 readLoop — Go's receiver reaches the
+    // conn/channels/pool as pc fields; goish's readLoop owns the
+    // ConnSrc outright and takes its channel bundle and the pool
+    // bank as parameters (no Transport back-pointer).
+    /// Go: the goroutine that owns the conn's READ side for its whole
+    /// life — peeks for response bytes, matches them to the waiting
+    /// requestAndChan, parses (1xx interims feed the writeLoop's
+    /// continue channel), wires the body's hand-back so the conn
+    /// returns to the pool the moment the body finishes cleanly, and
+    /// dies closing the conn on any read failure.
+    ///
+    /// goish deviations, all sequential-model collapses documented in
+    /// place: no readLimit re-arm (the head parser carries its own
+    /// caps), no transparent gzip (DisableCompression is inert), no
+    /// callerGone (roundTrip integration is staged — see
+    /// __spawn_loops), and the body hand-back is the bodyEOFSignal
+    /// Option<ConnSrc> hook rather than waitForBodyRead + eofc.
+    pub fn readLoop(
+        self: Arc<Self>,
+        mut src: super::client::ConnSrc,
+        reqch: crate::gochan::chan<requestAndChan>,
+        writeErrCh: crate::gochan::chan<error>,
+        bank: alloc::sync::Arc<
+            dyn Fn(&Arc<persistConn>, super::client::ConnSrc) -> bool + Send + Sync,
+        >,
+    ) {
+        // Go: closeErr := errReadLoopExiting; defer pc.close(closeErr)
+        let mut close_err: error = errReadLoopExiting.into();
+        let mut alive = true;
+        while alive {
+            // Go: _, err := pc.br.Peek(1)
+            let (_, perr) = match &mut src {
+                super::client::ConnSrc::Tcp(br) => br.Peek(1),
+                super::client::ConnSrc::Tls(br) => br.Peek(1),
+                super::client::ConnSrc::Dyn(br) => br.Peek(1),
+            };
+
+            // Go peeks first, then checks numExpectedResponses: bytes
+            // (or an error) with NO waiting request is the unsolicited
+            // case — classify and die.
+            let rc = match reqch.__try_recv() {
+                Some((rc, _)) => rc,
+                None => {
+                    if !perr.IsNil() {
+                        let buffered = __peek_buffered(&mut src);
+                        self.readLoopPeekFailLocked(perr, &buffered);
+                        let _ = src.close_conn();
+                        return;
+                    }
+                    // Bytes but no waiter yet — block for one (the
+                    // writer has already sent the request).
+                    let (rc, ok) = reqch.Recv();
+                    if !ok {
+                        let _ = src.close_conn();
+                        return;
+                    }
+                    rc
+                }
+            };
+
+            if !perr.IsNil() {
+                // Go: err = transportReadFromServerError{err}
+                close_err = errTransportReadFromServer.into();
+                let _ = src.close_conn();
+                self.closeLocked(close_err.clone());
+                let _ = rc.ch.Send(responseAndError {
+                    res: None,
+                    err: close_err.clone(),
+                });
+                return;
+            }
+
+            // Go (readResponse): parse heads until a non-interim one;
+            // a 100 releases the writeLoop's held body via continueCh.
+            let (resp, kind) = loop {
+                let (resp, kind, rerr) = match &mut src {
+                    super::client::ConnSrc::Tcp(br) => {
+                        super::client::read_response_head(br, rc.req.clone())
+                    }
+                    super::client::ConnSrc::Tls(br) => {
+                        super::client::read_response_head(br, rc.req.clone())
+                    }
+                    super::client::ConnSrc::Dyn(br) => {
+                        super::client::read_response_head(br, rc.req.clone())
+                    }
+                };
+                if !rerr.IsNil() {
+                    close_err = rerr.clone();
+                    let _ = src.close_conn();
+                    self.closeLocked(close_err.clone());
+                    let _ = rc.ch.Send(responseAndError {
+                        res: None,
+                        err: rerr,
+                    });
+                    return;
+                }
+                if resp.StatusCode == 100 {
+                    if let Some(cc) = &rc.continueCh {
+                        let _ = cc.Send(true);
+                    }
+                    continue;
+                }
+                break (resp, kind);
+            };
+            let mut resp = resp;
+
+            // Go: hasBody := req.Method != "HEAD" && resp.ContentLength != 0
+            // (the head parser has already folded HEAD into the kind).
+            // Go: alive = false on Close/1xx-unexpected.
+            if resp.Close || resp.StatusCode <= 199 {
+                alive = false;
+            }
+
+            let has_body = !matches!(kind, super::client::BodyKind::Empty);
+            if !has_body {
+                // Go: bank BEFORE delivering, so an immediate next
+                // request finds this conn.
+                alive = alive && self.wroteRequest(&writeErrCh) && bank(&self, src);
+                resp.Body = super::Body::default();
+                let _ = rc.ch.Send(responseAndError {
+                    res: Some(resp),
+                    err: errors::nil,
+                });
+                if !alive {
+                    self.closeLocked(close_err.clone());
+                    return;
+                }
+                // The banked conn now belongs to the pool; this loop
+                // is done (the next request's roundTrip re-spawns).
+                return;
+            }
+
+            // Body-bearing: hand the src INTO the body; its
+            // bodyEOFSignal hook returns it here (Some = clean, None
+            // = the body closed the conn).
+            let handback: crate::gochan::chan<Option<super::client::ConnSrc>> =
+                crate::make!(chan Option<super::client::ConnSrc>, 2);
+            let hb = handback.clone();
+            super::client::__attach_loop_body(
+                &mut resp,
+                kind,
+                src,
+                alloc::boxed::Box::new(move |s: Option<super::client::ConnSrc>| {
+                    let _ = hb.Send(s);
+                }),
+            );
+            let _ = rc.ch.Send(responseAndError {
+                res: Some(resp),
+                err: errors::nil,
+            });
+
+            // Go: select waitForBodyRead / pc.closech.
+            let (got, ok) = handback.Recv();
+            let back = match (ok, got) {
+                (true, Some(s)) => s,
+                _ => {
+                    // Dirty close — Go's bodyEOF false arm.
+                    close_err = errors::New(crate::string(
+                        "http: response body closed before exhaustion",
+                    ));
+                    self.closeLocked(close_err.clone());
+                    return;
+                }
+            };
+            alive = alive && self.wroteRequest(&writeErrCh) && bank(&self, back);
+            if !alive {
+                self.closeLocked(close_err.clone());
+                return;
+            }
+            return; // banked; see the no-body arm's comment.
+        }
+        self.closeLocked(close_err);
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:2597-2632 persistConn.writeLoop
+    // goishlint:ignore GOISH020 writeLoop — the write half, channels
+    // and Expect timeout arrive as parameters (no pc back-pointers);
+    // the head is pre-serialized by the caller (Go runs Request.write
+    // here; goish's serialize_request_head runs in roundTrip).
+    /// Go: the goroutine that owns the conn's WRITE side: receives a
+    /// writeRequest, writes head then (after any 100-continue wait)
+    /// body, reports the outcome BOTH to the body reader
+    /// (writeErrCh, "which might recycle us") and to roundTrip
+    /// (wr.ch), and dies closing the pc on a write failure. A write
+    /// that put nothing on the wire wraps as nothingWrittenError.
+    pub fn writeLoop(
+        self: Arc<Self>,
+        mut wh: crate::net::TCPConn,
+        writech: crate::gochan::chan<writeRequest>,
+        closech: crate::gochan::chan<()>,
+        writeErrCh: crate::gochan::chan<error>,
+        expect_timeout: crate::time::Duration,
+    ) {
+        loop {
+            let done = crate::select! {
+                let wr = (writech).Recv() => {
+                    let mut wr = wr;
+                    let (_, head_err) = crate::io::Writer::Write(&mut wh, wr.head.clone());
+                    let mut err = head_err.clone();
+                    if err.IsNil() {
+                        let mut skip_body = false;
+                        if let Some(wait) =
+                            self.waitForContinue(expect_timeout, wr.continueCh.clone())
+                        {
+                            if !wait() {
+                                skip_body = true;
+                            }
+                        }
+                        if skip_body {
+                            wr.tw.__abort_body();
+                        } else {
+                            let mut cw: &mut dyn crate::io::Writer = &mut wh;
+                            err = wr.tw.writeBody(&mut cw);
+                        }
+                    } else {
+                        // Go: pc.nwrite == startBytesWritten →
+                        // nothingWrittenError.
+                        err = errNothingWritten.into();
+                    }
+                    let _ = writeErrCh.Send(err.clone());
+                    let _ = wr.ch.Send(err.clone());
+                    if !err.IsNil() {
+                        self.close(err);
+                        true
+                    } else {
+                        false
+                    }
+                },
+                let _ = (closech).Recv() => true,
+            };
+            if done {
+                return;
+            }
+        }
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:2645-2671 persistConn.wroteRequest
+    // goishlint:ignore GOISH020 wroteRequest — Go reads pc.writeErrCh;
+    // no back-pointer, so the channel arrives as a param.
+    /// Go: "whether the request was written to the connection …
+    /// without error" — the common case reads the already-sent
+    /// result; the rare case (server replied before the writer's send
+    /// landed) grants maxWriteWaitBeforeConnReuse, and a writer still
+    /// stalled past that answers false so the conn is not reused.
+    pub fn wroteRequest(&self, writeErrCh: &crate::gochan::chan<error>) -> bool {
+        if let Some((err, _)) = writeErrCh.__try_recv() {
+            // Go: "Common case: the write happened well before the
+            // response, so avoid creating a timer."
+            return err.IsNil();
+        }
+        let timer = crate::time::NewTimer(maxWriteWaitBeforeConnReuse());
+        let out = crate::select! {
+            let err = (writeErrCh).Recv() => err.IsNil(),
+            let _ = (timer.C).Recv() => false,
+        };
+        timer.Stop();
+        return out;
+    }
+
+    // go: none — goish-only: split the conn, build the channel bundle
+    // and launch both loops. TCP only — a TLS record layer is one
+    // cipher-state object and cannot serve two goroutines (the same
+    // reason split_for_upgrade refuses TLS); TLS/Dyn conns stay on the
+    // sequential roundTrip path. roundTrip integration is STAGED: the
+    // loops smoke drives this directly today.
+    pub fn __spawn_loops(
+        self: &Arc<Self>,
+        expect_timeout: crate::time::Duration,
+        bank: alloc::sync::Arc<
+            dyn Fn(&Arc<persistConn>, super::client::ConnSrc) -> bool + Send + Sync,
+        >,
+    ) -> (Option<pcLoops>, error) {
+        let src = match self.__take_src() {
+            Some(s) => s,
+            None => {
+                return (
+                    None,
+                    errors::New(crate::string("http: persistConn has no connection")),
+                )
+            }
+        };
+        let mut src = src;
+        let wh = match &mut src {
+            super::client::ConnSrc::Tcp(br) => {
+                let (w, e) = br.__rd_mut().__dup_handle();
+                if !e.IsNil() {
+                    self.__put_src(src);
+                    return (None, e);
+                }
+                w
+            }
+            _ => {
+                self.__put_src(src);
+                return (
+                    None,
+                    errors::New(crate::string(
+                        "http: transport loops need a splittable (TCP) connection",
+                    )),
+                );
+            }
+        };
+        let loops = pcLoops {
+            writech: crate::make!(chan writeRequest, 1),
+            reqch: crate::make!(chan requestAndChan, 1),
+            closech: crate::make!(chan (), 1),
+            writeErrCh: crate::make!(chan error, 1),
+        };
+        {
+            let pc = self.clone();
+            let writech = loops.writech.clone();
+            let closech = loops.closech.clone();
+            let wec = loops.writeErrCh.clone();
+            crate::go!(stack(256 * crate::KB), move || {
+                pc.writeLoop(wh, writech, closech, wec, expect_timeout);
+            });
+        }
+        {
+            let pc = self.clone();
+            let reqch = loops.reqch.clone();
+            let wec = loops.writeErrCh.clone();
+            crate::go!(stack(256 * crate::KB), move || {
+                pc.readLoop(src, reqch, wec, bank);
+            });
+        }
+        return (Some(loops), errors::nil);
+    }
+
     // go: sdk 1.25.5 net/http/transport.go:2529-2546 persistConn.waitForContinue
-    // goishlint:ignore GOISH020 waitForContinue — ExpectContinueTimeout
-    // lives on the Transport; Go reaches it through pc.t, goish's pc
-    // carries no Transport back-pointer, so it arrives as a param.
+    // goishlint:ignore GOISH020 waitForContinue — Go reads
+    // ExpectContinueTimeout through pc.t; goish's pc carries no
+    // Transport back-pointer, so the timeout arrives directly.
     /// Go: "waitForContinue returns the function to block until any
     /// response, timeout or connection close. After any of them, the
     /// function returns a bool which indicates if the body should be
@@ -1021,9 +1436,9 @@ impl persistConn {
     /// arm watches pc.closech (the readLoop dying); with no
     /// concurrent closer, a conn already recorded broken answers
     /// false up front.
-    pub(crate) fn waitForContinue(
+    pub fn waitForContinue(
         &self,
-        t: &Transport,
+        timeout: crate::time::Duration,
         continueCh: Option<crate::gochan::chan<bool>>,
     ) -> Option<alloc::boxed::Box<dyn FnOnce() -> bool>> {
         let ch = match continueCh {
@@ -1033,7 +1448,6 @@ impl persistConn {
         if self.isBroken() {
             return Some(alloc::boxed::Box::new(|| false));
         }
-        let timeout = t.ExpectContinueTimeout;
         return Some(alloc::boxed::Box::new(move || {
             let timer = crate::time::NewTimer(timeout);
             let out = crate::select! {
@@ -1870,6 +2284,38 @@ fn removeIdleConnLocked(pool: &mut idlePool, pconn: &Arc<persistConn>) -> bool {
 }
 
 // ─── retry decision ─────────────────────────────────────────────────
+
+// go: none — goish-only: the buffered-bytes snapshot
+// readLoopPeekFailLocked sniffs for an unsolicited 408.
+fn __peek_buffered(src: &mut super::client::ConnSrc) -> crate::goslice::slice<crate::types::byte> {
+    let out = match src {
+        super::client::ConnSrc::Tcp(br) => {
+            let n = br.Buffered();
+            if n > 0 {
+                br.Peek(n).0
+            } else {
+                crate::goslice::slice::__from_vec(alloc::vec::Vec::new())
+            }
+        }
+        super::client::ConnSrc::Tls(br) => {
+            let n = br.Buffered();
+            if n > 0 {
+                br.Peek(n).0
+            } else {
+                crate::goslice::slice::__from_vec(alloc::vec::Vec::new())
+            }
+        }
+        super::client::ConnSrc::Dyn(br) => {
+            let n = br.Buffered();
+            if n > 0 {
+                br.Peek(n).0
+            } else {
+                crate::goslice::slice::__from_vec(alloc::vec::Vec::new())
+            }
+        }
+    };
+    return out;
+}
 
 // go: none — goish-only: see Transport::__bank_cfg.
 pub(crate) struct idleBankCfg {
