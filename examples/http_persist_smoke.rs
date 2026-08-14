@@ -16,7 +16,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use goish::fmt;
 use goish::net;
 use goish::net::http::httputil::persist::{
-    NewClientConn, NewProxyClientConn, NewServerConn,
+    ErrPipeline, NewClientConn, NewProxyClientConn, NewServerConn,
 };
 use goish::{go, string, time};
 
@@ -80,6 +80,73 @@ fn run() {
         check("ClientConn.Hijack detaches the same way",
               cc.Hijack().is_some() && cc.Hijack().is_none(), string(""));
         let _ = pc.Close();
+    }
+
+    // ── Do against a real HTTP server ──
+    //
+    // ClientConn.Do is Write + Read, and the pipeline id minted by the
+    // first is what lets the second know which response is its own.
+    {
+        let srvmux = goish::net::http::ServeMux::new();
+        srvmux.HandleFunc("/hi", |w, r| {
+            w.Header().Set(string("X-Echo"), r.URL.Path.clone());
+            let _ = w.Write(goish::bytes("persist-ok"));
+        });
+        let srv = alloc::sync::Arc::new(goish::net::http::Server {
+            Handler: alloc::sync::Arc::new(srvmux),
+            ReadHeaderTimeout: time::Duration(3 * 1_000_000_000),
+            ..Default::default()
+        });
+        let (sln, se) = net::Listen(string("tcp"), string("127.0.0.1:0"));
+        if !se.IsNil() {
+            check("listen 2", false, fmt::Sprintf!("%v", se));
+            finish();
+        }
+        let sport = sln.Addr().Port;
+        {
+            let s2 = srv.clone();
+            go!(stack(1024 * 1024), move || { let _ = s2.Serve(sln); });
+        }
+        time::Sleep(time::Duration(150 * 1_000_000));
+
+        let saddr = fmt::Sprintf!("127.0.0.1:%d", sport as i64);
+        let (c3, _) = net::Dial(string("tcp"), saddr.clone());
+        let cc2 = NewClientConn(c3, None);
+        let (req, _) = goish::net::http::NewRequest(
+            string("GET"),
+            fmt::Sprintf!("http://%s/hi", saddr),
+            goish::goslice::slice::new(),
+        );
+        let (resp, derr) = cc2.Do(&req);
+        let body = goish::string::from_bytes(&{ let (b, _) = goish::io::ReadAll(&mut resp.Body.clone()); b });
+        check(
+            "ClientConn.Do writes the request and reads its response",
+            derr.IsNil() && resp.StatusCode == 200
+                && resp.Header.Get(string("X-Echo")) == "/hi"
+                && body == "persist-ok",
+            fmt::Sprintf!("err=%v code=%d body=%q", derr, resp.StatusCode, body),
+        );
+        check(
+            "the pipeline slot is consumed: Pending is back to zero",
+            cc2.Pending() == 0,
+            fmt::Sprintf!("pending=%d", cc2.Pending()),
+        );
+
+        // Read without a matching Write has no pipeline slot, and must
+        // say so rather than steal someone else's response.
+        let (req2, _) = goish::net::http::NewRequest(
+            string("GET"),
+            fmt::Sprintf!("http://%s/hi", saddr),
+            goish::goslice::slice::new(),
+        );
+        let (_, perr) = cc2.Read(&req2);
+        check(
+            "Read with no prior Write is ErrPipeline",
+            goish::errors::Is(perr.clone(), ErrPipeline),
+            fmt::Sprintf!("%v", perr),
+        );
+        let _ = cc2.Close();
+        let _ = srv.clone().Close();
     }
 
     finish();
