@@ -30,6 +30,7 @@ extern crate alloc;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use crate::errors::{self, error};
 use crate::goslice::slice;
 use crate::string;
 use crate::types::int;
@@ -394,9 +395,9 @@ pub fn is408Message(buf: &slice<crate::types::byte>) -> bool {
 /// that always returns the same URL."
 pub fn ProxyURL(
     fixedURL: URL,
-) -> Arc<dyn Fn(&Request) -> (URL, crate::errors::error) + Send + Sync> {
-    return Arc::new(move |_r: &Request| -> (URL, crate::errors::error) {
-        return (fixedURL.clone(), crate::errors::nil);
+) -> Arc<dyn Fn(&Request) -> (URL, error) + Send + Sync> {
+    return Arc::new(move |_r: &Request| -> (URL, error) {
+        return (fixedURL.clone(), errors::nil);
     });
 }
 
@@ -435,6 +436,113 @@ impl connectMethod {
         }
         return string::new();
     }
+}
+
+// ─── error sentinels ────────────────────────────────────────────────
+
+crate::var! {
+    // go: sdk 1.25.5 net/http/transport.go:999-1015 errKeepAlivesDisabled
+    pub errKeepAlivesDisabled: error = "http: putIdleConn: keep alives disabled";
+    // go: sdk 1.25.5 net/http/transport.go:999-1015 errConnBroken
+    pub errConnBroken: error = "http: putIdleConn: connection is in bad state";
+    // go: sdk 1.25.5 net/http/transport.go:999-1015 errCloseIdle
+    pub errCloseIdle: error = "http: putIdleConn: CloseIdleConnections was called";
+    // go: sdk 1.25.5 net/http/transport.go:999-1015 errTooManyIdle
+    pub errTooManyIdle: error = "http: putIdleConn: too many idle connections";
+    // go: sdk 1.25.5 net/http/transport.go:999-1015 errTooManyIdleHost
+    pub errTooManyIdleHost: error = "http: putIdleConn: too many idle connections for host";
+    // go: sdk 1.25.5 net/http/transport.go:999-1015 errCloseIdleConns
+    pub errCloseIdleConns: error = "http: CloseIdleConnections called";
+    // go: sdk 1.25.5 net/http/transport.go:999-1015 errReadLoopExiting
+    pub errReadLoopExiting: error = "http: persistConn.readLoop exiting";
+    // go: sdk 1.25.5 net/http/transport.go:999-1015 errIdleConnTimeout
+    pub errIdleConnTimeout: error = "http: idle connection timeout";
+    // go: sdk 1.25.5 net/http/transport.go:999-1015 errServerClosedIdle
+    //
+    // Go: "not seen by users for idempotent requests, but may be seen
+    // by a user if the server shuts down an idle connection and sends
+    // its FIN in flight with already-written POST body bytes from the
+    // client." (golang/go#19943)
+    pub errServerClosedIdle: error = "http: server closed idle connection";
+    // go: sdk 1.25.5 net/http/transport.go:751 errCannotRewind
+    pub errCannotRewind: error = "net/http: cannot rewind body after connection loss";
+    // go: sdk 1.25.5 net/http/transport.go:2729 errRequestCanceled
+    pub errRequestCanceled: error = "net/http: request canceled";
+}
+
+// go: sdk 1.25.5 net/http/transport.go:2589-2591 nothingWrittenError
+// Go: "nothingWrittenError wraps a write errors which ended up
+// writing zero bytes." Whether a retry is safe hinges on this: if
+// nothing reached the wire, re-sending cannot duplicate a side
+// effect. A sentinel because goish has no errors::As.
+crate::var! {
+    pub errNothingWritten: error = "http: nothing written";
+}
+
+// go: sdk 1.25.5 net/http/transport.go:1024-1026 transportReadFromServerError
+// Go: "used by Transport.readLoop when the 1 byte peek read fails and
+// we're actually anticipating a response. Usually this is just due to
+// the inherent keep-alive shut down race."
+crate::var! {
+    pub errTransportReadFromServer: error = "http: transport read from server";
+}
+
+// ─── retry decision ─────────────────────────────────────────────────
+
+// go: sdk 1.25.5 net/http/transport.go:806-852 persistConn.shouldRetryRequest
+/// Go: "whether we should retry sending a failed HTTP request on a new
+/// connection."
+///
+/// Go's receiver is `*persistConn`, which is not ported yet; the only
+/// thing it reads from it is `pc.isReused()`, so that arrives as a
+/// parameter. Every other branch is verbatim.
+///
+/// The ordering matters and is not arbitrary. A FRESH connection never
+/// retries — Go's comment: "if we retried now, we could loop forever
+/// creating new connections and retrying if the server is just hanging
+/// up on us because it doesn't like our request". And nothing-written
+/// is checked BEFORE replayability, because a request that never
+/// reached the wire is safe to re-send whatever its method.
+pub fn shouldRetryRequest(
+    req: &Request,
+    err: error,
+    isReused: bool,
+) -> bool {
+    if errors::Is(err.clone(), super::request::errMissingHost.clone()) {
+        // Go: "User error."
+        return false;
+    }
+    if !isReused {
+        // Go: "This was a fresh connection. There's no reason the
+        // server should've hung up on us."
+        return false;
+    }
+    if errors::Is(err.clone(), errNothingWritten) {
+        // Go: "We never wrote anything, so it's safe to retry, if
+        // there's no body or we can 'rewind' the body with GetBody."
+        //
+        // goish's Request owns its body as a `slice<byte>`, which is
+        // always replayable, so Go's `req.GetBody != nil` half is
+        // always satisfied here.
+        return true;
+    }
+    if !req.isReplayable() {
+        // Go: "Don't retry non-idempotent requests."
+        return false;
+    }
+    if errors::Is(err.clone(), errTransportReadFromServer) {
+        // Go: "We got some non-EOF net.Conn.Read failure reading the
+        // 1st response byte from the server."
+        return true;
+    }
+    if errors::Is(err, errServerClosedIdle) {
+        // Go: "The server replied with io.EOF while we were trying to
+        // read the response. Probably an unfortunate keep-alive
+        // timeout, just as the client was writing a request."
+        return true;
+    }
+    // Go: "conservatively"
+    return false;
 }
 
 // ─── registered protocols ───────────────────────────────────────────
@@ -481,11 +589,11 @@ impl Transport {
     /// `*transportRequest`; goish has no such wrapper yet, so it takes
     /// the Request directly — the wrapper only adds extra headers and
     /// an error cell, neither of which this reads.
-    pub fn connectMethodForRequest(&self, req: &Request) -> (connectMethod, crate::errors::error) {
+    pub fn connectMethodForRequest(&self, req: &Request) -> (connectMethod, error) {
         let mut cm = connectMethod::default();
         cm.targetScheme = req.URL.Scheme.clone();
         cm.targetAddr = canonicalAddr(&req.URL);
-        let mut err = crate::errors::nil;
+        let mut err = errors::nil;
         if let Some(p) = self.Proxy.as_ref() {
             let (u, e) = p(req);
             err = e;

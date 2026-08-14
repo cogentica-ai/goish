@@ -566,6 +566,37 @@ impl Request {
     }
 
     // go: sdk 1.25.5 net/http/request.go:1579-1582 Request.requiresHTTP1
+    // go: sdk 1.25.5 net/http/request.go:1534-1548 Request.isReplayable
+    /// Go: whether this request may be re-sent on a fresh connection
+    /// after a connection failure.
+    ///
+    /// GET/HEAD/OPTIONS/TRACE are replayable because they are
+    /// idempotent. The two Idempotency-Key headers are non-standard
+    /// but "widely used to mean a POST or other request is idempotent"
+    /// (golang/go#19943) — a server that honours them opts its POSTs
+    /// into retry, so dropping the check would silently stop retrying
+    /// requests the caller expected to be retried.
+    ///
+    /// Go also requires `Body == nil || Body == NoBody || GetBody !=
+    /// nil`; goish's Request owns its body as a `slice<byte>`, which
+    /// is always replayable, so that guard is always satisfied.
+    pub fn isReplayable(&self) -> bool {
+        let m = if self.Method.Len() == 0 {
+            string("GET")
+        } else {
+            self.Method.clone()
+        };
+        if m == "GET" || m == "HEAD" || m == "OPTIONS" || m == "TRACE" {
+            return true;
+        }
+        if self.Header.has(string("Idempotency-Key"))
+            || self.Header.has(string("X-Idempotency-Key"))
+        {
+            return true;
+        }
+        return false;
+    }
+
     pub fn requiresHTTP1(&self) -> bool {
         return hasToken(self.Header.Get(string("Connection")), string("upgrade"))
             && crate::net::http::internal::ascii::EqualFold(
