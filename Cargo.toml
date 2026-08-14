@@ -1535,3 +1535,7 @@ path = "examples/testing_example_smoke.rs"
 [[example]]
 name = "slog_resolve_smoke"
 path = "examples/slog_resolve_smoke.rs"
+
+[[example]]
+name = "https_server_smoke"
+path = "examples/https_server_smoke.rs"

@@ -1540,9 +1540,9 @@ pub fn ConnStateString(c: ConnState) -> string {
 // five values at that width. Written as literals rather than a cast of
 // the ConnState consts because a const initializer cannot go through
 // goish's call-cast; they are kept adjacent so a divergence is visible.
-const CONN_STATE_NEW: u8 = 0; // StateNew
-const CONN_STATE_ACTIVE: u8 = 1; // StateActive
-const CONN_STATE_IDLE: u8 = 2; // StateIdle
+pub(crate) const CONN_STATE_NEW: u8 = 0; // StateNew
+pub(crate) const CONN_STATE_ACTIVE: u8 = 1; // StateActive
+pub(crate) const CONN_STATE_IDLE: u8 = 2; // StateIdle
 
 /// Per-connection tracking record — goish's rendering of Go's
 /// `conn.curState` packed atomic (server.go:299,
@@ -1566,7 +1566,7 @@ pub(crate) struct ConnTrack {
 impl ConnTrack {
     // go: sdk 1.25.5 net/http/server.go:1865-1884 conn.setState
     //
-    fn setState(&self, st: u8) {
+    pub(crate) fn setState(&self, st: u8) {
         self.since_ns
             .store(crate::runtime::sysmon::monotonic_ns(), Ordering::Relaxed);
         self.state.store(st, Ordering::Release);
@@ -2172,6 +2172,42 @@ impl Server {
     /// out-of-band `close(2)`: the owning serve_conn sees the timeout
     /// error and closes the fd itself, keeping single-owner fd
     /// discipline (no close/reuse race with an in-flight read).
+    /// Register a connection with the shutdown / idle-kick machinery
+    /// and bump `active_conns`, returning its tracking record.
+    ///
+    /// goish-only plumbing: Go needs no equivalent because plaintext
+    /// and TLS conns both flow through the single `conn.serve`, whereas
+    /// goish's HTTPS loop lives in server_tls.rs. Without this an
+    /// HTTPS conn is invisible to `Shutdown`, which then returns while
+    /// requests are still in flight.
+    pub(crate) fn __register_conn(&self, pd_addr: usize) -> Arc<ConnTrack> {
+        self.__state.active_conns.fetch_add(1, Ordering::AcqRel);
+        let track = Arc::new(ConnTrack {
+            state: AtomicU8::new(CONN_STATE_NEW),
+            since_ns: AtomicI64::new(crate::runtime::sysmon::monotonic_ns()),
+            pd_addr: AtomicUsize::new(pd_addr),
+        });
+        self.__state.tracked_conns.Lock().push(track.clone());
+        return track;
+    }
+
+    /// Drop a connection's tracking record and release its slot in
+    /// `active_conns`. Idempotent per record: `retain` is a no-op the
+    /// second time, and the counter is only decremented when the
+    /// record was still present.
+    pub(crate) fn __unregister_conn(&self, track: &Arc<ConnTrack>) {
+        let removed = {
+            let mut g = self.__state.tracked_conns.Lock();
+            let before = g.len();
+            g.retain(|t| !Arc::ptr_eq(t, track));
+            before != g.len()
+        };
+        if removed {
+            self.__state.active_conns.fetch_sub(1, Ordering::AcqRel);
+        }
+        return;
+    }
+
     fn kick_tracked_conns(&self, all: bool) {
         let now = crate::runtime::sysmon::monotonic_ns();
         let conns: Vec<Arc<ConnTrack>> = self.__state.tracked_conns.Lock().clone();
@@ -2458,7 +2494,7 @@ impl Server {
 
     /// `(*Server).logf` (server.go:3691): route a message through
     /// `ErrorLog` when set, else the `log` package default (stderr).
-    fn logf(&self, msg: string) {
+    pub(crate) fn logf(&self, msg: string) {
         match &self.ErrorLog {
             Some(l) => {
                 let _ = l.Output(2, msg);
@@ -2471,7 +2507,7 @@ impl Server {
 
     /// Resolve effective read-header timeout: `ReadHeaderTimeout` if
     /// set, else `ReadTimeout`, else the v1 default (5s).
-    fn read_header_timeout_ns(&self) -> i64 {
+    pub(crate) fn read_header_timeout_ns(&self) -> i64 {
         if self.ReadHeaderTimeout.0 > 0 {
             self.ReadHeaderTimeout.0 as i64
         } else if self.ReadTimeout.0 > 0 {
@@ -2486,7 +2522,7 @@ impl Server {
     /// goish keeps its v1 safety net when both are zero (Go leaves
     /// idle conns unbounded; goish falls back to the header timeout
     /// so an abandoned keep-alive conn always drains).
-    fn idle_timeout_ns(&self) -> i64 {
+    pub(crate) fn idle_timeout_ns(&self) -> i64 {
         if self.IdleTimeout.0 > 0 {
             self.IdleTimeout.0 as i64
         } else if self.ReadTimeout.0 > 0 {
@@ -2496,7 +2532,7 @@ impl Server {
         }
     }
 
-    fn write_timeout_ns(&self) -> i64 {
+    pub(crate) fn write_timeout_ns(&self) -> i64 {
         if self.WriteTimeout.0 > 0 {
             self.WriteTimeout.0 as i64
         } else {

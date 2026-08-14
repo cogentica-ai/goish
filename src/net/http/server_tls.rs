@@ -2,7 +2,7 @@
 //
 // Port of Go 1.25.5 net/http/server.go:
 //   Server.ServeTLS           (server.go:3511)
-//   Server.ListenAndServeTLS  (server.go:3639)
+//   Server.ListenAndServeTLS  (server.go:3732)
 //   ListenAndServeTLS         (server.go:3712)
 //
 // Go's `ServeTLS` wraps the listener with `crypto/tls.NewListener`
@@ -43,6 +43,7 @@ use crate::crypto::tls;
 use crate::errors::{self, error};
 use crate::goslice::slice;
 use crate::string;
+use crate::time;
 use crate::go;
 use crate::net;
 use crate::types::{byte, int};
@@ -258,8 +259,40 @@ impl Flusher for tlsResponse {
 
 /// Per-connection HTTPS serve loop: drive the handshake, then run
 /// HTTP/1.1 keep-alive over the established TLS conn.
-fn serve_tls_conn(srv: Arc<Server>, tls_conn: tls::Conn, handler: Arc<dyn Handler>) {
+fn serve_tls_conn(
+    srv: Arc<Server>,
+    tls_conn: tls::Conn,
+    handler: Arc<dyn Handler>,
+    raw_fd: i32,
+    pd_addr: usize,
+) {
     let conn = Arc::new(crate::sync::Mutex::new(tls_conn));
+    // Join the shutdown / idle-kick machinery. Without this an HTTPS
+    // conn is invisible to `Server.Shutdown`, which then returns while
+    // requests are still in flight and never kicks an idle HTTPS
+    // keep-alive conn. Go gets this for free: plaintext and TLS conns
+    // share `conn.serve` (server.go:2039).
+    let track = srv.__register_conn(pd_addr);
+    // Releases the slot on every ordinary exit path. The panic path
+    // cannot rely on it — goish recovery skips Rust drops — so the
+    // deferred recover below unregisters explicitly, and
+    // `__unregister_conn` is idempotent so the double call is safe.
+    struct TrackGuard<'a> {
+        srv: &'a Arc<Server>,
+        track: Arc<super::server::ConnTrack>,
+    }
+    impl<'a> Drop for TrackGuard<'a> {
+        // go: none — goish-only. Go relies on `defer` inside
+        // conn.serve; goish needs an explicit guard because the
+        // HTTPS loop is a separate function.
+        fn drop(&mut self) {
+            self.srv.__unregister_conn(&self.track);
+        }
+    }
+    let _track_guard = TrackGuard {
+        srv: &srv,
+        track: track.clone(),
+    };
     // Drive the handshake up front so a failure closes the conn
     // without reaching the handler.
     //
@@ -268,16 +301,42 @@ fn serve_tls_conn(srv: Arc<Server>, tls_conn: tls::Conn, handler: Arc<dyn Handle
     // (:1120). Formatting it per request cost an alloc *and* a lock
     // acquisition each; hoist both out of the loop, matching the
     // plaintext serve loop.
-    let remote_addr = {
+    //
+    // Go bounds the handshake with `Server.tlsHandshakeTimeout()`
+    // (server.go:3571) — the smallest positive of ReadHeaderTimeout /
+    // ReadTimeout / WriteTimeout — so a peer that completes the TCP
+    // connect and then stalls mid-handshake cannot pin the conn.
+    let (remote_addr, tls_state) = {
         let mut c = conn.Lock();
+        let hs_ns = srv.tlsHandshakeTimeout().Nanoseconds();
+        if hs_ns > 0 {
+            let _ = c.SetDeadline(time::Now().Add(time::Duration(hs_ns)));
+        }
         if !c.Handshake().IsNil() {
             let _ = c.Close();
             return;
         }
-        c.RemoteAddr().String()
+        if hs_ns > 0 {
+            let _ = c.SetDeadline(time::Time::default());
+        }
+        // Go snapshots the state ONCE after the handshake
+        // (`c.tlsState = new(tls.ConnectionState)`, server.go:1966)
+        // and readRequest copies the pointer onto every request
+        // (:1123). Post-handshake it does not change, so one Arc is
+        // shared by every request on this conn.
+        (
+            c.RemoteAddr().String(),
+            Arc::new(c.ConnectionState()),
+        )
     };
 
     let max_header_bytes = srv.MaxHeaderBytes;
+    // Read/write deadlines, resolved once per conn as the plaintext
+    // loop does (server.rs `serve_conn`).
+    let read_header_ns = srv.read_header_timeout_ns();
+    let idle_ns = srv.idle_timeout_ns();
+    let write_timeout_ns = srv.write_timeout_ns();
+    let mut first_request = true;
     // Recycled bufio backing buffer — the per-conn analogue of Go's
     // pooled `c.bufr` (newBufioReader, server.go:840), and the same
     // pattern the plaintext loop uses. The reader borrows the conn so
@@ -296,8 +355,19 @@ fn serve_tls_conn(srv: Arc<Server>, tls_conn: tls::Conn, handler: Arc<dyn Handle
         // Read one request. The bufio reader borrows the tls::Conn
         // through the mutex guard for the duration of the parse, then
         // hands its buffer back for the next request to reuse.
+        // Arm the wait-for-request read deadline: ReadHeaderTimeout on
+        // the first request, the idle bound between keep-alive
+        // requests (Go arms `idleTimeout()` while waiting for the next
+        // first byte, server.go:2135). Cleared once the headers parse
+        // so a handler's body read is not artificially capped.
+        let wait_ns = if first_request { read_header_ns } else { idle_ns };
+        first_request = false;
+
         let (mut req, err): (Request, error) = {
             let mut c = conn.Lock();
+            if wait_ns > 0 {
+                let _ = c.SetReadDeadline(time::Now().Add(time::Duration(wait_ns)));
+            }
             let mut br =
                 bufio::__new_reader_with_buf(&mut *c, core::mem::take(&mut rbuf));
             let out = ReadRequestWithLimit(&mut br, max_header_bytes);
@@ -309,6 +379,21 @@ fn serve_tls_conn(srv: Arc<Server>, tls_conn: tls::Conn, handler: Arc<dyn Handle
             let _ = c.Close();
             return;
         }
+        {
+            let c = conn.Lock();
+            let _ = c.SetReadDeadline(time::Time::default());
+            // Response phase: apply WriteTimeout if configured.
+            if write_timeout_ns > 0 {
+                let _ =
+                    c.SetWriteDeadline(time::Now().Add(time::Duration(write_timeout_ns)));
+            }
+        }
+        // Request in flight — Go's `c.setState(StateActive)`
+        // (server.go:2043): shutdown's idle-kick skips us now.
+        track.setState(super::server::CONN_STATE_ACTIVE);
+        // Go readRequest stamps the conn's TLS state onto every
+        // request served over TLS (server.go:1123).
+        req.TLS = Some(tls_state.clone());
         // Go conn.serve stamps `c.remoteAddr` at entry and readRequest
         // copies it onto every request (server.go:2076 / :1120).
         req.RemoteAddr = remote_addr.clone();
@@ -318,6 +403,33 @@ fn serve_tls_conn(srv: Arc<Server>, tls_conn: tls::Conn, handler: Arc<dyn Handle
         w.set_keep_alive(keep_alive);
         w.set_head(req.Method == string("HEAD"));
 
+        // Close the conn fd if the handler panics — the same guard the
+        // plaintext loop installs (server.rs, Go conn.serve's deferred
+        // recover at server.go:1944). goish's recovery longjmps to the
+        // goroutine entry without running Rust drops, so neither the
+        // `tls::Conn` nor its fd would ever be released: the client
+        // hangs on Read forever and the server leaks a descriptor per
+        // panicking request.
+        let panic_remote = remote_addr.clone();
+        let panic_srv = srv.clone();
+        let panic_track = track.clone();
+        crate::defer! {
+            let pv = crate::recover!();
+            if pv != crate::nil {
+                // Go logs "http: panic serving %v: %v\n%s" with a
+                // stack (server.go:1944); goish logs addr + value.
+                panic_srv.logf(crate::Sprintf!(
+                    "http: panic serving %s: %v",
+                    panic_remote,
+                    pv
+                ));
+                let _ = crate::syscall::Close(raw_fd);
+                // The TrackGuard above never fires on this path, so
+                // release the conn accounting here or Shutdown waits
+                // on a ghost conn forever.
+                panic_srv.__unregister_conn(&panic_track);
+            }
+        }
         handler.ServeHTTP(&w, &req);
         let _ = w.flush();
 
@@ -326,6 +438,10 @@ fn serve_tls_conn(srv: Arc<Server>, tls_conn: tls::Conn, handler: Arc<dyn Handle
             let _ = c.Close();
             return;
         }
+        // Waiting on the next keep-alive request — Go's
+        // `c.setState(StateIdle)` (server.go:2131), which is what
+        // makes this conn eligible for Shutdown's idle kick.
+        track.setState(super::server::CONN_STATE_IDLE);
     }
 }
 
@@ -376,6 +492,13 @@ impl Server {
                 self.__untrack_listener(&ln);
                 return err;
             }
+            // Grab the raw fd BEFORE the conn moves into the TLS
+            // wrapper: the panic path in `serve_tls_conn` closes it
+            // directly, because goish's recovery longjmps to the
+            // goroutine entry without running Rust drops.
+            let raw_fd = c.__fd();
+            let (_, pd) = c.__disconnect_watch_parts();
+            let pd_addr = pd as usize;
             let conn = tls::Server(alloc::boxed::Box::new(c), &cfg);
             let srv = self.clone();
             let h = handler.clone();
@@ -388,13 +511,13 @@ impl Server {
             // so depth is available while RSS still tracks only the
             // pages actually touched.
             go!(move || {
-                serve_tls_conn(srv, conn, h);
+                serve_tls_conn(srv, conn, h, raw_fd, pd_addr);
             });
         }
     }
 
     /// `(*Server).ListenAndServeTLS(certFile, keyFile)`
-    /// (server.go:3639) — bind `Addr` (default ":443") and serve
+    /// (server.go:3732) — bind `Addr` (default ":443") and serve
     /// HTTPS.
     pub fn ListenAndServeTLS<C, K>(self: Arc<Self>, certFile: C, keyFile: K) -> error
     where
