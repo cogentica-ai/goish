@@ -178,7 +178,9 @@ pub struct Cmd {
     /// Optional explicit environment. `nil`-equivalent (empty) means
     /// inherit the current process's environment.
     pub Env: slice<string>,
-    /// Optional working directory. Currently parsed but not honored.
+    /// Optional working directory. The child chdir()s here between
+    /// fork and exec, so a relative `Path` resolves against it exactly
+    /// as Go's `Cmd.Dir` describes.
     pub Dir: string,
     /// Optional stdin source. If set, a pipe is created and a goroutine
     /// copies from this reader to the child's stdin.
@@ -452,6 +454,17 @@ impl Cmd {
         for &x in self.Path.as_bytes() { path_buf.push(x); }
         path_buf.push(0);
 
+        // ── Dir NUL-buffer ──────────────────────────────────────────
+        // Prepared BEFORE the fork: allocation after fork is not
+        // async-signal-safe, and this is the same rule every other
+        // buffer here follows.
+        let mut dir_buf: Vec<u8> = Vec::new();
+        if self.Dir.Len() > 0 {
+            dir_buf.reserve(self.Dir.Len() as usize + 1);
+            for &x in self.Dir.as_bytes() { dir_buf.push(x); }
+            dir_buf.push(0);
+        }
+
         // ── Build envp ──────────────────────────────────────────────
         let env_strings: slice<string> = if crate::len(&self.Env) > 0 {
             self.Env.clone()
@@ -568,6 +581,15 @@ impl Cmd {
                 syscall::Close(err_pipe[1]);
             }
 
+            // Go: "Dir specifies the working directory of the command.
+            // If Dir is the empty string, Run runs the command in the
+            // calling process's current directory." The chdir belongs
+            // between fork and exec so the parent's cwd is untouched —
+            // doing it in the parent would race every other goroutine.
+            if !dir_buf.is_empty() && syscall::Chdir(dir_buf.as_ptr()) < 0 {
+                child_die(127);
+            }
+
             let _ = syscall::Execve(
                 path_buf.as_ptr(),
                 argv_ptrs.as_ptr(),
@@ -638,6 +660,24 @@ impl Cmd {
         self.cached_err_fd = err_pipe[0];
 
         crate::nilval::nil.into()
+    }
+
+    // go: none — goish-only: Go writes `cmd.Process.Kill()`, where
+    // `Process` is an `*os.Process` handle Start publishes. goish has
+    // no `os.Process`, so the kill lives on the Cmd that owns the pid.
+    /// Send SIGKILL to a child started with `Start()`. A no-op once
+    /// `Wait()` has reaped it — the pid is cleared there, and killing
+    /// a reaped pid could hit an unrelated process that inherited the
+    /// number.
+    pub fn Kill(&self) -> error {
+        if self.pid <= 0 {
+            return errors::New("os/exec: process already finished");
+        }
+        // SIGKILL
+        if crate::syscall::Kill(self.pid, 9) < 0 {
+            return errors::New("os/exec: kill failed");
+        }
+        return crate::nilval::nil.into();
     }
 
     /// `(*Cmd).Wait()` — wait for the child started with `Start()` to

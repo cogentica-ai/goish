@@ -48,6 +48,46 @@ fn main() {
     let err4 = cmd3.Run();
     check(err4 != nil, b"exec: false Run() should return error\n");
 
+    // ── Cmd.Dir is honored by the child ──────────────────────────────
+    // `pwd` prints the child's cwd; with Dir set it must be /tmp, and
+    // the PARENT's cwd must be untouched (the chdir lives between fork
+    // and exec, so a chdir in the parent would race every goroutine).
+    {
+        let mut cmd4 = exec::Command("pwd", goish::make!([]string, 0));
+        cmd4.Dir = string::from_static("/tmp");
+        let (out, err5) = cmd4.StdoutPipe();
+        check(err5 == nil, b"exec: StdoutPipe error\n");
+        let mut out = out;
+        let err6 = cmd4.Start();
+        check(err6 == nil, b"exec: pwd Start error\n");
+        let mut buf = goish::make!([]goish::byte, 256);
+        let (n, _) = goish::io::Reader::Read(&mut out, &mut buf);
+        let _ = cmd4.Wait();
+        let got = goish::string::from_bytes(&buf.slice(0, n));
+        let g: &str = got.as_ref();
+        check(g.trim_end() == "/tmp", b"exec: Cmd.Dir was not honored\n");
+    }
+
+    // ── Cmd.Kill terminates a running child ──────────────────────────
+    {
+        let mut cmd5 = exec::Command("sleep", goish::slice!([]string{ "30" }));
+        let err7 = cmd5.Start();
+        check(err7 == nil, b"exec: sleep Start error\n");
+        let err8 = cmd5.Kill();
+        check(err8 == nil, b"exec: Kill returned an error\n");
+        // Wait must return promptly (killed), not in 30 seconds.
+        let start = goish::time::Now();
+        let _ = cmd5.Wait();
+        let elapsed = goish::time::Since(start);
+        check(
+            elapsed < goish::time::Duration(5 * 1_000_000_000),
+            b"exec: Wait after Kill took too long\n",
+        );
+        // Killing a reaped pid is refused rather than signalling a
+        // pid the kernel may have handed to someone else.
+        check(cmd5.Kill() != nil, b"exec: Kill after Wait should fail\n");
+    }
+
     const OK: &[u8] = b"os/exec: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());
 }
