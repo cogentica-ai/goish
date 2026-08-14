@@ -405,6 +405,217 @@ pub fn joinURLPath(
     return (a.Path.clone() + b.Path.clone(), apath + bpath);
 }
 
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:215-219 BufferPool
+/// Go: "A BufferPool is an interface for getting and returning
+/// temporary byte slices for use by [io.CopyBuffer]."
+///
+/// The pool is the caller's to implement; goish does not ship one,
+/// because `sync::Pool` still faults under many-goroutine teardown.
+/// A plain per-proxy `Mutex<Vec<slice<byte>>>` is a fine stand-in.
+#[goish::interface] // goishlint:ignore GOISH022 - `goish::interface`, not `goish::int`
+pub trait BufferPool {
+    fn Get(&self) -> crate::goslice::slice<byte>;
+    fn Put(&self, b: crate::goslice::slice<byte>);
+}
+
+// goishlint:ignore GOISH019 maxLatencyWriter — Go's six fields
+// (dst, flush, latency, mu, t, flushPending) live behind one Arc here,
+// because `time::AfterFunc` needs a `Send + 'static` callback and the
+// callback is this same writer. The field set is preserved on
+// `mlwInner` / `mlwState`, one level down.
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:694-702 maxLatencyWriter
+/// The writer `copyResponse` interposes when a flush interval is set:
+/// every Write goes straight through, but a flush is scheduled rather
+/// than performed, and at most one is ever pending.
+///
+/// Go keeps `dst`, `flush` and the mutex in one struct with a pointer
+/// receiver. goish shares it through an `Arc` instead, because
+/// `time::AfterFunc` needs a `Send + 'static` closure and the timer
+/// callback and the writer are the same object.
+#[derive(Clone)]
+pub struct maxLatencyWriter {
+    inner: alloc::sync::Arc<mlwInner>,
+}
+
+// go: none — goish-only: the fields behind maxLatencyWriter's Arc.
+// `latency` and `dst` are immutable after construction, so only the
+// timer and the pending flag sit under the mutex — same partition as
+// Go's comment "protects t, flushPending, and dst.Flush".
+struct mlwInner {
+    dst: alloc::sync::Arc<
+        dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static,
+    >,
+    /// Go: "non-zero; negative means to flush immediately".
+    latency: crate::time::Duration,
+    mu: crate::sync::Mutex<mlwState>,
+}
+
+// go: none — goish-only: the mutex-guarded half of mlwInner.
+struct mlwState {
+    t: Option<crate::time::Timer>,
+    flushPending: bool,
+}
+
+// go: none — goish-only: Go builds the struct literal inline in
+// copyResponse, including `flush: http.NewResponseController(dst).Flush`
+// — a bound method value, which Rust has no spelling for. The
+// controller is rebuilt per flush instead; it holds nothing but the
+// writer, so this is the same work.
+pub fn __newMaxLatencyWriter(
+    dst: alloc::sync::Arc<
+        dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static,
+    >,
+    latency: crate::time::Duration,
+) -> maxLatencyWriter {
+    return maxLatencyWriter {
+        inner: alloc::sync::Arc::new(mlwInner {
+            dst,
+            latency,
+            mu: crate::sync::Mutex::new(mlwState {
+                t: None,
+                flushPending: false,
+            }),
+        }),
+    };
+}
+
+impl maxLatencyWriter {
+    // go: none — goish-only: Go's `flush` field, resolved per call.
+    fn flush(&self) -> crate::errors::error {
+        return super::super::responsecontroller::NewResponseController(self.inner.dst.clone())
+            .Flush();
+    }
+
+    // go: none — goish-only: copyResponse's "set up initial timer so
+    // headers get flushed even if body writes are delayed" pair, which
+    // reaches into the struct's unexported fields from outside any
+    // method. goish keeps the fields private, so the pair is named.
+    fn __arm_initial(&self) {
+        let me = self.clone();
+        let mut st = self.inner.mu.Lock();
+        st.flushPending = true;
+        st.t = Some(crate::time::AfterFunc(self.inner.latency, move || {
+            me.delayedFlush();
+        }));
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:704-722 maxLatencyWriter.Write
+    /// The write itself is never delayed — only the flush is. A
+    /// NEGATIVE latency flushes inline, which is how `flushInterval`
+    /// spells "this is a stream, never buffer it".
+    pub fn Write(
+        &self,
+        p: crate::goslice::slice<byte>,
+    ) -> (crate::types::int, crate::errors::error) {
+        let mut st = self.inner.mu.Lock();
+        let (n, err) = self.inner.dst.Write(p);
+        if self.inner.latency.0 < 0 {
+            let _ = self.flush();
+            return (n, err);
+        }
+        if st.flushPending {
+            return (n, err);
+        }
+        // Go: `m.t.Reset(m.latency)` when a timer already exists.
+        // goish's Timer has no Reset, so the spent timer is stopped
+        // and a fresh one armed — single-shot either way, and nothing
+        // observes the timer but this struct.
+        if let Some(t) = st.t.take() {
+            t.Stop();
+        }
+        let me = self.clone();
+        st.t = Some(crate::time::AfterFunc(self.inner.latency, move || {
+            me.delayedFlush();
+        }));
+        st.flushPending = true;
+        return (n, err);
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:724-732 maxLatencyWriter.delayedFlush
+    /// The `flushPending` re-check is not redundant: `stop` may have
+    /// run after `AfterFunc` already released this callback, and
+    /// flushing then would touch a response the handler is done with.
+    pub fn delayedFlush(&self) {
+        let mut st = self.inner.mu.Lock();
+        if !st.flushPending {
+            return;
+        }
+        let _ = self.flush();
+        st.flushPending = false;
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:734-741 maxLatencyWriter.stop
+    pub fn stop(&self) {
+        let mut st = self.inner.mu.Lock();
+        st.flushPending = false;
+        if let Some(t) = st.t.take() {
+            t.Stop();
+        }
+        return;
+    }
+}
+
+impl crate::io::Writer for maxLatencyWriter {
+    // go: none — goish-only: Go's maxLatencyWriter IS an io.Writer
+    // because its Write has the io.Writer signature. goish's method
+    // takes `&self` (the value is shared with the timer callback), so
+    // the `&mut self` trait method forwards to it.
+    fn Write(
+        &mut self,
+        p: crate::goslice::slice<byte>,
+    ) -> (crate::types::int, crate::errors::error) {
+        return maxLatencyWriter::Write(self, p);
+    }
+}
+
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:567-567 inOurTests
+/// Go: "whether we're in our own tests". Only the package's own tests
+/// set it; it exists so `shouldPanicOnCopyError` can panic there
+/// without breaking third-party tests written before Go 1.11.
+pub static inOurTests: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:574-587 shouldPanicOnCopyError
+/// Go: "reports whether the reverse proxy should panic with
+/// http.ErrAbortHandler. This is the right thing to do by default, but
+/// Go 1.10 and earlier did not, so existing unit tests weren't
+/// expecting panics. Only panic in our own tests, or when running
+/// under the HTTP server."
+///
+/// The server branch is the one that matters: under a Server the
+/// panic is recovered and the connection is torn down, which is how a
+/// half-copied body stops looking like a complete one. Outside a
+/// Server there is nobody to recover it, so the copy error is
+/// returned instead.
+pub fn shouldPanicOnCopyError(req: &super::super::request::Request) -> bool {
+    if inOurTests.load(core::sync::atomic::Ordering::Relaxed) {
+        // Go: "Our tests know to handle this panic."
+        return true;
+    }
+    if req
+        .Context()
+        .Value(super::super::server::ServerContextKey)
+        .is_some()
+    {
+        // Go: "We seem to be running under an HTTP server, so it'll
+        // recover the panic."
+        return true;
+    }
+    // Go: "Otherwise act like Go 1.10 and earlier to not break
+    // existing tests."
+    return false;
+}
+
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:818-818 errCopyDone
+crate::var! {
+    /// Go: "hijacked connection copy complete" — the sentinel the two
+    /// switchProtocolCopier goroutines send when their direction of an
+    /// upgraded connection finishes.
+    pub errCopyDone: error = "hijacked connection copy complete";
+}
+
 // goishlint:ignore GOISH019 ReverseProxy — Go's struct also carries
 // BufferPool (an io buffer recycler, which would sit on the open
 // sync::Pool fault) and the httptrace/h2 plumbing. What lands are the
@@ -440,6 +651,9 @@ pub struct ReverseProxy {
     pub ModifyResponse: Option<
         alloc::sync::Arc<dyn Fn(&mut super::super::response::Response) -> crate::errors::error + Send + Sync>,
     >,
+    /// Go: "optionally specifies a buffer pool to get byte slices for
+    /// use by [io.CopyBuffer] when copying HTTP response bodies."
+    pub BufferPool: Option<alloc::sync::Arc<dyn BufferPool + Send + Sync + 'static>>,
     /// Go: "an optional function that handles errors reaching the
     /// backend or errors from ModifyResponse."
     pub ErrorHandler: Option<
@@ -586,6 +800,146 @@ impl ReverseProxy {
             return crate::time::Duration(-1);
         }
         return self.FlushInterval;
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:626-651 ReverseProxy.copyResponse
+    /// Stream the backend body to the client, flushing at most every
+    /// `flushInterval`.
+    ///
+    /// The initial timer is armed BEFORE the first body byte is read,
+    /// which is what makes an SSE response usable: the head reaches
+    /// the client even when the backend then goes quiet for minutes.
+    /// A zero interval opts out entirely and writes straight through.
+    pub fn copyResponse(
+        &self,
+        dst: alloc::sync::Arc<
+            dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static,
+        >,
+        src: &mut dyn crate::io::Reader,
+        flushInterval: crate::time::Duration,
+    ) -> crate::errors::error {
+        // Go: `var w io.Writer = dst`, then replaces it with the
+        // latency writer. goish keeps the two apart because the
+        // ResponseWriter is not itself an io::Writer.
+        if flushInterval.0 != 0 {
+            let mlw = __newMaxLatencyWriter(dst, flushInterval);
+            let stopper = mlw.clone();
+            crate::defer! { stopper.stop(); }
+            // Go: "set up initial timer so headers get flushed even if
+            // body writes are delayed".
+            mlw.__arm_initial();
+            let mut w = mlw.clone();
+            let buf = self.__poolGet();
+            let (_, err) = self.copyBuffer(&mut w, src, buf.clone());
+            self.__poolPut(buf);
+            return err;
+        }
+        let mut w = responseWriterWriter { rw: dst };
+        let buf = self.__poolGet();
+        let (_, err) = self.copyBuffer(&mut w, src, buf.clone());
+        self.__poolPut(buf);
+        return err;
+    }
+
+    // go: none — goish-only: Go writes the pool pair as
+    // `buf = p.BufferPool.Get(); defer p.BufferPool.Put(buf)` inside
+    // copyResponse, and the deferred Put must run on every exit path.
+    // goish's `defer!` moves what it captures, so the pair is two
+    // named halves around the copy instead.
+    fn __poolGet(&self) -> crate::goslice::slice<byte> {
+        if let Some(p) = self.BufferPool.as_ref() {
+            return p.Get();
+        }
+        return crate::goslice::slice::<byte>::new();
+    }
+
+    // go: none — goish-only: the Put half of __poolGet. A nil pool
+    // never had a buffer to return, so this is a no-op there — Go's
+    // `defer` is registered only inside the same `!= nil` branch.
+    fn __poolPut(&self, buf: crate::goslice::slice<byte>) {
+        if let Some(p) = self.BufferPool.as_ref() {
+            p.Put(buf);
+        }
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:653-684 ReverseProxy.copyBuffer
+    /// Go: "copyBuffer returns any write errors or non-EOF read
+    /// errors, and the amount of bytes written."
+    ///
+    /// Three details carry weight. A read error that is neither EOF
+    /// nor `context.Canceled` is LOGGED but does not stop the loop
+    /// early — the bytes already read still get written. A short write
+    /// is `io.ErrShortWrite`, not silence. And EOF is normalised to
+    /// nil, so a clean end of body is not an error.
+    pub fn copyBuffer(
+        &self,
+        dst: &mut dyn crate::io::Writer,
+        src: &mut dyn crate::io::Reader,
+        buf: crate::goslice::slice<byte>,
+    ) -> (crate::types::int64, crate::errors::error) {
+        let mut buf = buf;
+        if crate::len(&buf) == 0 {
+            buf = crate::make!([]byte, 32 * 1024);
+        }
+        let mut written: crate::types::int64 = 0;
+        // Go's `for { … }` only leaves through a return; Rust needs
+        // the value to come out of the loop, so each exit breaks with
+        // the pair Go would have returned.
+        let out = loop {
+            let (nr, rerr) = src.Read(&mut buf);
+            if !rerr.IsNil()
+                && !crate::errors::Is(rerr.clone(), crate::io::EOF)
+                && !crate::errors::Is(rerr.clone(), crate::context::Canceled)
+            {
+                self.logf(
+                    crate::fmt::Sprintf!(
+                        "httputil: ReverseProxy read error during body copy: %v",
+                        rerr
+                    ),
+                    crate::goslice::slice::<crate::string>::new(),
+                );
+            }
+            if nr > 0 {
+                let (nw, werr) = dst.Write(buf.slice(0, nr));
+                if nw > 0 {
+                    written += crate::types::int64::from(nw);
+                }
+                if !werr.IsNil() {
+                    break (written, werr);
+                }
+                if nr != nw {
+                    break (written, crate::io::ErrShortWrite.into());
+                }
+            }
+            if !rerr.IsNil() {
+                if crate::errors::Is(rerr.clone(), crate::io::EOF) {
+                    break (written, crate::errors::nil);
+                }
+                break (written, rerr);
+            }
+        };
+        return out;
+    }
+}
+
+// go: none — goish-only: Go writes `var w io.Writer = dst` because its
+// ResponseWriter embeds io.Writer. goish's ResponseWriter has
+// `Write(&self, …)` and is not an io::Writer, so the adapter is
+// explicit.
+struct responseWriterWriter {
+    rw: alloc::sync::Arc<
+        dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static,
+    >,
+}
+
+impl crate::io::Writer for responseWriterWriter {
+    // go: none — goish-only: see responseWriterWriter above.
+    fn Write(
+        &mut self,
+        p: crate::goslice::slice<byte>,
+    ) -> (crate::types::int, crate::errors::error) {
+        return self.rw.Write(p);
     }
 }
 

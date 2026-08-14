@@ -80,6 +80,9 @@ struct tlsRespInner {
 }
 
 impl tlsResponse {
+    // go: none — goish-only: constructor for the TLS-side `response`.
+    // Go builds its `response` inline in `(*conn).readRequest`
+    // (server.go:1079); the split serve loop needs a named one.
     fn new(conn: Arc<crate::sync::Mutex<tls::Conn>>) -> Self {
         let mut h = Header::new();
         h.Set(string("Content-Type"), string("text/plain; charset=utf-8"));
@@ -314,7 +317,7 @@ fn serve_tls_conn(
     // (server.go:1961) — the smallest positive of ReadHeaderTimeout /
     // ReadTimeout / WriteTimeout — so a peer that completes the TCP
     // connect and then stalls mid-handshake cannot pin the conn.
-    let (remote_addr, tls_state) = {
+    let (remote_addr, tls_state, local_addr) = {
         let mut c = conn.Lock();
         let hs_ns = srv.tlsHandshakeTimeout().Nanoseconds();
         if hs_ns > 0 {
@@ -335,8 +338,20 @@ fn serve_tls_conn(
         (
             c.RemoteAddr().String(),
             Arc::new(c.ConnectionState()),
+            c.LocalAddr(),
         )
     };
+
+    // The per-conn context every request on this conn will carry.
+    let conn_ctx = crate::context::WithValue(
+        crate::context::WithValue(
+            crate::context::Background(),
+            super::server::ServerContextKey,
+            srv.clone(),
+        ),
+        super::server::LocalAddrContextKey,
+        local_addr,
+    );
 
     let max_header_bytes = srv.MaxHeaderBytes;
     // Read/write deadlines, resolved once per conn as the plaintext
@@ -405,6 +420,14 @@ fn serve_tls_conn(
         // Go conn.serve stamps `c.remoteAddr` at entry and readRequest
         // copies it onto every request (server.go:2076 / :1120).
         req.RemoteAddr = remote_addr.clone();
+        // Go builds ONE ctx per server (ServerContextKey, server.go:3461)
+        // and adds the local address per conn (:1937); every request
+        // served on the conn carries it. The plaintext loop does this
+        // through serve_conn's ctx argument — this loop has no ctx of
+        // its own, so it builds the same two values here. Without it a
+        // handler on HTTPS cannot reach its Server, and `httputil`'s
+        // shouldPanicOnCopyError silently takes the pre-1.11 branch.
+        req = req.WithContext(conn_ctx.clone());
 
         let keep_alive = request_keep_alive_pub(&mut req) && !srv.__state_in_shutdown();
         let w = tlsResponse::new(conn.clone());

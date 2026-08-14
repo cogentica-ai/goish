@@ -1482,6 +1482,24 @@ impl Handler for globalOptionsHandler {
     }
 }
 
+// go: sdk 1.25.5 net/http/server.go:244-244 ServerContextKey
+/// Go: "ServerContextKey is a context key. It can be used in HTTP
+/// handlers with Context.Value to access the server that started the
+/// handler. The associated value will be of type *Server."
+///
+/// Go's key is `&contextKey{"http-server"}` — a pointer, so no other
+/// package can forge it. goish's `context::WithValue` keys by `&str`,
+/// so the name is the key and the collision guarantee is by
+/// convention rather than by identity.
+pub const ServerContextKey: &str = "http-server";
+
+// go: sdk 1.25.5 net/http/server.go:250-250 LocalAddrContextKey
+/// Go: "LocalAddrContextKey is a context key. It can be used in HTTP
+/// handlers with Context.Value to access the local address the
+/// connection arrived on. The associated value will be of type
+/// net.Addr." See [`ServerContextKey`] on how the key is spelled.
+pub const LocalAddrContextKey: &str = "local-addr";
+
 // go: sdk 1.25.5 net/http/server.go:512-525 TrailerPrefix
 //
 /// Go: "TrailerPrefix is a magic prefix for [ResponseWriter.Header]
@@ -2097,6 +2115,11 @@ impl Server {
             Some(f) => f(&ln),
             None => crate::context::Background(),
         };
+        // Go: ctx := context.WithValue(baseCtx, ServerContextKey, s)
+        // (server.go:3461). A handler reaches its Server through this,
+        // and so does the package-level logf.
+        let base_ctx =
+            crate::context::WithValue(base_ctx, ServerContextKey, self.clone());
 
         // Go's accept-failure backoff (server.go:3421-3446): on a
         // temporary error (EMFILE/ENFILE/resource exhaustion), sleep
@@ -2447,6 +2470,12 @@ impl Server {
         // (server.go:2076); readRequest copies it onto every request
         // (:1120). Formatting it per request cost an alloc each.
         let remote_addr = conn.RemoteAddr().String();
+        // Go: ctx = context.WithValue(ctx, LocalAddrContextKey,
+        // c.rwc.LocalAddr()) (server.go:1937) — stamped once per conn,
+        // so a handler can tell WHICH listening address a request
+        // arrived on when the server has several.
+        let conn_ctx =
+            crate::context::WithValue(conn_ctx, LocalAddrContextKey, conn.LocalAddr());
         // Recycled bufio backing buffer — the per-conn analogue of
         // Go's pooled `c.bufr` (newBufioReader, server.go:840). Each
         // request's reader borrows the conn, so the reader itself is

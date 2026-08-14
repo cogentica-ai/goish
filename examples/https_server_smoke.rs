@@ -183,6 +183,26 @@ fn run() {
         let _ = w.Write(goish::convert::bytes(body));
     });
 
+    // The HTTPS loop builds its own context (it does not go through
+    // serve_conn), so the two server context keys have to be stamped
+    // there separately — and did not used to be at all.
+    mux.HandleFunc("/ctx", |w, r| {
+        let ctx = r.Context();
+        let srv_seen = ctx.Value(http::server::ServerContextKey).is_some();
+        let local = match ctx.Value(http::server::LocalAddrContextKey) {
+            None => string("absent"),
+            Some(v) => match v.downcast_ref::<net::TCPAddr>() {
+                None => string("wrong-type"),
+                Some(a) => a.String(),
+            },
+        };
+        let _ = w.Write(goish::convert::bytes(fmt::Sprintf!(
+            "server=%v local=%s",
+            srv_seen,
+            local
+        )));
+    });
+
     mux.HandleFunc("/panic", |_w, _r| {
         panic!("intentional panic from the /panic route");
     });
@@ -237,6 +257,27 @@ fn run() {
             pass("Request.TLS carries the negotiated version (TLS 1.3)");
         } else {
             fail(fmt::Sprintf!("negotiated version: got %s", resp));
+        }
+    }
+
+    // ── 1b. the two server context keys reach an HTTPS handler ──
+    {
+        let (resp, _) = tls_request(
+            port,
+            b"GET /ctx HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            8192,
+        );
+        let s: &str = resp.as_ref();
+        if s.contains("server=true") {
+            pass("ServerContextKey reaches a handler over HTTPS");
+        } else {
+            fail(fmt::Sprintf!("ServerContextKey: got %s", resp.clone()));
+        }
+        let want = fmt::Sprintf!("local=127.0.0.1:%d", port as i64);
+        if s.contains(want.as_ref() as &str) {
+            pass("LocalAddrContextKey carries the accepting address over HTTPS");
+        } else {
+            fail(fmt::Sprintf!("LocalAddrContextKey: got %s", resp));
         }
     }
 

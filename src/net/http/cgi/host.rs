@@ -39,7 +39,7 @@ pub fn upperCaseAndUnderscore(r: rune) -> rune {
     return r;
 }
 
-// go: sdk 1.25.5 net/http/cgi/host.go:98:115 removeLeadingDuplicates
+// go: sdk 1.25.5 net/http/cgi/host.go:98-115 removeLeadingDuplicates
 /// Drop every `key=value` entry that a LATER entry with the same key
 /// overrides, keeping the last occurrence.
 ///

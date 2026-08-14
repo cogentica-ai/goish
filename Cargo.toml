@@ -1617,5 +1617,13 @@ name = "http_proxyrequest_smoke"
 path = "examples/http_proxyrequest_smoke.rs"
 
 [[example]]
+name = "http_maxlatency_smoke"
+path = "examples/http_maxlatency_smoke.rs"
+
+[[example]]
+name = "http_servercontext_smoke"
+path = "examples/http_servercontext_smoke.rs"
+
+[[example]]
 name = "http_persist_smoke"
 path = "examples/http_persist_smoke.rs"
