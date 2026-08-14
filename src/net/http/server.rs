@@ -2380,7 +2380,7 @@ impl Server {
                 crate::runtime::netpoll::arm_watch(unsafe { &*watch_pd }, hook);
             }
 
-            let keep_alive = request_keep_alive(&req)
+            let keep_alive = request_keep_alive(&mut req)
                 && !self.__state.in_shutdown.load(Ordering::Acquire);
             let w = response::new(conn);
             w.__set_keep_alive(keep_alive);
@@ -2580,35 +2580,37 @@ pub fn Serve(ln: net::Listener, handler: Arc<dyn Handler>) -> error {
 /// HTTP/1.0: close default; `Connection: keep-alive` opts in.
 /// `pub(crate)` wrapper over `request_keep_alive` for the HTTPS serve
 /// loop in server_tls.rs.
-pub(crate) fn request_keep_alive_pub(req: &Request) -> bool {
-    request_keep_alive(req)
+pub(crate) fn request_keep_alive_pub(req: &mut Request) -> bool {
+    return request_keep_alive(req);
 }
 
-fn request_keep_alive(req: &Request) -> bool {
-    let conn_hdr = req.Header.Get(string("Connection"));
-    let conn_bytes = conn_hdr.as_bytes();
-    let says_close = ascii_eq_ignore_case(conn_bytes, b"close");
-    let says_keep_alive = ascii_eq_ignore_case(conn_bytes, b"keep-alive");
-    if req.ProtoMajor == 1 && req.ProtoMinor >= 1 {
-        !says_close
-    } else {
-        says_keep_alive
-    }
+/// Whether to reuse the connection after this request — the inverse of
+/// Go's `shouldClose` (transfer.go:745), which is what Go's conn.serve
+/// consults via `w.closeAfterReply`.
+///
+/// This used to be hand-rolled here, comparing the WHOLE `Connection`
+/// value against "close" / "keep-alive" with `Get()`. Two divergences
+/// from Go, both of which kept a connection alive that the client had
+/// asked to close:
+///
+///   - `Connection: keep-alive, close` (a real spelling) matched
+///     neither branch, so an HTTP/1.1 request took the `!says_close`
+///     path and stayed alive. Go tokenises the value and closes.
+///   - `Get()` returns only the FIRST header line, so a request
+///     sending `Connection: keep-alive` and `Connection: close`
+///     separately never saw the close. Go scans every value.
+///
+/// `removeCloseHeader` is false: the serve loop still needs to see the
+/// header, and Go passes false when reading a request too.
+fn request_keep_alive(req: &mut Request) -> bool {
+    return !super::transfer::shouldClose(
+        req.ProtoMajor,
+        req.ProtoMinor,
+        &mut req.Header,
+        false,
+    );
 }
 
-fn ascii_eq_ignore_case(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    for i in 0..a.len() {
-        let x = a[i] | 0x20;
-        let y = b[i] | 0x20;
-        if x != y {
-            return false;
-        }
-    }
-    true
-}
 
 // go: none — goish idiom: fill the `#[goish::interface]` downcast
 // registries for the types this package declares. See AGENTS.md §9b.

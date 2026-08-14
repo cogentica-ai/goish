@@ -399,7 +399,7 @@ fn serve_tls_conn(
         // copies it onto every request (server.go:2076 / :1120).
         req.RemoteAddr = remote_addr.clone();
 
-        let keep_alive = request_keep_alive_pub(&req) && !srv.__state_in_shutdown();
+        let keep_alive = request_keep_alive_pub(&mut req) && !srv.__state_in_shutdown();
         let w = tlsResponse::new(conn.clone());
         w.set_keep_alive(keep_alive);
         w.set_head(req.Method == string("HEAD"));
