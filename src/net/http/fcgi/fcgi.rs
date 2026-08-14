@@ -363,7 +363,22 @@ pub struct bufWriter {
     w: crate::bufio::Writer<streamWriter>,
 }
 
+// go: none — goish-only. Go's bufWriter EMBEDS `*bufio.Writer`, so it
+// inherits Write/Flush/WriteString; Rust has no embedding, so the two
+// the child response needs are forwarded explicitly.
+impl crate::io::Writer for bufWriter {
+    // go: none — forwards to the embedded bufio.Writer.
+    fn Write(&mut self, p: crate::goslice::slice<crate::types::byte>) -> (crate::types::int, error) {
+        return crate::io::Writer::Write(&mut self.w, p);
+    }
+}
+
 impl bufWriter {
+    // go: none — see the Writer impl above.
+    pub fn Flush(&mut self) -> error {
+        return self.w.Flush();
+    }
+
     // go: sdk 1.25.5 net/http/fcgi/fcgi.go:236-242 bufWriter.Close
     pub fn Close(&mut self) -> error {
         let err = self.w.Flush();

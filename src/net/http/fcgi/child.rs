@@ -66,6 +66,113 @@ pub struct request {
     pub keepConn: bool,
 }
 
+// go: sdk 1.25.5 net/http/fcgi/child.go:73-81 response
+/// The ResponseWriter a FastCGI child hands its Handler. Writes go
+/// out as `typeStdout` records on the FastCGI connection.
+pub struct response {
+    pub reqId: crate::types::uint16,
+    header: alloc::sync::Arc<crate::runtime::spin::SpinLock<super::super::header::Header>>,
+    state: crate::sync::Mutex<responseState>,
+    w: crate::sync::Mutex<super::fcgi::bufWriter>,
+}
+
+// go: none — goish-only: the three bools Go keeps as plain fields.
+// goish's ResponseWriter methods take `&self`, so they live behind a
+// mutex; same grouping the plaintext `response` uses.
+struct responseState {
+    code: crate::types::int,
+    wroteHeader: bool,
+    wroteCGIHeader: bool,
+}
+
+// go: sdk 1.25.5 net/http/fcgi/child.go:83-89 newResponse
+pub fn newResponse(c: &alloc::sync::Arc<super::fcgi::conn>, req: &request) -> response {
+    return response {
+        reqId: req.reqId,
+        header: alloc::sync::Arc::new(crate::runtime::spin::SpinLock::new(
+            super::super::header::Header::new(),
+        )),
+        state: crate::sync::Mutex::new(responseState {
+            code: 0,
+            wroteHeader: false,
+            wroteCGIHeader: false,
+        }),
+        w: crate::sync::Mutex::new(super::fcgi::newWriter(c, super::fcgi::typeStdout, req.reqId)),
+    };
+}
+
+impl response {
+    // go: sdk 1.25.5 net/http/fcgi/child.go:91-93 response.Header
+    pub fn Header(&self) -> super::super::responsewriter::HeaderHandle {
+        return super::super::responsewriter::HeaderHandle::__from_arc(self.header.clone());
+    }
+
+    // go: sdk 1.25.5 net/http/fcgi/child.go:104-120 response.WriteHeader
+    pub fn WriteHeader(&self, code: crate::types::int) {
+        let mut st = self.state.Lock();
+        if st.wroteHeader {
+            return;
+        }
+        st.wroteHeader = true;
+        st.code = code;
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/fcgi/child.go:126-138 response.writeCGIHeader
+    /// Emit the CGI-style head: a `Status:` line, then the headers,
+    /// then a blank line.
+    ///
+    /// Two details that are not decoration. The Content-Type is
+    /// SNIFFED from the first body bytes when the handler set none —
+    /// and NOT for 304, which must not carry one. And the whole head
+    /// is flushed here, before any body byte, so the parent sees a
+    /// complete response head even if the handler then stalls.
+    pub fn writeCGIHeader(&self, p: &crate::goslice::slice<crate::types::byte>) {
+        {
+            let mut st = self.state.Lock();
+            if st.wroteCGIHeader {
+                return;
+            }
+            st.wroteCGIHeader = true;
+        }
+        let code = self.state.Lock().code;
+        let mut w = self.w.Lock();
+        let head = crate::fmt::Sprintf!(
+            "Status: %s %s\r\n",
+            crate::strconv::Itoa(code),
+            super::super::status::StatusText(code)
+        );
+        let _ = crate::io::Writer::Write(
+            &mut *w,
+            crate::convert::bytes(head),
+        );
+        {
+            let mut h = self.header.lock();
+            if code != super::super::status::StatusNotModified
+                && h.Get(crate::string("Content-Type")).Len() == 0
+            {
+                h.Set(
+                    crate::string("Content-Type"),
+                    super::super::sniff::DetectContentType(p.clone()),
+                );
+            }
+            let _ = h.Write(&mut *w);
+        }
+        let _ = crate::io::Writer::Write(&mut *w, crate::convert::bytes("\r\n"));
+        let _ = w.Flush();
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/fcgi/child.go:140-145 response.Flush
+    pub fn Flush(&self) {
+        if !self.state.Lock().wroteHeader {
+            self.WriteHeader(super::super::status::StatusOK);
+        }
+        let _ = self.w.Lock().Flush();
+        return;
+    }
+}
+
 // go: sdk 1.25.5 net/http/fcgi/child.go:37-45 newRequest
 pub fn newRequest(reqId: uint16, flags: uint8) -> request {
     return request {
