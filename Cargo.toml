@@ -1611,3 +1611,7 @@ path = "examples/http_maxbytes_close_smoke.rs"
 [[example]]
 name = "http_cgi_host_smoke"
 path = "examples/http_cgi_host_smoke.rs"
+
+[[example]]
+name = "http_proxyrequest_smoke"
+path = "examples/http_proxyrequest_smoke.rs"

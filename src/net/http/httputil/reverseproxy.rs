@@ -405,6 +405,81 @@ pub fn joinURLPath(
     return (a.Path.clone() + b.Path.clone(), apath + bpath);
 }
 
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:30-40 ProxyRequest
+/// Go: "A ProxyRequest contains a request to be rewritten by a
+/// ReverseProxy." `In` is the inbound request as received; `Out` is
+/// the one that will be sent upstream, and is the only one a Rewrite
+/// func may mutate.
+pub struct ProxyRequest<'a> {
+    /// Go: "the request received by the proxy. The Rewrite function
+    /// must not modify In."
+    pub In: &'a super::super::request::Request,
+    /// Go: "the request which will be sent by the proxy."
+    pub Out: &'a mut super::super::request::Request,
+}
+
+impl<'a> ProxyRequest<'a> {
+    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:56-59 ProxyRequest.SetURL
+    /// Go: rewrite the outbound URL to route to `target`, then CLEAR
+    /// `Out.Host`.
+    ///
+    /// That clearing is the load-bearing half. Leaving Host set sends
+    /// the client's Host header to the backend, so a backend that
+    /// routes by Host — a vhost, or anything doing name-based TLS —
+    /// sees the wrong site. Go's own doc says SetURL "rewrites the
+    /// outbound Host header to match the target's host".
+    pub fn SetURL(&mut self, target: &super::super::url::URL) {
+        rewriteRequestURL(self.Out, target);
+        self.Out.Host = crate::string::new();
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:80-97 ProxyRequest.SetXForwarded
+    /// Go: "sets the X-Forwarded-For, X-Forwarded-Host, and
+    /// X-Forwarded-Proto headers of the outbound request."
+    ///
+    /// It appends to the OUTBOUND header, not the inbound one — so a
+    /// Rewrite that has not copied the client's X-Forwarded-For across
+    /// gets a chain containing only addresses this proxy observed,
+    /// which is what makes the value trustworthy. And when RemoteAddr
+    /// cannot be split, the header is DELETED rather than left alone:
+    /// a stale value is worse than none.
+    pub fn SetXForwarded(&mut self) {
+        let (clientIP, _, err) = crate::net::SplitHostPort(self.In.RemoteAddr.clone());
+        if err.IsNil() {
+            let prior = self.Out.Header.Values(crate::string("X-Forwarded-For"));
+            let mut v = clientIP;
+            if prior.Len() > 0 {
+                let mut joined = crate::string::new();
+                for i in 0..prior.Len() {
+                    if i > 0 {
+                        joined = crate::fmt::Sprintf!("%s, %s", joined, prior[i].clone());
+                    } else {
+                        joined = prior[i].clone();
+                    }
+                }
+                v = crate::fmt::Sprintf!("%s, %s", joined, v);
+            }
+            self.Out.Header.Set(crate::string("X-Forwarded-For"), v);
+        } else {
+            self.Out.Header.Del(crate::string("X-Forwarded-For"));
+        }
+        self.Out
+            .Header
+            .Set(crate::string("X-Forwarded-Host"), self.In.Host.clone());
+        if self.In.TLS.is_none() {
+            self.Out
+                .Header
+                .Set(crate::string("X-Forwarded-Proto"), crate::string("http"));
+        } else {
+            self.Out
+                .Header
+                .Set(crate::string("X-Forwarded-Proto"), crate::string("https"));
+        }
+        return;
+    }
+}
+
 // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:282-291 rewriteRequestURL
 //
 /// Points `req` at `target`: target scheme and host, the two paths
