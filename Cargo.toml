@@ -1551,3 +1551,7 @@ path = "examples/http_keepalive_token_smoke.rs"
 [[example]]
 name = "http_redirect_creds_smoke"
 path = "examples/http_redirect_creds_smoke.rs"
+
+[[example]]
+name = "http_socks_smoke"
+path = "examples/http_socks_smoke.rs"
