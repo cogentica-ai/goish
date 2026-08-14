@@ -1659,3 +1659,7 @@ path = "examples/http_hijack_smoke.rs"
 [[example]]
 name = "http_persist_smoke"
 path = "examples/http_persist_smoke.rs"
+
+[[example]]
+name = "time_stop_no_pin_smoke"
+path = "examples/time_stop_no_pin_smoke.rs"

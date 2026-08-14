@@ -27,15 +27,21 @@
 //
 // What v1 does NOT include:
 //   - Per-P timer heaps (Go's `pp.timers`).
-//   - Timer modify/stop (no Timer/Ticker objects yet — only Sleep).
 //   - sysmon's other duties: GC trigger, network poller, scavenger,
 //     forced preemption (M18b will own preemption).
+//
+// Timer stop IS supported, via `TimerToken` (see below): a park can
+// be cancelled early by another goroutine, which is what lets
+// `time::Timer::Stop` actually retire its sleeper instead of leaking
+// it for the full duration (goish waits for LIVE_G_COUNT == 0 at
+// exit, so a leaked 60 s sleeper used to pin process exit for 60 s).
 
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 use alloc::collections::BinaryHeap;
 use core::cmp::{Ordering as CmpOrdering, Reverse};
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicPtr, AtomicU32, AtomicU8, Ordering};
 
 use crate::runtime::sched::{
     chan_park_commit, current_g, for_each_m, gopark, goready, register_m_storage, G,
@@ -62,10 +68,54 @@ pub fn monotonic_ns() -> i64 {
 
 // ─── Timer heap ───────────────────────────────────────────────────
 
-#[derive(Clone, Copy)]
+/// State machine of a cancellable timer park. Exactly one of the two
+/// transitions out of ARMED happens; whichever side wins the CAS is
+/// the ONLY side allowed to `goready` the parked G (the loser must
+/// not even read the G pointer — after a cancel the G may exit and be
+/// freed while its heap entry is still queued).
+pub const TIMER_ARMED: u8 = 0;
+pub const TIMER_FIRED: u8 = 1;
+pub const TIMER_CANCELLED: u8 = 2;
+
+/// Shared handle for one cancellable timer park. Created by the
+/// timer owner (`time::NewTimer` / `AfterFunc` / `NewTicker`), held
+/// by both the sleeping goroutine and the `Stop` side.
+pub struct TimerToken {
+    state: AtomicU8,
+    /// The parked G. Set under the heap lock by
+    /// `timer_park_cancellable` just before parking; null until then
+    /// (and again after `rearm`). A cancel that wins while this is
+    /// null simply flips the state — the parker observes CANCELLED
+    /// before parking and returns without ever sleeping.
+    g: AtomicPtr<G>,
+}
+
+impl TimerToken {
+    pub fn new() -> Arc<TimerToken> {
+        Arc::new(TimerToken {
+            state: AtomicU8::new(TIMER_ARMED),
+            g: AtomicPtr::new(core::ptr::null_mut()),
+        })
+    }
+
+    /// Re-arm a fired token for the next round (Ticker). Owner-only:
+    /// must be called by the goroutine that parked, between wake-ups,
+    /// never while a park is in flight. The G pointer is nulled FIRST
+    /// so a concurrent cancel that wins against the fresh ARMED state
+    /// finds no G to wake (the parker will see CANCELLED at its
+    /// pre-park check instead) rather than goready-ing a RUNNING G.
+    pub fn rearm(&self) {
+        self.g.store(core::ptr::null_mut(), Ordering::Release);
+        self.state.store(TIMER_ARMED, Ordering::Release);
+    }
+}
+
 struct TimerEntry {
     deadline_ns: i64,
     g: NonNull<G>,
+    /// None for plain `Sleep` parks (nothing can cancel those);
+    /// Some for Timer/Ticker parks.
+    cancel: Option<Arc<TimerToken>>,
 }
 
 unsafe impl Send for TimerEntry {}
@@ -137,6 +187,7 @@ pub fn timer_park(ns: i64) {
     heap.push(Reverse(TimerEntry {
         deadline_ns: deadline,
         g,
+        cancel: None,
     }));
 
     if need_wake {
@@ -150,6 +201,113 @@ pub fn timer_park(ns: i64) {
 
     // gopark releases lock_atom on the scheduler stack post-swap.
     gopark(chan_park_commit, lock_atom);
+}
+
+/// Cancellable variant of `timer_park`, used by `time::Timer` /
+/// `Ticker` / `AfterFunc`. Parks the calling G for `ns`, but the park
+/// can be retired early by `timer_cancel(tok)` from any goroutine.
+///
+/// Returns `true` if the deadline elapsed (the timer FIRED — the
+/// caller should deliver the tick / run the func), `false` if a
+/// cancel won (the caller should just exit).
+///
+/// Serialization: the heap SpinLock is held continuously across the
+/// pre-park state check → `tok.g` publish → heap push → park-commit
+/// (released post-swap, same as `timer_park`), and `timer_cancel`
+/// takes the same lock. A cancel therefore either lands BEFORE the
+/// check (the parker sees CANCELLED and never parks) or AFTER the
+/// gobuf is committed (`goready` is safe). There is no in-between.
+pub fn timer_park_cancellable(ns: i64, tok: &Arc<TimerToken>) -> bool {
+    let g = match current_g() {
+        Some(g) => g,
+        None => {
+            // Bootstrap thread — no goroutine to park. Block the
+            // thread instead; a concurrent cancel can't shorten the
+            // nap but the CAS below still reports the right winner.
+            if ns > 0 {
+                let req = Timespec {
+                    tv_sec: ns / 1_000_000_000,
+                    tv_nsec: ns % 1_000_000_000,
+                };
+                let _ = syscall::Nanosleep(&req, core::ptr::null_mut());
+            }
+            return tok
+                .state
+                .compare_exchange(TIMER_ARMED, TIMER_FIRED, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok();
+        }
+    };
+    if ns <= 0 {
+        // Non-positive duration fires immediately (Go's sendTime path).
+        return tok
+            .state
+            .compare_exchange(TIMER_ARMED, TIMER_FIRED, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok();
+    }
+    let deadline = monotonic_ns().wrapping_add(ns);
+    let lock_atom = TIMER_HEAP.lock_atom();
+    unsafe {
+        raw_lock(lock_atom);
+    }
+    if tok.state.load(Ordering::Acquire) != TIMER_ARMED {
+        // Cancelled (or already fired) before we got here — don't park.
+        let fired = tok.state.load(Ordering::Acquire) == TIMER_FIRED;
+        unsafe {
+            crate::runtime::spin::raw_unlock(lock_atom);
+        }
+        return fired;
+    }
+    tok.g.store(g.as_ptr(), Ordering::Release);
+    let heap = unsafe { TIMER_HEAP.data_unchecked() };
+    let need_wake = match heap.peek() {
+        Some(Reverse(top)) => deadline < top.deadline_ns,
+        None => true,
+    };
+    heap.push(Reverse(TimerEntry {
+        deadline_ns: deadline,
+        g,
+        cancel: Some(tok.clone()),
+    }));
+    if need_wake {
+        SYSMON_PARK.fetch_add(1, Ordering::Release);
+        let addr = &SYSMON_PARK as *const AtomicU32 as *const u32;
+        Futex(addr, FUTEX_WAKE_PRIVATE, 1, core::ptr::null());
+    }
+    gopark(chan_park_commit, lock_atom);
+    // Woken by exactly one of sysmon (FIRED) or timer_cancel
+    // (CANCELLED); the state says which.
+    tok.state.load(Ordering::Acquire) == TIMER_FIRED
+}
+
+/// Cancel a `timer_park_cancellable` park. Returns `true` if the
+/// cancel won (the timer will NOT fire; the sleeper is woken and
+/// returns `false` from its park), `false` if the timer had already
+/// fired or was already cancelled. Safe to call from any goroutine,
+/// any number of times.
+pub fn timer_cancel(tok: &Arc<TimerToken>) -> bool {
+    let lock_atom = TIMER_HEAP.lock_atom();
+    unsafe {
+        raw_lock(lock_atom);
+    }
+    let won = tok
+        .state
+        .compare_exchange(TIMER_ARMED, TIMER_CANCELLED, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok();
+    let gp = tok.g.load(Ordering::Acquire);
+    unsafe {
+        crate::runtime::spin::raw_unlock(lock_atom);
+    }
+    if won {
+        if let Some(g) = NonNull::new(gp) {
+            // The parker's heap entry stays queued; when its deadline
+            // arrives, sysmon's CAS loses against CANCELLED and it is
+            // skipped without touching the (possibly freed) G.
+            goready(g);
+        }
+        // gp null: the cancel beat the park — the parker will see
+        // CANCELLED at its pre-park check and return immediately.
+    }
+    won
 }
 
 // ─── sysmon loop ──────────────────────────────────────────────────
@@ -293,12 +451,35 @@ extern "C" fn sysmon_main() -> ! {
         let next_deadline: Option<i64> = loop {
             let popped: Option<NonNull<G>> = {
                 let mut heap = TIMER_HEAP.lock();
-                match heap.peek().copied() {
-                    Some(Reverse(entry)) if entry.deadline_ns <= now => {
-                        heap.pop();
-                        Some(entry.g)
+                let due = matches!(
+                    heap.peek(),
+                    Some(Reverse(e)) if e.deadline_ns <= now
+                );
+                if !due {
+                    break heap.peek().map(|Reverse(e)| e.deadline_ns);
+                }
+                let Reverse(entry) = heap.pop().expect("due entry vanished");
+                match &entry.cancel {
+                    None => Some(entry.g),
+                    Some(tok) => {
+                        if tok
+                            .state
+                            .compare_exchange(
+                                TIMER_ARMED,
+                                TIMER_FIRED,
+                                Ordering::AcqRel,
+                                Ordering::Acquire,
+                            )
+                            .is_ok()
+                        {
+                            Some(entry.g)
+                        } else {
+                            // Cancelled while queued — the cancel side
+                            // already woke (or forewarned) the G; its
+                            // pointer may be dangling. Don't touch it.
+                            None
+                        }
                     }
-                    _ => break heap.peek().map(|Reverse(e)| e.deadline_ns),
                 }
             };
             if let Some(g) = popped {

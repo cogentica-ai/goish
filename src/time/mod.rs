@@ -1497,16 +1497,22 @@ pub fn Until(t: Time) -> Duration {
 
 // ─── Timer / Ticker / After (M18a-+) ────────────────────────────────
 //
-// Channel-based timers built on `Sleep`. Each timer owns a goroutine
-// that sleeps the deadline then non-blocking-sends on the chan. Stop
-// is an atomic cancel flag checked just before the send.
+// Channel-based timers built on the runtime's cancellable timer park
+// (`sysmon::timer_park_cancellable` / `timer_cancel`). Each timer is
+// exactly ONE goroutine parked on the sysmon timer heap; `Stop` CASes
+// the shared `TimerToken` and wakes the sleeper, which exits at once.
+// Nothing outlives a Stop — this matters because goish waits for
+// LIVE_G_COUNT == 0 at process exit, so the previous design (a
+// Sleep(d) sleeper that Stop could not shorten) pinned exit for the
+// timer's full duration.
 //
 // Mirror of Go's time/sleep.go: After == NewTimer(d).C; NewTimer
 // returns a Timer with public C field and Stop method. Ticker
 // likewise but periodic.
 //
 // Goish v1 limitations vs Go:
-//   - Reset is not implemented (would need to wake the sleeper).
+//   - Reset is not implemented (now possible on this design; not
+//     ported yet).
 //   - Timer's chan is buffered cap=1 (matches Go's pre-1.23
 //     behavior; post-1.23 sync mode is not faithful here).
 //   - AfterFunc returns a Timer with a fresh (unused) C chan, since
@@ -1516,6 +1522,7 @@ use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::gochan::chan;
+use crate::runtime::sysmon::{timer_cancel, timer_park_cancellable, TimerToken};
 
 /// `time.Timer` — single-fire timer that sends on `C` after a
 /// duration. Mirror of `time.Timer` (sleep.go).
@@ -1523,15 +1530,8 @@ pub struct Timer {
     /// `<-chan Time` — receives one `Time` value when the timer
     /// fires (unless `Stop` cancelled it first).
     pub C: chan<Time>,
-    /// Set once on Stop; gates the cap=1 stop_chan send so
-    /// repeat Stop() calls are idempotent.
-    stopped: Arc<AtomicBool>,
-    /// Cap=1 chan. Stop sends `()`; the watcher's outer select
-    /// races this against the timer fire — first arrival wins
-    /// and the watcher exits. Replaces the previous "set flag and
-    /// hope the post-Sleep check sees it" pattern, which never
-    /// actually shortened the watcher's lifetime.
-    stop_chan: chan<()>,
+    /// Shared with the sleeper goroutine; `Stop` cancels through it.
+    token: Arc<TimerToken>,
 }
 
 impl Timer {
@@ -1542,35 +1542,13 @@ impl Timer {
     /// Note: Stop does not close the channel. After Stop, no value
     /// will be sent on C.
     pub fn Stop(&self) -> bool {
-        let was = self.stopped.swap(true, Ordering::AcqRel);
-        if !was {
-            // First Stop: poke the watcher. Cap=1, so the send
-            // never blocks — there's always slot for the first
-            // Stop, and only the first Stop reaches this branch.
-            let stop = self.stop_chan.clone();
-            crate::select! {
-                stop.Send(()) => {},
-                default => {},
-            }
-        }
-        !was
+        // The token CAS is the single source of truth: it both wakes
+        // the parked sleeper (which exits immediately) and reports
+        // whether cancellation beat the fire. A second Stop, or a
+        // Stop after the fire, loses the CAS and returns false —
+        // exactly Go's contract.
+        timer_cancel(&self.token)
     }
-}
-
-/// Internal helper: spawn a fire-and-forget gor that sleeps `d`
-/// then signals on the returned chan. Used by both NewTimer and
-/// NewTicker watchers as the "timer fired" leg of a select. Lives
-/// at the bottom of the timer-call graph so callers can't recurse
-/// into `NewTimer`/`After` and explode.
-fn spawn_fire(d: Duration) -> chan<()> {
-    let fire: chan<()> = crate::make!(chan (), 1);
-    let inner = fire.clone();
-    crate::go!(stack(64 * crate::KB), move || {
-        Sleep(d);
-        // Cap=1, fresh chan; first __try_send always slots in.
-        let _ = inner.__try_send(());
-    });
-    fire
 }
 
 /// `time.NewTimer(d)` — create a Timer that fires after `d`.
@@ -1578,31 +1556,17 @@ fn spawn_fire(d: Duration) -> chan<()> {
 #[allow(non_snake_case)]
 pub fn NewTimer(d: Duration) -> Timer {
     let c: chan<Time> = crate::make!(chan Time, 1);
-    let stop_chan: chan<()> = crate::make!(chan (), 1);
+    let token = TimerToken::new();
     let c_inner = c.clone();
-    let stop_inner = stop_chan.clone();
+    let tok = token.clone();
     crate::go!(stack(64 * crate::KB), move || {
-        // spawn_fire spawns the actual sleeper. Its gor lives ≤ d
-        // regardless of Stop. Our outer select races that against
-        // the stop chan — when Stop fires, this outer watcher
-        // exits IMMEDIATELY, releasing both Arc<chan> handles.
-        // Worst-case leak after Stop: the spawn_fire gor's ≤ d.
-        let fire = spawn_fire(d);
-        crate::select! {
-            let _ = fire.Recv() => {
-                // Non-blocking — Go's sendTime (sleep.go:179).
-                let _ = c_inner.__try_send(Now());
-            },
-            let _ = stop_inner.Recv() => {
-                // Stopped before fire — exit, drop both chans.
-            },
+        if timer_park_cancellable(d.0, &tok) {
+            // Non-blocking — Go's sendTime (sleep.go:179).
+            let _ = c_inner.__try_send(Now());
         }
+        // Cancelled: exit at once; nothing is leaked.
     });
-    Timer {
-        C: c,
-        stopped: Arc::new(AtomicBool::new(false)),
-        stop_chan,
-    }
+    Timer { C: c, token }
 }
 
 /// `time.AfterFunc(d, f)` (sleep.go:188) — wait `d`, then run `f` in
@@ -1619,31 +1583,20 @@ where
 {
     // Go: c := make(chan Time, 1)  // not actually wired up; slim mirrors.
     let c: chan<Time> = crate::make!(chan Time, 1);
-    let stop_chan: chan<()> = crate::make!(chan (), 1);
-    let stop_inner = stop_chan.clone();
+    let token = TimerToken::new();
+    let tok = token.clone();
     crate::go!(stack(64 * crate::KB), move || {
-        // Race: timer firing vs Stop. Whichever side arrives first wins
-        // and the watcher exits. spawn_fire's gor still lives ≤ d, but
-        // its handle is dropped here so there's no leak past `d`.
-        let fire = spawn_fire(d);
-        crate::select! {
-            let _ = fire.Recv() => {
-                // Go: go f()  (sleep.go:189 — f runs on its own goroutine).
-                // Slim: run f directly on this watcher gor — it has no
-                // other work, so giving f a fresh gor would just add a
-                // hop. Single-shot semantics are identical.
-                f();
-            },
-            let _ = stop_inner.Recv() => {
-                // Stop wins — drop f.
-            },
+        // Race: timer firing vs Stop — whichever wins the token CAS.
+        if timer_park_cancellable(d.0, &tok) {
+            // Go: go f()  (sleep.go:189 — f runs on its own goroutine).
+            // Slim: run f directly on this sleeper gor — it has no
+            // other work, so giving f a fresh gor would just add a
+            // hop. Single-shot semantics are identical.
+            f();
         }
+        // Stop won — drop f, exit at once.
     });
-    Timer {
-        C: c,
-        stopped: Arc::new(AtomicBool::new(false)),
-        stop_chan,
-    }
+    Timer { C: c, token }
 }
 
 /// `time.After(d)` — equivalent to `NewTimer(d).C` semantically,
@@ -1671,27 +1624,24 @@ pub struct Ticker {
     /// `<-chan Time` — receives a `Time` value approximately every
     /// `d` duration.
     pub C: chan<Time>,
-    /// One-shot stop flag, gates the cap=1 stop_chan send.
+    /// Loop-exit flag: the tick loop re-checks it after every wake.
+    /// Needed alongside the token because the token is re-armed each
+    /// round — a Stop that lands in the FIRED→rearm gap loses its
+    /// CAS, and this flag is what still ends the loop.
     stopped: Arc<AtomicBool>,
-    /// Stop poke. The watcher loop selects on this against each
-    /// tick's After(d), so Stop exits the OUTER loop on the very
-    /// next iteration boundary. Without this, an unstoppable
-    /// `loop { Sleep(d); … }` could run forever if the user
-    /// dropped the Ticker without calling Stop.
-    stop_chan: chan<()>,
+    /// Shared with the tick loop; `Stop` cancels the in-flight park.
+    token: Arc<TimerToken>,
 }
 
 impl Ticker {
     /// Stop turns off a ticker. After Stop, no more ticks will
     /// be sent on C. Stop does not close the channel.
     pub fn Stop(&self) {
-        if !self.stopped.swap(true, Ordering::AcqRel) {
-            let stop = self.stop_chan.clone();
-            crate::select! {
-                stop.Send(()) => {},
-                default => {},
-            }
-        }
+        // Order matters: the flag must be visible BEFORE the wake, so
+        // a sleeper that wins the fire-CAS anyway still sees `stopped`
+        // on its post-wake check and exits.
+        self.stopped.store(true, Ordering::Release);
+        let _ = timer_cancel(&self.token);
     }
 }
 
@@ -1728,33 +1678,34 @@ pub fn NewTicker(d: Duration) -> Ticker {
         syscall::Exit(2);
     }
     let c: chan<Time> = crate::make!(chan Time, 1);
-    let stop_chan: chan<()> = crate::make!(chan (), 1);
+    let token = TimerToken::new();
+    let stopped = Arc::new(AtomicBool::new(false));
     let c_inner = c.clone();
-    let stop_inner = stop_chan.clone();
+    let tok = token.clone();
+    let stop_flag = stopped.clone();
     crate::go!(stack(64 * crate::KB), move || {
         loop {
-            // Per-tick spawn_fire — its inner gor lives ≤ d. The
-            // outer loop's select races against stop_chan: when
-            // Stop fires, the loop exits at this scheduling
-            // boundary, releasing both Arc<chan> handles. Worst-
-            // case leak after Stop: the in-flight spawn_fire gor
-            // for ≤ d.
-            let fire = spawn_fire(d);
-            crate::select! {
-                let _ = fire.Recv() => {
-                    let _ = c_inner.__try_send(Now());
-                },
-                let _ = stop_inner.Recv() => {
-                    return;
-                },
+            if stop_flag.load(Ordering::Acquire) {
+                return;
             }
+            if !timer_park_cancellable(d.0, &tok) {
+                // Stop cancelled the in-flight park.
+                return;
+            }
+            // The fire won the CAS, but Stop may have landed just
+            // after losing it — honour the flag before ticking.
+            if stop_flag.load(Ordering::Acquire) {
+                return;
+            }
+            let _ = c_inner.__try_send(Now());
+            // Re-arm for the next round. Owner-only, no park in
+            // flight here; a Stop racing this is caught by the flag
+            // check at the top (its cancel either loses to nothing
+            // or pre-cancels the next park).
+            tok.rearm();
         }
     });
-    Ticker {
-        C: c,
-        stopped: Arc::new(AtomicBool::new(false)),
-        stop_chan,
-    }
+    Ticker { C: c, stopped, token }
 }
 
 /// `time.Unix(sec, nsec)` — construct a Time from a Unix timestamp.
