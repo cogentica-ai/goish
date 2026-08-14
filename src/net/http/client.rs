@@ -1012,6 +1012,213 @@ impl Default for Client {
     }
 }
 
+// ─── redirect helpers (client.go) ───────────────────────────────────
+
+// go: sdk 1.25.5 net/http/client.go:147-170 refererForURL
+/// Go: "refererForURL returns a referer without any authentication
+/// info or an empty string if lastReq scheme is https and newReq
+/// scheme is http. If the referer was explicitly set, then it will
+/// continue to be used."
+///
+/// The https -> http rule is RFC 7231 5.5.2: a secure page's URL must
+/// not leak into a cleartext request. Query and fragment ARE kept;
+/// only the userinfo is stripped.
+pub fn refererForURL(lastReq: &URL, newReq: &URL, explicitRef: string) -> string {
+    if lastReq.Scheme == "https" && newReq.Scheme == "http" {
+        return string::new();
+    }
+    if explicitRef.Len() != 0 {
+        return explicitRef;
+    }
+
+    // Go strips `lastReq.User.String()+"@"` from the rendered URL
+    // here. goish's `url::URL` has NO `User` field — `Parse` splits the
+    // authority at the last '@' and DISCARDS the userinfo (url.rs:971)
+    // rather than storing it, so a goish URL can never render one and
+    // there is nothing to strip. If `URL.User` is ever added (it is a
+    // real GOISH019 field-parity gap, along with Opaque/OmitHost/
+    // ForceQuery), this function must grow that branch back.
+    return lastReq.String();
+}
+
+// go: sdk 1.25.5 net/http/client.go:539-547 urlErrorOp
+/// Go: the `(*url.Error).Op` value for a method. NOT title-case: Go
+/// keeps the first byte VERBATIM and lowercases the rest, so "GET"
+/// becomes "Get" but "head" stays "head". A method with non-ASCII
+/// bytes is returned unchanged (ascii.ToLower fails).
+pub fn urlErrorOp(method: string) -> string {
+    if method.Len() == 0 {
+        return string("Get");
+    }
+    let (lowerMethod, ok) = super::internal::ascii::ToLower(method.clone());
+    if ok {
+        let b = method.as_bytes();
+        let lb = lowerMethod.as_bytes();
+        let mut out: Vec<u8> = Vec::with_capacity(b.len());
+        out.push(b[0]);
+        out.extend_from_slice(&lb[1..]);
+        return string::from_bytes(&out);
+    }
+    return method;
+}
+
+// go: sdk 1.25.5 net/http/client.go:1011-1032 isDomainOrSubdomain
+/// Go: "reports whether sub is a subdomain (or exact match) of the
+/// parent domain. Both domains must already be in canonical form."
+///
+/// The `:%` guard is load-bearing: without it
+/// `::1%.www.example.com` would read as a subdomain of
+/// `www.example.com` because it ends in `.www.example.com`.
+pub fn isDomainOrSubdomain(sub: string, parent: string) -> bool {
+    if sub == parent {
+        return true;
+    }
+    // Go: "If sub contains a :, it's probably an IPv6 address (and is
+    // definitely not a hostname)."
+    if crate::strings::ContainsAny(sub.clone(), string(":%")) {
+        return false;
+    }
+    if !crate::strings::HasSuffix(sub.clone(), parent.clone()) {
+        return false;
+    }
+    // Go: sub must end in "."+parent.
+    let sb = sub.as_bytes();
+    let idx = sb.len() - parent.as_bytes().len() - 1;
+    return sb[idx] == b'.';
+}
+
+// go: sdk 1.25.5 net/http/client.go:992-1009 shouldCopyHeaderOnRedirect
+/// Go permits sending auth/cookie headers from "foo.com" to
+/// "sub.foo.com", but NOT the reverse and not to an unrelated host.
+pub fn shouldCopyHeaderOnRedirect(initial: &URL, dest: &URL) -> bool {
+    let (ihost, _) = super::request::idnaASCII(initial.Hostname());
+    let (dhost, _) = super::request::idnaASCII(dest.Hostname());
+    return isDomainOrSubdomain(dhost, ihost);
+}
+
+// go: sdk 1.25.5 net/http/client.go:1034-1040 stripPassword
+/// Redacts the password in a URL for error messages. An EMPTY password
+/// still counts as set: `http://u:@a.com` renders as `http://u:***@a.com`.
+pub fn stripPassword(u: &URL) -> string {
+    // Same `URL.User` gap as refererForURL above: goish's Parse
+    // discards userinfo, so a parsed URL never carries a password to
+    // redact and this reduces to String(). Kept as a named port so the
+    // rule is in one place when `URL.User` lands. Go's exact behaviour,
+    // for whoever adds it: an EMPTY password still counts as set —
+    // `http://u:@a.com` renders `http://u:***@a.com`.
+    return u.String();
+}
+
+// go: sdk 1.25.5 net/http/client.go:505-537 redirectBehavior
+/// Go: "describes what should happen when the client encounters a 3xx
+/// status code from the server." Returns
+/// `(redirectMethod, shouldRedirect, includeBody)`.
+///
+/// 301/302/303 downgrade ANY non-GET/HEAD method to GET (Issue 18570);
+/// 307/308 preserve both method and body. Every other status — 300 and
+/// 304 included — is not a redirect at all.
+pub fn redirectBehavior(
+    reqMethod: string,
+    resp: &Response,
+    _ireq: &Request,
+) -> (string, bool, bool) {
+    match resp.StatusCode {
+        301 | 302 | 303 => {
+            let mut redirectMethod = reqMethod.clone();
+            // Go: "RFC 2616 allowed automatic redirection only with GET
+            // and HEAD requests. RFC 7231 lifts this restriction, but we
+            // still restrict other methods to GET to maintain
+            // compatibility. See Issue 18570."
+            if reqMethod != "GET" && reqMethod != "HEAD" {
+                redirectMethod = string("GET");
+            }
+            return (redirectMethod, true, false);
+        }
+        307 | 308 => {
+            // Go additionally clears shouldRedirect when the original
+            // request had a body but no GetBody to replay it. goish's
+            // Request carries its body as an owned `slice<byte>`, which
+            // is always replayable, so that branch cannot arise —
+            // GetBody exists to rewind a streaming io.Reader.
+            return (reqMethod, true, true);
+        }
+        _ => {
+            return (string::new(), false, false);
+        }
+    }
+}
+
+// go: sdk 1.25.5 net/http/client.go:487 alwaysFalse
+pub fn alwaysFalse() -> bool {
+    return false;
+}
+
+// go: sdk 1.25.5 net/http/client.go:307-313 timeBeforeContextDeadline
+/// Go: "reports whether the non-zero Time t is before ctx's deadline,
+/// if any. If ctx does not have a deadline, it always reports true."
+pub fn timeBeforeContextDeadline(
+    t: crate::time::Time,
+    ctx: &alloc::sync::Arc<dyn crate::context::Context>,
+) -> bool {
+    match ctx.Deadline() {
+        None => {
+            return true;
+        }
+        Some(d) => {
+            return t.Before(d);
+        }
+    }
+}
+
+// go: none — goish-only. Go closes over `ireqhdr` in
+// `makeHeadersCopier` (client.go:756); goish holds the same snapshot in
+// a struct because the returned closure would otherwise need to own a
+// Header across the redirect loop's borrows. Same data, same rule.
+pub struct headersCopier {
+    ireqhdr: Header,
+}
+
+impl Client {
+    // go: sdk 1.25.5 net/http/client.go:756-818 Client.makeHeadersCopier
+    /// Go: "makes a function that copies headers from the initial
+    /// Request, ireq. For every redirect, this function must be called
+    /// so that it can copy headers into the upcoming Request."
+    ///
+    /// The Jar/icookies half of Go's version (issue 17494 — rewriting
+    /// the caller's own Cookie header when a hop's Set-Cookie
+    /// overrides it) is handled separately in `Do`'s loop, which
+    /// already restores `originalCookies` per hop.
+    pub fn makeHeadersCopier(&self, ireq: &Request) -> headersCopier {
+        return headersCopier {
+            ireqhdr: ireq.Header.Clone(),
+        };
+    }
+}
+
+impl headersCopier {
+    // go: none — goish-only: Go's makeHeadersCopier RETURNS a closure
+    // and this is that closure's body, split out because goish holds
+    // the captured header in a struct instead.
+    /// Copy the initial request's headers onto `req` — "at least the
+    /// safe ones". `stripSensitiveHeaders` drops the six credential
+    /// headers Go names.
+    pub fn copy(&self, req: &mut Request, stripSensitiveHeaders: bool) {
+        for (k, vv) in crate::range!(&self.ireqhdr) {
+            let ck = super::header::CanonicalHeaderKey(k.clone());
+            let sensitive = ck == "Authorization"
+                || ck == "Www-Authenticate"
+                || ck == "Cookie"
+                || ck == "Cookie2"
+                || ck == "Proxy-Authorization"
+                || ck == "Proxy-Authenticate";
+            if !(sensitive && stripSensitiveHeaders) {
+                req.Header.__set_values(k.clone(), vv.clone());
+            }
+        }
+        return;
+    }
+}
+
 const MAX_REDIRECTS: usize = 10;
 
 // go: sdk 1.25.5 net/http/client.go:489-493 ErrUseLastResponse
@@ -1077,6 +1284,17 @@ impl Client {
         let mut via: Vec<Request> = Vec::new();
         // The caller's own Cookie header, before any jar additions.
         let originalCookies = current.Header.Values(string("Cookie"));
+        // Go builds this ONCE from the initial request and calls it on
+        // every hop (client.go:609, :688). It is what keeps
+        // Authorization / Cookie / Proxy-Authorization from following a
+        // redirect to an unrelated host.
+        let copyHeaders = self.makeHeadersCopier(&current);
+        let initialURL = current.URL.clone();
+        // Go's flag is STICKY: `if !stripSensitiveHeaders && ...`
+        // (client.go:683). Once a hop leaves the initial host's domain,
+        // the credentials stay stripped for the rest of the chain —
+        // foo.com -> evil.com -> foo.com must NOT restore them.
+        let mut stripSensitiveHeaders = false;
         for _step in 0..MAX_REDIRECTS {
             // Go (client.go, send): if c.Jar != nil { for _, cookie
             // := range c.Jar.Cookies(req.URL) { req.AddCookie(cookie) } }
@@ -1148,18 +1366,8 @@ impl Client {
                     // redirect target gets a destructive method
                     // re-issued against a URL of their choosing.
                     // Converting to GET is exactly what prevents it.
-                    let next_method = if resp.StatusCode == 301
-                        || resp.StatusCode == 302
-                        || resp.StatusCode == 303
-                    {
-                        if current.Method != "GET" && current.Method != "HEAD" {
-                            string("GET")
-                        } else {
-                            current.Method.clone()
-                        }
-                    } else {
-                        current.Method.clone()
-                    };
+                    let (next_method, _shouldRedirect, includeBody) =
+                        redirectBehavior(current.Method.clone(), &resp, &current);
                     let mut next = Request {
                         Close: false,
                         Trailer: Header::new(),
@@ -1170,7 +1378,10 @@ impl Client {
                         Proto: string("HTTP/1.1"),
                         ProtoMajor: 1,
                         ProtoMinor: 1,
-                        Header: current.Header.clone(),
+                        // Headers are NOT copied wholesale here — see
+                        // copyHeaders below, which drops the credential
+                        // headers when the hop leaves the domain.
+                        Header: Header::new(),
                         Host: loc.Host.clone(),
                         ContentLength: 0,
                         Body: slice::<byte>::__from_vec(Vec::new()),
@@ -1181,10 +1392,35 @@ impl Client {
                         // context (Go client.go:665: ireq.Context()).
                         ctx: current.ctx.clone(),
                     };
-                    // Preserve body only on 307/308 (per RFC).
-                    if resp.StatusCode == 307 || resp.StatusCode == 308 {
+                    // Go: `includeBody` from redirectBehavior — true
+                    // for 307/308 only.
+                    if includeBody {
                         next.Body = current.Body.clone();
                         next.ContentLength = current.ContentLength;
+                    }
+
+                    // Go client.go:683-688 — decide whether this hop
+                    // leaves the initial host's domain, then copy the
+                    // initial request's headers minus the sensitive ones.
+                    if !stripSensitiveHeaders && initialURL.Host != next.URL.Host {
+                        if !shouldCopyHeaderOnRedirect(&initialURL, &next.URL) {
+                            stripSensitiveHeaders = true;
+                        }
+                    }
+                    copyHeaders.copy(&mut next, stripSensitiveHeaders);
+
+                    // Go client.go:690-694 — "Add the Referer header
+                    // from the most recent request URL to the new one,
+                    // if it's not https->http".
+                    {
+                        let ref_ = refererForURL(
+                            &current.URL,
+                            &next.URL,
+                            next.Header.Get(string("Referer")),
+                        );
+                        if ref_.Len() != 0 {
+                            next.Header.Set(string("Referer"), ref_);
+                        }
                     }
                     // Go (client.go): if err := c.checkRedirect(req,
                     //     reqs); err != nil { … }, called BEFORE the
