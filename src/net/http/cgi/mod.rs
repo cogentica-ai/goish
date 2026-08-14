@@ -21,5 +21,6 @@
 #![allow(dead_code)]
 
 pub mod child;
+pub mod host;
 
 pub use child::{envMap, response, Request, RequestFromMap, Serve};
