@@ -1641,5 +1641,9 @@ name = "http_pprof_smoke"
 path = "examples/http_pprof_smoke.rs"
 
 [[example]]
+name = "http_multipart_form_smoke"
+path = "examples/http_multipart_form_smoke.rs"
+
+[[example]]
 name = "http_persist_smoke"
 path = "examples/http_persist_smoke.rs"

@@ -124,6 +124,11 @@ pub(crate) struct FormCell {
     pub post_parsed: bool,
     pub form: crate::gomap::map<string, slice<string>>,
     pub post_form: crate::gomap::map<string, slice<string>>,
+    /// Go's `Request.MultipartForm *multipart.Form`, which is a plain
+    /// PUBLIC field there. It lives in the mutex cell here for the
+    /// same reason `form` does: `ParseMultipartForm` takes `&self`,
+    /// because a handler is handed `&Request`.
+    pub multipart_form: Option<crate::mime::multipart::Form>,
 }
 
 impl Request {
@@ -362,6 +367,114 @@ impl Request {
             return vs[0].clone();
         }
         string::new()
+    }
+
+    // go: sdk 1.25.5 net/http/request.go:1370-1406 Request.ParseMultipartForm
+    /// Go: "ParseMultipartForm parses a request body as multipart/form-data.
+    /// The whole request body is parsed and up to a total of maxMemory
+    /// bytes of its file parts are stored in memory […] ParseMultipartForm
+    /// calls [Request.ParseForm] if necessary."
+    ///
+    /// Issue 9305 is the detail worth keeping: the values go into BOTH
+    /// `Form` and `PostForm`. A handler that reads PostFormValue on a
+    /// multipart upload sees nothing otherwise.
+    ///
+    /// Go stores the result in the public `MultipartForm` field; goish
+    /// keeps it in the same mutex cell as `Form`, because the method
+    /// takes `&self`.
+    pub fn ParseMultipartForm(&self, maxMemory: crate::types::int64) -> error {
+        // Go: `if r.MultipartForm == multipartByReader` — a pointer
+        // comparison goish cannot make; see multipartByReader's note.
+        let mut parseFormErr: error = errors::nil;
+        if !self.form_state.Lock().parsed {
+            // Go: "Let errors in ParseForm fall through, and just
+            // return it at the end."
+            parseFormErr = self.ParseForm();
+        }
+        if self.form_state.Lock().multipart_form.is_some() {
+            return errors::nil;
+        }
+
+        let (mut mr, err) = self.MultipartReader();
+        if !err.IsNil() {
+            return err;
+        }
+        let (f, ferr) = mr.ReadForm(maxMemory);
+        if !ferr.IsNil() {
+            return ferr;
+        }
+
+        {
+            let mut st = self.form_state.Lock();
+            let keys = f.Value.Keys();
+            for i in 0..keys.len() {
+                let k = keys[i].clone();
+                let (v, _) = f.Value.Get(k.clone());
+                let (mut cur, _) = st.form.Get(k.clone());
+                let (mut post, _) = st.post_form.Get(k.clone());
+                for j in 0..crate::len(&v) {
+                    cur = crate::append!(cur, v[j].clone());
+                    // Go: "r.PostForm should also be populated. See
+                    // Issue 9305."
+                    post = crate::append!(post, v[j].clone());
+                }
+                st.form.Set(k.clone(), cur);
+                st.post_form.Set(k, post);
+            }
+            st.multipart_form = Some(f);
+        }
+
+        return parseFormErr;
+    }
+
+    // go: sdk 1.25.5 net/http/request.go:1446-1463 Request.FormFile
+    /// Go: "FormFile returns the first file for the provided form key.
+    /// FormFile calls [Request.ParseMultipartForm] and
+    /// [Request.ParseForm] if necessary."
+    ///
+    /// Go returns the `multipart.File` interface; goish returns the
+    /// `bytes::Reader` `FileHeader.Open` produces — see that method
+    /// for why there is only one implementation to return.
+    pub fn FormFile<K: Into<string>>(
+        &self,
+        key: K,
+    ) -> (
+        bytes::Reader,
+        crate::mime::multipart::FileHeader,
+        error,
+    ) {
+        let key: string = key.into();
+        if self.form_state.Lock().multipart_form.is_none() {
+            let err = self.ParseMultipartForm(crate::int64(defaultMaxMemory));
+            if !err.IsNil() {
+                return (
+                    bytes::NewReader(slice::<byte>::__from_vec(Vec::new())),
+                    crate::mime::multipart::FileHeader::default(),
+                    err,
+                );
+            }
+        }
+        let st = self.form_state.Lock();
+        if let Some(f) = st.multipart_form.as_ref() {
+            let (fhs, _) = f.File.Get(key);
+            if crate::len(&fhs) > 0 {
+                let fh = fhs[0].clone();
+                let (file, err) = fh.Open();
+                return (file, fh, err);
+            }
+        }
+        return (
+            bytes::NewReader(slice::<byte>::__from_vec(Vec::new())),
+            crate::mime::multipart::FileHeader::default(),
+            ErrMissingFile.into(),
+        );
+    }
+
+    // go: none — goish-only: Go exposes the parsed form as the public
+    // `Request.MultipartForm` field; goish keeps it in the mutex cell,
+    // so reading it is a method.
+    pub fn MultipartForm(&self) -> Option<crate::mime::multipart::Form> {
+        return self.form_state.Lock().multipart_form.clone();
     }
 
     /// `r.MultipartReader()` (request.go:497) — return a
