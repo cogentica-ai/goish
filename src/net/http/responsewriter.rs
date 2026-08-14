@@ -150,6 +150,20 @@ pub trait Hijacker {
 // PushOptions and Pusher moved to http.rs — Go declares both in
 // net/http/http.go, not in a response file.
 
+// `requestTooLarger` — net/http/request.go line 1243, declared inside
+// maxBytesReader.Read. Go's comment explains why it is an interface
+// rather than a `*response` assertion: "To prevent binaries which only
+// using the HTTP Client code (such as cmd/go) from also linking in the
+// HTTP server, don't use a static type assertion to the server
+// '*response' type."
+//
+// Named `requestTooLarger` in Go; goish spells it `__RequestTooLarge`
+// because `cast!` needs a nameable public trait.
+#[goish::interface] // goishlint:ignore GOISH022 - `goish::interface`, not `goish::int`
+pub trait __RequestTooLarge {
+    fn requestTooLarge(&self);
+}
+
 // ─── HeaderHandle ───────────────────────────────────────────────────
 
 /// A cheap reference handle to a `response`'s header map — the return
@@ -232,6 +246,7 @@ fn register_response_impls() {
     static REGISTER: crate::lazy::Lazy<()> = crate::lazy::Lazy::new(|| {
         __goish_register_ResponseWriter_impl::<response>();
         __goish_register_Flusher_impl::<response>();
+        __goish_register___RequestTooLarge_impl::<response>();
     });
     let _ = REGISTER.get();
 }
@@ -292,6 +307,12 @@ struct respInner {
     /// never emitted — Go's `chunkWriter.Write` "Eat writes."
     /// (server.go:1339).
     is_head: bool,
+    /// Go's `response.closeAfterReply` (server.go:236) — set when the
+    /// request or something during the handler decided this connection
+    /// must not be reused.
+    closeAfterReply: bool,
+    /// Go's `response.requestBodyLimitHit` (server.go:248).
+    requestBodyLimitHit: bool,
     /// Go's `response.trailers []string` (server.go:214) — trailer
     /// keys declared via the `Trailer` response header before the
     /// head is written. Populated by `declareTrailer`.
@@ -316,6 +337,8 @@ impl response {
                 chunked: false,
                 keep_alive: false,
                 is_head: false,
+                closeAfterReply: false,
+                requestBodyLimitHit: false,
                 trailers: Vec::new(),
             }),
             header: Arc::new(SpinLock::new(h)),
@@ -409,6 +432,34 @@ impl response {
     /// Render the response onto the wire. Idempotent — calling twice
     /// is a no-op. After `flush`, the underlying connection holds
     /// only the kept-alive read buffer (if any) and may be reused.
+    // `response.requestTooLarge` moved to the __RequestTooLarge impl
+    // below, so `cast!` can reach it the way Go's type assertion does.
+    /// Go: "called by maxBytesReader when too much input has been read
+    /// from the client."
+    ///
+    /// The connection MUST close: the client is still sending a body
+    /// nobody will read, so the unread remainder would be parsed as
+    /// the next keep-alive request. That is a request-smuggling shape,
+    /// which is why goish's earlier "slim port: drops Go's
+    /// requestTooLarge hook" was not a harmless simplification.
+    pub fn requestTooLarge(&self) {
+        let mut g = self.inner.lock();
+        g.closeAfterReply = true;
+        g.requestBodyLimitHit = true;
+        g.keep_alive = false;
+        if !g.wrote_header {
+            drop(g);
+            self.header.lock().Set(string("Connection"), string("close"));
+        }
+        return;
+    }
+
+    // `response.closeAfterReply` accessor — goish-only. The serve loop
+    // consults it after the handler returns.
+    pub fn __close_after_reply(&self) -> bool {
+        return self.inner.lock().closeAfterReply;
+    }
+
     // `response.declareTrailer` — net/http/server.go line 551.
     //
     // NOT a `// go:` anchor: this file holds `response` while server.rs
@@ -601,6 +652,13 @@ impl ResponseWriter for response {
         &self,
     ) -> Option<&(dyn core::any::Any + Send + Sync)> {
         Some(self)
+    }
+}
+
+impl __RequestTooLarge for response {
+    fn requestTooLarge(&self) {
+        response::requestTooLarge(self);
+        return;
     }
 }
 

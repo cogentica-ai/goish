@@ -1303,10 +1303,26 @@ pub fn parseBasicAuth(auth: string) -> (string, string, bool) {
 //
 /// `http.MaxBytesReader(w, r, n)` — returns a `Reader` that stops
 /// reading from `r` after `n` bytes, returning `MaxBytesError` once
-/// the limit is exceeded. Slim port: drops Go's `requestTooLarge`
-/// connection-close hook (goish ResponseWriter doesn't expose one
-/// yet) and the `io.ReadCloser` aspect (Reader-only).
+/// the limit is exceeded.
+///
+/// `w` was previously DROPPED from the signature, with a note calling
+/// it a slim port. It is not cosmetic: `w` is how Go reaches
+/// `requestTooLarge`, which forces the connection closed. Without it
+/// the client keeps sending a body nobody reads, and the remainder is
+/// parsed as the next keep-alive request. Still Reader-only rather
+/// than io.ReadCloser.
+///
+/// KNOWN GAP: a handler cannot yet PASS a `w` here. goish's
+/// `Handler::ServeHTTP` receives `&dyn ResponseWriter`, a borrow, and
+/// this needs an owned handle to hold across reads. Every caller
+/// therefore passes `None` today and the close does not fire. The
+/// parameter, the `__RequestTooLarge` interface and
+/// `response::requestTooLarge` are all in place; what is missing is a
+/// way to obtain an owned ResponseWriter from a handler — the same
+/// question `Hijacker` will ask. Do not remove the parameter again to
+/// "simplify": that is how the gap was hidden the first time.
 pub struct MaxBytesReader<R: io::Reader> {
+    w: Option<alloc::sync::Arc<dyn super::responsewriter::ResponseWriter + Send + Sync>>,
     inner: R,
     initial: int,
     remaining: int,
@@ -1463,10 +1479,15 @@ crate::var! {
 // goish names the CONSTRUCTOR `NewMaxBytesReader` because
 // `MaxBytesReader` is taken by the struct — Go has a func and an
 // unexported `maxBytesReader` type, Rust cannot share the name.
-pub fn NewMaxBytesReader<R: io::Reader>(r: R, n: int) -> MaxBytesReader<R> {
+pub fn NewMaxBytesReader<R: io::Reader>(
+    w: Option<alloc::sync::Arc<dyn super::responsewriter::ResponseWriter + Send + Sync>>,
+    r: R,
+    n: int,
+) -> MaxBytesReader<R> {
     // Go: if n < 0 { n = 0 }
     let n = if n < 0 { 0 } else { n };
     MaxBytesReader {
+        w,
         inner: r,
         initial: n,
         remaining: n,
@@ -1520,8 +1541,17 @@ impl<R: io::Reader> io::Reader for MaxBytesReader<R> {
         // Go: n = int(l.n); l.n = 0; … return n, &MaxBytesError{l.i}
         let limited_n = self.remaining;
         self.remaining = 0;
+        // Go: `l.w.requestTooLarge()` BEFORE building the error
+        // (request.go:1241). This is what closes the connection so the
+        // unread remainder of the body cannot be read as the next
+        // keep-alive request.
+        if let Some(w) = self.w.as_ref() {
+            if let (r, true) = crate::cast!(w.as_ref(), super::responsewriter::__RequestTooLarge) {
+                r.requestTooLarge();
+            }
+        }
         self.err = NewMaxBytesError(self.initial);
-        (limited_n, self.err.clone())
+        return (limited_n, self.err.clone());
     }
 }
 

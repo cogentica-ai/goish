@@ -83,7 +83,7 @@ fn main() {
     {
         let src = bytes("0123456789abcdefghij"); // 20 bytes
         let r = NewReader(src);
-        let mut limited = http::NewMaxBytesReader(r, 10);
+        let mut limited = http::NewMaxBytesReader(None, r, 10);
         let mut buf = slice::<u8>::__from_vec(alloc::vec![0u8; 32]);
         let (n1, _e1) = limited.Read(&mut buf);
         let (n2, e2) = limited.Read(&mut buf);
