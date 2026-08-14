@@ -569,6 +569,17 @@ pub(crate) fn read_full_into<R: Reader>(r: &mut bufio::Reader<R>, buf: &mut slic
 pub trait RoundTripper: Send + Sync {
     fn RoundTrip(&self, req: &Request) -> (Response, error);
 
+    // go: none — goish rendering of Go's `switch t := rt.(type) { case
+    // *Transport: … }` in knownRoundTripperImpl. Rust cannot
+    // type-switch a `dyn Trait` back to a concrete type, and a
+    // goish::interface method must return an OWNED type, so the whole
+    // probe lives on the trait: Transport overrides it, everything
+    // else inherits false.
+    fn __known_round_tripper(&self, req: &Request) -> bool {
+        let _ = req;
+        return false;
+    }
+
     // go: none — goish rendering of Go's OPTIONAL `closeIdler`
     // interface. Go's Client.CloseIdleConnections probes the
     // transport for an unexported
@@ -740,6 +751,20 @@ impl PartialEq<&Transport> for crate::nilval::Nil {
 }
 
 impl RoundTripper for Transport {
+    fn __known_round_tripper(&self, req: &Request) -> bool {
+        // Go recurses through any alternate RoundTripper registered
+        // for this request's scheme: a Transport is only "known" if
+        // its alternate is too.
+        match self.alternateRoundTripper(req) {
+            Some(alt) => {
+                return alt.__known_round_tripper(req);
+            }
+            None => {
+                return true;
+            }
+        }
+    }
+
     fn RoundTrip(&self, req: &Request) -> (Response, error) {
         // Resolve scheme.
         let scheme = req.URL.Scheme.clone();
@@ -1295,6 +1320,26 @@ pub fn basicAuth(username: string, password: string) -> string {
         .EncodeToString(crate::convert::bytes(creds.String()).as_ref());
 }
 
+// go: sdk 1.25.5 net/http/client.go:320-341 knownRoundTripperImpl
+/// Go: "reports whether rt is a RoundTripper that's maintained by the
+/// Go team and known to implement the latest optional semantics
+/// (notably contexts)."
+///
+/// Go checks for *Transport (recursing through any alternate
+/// RoundTripper registered for the request's scheme), then for the two
+/// HTTP/2 transports, then falls back to a reflect type-name
+/// comparison against "*http2.Transport" — its own comment calls that
+/// last one "a good enough heuristic".
+///
+/// goish has neither HTTP/2 transport, and `reflect` here is a value
+/// tree rather than Go's reflect, so only the *Transport arm ports.
+/// The recursion through alternateRoundTripper is the part that
+/// matters and is kept: a Transport with a registered protocol is
+/// only "known" if the alternate is too.
+pub fn knownRoundTripperImpl(rt: &Arc<dyn RoundTripper>, req: &Request) -> bool {
+    return rt.__known_round_tripper(req);
+}
+
 const MAX_REDIRECTS: usize = 10;
 
 // go: sdk 1.25.5 net/http/client.go:489-493 ErrUseLastResponse
@@ -1338,6 +1383,38 @@ impl Client {
     /// (client.go:394) does it: the request is re-parented under
     /// `context.WithTimeout`, and the transport folds the context
     /// deadline into its connection deadlines.
+    // go: sdk 1.25.5 net/http/client.go:192-197 Client.deadline
+    /// Go: the absolute deadline for the whole request, or the zero
+    /// Time when `Timeout` is unset.
+    pub fn deadline(&self) -> time::Time {
+        if self.Timeout > time::Duration(0) {
+            return time::Now().Add(self.Timeout);
+        }
+        return time::Time::default();
+    }
+
+    // go: sdk 1.25.5 net/http/client.go:199-204 Client.transport
+    /// Go: `c.Transport` when set, else `DefaultTransport`. goish's
+    /// field is non-optional and already defaults to a Transport, so
+    /// this is the accessor rather than a fallback.
+    pub fn transport(&self) -> Arc<dyn RoundTripper> {
+        return self.Transport.clone();
+    }
+
+    // go: sdk 1.25.5 net/http/client.go:497-503 Client.checkRedirect
+    /// Go: "calls either the user's configured CheckRedirect function,
+    /// or the default."
+    pub fn checkRedirect(&self, req: &Request, via: &[Request]) -> error {
+        match self.CheckRedirect.as_ref() {
+            Some(f) => {
+                return f(req, via);
+            }
+            None => {
+                return defaultCheckRedirect(req, via);
+            }
+        }
+    }
+
     pub fn Do(&self, req: &Request) -> (Response, error) {
         let mut current = req.clone();
         // Whole-exchange deadline via ctx. The drop guard covers the

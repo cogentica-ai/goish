@@ -580,6 +580,23 @@ impl Request {
     /// Go also requires `Body == nil || Body == NoBody || GetBody !=
     /// nil`; goish's Request owns its body as a `slice<byte>`, which
     /// is always replayable, so that guard is always satisfied.
+    // go: sdk 1.25.5 net/http/request.go:1550-1560 Request.outgoingLength
+    /// Go: "reports the Content-Length of this outgoing (Client)
+    /// request. It maps 0 into -1 (unknown) when the Body is non-nil."
+    ///
+    /// The 0 -> -1 mapping is the point: a non-empty body whose length
+    /// nobody set must be framed as UNKNOWN (chunked), not as
+    /// zero-length, or the body silently never reaches the wire.
+    pub fn outgoingLength(&self) -> i64 {
+        if self.Body.Len() == 0 {
+            return 0;
+        }
+        if self.ContentLength != 0 {
+            return crate::int64(self.ContentLength);
+        }
+        return -1;
+    }
+
     pub fn isReplayable(&self) -> bool {
         let m = if self.Method.Len() == 0 {
             string("GET")
@@ -1323,9 +1340,9 @@ pub fn parseBasicAuth(auth: string) -> (string, string, bool) {
 /// "simplify": that is how the gap was hidden the first time.
 pub struct MaxBytesReader<R: io::Reader> {
     w: Option<alloc::sync::Arc<dyn super::responsewriter::ResponseWriter + Send + Sync>>,
-    inner: R,
-    initial: int,
-    remaining: int,
+    r: R,
+    i: int,
+    n: int,
     err: error,
 }
 
@@ -1488,9 +1505,9 @@ pub fn NewMaxBytesReader<R: io::Reader>(
     let n = if n < 0 { 0 } else { n };
     MaxBytesReader {
         w,
-        inner: r,
-        initial: n,
-        remaining: n,
+        r,
+        i: n,
+        n,
         err: errors::nil,
     }
 }
@@ -1521,26 +1538,26 @@ impl<R: io::Reader> io::Reader for MaxBytesReader<R> {
         }
         // Go: if int64(len(p))-1 > l.n { p = p[:l.n+1] }
         // We can't shrink the caller's slice; instead read into a tmp.
-        let cap = if p.Len() - 1 > self.remaining {
-            self.remaining + 1
+        let cap = if p.Len() - 1 > self.n {
+            self.n + 1
         } else {
             p.Len()
         };
         let mut tmp = crate::make!([]byte, cap);
-        let (n, err) = self.inner.Read(&mut tmp);
+        let (n, err) = self.r.Read(&mut tmp);
         // Copy what we read into p.
         for i in 0..n {
             p[i] = tmp[i];
         }
         // Go: if int64(n) <= l.n { l.n -= int64(n); l.err = err; return n, err }
-        if n <= self.remaining {
-            self.remaining -= n;
+        if n <= self.n {
+            self.n -= n;
             self.err = err.clone();
             return (n, err);
         }
         // Go: n = int(l.n); l.n = 0; … return n, &MaxBytesError{l.i}
-        let limited_n = self.remaining;
-        self.remaining = 0;
+        let limited_n = self.n;
+        self.n = 0;
         // Go: `l.w.requestTooLarge()` BEFORE building the error
         // (request.go:1241). This is what closes the connection so the
         // unread remainder of the body cannot be read as the next
@@ -1550,7 +1567,7 @@ impl<R: io::Reader> io::Reader for MaxBytesReader<R> {
                 r.requestTooLarge();
             }
         }
-        self.err = NewMaxBytesError(self.initial);
+        self.err = NewMaxBytesError(self.i);
         return (limited_n, self.err.clone());
     }
 }
