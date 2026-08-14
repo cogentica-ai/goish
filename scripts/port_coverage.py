@@ -25,7 +25,12 @@ BEFORE anchors are in place, and to track the percentage over time.
 import os, re, sys, json, subprocess
 
 # Out of scope: cgo/BoringSSL bridge, asm generators, test-only helpers.
-SKIP = re.compile(r"(^|/)(boring|_asm|cryptotest|checktest|syso|fipsonly)(/|$)")
+# `testdata` matches the go tool's own rule: "directories named
+# 'testdata'" are ignored (go help packages) — their .go files are
+# fixtures/generators, not package API. Bit us via
+# net/http/pprof/testdata/delta_mutex.go, a fixture GENERATOR whose
+# `func main` sat in the denominator as a phantom 0/1 package.
+SKIP = re.compile(r"(^|/)(boring|_asm|cryptotest|checktest|syso|fipsonly|testdata)(/|$)")
 
 # goish is single-target x86_64-unknown-linux-gnu. Files whose build
 # constraint is another GOARCH/GOOS are not part of the port surface, the

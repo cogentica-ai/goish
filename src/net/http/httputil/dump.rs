@@ -52,6 +52,42 @@ pub fn drainBody(
     );
 }
 
+// go: sdk 1.25.5 net/http/httputil/dump.go:77-168 DumpRequestOut
+//
+/// Go: "DumpRequestOut is like DumpRequest but for outgoing client
+/// requests. It includes any headers that the standard
+/// http.Transport adds, such as User-Agent." Go achieves that by
+/// round-tripping through a fake conn that records the wire; goish
+/// reaches the same guarantee directly: `serialize_request` IS the
+/// code path the goish client writes with, so the dump is exactly
+/// what would go on the wire. (Divergences follow the client's own:
+/// goish's transport does not add Accept-Encoding.)
+///
+/// `body == false` keeps the Content-Length header intact but cuts
+/// the dump at the end of the head — Go's dummyBody truncation at
+/// the first CRLFCRLF (dump.go:160-165).
+pub fn DumpRequestOut(req: &Request, body: bool) -> (slice<byte>, error) {
+    // Go computes host the way the transport does: URL.Host, unless
+    // Request.Host overrides (request write, request.go:665).
+    let host = if req.Host.Len() != 0 {
+        req.Host.clone()
+    } else {
+        req.URL.Host.clone()
+    };
+    let dump = super::super::client::serialize_request(req, &host);
+    if !body {
+        // Go: if i := bytes.Index(dump, "\r\n\r\n"); i >= 0 { dump = dump[:i+4] }
+        let raw: &[u8] = &dump;
+        if let Some(i) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+            return (
+                slice::<byte>::__from_vec(raw[..i + 4].to_vec()),
+                errors::nil,
+            );
+        }
+    }
+    return (dump, errors::nil);
+}
+
 // go: sdk 1.25.5 net/http/httputil/dump.go:218-286 DumpRequest
 /// `httputil.DumpRequest(req, body) -> ([]byte, error)` — render a
 /// Request in HTTP/1.x wire format. Line-by-line port of Go 1.25
