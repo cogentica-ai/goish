@@ -261,7 +261,7 @@ fn streamEvents(w: &(dyn http::ResponseWriter + Send + Sync + 'static), _r: &htt
 
 fn importLimited(w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request) {
     // Go: body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64))
-    let mut mbr = http::NewMaxBytesReader(None, r.body_reader(), 64);
+    let mut mbr = http::MaxBytesReader(None, r.body_reader(), 64);
     let (data, err) = io::ReadAll(&mut mbr);
     if err != nil {
         http::Error(w, "import too large", http::StatusRequestEntityTooLarge);

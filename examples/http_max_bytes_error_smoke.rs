@@ -35,7 +35,7 @@ fn main() {
     {
         let payload = bytes("0123456789");
         let buf = goish::bytes::NewBuffer(payload);
-        let mut limited = http::NewMaxBytesReader(None, buf, 5);
+        let mut limited = http::MaxBytesReader(None, buf, 5);
         let mut out = goish::make!([]byte, 32);
         let mut total: i64 = 0;
         let mut last_err = errors::nil.clone();
@@ -66,7 +66,7 @@ fn main() {
     {
         let payload = bytes("hi");
         let buf = goish::bytes::NewBuffer(payload);
-        let mut limited = http::NewMaxBytesReader(None, buf, 100);
+        let mut limited = http::MaxBytesReader(None, buf, 100);
         let mut out = goish::make!([]byte, 4);
         let (n, err) = limited.Read(&mut out);
         // Should read 2 bytes, no error.

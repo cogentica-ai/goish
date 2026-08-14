@@ -46,7 +46,7 @@ fn run() {
         // `w` is the borrow ServeHTTP handed us — exactly what
         // MaxBytesReader needs, and it outlives the reader.
         let body = goish::bytes::NewReader(r.Body.clone());
-        let mut mbr = http::NewMaxBytesReader(Some(w), body, 8);
+        let mut mbr = http::MaxBytesReader(Some(w), body, 8);
         let mut buf = goish::make!([]goish::byte, 4096);
         let (_, e) = mbr.Read(&mut buf);
         if !e.IsNil() {

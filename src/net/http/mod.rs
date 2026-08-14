@@ -77,7 +77,7 @@ pub use http::{HTTP2Config, NoBody, Protocols, PushOptions, Pusher};
 pub use request::{
     ErrHeaderTooLong, ErrMaxBytes, ErrMissingBoundary, ErrMissingContentLength, ErrMissingFile,
     ErrNoCookie, ErrNotMultipart, ErrNotSupported, ErrShortBody, ErrUnexpectedTrailer,
-    MaxBytesError, MaxBytesReader, NewMaxBytesError, NewMaxBytesReader, ParseHTTPVersion,
+    MaxBytesError, MaxBytesReader, NewMaxBytesError, ParseHTTPVersion,
     ProtocolError, ReadRequest, Request,
 };
 pub use responsecontroller::{NewResponseController, ResponseController};

@@ -1336,12 +1336,27 @@ pub fn parseBasicAuth(auth: string) -> (string, string, bool) {
 /// this taking an `Arc`, concluded a handler could never supply one,
 /// and documented it as a known gap; the gap was my choice of
 /// ownership, not the signature.
-pub struct MaxBytesReader<'w, R: io::Reader> {
+pub struct maxBytesReader<'w, R: io::Reader> {
     w: Option<&'w (dyn super::responsewriter::ResponseWriter + Send + Sync + 'static)>,
     r: R,
     i: int,
     n: int,
     err: error,
+}
+
+impl __ErrNotSupported {
+    // go: sdk 1.25.5 net/http/request.go:52-55 ProtocolError.Is
+    /// Go: "Is lets http.ErrNotSupported match errors.ErrUnsupported."
+    ///
+    /// Go's receiver is `*ProtocolError` and the body is
+    /// `pe == ErrNotSupported && err == errors.ErrUnsupported` — an
+    /// identity test on the sentinel, not a type test, so only THAT
+    /// one ProtocolError matches. goish reaches the same result
+    /// through the Unwrap chain already on this type; `Is` is spelled
+    /// out so the rule is greppable under its Go name.
+    pub fn Is(&self, err: crate::errors::error) -> bool {
+        return crate::errors::Is(err, crate::errors::ErrUnsupported);
+    }
 }
 
 crate::var! {
@@ -1491,17 +1506,19 @@ crate::var! {
 
 // go: sdk 1.25.5 net/http/request.go:1186-1191 MaxBytesReader
 //
-// goish names the CONSTRUCTOR `NewMaxBytesReader` because
-// `MaxBytesReader` is taken by the struct — Go has a func and an
-// unexported `maxBytesReader` type, Rust cannot share the name.
-pub fn NewMaxBytesReader<'w, R: io::Reader>(
+// Go has the exported FUNC `MaxBytesReader` and the unexported TYPE
+// `maxBytesReader`. goish had them the wrong way round — the struct
+// took the exported name and the constructor became
+// `NewMaxBytesReader`, which matches nothing in Go and hid the
+// function from the coverage check. Now spelled as Go spells them.
+pub fn MaxBytesReader<'w, R: io::Reader>(
     w: Option<&'w (dyn super::responsewriter::ResponseWriter + Send + Sync + 'static)>,
     r: R,
     n: int,
-) -> MaxBytesReader<'w, R> {
+) -> maxBytesReader<'w, R> {
     // Go: if n < 0 { n = 0 }
     let n = if n < 0 { 0 } else { n };
-    MaxBytesReader {
+    maxBytesReader {
         w,
         r,
         i: n,
@@ -1510,7 +1527,7 @@ pub fn NewMaxBytesReader<'w, R: io::Reader>(
     }
 }
 
-impl<'w, R: io::Reader> io::Reader for MaxBytesReader<'w, R> {
+impl<'w, R: io::Reader> io::Reader for maxBytesReader<'w, R> {
     // go: sdk 1.25.5 net/http/request.go:1211-1251 maxBytesReader.Read
     //
     /// Verified against goref across the boundary that matters. Go
