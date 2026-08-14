@@ -233,6 +233,10 @@ struct wantConnState {
     /// Go: `key connectMethodKey` — which pool bucket this waiter
     /// wants a conn from.
     key: connectMethodKey,
+    /// Go: `ctx context.Context — context for dial, cleared after
+    /// delivered or canceled`. None doubles as Go's nil: dialConnFor
+    /// reads it as "the waiter gave up".
+    ctx: Option<Arc<dyn crate::context::Context>>,
     done: bool,
     delivered: Option<Arc<persistConn>>,
     /// Go carries this in the delivered `connOrError`; goish keeps it
@@ -247,6 +251,10 @@ impl wantConn {
             result: crate::make!(chan connOrError, 1),
             state: crate::sync::Mutex::new(wantConnState {
                 key: connectMethodKey::default(),
+                // Go constructs wantConn WITH the request ctx (getConn
+                // literal); nil means "canceled". Background is the
+                // live default until getConn stores the real one.
+                ctx: Some(crate::context::Background()),
                 done: false,
                 delivered: None,
                 idleAt: crate::time::Time::default(),
@@ -278,6 +286,20 @@ impl wantConn {
     /// (connection or error)."
     pub fn waiting(&self) -> bool {
         return !self.state.Lock().done;
+    }
+
+    // go: none — goish-only: getConn stores the request ctx here for
+    // the dial goroutine (Go zero-values it in the wantConn literal).
+    pub(crate) fn __set_ctx(&self, ctx: Arc<dyn crate::context::Context>) {
+        self.state.Lock().ctx = Some(ctx);
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:1332-1338 wantConn.getCtxForDial
+    /// Go: "context for dial, cleared after delivered or canceled" —
+    /// None answers Go's nil, telling dialConnFor the waiter is gone.
+    pub fn getCtxForDial(&self) -> Option<Arc<dyn crate::context::Context>> {
+        return self.state.Lock().ctx.clone();
     }
 
     // go: sdk 1.25.5 net/http/transport.go:1339-1357 wantConn.tryDeliver
@@ -327,6 +349,7 @@ impl wantConn {
             let mut st = self.state.Lock();
             let pc = if st.done { st.delivered.take() } else { None };
             st.done = true;
+            st.ctx = None;
             pc
         };
         if let Some(pc) = pc {
@@ -1074,6 +1097,39 @@ impl Transport {
     // (transport.go:1571-1583), split out because the dial half needs
     // startDialConnForLocked. Returns whether a slot was taken; false
     // means the caller must queue.
+    // go: sdk 1.25.5 net/http/transport.go:1565-1593 Transport.queueForDial
+    /// Go: "queues w to wait for permission to begin dialing. Once w
+    /// receives permission to dial, it will do so in a separate
+    /// goroutine." With MaxConnsPerHost unset the dial starts
+    /// immediately; at the cap the waiter queues until
+    /// decConnsPerHost hands it a freed slot.
+    ///
+    /// KNOWN GAP while the transport loops are pending: a conn that
+    /// dies ORGANICALLY (banked then broken, reaped, or closed after
+    /// its response) does not release its per-host slot — Go does
+    /// that from readLoop's deferred decConnsPerHost. Dial failures
+    /// and canceled waiters DO release theirs (dialConnFor /
+    /// wantConn.cancel), so MaxConnsPerHost=0 (the default,
+    /// unlimited) is unaffected.
+    /// goish note: Go dials on a fresh goroutine
+    /// (startDialConnForLocked) so getConn's select can abandon a
+    /// slow dial on ctx cancel; goish's net::Dial is not
+    /// ctx-interruptible anyway, so the dial runs INLINE here and the
+    /// delivery is buffered before getConn's select even starts. The
+    /// goroutine form stays available on an Arc'd Transport.
+    pub fn queueForDial(&self, w: &Arc<wantConn>) {
+        // Go: w.beforeDial() — a test hook; goish has none.
+        if self.__take_conn_slot(&w.__key()) {
+            self.dialConnFor(w);
+            return;
+        }
+        self.__queue_for_slot(&w.__key(), w.clone());
+        return;
+    }
+
+    // go: none — goish-only: queueForDial's take-a-slot half,
+    // factored so the accounting is unit-testable without a dial.
+    // Always true when MaxConnsPerHost is unset (Go's <= 0 arm).
     pub fn __take_conn_slot(&self, key: &connectMethodKey) -> bool {
         if self.MaxConnsPerHost <= 0 {
             return true;
@@ -1088,8 +1144,8 @@ impl Transport {
         return false;
     }
 
-    // go: none — goish-only: the queue half of the same Go function
-    // (transport.go:1585-1591).
+    // go: none — goish-only: queueForDial's at-capacity half
+    // (transport.go:1585-1591), same factoring reason.
     pub fn __queue_for_slot(&self, key: &connectMethodKey, w: Arc<wantConn>) {
         let mut cph = self.__conns_per_host.Lock();
         let k = key.String();
@@ -1193,10 +1249,13 @@ impl Transport {
     /// Staged: `dialConn` is a placeholder, so this takes the failure
     /// path today. The accounting it drives is real and tested.
     pub fn dialConnFor(&self, w: &Arc<wantConn>) {
-        if !w.waiting() {
-            // Go: `ctx := w.getCtxForDial(); if ctx == nil { … }` — the
-            // waiter gave up before we got here, so return its slot.
-            self.decConnsPerHost(&w.__key());
+        // Go: ctx := w.getCtxForDial(); if ctx == nil — the waiter
+        // gave up (canceled) before we got here: return its slot.
+        let ctx = w.getCtxForDial();
+        if ctx.is_none() {
+            if let Some(next) = self.decConnsPerHost(&w.__key()) {
+                self.dialConnFor(&next);
+            }
             return;
         }
 
@@ -1211,17 +1270,40 @@ impl Transport {
                 }
             }
         } else {
-            self.decConnsPerHost(&w.__key());
+            // A failed dial frees its slot — and the freed slot goes
+            // straight to the next queued waiter (Go hands it via
+            // startDialConnForLocked from decConnsPerHost's caller).
+            if let Some(next) = self.decConnsPerHost(&w.__key()) {
+                self.dialConnFor(&next);
+            }
         }
         return;
     }
 
-    // go: none — goish-only placeholder for transport.go:1731's
-    // `dialConn`: 232 lines of TCP + TLS + proxy CONNECT + ALPN.
-    // Returning the error keeps dialConnFor's accounting exercisable;
-    // the real port needs the TLS handshake wired to Transport.
-    fn dialConn(&self, _key: &connectMethodKey) -> (Option<Arc<persistConn>>, error) {
-        return (None, errDialNotPorted.into());
+    // go: sdk 1.25.5 net/http/transport.go:1739-1954 Transport.dialConn
+    // goishlint:ignore GOISH020 dialConn — Go's first param is the
+    // dial ctx (goish's net::Dial is not ctx-interruptible yet) and
+    // its second is the full connectMethod; the key carries what the
+    // TCP arm consumes.
+    /// PARTIAL: the plain-TCP arm of Go's 232 lines. The TLS,
+    /// proxy-CONNECT and ALPN arms still answer errDialNotPorted —
+    /// RoundTrip's HTTPS path dials per request until they land. The
+    /// pc leaves here carrying its ConnSrc (Go's conn + br pair);
+    /// readLoop/writeLoop spawning is the loops phase.
+    fn dialConn(&self, key: &connectMethodKey) -> (Option<Arc<persistConn>>, error) {
+        if key.scheme != "http" || key.proxy.Len() != 0 {
+            return (None, errDialNotPorted.into());
+        }
+        // Go: t.dial(ctx, "tcp", cm.addr()) — goish's DialContext
+        // hook is not consulted here yet (nor was it on the inline
+        // path this replaces).
+        let (conn, derr) = crate::net::Dial(crate::string("tcp"), key.addr.clone());
+        if !derr.IsNil() {
+            return (None, derr);
+        }
+        let pc = Arc::new(persistConn::__new(key.clone()));
+        pc.__put_src(super::client::ConnSrc::Tcp(crate::bufio::NewReader(conn)));
+        return (Some(pc), errors::nil);
     }
 
     // go: sdk 1.25.5 net/http/transport.go:1487-1561 Transport.getConn
@@ -1246,28 +1328,47 @@ impl Transport {
     /// for the httptrace hooks and the dial context.
     pub fn getConn(
         &self,
-        _req: &Request,
+        req: &Request,
         cm: &connectMethod,
     ) -> (Option<Arc<persistConn>>, error) {
         let w = Arc::new(wantConn::__new());
         w.__set_key(cm.key());
 
-        if !self.queueForIdleConn(&w) {
-            if !self.__take_conn_slot(&cm.key()) {
-                self.__queue_for_slot(&cm.key(), w.clone());
+        if self.queueForIdleConn(&w) {
+            // Go: "case r := <-w.result:" — already buffered by
+            // tryDeliver on the idle-hit path.
+            let (r, ok) = w.result.Recv();
+            if !ok {
+                return (None, errNoIdleConn.into());
             }
-            return (None, errNoIdleConn.into());
+            if !r.err.IsNil() {
+                return (None, r.err);
+            }
+            return (r.pc, errors::nil);
         }
 
-        // Go: `case r := <-w.result:` — already buffered by tryDeliver.
-        let (r, ok) = w.result.Recv();
-        if !ok {
-            return (None, errNoIdleConn.into());
-        }
-        if !r.err.IsNil() {
-            return (None, r.err);
-        }
-        return (r.pc, errors::nil);
+        // Miss: queue the dial and BLOCK for whichever answers first —
+        // the dial goroutine's delivery or the request context. Go's
+        // select also watches the test hooks and cancelation channel;
+        // the ctx arm covers goish's cancelation model.
+        w.__set_ctx(req.Context());
+        self.queueForDial(&w);
+        let done = req.Context().Done();
+        let out = crate::select! {
+            let r = (w.result).Recv() => {
+                if !r.err.IsNil() {
+                    (None, r.err)
+                } else {
+                    (r.pc, errors::nil)
+                }
+            },
+            let _ = done.Recv() => {
+                // Go: "case <-req.Context().Done(): … w.cancel(t)".
+                w.cancel(self);
+                (None, req.Context().Err())
+            },
+        };
+        return out;
     }
 
     // go: sdk 1.25.5 net/http/transport.go:1148-1231 Transport.queueForIdleConn

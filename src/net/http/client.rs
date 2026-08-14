@@ -1017,13 +1017,13 @@ impl RoundTripper for Transport {
         } else {
             // ── HTTP path ────────────────────────────────────────────────
             let dial_addr = ensure_default_port(&host, 80);
-            // Go (getConn, transport.go:1487): try the idle pool
-            // before dialing. The staged wantConn/queueForIdleConn
-            // machinery pops a non-stale conn for this key.
-            let cm_key = super::transport::connectMethodKey {
-                proxy: string::new(),
-                scheme: string("http"),
-                addr: dial_addr.clone(),
+            // Go (roundTrip → getConn): the connect method for this
+            // request; getConn tries the idle pool, else queues a
+            // dial (queueForDial → dialConnFor → dialConn).
+            let cm = super::transport::connectMethod {
+                proxyURL: None,
+                targetScheme: string("http"),
+                targetAddr: dial_addr.clone(),
                 onlyH1: false,
             };
 
@@ -1035,52 +1035,45 @@ impl RoundTripper for Transport {
             // failed on a REUSED conn (the server may have closed it
             // while idle) is retried once on a fresh dial
             // (shouldRetryRequest; pc.isReused is the gate).
-            let mut tried_pooled = false;
             loop {
-                let mut pooled: Option<Arc<super::transport::persistConn>> = None;
-                if !self.DisableKeepAlives && !tried_pooled {
-                    let w = Arc::new(super::transport::wantConn::__new());
-                    w.__set_key(cm_key.clone());
-                    if self.queueForIdleConn(&w) {
-                        pooled = w.__delivered();
-                    }
+                // Go (roundTrip): pconn, err := t.getConn(treq, cm) —
+                // idle pool first, else dial through the
+                // wantConn/connsPerHost machinery.
+                let (pc, gerr) = self.getConn(&rt_req, &cm);
+                if !gerr.IsNil() {
+                    return (Response::default(), ctx_err_or(&ctx, gerr));
                 }
-                let (mut src, watch, pc) = match pooled
-                    .and_then(|pc| pc.__take_src().map(|s| (pc, s)))
-                {
-                    Some((pc, src)) => {
-                        tried_pooled = true;
-                        let mut src = src;
-                        // Re-arm deadline + ctx watch on the pooled conn.
-                        let dl = self.effective_deadline(&ctx);
-                        let tcp = src.__tcp_mut();
-                        if !dl.IsZero() {
-                            let _ = tcp.SetDeadline(dl);
-                        } else {
-                            let _ = tcp.SetDeadline(time::Time::default());
-                        }
-                        let watch = arm_cancel_watch(&ctx, tcp.__disconnect_watch_parts());
-                        (src, watch, pc)
-                    }
+                let pc = match pc {
+                    Some(pc) => pc,
                     None => {
-                        tried_pooled = true;
-                        let (conn, derr) = net::Dial(string("tcp"), dial_addr.clone());
-                        if !derr.IsNil() {
-                            return (Response::default(), derr);
-                        }
-                        // Deadline: Transport.Timeout tightened by the
-                        // ctx deadline.
-                        let dl = self.effective_deadline(&ctx);
-                        if !dl.IsZero() {
-                            let _ = conn.SetDeadline(dl);
-                        }
-                        // ctx-cancel watcher (see arm_cancel_watch).
-                        let watch = arm_cancel_watch(&ctx, conn.__disconnect_watch_parts());
-                        let pc = Arc::new(super::transport::persistConn::__new(cm_key.clone()));
-                        (ConnSrc::Tcp(bufio::NewReader(conn)), watch, pc)
+                        return (
+                            Response::default(),
+                            errors::New(string("http: getConn returned no connection")),
+                        )
                     }
                 };
                 let pc_reused = pc.isReused();
+                let mut src = match pc.__take_src() {
+                    Some(s) => s,
+                    None => {
+                        return (
+                            Response::default(),
+                            errors::New(string("http: persistConn has no connection")),
+                        )
+                    }
+                };
+                // Arm the per-request deadline + ctx watch (fresh and
+                // pooled conns alike; the bank cleared the deadline).
+                let watch = {
+                    let dl = self.effective_deadline(&ctx);
+                    let tcp = src.__tcp_mut();
+                    if !dl.IsZero() {
+                        let _ = tcp.SetDeadline(dl);
+                    } else {
+                        let _ = tcp.SetDeadline(time::Time::default());
+                    }
+                    arm_cancel_watch(&ctx, tcp.__disconnect_watch_parts())
+                };
 
                 // Write the request: head, then stream the body (see
                 // the TLS arm above).
