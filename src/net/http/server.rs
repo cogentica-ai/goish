@@ -2041,14 +2041,22 @@ pub(crate) const CONN_STATE_CLOSED: u8 = 4; // StateClosed
 /// call blocked in a background goroutine to wait for activity and
 /// trigger a CloseNotifier channel."
 ///
-/// STAGED. goish's serve loop bounds the header read with a socket
-/// read deadline instead, which is why this is not wired: swapping it
-/// in means restructuring the hardened M31 serve loop, and the state
-/// machine is worth having under test first.
+/// WIRED: the serve loop routes every header byte through `Read`, so
+/// `Server.MaxHeaderBytes` bounds the WHOLE header block (the
+/// per-line cap alone let a client send unbounded header bytes one
+/// modest line at a time), and the disconnect watch runs through
+/// startBackgroundRead/abortPendingRead.
 ///
 /// Go's `lock()` / `unlock()` ARE ported, using `Mutex::LockManual` +
-/// `Mutex::__locked_mut`. The Cond that Go's `lock()` lazily builds
-/// lands with the background reader.
+/// `Mutex::__locked_mut`.
+///
+/// One deliberate deviation, recorded in the serve loop's history:
+/// the background read is the netpoller disconnect watch, not a
+/// parked goroutine — v1's goroutine-per-request watcher cost ~15% of
+/// server CPU in newproc/goexit alone. The watch MSG_PEEKs and
+/// consumes nothing, so Go's pipelined-byte buffer (`hasByte` stays a
+/// field, never set) and the cond/inRead join machinery have no work
+/// to do here.
 pub struct connReader {
     state: crate::sync::Mutex<connReaderState>,
 }
@@ -2068,8 +2076,14 @@ struct connReaderState {
     aborted: bool,
     hasByte: bool,
     /// Go nils `cr.conn` in releaseConn; goish records the transition
-    /// until the `conn` back-pointer lands with the background reader.
+    /// and drops the per-request hooks below.
     released: bool,
+    /// Go: `conn *conn` — the back-pointer's two uses, stored per
+    /// request: cancelCtx + curReq.closeNotify (handleReadErrorLocked).
+    hooks: Option<(
+        Arc<crate::context::CancelFunc>,
+        Arc<super::responsewriter::closeNotifyCell>,
+    )>,
 }
 
 impl connReader {
@@ -2082,6 +2096,7 @@ impl connReader {
                 aborted: false,
                 hasByte: false,
                 released: false,
+                hooks: None,
             }),
         };
     }
@@ -2114,8 +2129,109 @@ impl connReader {
         // below, and the reference does not escape.
         unsafe {
             self.state.__locked_mut().released = true;
+            self.state.__locked_mut().hooks = None;
         }
         self.unlock();
+        return;
+    }
+
+    // go: none — goish-only: stores the per-request halves of Go's
+    // `cr.conn` back-pointer (cancelCtx + curReq for closeNotify) and
+    // re-arms a reader released by the previous request.
+    pub(crate) fn __set_hooks(
+        &self,
+        cancel: Arc<crate::context::CancelFunc>,
+        cnc: Arc<super::responsewriter::closeNotifyCell>,
+    ) {
+        let mut st = self.state.Lock();
+        st.hooks = Some((cancel, cnc));
+        st.released = false;
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:687-698 connReader.startBackgroundRead
+    // goishlint:ignore GOISH020 startBackgroundRead — Go's receiver
+    // reaches the PollDesc through cr.rwc; goish's conn ownership
+    // flows through the response writer, so the watch target is a
+    // parameter.
+    /// Arm the disconnect watch for the handler's lifetime. Go spawns
+    /// `go cr.backgroundRead()` blocked in a 1-byte read; goish arms a
+    /// netpoller hook on the conn's PollDesc that runs
+    /// `backgroundRead` when the poller's MSG_PEEK probe sees
+    /// EOF/reset (see the struct comment for why).
+    pub(crate) fn startBackgroundRead(
+        self: &Arc<Self>,
+        watch_pd: *const crate::runtime::netpoll::PollDesc,
+    ) {
+        if watch_pd.is_null() {
+            return;
+        }
+        self.state.Lock().aborted = false;
+        let cr = self.clone();
+        let hook: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            cr.backgroundRead();
+        });
+        crate::runtime::netpoll::arm_watch(unsafe { &*watch_pd }, hook);
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:701-739 connReader.backgroundRead
+    /// The watch-fire path. Go's goroutine distinguishes a pipelined
+    /// byte (n == 1: buffered, deliberately NOT a CloseNotify since Go
+    /// 1.11) from a read error; the goish probe is MSG_PEEK-gated and
+    /// only fires on EOF/reset, so what reaches here is exactly the
+    /// error arm — handleReadErrorLocked — unless abortPendingRead is
+    /// already tearing the watch down (Go: "Ignore this error. It's
+    /// the expected error from another goroutine calling
+    /// abortPendingRead").
+    pub(crate) fn backgroundRead(&self) {
+        self.lock();
+        // SAFETY: manual-locked above, unlocked below; the reference
+        // does not escape (hooks are cloned out).
+        let hooks = unsafe {
+            let st = self.state.__locked_mut();
+            if st.aborted {
+                None
+            } else {
+                st.hooks.clone()
+            }
+        };
+        if let Some((cancel, cnc)) = hooks {
+            // handleReadErrorLocked's pair, fired together.
+            cancel();
+            cnc.closeNotify();
+        }
+        self.unlock();
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:741-753 connReader.abortPendingRead
+    // goishlint:ignore GOISH020 abortPendingRead — same borrowed
+    // PollDesc parameter as startBackgroundRead above.
+    /// Quiesce the background read before the serve loop touches the
+    /// conn's read side again. Go pokes the read deadline into the
+    /// past (aLongTimeAgo) and cond-waits for the reader goroutine to
+    /// drain out; goish disarms the poller hook — nothing to join,
+    /// and a racing fire is fenced by `aborted`.
+    pub(crate) fn abortPendingRead(&self, watch_pd: *const crate::runtime::netpoll::PollDesc) {
+        if watch_pd.is_null() {
+            return;
+        }
+        self.state.Lock().aborted = true;
+        crate::runtime::netpoll::disarm_watch(unsafe { &*watch_pd });
+        self.state.Lock().aborted = false;
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:769-777 connReader.handleReadErrorLocked
+    /// Go: "Any error means the connection is dead and we should down
+    /// its context" — cancel the request ctx AND fire CloseNotify,
+    /// the same pair or neither. Caller holds the state lock.
+    fn handleReadErrorLocked(&self, st: &mut connReaderState) {
+        if let Some((cancel, cnc)) = &st.hooks {
+            cancel();
+            cnc.closeNotify();
+        }
         return;
     }
 
@@ -2146,6 +2262,81 @@ impl connReader {
         return self.state.Lock().remain <= 0;
     }
 
+    // go: sdk 1.25.5 net/http/server.go:779-825 connReader.Read
+    // goishlint:ignore GOISH020 Read — Go's receiver owns `rwc
+    // net.Conn`; goish's conn ownership flows through the response
+    // writer, so the read borrows it as a parameter.
+    /// The limit-bounded read every header byte flows through — the
+    /// serve loop's bufio wraps this via `__ConnReaderRead`.
+    pub(crate) fn Read(
+        &self,
+        rwc: &mut crate::net::TCPConn,
+        p: &mut crate::goslice::slice<crate::types::byte>,
+    ) -> (crate::types::int, crate::errors::error) {
+        let remain = {
+            let st = self.state.Lock();
+            // Go: if cr.hitReadLimit() { return 0, io.EOF }
+            if st.remain <= 0 {
+                return (0, crate::io::EOF.into());
+            }
+            st.remain
+        };
+        if p.Len() == 0 {
+            return (0, crate::errors::nil);
+        }
+        // Go: if int64(len(p)) > cr.remain { p = p[:cr.remain] } —
+        // goish slices share their backing, so the shortened view
+        // writes through to `p`.
+        let (n, err) = if crate::int64(p.Len()) > remain {
+            let mut view = p.slice(0, remain);
+            <crate::net::TCPConn as crate::io::Reader>::Read(rwc, &mut view)
+        } else {
+            <crate::net::TCPConn as crate::io::Reader>::Read(rwc, p)
+        };
+        self.lock();
+        // SAFETY: manual-locked above, unlocked below; the reference
+        // does not escape.
+        unsafe {
+            let st = self.state.__locked_mut();
+            if !err.IsNil() {
+                self.handleReadErrorLocked(st);
+            }
+            st.remain -= crate::int64(n);
+        }
+        self.unlock();
+        return (n, err);
+    }
+}
+
+// go: none — goish-only: the borrow-pair Go expresses as connReader's
+// own `rwc` field; the serve loop's bufio wraps this for the header
+// phase so every byte is limit-accounted.
+pub(crate) struct __ConnReaderRead<'a> {
+    pub(crate) cr: &'a Arc<connReader>,
+    pub(crate) rwc: &'a mut crate::net::TCPConn,
+}
+
+impl crate::io::Reader for __ConnReaderRead<'_> {
+    fn Read(
+        &mut self,
+        p: &mut crate::goslice::slice<crate::types::byte>,
+    ) -> (crate::types::int, crate::errors::error) {
+        return self.cr.Read(self.rwc, p);
+    }
+}
+
+// go: sdk 1.25.5 net/http/server.go:2300-2312 requestBodyRemains
+/// Go: "reports whether future calls to Read on rc might yield more
+/// data." The server buffers an inbound body before the handler runs
+/// (an Eager Body), so today this always answers false — exactly Go's
+/// `*body` case with the source drained — and the serve loop takes
+/// the immediate-startBackgroundRead arm.
+pub(crate) fn requestBodyRemains(rc: &super::Body) -> bool {
+    let out = match rc.__eager_len() {
+        Some(_) => false,
+        None => true,
+    };
+    return out;
 }
 
 pub(crate) struct ConnTrack {
@@ -3003,6 +3194,9 @@ impl Server {
         // arrived on when the server has several.
         let conn_ctx =
             crate::context::WithValue(conn_ctx, LocalAddrContextKey, conn.LocalAddr());
+        // Go: c.r = &connReader{conn: c} (newConn) — one per conn,
+        // living across keep-alive requests.
+        let cr = Arc::new(connReader::__new());
         loop {
             if self.__state.in_shutdown.load(Ordering::Acquire) {
                 let _ = conn.Close();
@@ -3021,24 +3215,78 @@ impl Server {
             let _ = conn.SetReadDeadline(dl);
 
             let conn_fd = conn.__fd();
+            // Go (c.readRequest, server.go:1066): bound the WHOLE
+            // header block, not just each line —
+            // c.r.setReadLimit(c.server.initialReadLimitSize()).
+            cr.setReadLimit(self.initialReadLimitSize());
             let (mut req, err) = {
                 // Pooled backing buffer — Go's c.bufr (newBufioReader,
                 // server.go:2017). Go builds the reader once per conn;
                 // goish's reader borrows the conn per request, so the
                 // get/put runs per request and the amortization is
-                // cross-conn through the shared pool.
-                let mut br = newBufioReader(&mut conn);
+                // cross-conn through the shared pool. Header bytes
+                // flow through the connReader's byte-limited Read.
+                let mut br = newBufioReader(__ConnReaderRead {
+                    cr: &cr,
+                    rwc: &mut conn,
+                });
                 // Server variant: carries the fd so the parser can
-                // emit `100 Continue` before the eager body read.
+                // emit `100 Continue` before the eager body read, and
+                // the connReader so the header limit lifts before the
+                // body decode (Go: c.r.setInfiniteReadLimit() after
+                // readRequest returns — goish's parser reads the body
+                // eagerly inside the same call).
                 let out = super::request::__read_request_server(
                     &mut br,
                     self.MaxHeaderBytes,
                     conn_fd,
+                    Some(&cr),
                 );
                 putBufioReader(br);
                 out
             };
             if !err.IsNil() {
+                // Go conn.serve's error switch (server.go:2040-2076).
+                // errorHeaders (server.go:2040) is inlined in each arm.
+                const ERROR_HEADERS: &str =
+                    "\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n";
+                // Go: case err == errTooLarge — the connReader's limit
+                // ran dry mid-header: "431 Request Header Fields Too
+                // Large", then closeWriteAndWait (the client is likely
+                // still writing; a slammed socket would RST away the
+                // error response).
+                if cr.hitReadLimit() {
+                    let public_err = "431 Request Header Fields Too Large";
+                    let _ = crate::io::Writer::Write(
+                        &mut conn,
+                        crate::convert::bytes(
+                            string("HTTP/1.1 ") + string(public_err) + string(ERROR_HEADERS)
+                                + string(public_err),
+                        ),
+                    );
+                    closeWriteAndWait(&conn);
+                    let _ = conn.Close();
+                    return;
+                }
+                // Go: case isUnsupportedTEError(err) — "A server that
+                // receives a request message with a transfer coding it
+                // does not understand SHOULD respond with 501" (RFC
+                // 7230 §3.3.1). Deliberately does not echo the value
+                // back (XSS risk).
+                if super::transfer::isUnsupportedTEError(err.clone()) {
+                    let code = super::status::StatusNotImplemented;
+                    let _ = crate::io::Writer::Write(
+                        &mut conn,
+                        crate::convert::bytes(crate::fmt::Sprintf!(
+                            "HTTP/1.1 %d %s%sUnsupported transfer encoding",
+                            code,
+                            super::status::StatusText(code),
+                            string(ERROR_HEADERS)
+                        )),
+                    );
+                    let _ = conn.Close();
+                    return;
+                }
                 // Unknown Expect value → 417 + close (Go
                 // sendExpectationFailed, server.go:2103).
                 if errors::Is(err.clone(), super::request::ErrUnsupportedExpect) {
@@ -3112,14 +3360,19 @@ impl Server {
             // signals fire together or not at all.
             let cnc = Arc::new(super::responsewriter::closeNotifyCell::new());
             let (_, watch_pd) = conn.__disconnect_watch_parts();
-            if !watch_pd.is_null() {
-                let cancel = req_cancel.clone();
-                let cell = cnc.clone();
-                let hook: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
-                    cancel();
-                    cell.closeNotify();
-                });
-                crate::runtime::netpoll::arm_watch(unsafe { &*watch_pd }, hook);
+            // Go (conn.serve, server.go:2094-2099): a body with bytes
+            // still on the wire defers the background read to the
+            // body's EOF (registerOnHitEOF); a drained one starts it
+            // immediately. The server's eager body decode means the
+            // second arm always runs today.
+            cr.__set_hooks(req_cancel.clone(), cnc.clone());
+            if requestBodyRemains(&req.Body) {
+                // registerOnHitEOF territory — unreachable until the
+                // inbound body streams; the connReader is armed late
+                // there, at the body's EOF.
+                cr.startBackgroundRead(watch_pd);
+            } else {
+                cr.startBackgroundRead(watch_pd);
             }
 
             let keep_alive = request_keep_alive(&mut req)
@@ -3188,15 +3441,13 @@ impl Server {
             // fire, so Go panics rather than hand back a dead channel.
             w.__set_handler_done();
 
-            // Handler done — disarm the disconnect watch before
+            // Handler done — quiesce the background read before
             // touching the conn's read side again (Go
-            // abortPendingRead, server.go:756). Nothing to join: the
-            // watch is a poller-side hook, and a racing disconnect
-            // fire merely cancels a request context that is already
-            // finishing (Go cancels it right below anyway).
-            if !watch_pd.is_null() {
-                crate::runtime::netpoll::disarm_watch(unsafe { &*watch_pd });
-            }
+            // abortPendingRead, server.go:741), then drop the
+            // per-request hooks (Go releaseConn: a late watch fire
+            // must find nothing to cancel).
+            cr.abortPendingRead(watch_pd);
+            cr.releaseConn();
 
             // Go: `if c.hijacked() { return }` right after ServeHTTP
             // (server.go:2149). The connection belongs to the handler

@@ -998,7 +998,7 @@ pub fn ReadRequestWithLimit<R: io::Reader>(
     br: &mut bufio::Reader<R>,
     max_header_bytes: int,
 ) -> (Request, error) {
-    __read_request_server(br, max_header_bytes, -1)
+    __read_request_server(br, max_header_bytes, -1, None)
 }
 
 /// Server-side variant carrying the raw conn fd so the parser can
@@ -1044,6 +1044,11 @@ pub(crate) fn __read_request_server<R: io::Reader>(
     br: &mut bufio::Reader<R>,
     max_header_bytes: int,
     interim_fd: i32,
+    // The serve loop's connReader: its header-byte limit lifts here
+    // once the head is parsed (Go: c.r.setInfiniteReadLimit() after
+    // readRequest returns; goish's parser reads the body eagerly
+    // inside the same call, so the lift happens inside instead).
+    cr: Option<&super::server::connReader>,
 ) -> (Request, error) {
     let max_line = if max_header_bytes > 0 {
         max_header_bytes as usize
@@ -1148,6 +1153,13 @@ pub(crate) fn __read_request_server<R: io::Reader>(
                 }
             }
         }
+    }
+
+    // Head fully parsed — lift the connReader's header-byte limit
+    // before the body decode (Go: c.r.setInfiniteReadLimit(), called
+    // by conn.readRequest right after readRequest returns).
+    if let Some(cr) = cr {
+        cr.setInfiniteReadLimit();
     }
 
     // `Expect` (RFC 9110 §10.1.1) — server path only. Mirrors Go's

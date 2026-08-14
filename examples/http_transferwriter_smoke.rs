@@ -292,9 +292,14 @@ Transfer-Encoding: gzip
         let (n, _) = goish::io::Reader::Read(&mut c, &mut b);
         let got = goish::string::from_bytes(&b.slice(0, n));
         let gv: &str = got.as_ref();
+        // Go answers "501 Not Implemented … Unsupported transfer
+        // encoding" (RFC 7230 §3.3.1, server.go:2055) — a silent
+        // close no longer passes.
         check(
-            "double Transfer-Encoding gets an error status, never the handler",
-            (n == 0 || gv.contains("400") || gv.contains("501")) && !gv.contains("SHOULD NOT RUN"),
+            "double Transfer-Encoding gets Go's 501, never the handler",
+            gv.contains("501 Not Implemented")
+                && gv.contains("Unsupported transfer encoding")
+                && !gv.contains("SHOULD NOT RUN"),
             got.clone(),
         );
         let _ = c.Close();

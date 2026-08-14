@@ -1699,3 +1699,7 @@ path = "examples/http_proxyenv_smoke.rs"
 [[example]]
 name = "http_transferwriter_smoke"
 path = "examples/http_transferwriter_smoke.rs"
+
+[[example]]
+name = "http_connreader_limit_smoke"
+path = "examples/http_connreader_limit_smoke.rs"
