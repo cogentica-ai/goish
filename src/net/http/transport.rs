@@ -96,6 +96,64 @@ pub fn canonicalAddr(url: &URL) -> string {
 ///     http://proxy.com|https|foo.com    http proxy, then CONNECT
 ///     http://proxy.com|http             http proxy, http anywhere after
 ///     socks5://proxy.com|http|foo.com   socks5, then http
+// go: sdk 1.25.5 net/http/transport.go:514-524 transportRequest
+// goishlint:ignore GOISH019 transportRequest — Go embeds *Request and
+// carries trace/ctx/cancel for the loops phase; what lands is the
+// request plus the two guarded cells its ported methods touch.
+/// Go: "transportRequest is a wrapper around a *Request that adds
+/// extra headers to write and stores any error to return from
+/// roundTrip."
+pub struct transportRequest {
+    /// Go embeds `*Request` — "original request, not to be mutated".
+    pub Request: Request,
+    /// Go: `extra Header — extra headers to write, or nil`.
+    extra: crate::sync::Mutex<Option<super::header::Header>>,
+    /// Go: `mu sync.Mutex; err error — first setError value for
+    /// mapRoundTripError to consider`.
+    err: crate::sync::Mutex<error>,
+}
+
+impl transportRequest {
+    // go: none — goish-only constructor; Go writes the literal in
+    // roundTrip.
+    pub fn __new(req: Request) -> transportRequest {
+        return transportRequest {
+            Request: req,
+            extra: crate::sync::Mutex::new(None),
+            err: crate::sync::Mutex::new(errors::nil),
+        };
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:526-531 transportRequest.extraHeaders
+    /// Go lazily allocates and returns the map for the caller to
+    /// mutate; goish's map handles share their backing, so the clone
+    /// handed out writes through to the stored one.
+    pub fn extraHeaders(&self) -> super::header::Header {
+        let mut g = self.extra.Lock();
+        if g.is_none() {
+            *g = Some(super::header::Header::new());
+        }
+        return g.as_ref().unwrap().clone();
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:533-539 transportRequest.setError
+    /// First error wins — later failures on the same request must not
+    /// mask the one that actually explains it.
+    pub fn setError(&self, err: error) {
+        let mut g = self.err.Lock();
+        if g.IsNil() {
+            *g = err;
+        }
+        return;
+    }
+
+    // go: none — goish-only: mapRoundTripError reads Go's `req.err`
+    // under mu directly.
+    pub(crate) fn __err(&self) -> error {
+        return self.err.Lock().clone();
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct connectMethod {
     /// Go: "nil for no proxy, else full proxy URL"
@@ -384,6 +442,12 @@ impl wantConn {
 // implementation and the only one in the tree.
 pub trait Waiter {
     fn waiting(&self) -> bool;
+    // go: none — goish-only: Go's cleanFrontCanceled tests
+    // `w.cancelCtx != nil`; the goish marker is a live dial ctx.
+    // Defaults to live so test waiter types are unaffected.
+    fn dial_ctx_live(&self) -> bool {
+        return true;
+    }
 }
 
 impl Waiter for Arc<wantConn> {
@@ -391,6 +455,11 @@ impl Waiter for Arc<wantConn> {
     // queue's generic bound is satisfied by the real type.
     fn waiting(&self) -> bool {
         return wantConn::waiting(self);
+    }
+
+    // go: none — see the trait doc: wantConn.cancel clears the ctx.
+    fn dial_ctx_live(&self) -> bool {
+        return self.getCtxForDial().is_some();
     }
 }
 
@@ -483,6 +552,26 @@ impl<T: Waiter + Clone> wantConnQueue<T> {
             cleaned = true;
         }
         return cleaned;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:1450-1458 wantConnQueue.cleanFrontCanceled
+    /// Go: "pops any wantConns with canceled dials from the head of
+    /// the queue" — Go tests `w.cancelCtx != nil`; goish's canceled
+    /// marker is the cleared dial ctx (Waiter::dial_ctx_live). Go's
+    /// caller is the dialsInProgress bookkeeping queue, which goish's
+    /// inline dial doesn't carry; the queue discipline is exercised
+    /// by the connlimit smoke.
+    pub fn cleanFrontCanceled(&mut self) {
+        loop {
+            let front_canceled = match self.peekFront() {
+                None => return,
+                Some(w) => !w.dial_ctx_live(),
+            };
+            if !front_canceled {
+                return;
+            }
+            let _ = self.popFront();
+        }
     }
 
     // go: sdk 1.25.5 net/http/transport.go:1462-1469 wantConnQueue.all
@@ -848,6 +937,52 @@ impl persistConn {
             )));
         }
         return;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:2187-2235 persistConn.mapRoundTripError
+    // goishlint:ignore GOISH020 mapRoundTripError — Go's middle param
+    // is startBytesWritten for the nwrite comparison; the sequential
+    // writer already knows the nothing-written fact as `head_failed`.
+    /// Go: "returns the appropriate error value for
+    /// persistConn.roundTrip." Cancellation beats network noise, an
+    /// explicit setError beats the raw failure, errServerClosedIdle
+    /// is never decorated, and a broken conn's error names the
+    /// transport. The writeLoopDone join belongs to the loops phase.
+    pub(crate) fn mapRoundTripError(
+        &self,
+        treq: &transportRequest,
+        head_failed: bool,
+        err: error,
+    ) -> error {
+        if err.IsNil() {
+            return errors::nil;
+        }
+        // Go: "If the request was canceled, that's better than
+        // network failures that were likely the result of tearing
+        // down the connection."
+        let cerr = self.canceled();
+        if !cerr.IsNil() {
+            return cerr;
+        }
+        // Go: "See if an error was set explicitly."
+        let reqErr = treq.__err();
+        if !reqErr.IsNil() {
+            return reqErr;
+        }
+        if errors::Is(err.clone(), errServerClosedIdle) {
+            // Go: "Don't decorate"
+            return err;
+        }
+        if self.isBroken() {
+            if head_failed {
+                return errNothingWritten.into();
+            }
+            return errors::New(crate::fmt::Sprintf!(
+                "net/http: HTTP/1.x transport connection broken: %v",
+                err
+            ));
+        }
+        return err;
     }
 
     // go: sdk 1.25.5 net/http/transport.go:2167-2177 persistConn.closeConnIfStillIdle

@@ -1031,6 +1031,10 @@ impl RoundTripper for Transport {
             // — the retry path below must be able to replay a consumed
             // body via GetBody (rewindBody), never resend it empty.
             let mut rt_req = super::transport::setupRewindBody(req);
+            // Go (roundTrip): treq := &transportRequest{Request: req, …}
+            // — the error cell mapRoundTripError consults, rebuilt per
+            // rewind like Go rebuilds it per retry loop turn.
+            let mut treq = super::transport::transportRequest::__new(rt_req.clone());
             // Retry loop — Go's transport.roundTrip: a request that
             // failed on a REUSED conn (the server may have closed it
             // while idle) is retried once on a fresh dial
@@ -1114,6 +1118,7 @@ impl RoundTripper for Transport {
                     } else {
                         werr.clone()
                     };
+                    treq.setError(werr.clone());
                     if super::transport::shouldRetryRequest(&rt_req, mapped, pc_reused) {
                         // Go (roundTrip retry): req, err = rewindBody(req)
                         let (rw, rwerr) = super::transport::rewindBody(&rt_req);
@@ -1121,9 +1126,11 @@ impl RoundTripper for Transport {
                             return (Response::default(), rwerr);
                         }
                         rt_req = rw;
+                        treq = super::transport::transportRequest::__new(rt_req.clone());
                         continue;
                     }
-                    return (Response::default(), ctx_err_or(&ctx, werr));
+                    let mapped_out = pc.mapRoundTripError(&treq, head_failed, werr);
+                    return (Response::default(), ctx_err_or(&ctx, mapped_out));
                 }
 
                 // Read the response head; the src moves onward into
@@ -1159,15 +1166,17 @@ impl RoundTripper for Transport {
                     } else {
                         rerr.clone()
                     };
-                    if super::transport::shouldRetryRequest(&rt_req, mapped, pc_reused) {
+                    if super::transport::shouldRetryRequest(&rt_req, mapped.clone(), pc_reused) {
                         let (rw, rwerr) = super::transport::rewindBody(&rt_req);
                         if !rwerr.IsNil() {
                             return (resp, rwerr);
                         }
                         rt_req = rw;
+                        treq = super::transport::transportRequest::__new(rt_req.clone());
                         continue;
                     }
-                    return (resp, ctx_err_or(&ctx, rerr));
+                    let mapped_out = pc.mapRoundTripError(&treq, false, mapped);
+                    return (resp, ctx_err_or(&ctx, mapped_out));
                 }
 
                 // Go's bodyEOFSignal bank-back: reusable when the
