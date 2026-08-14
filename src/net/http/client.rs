@@ -616,6 +616,10 @@ pub struct Transport {
     /// `connectMethodKey.String()` because goish has no struct-keyed
     /// map. STAGED — nothing puts a conn in it yet.
     pub(crate) __idle: crate::sync::Mutex<super::transport::idlePool>,
+    /// Go's `connsPerHostMu` + `connsPerHost` + `connsPerHostWait`
+    /// (transport.go:278-281) — the MaxConnsPerHost limiter, a
+    /// separate lock from the idle pool in Go and kept separate here.
+    pub(crate) __conns_per_host: crate::sync::Mutex<super::transport::connsPerHost>,
     /// Go's `MaxResponseHeaderBytes` (transport.go:288) — cap on the
     /// response head. Zero means Go's 10 MiB default; NEGATIVE passes
     /// through, like MaxIdleConnsPerHost.
@@ -670,6 +674,9 @@ impl Default for Transport {
     fn default() -> Self {
         Transport {
             __idle: crate::sync::Mutex::new(super::transport::idlePool::new()),
+            __conns_per_host: crate::sync::Mutex::new(
+                super::transport::connsPerHost::new(),
+            ),
             MaxResponseHeaderBytes: 0,
             WriteBufferSize: 0,
             ReadBufferSize: 0,

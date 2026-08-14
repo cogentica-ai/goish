@@ -337,8 +337,11 @@ impl Waiter for Arc<wantConn> {
     }
 }
 
-#[derive(Default)]
-pub struct wantConnQueue<T: Waiter> {
+// Go's map holds wantConnQueue BY VALUE — its own comment says "q is
+// a value (like a slice), so we have to store the updated q back into
+// the map". Clone + Default give goish the same get-modify-put shape.
+#[derive(Clone)]
+pub struct wantConnQueue<T: Waiter + Clone> {
     /// Go: "This is a queue, not a deque. It is split into two stages
     /// - head[headPos:] and tail."
     head: Vec<Option<T>>,
@@ -346,7 +349,17 @@ pub struct wantConnQueue<T: Waiter> {
     tail: Vec<Option<T>>,
 }
 
-impl<T: Waiter> wantConnQueue<T> {
+// go: none — goish-only: a derived Default would demand `T: Default`,
+// which `Arc<wantConn>` cannot satisfy. Go's zero queue is just two
+// empty slices, so write it by hand.
+impl<T: Waiter + Clone> Default for wantConnQueue<T> {
+    // go: none — see the note above.
+    fn default() -> wantConnQueue<T> {
+        return wantConnQueue::new();
+    }
+}
+
+impl<T: Waiter + Clone> wantConnQueue<T> {
     // go: none — goish-only: Go zero-values wantConnQueue; Rust needs
     // an explicit constructor for the generic parameter.
     pub fn new() -> wantConnQueue<T> {
@@ -781,6 +794,132 @@ impl fakeLocker {
 /// there is no nil case to handle — the clone is the whole job.
 pub fn cloneTLSConfig(cfg: &crate::crypto::tls::Config) -> crate::crypto::tls::Config {
     return cfg.clone();
+}
+
+// ─── the per-host connection limiter ────────────────────────────────
+
+// go: none — goish-only: the payload of Go's `connsPerHostMu`, i.e.
+// the two Transport fields it guards (transport.go:278-281). Keyed by
+// `connectMethodKey.String()` for the same reason the idle pool is.
+pub struct connsPerHost {
+    /// Go: `connsPerHost map[connectMethodKey]int`
+    pub counts: crate::gomap::map<string, int>,
+    /// Go: `connsPerHostWait map[connectMethodKey]wantConnQueue`
+    pub wait: crate::gomap::map<string, wantConnQueue<Arc<wantConn>>>,
+}
+
+impl connsPerHost {
+    // go: none — goish-only constructor; Go zero-values both maps.
+    pub fn new() -> connsPerHost {
+        return connsPerHost {
+            counts: crate::gomap::map::<string, int>::new(),
+            wait: crate::gomap::map::<string, wantConnQueue<Arc<wantConn>>>::new(),
+        };
+    }
+}
+
+impl Transport {
+    // go: sdk 1.25.5 net/http/transport.go:1633-1680 Transport.decConnsPerHost
+    /// Give a per-host connection slot back. Go's comment on the
+    /// underflow is worth keeping verbatim: "Shouldn't happen, but if
+    /// it does, the counting is buggy and could easily lead to a
+    /// silent DEADLOCK, so report the problem loudly." Hence a panic
+    /// rather than a saturating decrement.
+    ///
+    /// The slot is handed to a still-waiting dialer if there is one,
+    /// rather than decremented — Go: "Some goroutines on the wait list
+    /// may have timed out or gotten a connection another way. If
+    /// they're all gone, we don't want to kick off any spurious dial
+    /// operations." Skipping the hand-off and always decrementing is
+    /// not equivalent: a waiter would sit there while the count says
+    /// a slot is free.
+    ///
+    /// Staged: `startDialConnForLocked` is not ported, so the handed-off
+    /// waiter is delivered nothing yet — `__dec_conns_per_host_handoff`
+    /// reports which waiter WOULD have been started, and the tests
+    /// assert on that.
+    pub fn decConnsPerHost(&self, key: &connectMethodKey) -> Option<Arc<wantConn>> {
+        if self.MaxConnsPerHost <= 0 {
+            return None;
+        }
+        let mut cph = self.__conns_per_host.Lock();
+        let k = key.String();
+        let n = cph.counts.Get(k.clone()).0;
+        if n == 0 {
+            panic!("net/http: internal error: connCount underflow");
+        }
+
+        // Go: "Can we hand this count to a goroutine still waiting to
+        // dial?"
+        let mut handed: Option<Arc<wantConn>> = None;
+        if cph.wait.Get(k.clone()).1 {
+            let mut q = cph.wait.Get(k.clone()).0;
+            if q.len() > 0 {
+                while q.len() > 0 {
+                    match q.popFront() {
+                        None => {
+                            break;
+                        }
+                        Some(w) => {
+                            if w.waiting() {
+                                handed = Some(w);
+                                break;
+                            }
+                        }
+                    }
+                }
+                if q.len() == 0 {
+                    cph.wait.Delete(k.clone());
+                } else {
+                    // Go: "q is a value (like a slice), so we have to
+                    // store the updated q back into the map."
+                    cph.wait.Set(k.clone(), q);
+                }
+                if handed.is_some() {
+                    return handed;
+                }
+            }
+        }
+
+        // Go: "Otherwise, decrement the recorded count."
+        let n = n - 1;
+        if n == 0 {
+            cph.counts.Delete(k);
+        } else {
+            cph.counts.Set(k, n);
+        }
+        return None;
+    }
+
+    // go: none — goish-only: the count half of Go's queueForDial
+    // (transport.go:1571-1583), split out because the dial half needs
+    // startDialConnForLocked. Returns whether a slot was taken; false
+    // means the caller must queue.
+    pub fn __take_conn_slot(&self, key: &connectMethodKey) -> bool {
+        if self.MaxConnsPerHost <= 0 {
+            return true;
+        }
+        let mut cph = self.__conns_per_host.Lock();
+        let k = key.String();
+        let n = cph.counts.Get(k.clone()).0;
+        if n < self.MaxConnsPerHost {
+            cph.counts.Set(k, n + 1);
+            return true;
+        }
+        return false;
+    }
+
+    // go: none — goish-only: the queue half of the same Go function
+    // (transport.go:1585-1591).
+    pub fn __queue_for_slot(&self, key: &connectMethodKey, w: Arc<wantConn>) {
+        let mut cph = self.__conns_per_host.Lock();
+        let k = key.String();
+        let mut q = cph.wait.Get(k.clone()).0;
+        q.cleanFrontNotWaiting();
+        q.pushBack(w);
+        cph.wait.Set(k, q);
+        return;
+    }
 }
 
 // ─── the idle pool ──────────────────────────────────────────────────
