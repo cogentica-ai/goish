@@ -1,3 +1,4 @@
+// go: file net/http/server.go decls: Server.ServeTLS, Server.ListenAndServeTLS, ListenAndServeTLS
 // net/http/server_tls — HTTPS server (ServeTLS / ListenAndServeTLS).
 //
 // Port of Go 1.25.5 net/http/server.go:
@@ -105,6 +106,7 @@ impl tlsResponse {
         self.inner.lock().keep_alive = ka;
     }
 
+    // go: none — goish-only accessor for the TLS-side response.
     /// Mirrors `response::__close_after_reply` on the plaintext path:
     /// the handler may force the conn closed after keep-alive was
     /// decided.
@@ -116,6 +118,9 @@ impl tlsResponse {
         self.inner.lock().is_head = is_head;
     }
 
+    // go: none — goish-only: the TLS-side analogue of chunkWriter's
+    // flush (server.go:387). Go's writes go through bufio + chunkWriter;
+    // this renders straight onto the record layer.
     /// Render the response onto the TLS record layer. Idempotent.
     fn flush(&self) -> error {
         let mut g = self.inner.lock();
@@ -160,6 +165,9 @@ impl tlsResponse {
         err
     }
 
+    // go: none — goish-only: Go promotes to chunked inside
+    // chunkWriter.writeHeader (server.go:1229); the TLS writer has no
+    // chunkWriter, so the promotion is its own step.
     /// `Flush()` backing — promote to chunked streaming: emit the head
     /// (Transfer-Encoding: chunked) plus any buffered body as the
     /// first chunk. Subsequent `Write`s stream each call as a chunk.
@@ -198,6 +206,9 @@ impl tlsResponse {
     }
 }
 
+// go: none — goish-only: Go gets chunk framing from
+// internal.NewChunkedWriter; this writes it inline over the record
+// layer.
 /// Emit one HTTP chunk (`<hex>\r\n<data>\r\n`) over the TLS conn.
 fn write_chunk(conn: &mut tls::Conn, data: &[byte]) -> (int, error) {
     let n = data.len();
@@ -268,6 +279,9 @@ impl Flusher for tlsResponse {
 
 // ─── serve loop ─────────────────────────────────────────────────────
 
+// go: none — goish-only: Go has ONE `(*conn).serve` with the TLS
+// handshake as a branch inside it (server.go:1961). goish's serve_conn
+// is specialised on net::TCPConn, so the TLS path is a second loop.
 /// Per-connection HTTPS serve loop: drive the handshake, then run
 /// HTTP/1.1 keep-alive over the established TLS conn.
 fn serve_tls_conn(
@@ -603,6 +617,9 @@ impl Server {
         self.ServeTLS(ln, certFile, keyFile)
     }
 
+    // go: none — goish-only: Go clones srv.TLSConfig and calls
+    // LoadX509KeyPair inline in ServeTLS (server.go:3524); goish needs
+    // the result before the accept loop, so it is named.
     /// Build the effective server `tls::Config`: use `Server.TLSConfig`
     /// if present (its `Certificates` win), else load the cert/key
     /// PEM pair via `tls::LoadX509KeyPair`. Mirrors Go's ServeTLS
