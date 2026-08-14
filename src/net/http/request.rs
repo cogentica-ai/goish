@@ -797,6 +797,34 @@ pub fn ReadRequestWithLimit<R: io::Reader>(
 /// reads bodies eagerly, so "just before the body read" is the same
 /// linearization point. `interim_fd < 0` disables Expect handling
 /// (client-side response parsing paths).
+// go: none — goish-only: Go writes `new(http.Request)` or
+// `&http.Request{…}` for the zero value; Request has unexported fields
+// (ctx, form state, path values) so goish needs a named constructor.
+// Matches Go's zero value field for field.
+impl Default for Request {
+    fn default() -> Request {
+        return Request {
+            Close: false,
+            Trailer: Header::new(),
+            TLS: None,
+            RequestURI: string::new(),
+            Method: string::new(),
+            URL: URL::empty(),
+            Proto: string::new(),
+            ProtoMajor: 0,
+            ProtoMinor: 0,
+            Header: Header::new(),
+            Host: string::new(),
+            ContentLength: 0,
+            Body: slice::<byte>::__from_vec(Vec::new()),
+            RemoteAddr: string::new(),
+            path_values: crate::gomap::map::<string, string>::new(),
+            form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(FormCell::default())),
+            ctx: None,
+        };
+    }
+}
+
 pub(crate) fn __read_request_server<R: io::Reader>(
     br: &mut bufio::Reader<R>,
     max_header_bytes: int,
