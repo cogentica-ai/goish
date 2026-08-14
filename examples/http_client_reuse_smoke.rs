@@ -362,6 +362,60 @@ fn run() -> ! {
         ts.Close();
     }
 
+    // ── 6. Transport.DialTLSContext is consulted for https ──
+    {
+        // The hook ignores the target and dials the PLAIN backend —
+        // proving the custom dialer owns the conn entirely (Go skips
+        // addTLS when a custom TLS dialer is set; the conn is taken
+        // as delivered). The request's scheme is https; the wire is
+        // whatever the hook produced.
+        static TLS_DIAL_CALLS: AtomicUsize = AtomicUsize::new(0);
+        let backend = fmt::Sprintf!("127.0.0.1:%d", port as i64);
+        let mut tr = http::Transport::default();
+        tr.DialTLSContext = Some(Arc::new(
+            move |_ctx: Option<Arc<dyn goish::context::Context>>,
+                  _network: goish::string,
+                  _addr: goish::string| {
+                TLS_DIAL_CALLS.fetch_add(1, Ordering::SeqCst);
+                let (c, e) = net::Dial(string("tcp"), backend.clone());
+                if !e.IsNil() {
+                    return (None, e);
+                }
+                let b: alloc::boxed::Box<dyn net::Conn> = alloc::boxed::Box::new(c);
+                (Some(b), goish::errors::nil)
+            },
+        ));
+        let mut client = http::Client::default();
+        client.Transport = Arc::new(tr);
+        let (mut resp, err) = client.Do(&{
+            let (r, _) = http::NewRequest(
+                string("GET"),
+                string("https://custom-dialer.invalid/x"),
+                goish::nil,
+            );
+            r
+        });
+        if err.IsNil() {
+            let (body, _) = goish::io::ReadAll(&mut resp.Body);
+            let _ = resp.Body.Close();
+            check(
+                "DialTLSContext hook carries an https request end to end",
+                TLS_DIAL_CALLS.load(Ordering::SeqCst) == 1 && body.Len() == 22,
+                fmt::Sprintf!(
+                    "calls=%d body=%d",
+                    TLS_DIAL_CALLS.load(Ordering::SeqCst) as i64,
+                    body.Len() as i64
+                ),
+            );
+        } else {
+            check(
+                "DialTLSContext hook carries an https request end to end",
+                false,
+                fmt::Sprintf!("%v", err),
+            );
+        }
+    }
+
     let f = FAILED.load(Ordering::Relaxed);
     if f == 0 {
         fmt::Printf!("HTTP_CLIENT_REUSE_OK\n");

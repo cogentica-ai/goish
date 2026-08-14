@@ -1496,6 +1496,22 @@ impl Transport {
         if (key.scheme != "http" && key.scheme != "https") || key.proxy.Len() != 0 {
             return (None, errDialNotPorted.into());
         }
+        // Go (dialConn): cm.scheme() == "https" && t.hasCustomTLSDialer()
+        // — the hook dials AND handshakes; addTLS is skipped and the
+        // conn arrives as the interface type (no PollDesc → the
+        // disconnect watch stays disarmed on it).
+        if key.scheme == "https" && self.hasCustomTLSDialer() {
+            let (conn, derr) =
+                self.customDialTLS(ctx.clone(), crate::string("tcp"), key.addr.clone());
+            if !derr.IsNil() {
+                return (None, derr);
+            }
+            let pc = Arc::new(persistConn::__new(key.clone()));
+            pc.__put_src(super::client::ConnSrc::Dyn(crate::bufio::NewReader(
+                super::client::DynConn(conn.unwrap()),
+            )));
+            return (Some(pc), errors::nil);
+        }
         // Go: t.dial(ctx, "tcp", cm.addr()) — goish's DialContext
         // hook is not consulted here yet (nor was it on the inline
         // path this replaces).
@@ -1984,7 +2000,35 @@ impl Transport {
     /// this is constant false. Named now so the TLS dial path has a
     /// hook to fill rather than a condition to invent.
     pub fn hasCustomTLSDialer(&self) -> bool {
-        return false;
+        return self.DialTLS.is_some() || self.DialTLSContext.is_some();
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:1471-1481 Transport.customDialTLS
+    /// Go: DialTLSContext wins over the deprecated DialTLS, and a
+    /// hook answering (nil, nil) is a hard error — a silent nil conn
+    /// would NPE deep in the pool instead of naming the buggy hook.
+    pub(crate) fn customDialTLS(
+        &self,
+        ctx: Option<Arc<dyn crate::context::Context>>,
+        network: crate::gostring::string,
+        addr: crate::gostring::string,
+    ) -> (Option<alloc::boxed::Box<dyn crate::net::Conn>>, error) {
+        let (conn, err) = if let Some(f) = &self.DialTLSContext {
+            f(ctx, network, addr)
+        } else if let Some(f) = &self.DialTLS {
+            f(network, addr)
+        } else {
+            (None, errors::nil)
+        };
+        if conn.is_none() && err.IsNil() {
+            return (
+                None,
+                errors::New(crate::string(
+                    "net/http: Transport.DialTLS or DialTLSContext returned (nil, nil)",
+                )),
+            );
+        }
+        return (conn, err);
     }
 
     // go: sdk 1.25.5 net/http/transport.go:1040-1045 Transport.maxIdleConnsPerHost

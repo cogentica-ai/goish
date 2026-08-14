@@ -76,6 +76,40 @@ use super::url::URL;
 pub(crate) enum ConnSrc {
     Tcp(bufio::Reader<crate::net::TCPConn>),
     Tls(bufio::Reader<crate::crypto::tls::Conn>),
+    /// A caller-supplied connection (Transport.DialTLS/DialTLSContext
+    /// — Go stores it as the interface-typed pc.conn). No PollDesc is
+    /// reachable through the trait, so the disconnect watch stays
+    /// disarmed on these.
+    Dyn(bufio::Reader<DynConn>),
+}
+
+// go: none — goish-only: the io-trait bridge over a caller-supplied
+// `dyn net::Conn` (the net::Conn trait spells Read/Write/Close as its
+// own methods, not the io traits bufio wants).
+pub(crate) struct DynConn(pub(crate) alloc::boxed::Box<dyn crate::net::Conn>);
+
+impl Reader for DynConn {
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        return self.0.Read(p);
+    }
+}
+
+impl crate::io::Writer for DynConn {
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        return self.0.Write(p);
+    }
+}
+
+impl Closer for DynConn {
+    fn Close(&mut self) -> error {
+        return self.0.Close();
+    }
+}
+
+impl DynConn {
+    pub(crate) fn SetDeadline(&self, t: crate::time::Time) -> error {
+        return self.0.SetDeadline(t);
+    }
 }
 
 impl Reader for ConnSrc {
@@ -83,6 +117,7 @@ impl Reader for ConnSrc {
         match self {
             ConnSrc::Tcp(br) => br.Read(p),
             ConnSrc::Tls(br) => br.Read(p),
+            ConnSrc::Dyn(br) => br.Read(p),
         }
     }
 }
@@ -92,6 +127,7 @@ impl ConnSrc {
         match self {
             ConnSrc::Tcp(br) => br.__rd_mut().Close(),
             ConnSrc::Tls(br) => br.__rd_mut().Close(),
+            ConnSrc::Dyn(br) => br.__rd_mut().Close(),
         }
     }
 
@@ -105,6 +141,7 @@ impl ConnSrc {
                 let raw: &[u8] = &p;
                 br.__rd_mut().Write(raw)
             }
+            ConnSrc::Dyn(br) => crate::io::Writer::Write(br.__rd_mut(), p),
         };
         return out;
     }
@@ -122,7 +159,7 @@ impl ConnSrc {
     pub(crate) fn __tcp_mut(&mut self) -> &mut crate::net::TCPConn {
         match self {
             ConnSrc::Tcp(br) => br.__rd_mut(),
-            ConnSrc::Tls(_) => panic!("__tcp_mut on a TLS source"),
+            ConnSrc::Tls(_) | ConnSrc::Dyn(_) => panic!("__tcp_mut on a TLS source"),
         }
     }
 
@@ -133,6 +170,7 @@ impl ConnSrc {
         let out = match self {
             ConnSrc::Tcp(br) => br.__rd_mut().SetDeadline(t),
             ConnSrc::Tls(br) => br.__rd_mut().SetDeadline(t),
+            ConnSrc::Dyn(br) => br.__rd_mut().SetDeadline(t),
         };
         return out;
     }
@@ -149,7 +187,7 @@ impl ConnSrc {
                     (Some((ConnSrc::Tcp(br), w)), errors::nil)
                 }
             }
-            ConnSrc::Tls(_) => (
+            ConnSrc::Tls(_) | ConnSrc::Dyn(_) => (
                 None,
                 errors::New(string(
                     "httputil: protocol switch over a TLS backend is not supported",
@@ -769,6 +807,19 @@ pub type ProxyResolver = alloc::sync::Arc<
 /// addr) -> (Conn, error)` but those are inert in v1.
 pub type DialContextFn = alloc::sync::Arc<dyn Fn() + Send + Sync>;
 
+/// `Transport.DialTLSContext`'s shape (transport.go:120): dial AND
+/// handshake, returning a ready encrypted conn. Go's is
+/// `func(ctx, network, addr) (net.Conn, error)`.
+pub type DialTLSContextFn = alloc::sync::Arc<
+    dyn Fn(
+            Option<Arc<dyn crate::context::Context>>,
+            string,
+            string,
+        ) -> (Option<alloc::boxed::Box<dyn crate::net::Conn>>, error)
+        + Send
+        + Sync,
+>;
+
 /// `http.Transport` (transport.go:163). v1: dial-per-request, no idle
 /// pool. Field surface mirrors Go's struct so user ports can configure
 /// or read these slots; only `Timeout` actually drives behaviour
@@ -814,6 +865,20 @@ pub struct Transport {
     /// Per-dial timeout/keepalive callback. `Option` so the zero value
     /// is None.
     pub DialContext: Option<DialContextFn>,
+    /// `Transport.DialTLSContext` (transport.go:117) — Go: "specifies
+    /// an optional dial function for creating TLS connections for
+    /// non-proxied HTTPS requests" — the conn arrives already
+    /// handshaken; addTLS is skipped.
+    pub DialTLSContext: Option<DialTLSContextFn>,
+    /// `Transport.DialTLS` (transport.go:126) — the ctx-less
+    /// deprecated form; DialTLSContext wins when both are set.
+    pub DialTLS: Option<
+        alloc::sync::Arc<
+            dyn Fn(string, string) -> (Option<alloc::boxed::Box<dyn crate::net::Conn>>, error)
+                + Send
+                + Sync,
+        >,
+    >,
     /// Maximum time waiting for the TLS handshake. Inert in v1.
     pub TLSHandshakeTimeout: time::Duration,
     /// Maximum time waiting for an Expect: 100-continue response.
@@ -851,6 +916,8 @@ impl Default for Transport {
             Proxy: None,
             IdleConnTimeout: time::Duration(0),
             DialContext: None,
+            DialTLSContext: None,
+            DialTLS: None,
             TLSHandshakeTimeout: time::Duration(0),
             ExpectContinueTimeout: time::Duration(0),
             TLSClientConfig: crate::crypto::tls::Config::default(),
@@ -1095,6 +1162,7 @@ impl RoundTripper for Transport {
                 let (mut resp, kind, rerr) = match &mut src {
                     ConnSrc::Tcp(br) => read_response_head(br, Some(rt_req.clone())),
                     ConnSrc::Tls(br) => read_response_head(br, Some(rt_req.clone())),
+                    ConnSrc::Dyn(br) => read_response_head(br, Some(rt_req.clone())),
                 };
                 if !rerr.IsNil() {
                     stop_cancel_watch(watch);
@@ -1115,6 +1183,14 @@ impl RoundTripper for Transport {
                             }
                         }
                         ConnSrc::Tls(br) => {
+                            let n = br.Buffered();
+                            if n > 0 {
+                                br.Peek(n).0
+                            } else {
+                                slice::<byte>::__from_vec(Vec::new())
+                            }
+                        }
+                        ConnSrc::Dyn(br) => {
                             let n = br.Buffered();
                             if n > 0 {
                                 br.Peek(n).0
