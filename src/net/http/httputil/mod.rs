@@ -18,6 +18,7 @@
 
 pub mod dump;
 pub mod httputil;
+pub mod persist;
 pub mod reverseproxy;
 
 pub use dump::{dumpConn, outgoingLength, valueOrDefault, DumpRequest, DumpResponse};

@@ -1615,3 +1615,7 @@ path = "examples/http_cgi_host_smoke.rs"
 [[example]]
 name = "http_proxyrequest_smoke"
 path = "examples/http_proxyrequest_smoke.rs"
+
+[[example]]
+name = "http_persist_smoke"
+path = "examples/http_persist_smoke.rs"
