@@ -223,6 +223,17 @@ impl<T> Mutex<T> {
         return &mut *self.data.get();
     }
 
+    // go: none — goish-only. Rust-side escape hatch mirroring
+    // `std::sync::Mutex::into_inner` / `SpinLock::into_inner`: taking
+    // `self` by value statically guarantees no other reference (or
+    // waiter) exists, so no locking occurs. Used by owners consuming
+    // themselves (e.g. `response::__take_conn` recovering the conn).
+    /// Consume the mutex, returning the protected value.
+    #[inline]
+    pub fn into_inner(self) -> T {
+        self.data.into_inner()
+    }
+
     /// Internal: drop the locked bit and (if waiters present) hand
     /// off ownership to the head waiter. Used by `MutexGuard::drop`
     /// and by `Unlock`.

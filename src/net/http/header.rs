@@ -240,7 +240,10 @@ impl Header {
         exclude: &map<string, bool>,
     ) -> crate::error {
         let sorter = self.sortedKeyValues(exclude);
-        let kvs = &sorter.kvs;
+        // Cheap Arc-backed handle clone, so `sorter` stays movable
+        // into `Put` while the loop still reads the entries.
+        let kvs = sorter.kvs.clone();
+        let kvs = &kvs;
         let n = len(kvs);
         let mut i: int = 0;
         while i < n {
@@ -268,13 +271,13 @@ impl Header {
                 for part in [k.clone(), string(": "), v, string("\r\n")] {
                     let (_, e) = w.Write(crate::convert::bytes(part));
                     if !e.IsNil() {
-                        // (no pool Put — see headerSorterPool)
+                        headerSorterPool().Put(sorter);
                         return e;
                     }
                 }
             }
         }
-        // (no pool Put — see headerSorterPool)
+        headerSorterPool().Put(sorter);
         return crate::errors::nil;
     }
 
@@ -287,11 +290,7 @@ impl Header {
     // pool, so goish returns the sorter alone and the caller reads
     // `sorter.kvs`. Same allocation reuse, one return value.
     pub fn sortedKeyValues(&self, exclude: &map<string, bool>) -> headerSorter {
-        // NOT `headerSorterPool().Get()`, deliberately — see the note
-        // on headerSorterPool below. Go pools this to avoid an
-        // allocation; goish allocates fresh, which is a performance
-        // cost and not a semantic one.
-        let mut hs = headerSorter::default();
+        let mut hs = headerSorterPool().Get();
         let mut kvs: alloc::vec::Vec<keyValues> = alloc::vec::Vec::new();
         for (k, vv) in self.inner.__iter() {
             let (skip, _) = exclude.Get(k.clone());
@@ -361,24 +360,15 @@ pub struct headerSorter {
 
 // go: sdk 1.25.5 net/http/header.go:160-162 headerSorterPool
 //
-// DECLARED BUT NOT USED BY sortedKeyValues, deliberately.
-//
-// Routing sortedKeyValues through this pool made
-// examples/http_complex_api segfault at exit in ~80% of runs — 8/8
-// clean before the change, 8/8 clean again with the pool bypassed and
-// everything else identical. The test drives a 32-way concurrent
-// hammer through the server's response path, so the pool is reached
-// from many per-connection goroutines at once. The fault is in that
-// interaction, not in this file: `sync::Pool::Get` takes a
-// `sync::Mutex`, and `crypto/.../drbg` uses the same Lazy-static
-// pattern without trouble, so the difference is the concurrency, not
-// the shape.
-//
-// Go pools here purely to avoid an allocation. goish allocates a fresh
-// headerSorter instead: a performance cost, not a semantic one. The
-// declaration stays because Go has it and because the next person to
-// investigate sync::Pool should find this note rather than rediscover
-// the crash.
+// History: wiring this pool into sortedKeyValues used to SIGSEGV
+// http_complex_api at exit (~3-6 of 8 runs, 2026-08-14). The pool was
+// innocent: its `Mutex::Lock` parked the goroutine while the CALLER
+// (`response::flush`) held a runtime `SpinLock` guard across the
+// whole render — and a SpinLock guard must never straddle a park (its
+// m.locks bump/drop lands on two different Ms after migration). The
+// responsewriter locks are `sync::Mutex` now, the scheduler traps the
+// pattern loudly ("schedule: holding locks"), and this pool is wired
+// exactly as Go wires it.
 pub fn headerSorterPool() -> &'static crate::sync::Pool<headerSorter> {
     static POOL: crate::lazy::Lazy<crate::sync::Pool<headerSorter>> =
         crate::lazy::Lazy::new(|| crate::sync::Pool::new(|| headerSorter::default()));

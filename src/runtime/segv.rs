@@ -124,7 +124,7 @@ pub fn unregister(g: *mut G) {
 }
 
 /// Look up the spawn site for `g`. Async-signal-safe — only loads.
-fn lookup(g: *mut G) -> Option<(&'static str, u32)> {
+pub(crate) fn lookup(g: *mut G) -> Option<(&'static str, u32)> {
     let g_addr = g as usize;
     let mut probe = hash_g(g_addr);
     for _ in 0..SPAWN_TABLE_SIZE {

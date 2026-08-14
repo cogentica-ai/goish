@@ -328,7 +328,42 @@ pub fn releasem() {
     // preempt inside critical sections (the select! straddle behind
     // the 2026-07 lost-wakeup hang). Any pair spanning a park must
     // split into two same-M epochs around it.
-    debug_assert!(prev != 0, "releasem: m.locks underflow");
+    if prev == 0 {
+        // Underflow: dump the caller chain of the FIRST bad releasem,
+        // then exit hard. A debug_assert here is worse than useless —
+        // the panic path itself takes locks and re-enters releasem, so
+        // one underflow cascades into an unbounded panic storm ending
+        // in a stack overflow (observed 2026-08-14). Self-contained
+        // rbp walk with loose sanity checks — releasem may run on g0,
+        // where the G-bounded walker refuses to work. The primary
+        // guard against ever reaching this is scheduler.rs's
+        // check_no_locks_at_schedule ("schedule: holding locks").
+        unsafe {
+            let msg = b"releasem UNDERFLOW, caller PCs:\n";
+            crate::syscall::Write(crate::syscall::STDERR, msg.as_ptr(), msg.len());
+            let mut rbp: u64;
+            core::arch::asm!("mov {}, rbp", out(reg) rbp, options(nomem, nostack));
+            let mut hops = 0;
+            while hops < 10 && rbp != 0 && rbp & 7 == 0 {
+                let next = *(rbp as *const u64);
+                let pc = *((rbp + 8) as *const u64);
+                if pc == 0 { break; }
+                let mut buf = [b'0'; 19];
+                buf[0] = b' '; buf[1] = b'0'; buf[2] = b'x';
+                let mut v = pc;
+                let mut i = 18;
+                while i >= 3 { let nib = (v & 0xf) as u8;
+                    buf[i] = if nib < 10 { b'0' + nib } else { b'a' + nib - 10 };
+                    v >>= 4; i -= 1; }
+                crate::syscall::Write(crate::syscall::STDERR, buf.as_ptr(), buf.len());
+                crate::syscall::Write(crate::syscall::STDERR, b"\n".as_ptr(), 1);
+                if next <= rbp || next - rbp > 1 << 20 { break; }
+                rbp = next;
+                hops += 1;
+            }
+        }
+        crate::syscall::Exit(87);
+    }
     let _ = prev;
 }
 

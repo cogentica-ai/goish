@@ -93,7 +93,7 @@ pub fn newPopulateResponseWriter() -> (Arc<populateResponse>, crate::gochan::cha
             Body: Body::from_reader(Box::new(pr)),
             ..Default::default()
         }),
-        hdr: Arc::new(crate::runtime::spin::SpinLock::new(Header::new())),
+        hdr: Arc::new(crate::sync::Mutex::new(Header::new())),
         ch: ch.clone(),
         state: crate::sync::Mutex::new(populateState {
             wroteHeader: false,
@@ -128,11 +128,11 @@ struct populateState {
 pub struct populateResponse {
     res: crate::sync::Mutex<Response>,
     /// Go's `pr.res.Header` IS the map the handler mutates. goish's
-    /// `HeaderHandle` wraps an `Arc<SpinLock<Header>>`, so the header
+    /// `HeaderHandle` wraps an `Arc<crate::sync::Mutex<Header>>`, so the header
     /// is held here and copied onto the Response when it is sent —
     /// returning a clone from `Header()` would silently drop every
     /// header the handler sets.
-    hdr: Arc<crate::runtime::spin::SpinLock<Header>>,
+    hdr: Arc<crate::sync::Mutex<Header>>,
     ch: crate::gochan::chan<Response>,
     state: crate::sync::Mutex<populateState>,
     pw: crate::io::PipeWriter,
@@ -170,7 +170,7 @@ impl populateResponse {
         // return as soon as the head is known while the body is still
         // being written.
         let mut resp = self.res.Lock().clone();
-        resp.Header = self.hdr.lock().clone();
+        resp.Header = self.hdr.Lock().clone();
         self.ch.Send(resp);
         return;
     }

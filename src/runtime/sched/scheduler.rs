@@ -838,6 +838,57 @@ fn dropg() {
         .store(0, Ordering::Release);
 }
 
+/// Go's `schedule: holding locks` tripwire (proc.go:3529, mirrored
+/// at the yield-continuation tails rather than schedule() entry so
+/// the guilty G is still in hand for diagnostics).
+///
+/// By the time a yield continuation is about to enter the dispatch
+/// loop, every SpinLock its G's critical path took must have been
+/// released — directly, or by the park's commit fn (chan/select/
+/// timer/netpoll parks all hand their lock to the commit fn, which
+/// runs inside `park_m`). A non-zero `m.locks` here means a SpinLock
+/// guard is being held ACROSS the park: its eventual drop will run
+/// `releasem` on whatever M resumes the G, wrapping that M's counter
+/// to u32::MAX while this M leaks +1 — after which preemption
+/// misfires inside critical sections and the process dies far from
+/// the cause (the 2026-08-14 http_complex_api SIGSEGV: a
+/// `SpinLock<respInner>` guard held across `conn.Write`). Fail
+/// loudly at the scene instead, naming the parked G's spawn site.
+#[inline]
+fn check_no_locks_at_schedule(g_ptr: *mut G, what: &[u8]) {
+    let locks = super::m::current_m_locks();
+    if locks == 0 {
+        return;
+    }
+    let w = |s: &[u8]| {
+        crate::syscall::Write(crate::syscall::STDERR, s.as_ptr(), s.len());
+    };
+    w(b"goish: fatal: schedule: holding locks (in ");
+    w(what);
+    w(b") - a SpinLock guard is held across a park/yield; G spawned at ");
+    if let Some((file, line)) = crate::runtime::segv::lookup(g_ptr) {
+        w(file.as_bytes());
+        w(b":");
+        let mut buf = [0u8; 20];
+        let mut i = buf.len();
+        let mut v = line;
+        if v == 0 {
+            i -= 1;
+            buf[i] = b'0';
+        }
+        while v > 0 {
+            i -= 1;
+            buf[i] = b'0' + (v % 10) as u8;
+            v /= 10;
+        }
+        w(&buf[i..]);
+    } else {
+        w(b"<unknown>");
+    }
+    w(b"\n");
+    crate::syscall::Exit(2);
+}
+
 /// `gosched_m(gp)` — Gosched continuation on g0. Mirrors Go's
 /// `gosched_m` → `goschedImpl(gp, false)` (proc.go:4283, 4318).
 ///
@@ -852,6 +903,9 @@ extern "C" fn gosched_m(g_ptr: *mut G) -> ! {
         (*g_ptr).status = GStatus::Runnable;
     }
     dropg();
+    // Tripwire BEFORE enqueue: once the G is on a runqueue another M
+    // can dispatch and finish it, racing our fatal exit.
+    check_no_locks_at_schedule(g_ptr, b"gosched_m");
     // `next=false` matches Go's `goschedImpl(_, false)` — Gosched
     // yields to the back of the queue (proc.go:4307 globrunqput).
     enqueue_runnable(g, false);
@@ -897,6 +951,7 @@ extern "C" fn park_m(g_ptr: *mut G) -> ! {
     } else {
         current_m().lock().waitlock = core::ptr::null();
     }
+    check_no_locks_at_schedule(g_ptr, b"park_m");
     schedule_loop()
 }
 
@@ -912,6 +967,7 @@ extern "C" fn goexit0(g_ptr: *mut G) -> ! {
     }
     dropg();
 
+    check_no_locks_at_schedule(g_ptr, b"goexit0");
     let prev = LIVE_G_COUNT.fetch_sub(1, Ordering::AcqRel);
 
     // Release the SIGSEGV side-table slot so the next goroutine

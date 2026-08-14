@@ -88,7 +88,7 @@ pub struct request {
 /// out as `typeStdout` records on the FastCGI connection.
 pub struct response {
     pub reqId: crate::types::uint16,
-    header: alloc::sync::Arc<crate::runtime::spin::SpinLock<super::super::header::Header>>,
+    header: alloc::sync::Arc<crate::sync::Mutex<super::super::header::Header>>,
     state: crate::sync::Mutex<responseState>,
     w: crate::sync::Mutex<super::fcgi::bufWriter>,
 }
@@ -106,7 +106,7 @@ struct responseState {
 pub fn newResponse(c: &alloc::sync::Arc<super::fcgi::conn>, req: &request) -> response {
     return response {
         reqId: req.reqId,
-        header: alloc::sync::Arc::new(crate::runtime::spin::SpinLock::new(
+        header: alloc::sync::Arc::new(crate::sync::Mutex::new(
             super::super::header::Header::new(),
         )),
         state: crate::sync::Mutex::new(responseState {
@@ -164,7 +164,7 @@ impl response {
             crate::convert::bytes(head),
         );
         {
-            let mut h = self.header.lock();
+            let mut h = self.header.Lock();
             if code != super::super::status::StatusNotModified
                 && h.Get(crate::string("Content-Type")).Len() == 0
             {

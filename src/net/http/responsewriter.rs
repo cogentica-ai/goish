@@ -190,41 +190,41 @@ pub trait __RequestTooLarge {
 /// `response` it came from. Cloning a `HeaderHandle` is an `Arc`
 /// bump, not a map copy.
 #[derive(Clone)]
-pub struct HeaderHandle(Arc<SpinLock<Header>>);
+pub struct HeaderHandle(Arc<crate::sync::Mutex<Header>>);
 
 impl HeaderHandle {
     /// Create a new `HeaderHandle` backed by the given `Header` value.
     /// Useful for constructing mock `ResponseWriter` implementations in tests.
     pub fn new(header: Header) -> Self {
-        HeaderHandle(Arc::new(SpinLock::new(header)))
+        HeaderHandle(Arc::new(crate::sync::Mutex::new(header)))
     }
 
     /// Wrap an existing shared header cell — used by the HTTPS
     /// response writer (server_tls.rs), which owns its own
-    /// `Arc<SpinLock<Header>>`.
-    pub(crate) fn __from_arc(inner: Arc<SpinLock<Header>>) -> Self {
+    /// `Arc<crate::sync::Mutex<Header>>`.
+    pub(crate) fn __from_arc(inner: Arc<crate::sync::Mutex<Header>>) -> Self {
         HeaderHandle(inner)
     }
 
     /// Snapshot: clone the current header state. Use in tests to read back
     /// what was written into the handle.
     pub fn snapshot(&self) -> Header {
-        self.0.lock().clone()
+        self.0.Lock().clone()
     }
 
     /// `h.Set(key, value)` — replace any existing values for `key`.
     pub fn Set<K: Into<string>, V: Into<string>>(&self, key: K, value: V) {
-        self.0.lock().Set(key, value);
+        self.0.Lock().Set(key, value);
     }
 
     /// `h.Add(key, value)` — append `value` to the values for `key`.
     pub fn Add<K: Into<string>, V: Into<string>>(&self, key: K, value: V) {
-        self.0.lock().Add(key, value);
+        self.0.Lock().Add(key, value);
     }
 
     /// `h.Del(key)` — drop all values for `key`.
     pub fn Del<K: Into<string>>(&self, key: K) {
-        self.0.lock().Del(key);
+        self.0.Lock().Del(key);
     }
 
     // go: none — HeaderHandle is goish-only plumbing (Go's Header is a
@@ -235,17 +235,17 @@ impl HeaderHandle {
     /// Distinct from `Get` returning `""`: serveError must tell an
     /// absent header from one explicitly set empty.
     pub fn has<K: Into<string>>(&self, key: K) -> bool {
-        return self.0.lock().has(key);
+        return self.0.Lock().has(key);
     }
 
     /// `h.Get(key)` — the first value for `key`, or `""`.
     pub fn Get<K: Into<string>>(&self, key: K) -> string {
-        self.0.lock().Get(key)
+        self.0.Lock().Get(key)
     }
 
     /// `h.Values(key)` — all values for `key`.
     pub fn Values<K: Into<string>>(&self, key: K) -> slice<string> {
-        self.0.lock().Values(key)
+        self.0.Lock().Values(key)
     }
 }
 
@@ -277,7 +277,7 @@ fn register_response_impls() {
 /// can take `&self`. There is no real lock contention: a `response`
 /// is confined to its single connection-serving goroutine.
 ///
-/// The header lives in its own `Arc<SpinLock<Header>>` so that the
+/// The header lives in its own `Arc<crate::sync::Mutex<Header>>` so that the
 /// `HeaderHandle` returned by `Header()` shares it (lock order is
 /// always `inner` before `header`, so the two locks never deadlock).
 ///
@@ -389,13 +389,13 @@ impl closeNotifyCell {
 }
 
 pub struct response {
-    inner: SpinLock<respInner>,
+    inner: crate::sync::Mutex<respInner>,
     /// The close-notify cell this response shares with the conn's
     /// disconnect watch.
     cnc: Arc<closeNotifyCell>,
     /// Response headers — shared with every `HeaderHandle` handed out
     /// by `Header()`.
-    header: Arc<SpinLock<Header>>,
+    header: Arc<crate::sync::Mutex<Header>>,
 }
 
 /// Mutable state of a `response`, serialised behind the writer's
@@ -449,7 +449,7 @@ impl response {
         let mut h = Header::new();
         h.Set(string("Content-Type"), string("text/plain; charset=utf-8"));
         response {
-            inner: SpinLock::new(respInner {
+            inner: crate::sync::Mutex::new(respInner {
                 conn,
                 status: 200,
                 wrote_header: false,
@@ -463,7 +463,7 @@ impl response {
                 canWriteContinue: true,
                 trailers: Vec::new(),
             }),
-            header: Arc::new(SpinLock::new(h)),
+            header: Arc::new(crate::sync::Mutex::new(h)),
             cnc: Arc::new(closeNotifyCell::new()),
         }
     }
@@ -519,14 +519,14 @@ impl response {
         if self.cnc.__is_hijacked() {
             return (TCPConn::dead(), super::server::ErrHijacked.into());
         }
-        let mut g = self.inner.lock();
+        let mut g = self.inner.Lock();
         // Go: `if w.wroteHeader { w.cw.flush() }` — whatever the
         // handler already wrote must reach the client before the new
         // owner starts writing its own bytes.
         if g.wrote_header && !g.flushed {
             drop(g);
             let _ = self.flush();
-            g = self.inner.lock();
+            g = self.inner.Lock();
         }
         self.cnc.__set_hijacked();
         g.canWriteContinue = false;
@@ -577,7 +577,7 @@ impl response {
     /// depend on.
     pub fn sendExpectationFailed(&self) {
         self.header
-            .lock()
+            .Lock()
             .Set(string("Connection"), string("close"));
         self.__set_keep_alive(false);
         self.WriteHeader(super::status::StatusExpectationFailed);
@@ -586,7 +586,7 @@ impl response {
 
     /// Server hook: enable/disable HTTP keep-alive on this response.
     pub fn __set_keep_alive(&self, keep_alive: bool) {
-        self.inner.lock().keep_alive = keep_alive;
+        self.inner.Lock().keep_alive = keep_alive;
     }
 
     /// Server hook: mark this response as answering a HEAD request.
@@ -594,13 +594,13 @@ impl response {
     /// (server.go:1302): headers and derived Content-Length are
     /// produced as for GET, but no body bytes reach the wire.
     pub fn __set_head(&self, is_head: bool) {
-        self.inner.lock().is_head = is_head;
+        self.inner.Lock().is_head = is_head;
     }
 
     /// Server hook: raw fd of the underlying connection. Used by
     /// `serve_conn` to register a panic-time close cleanup.
     pub fn __conn_fd(&self) -> i32 {
-        self.inner.lock().conn.__fd()
+        self.inner.Lock().conn.__fd()
     }
 
     /// Promote the response into streaming (chunked) mode. Backs the
@@ -612,7 +612,7 @@ impl response {
     /// point on, every `Write` emits a chunk directly on the wire.
     /// Subsequent calls are no-ops at the wire level.
     fn promote_chunked(&self) -> error {
-        let mut g = self.inner.lock();
+        let mut g = self.inner.Lock();
         if !g.wrote_header {
             g.wrote_header = true;
         }
@@ -627,14 +627,14 @@ impl response {
         // handler's `w.Header().Set("Trailer", "X-Sum")` actually
         // produce a trailer at the end.
         {
-            let decls = self.header.lock().Values(string("Trailer"));
+            let decls = self.header.Lock().Values(string("Trailer"));
             drop(g);
             for i in 0..decls.Len() {
                 super::server::foreachHeaderElement(decls[i].clone(), |k: string| {
                     self.declareTrailer(k);
                 });
             }
-            g = self.inner.lock();
+            g = self.inner.Lock();
         }
         // A HEAD response has no body at all — no Transfer-Encoding,
         // no chunks, no terminator (Go's chunkWriter eats the writes;
@@ -643,7 +643,7 @@ impl response {
         // Build the head: set Transfer-Encoding, clear any user-set
         // Content-Length (mutually exclusive per RFC 7230 §3.3.2).
         let head = {
-            let mut h = self.header.lock();
+            let mut h = self.header.Lock();
             if !suppress_body {
                 h.Del(string("Content-Length"));
                 h.Set(string("Transfer-Encoding"), string("chunked"));
@@ -682,13 +682,13 @@ impl response {
     /// which is why goish's earlier "slim port: drops Go's
     /// requestTooLarge hook" was not a harmless simplification.
     pub fn requestTooLarge(&self) {
-        let mut g = self.inner.lock();
+        let mut g = self.inner.Lock();
         g.closeAfterReply = true;
         g.requestBodyLimitHit = true;
         g.keep_alive = false;
         if !g.wrote_header {
             drop(g);
-            self.header.lock().Set(string("Connection"), string("close"));
+            self.header.Lock().Set(string("Connection"), string("close"));
         }
         return;
     }
@@ -696,7 +696,7 @@ impl response {
     // `response.closeAfterReply` accessor — goish-only. The serve loop
     // consults it after the handler returns.
     pub fn __close_after_reply(&self) -> bool {
-        return self.inner.lock().closeAfterReply;
+        return self.inner.Lock().closeAfterReply;
     }
 
     // `response.disableWriteContinue` — net/http/server.go line 574.
@@ -708,14 +708,14 @@ impl response {
     /// get that wait; goish's flag lives under the response's own
     /// lock, which serialises it against the writer the same way.
     pub fn disableWriteContinue(&self) {
-        self.inner.lock().canWriteContinue = false;
+        self.inner.Lock().canWriteContinue = false;
         return;
     }
 
     // `response.canWriteContinue` reader — goish-only, so the serve
     // loop and tests can observe the flag.
     pub fn __can_write_continue(&self) -> bool {
-        return self.inner.lock().canWriteContinue;
+        return self.inner.Lock().canWriteContinue;
     }
 
     // `response.closedRequestBodyEarly` — net/http/server.go line 1751.
@@ -755,7 +755,7 @@ impl response {
             // Go: "Forbidden by RFC 7230, section 4.1.2"
             return;
         }
-        self.inner.lock().trailers.push(k);
+        self.inner.Lock().trailers.push(k);
         return;
     }
 
@@ -767,7 +767,7 @@ impl response {
     /// Empty Header (Go's nil) when there are none.
     pub fn finalTrailers(&self) -> Header {
         let mut t = Header::new();
-        let h = self.header.lock();
+        let h = self.header.Lock();
         for (k, vv) in crate::range!(&*h) {
             let ks: &str = k.as_ref();
             if let Some(kk) = ks.strip_prefix(super::server::TrailerPrefix) {
@@ -777,7 +777,7 @@ impl response {
                 );
             }
         }
-        let g = self.inner.lock();
+        let g = self.inner.Lock();
         for k in g.trailers.iter() {
             let vals = h.Values(k.clone());
             for i in 0..vals.Len() {
@@ -793,7 +793,7 @@ impl response {
     /// response type. It's illegal to call this before the header has
     /// been flushed." Go panics on that misuse; so does this.
     pub fn bodyAllowed(&self) -> bool {
-        let g = self.inner.lock();
+        let g = self.inner.Lock();
         if !g.wrote_header {
             panic!("");
         }
@@ -801,7 +801,7 @@ impl response {
     }
 
     pub fn flush(&self) -> error {
-        let mut g = self.inner.lock();
+        let mut g = self.inner.Lock();
         if g.flushed {
             return errors::nil;
         }
@@ -823,7 +823,7 @@ impl response {
             let trailers = {
                 drop(g);
                 let t = self.finalTrailers();
-                g = self.inner.lock();
+                g = self.inner.Lock();
                 t
             };
             let mut out: Vec<u8> = alloc::vec![b'0', b'\r', b'\n'];
@@ -841,7 +841,7 @@ impl response {
 
         // Buffered mode: emit Content-Length derived from buffered body.
         let buf = {
-            let mut h = self.header.lock();
+            let mut h = self.header.Lock();
             // HEAD still advertises the GET-equivalent length; 1xx/
             // 204/304 must not carry an auto Content-Length at all
             // (Go omits it for bodyless statuses, server.go:1533).
@@ -891,7 +891,7 @@ impl ResponseWriter for response {
     }
 
     fn Write(&self, p: slice<byte>) -> (int, error) {
-        let mut g = self.inner.lock();
+        let mut g = self.inner.Lock();
         if !g.wrote_header {
             g.wrote_header = true;
         }
@@ -914,7 +914,7 @@ impl ResponseWriter for response {
     }
 
     fn WriteHeader(&self, statusCode: int) {
-        let mut g = self.inner.lock();
+        let mut g = self.inner.Lock();
         if g.wrote_header {
             return;
         }

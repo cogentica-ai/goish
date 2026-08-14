@@ -66,8 +66,8 @@ use super::server::{Handler, Server};
 /// sink is the TLS record layer rather than a raw fd.
 pub(crate) struct tlsResponse {
     conn: Arc<crate::sync::Mutex<tls::Conn>>,
-    header: Arc<crate::runtime::spin::SpinLock<Header>>,
-    inner: crate::runtime::spin::SpinLock<tlsRespInner>,
+    header: Arc<crate::sync::Mutex<Header>>,
+    inner: crate::sync::Mutex<tlsRespInner>,
 }
 
 struct tlsRespInner {
@@ -89,8 +89,8 @@ impl tlsResponse {
         h.Set(string("Content-Type"), string("text/plain; charset=utf-8"));
         tlsResponse {
             conn,
-            header: Arc::new(crate::runtime::spin::SpinLock::new(h)),
-            inner: crate::runtime::spin::SpinLock::new(tlsRespInner {
+            header: Arc::new(crate::sync::Mutex::new(h)),
+            inner: crate::sync::Mutex::new(tlsRespInner {
                 status: 200,
                 wrote_header: false,
                 flushed: false,
@@ -103,7 +103,7 @@ impl tlsResponse {
     }
 
     fn set_keep_alive(&self, ka: bool) {
-        self.inner.lock().keep_alive = ka;
+        self.inner.Lock().keep_alive = ka;
     }
 
     // go: none — goish-only accessor for the TLS-side response.
@@ -111,11 +111,11 @@ impl tlsResponse {
     /// the handler may force the conn closed after keep-alive was
     /// decided.
     fn close_after_reply(&self) -> bool {
-        return !self.inner.lock().keep_alive;
+        return !self.inner.Lock().keep_alive;
     }
 
     fn set_head(&self, is_head: bool) {
-        self.inner.lock().is_head = is_head;
+        self.inner.Lock().is_head = is_head;
     }
 
     // go: none — goish-only: the TLS-side analogue of chunkWriter's
@@ -123,7 +123,7 @@ impl tlsResponse {
     // this renders straight onto the record layer.
     /// Render the response onto the TLS record layer. Idempotent.
     fn flush(&self) -> error {
-        let mut g = self.inner.lock();
+        let mut g = self.inner.Lock();
         if g.flushed {
             return errors::nil;
         }
@@ -142,7 +142,7 @@ impl tlsResponse {
         }
 
         let buf = {
-            let mut h = self.header.lock();
+            let mut h = self.header.Lock();
             if bodyAllowedForStatus(g.status)
                 && h.Get(string("Content-Length")).Len() == 0
             {
@@ -172,7 +172,7 @@ impl tlsResponse {
     /// (Transfer-Encoding: chunked) plus any buffered body as the
     /// first chunk. Subsequent `Write`s stream each call as a chunk.
     fn promote_chunked(&self) -> error {
-        let mut g = self.inner.lock();
+        let mut g = self.inner.Lock();
         g.wrote_header = true;
         if g.chunked {
             return errors::nil;
@@ -180,7 +180,7 @@ impl tlsResponse {
         g.chunked = true;
         let suppress_body = g.is_head || !bodyAllowedForStatus(g.status);
         let head = {
-            let mut h = self.header.lock();
+            let mut h = self.header.Lock();
             if !suppress_body {
                 h.Del(string("Content-Length"));
                 h.Set(string("Transfer-Encoding"), string("chunked"));
@@ -237,7 +237,7 @@ impl ResponseWriter for tlsResponse {
     }
 
     fn Write(&self, p: slice<byte>) -> (int, error) {
-        let mut g = self.inner.lock();
+        let mut g = self.inner.Lock();
         g.wrote_header = true;
         if p.len() > 0 && !bodyAllowedForStatus(g.status) {
             return (0, super::server::ErrBodyNotAllowed.into());
@@ -254,7 +254,7 @@ impl ResponseWriter for tlsResponse {
     }
 
     fn WriteHeader(&self, statusCode: int) {
-        let mut g = self.inner.lock();
+        let mut g = self.inner.Lock();
         if g.wrote_header {
             return;
         }
