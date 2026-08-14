@@ -1587,3 +1587,7 @@ path = "examples/http_persistconn_smoke.rs"
 [[example]]
 name = "http_idlepool_smoke"
 path = "examples/http_idlepool_smoke.rs"
+
+[[example]]
+name = "http_transport_clone_smoke"
+path = "examples/http_transport_clone_smoke.rs"

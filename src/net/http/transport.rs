@@ -635,6 +635,34 @@ impl persistConn {
     }
 }
 
+// go: sdk 1.25.5 net/http/transport.go:3080-3080 fakeLocker
+/// Go: "fakeLocker is a sync.Locker which does nothing. It's used to
+/// guard test-only fields when not under test, to avoid runtime
+/// atomic overhead."
+pub struct fakeLocker;
+
+impl fakeLocker {
+    // go: sdk 1.25.5 net/http/transport.go:3082 fakeLocker.Lock
+    pub fn Lock(&self) {
+        return;
+    }
+    // go: sdk 1.25.5 net/http/transport.go:3083 fakeLocker.Unlock
+    pub fn Unlock(&self) {
+        return;
+    }
+}
+
+// go: sdk 1.25.5 net/http/transport.go:3098-3103 cloneTLSConfig
+/// Go: "returns a shallow clone of cfg, or a new zero tls.Config if
+/// cfg is nil. This is safe to call even if cfg is in active use by a
+/// TLS client or server."
+///
+/// goish's `Transport.TLSClientConfig` is a VALUE, not a pointer, so
+/// there is no nil case to handle — the clone is the whole job.
+pub fn cloneTLSConfig(cfg: &crate::crypto::tls::Config) -> crate::crypto::tls::Config {
+    return cfg.clone();
+}
+
 // ─── the idle pool ──────────────────────────────────────────────────
 
 // go: none — goish-only: the payload of Go's `idleMu sync.Mutex`, i.e.
@@ -729,6 +757,49 @@ impl Transport {
     pub fn removeIdleConnLocked(&self, pconn: &Arc<persistConn>) -> bool {
         let mut pool = self.__idle.Lock();
         return __removeIdleConnLocked(&mut pool, pconn);
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:329-373 Transport.Clone
+    /// Go: "Clone returns a deep copy of t's exported fields."
+    ///
+    /// PARTIAL, and the omissions are Go fields goish's Transport does
+    /// not have — OnProxyConnectResponse, Dial/DialTLS(Context),
+    /// ResponseHeaderTimeout, ProxyConnectHeader,
+    /// GetProxyConnectHeader, ForceAttemptHTTP2, HTTP2, Protocols,
+    /// TLSNextProto. Every field that DOES exist is copied.
+    ///
+    /// Deep in the sense that matters: the clone gets a FRESH idle
+    /// pool and its own registered-protocol map, so a mutation on one
+    /// Transport cannot reach the other.
+    pub fn Clone(&self) -> Transport {
+        let mut t2 = Transport::default();
+        t2.Proxy = self.Proxy.clone();
+        t2.DialContext = self.DialContext.clone();
+        t2.TLSHandshakeTimeout = self.TLSHandshakeTimeout;
+        t2.DisableKeepAlives = self.DisableKeepAlives;
+        t2.DisableCompression = self.DisableCompression;
+        t2.MaxIdleConns = self.MaxIdleConns;
+        t2.MaxIdleConnsPerHost = self.MaxIdleConnsPerHost;
+        t2.MaxConnsPerHost = self.MaxConnsPerHost;
+        t2.IdleConnTimeout = self.IdleConnTimeout;
+        t2.ExpectContinueTimeout = self.ExpectContinueTimeout;
+        t2.MaxResponseHeaderBytes = self.MaxResponseHeaderBytes;
+        t2.WriteBufferSize = self.WriteBufferSize;
+        t2.ReadBufferSize = self.ReadBufferSize;
+        t2.Timeout = self.Timeout;
+        // Go: `t2.TLSClientConfig = t.TLSClientConfig.Clone()`.
+        t2.TLSClientConfig = cloneTLSConfig(&self.TLSClientConfig);
+        // Go clones TLSNextProto with maps.Clone. The goish analogue is
+        // the registered-protocol map, which must NOT be shared or a
+        // RegisterProtocol on the clone would mutate the original.
+        {
+            let src = self.__alt_proto.Lock();
+            let mut dst = t2.__alt_proto.Lock();
+            for (k, v) in crate::range!(&*src) {
+                dst.Set(k.clone(), v.clone());
+            }
+        }
+        return t2;
     }
 
     // go: sdk 1.25.5 net/http/transport.go:887-910 Transport.CloseIdleConnections
