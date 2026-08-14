@@ -1,3 +1,14 @@
+// go: file net/http/server.go decls: conn.hijacked, conn.hijackLocked, response.finishRequest, response.shouldReuseConnection, response.CloseNotify, response.closeNotify, response.Hijack, response.sendExpectationFailed, response.requestTooLarge, response.disableWriteContinue, response.closedRequestBodyEarly, response.declareTrailer, response.finalTrailers, response.bodyAllowed, response.Header, response.Write, response.WriteHeader
+// goishlint:ignore GOISH015 — this file is the `response`/ResponseWriter
+// half of server.go, split out for size the same way server_tls.rs holds
+// its ServeTLS third; the decls manifest above carries the traceability
+// the filename rule wants, and renaming to server.rs would collide.
+// goishlint:ignore GOISH018 — per-file completeness cannot hold on a
+// split Go file: server.go's other ~130 functions live in server.rs,
+// which stays UNsuppressed and is the canonical worklist. Nothing this
+// suppression hides is missing from that ledger.
+// goishlint:ignore GOISH021 — same split-file reasoning as GOISH018;
+// server.go's consts/types are anchored in server.rs.
 // net/http/response — the ResponseWriter interface + its v1 concrete
 // implementation, `response`.
 //
@@ -193,12 +204,14 @@ pub trait __RequestTooLarge {
 pub struct HeaderHandle(Arc<crate::sync::Mutex<Header>>);
 
 impl HeaderHandle {
+    // go: none — goish-only constructor for mock ResponseWriters in tests.
     /// Create a new `HeaderHandle` backed by the given `Header` value.
     /// Useful for constructing mock `ResponseWriter` implementations in tests.
     pub fn new(header: Header) -> Self {
         HeaderHandle(Arc::new(crate::sync::Mutex::new(header)))
     }
 
+    // go: none — goish-only plumbing for the TLS response writer's shared header cell.
     /// Wrap an existing shared header cell — used by the HTTPS
     /// response writer (server_tls.rs), which owns its own
     /// `Arc<crate::sync::Mutex<Header>>`.
@@ -206,22 +219,26 @@ impl HeaderHandle {
         HeaderHandle(inner)
     }
 
+    // go: none — goish-only test convenience over the shared header cell.
     /// Snapshot: clone the current header state. Use in tests to read back
     /// what was written into the handle.
     pub fn snapshot(&self) -> Header {
         self.0.Lock().clone()
     }
 
+    // go: none — HeaderHandle forwarder; Header::Set carries the header.go anchor.
     /// `h.Set(key, value)` — replace any existing values for `key`.
     pub fn Set<K: Into<string>, V: Into<string>>(&self, key: K, value: V) {
         self.0.Lock().Set(key, value);
     }
 
+    // go: none — HeaderHandle forwarder; Header::Add carries the header.go anchor.
     /// `h.Add(key, value)` — append `value` to the values for `key`.
     pub fn Add<K: Into<string>, V: Into<string>>(&self, key: K, value: V) {
         self.0.Lock().Add(key, value);
     }
 
+    // go: none — HeaderHandle forwarder; Header::Del carries the header.go anchor.
     /// `h.Del(key)` — drop all values for `key`.
     pub fn Del<K: Into<string>>(&self, key: K) {
         self.0.Lock().Del(key);
@@ -238,11 +255,13 @@ impl HeaderHandle {
         return self.0.Lock().has(key);
     }
 
+    // go: none — HeaderHandle forwarder; Header::Get carries the header.go anchor.
     /// `h.Get(key)` — the first value for `key`, or `""`.
     pub fn Get<K: Into<string>>(&self, key: K) -> string {
         self.0.Lock().Get(key)
     }
 
+    // go: none — HeaderHandle forwarder; Header::Values carries the header.go anchor.
     /// `h.Values(key)` — all values for `key`.
     pub fn Values<K: Into<string>>(&self, key: K) -> slice<string> {
         self.0.Lock().Values(key)
@@ -251,6 +270,7 @@ impl HeaderHandle {
 
 // ─── Registry wiring ────────────────────────────────────────────────
 
+// go: none — goish-only interface-registry wiring for cast! support.
 /// Register `response`'s trait impls into the per-trait downcast
 /// registries the `#[goish::interface]` macro emits. Must run before
 /// any `goish::cast!(w, Trait)` call. Idempotent and cheap on the hot
@@ -325,6 +345,7 @@ impl closeNotifyCell {
         };
     }
 
+    // go: none — goish-only cell mechanics behind conn.closeNotify (anchored on the response-side method).
     /// `response.closeNotify` (server.go:2275). Go: "already
     /// triggered" is a no-op, and the send only happens if someone
     /// asked for the channel — the buffered cap-1 chan is what keeps
@@ -347,6 +368,7 @@ impl closeNotifyCell {
         return self.st.lock().handlerDone;
     }
 
+    // go: none — goish-only accessor over the hijacked flag (conn.hijacked carries the anchor).
     /// `(*conn).hijacked()` (server.go:308).
     pub fn __is_hijacked(&self) -> bool {
         return self.st.lock().hijacked;
@@ -367,6 +389,7 @@ impl closeNotifyCell {
         return;
     }
 
+    // go: none — goish-only cell accessor backing response.CloseNotify (anchored on the response method).
     /// `response.CloseNotify` (server.go:2260).
     pub fn CloseNotify(&self) -> crate::gochan::chan<bool> {
         let mut g = self.st.lock();
@@ -430,6 +453,10 @@ struct respInner {
     closeAfterReply: bool,
     /// Go's `response.requestBodyLimitHit` (server.go:248).
     requestBodyLimitHit: bool,
+    /// Go's `conn.werr` (server.go:298) — "any errors writing to rwc",
+    /// consulted by shouldReuseConnection. Go hangs it on the conn;
+    /// goish's response owns the conn, so it lives here.
+    werr: error,
     /// Go's `canWriteContinue atomic.Bool` (server.go:244) — cleared
     /// by disableWriteContinue so Request.Body.Read stops emitting an
     /// automatic 100-Continue.
@@ -441,6 +468,7 @@ struct respInner {
 }
 
 impl response {
+    // go: none — goish-only constructor; Go builds its response inline in conn.readRequest.
     /// Build a fresh `response` over `conn`. Connection is closed
     /// after the response unless the server flips `__set_keep_alive`
     /// before invoking the handler.
@@ -460,6 +488,7 @@ impl response {
                 is_head: false,
                 closeAfterReply: false,
                 requestBodyLimitHit: false,
+                werr: errors::nil,
                 canWriteContinue: true,
                 trailers: Vec::new(),
             }),
@@ -477,22 +506,22 @@ impl response {
         return r;
     }
 
-    /// `response.CloseNotify` (server.go:2260) — see closeNotifyCell.
+    // go: sdk 1.25.5 net/http/server.go:2260-2273 response.CloseNotify
+    /// See closeNotifyCell for the mechanics.
     pub fn CloseNotify(&self) -> crate::gochan::chan<bool> {
         return self.cnc.CloseNotify();
     }
 
-    /// `response.closeNotify` (server.go:2275) — see closeNotifyCell.
+    // go: sdk 1.25.5 net/http/server.go:2275-2285 response.closeNotify
+    /// See closeNotifyCell for the mechanics.
     pub fn closeNotify(&self) {
         self.cnc.closeNotify();
         return;
     }
 
-    /// `(*response).Hijack()` (server.go:2237) folded together with
-    /// `(*conn).hijackLocked()` (server.go:315).
-    ///
-    /// Prose, not an anchor: this file holds part of server.go and the
-    /// rest lives in server.rs.
+    // go: sdk 1.25.5 net/http/server.go:2237-2258 response.Hijack
+    //
+    /// The locked core is `hijackLocked` below, as in Go.
     ///
     /// The ownership transfer is the whole point. Go hands the caller
     /// `c.rwc` and stops using it — the server never closes a hijacked
@@ -519,10 +548,25 @@ impl response {
         if self.cnc.__is_hijacked() {
             return (TCPConn::dead(), super::server::ErrHijacked.into());
         }
+        return self.hijackLocked();
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:317-337 conn.hijackLocked
+    //
+    /// The core of Hijack, past the ErrHijacked/handler-done gates.
+    /// Adaptations, stated: Go returns a `*bufio.ReadWriter` wrapping
+    /// the conn's buffered reader/writer (and Peeks the background-
+    /// read byte back into it); goish's request reader is returned to
+    /// the pool per request and the response writes directly, so
+    /// there is no buffered state to hand over and the conn alone is
+    /// the handoff. `abortPendingRead` is Go's background-read
+    /// cancel; goish disarms its netpoll disconnect watch in the
+    /// serve loop's hijack branch instead. What ports intact: the
+    /// hijacked flag, the pre-handoff flush of anything the handler
+    /// already wrote, and the deadline clear (a long-lived hijacked
+    /// conn never agreed to the server's per-request policy).
+    fn hijackLocked(&self) -> (TCPConn, error) {
         let mut g = self.inner.Lock();
-        // Go: `if w.wroteHeader { w.cw.flush() }` — whatever the
-        // handler already wrote must reach the client before the new
-        // owner starts writing its own bytes.
         if g.wrote_header && !g.flushed {
             drop(g);
             let _ = self.flush();
@@ -537,8 +581,11 @@ impl response {
         return (rwc, crate::errors::nil);
     }
 
-    /// `(*conn).hijacked()` (server.go:308) — read by the serve loop
-    /// so it stops touching a connection it no longer owns.
+    // go: sdk 1.25.5 net/http/server.go:310-314 conn.hijacked
+    //
+    /// Read by the serve loop so it stops touching a connection it no
+    /// longer owns. Go guards the flag with c.mu; goish's flag lives
+    /// in the closeNotifyCell's lock.
     pub fn __hijacked(&self) -> bool {
         return self.cnc.__is_hijacked();
     }
@@ -556,11 +603,9 @@ impl response {
         return;
     }
 
-    /// `response.sendExpectationFailed` (server.go:2217).
-    ///
-    /// Prose, not an anchor: this file holds part of server.go's
-    /// declarations and the rest live in server.rs, so an anchor here
-    /// would put the file under per-file rules it cannot satisfy
+    // go: sdk 1.25.5 net/http/server.go:2217-2233 response.sendExpectationFailed
+    //
+    /// Sends 417 and arranges the close.
     /// without a decls manifest.
     ///
     /// RFC 7231 5.1.1: "A server that receives an Expect field-value
@@ -584,11 +629,13 @@ impl response {
         return;
     }
 
+    // go: none — goish-only: Go derives keep-alive from conn state; goish's serve loop injects it.
     /// Server hook: enable/disable HTTP keep-alive on this response.
     pub fn __set_keep_alive(&self, keep_alive: bool) {
         self.inner.Lock().keep_alive = keep_alive;
     }
 
+    // go: none — goish-only: Go stores the request on the response; goish passes the HEAD-ness in.
     /// Server hook: mark this response as answering a HEAD request.
     /// Mirrors Go's `isHEAD := w.req.Method == "HEAD"`
     /// (server.go:1302): headers and derived Content-Length are
@@ -597,12 +644,14 @@ impl response {
         self.inner.Lock().is_head = is_head;
     }
 
+    // go: none — goish-only: the serve loop's panic guard needs the raw fd.
     /// Server hook: raw fd of the underlying connection. Used by
     /// `serve_conn` to register a panic-time close cleanup.
     pub fn __conn_fd(&self) -> i32 {
         self.inner.Lock().conn.__fd()
     }
 
+    // go: none — goish-only: Go promotes to chunked inside chunkWriter.writeHeader; the buffered writer needs it as an explicit step (this carries response.Flush's semantics).
     /// Promote the response into streaming (chunked) mode. Backs the
     /// `Flusher::Flush` interface method.
     ///
@@ -668,6 +717,7 @@ impl response {
         errors::nil
     }
 
+    // go: none — goish-only accessor; the serve loop reads Go's field directly.
     /// Render the response onto the wire. Idempotent — calling twice
     /// is a no-op. After `flush`, the underlying connection holds
     /// only the kept-alive read buffer (if any) and may be reused.
@@ -681,6 +731,14 @@ impl response {
     /// the next keep-alive request. That is a request-smuggling shape,
     /// which is why goish's earlier "slim port: drops Go's
     /// requestTooLarge hook" was not a harmless simplification.
+    // go: none — goish-only accessor: the serve loop consults Go's
+    // `w.requestBodyLimitHit` field directly (server.go:2119); goish's
+    // field is behind the response lock.
+    pub fn __request_body_limit_hit(&self) -> bool {
+        return self.inner.Lock().requestBodyLimitHit;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:564-570 response.requestTooLarge
     pub fn requestTooLarge(&self) {
         let mut g = self.inner.Lock();
         g.closeAfterReply = true;
@@ -693,14 +751,14 @@ impl response {
         return;
     }
 
+    // go: none — goish-only accessor; the serve loop reads Go's field directly.
     // `response.closeAfterReply` accessor — goish-only. The serve loop
     // consults it after the handler returns.
     pub fn __close_after_reply(&self) -> bool {
         return self.inner.Lock().closeAfterReply;
     }
 
-    // `response.disableWriteContinue` — net/http/server.go line 574.
-    // Prose, not an anchor; see declareTrailer below.
+    // go: sdk 1.25.5 net/http/server.go:574-578 response.disableWriteContinue
     //
     /// Go: "stops Request.Body.Read from sending an automatic
     /// 100-Continue. If a 100-Continue is being written, it waits for
@@ -712,13 +770,14 @@ impl response {
         return;
     }
 
+    // go: none — goish-only accessor over the canWriteContinue flag.
     // `response.canWriteContinue` reader — goish-only, so the serve
     // loop and tests can observe the flag.
     pub fn __can_write_continue(&self) -> bool {
         return self.inner.Lock().canWriteContinue;
     }
 
-    // `response.closedRequestBodyEarly` — net/http/server.go line 1751.
+    // go: sdk 1.25.5 net/http/server.go:1751-1754 response.closedRequestBodyEarly
     //
     /// Go type-asserts `w.req.Body.(*body)` and asks it whether Close
     /// beat EOF; `shouldReuseConnection` refuses the conn when it did,
@@ -734,13 +793,11 @@ impl response {
         return false;
     }
 
-    // `response.declareTrailer` — net/http/server.go line 551.
+    // go: sdk 1.25.5 net/http/server.go:553-560 response.declareTrailer
     //
-    // NOT a `// go:` anchor: this file holds `response` while server.rs
-    // holds the rest of server.go, and GOISH018/021 are per-FILE — one
-    // anchor here made the rule demand all 153 of server.go's
-    // declarations in this file (+209 false findings, measured). Same
-    // split-file limitation as server_tls.rs.
+    // (The old "prose, not an anchor" workaround here predated the
+    // `// go: file … decls:` manifest, which now scopes the per-file
+    // rules to the declared subset.)
     /// Go: "declareTrailer is called for each Trailer header when the
     /// response header is written. It notes that a header will need to
     /// be written in the trailers at the end of the response."
@@ -759,8 +816,7 @@ impl response {
         return;
     }
 
-    // `response.finalTrailers` — net/http/server.go line 529. Prose,
-    // not an anchor; see declareTrailer above.
+    // go: sdk 1.25.5 net/http/server.go:529-548 response.finalTrailers
     /// The trailer set to emit after the last chunk: keys the handler
     /// declared up front via the `Trailer` header, plus any header it
     /// set under the `Trailer:` magic prefix while writing the body.
@@ -787,8 +843,7 @@ impl response {
         return t;
     }
 
-    // `response.bodyAllowed` — net/http/server.go line 1613. Prose,
-    // not an anchor; see declareTrailer above.
+    // go: sdk 1.25.5 net/http/server.go:1615-1620 response.bodyAllowed
     /// Go: "bodyAllowed reports whether a Write is allowed for this
     /// response type. It's illegal to call this before the header has
     /// been flushed." Go panics on that misuse; so does this.
@@ -800,6 +855,7 @@ impl response {
         return bodyAllowedForStatus(g.status);
     }
 
+    // go: none — goish-only: the buffered writer's single render-and-write; Go's equivalent work happens incrementally inside chunkWriter + finishRequest.
     pub fn flush(&self) -> error {
         let mut g = self.inner.Lock();
         if g.flushed {
@@ -836,6 +892,9 @@ impl response {
             }
             out.extend_from_slice(b"\r\n");
             let (_, err) = g.conn.Write(slice::<byte>::__from_vec(out));
+            if !err.IsNil() {
+                g.werr = err.clone();
+            }
             return err;
         }
 
@@ -861,9 +920,89 @@ impl response {
             buf
         };
         let (_, err) = g.conn.Write(slice::<byte>::__from_vec(buf));
+        if !err.IsNil() {
+            g.werr = err.clone();
+        }
         err
     }
 
+    // go: sdk 1.25.5 net/http/server.go:1700-1723 response.finishRequest
+    // goishlint:ignore GOISH020 finishRequest — Go reads w.req (a field);
+    // goish's response carries no request, so the serve loop passes it.
+    //
+    /// End-of-request bookkeeping, run by the serve loop after the
+    /// handler returns (and after the hijack check — a hijacked conn
+    /// never reaches here). Adaptations, each stated:
+    ///  * Go flushes w.w/w.cw/c.bufw and returns them to the bufio
+    ///    pools; goish's response renders straight onto the conn, and
+    ///    its pooled READER is already returned per request by the
+    ///    serve loop — `flush()` here is the whole write side.
+    ///  * `c.r.abortPendingRead` is Go's background-read cancel; goish
+    ///    watches for disconnect via netpoll and disarms that watch in
+    ///    the serve loop instead.
+    ///  * `w.reqBody.Close()` — goish reads bodies eagerly; there is
+    ///    no streaming reader left to close.
+    /// What ports intact: handlerDone, the default 200 for a handler
+    /// that never wrote, the flush, and `MultipartForm.RemoveAll` —
+    /// Go's cleanup of a parsed form's temp files at request end.
+    pub fn finishRequest(&self, req: &super::request::Request) {
+        self.__set_handler_done();
+        {
+            let g = self.inner.Lock();
+            if !g.wrote_header {
+                drop(g);
+                // Go: w.WriteHeader(StatusOK) — the default status.
+                <Self as ResponseWriter>::WriteHeader(self, super::status::StatusOK);
+            }
+        }
+        let _ = self.flush();
+        // Go: if w.req.MultipartForm != nil { w.req.MultipartForm.RemoveAll() }
+        if let Some(mf) = req.MultipartForm() {
+            let _ = mf.RemoveAll();
+        }
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:1725-1749 response.shouldReuseConnection
+    // goishlint:ignore GOISH020 shouldReuseConnection — Go reads w.req (a
+    // field); goish's response carries no request, so the caller passes it.
+    //
+    /// Go: "reports whether the connection can be reused" — consulted
+    /// AFTER finishRequest. The three checks that port intact:
+    /// closeAfterReply, the wrote-too-little guard ("Did not write
+    /// enough. Avoid getting out of sync."), and a recorded write
+    /// error (`c.werr`). `closedRequestBodyEarly` reduces to false —
+    /// goish's eager body is fully consumed before the handler runs,
+    /// so there is never an early-closed streaming body to get out of
+    /// sync with.
+    ///
+    /// The wrote-too-little guard is goish-shaped: Go compares the
+    /// declared contentLength against bytes written through the
+    /// chunkWriter; goish buffers the body, so the comparison is a
+    /// handler-set Content-Length header vs the buffered body length.
+    /// Same protection: a handler that promises N bytes and delivers
+    /// fewer must not leave a keep-alive peer waiting on the shortfall.
+    pub fn shouldReuseConnection(&self, req: &super::request::Request) -> bool {
+        let g = self.inner.Lock();
+        if g.closeAfterReply {
+            return false;
+        }
+        if req.Method != "HEAD" && !g.chunked && bodyAllowedForStatus(g.status) {
+            let declared = self.header.Lock().Get(string("Content-Length"));
+            if declared.Len() != 0 {
+                let (n, err) = crate::strconv::ParseInt(declared, 10, 64);
+                if err.IsNil() && n != g.body.len() as i64 {
+                    return false;
+                }
+            }
+        }
+        if !g.werr.IsNil() {
+            return false;
+        }
+        return true;
+    }
+
+    // go: none — goish-only: the keep-alive loop reclaims the conn from the finished response; Go's conn owns the socket for the conn's whole life instead.
     /// Server hook: flush the response and return the underlying
     /// connection. Used by the keep-alive loop in ListenAndServe to
     /// hand the connection back for the next request on the same fd.
@@ -872,6 +1011,7 @@ impl response {
         self.inner.into_inner().conn
     }
 
+    // go: none — goish-only convenience for examples driving their own accept loop.
     /// Convenience for examples that drive their own accept loop:
     /// flush headers (if not yet) and close the underlying conn.
     pub fn close_conn(self) -> error {
@@ -884,12 +1024,14 @@ impl response {
 // ─── Interface impls for `response` ─────────────────────────────────
 
 impl ResponseWriter for response {
+    // go: sdk 1.25.5 net/http/server.go:1128-1137 response.Header
     fn Header(&self) -> HeaderHandle {
         // The handle shares the response's header `Arc` — mutations
         // on it (`w.Header().Set(...)`) flow back to this response.
         HeaderHandle(self.header.clone())
     }
 
+    // go: sdk 1.25.5 net/http/server.go:1656-1658 response.Write
     fn Write(&self, p: slice<byte>) -> (int, error) {
         let mut g = self.inner.Lock();
         if !g.wrote_header {
@@ -913,6 +1055,7 @@ impl ResponseWriter for response {
         (p.len() as int, errors::nil)
     }
 
+    // go: sdk 1.25.5 net/http/server.go:1185-1235 response.WriteHeader
     fn WriteHeader(&self, statusCode: int) {
         // Go logs both misuse cases with the offending CALLER's frame
         // (server.go:1186-1194) — the whole point of relevantCaller is
@@ -946,6 +1089,7 @@ impl ResponseWriter for response {
         g.status = statusCode;
     }
 
+    // go: none — goish-only interface-registry hook emitted for cast! support.
     fn __goish_as_dyn_any(
         &self,
     ) -> Option<&(dyn core::any::Any + Send + Sync)> {
@@ -954,6 +1098,7 @@ impl ResponseWriter for response {
 }
 
 impl __RequestTooLarge for response {
+    // go: none — trait forwarder; the response.requestTooLarge anchor is on the inherent method.
     fn requestTooLarge(&self) {
         response::requestTooLarge(self);
         return;
@@ -961,6 +1106,7 @@ impl __RequestTooLarge for response {
 }
 
 impl Hijacker for response {
+    // go: none — trait forwarder; the response.Hijack anchor is on the inherent method.
     /// `(*response).Hijack()` — see the inherent method.
     fn Hijack(&self) -> (TCPConn, error) {
         return response::Hijack(self);
@@ -968,6 +1114,7 @@ impl Hijacker for response {
 }
 
 impl CloseNotifier for response {
+    // go: none — trait forwarder; the response.CloseNotify anchor is on the inherent method.
     /// `(*response).CloseNotify()` (server.go:2260).
     fn CloseNotify(&self) -> crate::gochan::chan<bool> {
         return response::CloseNotify(self);
@@ -975,6 +1122,7 @@ impl CloseNotifier for response {
 }
 
 impl Flusher for response {
+    // go: none — forwards to FlushError-shaped promote_chunked; the response.Flush anchor lives on the inherent flush machinery (see promote_chunked).
     /// `(*response).Flush()` (server.go:1756) — promote to chunked
     /// streaming. Go's one-line body is `w.FlushError()`; the error is
     /// dropped either way, because `Flusher.Flush` has no error return.
@@ -982,6 +1130,7 @@ impl Flusher for response {
         let _ = self.promote_chunked();
     }
 
+    // go: none — goish-only interface-registry hook emitted for cast! support.
     fn __goish_as_dyn_any(
         &self,
     ) -> Option<&(dyn core::any::Any + Send + Sync)> {
@@ -989,6 +1138,7 @@ impl Flusher for response {
     }
 }
 
+// go: none — goish-only: the trailer half of build_head, reused by flush.
 /// Build the response head (status line + headers + final CRLF).
 /// Shared between buffered and streaming modes.
 // go: none — goish-only: the trailer block after the terminating
@@ -1001,6 +1151,7 @@ fn build_trailer_block(trailers: &Header) -> Vec<u8> {
     return hb.Bytes().as_ref().to_vec();
 }
 
+// go: none — goish-only: renders status line + sorted headers in one buffer; Go streams the same bytes through chunkWriter.writeHeader.
 pub(crate) fn build_head(status: int, header: &Header) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::with_capacity(256);
     // Go's writeStatusLine (server.go:1596), ported in server.rs.
@@ -1031,6 +1182,7 @@ pub(crate) fn build_head(status: int, header: &Header) -> Vec<u8> {
     return buf;
 }
 
+// go: none — goish-only: one chunked-encoding frame; Go's chunkWriter does this inside its Write.
 /// Emit one chunk on the wire: `<hex>\r\n<data>\r\n`. Returns
 /// `(data.len(), err)` so a `Write` proxy can forward it.
 fn write_chunk(conn: &mut TCPConn, data: &slice<byte>) -> (int, error) {
@@ -1053,6 +1205,7 @@ fn write_chunk(conn: &mut TCPConn, data: &slice<byte>) -> (int, error) {
     (n, terr)
 }
 
+// go: none — goish-only chunk-size renderer (Go uses fmt in chunkWriter).
 pub(crate) fn push_hex(buf: &mut Vec<u8>, mut n: u64) {
     if n == 0 {
         buf.push(b'0');
@@ -1076,6 +1229,7 @@ pub(crate) fn push_hex(buf: &mut Vec<u8>, mut n: u64) {
     }
 }
 
+// go: none — goish-only rendering helper (Go uses strconv.AppendInt via the chunkWriter).
 /// Reason phrase for a status code via the full IANA registry. Empty
 /// string falls back to "Status" so the wire stays well-formed.
 
@@ -1091,6 +1245,7 @@ fn int_to_string(n: i64) -> string {
     string::from_bytes(&buf)
 }
 
+// go: none — goish-only rendering helper for the head builder.
 fn push_dec_64(buf: &mut Vec<u8>, mut n: u64) {
     if n == 0 {
         buf.push(b'0');

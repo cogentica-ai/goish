@@ -1558,6 +1558,28 @@ pub trait closeWriter {
     fn CloseWrite(&self) -> error;
 }
 
+// go: waived conn.finalFlush — Go's finalFlush flushes and pool-returns
+// the CONN-LEVEL bufio reader/writer (c.bufr/c.bufw). goish's response
+// renders directly onto the conn (no conn-level writer to flush), and
+// the pooled request reader is already returned per request inside the
+// serve loop — the function's entire job is done elsewhere by
+// construction, and a ported body would be empty.
+
+// go: sdk 1.25.5 net/http/server.go:1820-1847 conn.closeWriteAndWait
+//
+/// RST-avoidance shutdown, verbatim from Go's comment: closing with
+/// unread client bytes in flight makes many TCP stacks drop the
+/// client's UNREAD receive buffer when its next write fails — which
+/// truncates away the very error response this server just sent. So:
+/// half-close the write side, then wait `rstAvoidanceDelay` before
+/// the full close, as RFC 7230 §6.6 recommends. (finalFlush is waived
+/// above; TCPConn always has CloseWrite, so Go's closeWriter assert
+/// always succeeds here.)
+pub(crate) fn closeWriteAndWait(conn: &net::TCPConn) {
+    let _ = conn.CloseWrite();
+    time::Sleep(rstAvoidanceDelay());
+}
+
 // go: sdk 1.25.5 net/http/server.go:1926-1930 connectionStater
 //
 /// Asserted on a conn to recover its TLS state without depending on
@@ -3171,26 +3193,37 @@ impl Server {
                 return;
             }
 
-            // Capture the post-handler close decision BEFORE the
-            // writer is consumed for its conn.
-            let close_after_reply = w.__close_after_reply();
-            conn = w.__take_conn();
-            // Response finished → cancel the request context (Go
-            // finishRequest → w.cancelCtx(), server.go:1683).
+            // Go: w.finishRequest() (conn.serve, server.go:2116) —
+            // default 200 for a silent handler, final flush (recording
+            // any write error for shouldReuseConnection), multipart
+            // temp-state cleanup.
+            w.finishRequest(&req);
+            // Response finished → cancel the request context.
             (req_cancel)();
+
+            // Go's `w.shouldReuseConnection()` (server.go:2118) is
+            // consulted AFTER the handler, not before: the handler —
+            // or MaxBytesReader hitting its limit — can set
+            // closeAfterReply mid-request, a write error mid-flush
+            // kills reuse, and a handler that promised more
+            // Content-Length than it delivered must not leave the
+            // peer waiting on the shortfall.
+            let reuse = keep_alive && w.shouldReuseConnection(&req);
+            let limit_hit = w.__request_body_limit_hit();
+            conn = w.__take_conn();
 
             if write_timeout_ns > 0 {
                 let _ = conn.SetWriteDeadline(time::Time::default());
             }
 
-            // Go's `w.shouldReuseConnection()` (server.go:1725) is
-            // consulted AFTER the handler, not before: the handler —
-            // or MaxBytesReader hitting its limit — can set
-            // closeAfterReply mid-request. Deciding from the request
-            // alone leaves the conn open with an unread body still
-            // arriving, which the next keep-alive read would then
-            // parse as a request.
-            if !keep_alive || close_after_reply {
+            if !reuse {
+                // Go: if w.requestBodyLimitHit || w.closedRequestBodyEarly()
+                //     { c.closeWriteAndWait() } (server.go:2119) — the
+                // client likely still has unsent body bytes; slamming
+                // the socket would RST away our own error response.
+                if limit_hit {
+                    closeWriteAndWait(&conn);
+                }
                 let _ = conn.Close();
                 return;
             }

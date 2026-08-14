@@ -1683,3 +1683,7 @@ path = "examples/http_url_userinfo_smoke.rs"
 [[example]]
 name = "http_h2policy_smoke"
 path = "examples/http_h2policy_smoke.rs"
+
+[[example]]
+name = "http_conn_reuse_smoke"
+path = "examples/http_conn_reuse_smoke.rs"
