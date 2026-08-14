@@ -261,6 +261,11 @@ impl wantConn {
         return;
     }
 
+    // go: none — goish-only: read Go's `w.key`.
+    pub fn __key(&self) -> connectMethodKey {
+        return self.state.Lock().key.clone();
+    }
+
     // go: none — goish-only: read `w.key` while the idle pool lock is
     // already held, so queueForIdleConn does not re-enter it.
     #[allow(dead_code)]
@@ -626,6 +631,8 @@ crate::var! {
     // its FIN in flight with already-written POST body bytes from the
     // client." (golang/go#19943)
     pub errServerClosedIdle: error = "http: server closed idle connection";
+    // go: none — goish-only: see the dialConn placeholder.
+    pub errDialNotPorted: error = "http: dialConn not yet ported";
     // go: none — goish-only: getConn returns this instead of blocking
     // on a dial that cannot happen yet. Not a Go sentinel; it exists
     // only while dialConn is unported and disappears with it.
@@ -1051,6 +1058,69 @@ impl Transport {
         return errors::nil;
     }
 
+    // go: sdk 1.25.5 net/http/transport.go:1596-1605 Transport.startDialConnForLocked
+    /// Launch a dial for `w` on its own goroutine. Go's `Locked`
+    /// suffix means connsPerHostMu is already held by the caller;
+    /// goish takes the same contract, so the spawn happens before any
+    /// further lock is touched.
+    pub fn startDialConnForLocked(self: &Arc<Self>, w: Arc<wantConn>) {
+        let t = self.clone();
+        crate::go!(stack(256 * 1024), move || {
+            t.dialConnFor(&w);
+        });
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:1610-1629 Transport.dialConnFor
+    /// Go: "dials on behalf of w and delivers the result to w. […] If
+    /// the dial is canceled or unsuccessful, dialConnFor decrements
+    /// t.connCount[w.cm.key()]."
+    ///
+    /// That decrement is why this is worth porting ahead of dialConn:
+    /// a FAILED dial must give its per-host slot back, or the count
+    /// drifts up until the host is permanently at capacity and every
+    /// later request queues forever. It is also the path into
+    /// decConnsPerHost's underflow panic, so getting it wrong is loud
+    /// rather than silent.
+    ///
+    /// The other branch is subtler: when the dial SUCCEEDS but the
+    /// waiter has gone (cancelled, or served from the pool meanwhile),
+    /// the conn goes to putOrCloseIdleConn rather than being dropped.
+    ///
+    /// Staged: `dialConn` is a placeholder, so this takes the failure
+    /// path today. The accounting it drives is real and tested.
+    pub fn dialConnFor(&self, w: &Arc<wantConn>) {
+        if !w.waiting() {
+            // Go: `ctx := w.getCtxForDial(); if ctx == nil { … }` — the
+            // waiter gave up before we got here, so return its slot.
+            self.decConnsPerHost(&w.__key());
+            return;
+        }
+
+        let (pc, err) = self.dialConn(&w.__key());
+        let delivered = w.tryDeliver(pc.clone(), err.clone(), crate::time::Time::default());
+        if err.IsNil() {
+            if !delivered {
+                // Go: "pconn was not passed to w […] Add to the idle
+                // connection pool."
+                if let Some(pc) = pc {
+                    self.putOrCloseIdleConn(&pc);
+                }
+            }
+        } else {
+            self.decConnsPerHost(&w.__key());
+        }
+        return;
+    }
+
+    // go: none — goish-only placeholder for transport.go:1731's
+    // `dialConn`: 232 lines of TCP + TLS + proxy CONNECT + ALPN.
+    // Returning the error keeps dialConnFor's accounting exercisable;
+    // the real port needs the TLS handshake wired to Transport.
+    fn dialConn(&self, _key: &connectMethodKey) -> (Option<Arc<persistConn>>, error) {
+        return (None, errDialNotPorted.into());
+    }
+
     // go: sdk 1.25.5 net/http/transport.go:1487-1561 Transport.getConn
     /// Obtain a connection for `cm`: try the idle pool, else queue for
     /// a dial, then wait for whichever answers.
@@ -1066,7 +1136,16 @@ impl Transport {
     /// would hang forever. Go blocks in a `select` on the result
     /// channel and the request context. The waiter IS left on the
     /// queue, so a later putOrCloseIdleConn can still find it.
-    pub fn getConn(&self, cm: &connectMethod) -> (Option<Arc<persistConn>>, error) {
+    /// Go's first parameter is `*transportRequest`, a wrapper that
+    /// adds extra headers and an error cell around `*Request`. goish
+    /// has no wrapper yet, so the Request arrives directly — the arity
+    /// and the role are Go's. Nothing here reads it today; Go uses it
+    /// for the httptrace hooks and the dial context.
+    pub fn getConn(
+        &self,
+        _req: &Request,
+        cm: &connectMethod,
+    ) -> (Option<Arc<persistConn>>, error) {
         let w = Arc::new(wantConn::__new());
         w.__set_key(cm.key());
 

@@ -171,19 +171,20 @@ fn run() {
             targetAddr: goish::net::http::transport::canonicalAddr(&u),
             onlyH1: false,
         };
-        let (got, e) = t.getConn(&cm);
+        let (r0, _) = goish::net::http::NewRequest(string("GET"), string("http://a.com/"), goish::slice::new());
+        let (got, e) = t.getConn(&r0, &cm);
         check("getConn returns the pooled conn without dialing",
               e.IsNil() && got.map(|g| Arc::ptr_eq(&g, &pc)).unwrap_or(false),
               fmt::Sprintf!("%v", e));
         // Second call: pool is empty now, so it queues and reports
         // that no idle conn was available.
-        let (got2, e2) = t.getConn(&cm);
+        let (got2, e2) = t.getConn(&r0, &cm);
         check("a second getConn finds nothing and queues instead",
               got2.is_none() && !e2.IsNil(), string(""));
         // The waiter really is queued: freeing a conn now satisfies it.
         let fresh = conn("a.com");
         let _ = t.tryPutIdleConn(&fresh);
-        let (got3, e3) = t.getConn(&cm);
+        let (got3, e3) = t.getConn(&r0, &cm);
         check("and a newly pooled conn is handed out on the next call",
               e3.IsNil() && got3.is_some(), fmt::Sprintf!("%v", e3));
     }

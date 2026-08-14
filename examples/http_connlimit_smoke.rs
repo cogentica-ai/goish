@@ -118,6 +118,43 @@ fn run() {
               handed.is_some() && Arc::ptr_eq(&handed.unwrap(), &live), string(""));
     }
 
+    // ── dialConnFor gives the slot back when the dial fails ──
+    // This is the invariant that keeps a host from silently wedging:
+    // without it the count drifts up until every request queues
+    // forever. dialConn is a placeholder, so every dial "fails" here.
+    {
+        let mut t = Transport::default();
+        t.MaxConnsPerHost = 1;
+        let t = Arc::new(t);
+        let k = key("a.com");
+        check("a slot can be taken", t.__take_conn_slot(&k), string(""));
+        check("and the host is then at capacity", !t.__take_conn_slot(&k), string(""));
+        let w = Arc::new(wantConn::__new());
+        w.__set_key(k.clone());
+        t.dialConnFor(&w);
+        // Failure path: slot returned, waiter told why.
+        check("a failed dial returns the slot",
+              t.__take_conn_slot(&k), string(""));
+        check("and the waiter is finished, not left hanging",
+              !w.waiting(), string(""));
+    }
+    {
+        // A waiter that gave up gets its slot returned too, without
+        // any delivery attempt.
+        let mut t = Transport::default();
+        t.MaxConnsPerHost = 1;
+        let t = Arc::new(t);
+        let k = key("b.com");
+        let _ = t.__take_conn_slot(&k);
+        let w = Arc::new(wantConn::__new());
+        w.__set_key(k.clone());
+        let pc: Arc<persistConn> = Arc::new(persistConn::__new(k.clone()));
+        let _ = w.tryDeliver(Some(pc), errors::nil, time::Time::default());
+        t.dialConnFor(&w);
+        check("an abandoned waiter's slot is returned without a dial",
+              t.__take_conn_slot(&k), string(""));
+    }
+
     let p = PASSED.load(Ordering::Relaxed);
     let f = FAILED.load(Ordering::Relaxed);
     fmt::Printf!("\n%d passed, %d failed\n", p as i64, f as i64);
