@@ -1117,6 +1117,15 @@ pub type ConnContextFn = Arc<
 /// conns and closes them later, which a borrowed conn cannot express.
 pub type ConnStateHook = Arc<dyn Fn(int, ConnState) + Send + Sync>;
 
+// go: none — goish carrier for the inline field type of
+// `Server.TLSNextProto` (server.go:3062):
+// `func(*Server, *tls.Conn, Handler)`. Option because Go's func values
+// are nilable and goish's map zero value must be spellable (the same
+// shape Transport.__alt_proto uses for its RoundTripper map).
+pub type TLSNextProtoFn = Option<
+    Arc<dyn Fn(&Server, &mut crate::crypto::tls::Conn, Arc<dyn Handler>) + Send + Sync>,
+>;
+
 pub struct Server {
     /// `host:port` to listen on. Empty = ":80".
     pub Addr: string,
@@ -1181,6 +1190,21 @@ pub struct Server {
     /// certificate source.
     pub TLSConfig: Option<crate::crypto::tls::Config>,
 
+    /// `Server.TLSNextProto` (server.go:3055-3062) —
+    /// Go: "TLSNextProto optionally specifies a function to take over
+    /// ownership of the provided TLS connection when an ALPN protocol
+    /// upgrade has occurred. […] If TLSNextProto is not nil, HTTP/2
+    /// support is not enabled automatically." `None` models Go's nil
+    /// map; the historic disable idiom (non-nil map with no "h2") is
+    /// honoured by `protocols()`.
+    pub TLSNextProto: Option<crate::gomap::map<string, TLSNextProtoFn>>,
+
+    /// `Server.Protocols` (server.go:3099-3104) —
+    /// Go: "Protocols is the set of protocols accepted by the server.
+    /// […] If Protocols is nil, the default is usually HTTP/1 and
+    /// HTTP/2." `None` models Go's nil pointer.
+    pub Protocols: Option<super::http::Protocols>,
+
     /// Internal runtime state. Bundled behind a single field so users
     /// can construct a `Server` with Go-style struct literal syntax —
     /// `Server { Addr, Handler, ..., ..Default::default() }` — without
@@ -1225,6 +1249,13 @@ pub struct __ServerState {
     /// (server.go:3101); each is spawned on its own goroutine once
     /// when Shutdown/Close begins.
     on_shutdown: Mutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
+    /// Go's `nextProtoOnce sync.Once` — "guards setupHTTP2_* init"
+    /// (server.go:3109). Unexported Server field; parked here so the
+    /// public struct stays literal-constructible.
+    next_proto_once: crate::sync::Once,
+    /// Go's `nextProtoErr error` — "result of http2.ConfigureServer
+    /// if used" (server.go:3110).
+    next_proto_err: Mutex<error>,
 }
 
 // go: sdk 1.25.5 net/http/server.go:371-374 crlf
@@ -1475,6 +1506,46 @@ pub fn relevantCaller() -> crate::runtime::Frame {
         }
     }
     return frame;
+}
+
+// go: sdk 1.25.5 net/http/server.go:3562-3592 adjustNextProtos
+//
+/// Go: "Make a copy of NextProtos since it might be shared with some
+/// other tls.Config (tls.Config.Clone doesn't do a deep copy)."
+/// Filters "http/1.1" / "h2" entries the protocol set excludes,
+/// preserving order (Go's slices.DeleteFunc), then appends whichever
+/// enabled protocol wasn't already listed — h2 first, as Go does.
+pub fn adjustNextProtos(
+    nextProtos: crate::goslice::slice<string>,
+    protos: super::http::Protocols,
+) -> crate::goslice::slice<string> {
+    let mut have = super::http::Protocols::default();
+    let mut out: Vec<string> = Vec::new();
+    let n = crate::len(&nextProtos);
+    let mut i: int = 0;
+    while i < n {
+        let sp = nextProtos[i].clone();
+        i += 1;
+        if sp == "http/1.1" {
+            if !protos.HTTP1() {
+                continue; // deleted
+            }
+            have.SetHTTP1(true);
+        } else if sp == "h2" {
+            if !protos.HTTP2() {
+                continue; // deleted
+            }
+            have.SetHTTP2(true);
+        }
+        out.push(sp);
+    }
+    if protos.HTTP2() && !have.HTTP2() {
+        out.push(string("h2"));
+    }
+    if protos.HTTP1() && !have.HTTP1() {
+        out.push(string("http/1.1"));
+    }
+    return crate::goslice::slice::__from_vec(out);
 }
 
 // go: sdk 1.25.5 net/http/server.go:1808-1810 closeWriter
@@ -2163,6 +2234,8 @@ impl Default for Server {
             ConnContext: None,
             ErrorLog: None,
             TLSConfig: None,
+            TLSNextProto: None,
+            Protocols: None,
             ConnState: Mutex::new(None),
             __state: __ServerState::default(),
         }
@@ -2179,6 +2252,8 @@ impl Default for __ServerState {
             conn_sem: Mutex::new(None),
             tracked_conns: Mutex::new(Vec::new()),
             on_shutdown: Mutex::new(Vec::new()),
+            next_proto_once: crate::sync::Once::new(),
+            next_proto_err: Mutex::new(errors::nil),
         }
     }
 }
@@ -2346,6 +2421,120 @@ impl Server {
         self.Serve(ln)
     }
 
+    // go: sdk 1.25.5 net/http/server.go:3535-3558 Server.protocols
+    /// The effective protocol set. Adaptations, both stated: goish has
+    /// no godebug, so Go's `http2server.Value() == "0"` reads as
+    /// unset; and the map probe uses GetRef (presence only), Go's
+    /// comma-ok.
+    pub fn protocols(&self) -> super::http::Protocols {
+        if let Some(p) = &self.Protocols {
+            return *p; // user-configured set
+        }
+        // Go: "The historic way of disabling HTTP/2 is to set
+        // TLSNextProto to a non-nil map with no 'h2' entry."
+        let mut http2_disabled = false;
+        if let Some(m) = &self.TLSNextProto {
+            let (_, has_h2) = m.GetRef(string("h2"));
+            http2_disabled = !has_h2;
+        }
+        let mut p = super::http::Protocols::default();
+        p.SetHTTP1(true); // Go: "default always includes HTTP/1"
+        if !http2_disabled {
+            p.SetHTTP2(true);
+        }
+        return p;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:3396-3417 Server.shouldConfigureHTTP2ForServe
+    /// Go: "reports whether Server.Serve should configure automatic
+    /// HTTP/2 (which sets up the s.TLSNextProto map)". The no-config
+    /// branch is Go 1.6 compat; the NextProtos probe is Issue 15908
+    /// (never mutate a tls.Config the user may already have handed to
+    /// tls.NewListener).
+    pub fn shouldConfigureHTTP2ForServe(&self) -> bool {
+        let cfg = match &self.TLSConfig {
+            Some(c) => c,
+            None => return true,
+        };
+        if self.protocols().UnencryptedHTTP2() {
+            return true;
+        }
+        // Go: slices.Contains(s.TLSConfig.NextProtos, http2NextProtoTLS)
+        let n = crate::len(&cfg.NextProtos);
+        let mut i: int = 0;
+        while i < n {
+            if cfg.NextProtos[i] == super::omithttp2::http2NextProtoTLS {
+                return true;
+            }
+            i += 1;
+        }
+        return false;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:3754-3757 Server.setupHTTP2_ServeTLS
+    /// Go: "conditionally configures HTTP/2 on s and reports whether
+    /// there was an error setting it up. If it is not configured for
+    /// policy reasons, nil is returned."
+    pub fn setupHTTP2_ServeTLS(&self) -> error {
+        self.__state
+            .next_proto_once
+            .Do(|| self.onceSetNextProtoDefaults());
+        return self.__state.next_proto_err.Lock().clone();
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:3767-3770 Server.setupHTTP2_Serve
+    /// Go: "called from (*Server).Serve and conditionally configures
+    /// HTTP/2 on s using a more conservative policy than
+    /// setupHTTP2_ServeTLS, because Serve is called after tls.Listen
+    /// and may be called concurrently."
+    pub fn setupHTTP2_Serve(&self) -> error {
+        self.__state
+            .next_proto_once
+            .Do(|| self.onceSetNextProtoDefaults_Serve());
+        return self.__state.next_proto_err.Lock().clone();
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:3772-3776 Server.onceSetNextProtoDefaults_Serve
+    fn onceSetNextProtoDefaults_Serve(&self) {
+        if self.shouldConfigureHTTP2ForServe() {
+            self.onceSetNextProtoDefaults();
+        }
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:3783-3803 Server.onceSetNextProtoDefaults
+    /// Go: "configures HTTP/2, if the user hasn't configured otherwise
+    /// (by setting s.TLSNextProto non-nil). It must only be called via
+    /// s.nextProtoOnce (use s.setupHTTP2_*)."
+    ///
+    /// goish, like a Go `nethttpomithttp2` build, takes the FIRST
+    /// branch every time: `omitBundledHTTP2` is const-true, so the
+    /// rest is dead code kept because it is what Go says — and so the
+    /// policy reads intact if a bundled HTTP/2 ever lands. (The
+    /// godebug http2server probe is elided; goish has no godebug.)
+    fn onceSetNextProtoDefaults(&self) {
+        if super::http::omitBundledHTTP2 {
+            return;
+        }
+        #[allow(unreachable_code)]
+        {
+            let p = self.protocols();
+            if !p.HTTP2() && !p.UnencryptedHTTP2() {
+                return;
+            }
+            if let Some(m) = &self.TLSNextProto {
+                let (_, ok) = m.GetRef(string("h2"));
+                if ok {
+                    // Go: "TLSNextProto already contains an HTTP/2
+                    // implementation" (x/net/http2.ConfigureServer).
+                    return;
+                }
+            }
+            let conf = super::omithttp2::http2Server::default();
+            let err = super::omithttp2::http2ConfigureServer(self, &conf);
+            *self.__state.next_proto_err.Lock() = err;
+        }
+    }
+
     /// `(*Server).Serve(l)` (server.go:3433) — accept loop on a
     /// pre-bound Listener. Tracks the listener so `Shutdown` can
     /// break the Accept loop and close the socket.
@@ -2363,6 +2552,14 @@ impl Server {
     // the signature costs nothing and changes no public API: `Serve`
     // stays exactly as Go declares it and simply wraps.
     pub(crate) fn __serve_arc(self: Arc<Self>, ln: Arc<net::Listener>) -> error {
+        // Go: if err := s.setupHTTP2_Serve(); err != nil { return err }
+        // (Serve, server.go:3443) — before the listener is tracked.
+        {
+            let err = self.setupHTTP2_Serve();
+            if !err.IsNil() {
+                return err;
+            }
+        }
         // Install into tracked_listeners + initialize conn_sem (if
         // backpressure configured) under one critical section; check
         // in_shutdown atomically (Go `trackListener` returning false

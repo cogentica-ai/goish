@@ -533,6 +533,15 @@ impl Server {
         C: Into<string>,
         K: Into<string>,
     {
+        // Go: if err := srv.setupHTTP2_ServeTLS(); err != nil { return err }
+        // (ServeTLS, server.go:3520) — the less conservative policy,
+        // since ServeTLS owns the TLS config it is about to build.
+        {
+            let err = self.setupHTTP2_ServeTLS();
+            if !err.IsNil() {
+                return err;
+            }
+        }
         let cfg = match self.__resolve_tls_config(certFile.into(), keyFile.into()) {
             Ok(c) => c,
             Err(e) => return e,
