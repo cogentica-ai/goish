@@ -307,6 +307,61 @@ fn run() -> ! {
         );
     }
 
+    // ── 5. HTTPS conns pool too (dialConn's addTLS arm) ──
+    {
+        let addrs = Arc::new(goish::sync::Mutex::new(Vec::<goish::string>::new()));
+        let mux = http::ServeMux::new();
+        {
+            let a = addrs.clone();
+            mux.HandleFunc(string("/t"), move |w, r| {
+                a.Lock().push(r.RemoteAddr.clone());
+                let _ = w.Write(bytes("tls-ok"));
+            });
+        }
+        let ts = http::httptest::NewTLSServer(Arc::new(mux));
+        let mut client = http::Client::default();
+        let mut tr = http::Transport::default();
+        tr.TLSClientConfig.InsecureSkipVerify = true;
+        client.Transport = Arc::new(tr);
+        let url = ts.URL() + string("/t");
+        let mut ok = true;
+        for i in 0..3 {
+            let (mut resp, err) = client.Do(&{
+                let (r, _) = http::NewRequest(string("GET"), url.clone(), goish::nil);
+                r
+            });
+            if !err.IsNil() {
+                check("HTTPS GET succeeds", false, fmt::Sprintf!("i=%d %v", i as i64, err));
+                ok = false;
+                break;
+            }
+            let (body, _) = goish::io::ReadAll(&mut resp.Body);
+            let _ = resp.Body.Close();
+            if goish::string::from_bytes(&body) != "tls-ok" {
+                ok = false;
+            }
+        }
+        if ok {
+            let a = addrs.Lock();
+            // One client conn = one RemoteAddr (the ephemeral port
+            // pins the socket identity). A dial-per-request TLS
+            // client shows three distinct ports here.
+            let same = a.len() == 3 && a[0] == a[1] && a[1] == a[2];
+            check(
+                "three HTTPS GETs ride ONE pooled TLS connection",
+                same,
+                fmt::Sprintf!(
+                    "addrs=%d distinct? %s %s %s",
+                    a.len() as i64,
+                    a.get(0).cloned().unwrap_or_default(),
+                    a.get(1).cloned().unwrap_or_default(),
+                    a.get(2).cloned().unwrap_or_default()
+                ),
+            );
+        }
+        ts.Close();
+    }
+
     let f = FAILED.load(Ordering::Relaxed);
     if f == 0 {
         fmt::Printf!("HTTP_CLIENT_REUSE_OK\n");

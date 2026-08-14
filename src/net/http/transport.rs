@@ -823,6 +823,11 @@ pub struct persistConn {
     /// Go: `idleTimer *time.Timer` — the IdleConnTimeout reaper for
     /// the CURRENT idle cycle; stopped when the conn is taken.
     idleTimer: crate::sync::Mutex<Option<crate::time::Timer>>,
+    /// goish-only: the raw socket's netpoll watch target, captured at
+    /// dial time BEFORE any TLS wrap (the tls.Conn hides the TCPConn,
+    /// and the disconnect watch wants the PollDesc underneath).
+    /// (fd, PollDesc address); (0, 0) when unavailable.
+    watch_parts: crate::sync::Mutex<(i32, usize)>,
 }
 
 // go: none — goish-only: the payload of Go's `mu sync.Mutex`, i.e. the
@@ -864,6 +869,7 @@ impl persistConn {
             cacheKey,
             src: crate::sync::Mutex::new(None),
             idleTimer: crate::sync::Mutex::new(None),
+            watch_parts: crate::sync::Mutex::new((0, 0)),
             state: crate::sync::Mutex::new(pcState {
                 reused: false,
                 broken: false,
@@ -905,6 +911,53 @@ impl persistConn {
             old.Stop();
         }
         return;
+    }
+
+    // go: none — goish-only: see the watch_parts field.
+    pub(crate) fn __set_watch_parts(&self, fd: i32, pd: usize) {
+        *self.watch_parts.Lock() = (fd, pd);
+        return;
+    }
+
+    // go: none — see __set_watch_parts.
+    pub(crate) fn __watch_parts(&self) -> (i32, usize) {
+        return *self.watch_parts.Lock();
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:1684-1731 persistConn.addTLS
+    // goishlint:ignore GOISH020 addTLS — Go's ctx (HandshakeContext)
+    // and trace params serve machinery goish's handshake doesn't take
+    // yet; the handshake-deadline half of the timeout survives.
+    /// Go: "Initiate TLS and check remote host name against
+    /// certificate." The config clones, ServerName defaults to the
+    /// dial name, and TLSHandshakeTimeout bounds the handshake —
+    /// goish arms it as a socket deadline on the plain conn rather
+    /// than Go's AfterFunc + goroutine race (the handshake is
+    /// synchronous here and the deadline interrupts its reads).
+    /// Go stores tlsState; goish's pc does not carry it yet.
+    pub(crate) fn addTLS(
+        &self,
+        t: &Transport,
+        name: crate::gostring::string,
+        plain: crate::net::TCPConn,
+    ) -> error {
+        let mut cfg = t.TLSClientConfig.clone();
+        if cfg.ServerName.Len() == 0 {
+            cfg.ServerName = name;
+        }
+        if t.TLSHandshakeTimeout.0 > 0 {
+            let _ = plain.SetDeadline(crate::time::Now().Add(t.TLSHandshakeTimeout));
+        }
+        let boxed: alloc::boxed::Box<dyn crate::net::Conn> = alloc::boxed::Box::new(plain);
+        let mut tls_conn = crate::crypto::tls::Client(boxed, &cfg);
+        let herr = tls_conn.Handshake();
+        if !herr.IsNil() {
+            let _ = tls_conn.Close();
+            return herr;
+        }
+        let _ = tls_conn.SetDeadline(crate::time::Time::default());
+        self.__put_src(super::client::ConnSrc::Tls(crate::bufio::NewReader(tls_conn)));
+        return errors::nil;
     }
 
     // go: none — goish-only: the close reason `closeLocked` recorded;
@@ -1406,7 +1459,7 @@ impl Transport {
             return;
         }
 
-        let (pc, err) = self.dialConn(&w.__key());
+        let (pc, err) = self.dialConn(ctx, &w.__key());
         let delivered = w.tryDeliver(pc.clone(), err.clone(), crate::time::Time::default());
         if err.IsNil() {
             if !delivered {
@@ -1428,17 +1481,19 @@ impl Transport {
     }
 
     // go: sdk 1.25.5 net/http/transport.go:1739-1954 Transport.dialConn
-    // goishlint:ignore GOISH020 dialConn — Go's first param is the
-    // dial ctx (goish's net::Dial is not ctx-interruptible yet) and
-    // its second is the full connectMethod; the key carries what the
-    // TCP arm consumes.
-    /// PARTIAL: the plain-TCP arm of Go's 232 lines. The TLS,
-    /// proxy-CONNECT and ALPN arms still answer errDialNotPorted —
-    /// RoundTrip's HTTPS path dials per request until they land. The
-    /// pc leaves here carrying its ConnSrc (Go's conn + br pair);
-    /// readLoop/writeLoop spawning is the loops phase.
-    fn dialConn(&self, key: &connectMethodKey) -> (Option<Arc<persistConn>>, error) {
-        if key.scheme != "http" || key.proxy.Len() != 0 {
+    /// PARTIAL: the TCP and TLS arms of Go's 232 lines; the
+    /// proxy-CONNECT and ALPN arms still answer errDialNotPorted.
+    /// The pc leaves here carrying its ConnSrc (Go's conn + br pair);
+    /// readLoop/writeLoop spawning is the loops phase. Go's ctx
+    /// reaches the handshake as HandshakeContext; goish arms the
+    /// netpoll cancel watch + the ctx deadline on the raw socket for
+    /// the handshake's duration, which interrupts it the same way.
+    fn dialConn(
+        &self,
+        ctx: Option<Arc<dyn crate::context::Context>>,
+        key: &connectMethodKey,
+    ) -> (Option<Arc<persistConn>>, error) {
+        if (key.scheme != "http" && key.scheme != "https") || key.proxy.Len() != 0 {
             return (None, errDialNotPorted.into());
         }
         // Go: t.dial(ctx, "tcp", cm.addr()) — goish's DialContext
@@ -1449,6 +1504,36 @@ impl Transport {
             return (None, derr);
         }
         let pc = Arc::new(persistConn::__new(key.clone()));
+        // The disconnect watch wants the RAW socket's PollDesc —
+        // captured before any TLS wrap hides the TCPConn.
+        {
+            let (fd, pd) = conn.__disconnect_watch_parts();
+            pc.__set_watch_parts(fd, pd as usize);
+        }
+        if key.scheme == "https" {
+            // Go: if cm.scheme() == "https" { pconn.addTLS(ctx, …) }
+            // — SNI from the addr with the port stripped. The ctx
+            // covers the HANDSHAKE: deadline folded onto the socket,
+            // cancel watch armed for its duration.
+            if let Some(c) = &ctx {
+                if let Some(dl) = c.Deadline() {
+                    let _ = conn.SetDeadline(dl);
+                }
+            }
+            let watch =
+                super::client::arm_cancel_watch(&ctx, conn.__disconnect_watch_parts());
+            let name = super::client::host_without_port(&key.addr);
+            let aerr = pc.addTLS(self, name, conn);
+            super::client::stop_cancel_watch(watch);
+            if !aerr.IsNil() {
+                let ctx_err = ctx.map(|c| c.Err()).unwrap_or(errors::nil);
+                if !ctx_err.IsNil() {
+                    return (None, ctx_err);
+                }
+                return (None, aerr);
+            }
+            return (Some(pc), errors::nil);
+        }
         pc.__put_src(super::client::ConnSrc::Tcp(crate::bufio::NewReader(conn)));
         return (Some(pc), errors::nil);
     }

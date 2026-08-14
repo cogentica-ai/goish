@@ -49,7 +49,6 @@ use crate::errors::{self, error};
 use crate::gonilable::nilable;
 use crate::goslice::slice;
 use crate::io::{self, Closer, Reader};
-use crate::net;
 use crate::string;
 use crate::strings;
 use crate::time;
@@ -127,6 +126,17 @@ impl ConnSrc {
         }
     }
 
+    // go: none — goish-only: per-request deadline control over either
+    // source (Go sets it on pc.conn, which is the tls.Conn after
+    // addTLS — same dispatch).
+    pub(crate) fn __set_deadline(&mut self, t: crate::time::Time) -> error {
+        let out = match self {
+            ConnSrc::Tcp(br) => br.__rd_mut().SetDeadline(t),
+            ConnSrc::Tls(br) => br.__rd_mut().SetDeadline(t),
+        };
+        return out;
+    }
+
     pub(crate) fn split_for_upgrade(
         self,
     ) -> (Option<(ConnSrc, crate::net::TCPConn)>, error) {
@@ -147,6 +157,17 @@ impl ConnSrc {
             ),
         };
         return out;
+    }
+}
+
+// go: none — goish-only: transferWriter::writeBody wants `&mut dyn
+// io::Writer`; this adapts a borrowed ConnSrc (Go's persistConnWriter
+// role, minus the nwrite accounting that arrives with the loops).
+pub(crate) struct ConnSrcWriter<'a>(pub(crate) &'a mut ConnSrc);
+
+impl crate::io::Writer for ConnSrcWriter<'_> {
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        return self.0.write(p);
     }
 }
 
@@ -940,93 +961,19 @@ impl RoundTripper for Transport {
             }
         }
 
-        if is_https {
-            // ── HTTPS path ───────────────────────────────────────────────
-            // Dial the raw TCP conn ourselves (instead of tls::Dial's
-            // dial-and-handshake) so the deadline and the ctx-cancel
-            // watcher are armed on the socket *before* the handshake —
-            // Timeout and cancellation cover the ClientHello/ServerHello
-            // exchange, not just the request/response I/O after it.
-            let dial_addr = ensure_default_port(&host, 443);
-
-            let (raw_conn, derr) = net::Dial(string("tcp"), dial_addr);
-            if !derr.IsNil() {
-                return (Response::default(), derr);
-            }
-
-            // Deadline: Transport.Timeout tightened by the ctx deadline.
-            let dl = self.effective_deadline(&ctx);
-            if !dl.IsZero() {
-                let _ = raw_conn.SetDeadline(dl);
-            }
-
-            // ctx-cancel watcher on the underlying socket — TLS reads
-            // and writes all funnel into it, so a past netpoll
-            // deadline interrupts them exactly like plain HTTP.
-            let watch = arm_cancel_watch(&ctx, raw_conn.__disconnect_watch_parts());
-
-            // tls.Client(conn, cfg) + Handshake, SNI from the config
-            // or the request host (what tls::Dial would derive).
-            let mut tls_cfg = self.TLSClientConfig.clone();
-            if tls_cfg.ServerName.Len() == 0 {
-                tls_cfg.ServerName = host_without_port(&host);
-            }
-            let box_conn: alloc::boxed::Box<dyn crate::net::Conn> =
-                alloc::boxed::Box::new(raw_conn);
-            let mut tls_conn = crate::crypto::tls::Client(box_conn, &tls_cfg);
-            let herr = tls_conn.Handshake();
-            if !herr.IsNil() {
-                stop_cancel_watch(watch);
-                let _ = tls_conn.Close();
-                return (Response::default(), ctx_err_or(&ctx, herr));
-            }
-
-            // Write the request: head first, then STREAM the body
-            // through transferWriter::writeBody (chunked-encoded when
-            // the framing decision chose it).
-            let (head, mut tw, serr) = serialize_request_head(req, &host, false);
-            if !serr.IsNil() {
-                stop_cancel_watch(watch);
-                let _ = tls_conn.Close();
-                return (Response::default(), serr);
-            }
-            let (_, werr) = <crate::crypto::tls::Conn as crate::io::Writer>::Write(
-                &mut tls_conn,
-                head,
-            );
-            if !werr.IsNil() {
-                stop_cancel_watch(watch);
-                let _ = tls_conn.Close();
-                return (Response::default(), ctx_err_or(&ctx, werr));
-            }
-            let werr = tw.writeBody(&mut tls_conn);
-            if !werr.IsNil() {
-                stop_cancel_watch(watch);
-                let _ = tls_conn.Close();
-                return (Response::default(), ctx_err_or(&ctx, werr));
-            }
-
-            // Read the response head; the conn moves into the bufio
-            // reader and onward into resp.Body, which streams the
-            // body bytes until the caller Closes it.
-            let mut br = bufio::NewReader(tls_conn);
-            let (mut resp, kind, rerr) = read_response_head(&mut br, Some(req.clone()));
-            if !rerr.IsNil() {
-                stop_cancel_watch(watch);
-                let _ = br.__rd_mut().Close();
-                return (resp, ctx_err_or(&ctx, rerr));
-            }
-            attach_stream_body(&mut resp, kind, ConnSrc::Tls(br), ctx, watch, None);
-            (resp, errors::nil)
-        } else {
-            // ── HTTP path ────────────────────────────────────────────────
-            let dial_addr = ensure_default_port(&host, 80);
-            // Go (roundTrip → getConn): the connect method for this
-            // request; getConn tries the idle pool, else queues a
-            // dial (queueForDial → dialConnFor → dialConn).
+        // ── unified path (Go roundTrip → getConn) ──
+        // One loop for both schemes: getConn tries the idle pool,
+        // else dials (dialConn's TLS arm runs addTLS, so HTTPS conns
+        // POOL exactly like plain ones). The deadline and the
+        // ctx-cancel watch arm on the raw socket's PollDesc captured
+        // at dial time — before any TLS wrap — so Timeout and
+        // cancellation cover the handshake and every request on the
+        // conn after it.
+        {
+            let dial_addr = ensure_default_port(&host, if is_https { 443 } else { 80 });
             let cm = super::transport::connectMethod {
                 proxyURL: None,
-                targetScheme: string("http"),
+                targetScheme: if is_https { string("https") } else { string("http") },
                 targetAddr: dial_addr.clone(),
                 onlyH1: false,
             };
@@ -1072,15 +1019,20 @@ impl RoundTripper for Transport {
                 };
                 // Arm the per-request deadline + ctx watch (fresh and
                 // pooled conns alike; the bank cleared the deadline).
+                // The watch target is the raw socket's PollDesc the
+                // dial captured — valid under a TLS wrap too.
                 let watch = {
                     let dl = self.effective_deadline(&ctx);
-                    let tcp = src.__tcp_mut();
                     if !dl.IsZero() {
-                        let _ = tcp.SetDeadline(dl);
+                        let _ = src.__set_deadline(dl);
                     } else {
-                        let _ = tcp.SetDeadline(time::Time::default());
+                        let _ = src.__set_deadline(time::Time::default());
                     }
-                    arm_cancel_watch(&ctx, tcp.__disconnect_watch_parts())
+                    let (wfd, wpd) = pc.__watch_parts();
+                    arm_cancel_watch(
+                        &ctx,
+                        (wfd, wpd as *const crate::runtime::netpoll::PollDesc),
+                    )
                 };
 
                 // Write the request: head, then stream the body (see
@@ -1091,9 +1043,10 @@ impl RoundTripper for Transport {
                     let _ = src.close_conn();
                     return (Response::default(), serr);
                 }
-                let (_, head_werr) = crate::io::Writer::Write(src.__tcp_mut(), head);
+                let (_, head_werr) = src.write(head);
                 let (werr, head_failed) = if head_werr.IsNil() {
-                    let mut cw: &mut dyn crate::io::Writer = src.__tcp_mut();
+                    let mut cw = ConnSrcWriter(&mut src);
+                    let mut cw: &mut dyn crate::io::Writer = &mut cw;
                     (tw.writeBody(&mut cw), false)
                 } else {
                     (head_werr, true)
@@ -1141,7 +1094,7 @@ impl RoundTripper for Transport {
                 // resp.Body, which streams until the caller Closes it.
                 let (mut resp, kind, rerr) = match &mut src {
                     ConnSrc::Tcp(br) => read_response_head(br, Some(rt_req.clone())),
-                    ConnSrc::Tls(_) => unreachable!("plain arm"),
+                    ConnSrc::Tls(br) => read_response_head(br, Some(rt_req.clone())),
                 };
                 if !rerr.IsNil() {
                     stop_cancel_watch(watch);
@@ -1161,7 +1114,14 @@ impl RoundTripper for Transport {
                                 slice::<byte>::__from_vec(Vec::new())
                             }
                         }
-                        ConnSrc::Tls(_) => slice::<byte>::__from_vec(Vec::new()),
+                        ConnSrc::Tls(br) => {
+                            let n = br.Buffered();
+                            if n > 0 {
+                                br.Peek(n).0
+                            } else {
+                                slice::<byte>::__from_vec(Vec::new())
+                            }
+                        }
                     };
                     let _ = src.close_conn();
                     let mapped = if pc_reused {
@@ -1198,7 +1158,7 @@ impl RoundTripper for Transport {
                         Some(alloc::boxed::Box::new(move |mut s: ConnSrc| {
                             // Clear the per-request deadline before the
                             // conn waits idle.
-                            let _ = s.__tcp_mut().SetDeadline(time::Time::default());
+                            let _ = s.__set_deadline(time::Time::default());
                             pc2.__put_src(s);
                             let e = super::transport::__try_put_idle(&idle, &cfg, &pc2);
                             if !e.IsNil() {
@@ -1340,7 +1300,7 @@ fn ctx_err_or(ctx: &Option<Arc<dyn crate::context::Context>>, fallback: error) -
 /// Returns `None` (nothing to watch) or the (stop, exited) chan pair
 /// to hand to `stop_cancel_watch`, which must run before the conn is
 /// closed — the watcher dereferences the conn's PollDesc.
-fn arm_cancel_watch(
+pub(crate) fn arm_cancel_watch(
     ctx: &Option<Arc<dyn crate::context::Context>>,
     parts: (i32, *const crate::runtime::netpoll::PollDesc),
 ) -> Option<(crate::gochan::chan<()>, crate::gochan::chan<()>)> {
@@ -1375,7 +1335,7 @@ fn arm_cancel_watch(
 
 /// Stop + join the ctx-cancel watcher. Must run before the conn is
 /// closed (the watcher dereferences the conn's PollDesc).
-fn stop_cancel_watch(watch: Option<(crate::gochan::chan<()>, crate::gochan::chan<()>)>) {
+pub(crate) fn stop_cancel_watch(watch: Option<(crate::gochan::chan<()>, crate::gochan::chan<()>)>) {
     if let Some((stop, exited)) = watch {
         stop.Close();
         let (_, _) = exited.Recv();
@@ -1384,7 +1344,7 @@ fn stop_cancel_watch(watch: Option<(crate::gochan::chan<()>, crate::gochan::chan
 
 /// Strip a `:port` suffix from `host` — the SNI name for a dialed
 /// address (what `tls::Dial` derives internally).
-fn host_without_port(host: &string) -> string {
+pub(crate) fn host_without_port(host: &string) -> string {
     if !has_port(host) {
         return host.clone();
     }
