@@ -49,7 +49,7 @@ fn main() {
         let (mut req, _) =
             http::NewRequest(string("POST"), string("http://x/upload"), bytes(""));
         req.Header.Set(string("Content-Type"), ct);
-        req.Body = body;
+        req.Body = http::Body::from_bytes(body);
 
         let (mut mr, err) = req.MultipartReader();
         if !err.IsNil() {

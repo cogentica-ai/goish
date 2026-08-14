@@ -110,7 +110,8 @@ fn main() {
 
     check(req.ContentLength == 13, b"ContentLength != 13\n");
 
-    let body: &[u8] = &*req.Body;
+    let (rbody, _) = goish::io::ReadAll(&mut req.Body.clone());
+    let body: &[u8] = &*rbody;
     if body != b"{\"hello\":1}\r\n" {
         // Diagnostic dump.
         let pre: &[u8] = b"got body (len=";

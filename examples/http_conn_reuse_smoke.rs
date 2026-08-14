@@ -116,7 +116,8 @@ fn run() -> ! {
     // has already told the writer via requestTooLarge.
     let capped = http::ServeMux::new();
     capped.HandleFunc("/capped", |w, r| {
-        if r.Body.Len() >= 1024 {
+        let (body, _) = goish::io::ReadAll(&mut r.Body.clone());
+        if body.Len() >= 1024 {
             // The handler saw the truncated body; answer 413.
             w.WriteHeader(413);
             let _ = w.Write(goish::bytes("too big"));

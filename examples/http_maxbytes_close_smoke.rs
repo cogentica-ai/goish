@@ -45,7 +45,7 @@ fn run() {
     mux.HandleFunc("/limited", |w, r| {
         // `w` is the borrow ServeHTTP handed us — exactly what
         // MaxBytesReader needs, and it outlives the reader.
-        let body = goish::bytes::NewReader(r.Body.clone());
+        let body = r.body_reader();
         let mut mbr = http::MaxBytesReader(Some(w), body, 8);
         let mut buf = goish::make!([]goish::byte, 4096);
         let (_, e) = mbr.Read(&mut buf);
@@ -63,7 +63,8 @@ fn run() {
         "/wrapped",
         http::MaxBytesHandler(
             Arc::new(http::HandlerFunc(|w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request| {
-                let _ = w.Write(goish::convert::bytes(fmt::Sprintf!("got %d", r.Body.Len())));
+                let (body, _) = goish::io::ReadAll(&mut r.Body.clone());
+                let _ = w.Write(goish::convert::bytes(fmt::Sprintf!("got %d", body.Len())));
             })),
             8,
         ),

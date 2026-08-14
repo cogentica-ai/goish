@@ -46,9 +46,10 @@ fn main() {
         let len_h = echo_seen_len.clone();
         let ct_h = echo_seen_ct.clone();
         mux.HandleFunc(string("/echo"), move |w, r| {
-            len_h.store(r.Body.Len() as usize, Ordering::SeqCst);
+            let (rbody, _) = goish::io::ReadAll(&mut r.Body.clone());
+            len_h.store(rbody.Len() as usize, Ordering::SeqCst);
             *ct_h.Lock() = r.Header.Get(string("Content-Type"));
-            let _ = w.Write(r.Body.clone());
+            let _ = w.Write(rbody);
         });
     }
 
@@ -59,7 +60,8 @@ fn main() {
         let b_h = form_seen_b.clone();
         mux.HandleFunc(string("/form"), move |w, r| {
             // Convert the request body to a Vec<u8> for parsing.
-            let body = &r.Body;
+            let (rbody, _) = goish::io::ReadAll(&mut r.Body.clone());
+            let body = &rbody;
             let mut bv: Vec<u8> = Vec::new();
             for i in 0..body.Len() {
                 bv.push(body[i]);

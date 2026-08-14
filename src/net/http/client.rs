@@ -358,6 +358,43 @@ impl Body {
         let mut g = self.inner.Lock();
         close_locked(&mut g)
     }
+
+    // go: none — goish-only: non-consuming view of a fully-buffered
+    // (Eager) body's unread remainder. None for a streaming body.
+    // The cheap path for callers that Go writes as slice access on an
+    // in-memory body (DumpRequest, redirect replay, serialization of
+    // a NewRequest-built request).
+    pub(crate) fn __bytes_eager(&self) -> Option<slice<byte>> {
+        let g = self.inner.Lock();
+        let out = match &g.framing {
+            FramedBody::Eager { data, off } => Some(data.slice(*off, data.Len())),
+            _ => None,
+        };
+        return out;
+    }
+
+    // go: none — goish-only: unread length of an Eager body, None if
+    // streaming. `outgoingLength`'s "Body == nil" test maps here.
+    pub(crate) fn __eager_len(&self) -> Option<int> {
+        let g = self.inner.Lock();
+        let out = match &g.framing {
+            FramedBody::Eager { data, off } => Some(data.Len() - *off),
+            _ => None,
+        };
+        return out;
+    }
+
+    // go: none — goish-only: the body's remaining bytes as a slice.
+    // Eager bodies hand back a non-consuming view; a streaming body is
+    // drained (and left re-readable as the Eager remainder, the
+    // `__drain_remainder` shape). Callers that Go writes as
+    // `io.ReadAll(r.Body)` over a body they must not lose use this.
+    pub(crate) fn __materialize(&self) -> (slice<byte>, error) {
+        if let Some(b) = self.__bytes_eager() {
+            return (b, errors::nil);
+        }
+        return self.__drain_remainder();
+    }
 }
 
 // go: none — goish-only body of transport.rs's newReadWriteCloserBody
@@ -1636,7 +1673,7 @@ impl Client {
                         Header: Header::new(),
                         Host: loc.Host.clone(),
                         ContentLength: 0,
-                        Body: slice::<byte>::__from_vec(Vec::new()),
+                        Body: Body::default(),
                         RemoteAddr: string::new(),
                         pat: None,
         matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
@@ -1889,6 +1926,17 @@ impl __RequestBody for () {
     }
 }
 
+/// A `Body` handed straight back as another request's body — the
+/// ReverseProxy shape (`outreq.Body = r.Body`). An in-memory body is
+/// viewed without consuming; a streaming one is drained (phase 2 of
+/// the transfer.go port threads it through unread).
+impl __RequestBody for Body {
+    #[inline]
+    fn __to_body(self) -> slice<byte> {
+        return self.__materialize().0;
+    }
+}
+
 impl __RequestBody for slice<byte> {
     #[inline]
     fn __to_body(self) -> slice<byte> {
@@ -1955,6 +2003,7 @@ pub fn NewRequest<M: Into<string>, U: Into<string>, B: __RequestBody>(
     }
     let body_len = body.Len();
     let host = u.Host.clone();
+    let body = Body::from_bytes(body);
     let req = Request {
         Close: false,
         Trailer: Header::new(),
@@ -1993,7 +2042,7 @@ fn default_request() -> Request {
         Header: Header::new(),
         Host: string::new(),
         ContentLength: 0,
-        Body: slice::<byte>::__from_vec(Vec::new()),
+        Body: Body::default(),
         RemoteAddr: string::new(),
         pat: None,
         matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
@@ -2180,7 +2229,8 @@ pub(crate) fn serialize_request_proxy(
     }
 
     // Go: fmt.Fprintf(&b, "Content-Length: %d\r\n", contentLength) — for body-bearing
-    let body_len = req.Body.Len();
+    let (body_bytes, _) = req.Body.__materialize();
+    let body_len = body_bytes.Len();
     let has_body_method = !(req.Method == "GET"
         || req.Method == "HEAD"
         || req.Method == "DELETE"
@@ -2233,7 +2283,7 @@ pub(crate) fn serialize_request_proxy(
     }
     let mut out = head;
     for i in 0..body_len {
-        out = append!(out, req.Body[i]);
+        out = append!(out, body_bytes[i]);
     }
     out
 }

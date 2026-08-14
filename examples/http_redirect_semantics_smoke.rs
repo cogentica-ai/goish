@@ -52,7 +52,8 @@ fn main() {
         let mux = http::ServeMux::new();
         mux.HandleFunc(string("/dst"), |_w, r| {
             *METHOD.Lock() = r.Method.as_bytes().to_vec();
-            *BODY.Lock() = (&*r.Body).to_vec();
+            let (body, _) = goish::io::ReadAll(&mut r.Body.clone());
+            *BODY.Lock() = (&*body).to_vec();
         });
         for code in [301, 302, 303, 307, 308].iter() {
             let c = *code;

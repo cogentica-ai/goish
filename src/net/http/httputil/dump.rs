@@ -93,13 +93,14 @@ pub fn DumpRequestOut(req: &Request, body: bool) -> (slice<byte>, error) {
 /// Request in HTTP/1.x wire format. Line-by-line port of Go 1.25
 /// src/net/http/httputil/dump.go:218.
 ///
-/// If `body` is true, the request body is included verbatim. Goish's
-/// `req.Body` is already a buffered slice<byte>, so no `drainBody`
-/// dance is needed (Go has to read+restore from io.ReadCloser).
+/// If `body` is true, the request body is included verbatim. A
+/// buffered (Eager) body is viewed without consuming; a streaming one
+/// is drained and left re-readable — Go's `drainBody` shape.
 pub fn DumpRequest(req: &Request, body: bool) -> (slice<byte>, error) {
+    let (body_bytes, _) = req.Body.__materialize();
     // Go: var b bytes.Buffer
     let mut b = strings::Builder::new();
-    b.Grow(256 + req.Body.Len());
+    b.Grow(256 + body_bytes.Len());
 
     // Go: reqURI := req.RequestURI; if reqURI == "" { reqURI = req.URL.RequestURI() }
     // Goish doesn't store RequestURI separately; build from URL.Path + RawQuery.
@@ -177,9 +178,9 @@ pub fn DumpRequest(req: &Request, body: bool) -> (slice<byte>, error) {
 
     // Go: if req.Body != nil { … }
     let mut out = crate::convert::bytes(b.String());
-    if body && req.Body.Len() > 0 {
-        for i in 0..req.Body.Len() {
-            out = crate::append!(out, req.Body[i]);
+    if body && body_bytes.Len() > 0 {
+        for i in 0..body_bytes.Len() {
+            out = crate::append!(out, body_bytes[i]);
         }
     }
 
@@ -386,7 +387,7 @@ pub fn valueOrDefault(value: string, def: string) -> string {
 // `ContentLength` there; that gap closes when Body becomes a real
 // io.ReadCloser.
 pub fn outgoingLength(req: &Request) -> crate::types::int64 {
-    if crate::len(&req.Body) == 0 {
+    if matches!(req.Body.__eager_len(), Some(0)) {
         return 0;
     }
     if req.ContentLength != 0 {

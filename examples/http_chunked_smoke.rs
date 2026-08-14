@@ -187,9 +187,10 @@ fn main() {
 
         let mux = http::ServeMux::new();
         mux.HandleFunc(string("/upload"), move |w, r| {
-            len_h.store(r.Body.Len() as usize, Ordering::SeqCst);
+            let (rbody, _) = goish::io::ReadAll(&mut r.Body.clone());
+            len_h.store(rbody.Len() as usize, Ordering::SeqCst);
             cl_h.store(r.ContentLength as i64, Ordering::SeqCst);
-            let body = &r.Body;
+            let body = &rbody;
             let expected = b"hello world!";
             let mut ok = body.Len() as usize == expected.len();
             if ok {

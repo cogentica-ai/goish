@@ -546,24 +546,21 @@ pub fn NotFound(w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request) 
 /// passes `w` through to MaxBytesReader. Hand-rolling
 /// `MaxBytesReader(None, …)` does not.
 ///
-/// goish's Request owns its body as `slice<byte>` rather than an
-/// io.ReadCloser, so the wrap TRUNCATES eagerly and reports the same
-/// MaxBytesError to the handler on over-limit, instead of deferring it
-/// to the handler's first Read. Same cap, same 413-shaped outcome,
-/// same conn close; the difference is when the error surfaces.
+/// The server buffers an inbound body before the handler runs, so the
+/// wrap TRUNCATES eagerly and reports the same MaxBytesError to the
+/// handler on over-limit, instead of deferring it to the handler's
+/// first Read. Same cap, same 413-shaped outcome, same conn close;
+/// the difference is when the error surfaces.
 pub fn MaxBytesHandler(h: Arc<dyn Handler>, n: crate::types::int) -> Arc<dyn Handler> {
     return Arc::new(HandlerFunc(
         move |w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request| {
             let n = if n < 0 { 0 } else { n };
             let mut r2 = r.clone();
-            if r2.Body.Len() > n {
+            let (body_bytes, _) = r2.Body.__materialize();
+            if body_bytes.Len() > n {
                 // Over the cap: truncate and tell the writer, which is
                 // what forces the connection closed.
-                let raw: &[u8] = &r2.Body;
-                let cut = crate::builtin::__make_size(n);
-                r2.Body = crate::goslice::slice::<crate::types::byte>::__from_vec(
-                    raw[..cut].to_vec(),
-                );
+                r2.Body = super::Body::from_bytes(body_bytes.slice(0, n));
                 if let (rt, true) = crate::cast!(w, super::responsewriter::__RequestTooLarge) {
                     rt.requestTooLarge();
                 }

@@ -78,7 +78,7 @@ pub fn RequestFromMap(params: &map<string, string>) -> (Request, error) {
         Header: Header::new(),
         Host: string::new(),
         ContentLength: 0,
-        Body: slice::<byte>::__from_vec(Vec::new()),
+        Body: super::super::Body::default(),
         RemoteAddr: string::new(),
         pat: None,
         matches: slice::<string>::__from_vec(alloc::vec::Vec::new()),
@@ -232,7 +232,7 @@ pub fn Request() -> (Request, error) {
             got += n as usize;
         }
         buf.truncate(got);
-        r.Body = slice::<byte>::__from_vec(buf);
+        r.Body = super::super::Body::from_bytes(slice::<byte>::__from_vec(buf));
     }
     return (r, errors::nil);
 }

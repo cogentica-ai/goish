@@ -400,7 +400,7 @@ impl HTTPHandler for Handler {
             )));
         }
         if req.ContentLength != 0 {
-            cmd.SetStdin(crate::bytes::NewReader(req.Body.clone()));
+            cmd.SetStdin(crate::bytes::NewReader(req.Body.__materialize().0));
         }
         let (stdoutRead, perr) = cmd.StdoutPipe();
         if !perr.IsNil() {

@@ -60,7 +60,7 @@ fn main() {
     }
     eqi(httputil::outgoingLength(&r), 0, "no body", &mut bad);
 
-    r.Body = slice::<u8>::__from_vec(b"hello".to_vec());
+    r.Body = http::Body::from_bytes(slice::<u8>::__from_vec(b"hello".to_vec()));
     r.ContentLength = 5;
     eqi(httputil::outgoingLength(&r), 5, "5-byte body, CL=5", &mut bad);
 
@@ -69,7 +69,7 @@ fn main() {
 
     // goish has no NoBody sentinel; an empty slice IS that state, and
     // Go answers 0 for it.
-    r.Body = slice::<u8>::new();
+    r.Body = http::Body::from_bytes(slice::<u8>::new());
     r.ContentLength = 0;
     eqi(httputil::outgoingLength(&r), 0, "NoBody equivalent", &mut bad);
 

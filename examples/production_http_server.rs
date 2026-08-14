@@ -113,8 +113,9 @@ fn apiEcho(w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Req
         return;
     }
     // Go shape: var req map[string]any; if err := json.Unmarshal(r.Body, &req); err != nil { … }
+    let (body, _) = goish::io::ReadAll(&mut r.Body.clone());
     let mut req_val = json::Value::Null;
-    let perr = json::Unmarshal(&r.Body, &mut req_val);
+    let perr = json::Unmarshal(&body, &mut req_val);
     if perr != nil {
         http::Error(w, "invalid json", http::StatusBadRequest);
         return;
@@ -548,7 +549,7 @@ fn main() {
         if err != nil {
             fail(fmt::Sprintf!("%s: NewRequest: %s", name, err.Error()));
         } else {
-            req.Body = payload.clone();
+            req.Body = http::Body::from_bytes(payload.clone());
             req.ContentLength = payload.Len();
             req.Header.Set("Content-Type", "application/json");
             let (mut resp, err) = client.Do(&req);
@@ -573,8 +574,9 @@ fn main() {
         if err != nil {
             fail(fmt::Sprintf!("%s: NewRequest: %s", name, err.Error()));
         } else {
-            req.Body = bytes("not-json{");
-            req.ContentLength = req.Body.Len();
+            let payload2 = bytes("not-json{");
+            req.ContentLength = payload2.Len();
+            req.Body = http::Body::from_bytes(payload2);
             req.Header.Set("Content-Type", "application/json");
             let (resp, err) = client.Do(&req);
             if err != nil {
@@ -592,8 +594,9 @@ fn main() {
         if err != nil {
             fail(fmt::Sprintf!("%s: NewRequest: %s", name, err.Error()));
         } else {
-            req.Body = bytes(r#"{"name":"x"}"#);
-            req.ContentLength = req.Body.Len();
+            let payload3 = bytes(r#"{"name":"x"}"#);
+            req.ContentLength = payload3.Len();
+            req.Body = http::Body::from_bytes(payload3);
             req.Header.Set("Content-Type", "application/json");
             let (resp, err) = client.Do(&req);
             if err != nil {

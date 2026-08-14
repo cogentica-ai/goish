@@ -43,15 +43,17 @@ pub struct Request {
     pub Header: Header,
     pub Host: string,
     pub ContentLength: int, // -1 if unknown
-    /// Fully-buffered request body. Bounded by `Content-Length`.
-    /// Empty for GET/HEAD/no-body methods.
+    /// `Request.Body` (request.go:175) — the request body, a streaming
+    /// `io.ReadCloser` like Go's (goish's `Body` implements
+    /// `io::Reader` + `io::Closer`; read it with `io::ReadAll`).
     ///
-    /// **Deviation from Go**: Go exposes `Body io.ReadCloser` for
-    /// streaming. Goish v1 reads the body upfront — callers wrap it
-    /// in `bytes::NewReader` if they want a `Reader`. For the
-    /// sub-MB requests typical of REST APIs this is the same
-    /// observable behavior with simpler lifetimes.
-    pub Body: slice<byte>,
+    /// **Deviation from Go, narrowed**: the TYPE is Go's, but the
+    /// server still buffers an inbound body fully before the handler
+    /// runs (the connReader port will lift that); a handler's reads
+    /// come from that buffer. Client requests built by `NewRequest`
+    /// carry an in-memory body today, so `serialize_request` can frame
+    /// them with Content-Length exactly as before.
+    pub Body: super::Body,
     pub RemoteAddr: string,
     // "The following fields are for requests matched by ServeMux."
     // (request.go:334-338) — Go's pat/matches/otherValues trio, kept
@@ -144,9 +146,11 @@ impl Request {
     /// Convenience: `bytes::Reader` over `Body` so handler code that
     /// expects an `io::Reader` (`json::NewDecoder(req.body_reader())`)
     /// keeps working. Mirrors what `Request.Body io.Reader` would
-    /// return in Go.
+    /// return in Go. Non-consuming for the server's buffered bodies;
+    /// a streaming body is drained (and stays re-readable).
     pub fn body_reader(&self) -> bytes::Reader {
-        bytes::NewReader(self.Body.clone())
+        let (b, _) = self.Body.__materialize();
+        bytes::NewReader(b)
     }
 
     // go: sdk 1.25.5 net/http/request.go:352-357 Request.Context
@@ -520,7 +524,8 @@ impl Request {
                 ErrNotMultipart.into(),
             );
         }
-        if self.Body.Len() == 0 {
+        let (body_bytes, _) = self.Body.__materialize();
+        if body_bytes.Len() == 0 {
             return (
                 empty_multipart_reader(),
                 errors::New(string("missing form body")),
@@ -535,7 +540,7 @@ impl Request {
             return (empty_multipart_reader(), ErrMissingBoundary.into());
         }
         (
-            crate::mime::multipart::NewReader(self.Body.clone(), boundary),
+            crate::mime::multipart::NewReader(body_bytes, boundary),
             errors::nil,
         )
     }
@@ -731,7 +736,9 @@ impl Request {
     /// nobody set must be framed as UNKNOWN (chunked), not as
     /// zero-length, or the body silently never reaches the wire.
     pub fn outgoingLength(&self) -> i64 {
-        if self.Body.Len() == 0 {
+        // Go: if r.Body == nil || r.Body == NoBody { return 0 } — an
+        // exhausted in-memory body is goish's nil/NoBody.
+        if matches!(self.Body.__eager_len(), Some(0)) {
             return 0;
         }
         if self.ContentLength != 0 {
@@ -1003,7 +1010,7 @@ impl Default for Request {
             Header: Header::new(),
             Host: string::new(),
             ContentLength: 0,
-            Body: slice::<byte>::__from_vec(Vec::new()),
+            Body: super::Body::default(),
             RemoteAddr: string::new(),
             pat: None,
             matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
@@ -1037,7 +1044,7 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         Header: Header::new(),
         Host: string::new(),
         ContentLength: 0,
-        Body: slice::<byte>::__from_vec(Vec::new()),
+        Body: super::Body::default(),
         RemoteAddr: string::new(),
         pat: None,
         matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
@@ -1184,7 +1191,7 @@ pub(crate) fn __read_request_server<R: io::Reader>(
                 break;
             }
         }
-        req.Body = slice::<byte>::__from_vec(buf);
+        req.Body = super::Body::from_bytes(slice::<byte>::__from_vec(buf));
         return (req, errors::nil);
     }
 
@@ -1220,7 +1227,7 @@ pub(crate) fn __read_request_server<R: io::Reader>(
                 return (req, errors::New(string("net/http: read returned 0 bytes")));
             }
         }
-        req.Body = slice::<byte>::__from_vec(buf);
+        req.Body = super::Body::from_bytes(slice::<byte>::__from_vec(buf));
     }
 
     (req, errors::nil)
@@ -1816,7 +1823,8 @@ impl<'w, R: io::Reader> io::Reader for maxBytesReader<'w, R> {
 fn parsePostForm(r: &Request) -> (crate::gomap::map<string, slice<string>>, error) {
     use crate::gomap::map;
     // Go: if r.Body == nil { return … }
-    if r.Body.Len() == 0 && r.ContentLength <= 0 {
+    let (body_bytes, _) = r.Body.__materialize();
+    if body_bytes.Len() == 0 && r.ContentLength <= 0 {
         return (map::<string, slice<string>>::new(), errors::nil);
     }
     // Go: ct := r.Header.Get("Content-Type")
@@ -1829,8 +1837,6 @@ fn parsePostForm(r: &Request) -> (crate::gomap::map<string, slice<string>>, erro
         return (map::<string, slice<string>>::new(), errors::nil);
     }
     // Go: b, e := io.ReadAll(reader)
-    // We already have r.Body fully buffered; just decode it as a string.
-    let body_bytes = r.Body.clone();
     let body_str = crate::convert::string(body_bytes);
     super::url::ParseQuery(body_str)
 }

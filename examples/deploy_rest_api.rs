@@ -210,7 +210,8 @@ fn main() {
     });
     // Minimal REST resource.
     mux.HandleFunc("POST /api/notes", |w, r| {
-        if r.Body.len() == 0 {
+        let (body, _) = goish::io::ReadAll(&mut r.Body.clone());
+        if body.len() == 0 {
             w.WriteHeader(422);
             return;
         }

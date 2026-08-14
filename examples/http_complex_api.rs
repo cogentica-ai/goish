@@ -318,7 +318,8 @@ fn main() {
                     Done: false,
                     Version: 0,
                 };
-                let err = json::Unmarshal(&r.Body, &mut t);
+                let (rbody, _) = io::ReadAll(&mut r.Body.clone());
+                let err = json::Unmarshal(&rbody, &mut t);
                 if err != nil {
                     http::Error(w, "invalid json", http::StatusBadRequest);
                     return;
@@ -403,7 +404,8 @@ fn main() {
                     Done: false,
                     Version: 0,
                 };
-                let err = json::Unmarshal(&r.Body, &mut t);
+                let (rbody, _) = io::ReadAll(&mut r.Body.clone());
+                let err = json::Unmarshal(&rbody, &mut t);
                 if err != nil {
                     http::Error(w, "invalid json", http::StatusBadRequest);
                     return;
@@ -667,8 +669,9 @@ fn main() {
         if err != nil {
             fail(fmt::Sprintf!("%s: NewRequest: %s", name, err.Error()));
         } else {
-            req.Body = bytes(r#"{"title":"write complex example","done":true}"#);
-            req.ContentLength = req.Body.Len();
+            let payload = bytes(r#"{"title":"write complex example","done":true}"#);
+            req.ContentLength = payload.Len();
+            req.Body = http::Body::from_bytes(payload);
             req.Header.Set("Content-Type", "application/json");
             let (mut resp, err) = client.Do(&req);
             let (body, _) = io::ReadAll(&mut resp.Body);
@@ -974,8 +977,9 @@ fn main() {
         if err != nil {
             fail(fmt::Sprintf!("%s: NewRequest: %s", name, err.Error()));
         } else {
-            req.Body = buf.Bytes();
-            req.ContentLength = req.Body.Len();
+            let payload = buf.Bytes();
+            req.ContentLength = payload.Len();
+            req.Body = http::Body::from_bytes(payload);
             req.Header.Set("Content-Type", &ct);
             let (mut resp, err) = client.Do(&req);
             let (body, _) = io::ReadAll(&mut resp.Body);

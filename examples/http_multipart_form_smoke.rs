@@ -78,7 +78,7 @@ fn newUpload(ct: goish::string, body: goish::slice<goish::byte>) -> http::Reques
     r.URL = u;
     r.Header.Set(string("Content-Type"), ct);
     r.ContentLength = goish::builtin::len(&body) as i64;
-    r.Body = body;
+    r.Body = http::Body::from_bytes(body);
     return r;
 }
 

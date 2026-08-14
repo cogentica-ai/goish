@@ -68,7 +68,8 @@ struct echoHandler;
 impl http::Handler for echoHandler {
     fn ServeHTTP(&self, w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request) {
         remember(&SAW_METHOD, r.Method.clone());
-        remember(&SAW_BODY, goish::string::from_bytes(&r.Body));
+        let (rbody, _) = goish::io::ReadAll(&mut r.Body.clone());
+        remember(&SAW_BODY, goish::string::from_bytes(&rbody));
         // ProcessEnv is the whole reason the context is threaded
         // through: REMOTE_USER is nowhere on the Request.
         let env = fcgi::ProcessEnv(r);

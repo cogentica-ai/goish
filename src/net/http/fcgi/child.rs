@@ -550,7 +550,7 @@ impl child {
             );
         } else {
             let mut httpReq = httpReq;
-            httpReq.Body = req.body.clone();
+            httpReq.Body = crate::net::http::Body::from_bytes(req.body.clone());
             httpReq.ContentLength = crate::int64(crate::len(&req.body));
             let withoutUsedEnvVars = filterOutUsedEnvVars(&req.params);
             let envVarCtx = crate::context::WithValue(
