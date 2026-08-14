@@ -22,6 +22,7 @@ pub mod cookiejar;
 pub mod csrf;
 pub mod cgi;
 pub mod fcgi;
+pub mod filetransport;
 pub mod fs;
 pub mod header;
 pub mod http;

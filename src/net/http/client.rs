@@ -107,6 +107,12 @@ enum FramedBody {
     Cl { src: ConnSrc, remaining: int },
     Chunked { cr: super::internal::chunked::ChunkedReader<ConnSrc> },
     UntilEof { src: ConnSrc },
+    /// An arbitrary `io.ReadCloser` standing in for the body — Go's
+    /// `Response.Body` is that interface, so anything can fill it. The
+    /// other variants are conn-backed; this one exists for bodies with
+    /// no connection behind them, such as `io.Pipe`'s read half in
+    /// filetransport.go.
+    Piped { r: alloc::boxed::Box<dyn crate::io::ReadCloser + Send + Sync> },
     Closed,
 }
 
@@ -167,6 +173,7 @@ fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
         }
         FramedBody::Chunked { cr } => cr.Read(p),
         FramedBody::UntilEof { src } => src.Read(p),
+        FramedBody::Piped { r } => r.Read(p),
         FramedBody::Closed => (
             0,
             errors::New(string("http: read on closed response body")),
@@ -194,6 +201,7 @@ fn close_locked(st: &mut BodyState) -> error {
     let err = match &mut st.framing {
         FramedBody::Cl { src, .. } | FramedBody::UntilEof { src } => src.close_conn(),
         FramedBody::Chunked { cr } => cr.__bufio_mut().__rd_mut().close_conn(),
+        FramedBody::Piped { r } => r.Close(),
         _ => errors::nil,
     };
     st.framing = FramedBody::Closed;
@@ -244,6 +252,17 @@ impl Body {
     /// then EOF; Close is a no-op state flip.
     pub fn from_bytes(data: slice<byte>) -> Body {
         Body::from_parts(FramedBody::Eager { data, off: 0 }, None, None)
+    }
+
+    /// Body backed by an arbitrary `io.ReadCloser`. Go's
+    /// `Response.Body` IS that interface; goish's `Body` is a closed
+    /// enum over the conn-backed framings, so this is the escape hatch
+    /// for a body with no connection — `io.Pipe` in filetransport.go,
+    /// and anything a future RoundTripper wants to hand back.
+    pub fn from_reader(
+        r: alloc::boxed::Box<dyn crate::io::ReadCloser + Send + Sync>,
+    ) -> Body {
+        return Body::from_parts(FramedBody::Piped { r }, None, None);
     }
 
     /// Crate-internal: hand the `Client.Timeout` WithTimeout release
