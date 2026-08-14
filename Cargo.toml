@@ -1559,3 +1559,7 @@ path = "examples/http_socks_smoke.rs"
 [[example]]
 name = "http_filetransport_smoke"
 path = "examples/http_filetransport_smoke.rs"
+
+[[example]]
+name = "http_servemux121_smoke"
+path = "examples/http_servemux121_smoke.rs"
