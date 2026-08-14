@@ -248,6 +248,17 @@ fn close_locked(st: &mut BodyState) -> error {
     if let Some(w) = st.watch.take() {
         stop_cancel_watch(Some(w));
     }
+    // An in-memory (Eager) body is Go's NopCloser shape — NewRequest
+    // wraps *bytes.Reader/*strings.Reader in io.NopCloser, so Close is
+    // a NO-OP and the bytes stay readable. transferWriter::writeBody
+    // "always closes t.BodyCloser"; without this, that close killed
+    // 307/308 redirect replay of an in-memory request body.
+    if matches!(st.framing, FramedBody::Eager { .. }) {
+        if let Some(c) = st.cancel.take() {
+            c();
+        }
+        return errors::nil;
+    }
     let err = match &mut st.framing {
         FramedBody::Cl { src, .. }
         | FramedBody::UntilEof { src }
@@ -963,12 +974,25 @@ impl RoundTripper for Transport {
                 return (Response::default(), ctx_err_or(&ctx, herr));
             }
 
-            // Write the request.
-            let req_bytes = serialize_request(req, &host);
+            // Write the request: head first, then STREAM the body
+            // through transferWriter::writeBody (chunked-encoded when
+            // the framing decision chose it).
+            let (head, mut tw, serr) = serialize_request_head(req, &host, false);
+            if !serr.IsNil() {
+                stop_cancel_watch(watch);
+                let _ = tls_conn.Close();
+                return (Response::default(), serr);
+            }
             let (_, werr) = <crate::crypto::tls::Conn as crate::io::Writer>::Write(
                 &mut tls_conn,
-                req_bytes,
+                head,
             );
+            if !werr.IsNil() {
+                stop_cancel_watch(watch);
+                let _ = tls_conn.Close();
+                return (Response::default(), ctx_err_or(&ctx, werr));
+            }
+            let werr = tw.writeBody(&mut tls_conn);
             if !werr.IsNil() {
                 stop_cancel_watch(watch);
                 let _ = tls_conn.Close();
@@ -1005,9 +1029,24 @@ impl RoundTripper for Transport {
             // ctx-cancel watcher (see arm_cancel_watch).
             let watch = arm_cancel_watch(&ctx, conn.__disconnect_watch_parts());
 
-            // Write the request.
-            let req_bytes = serialize_request(req, &host);
-            let (_, werr) = conn.Write(req_bytes);
+            // Write the request: head, then stream the body (see the
+            // TLS arm above).
+            let (head, mut tw, serr) = serialize_request_head(req, &host, false);
+            if !serr.IsNil() {
+                stop_cancel_watch(watch);
+                let _ = conn.Close();
+                return (Response::default(), serr);
+            }
+            let (_, werr) = conn.Write(head);
+            if !werr.IsNil() {
+                stop_cancel_watch(watch);
+                let _ = conn.Close();
+                return (Response::default(), ctx_err_or(&ctx, werr));
+            }
+            let werr = {
+                let mut cw = &mut conn;
+                tw.writeBody(&mut cw)
+            };
             if !werr.IsNil() {
                 stop_cancel_watch(watch);
                 let _ = conn.Close();
@@ -1342,7 +1381,7 @@ pub fn stripPassword(u: &URL) -> string {
 pub fn redirectBehavior(
     reqMethod: string,
     resp: &Response,
-    _ireq: &Request,
+    ireq: &Request,
 ) -> (string, bool, bool) {
     match resp.StatusCode {
         301 | 302 | 303 => {
@@ -1357,11 +1396,13 @@ pub fn redirectBehavior(
             return (redirectMethod, true, false);
         }
         307 | 308 => {
-            // Go additionally clears shouldRedirect when the original
-            // request had a body but no GetBody to replay it. goish's
-            // Request carries its body as an owned `slice<byte>`, which
-            // is always replayable, so that branch cannot arise —
-            // GetBody exists to rewind a streaming io.Reader.
+            // Go: "We had a request body, and 307/308 require
+            // re-sending it, but GetBody is not defined. So just use
+            // the last response." The send consumed the body; without
+            // a replay hook the redirect cannot be followed.
+            if ireq.GetBody.is_none() && ireq.outgoingLength() != 0 {
+                return (reqMethod, false, true);
+            }
             return (reqMethod, true, true);
         }
         _ => {
@@ -1579,6 +1620,10 @@ impl Client {
         // redirect to an unrelated host.
         let copyHeaders = self.makeHeadersCopier(&current);
         let initialURL = current.URL.clone();
+        // Go replays a 307/308 body from the INITIAL request's GetBody
+        // (client.go:669-676) — never from the consumed hop body.
+        let ireqGetBody = current.GetBody.clone();
+        let ireqContentLength = current.ContentLength;
         // Go's flag is STICKY: `if !stripSensitiveHeaders && ...`
         // (client.go:683). Once a hop leaves the initial host's domain,
         // the credentials stay stripped for the rest of the chain —
@@ -1673,7 +1718,9 @@ impl Client {
                         Header: Header::new(),
                         Host: loc.Host.clone(),
                         ContentLength: 0,
+                        TransferEncoding: slice::<string>::__from_vec(Vec::new()),
                         Body: Body::default(),
+                        GetBody: None,
                         RemoteAddr: string::new(),
                         pat: None,
         matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
@@ -1684,10 +1731,21 @@ impl Client {
                         ctx: current.ctx.clone(),
                     };
                     // Go: `includeBody` from redirectBehavior — true
-                    // for 307/308 only.
+                    // for 307/308 only. Go: if includeBody &&
+                    // ireq.GetBody != nil { next.Body, err =
+                    // ireq.GetBody(); next.ContentLength =
+                    // ireq.ContentLength } — a FRESH body; the hop
+                    // that was just sent consumed the old one.
                     if includeBody {
-                        next.Body = current.Body.clone();
-                        next.ContentLength = current.ContentLength;
+                        if let Some(gb) = &ireqGetBody {
+                            let (b, gerr) = gb();
+                            if !gerr.IsNil() {
+                                return (resp, gerr);
+                            }
+                            next.Body = b;
+                            next.ContentLength = ireqContentLength;
+                            next.GetBody = ireqGetBody.clone();
+                        }
                     }
 
                     // Go client.go:683-688 — decide whether this hop
@@ -2003,6 +2061,7 @@ pub fn NewRequest<M: Into<string>, U: Into<string>, B: __RequestBody>(
     }
     let body_len = body.Len();
     let host = u.Host.clone();
+    let gb_data = body.clone();
     let body = Body::from_bytes(body);
     let req = Request {
         Close: false,
@@ -2017,7 +2076,15 @@ pub fn NewRequest<M: Into<string>, U: Into<string>, B: __RequestBody>(
         Header: Header::new(),
         Host: host,
         ContentLength: body_len,
+        TransferEncoding: slice::<string>::__from_vec(Vec::new()),
         Body: body,
+        // Go populates GetBody for the in-memory body types
+        // (request.go:924-943) so 307/308 redirects can replay the
+        // body after the send consumed it. goish's eager body is
+        // exactly that case: a fresh Body over the same bytes.
+        GetBody: Some(alloc::sync::Arc::new(move || {
+            return (Body::from_bytes(gb_data.clone()), errors::nil);
+        })),
         RemoteAddr: string::new(),
         pat: None,
         matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
@@ -2042,7 +2109,9 @@ fn default_request() -> Request {
         Header: Header::new(),
         Host: string::new(),
         ContentLength: 0,
+        TransferEncoding: slice::<string>::__from_vec(Vec::new()),
         Body: Body::default(),
+        GetBody: None,
         RemoteAddr: string::new(),
         pat: None,
         matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
@@ -2153,13 +2222,15 @@ fn has_port(host: &string) -> bool {
 }
 
 /// Serialize a Request onto the wire as HTTP/1.1. Returns the bytes
-/// ready to write to the underlying conn.
+/// ready to write to the underlying conn — head plus fully-encoded
+/// body (chunked framing included when the transferWriter chose it).
 ///
-/// Loose port of `(*Request).write` (request.go:603) — we don't have
-/// `bufio.Writer` plumbing yet, so we accumulate into a `strings::Builder`
-/// for the head and concatenate the body slice<byte> at the end.
-pub(crate) fn serialize_request(req: &Request, host: &string) -> slice<byte> {
-    serialize_request_proxy(req, host, false)
+/// Loose port of `(*Request).write` (request.go:603). The Client's
+/// send path avoids this buffered form: it writes the head, then
+/// STREAMS the body with `transferWriter::writeBody` directly onto
+/// the conn.
+pub(crate) fn serialize_request(req: &Request, host: &string) -> (slice<byte>, error) {
+    return serialize_request_proxy(req, host, false);
 }
 
 /// Same as `serialize_request` but emits an absolute Request-URI in
@@ -2169,7 +2240,36 @@ pub(crate) fn serialize_request_proxy(
     req: &Request,
     host: &string,
     using_proxy: bool,
-) -> slice<byte> {
+) -> (slice<byte>, error) {
+    let (head, mut tw, err) = serialize_request_head(req, host, using_proxy);
+    if !err.IsNil() {
+        return (head, err);
+    }
+    let mut buf = crate::bytes::Buffer::new();
+    let _ = crate::io::Writer::Write(&mut buf, head);
+    let werr = tw.writeBody(&mut buf);
+    if !werr.IsNil() {
+        return (buf.Bytes(), werr);
+    }
+    return (buf.Bytes(), errors::nil);
+}
+
+/// The request HEAD alone — request line, Host, User-Agent, the
+/// transfer-owned lines (via `transferWriter::writeHeader`: Connection:
+/// close, Content-Length or Transfer-Encoding: chunked, Trailer), and
+/// the user headers. Returns the transferWriter so the caller can
+/// stream the body next; its decisions (probe included) are made here.
+pub(crate) fn serialize_request_head(
+    req: &Request,
+    host: &string,
+    using_proxy: bool,
+) -> (slice<byte>, super::transfer::transferWriter, error) {
+    let (tw, terr) = super::transfer::newTransferWriter(
+        super::transfer::TransferMsg::Req(req),
+    );
+    if !terr.IsNil() {
+        return (slice::<byte>::__from_vec(Vec::new()), tw, terr);
+    }
     // Go: var b strings.Builder
     let mut b = strings::Builder::new();
     b.Grow(256);
@@ -2228,26 +2328,16 @@ pub(crate) fn serialize_request_proxy(
         let _ = b.WriteString("\r\n");
     }
 
-    // Go: fmt.Fprintf(&b, "Content-Length: %d\r\n", contentLength) — for body-bearing
-    let (body_bytes, _) = req.Body.__materialize();
-    let body_len = body_bytes.Len();
-    let has_body_method = !(req.Method == "GET"
-        || req.Method == "HEAD"
-        || req.Method == "DELETE"
-        || req.Method == "OPTIONS");
-    if body_len > 0 || has_body_method {
-        let _ = b.WriteString("Content-Length: ");
-        let _ = b.WriteString(crate::strconv::Itoa(body_len));
-        let _ = b.WriteString("\r\n");
-    }
-
-    // Go (request.go, write): if r.Close { _, err = io.WriteString(w,
-    //     "Connection: close\r\n") }
-    //
-    // This was missing, so a Request with Close set asked for no such
-    // thing on the wire and the peer kept the connection open.
-    if req.Close {
-        let _ = b.WriteString("Connection: close\r\n");
+    // Go (request.go:699): err = tw.writeHeader(w, trace) — the
+    // transfer-owned lines: Connection: close, exactly one of
+    // Content-Length / Transfer-Encoding: chunked, and Trailer.
+    {
+        let mut hb = crate::bytes::Buffer::new();
+        let herr = tw.writeHeader(&mut hb, None);
+        if !herr.IsNil() {
+            return (slice::<byte>::__from_vec(Vec::new()), tw, herr);
+        }
+        let _ = b.WriteString(string::from_bytes(&hb.Bytes()));
     }
 
     // Go (request.go:707): err = r.Header.writeSubset(w,
@@ -2276,16 +2366,8 @@ pub(crate) fn serialize_request_proxy(
     // Go: b.WriteString("\r\n")
     let _ = b.WriteString("\r\n");
 
-    // Concat head + body. Convert head to bytes, then append body.
     let head = crate::convert::bytes(b.String());
-    if body_len == 0 {
-        return head;
-    }
-    let mut out = head;
-    for i in 0..body_len {
-        out = append!(out, body_bytes[i]);
-    }
-    out
+    return (head, tw, errors::nil);
 }
 
 /// `application/x-www-form-urlencoded` encode a list of (key, value) pairs.

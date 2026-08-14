@@ -226,6 +226,131 @@ impl Response {
             || self.ProtoMajor == major && self.ProtoMinor >= minor;
     }
 
+    // go: sdk 1.25.5 net/http/response.go:245-334 Response.Write
+    /// Go: "Writes r to w in the HTTP/1.x server response format,
+    /// including the status line, headers, body, and optional
+    /// trailer. … The Response Body is closed after it is sent."
+    ///
+    /// The zero-ContentLength probe is the subtle half: 0 can mean
+    /// "actually empty" or "unknown"; one byte is read to find out,
+    /// and a non-empty body flips to unknown length (chunked or
+    /// close-delimited via the transferWriter).
+    pub fn Write<W: crate::io::Writer>(&self, w: &mut W) -> crate::errors::error {
+        use crate::errors;
+        // Go: "Status line"
+        let mut text = self.Status.clone();
+        if text.Len() == 0 {
+            text = super::status::StatusText(self.StatusCode);
+            if text.Len() == 0 {
+                text = string("status code ") + crate::strconv::Itoa(self.StatusCode);
+            }
+        } else {
+            // Go: "Just to reduce stutter" — strip a leading
+            // "200 " if Status already includes the code.
+            text = crate::strings::TrimPrefix(
+                text,
+                crate::strconv::Itoa(self.StatusCode) + string(" "),
+            );
+        }
+
+        let line = crate::fmt::Sprintf!(
+            "HTTP/%d.%d %03d %s\r\n",
+            self.ProtoMajor,
+            self.ProtoMinor,
+            self.StatusCode,
+            text
+        );
+        let (_, err) = w.Write(crate::convert::bytes(line));
+        if !err.IsNil() {
+            return err;
+        }
+
+        // Go: "Clone it, so we can modify r1 as needed."
+        let mut r1 = self.clone();
+        if r1.ContentLength == 0 && !matches!(r1.Body.__eager_len(), Some(0)) {
+            // Go: "Is it actually 0 length? Or just unknown?"
+            let mut buf = crate::make!([]crate::types::byte, 1);
+            let mut probe = r1.Body.clone();
+            let (n, perr) = crate::io::Reader::Read(&mut probe, &mut buf);
+            if !perr.IsNil() && !errors::Is(perr.clone(), crate::io::EOF) {
+                return perr;
+            }
+            if n == 0 {
+                // Go: r1.Body = NoBody
+                r1.Body = super::Body::default();
+            } else {
+                r1.ContentLength = -1;
+                r1.Body = super::transfer::__rechain_probed_byte(buf[0], self.Body.clone());
+            }
+        }
+        // Go: "If we're sending a non-chunked HTTP/1.1 response
+        // without a content-length, the only way to do that is the
+        // old HTTP/1.0 way, by noting the EOF with a connection
+        // close, so we need to set Close."
+        if r1.ContentLength == -1
+            && !r1.Close
+            && r1.ProtoAtLeast(1, 1)
+            && !super::transfer::chunked(&r1.TransferEncoding)
+            && !r1.Uncompressed
+        {
+            r1.Close = true;
+        }
+
+        // Go: "Process Body,ContentLength,Close,Trailer"
+        let (mut tw, terr) =
+            super::transfer::newTransferWriter(super::transfer::TransferMsg::Resp(&r1));
+        if !terr.IsNil() {
+            return terr;
+        }
+        {
+            let mut hb = crate::bytes::Buffer::new();
+            let herr = tw.writeHeader(&mut hb, None);
+            if !herr.IsNil() {
+                return herr;
+            }
+            let (_, we) = w.Write(hb.Bytes());
+            if !we.IsNil() {
+                return we;
+            }
+        }
+
+        // Go: "Rest of header"
+        let herr = self.Header.WriteSubset(w, &respExcludeHeader());
+        if !herr.IsNil() {
+            return herr;
+        }
+
+        // Go: "contentLengthAlreadySent may have been already sent for
+        // POST/PUT requests, even if zero length. See Issue 8180."
+        let contentLengthAlreadySent = tw.shouldSendContentLength();
+        if r1.ContentLength == 0
+            && !super::transfer::chunked(&r1.TransferEncoding)
+            && !contentLengthAlreadySent
+            && super::transfer::bodyAllowedForStatus(self.StatusCode)
+        {
+            let (_, we) = w.Write(crate::convert::bytes("Content-Length: 0\r\n"));
+            if !we.IsNil() {
+                return we;
+            }
+        }
+
+        // Go: "End-of-header"
+        let (_, we) = w.Write(crate::convert::bytes("\r\n"));
+        if !we.IsNil() {
+            return we;
+        }
+
+        // Go: "Write body and trailer"
+        let mut bw: &mut dyn crate::io::Writer = w;
+        let werr = tw.writeBody(&mut bw);
+        if !werr.IsNil() {
+            return werr;
+        }
+
+        // Go: "Success"
+        return errors::nil;
+    }
+
     // go: sdk 1.25.5 net/http/response.go:336-340 Response.closeBody
     #[allow(dead_code)] // consumer is transport.go, unported
     pub(crate) fn closeBody(&mut self) {

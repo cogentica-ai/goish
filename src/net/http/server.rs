@@ -1356,6 +1356,24 @@ pub fn htmlReplacer() -> crate::strings::Replacer {
     ]));
 }
 
+// goishlint:ignore GOISH019 — one finding, on `readResult` below: Go's
+// `_ incomparable` guard field cannot be spelled in Rust (no `_`
+// fields) and guards against ==, which goish doesn't derive anyway.
+// This rule has no line-scoped form; every other struct in this file
+// passes the field check today and stays covered by review.
+// go: sdk 1.25.5 net/http/server.go:645-650 readResult
+/// The outcome of one Read, shuttled over a channel — Go declares it
+/// beside connReader; probeRequestBody's ByteReadCh (transfer.rs) is
+/// the first ported consumer. Go's `_ incomparable` guard field has
+/// no goish equivalent (struct comparison isn't derived here).
+#[derive(Clone, Default)]
+pub(crate) struct readResult {
+    pub n: crate::types::int,
+    pub err: crate::errors::error,
+    /// Go: "byte read, if n == 1"
+    pub b: crate::types::byte,
+}
+
 // go: sdk 1.25.5 net/http/server.go:834-834 copyBufPool
 //
 // Go pools fixed [copyBufPoolSize]byte ARRAYS, not slices, which is

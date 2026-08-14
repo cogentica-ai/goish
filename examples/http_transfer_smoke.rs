@@ -383,11 +383,10 @@ fn run() {
         ];
         let mut bad = string("");
         for (m, cl, te, want) in cases {
-            let tw = transferWriter {
-                Method: string(*m),
-                ContentLength: *cl,
-                TransferEncoding: strs(te),
-            };
+            let mut tw = transferWriter::default();
+            tw.Method = string(*m);
+            tw.ContentLength = *cl;
+            tw.TransferEncoding = strs(te);
             if tw.shouldSendContentLength() != *want {
                 bad = fmt::Sprintf!("%s cl=%d -> %v", string(*m), *cl, tw.shouldSendContentLength());
             }

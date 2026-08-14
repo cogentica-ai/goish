@@ -173,8 +173,16 @@ fn run() {
             )),
             ..Default::default()
         };
+        // The body is PIPE-backed, like a real backend conn: Close
+        // must reach the underlying stream. (An in-memory body's
+        // Close is a NopCloser no-op — Go's shape — so it could not
+        // witness the close.)
+        let (pr3, mut pw3) = goish::io::Pipe();
+        goish::go!(stack(256 * 1024), move || {
+            let _ = pw3.Write(goish::bytes("payload"));
+        });
         let mut res3 = goish::net::http::Response {
-            Body: goish::net::http::Body::from(goish::bytes("payload")),
+            Body: goish::net::http::Body::from_reader(alloc::boxed::Box::new(pr3)),
             ..Default::default()
         };
         let cont3 = fail_rp.modifyResponse(&w, &mut res3, &req);
@@ -185,7 +193,7 @@ fn run() {
         // Go closes the body BEFORE the error handler runs; the
         // backend conn is finished with either way. A body left open
         // here leaks one conn per rejected response, so read it back:
-        // a closed goish Body reports so rather than returning bytes.
+        // the closed pipe reports so rather than returning bytes.
         let mut sink = goish::make!([]goish::byte, 16);
         let (n3, e3) = goish::io::Reader::Read(&mut res3.Body, &mut sink);
         check("the rejected response's Body is closed, not leaked",

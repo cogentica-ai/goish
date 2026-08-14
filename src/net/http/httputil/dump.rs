@@ -74,7 +74,10 @@ pub fn DumpRequestOut(req: &Request, body: bool) -> (slice<byte>, error) {
     } else {
         req.URL.Host.clone()
     };
-    let dump = super::super::client::serialize_request(req, &host);
+    let (dump, derr) = super::super::client::serialize_request(req, &host);
+    if !derr.IsNil() {
+        return (dump, derr);
+    }
     if !body {
         // Go: if i := bytes.Index(dump, "\r\n\r\n"); i >= 0 { dump = dump[:i+4] }
         let raw: &[u8] = &dump;

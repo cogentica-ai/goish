@@ -43,6 +43,12 @@ pub struct Request {
     pub Header: Header,
     pub Host: string,
     pub ContentLength: int, // -1 if unknown
+    /// `Request.TransferEncoding` (request.go:196) — Go: "lists the
+    /// transfer encodings from outermost to innermost. An empty list
+    /// denotes the 'identity' encoding. … Transfer-Encoding can
+    /// usually be ignored; chunked encoding is automatically added
+    /// and removed as necessary when sending and receiving requests."
+    pub TransferEncoding: slice<string>,
     /// `Request.Body` (request.go:175) — the request body, a streaming
     /// `io.ReadCloser` like Go's (goish's `Body` implements
     /// `io::Reader` + `io::Closer`; read it with `io::ReadAll`).
@@ -54,6 +60,14 @@ pub struct Request {
     /// carry an in-memory body today, so `serialize_request` can frame
     /// them with Content-Length exactly as before.
     pub Body: super::Body,
+    /// `Request.GetBody` (request.go:190-196) — Go: "defines an
+    /// optional func to return a new copy of Body. It is used for
+    /// client requests when a redirect requires reading the body more
+    /// than once. … For server requests, it is unused." `NewRequest`
+    /// populates it for in-memory bodies, exactly as Go does for
+    /// bytes.Buffer/bytes.Reader/strings.Reader.
+    pub GetBody:
+        Option<alloc::sync::Arc<dyn Fn() -> (super::Body, crate::errors::error) + Send + Sync>>,
     pub RemoteAddr: string,
     // "The following fields are for requests matched by ServeMux."
     // (request.go:334-338) — Go's pat/matches/otherValues trio, kept
@@ -575,7 +589,10 @@ impl Request {
         // announced one copy. On a keep-alive connection the surplus
         // bytes are read as the start of the next request — a
         // request-smuggling desync, self-inflicted on every POST.
-        let out = super::client::serialize_request_proxy(self, &host, using_proxy);
+        let (out, serr) = super::client::serialize_request_proxy(self, &host, using_proxy);
+        if !serr.IsNil() {
+            return serr;
+        }
         let (_, e) = w.Write(out);
         return e;
     }
@@ -1010,7 +1027,9 @@ impl Default for Request {
             Header: Header::new(),
             Host: string::new(),
             ContentLength: 0,
+            TransferEncoding: slice::<string>::__from_vec(Vec::new()),
             Body: super::Body::default(),
+            GetBody: None,
             RemoteAddr: string::new(),
             pat: None,
             matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
@@ -1044,7 +1063,9 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         Header: Header::new(),
         Host: string::new(),
         ContentLength: 0,
+        TransferEncoding: slice::<string>::__from_vec(Vec::new()),
         Body: super::Body::default(),
+        GetBody: None,
         RemoteAddr: string::new(),
         pat: None,
         matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
