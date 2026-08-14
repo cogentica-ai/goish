@@ -872,6 +872,50 @@ pub fn valueOrDefault<V: Into<string>, D: Into<string>>(value: V, def: D) -> str
 
 // ─── ReadRequest ─────────────────────────────────────────────────────
 
+// go: sdk 1.25.5 net/http/request.go:1036-1036 textprotoReaderPool
+//
+// Go pools whole `*textproto.Reader`s (swapping `tr.R` in and out);
+// goish's textproto::Reader OWNS its bufio reader and is generic over
+// the source, so the reusable allocation — the line-scratch Vec — is
+// what crosses the pool. Same amortization, honest shape change.
+pub fn textprotoReaderPool() -> &'static crate::sync::Pool<bufio::PoolBuf> {
+    static POOL: crate::lazy::Lazy<crate::sync::Pool<bufio::PoolBuf>> =
+        crate::lazy::Lazy::new(|| {
+            crate::sync::Pool::new(|| bufio::PoolBuf(alloc::vec::Vec::new()))
+        });
+    return POOL.get();
+}
+
+// go: sdk 1.25.5 net/http/request.go:1038-1045 newTextprotoReader
+//
+/// Note on wiring: Go's readRequest goes through textproto for its
+/// line reading; goish's `__read_request_server` parses borrowed
+/// views straight off the bufio buffer (see `read_line_with`), so the
+/// server path never constructs a textproto::Reader at all. These
+/// exist for the callers that do (MIME/trailer parsing, user code).
+pub fn newTextprotoReader<R: io::Reader>(
+    br: bufio::Reader<R>,
+) -> crate::net::textproto::Reader<R> {
+    return crate::net::textproto::__new_reader_with_scratch(
+        br,
+        textprotoReaderPool().Get(),
+    );
+}
+
+// go: sdk 1.25.5 net/http/request.go:1047-1050 putTextprotoReader
+//
+/// Returns the inner bufio reader — Go detaches it with `r.R = nil`
+/// (request.go:1048); goish's ownership hands it back instead, so a
+/// caller chaining Go's put-both pattern can go on to
+/// `putBufioReader` with it.
+pub fn putTextprotoReader<R: io::Reader>(
+    r: crate::net::textproto::Reader<R>,
+) -> bufio::Reader<R> {
+    let (br, scratch) = r.__into_parts();
+    textprotoReaderPool().Put(scratch);
+    return br;
+}
+
 const DEFAULT_MAX_LINE: usize = 8 * 1024;
 const MAX_HEADERS: usize = 100;
 const MAX_BODY: usize = 16 * 1024 * 1024; // 16 MiB safety cap

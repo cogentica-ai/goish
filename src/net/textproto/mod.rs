@@ -409,6 +409,7 @@ impl<'a, W: io::Writer> DotWriter<'a, W> {
 
 mod reader;
 pub use reader::{NewReader, Reader, validHeaderFieldByte, validHeaderValueByte};
+pub(crate) use reader::__new_reader_with_scratch;
 
 // ─── Pipeline (pipeline.go) ─────────────────────────────────────────
 

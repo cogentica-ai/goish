@@ -483,12 +483,25 @@ pub fn NewReaderSize<R: io::Reader>(rd: R, size: int) -> Reader<R> {
 /// request, so the per-request 4 KiB allocate-and-zero disappears.
 /// An undersized (e.g. first-use empty) Vec is grown to
 /// `defaultBufSize` once; the zeroing only touches the grown region.
-pub(crate) fn __new_reader_with_buf<R: io::Reader>(rd: R, mut buf: Vec<byte>) -> Reader<R> {
+// go: none — goish-only. The unit that crosses net/http's bufio and
+// textproto pools. Go pools whole type-erased Reader/Writer structs;
+// goish's are generic over the wrapped type, so the reusable
+// ALLOCATION — the backing buffer — is what gets pooled, and this
+// newtype is its name (a raw `Vec<byte>` in those signatures would
+// also violate the no-Rust-containers rule, GOISH008).
+#[doc(hidden)]
+pub struct PoolBuf(pub(crate) Vec<byte>);
+
+// go: none — goish-only: the get half of net/http's bufio reader
+// pool (newBufioReader, server.go:866); sizes a recycled PoolBuf and
+// builds a Reader around it.
+pub(crate) fn __new_reader_with_buf<R: io::Reader>(rd: R, buf: PoolBuf) -> Reader<R> {
+    let mut buf = buf.0;
     let sz = (defaultBufSize as usize).max(minReadBufferSize);
     if buf.len() < sz {
         buf.resize(sz, 0);
     }
-    Reader {
+    return Reader {
         buf,
         rd,
         r: 0,
@@ -497,7 +510,7 @@ pub(crate) fn __new_reader_with_buf<R: io::Reader>(rd: R, mut buf: Vec<byte>) ->
         last_byte: -1,
         last_rune_size: -1,
         scratch: Vec::new(),
-    }
+    };
 }
 
 impl<R: io::Reader> Reader<R> {
@@ -521,13 +534,23 @@ impl<R: io::Reader> Reader<R> {
         (self.w - self.r) as int
     }
 
+    // go: none — goish-only: the put half of Go's bufio reader pool
+    // (putBufioReader, server.go:886).
     /// Crate-internal: recover the backing buffer for recycling into
-    /// the next `__new_reader_with_buf` (the put half of Go's bufio
-    /// reader pool, net/http/server.go:857). Buffered-but-unconsumed
+    /// the next `__new_reader_with_buf`. Buffered-but-unconsumed
     /// bytes are discarded, matching the previous
     /// fresh-reader-per-request behavior.
-    pub(crate) fn __into_buf(self) -> Vec<byte> {
-        self.buf
+    pub(crate) fn __into_buf(self) -> PoolBuf {
+        return PoolBuf(self.buf);
+    }
+
+    // go: none — goish-only test hook.
+    /// Identity of the backing buffer, for asserting pool reuse (a
+    /// behavioural test cannot distinguish reuse from a silent fresh
+    /// allocation).
+    #[doc(hidden)]
+    pub fn __buf_ptr(&self) -> *const u8 {
+        return self.buf.as_ptr();
     }
 
     /// Crate-internal zero-copy line read for the HTTP parser: borrow
@@ -1019,7 +1042,45 @@ pub fn NewWriterSize<W: io::Writer>(wr: W, size: int) -> Writer<W> {
     }
 }
 
+// go: none — goish-only: the get half of net/http's bufio writer
+// pools (newBufioWriterSize, server.go:900). See `PoolBuf` for why
+// the buffer, not the Writer, is the pooled unit.
+/// Build a Writer around a recycled backing buffer, resized to
+/// `size`. The put half is `__into_buf`.
+pub(crate) fn __new_writer_with_buf<W: io::Writer>(
+    wr: W,
+    buf: PoolBuf,
+    size: int,
+) -> Writer<W> {
+    let mut buf = buf.0;
+    let sz = if size <= 0 { defaultBufSize as usize } else { size as usize };
+    buf.resize(sz, 0);
+    return Writer {
+        err: nil,
+        buf,
+        n: 0,
+        wr,
+    };
+}
+
 impl<W: io::Writer> Writer<W> {
+    // go: none — goish-only: the put half of Go's bufio writer pools
+    // (putBufioWriter, server.go:921).
+    /// Consume the writer, returning its backing buffer for pooling.
+    /// Unflushed bytes are DISCARDED — same contract as Go's
+    /// `bw.Reset(nil)` before the pool Put (putBufioWriter,
+    /// server.go:922): callers flush first or forfeit the tail.
+    pub(crate) fn __into_buf(self) -> PoolBuf {
+        return PoolBuf(self.buf);
+    }
+
+    // go: none — goish-only test hook.
+    /// Identity of the backing buffer (see Reader's `__buf_ptr`).
+    #[doc(hidden)]
+    pub fn __buf_ptr(&self) -> *const u8 {
+        return self.buf.as_ptr();
+    }
+
     /// `Size()` — buffer capacity in bytes.
     pub fn Size(&self) -> int {
         self.buf.len() as int

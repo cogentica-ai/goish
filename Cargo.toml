@@ -1667,3 +1667,7 @@ path = "examples/time_stop_no_pin_smoke.rs"
 [[example]]
 name = "net_close_wakes_accept_smoke"
 path = "examples/net_close_wakes_accept_smoke.rs"
+
+[[example]]
+name = "http_bufio_pool_smoke"
+path = "examples/http_bufio_pool_smoke.rs"

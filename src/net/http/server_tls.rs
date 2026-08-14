@@ -39,7 +39,6 @@ extern crate alloc;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use crate::bufio;
 use crate::crypto::tls;
 use crate::errors::{self, error};
 use crate::goslice::slice;
@@ -387,12 +386,6 @@ fn serve_tls_conn(
     let idle_ns = srv.idle_timeout_ns();
     let write_timeout_ns = srv.write_timeout_ns();
     let mut first_request = true;
-    // Recycled bufio backing buffer — the per-conn analogue of Go's
-    // pooled `c.bufr` (newBufioReader, server.go:840), and the same
-    // pattern the plaintext loop uses. The reader borrows the conn so
-    // it is rebuilt per request, but the 4 KiB buffer survives instead
-    // of being allocated and dropped on every keep-alive request.
-    let mut rbuf: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
     loop {
         if srv
             .__state_in_shutdown()
@@ -418,10 +411,11 @@ fn serve_tls_conn(
             if wait_ns > 0 {
                 let _ = c.SetReadDeadline(time::Now().Add(time::Duration(wait_ns)));
             }
-            let mut br =
-                bufio::__new_reader_with_buf(&mut *c, core::mem::take(&mut rbuf));
+            // Pooled backing buffer — Go's c.bufr (newBufioReader),
+            // same wiring as the plaintext loop.
+            let mut br = super::server::newBufioReader(&mut *c);
             let out = ReadRequestWithLimit(&mut br, max_header_bytes);
-            rbuf = br.__into_buf();
+            super::server::putBufioReader(br);
             out
         };
         if !err.IsNil() {

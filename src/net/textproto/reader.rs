@@ -54,6 +54,46 @@ pub fn NewReader<R: io::Reader>(r: bufio::Reader<R>) -> Reader<R> {
     Reader { R: r, buf: Vec::new() }
 }
 
+// go: none — goish-only: the get half of net/http's
+// textprotoReaderPool (newTextprotoReader, request.go:1038).
+/// Build a Reader with a recycled scratch buffer; the take-back half
+/// is `__into_parts`. Go pools the whole `*textproto.Reader` struct
+/// (swapping `tr.R`); goish's Reader OWNS its bufio reader and is
+/// generic over `R`, so the reusable allocation (the line-scratch
+/// `buf`) is what crosses the pool.
+pub(crate) fn __new_reader_with_scratch<R: io::Reader>(
+    r: bufio::Reader<R>,
+    scratch: bufio::PoolBuf,
+) -> Reader<R> {
+    let mut scratch = scratch.0;
+    scratch.clear();
+    return Reader { R: r, buf: scratch };
+}
+
+impl<R: io::Reader> Reader<R> {
+    // go: none — goish-only: the put half of net/http's
+    // textprotoReaderPool (putTextprotoReader, request.go:1047).
+    /// Consume the Reader, returning `(inner bufio reader, scratch)`.
+    /// Mirrors Go's `r.R = nil` detach — ownership forces goish to
+    /// hand the bufio reader back instead of nil-ing a pointer.
+    pub(crate) fn __into_parts(self) -> (bufio::Reader<R>, bufio::PoolBuf) {
+        return (self.R, bufio::PoolBuf(self.buf));
+    }
+
+    // go: none — goish-only test hook.
+    /// Identity of the scratch allocation, null while the scratch has
+    /// never allocated (an empty Vec's dangling as_ptr is EQUAL
+    /// across instances, which would make a reuse assertion pass
+    /// vacuously).
+    #[doc(hidden)]
+    pub fn __scratch_ptr(&self) -> *const u8 {
+        if self.buf.capacity() == 0 {
+            return core::ptr::null();
+        }
+        return self.buf.as_ptr();
+    }
+}
+
 impl<R: io::Reader> Reader<R> {
     // Go: reader.go:43-46
     //   func (r *Reader) ReadLine() (string, error) {

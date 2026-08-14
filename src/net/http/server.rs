@@ -1367,6 +1367,88 @@ pub fn putCopyBuf(b: crate::goslice::slice<crate::types::byte>) {
     copyBufPool().Put(b);
 }
 
+// ─── bufio reader/writer pools (server.go:826-926) ──────────────────
+//
+// Go pools whole `*bufio.Reader`/`*bufio.Writer`s because its readers
+// are type-erased behind io interfaces; goish's are generic over the
+// wrapped type, so what crosses the pool is the reusable ALLOCATION —
+// the backing `Vec<byte>` — and new*/put* rebuild the (allocation-
+// free) struct around it. Same amortization, one honest shape change.
+//
+// These were unportable until 2026-08-14: `Pool::Get` parks on a
+// sync::Mutex, and the response path used to hold a runtime SpinLock
+// guard across it (see headerSorterPool's note in header.rs).
+
+// go: sdk 1.25.5 net/http/server.go:826-830 bufioReaderPool
+// (whole var-group range, grouped-var convention)
+pub fn bufioReaderPool() -> &'static crate::sync::Pool<bufio::PoolBuf> {
+    static POOL: crate::lazy::Lazy<crate::sync::Pool<bufio::PoolBuf>> =
+        crate::lazy::Lazy::new(|| crate::sync::Pool::new(|| bufio::PoolBuf(alloc::vec::Vec::new())));
+    return POOL.get();
+}
+
+// go: sdk 1.25.5 net/http/server.go:826-830 bufioWriter2kPool
+pub fn bufioWriter2kPool() -> &'static crate::sync::Pool<bufio::PoolBuf> {
+    static POOL: crate::lazy::Lazy<crate::sync::Pool<bufio::PoolBuf>> =
+        crate::lazy::Lazy::new(|| crate::sync::Pool::new(|| bufio::PoolBuf(alloc::vec::Vec::new())));
+    return POOL.get();
+}
+
+// go: sdk 1.25.5 net/http/server.go:826-830 bufioWriter4kPool
+pub fn bufioWriter4kPool() -> &'static crate::sync::Pool<bufio::PoolBuf> {
+    static POOL: crate::lazy::Lazy<crate::sync::Pool<bufio::PoolBuf>> =
+        crate::lazy::Lazy::new(|| crate::sync::Pool::new(|| bufio::PoolBuf(alloc::vec::Vec::new())));
+    return POOL.get();
+}
+
+// go: sdk 1.25.5 net/http/server.go:847-855 bufioWriterPool
+pub fn bufioWriterPool(
+    size: crate::types::int,
+) -> Option<&'static crate::sync::Pool<bufio::PoolBuf>> {
+    match size {
+        2048 => Some(bufioWriter2kPool()),
+        4096 => Some(bufioWriter4kPool()),
+        _ => None,
+    }
+}
+
+// go: sdk 1.25.5 net/http/server.go:866-875 newBufioReader
+pub fn newBufioReader<R: crate::io::Reader>(r: R) -> bufio::Reader<R> {
+    // Go: pool hit → br.Reset(r); miss → bufio.NewReader(r). goish:
+    // the pool's New closure mints an empty Vec, which
+    // __new_reader_with_buf sizes — hit and miss are one path.
+    return bufio::__new_reader_with_buf(r, bufioReaderPool().Get());
+}
+
+// go: sdk 1.25.5 net/http/server.go:886-889 putBufioReader
+pub fn putBufioReader<R: crate::io::Reader>(br: bufio::Reader<R>) {
+    // Go: br.Reset(nil) — consuming the reader is goish's detach.
+    bufioReaderPool().Put(br.__into_buf());
+}
+
+// go: sdk 1.25.5 net/http/server.go:900-910 newBufioWriterSize
+pub fn newBufioWriterSize<W: crate::io::Writer>(
+    w: W,
+    size: crate::types::int,
+) -> bufio::Writer<W> {
+    if let Some(pool) = bufioWriterPool(size) {
+        return bufio::__new_writer_with_buf(w, pool.Get(), size);
+    }
+    return bufio::NewWriterSize(w, size);
+}
+
+// go: sdk 1.25.5 net/http/server.go:921-926 putBufioWriter
+//
+/// Unflushed bytes are DISCARDED, exactly as Go's `bw.Reset(nil)`
+/// discards them — callers flush first or forfeit the tail.
+pub fn putBufioWriter<W: crate::io::Writer>(bw: bufio::Writer<W>) {
+    let size = bw.Size();
+    if let Some(pool) = bufioWriterPool(size) {
+        pool.Put(bw.__into_buf());
+    }
+    // Other sizes: dropped, as in Go (bufioWriterPool returns nil).
+}
+
 // go: sdk 1.25.5 net/http/server.go:1808-1810 closeWriter
 //
 /// Go: "closeWriter is an interface that implements CloseWrite." The
@@ -2564,12 +2646,6 @@ impl Server {
         // arrived on when the server has several.
         let conn_ctx =
             crate::context::WithValue(conn_ctx, LocalAddrContextKey, conn.LocalAddr());
-        // Recycled bufio backing buffer — the per-conn analogue of
-        // Go's pooled `c.bufr` (newBufioReader, server.go:840). Each
-        // request's reader borrows the conn, so the reader itself is
-        // rebuilt per request, but the 4 KiB buffer survives.
-        let mut rbuf: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
-
         loop {
             if self.__state.in_shutdown.load(Ordering::Acquire) {
                 let _ = conn.Close();
@@ -2589,8 +2665,12 @@ impl Server {
 
             let conn_fd = conn.__fd();
             let (mut req, err) = {
-                let mut br =
-                    bufio::__new_reader_with_buf(&mut conn, core::mem::take(&mut rbuf));
+                // Pooled backing buffer — Go's c.bufr (newBufioReader,
+                // server.go:2017). Go builds the reader once per conn;
+                // goish's reader borrows the conn per request, so the
+                // get/put runs per request and the amortization is
+                // cross-conn through the shared pool.
+                let mut br = newBufioReader(&mut conn);
                 // Server variant: carries the fd so the parser can
                 // emit `100 Continue` before the eager body read.
                 let out = super::request::__read_request_server(
@@ -2598,7 +2678,7 @@ impl Server {
                     self.MaxHeaderBytes,
                     conn_fd,
                 );
-                rbuf = br.__into_buf();
+                putBufioReader(br);
                 out
             };
             if !err.IsNil() {
