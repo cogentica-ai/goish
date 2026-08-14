@@ -112,6 +112,11 @@ impl super::super::server::Handler for reverseProxyHandler {
     ) {
         // Go: outreq := req.Clone(req.Context())
         let mut outreq = r.clone();
+        // The inbound request carries the server-stamped RequestURI;
+        // an OUTGOING request must not (client.go `send` refuses it —
+        // Go's proxy dodges the guard by calling Transport.RoundTrip
+        // directly, goish's routes through the Client).
+        outreq.RequestURI = string::new();
 
         // Go: rewriteRequestURL(req, target)
         rewriteRequestURL(&mut outreq, &self.target);

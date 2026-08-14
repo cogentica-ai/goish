@@ -143,6 +143,65 @@ fn run() -> ! {
         "keepme",
     );
 
+    // ── live: URL userinfo becomes Authorization: Basic on the wire ──
+    // (client.go `send`: u := req.URL.User; "Basic " + basicAuth —
+    // goref: base64("user:pa ss") == "dXNlcjpwYSBzcw==".) A caller-set
+    // Authorization header must win over the URL's credentials.
+    {
+        use alloc::sync::Arc;
+        let seen = Arc::new(goish::sync::Mutex::new(goish::string::new()));
+        let mux = goish::net::http::ServeMux::new();
+        {
+            let seen = seen.clone();
+            mux.HandleFunc(string("/auth"), move |w, r| {
+                *seen.Lock() = r.Header.Get(string("Authorization"));
+                let _ = w.Write(goish::bytes("ok"));
+            });
+        }
+        let ts = goish::net::http::httptest::NewServer(Arc::new(mux));
+        let base = goish::strings::TrimPrefix(ts.URL(), string("http://"));
+
+        let url1 = fmt::Sprintf!("http://user:pa%%20ss@%s/auth", base);
+        let (mut resp, err) = goish::net::http::Get(url1);
+        if err.IsNil() {
+            let _ = goish::io::Closer::Close(&mut resp.Body);
+        }
+        check(
+            "URL userinfo arrives as Authorization: Basic",
+            (*seen.Lock()).clone(),
+            "Basic dXNlcjpwYSBzcw==",
+        );
+
+        let url2 = fmt::Sprintf!("http://user:pw@%s/auth", base);
+        let (mut req, _) = goish::net::http::NewRequest(string("GET"), url2, goish::nil);
+        req.Header.Set(string("Authorization"), string("Bearer mine"));
+        let client = goish::net::http::Client::default();
+        let (mut resp, err) = client.Do(&req);
+        if err.IsNil() {
+            let _ = goish::io::Closer::Close(&mut resp.Body);
+        }
+        check(
+            "a caller-set Authorization wins over URL credentials",
+            (*seen.Lock()).clone(),
+            "Bearer mine",
+        );
+
+        // Go send: a set RequestURI is refused client-side.
+        let (mut req, _) = goish::net::http::NewRequest(
+            string("GET"),
+            fmt::Sprintf!("http://%s/auth", base),
+            goish::nil,
+        );
+        req.RequestURI = string("/auth");
+        let (_, err) = client.Do(&req);
+        check(
+            "a set RequestURI is refused in client requests",
+            fmt::Sprintf!("%v", err),
+            "http: Request.RequestURI can't be set in client requests",
+        );
+        ts.Close();
+    }
+
     let f = FAILED.load(Ordering::Relaxed);
     if f == 0 {
         fmt::Printf!("HTTP_URL_USERINFO_OK\n");

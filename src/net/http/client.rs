@@ -1495,6 +1495,124 @@ impl Drop for __CancelOnDrop {
     }
 }
 
+// go: sdk 1.25.5 net/http/client.go:351-421 setRequestCancel
+/// Go: "sets req.Cancel and adds a deadline context to req if
+/// deadline is non-zero."
+///
+/// goish carries only the knownRoundTripperImpl arm — every goish
+/// transport is "known", and the deprecated `Request.Cancel` channel
+/// (whose legacy doCancel machinery is the rest of Go's function) has
+/// no goish field. Go's WithDeadline is spelled WithTimeout(until):
+/// context.WithDeadline is not ported yet.
+pub(crate) fn setRequestCancel(
+    req: &mut Request,
+    rt: &Arc<dyn RoundTripper>,
+    deadline: crate::time::Time,
+) -> (
+    crate::context::CancelFunc,
+    Arc<dyn Fn() -> bool + Send + Sync>,
+) {
+    let af: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(|| alwaysFalse());
+    if deadline.IsZero() {
+        // Go: return nop, alwaysFalse
+        return (alloc::boxed::Box::new(|| {}), af);
+    }
+    let _ = knownRoundTripperImpl(rt, req);
+    let oldCtx = req.Context();
+    // Go: "If they already had a Request.Context that's expiring
+    // sooner, do nothing."
+    if !timeBeforeContextDeadline(deadline.clone(), &oldCtx) {
+        return (alloc::boxed::Box::new(|| {}), af);
+    }
+    let until = deadline.clone().Sub(crate::time::Now());
+    let (ctx, cancelCtx) = crate::context::WithTimeout(oldCtx, until);
+    req.ctx = Some(ctx);
+    let dl = deadline;
+    return (
+        cancelCtx,
+        Arc::new(move || {
+            return crate::time::Now().After(dl.clone());
+        }),
+    );
+}
+
+// go: sdk 1.25.5 net/http/client.go:209-303 send
+/// Go: "send issues an HTTP request. Caller should close resp.Body
+/// when done reading from it." The request-shape guards live here —
+/// a set RequestURI is refused, and URL userinfo becomes an
+/// `Authorization: Basic` header unless the caller set one — plus
+/// the deadline arming (setRequestCancel) whose release rides in the
+/// response Body (Go's cancelTimerBody; goish's Body carries the
+/// CancelFunc and fires it on Close/Drop).
+///
+/// The `(*Client).send` jar halves stay inline in Do, exactly where
+/// Go's wrapper has them. Go's nil-URL / nil-Header / nil-Body arms
+/// are values in goish (an empty URL is its nil); the RoundTripper
+/// non-nil guard cannot arise (Client.Transport is a value).
+pub(crate) fn send(
+    ireq: &Request,
+    rt: &Arc<dyn RoundTripper>,
+    deadline: crate::time::Time,
+) -> (
+    Response,
+    Arc<dyn Fn() -> bool + Send + Sync>,
+    error,
+) {
+    let af: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(|| alwaysFalse());
+    // Go: req is a lazy shallow fork of ireq; goish Requests clone
+    // cheaply (Arc-backed innards), so the fork is unconditional.
+    let mut req = ireq.clone();
+
+    if req.URL.Scheme.Len() == 0 && req.URL.Host.Len() == 0 && req.URL.Path.Len() == 0 {
+        let _ = req.Body.__close_shared();
+        return (
+            Response::default(),
+            af,
+            errors::New(string("http: nil Request.URL")),
+        );
+    }
+
+    if req.RequestURI.Len() != 0 {
+        let _ = req.Body.__close_shared();
+        return (
+            Response::default(),
+            af,
+            errors::New(string(
+                "http: Request.RequestURI can't be set in client requests",
+            )),
+        );
+    }
+
+    // Go: if u := req.URL.User; u != nil && req.Header.Get(
+    // "Authorization") == "" { … "Basic " + basicAuth(...) }
+    if let Some(u) = req.URL.User.clone() {
+        if req.Header.Get(string("Authorization")).Len() == 0 {
+            let username = u.Username();
+            let (password, _) = u.Password();
+            req.Header = super::clone::cloneOrMakeHeader(&ireq.Header);
+            req.Header.Set(
+                string("Authorization"),
+                string("Basic ") + basicAuth(username, password),
+            );
+        }
+    }
+
+    let (stop_timer, did_timeout) = setRequestCancel(&mut req, rt, deadline.clone());
+
+    let (resp, err) = rt.RoundTrip(&req);
+    if !err.IsNil() {
+        stop_timer();
+        return (resp, did_timeout, err);
+    }
+    // Go's non-nil-Body guarantee holds by construction: goish's
+    // Response.Body is a value.
+    if !deadline.IsZero() {
+        // Go: resp.Body = &cancelTimerBody{stop, rc, reqDidTimeout}.
+        resp.Body.__set_cancel(stop_timer);
+    }
+    return (resp, did_timeout, errors::nil);
+}
+
 impl Client {
     // go: sdk 1.25.5 net/http/client.go:586-588 Client.Do
     //
@@ -1540,17 +1658,10 @@ impl Client {
 
     pub fn Do(&self, req: &Request) -> (Response, error) {
         let mut current = req.clone();
-        // Whole-exchange deadline via ctx. The drop guard covers the
-        // error paths; on success the release migrates into the
-        // returned Body (Go's setRequestCancel stops the timer on
-        // body Close, not on Do return — the deadline covers body
-        // reads).
-        let mut _cancel_guard = __CancelOnDrop(None);
-        if self.Timeout.0 > 0 {
-            let (ctx, cancel) = crate::context::WithTimeout(current.Context(), self.Timeout);
-            current = current.WithContext(ctx);
-            _cancel_guard.0 = Some(cancel);
-        }
+        // Go: deadline := c.deadline() — one wall-clock bound for the
+        // WHOLE redirect chain; `send` arms it per hop and hands the
+        // release to the response Body (Go's cancelTimerBody shape).
+        let deadline = self.deadline();
         // Go's defaultCheckRedirect errors when the `via` list has
         // reached 10, i.e. BEFORE issuing an 11th request — so a
         // redirect loop causes exactly MAX_REDIRECTS requests, not
@@ -1604,7 +1715,10 @@ impl Client {
                     current.AddCookie(&cs[i]);
                 }
             }
-            let (resp, err) = self.Transport.RoundTrip(&current);
+            // Go: resp, didTimeout, err = c.send(req, deadline) —
+            // the jar halves of (*Client).send are the blocks above
+            // and below this call.
+            let (resp, _did_timeout, err) = send(&current, &self.Transport, deadline.clone());
             if !err.IsNil() {
                 return (resp, err);
             }
@@ -1624,10 +1738,8 @@ impl Client {
                 301 | 302 | 303 | 307 | 308 => {
                     let (loc, lerr) = resp.Location();
                     if !lerr.IsNil() {
-                        // No Location → return as-is.
-                        if let Some(c) = _cancel_guard.0.take() {
-                            resp.Body.__set_cancel(c);
-                        }
+                        // No Location → return as-is (the deadline
+                        // release already rides in the Body).
                         return (resp, errors::nil);
                     }
                     // Go: the hop's body is closed before following.
@@ -1736,9 +1848,6 @@ impl Client {
                         if !e.IsNil() {
                             let sentinel: error = ErrUseLastResponse.into();
                             if errors::Is(e.clone(), sentinel) {
-                                if let Some(c) = _cancel_guard.0.take() {
-                                    resp.Body.__set_cancel(c);
-                                }
                                 return (resp, errors::nil);
                             }
                             return (resp, e);
@@ -1749,10 +1858,8 @@ impl Client {
                 }
                 _ => {
                     // Final response: the Timeout release rides along
-                    // in the Body, invoked on Close/Drop.
-                    if let Some(c) = _cancel_guard.0.take() {
-                        resp.Body.__set_cancel(c);
-                    }
+                    // in the Body (set by `send`), invoked on
+                    // Close/Drop.
                     return (resp, errors::nil);
                 }
             }
