@@ -34,6 +34,7 @@ pub mod internal;
 pub mod jar;
 pub mod mapping;
 pub mod method;
+pub(crate) mod httpproxy;
 pub(crate) mod omithttp2;
 pub mod pattern;
 pub mod request;

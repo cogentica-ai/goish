@@ -793,12 +793,18 @@ impl Default for Transport {
 /// what produces the resolver value in goish; Go callers assigning the
 /// bare identifier go through `From<>` under the hood).
 pub fn ProxyFromEnvironment() -> ProxyResolver {
-    // goish has no `httpproxy.FromEnvironment`; until it lands this
-    // resolves to "no proxy", which is what Go returns when none of
-    // HTTP_PROXY/HTTPS_PROXY/NO_PROXY is set. The signature is now
-    // Go's, so a real implementation drops in without touching callers.
-    alloc::sync::Arc::new(|_r: &Request| -> (super::url::URL, error) {
-        return (super::url::URL::empty(), errors::nil);
+    // Mirrors Go's `return envProxyFunc()(req.URL)` — transport.go
+    // lines 499-501. The
+    // environment is read once and cached across requests; goish's
+    // "no proxy" is the empty URL (the resolver-shape's nil).
+    alloc::sync::Arc::new(|r: &Request| -> (super::url::URL, error) {
+        let f = super::transport::envProxyFunc();
+        let (u, err) = f(&r.URL);
+        let out = match u {
+            Some(u) => u,
+            None => super::url::URL::empty(),
+        };
+        return (out, err);
     })
 }
 

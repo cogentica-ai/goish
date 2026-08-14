@@ -1691,3 +1691,7 @@ path = "examples/http_conn_reuse_smoke.rs"
 [[example]]
 name = "http_proxy_upgrade_smoke"
 path = "examples/http_proxy_upgrade_smoke.rs"
+
+[[example]]
+name = "http_proxyenv_smoke"
+path = "examples/http_proxyenv_smoke.rs"

@@ -118,6 +118,13 @@ def decl_hits(gofile, sym, free_only=False):
                 # assignment inside a function body.
                 re.compile(r"^\s+" + re.escape(sym) +
                            r"\s*(=|\s+[\w.\[\]*]+\s*=|\s+[\w.\[\]*]+$)"),
+                # A grouped-block member whose TYPE is a func type:
+                # net/http's `envProxyFuncValue func(*url.URL) (*url.URL,
+                # error)`. The general member pattern above can't match
+                # it — a func type carries parens — so without this the
+                # only "hits" for such a var are its ASSIGNMENTS inside
+                # function bodies, and the decl itself can never anchor.
+                re.compile(r"^\s+" + re.escape(sym) + r"\s+func\s*\("),
                 # An `iota` continuation line, which carries no `=` at
                 # all: net/http's `protoHTTP1 = 1 << iota` is followed
                 # by bare `protoHTTP2` and `protoUnencryptedHTTP2`.

@@ -1537,6 +1537,53 @@ impl Transport {
     }
 }
 
+// go: sdk 1.25.5 net/http/transport.go:954-957 envProxyFuncValue
+// go: sdk 1.25.5 net/http/transport.go:954-957 envProxyOnce
+// goishlint:ignore GOISH014 envProxyOnce — one accessor carries Go's
+// var PAIR (the Once folded into the Mutex<Option<…>> slot); the
+// checker compares the nearest anchor's symbol only.
+//
+// Go pairs a sync.Once with the cached func value; goish folds the
+// pair into one Mutex<Option<…>> slot — same once-semantics, and it
+// lets resetProxyConfig actually reset (Go overwrites the Once).
+fn envProxyFuncValue() -> &'static crate::sync::Mutex<
+    Option<alloc::sync::Arc<dyn Fn(&super::url::URL) -> (Option<super::url::URL>, crate::errors::error) + Send + Sync>>,
+> {
+    static SLOT: crate::lazy::Lazy<
+        crate::sync::Mutex<
+            Option<
+                alloc::sync::Arc<
+                    dyn Fn(&super::url::URL) -> (Option<super::url::URL>, crate::errors::error)
+                        + Send
+                        + Sync,
+                >,
+            >,
+        >,
+    > = crate::lazy::Lazy::new(|| crate::sync::Mutex::new(None));
+    return SLOT.get();
+}
+
+// go: sdk 1.25.5 net/http/transport.go:959-966 envProxyFunc
+/// Go: "returns a function that reads the environment variable to
+/// determine the proxy address" — computed once, cached; the
+/// environment is only consulted on the first call.
+pub(crate) fn envProxyFunc() -> alloc::sync::Arc<
+    dyn Fn(&super::url::URL) -> (Option<super::url::URL>, crate::errors::error) + Send + Sync,
+> {
+    let mut g = envProxyFuncValue().Lock();
+    if g.is_none() {
+        *g = Some(super::httpproxy::FromEnvironment().ProxyFunc());
+    }
+    return g.as_ref().unwrap().clone();
+}
+
+// go: sdk 1.25.5 net/http/transport.go:968-972 resetProxyConfig
+/// Go: "resetProxyConfig is used by tests."
+pub fn resetProxyConfig() {
+    *envProxyFuncValue().Lock() = None;
+    return;
+}
+
 // go: sdk 1.25.5 net/http/transport.go:2548-2554 newReadWriteCloserBody
 // goishlint:ignore GOISH020 newReadWriteCloserBody — Go takes the pair
 // (br *bufio.Reader, body io.ReadWriteCloser); goish's ConnSrc IS that
