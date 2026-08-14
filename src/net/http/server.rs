@@ -1548,6 +1548,127 @@ pub(crate) const CONN_STATE_IDLE: u8 = 2; // StateIdle
 /// `conn.curState` packed atomic (server.go:299,
 /// `packed (unixtime<<8|uint8(ConnState))`) plus the netpoll handle
 /// the shutdown path needs to kick a parked reader.
+// ─── connReader ─────────────────────────────────────────────────────
+
+// goishlint:ignore GOISH019 connReader — Go's struct carries `rwc`,
+// `conn`, `cond` and `byteBuf` alongside the guarded flags. The
+// background-read goroutine that needs them is not ported (see the
+// note on startBackgroundRead below), so what lands is the READ-LIMIT
+// state machine, behind one Mutex rather than `mu` + bare fields.
+// go: sdk 1.25.5 net/http/server.go:659-671 connReader
+/// Go: "connReader is the io.Reader wrapper used by *conn. It combines
+/// a selectively-activated io.LimitedReader (to bound request header
+/// read sizes) with support for selectively keeping an io.Reader.Read
+/// call blocked in a background goroutine to wait for activity and
+/// trigger a CloseNotifier channel."
+///
+/// STAGED. goish's serve loop bounds the header read with a socket
+/// read deadline instead, which is why this is not wired: swapping it
+/// in means restructuring the hardened M31 serve loop, and the state
+/// machine is worth having under test first.
+///
+/// Go's `lock()` / `unlock()` ARE ported, using `Mutex::LockManual` +
+/// `Mutex::__locked_mut`. The Cond that Go's `lock()` lazily builds
+/// lands with the background reader.
+pub struct connReader {
+    state: crate::sync::Mutex<connReaderState>,
+}
+
+// go: none — goish-only: the payload of Go's `mu sync.Mutex` on
+// connReader, restricted to the fields this slice ports.
+// The last three are Go's fields for the background reader, carried
+// now so the struct does not have to change shape when it lands.
+#[allow(dead_code)]
+struct connReaderState {
+    /// Go: "bytes remaining"
+    remain: i64,
+    /// Go: set while a Read is in flight; a second concurrent Read is
+    /// a caller bug, not a race to tolerate.
+    inRead: bool,
+    /// Go: "set true before conn.rwc deadline is set to past"
+    aborted: bool,
+    hasByte: bool,
+    /// Go nils `cr.conn` in releaseConn; goish records the transition
+    /// until the `conn` back-pointer lands with the background reader.
+    released: bool,
+}
+
+impl connReader {
+    // go: none — goish-only: Go zero-values connReader inside newConn.
+    pub fn __new() -> connReader {
+        return connReader {
+            state: crate::sync::Mutex::new(connReaderState {
+                remain: 0,
+                inRead: false,
+                aborted: false,
+                hasByte: false,
+                released: false,
+            }),
+        };
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:672-677 connReader.lock
+    /// Go: acquires `cr.mu` and lazily builds `cr.cond` under it.
+    /// goish has no Cond yet (it arrives with the background reader),
+    /// so this is the acquire alone — a MANUAL lock, because Go's
+    /// callers unlock in a different function than they lock in.
+    pub fn lock(&self) {
+        self.state.LockManual();
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:679 connReader.unlock
+    pub fn unlock(&self) {
+        self.state.Unlock();
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:681-685 connReader.releaseConn
+    /// Go: "conn is nil after handler exit" — this is what nils it, so
+    /// a later Read on a hijacked conn stops reaching back into the
+    /// server. goish's `conn` field lands with the background reader;
+    /// the lock discipline is what this ports, and it is the reason
+    /// `lock`/`unlock` had to be real rather than a scoped guard.
+    pub fn releaseConn(&self) {
+        self.lock();
+        // SAFETY: locked immediately above, released immediately
+        // below, and the reference does not escape.
+        unsafe {
+            self.state.__locked_mut().released = true;
+        }
+        self.unlock();
+        return;
+    }
+
+    // go: none — goish-only: reads the flag releaseConn sets, so a
+    // test can observe the manual-lock path actually took effect.
+    pub fn __released(&self) -> bool {
+        return self.state.Lock().released;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:755 connReader.setReadLimit
+    pub fn setReadLimit(&self, remain: i64) {
+        self.state.Lock().remain = remain;
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:756 connReader.setInfiniteReadLimit
+    /// Go sets `maxInt64`, not "no limit" — so `hitReadLimit` keeps
+    /// working without a special case, and the counter can still be
+    /// decremented safely.
+    pub fn setInfiniteReadLimit(&self) {
+        self.state.Lock().remain = i64::MAX;
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:757 connReader.hitReadLimit
+    /// `<= 0`, not `== 0`: a Read that overshoots must stay limited.
+    pub fn hitReadLimit(&self) -> bool {
+        return self.state.Lock().remain <= 0;
+    }
+
+}
+
 pub(crate) struct ConnTrack {
     /// CONN_STATE_* value.
     state: AtomicU8,

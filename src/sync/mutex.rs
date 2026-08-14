@@ -190,6 +190,39 @@ impl<T> Mutex<T> {
         self.unlock();
     }
 
+    /// The missing half of the Go-shape manual lock/unlock pair:
+    /// access the guarded value while the lock is held via
+    /// `LockManual` / `TryLockManual` rather than a guard.
+    ///
+    /// Go's `mu sync.Mutex` sits BESIDE the fields it guards, so a
+    /// method that locks and a method that unlocks can both touch
+    /// them — which is how `connReader.lock()` / `unlock()` and every
+    /// `…Locked` function in net/http are written. goish's Mutex OWNS
+    /// the value, so without this a Go type of that shape cannot be
+    /// ported without collapsing lock and unlock into one scope.
+    ///
+    /// # Safety
+    ///
+    /// The caller must hold this mutex (via `LockManual` or a
+    /// successful `TryLockManual`) for the whole lifetime of the
+    /// returned reference, and must not create a second live
+    /// reference from it. Holding a `MutexGuard` at the same time is
+    /// undefined behaviour — pick one discipline per critical
+    /// section.
+    ///
+    /// Prefer `Lock()` and its guard wherever lock and unlock can sit
+    /// in one scope; this exists for the cases where Go's shape says
+    /// they cannot.
+    // go: none — goish-only. Go's `sync.Mutex` guards fields that sit
+    // BESIDE it, so there is nothing to hand out; goish's Mutex owns
+    // its value, and this is how a manually-locked holder reaches it.
+    #[inline]
+    #[doc(hidden)]
+    #[allow(clippy::mut_from_ref)]
+    pub unsafe fn __locked_mut(&self) -> &mut T {
+        return &mut *self.data.get();
+    }
+
     /// Internal: drop the locked bit and (if waiters present) hand
     /// off ownership to the head waiter. Used by `MutexGuard::drop`
     /// and by `Unlock`.

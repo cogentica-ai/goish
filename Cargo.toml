@@ -1599,3 +1599,7 @@ path = "examples/http_wantconn_smoke.rs"
 [[example]]
 name = "http_connlimit_smoke"
 path = "examples/http_connlimit_smoke.rs"
+
+[[example]]
+name = "http_connreader_smoke"
+path = "examples/http_connreader_smoke.rs"
