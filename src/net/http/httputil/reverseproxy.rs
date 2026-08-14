@@ -405,6 +405,122 @@ pub fn joinURLPath(
     return (a.Path.clone() + b.Path.clone(), apath + bpath);
 }
 
+// goishlint:ignore GOISH019 ReverseProxy — Go's struct also carries
+// BufferPool (an io buffer recycler, which would sit on the open
+// sync::Pool fault) and the httptrace/h2 plumbing. What lands are the
+// fields the methods below actually read.
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:112-213 ReverseProxy
+/// Go: "ReverseProxy is an HTTP Handler that takes an incoming request
+/// and sends it to another server, proxying the response back to the
+/// client."
+///
+/// STAGED: `ServeHTTP` is not ported — it needs the streaming response
+/// copy, which needs Body as io.ReadCloser. goish's working proxy is
+/// still `NewSingleHostReverseProxy`. What lands here is the POLICY
+/// that handler consults, which is testable on its own.
+#[derive(Default)]
+pub struct ReverseProxy {
+    /// Go: "Rewrite must be a function which modifies the request into
+    /// a new request to be sent using Transport." Preferred over
+    /// Director — it cannot accidentally forward the inbound
+    /// X-Forwarded-For.
+    pub Rewrite: Option<alloc::sync::Arc<dyn Fn(&mut ProxyRequest) + Send + Sync>>,
+    /// Go: "Deprecated: Use Rewrite instead."
+    pub Director:
+        Option<alloc::sync::Arc<dyn Fn(&mut super::super::request::Request) + Send + Sync>>,
+    /// Go: "the flush interval to flush to the client while copying
+    /// the response body. If zero, no periodic flushing is done. A
+    /// negative value means to flush immediately."
+    pub FlushInterval: crate::time::Duration,
+    /// Go: "an optional logger for errors […] If nil, logging is done
+    /// via the log package's standard logger."
+    pub ErrorLog: Option<alloc::sync::Arc<crate::log::Logger>>,
+    /// Go: "an optional function that modifies the Response from the
+    /// backend. […] If it returns an error, ErrorHandler is called."
+    pub ModifyResponse: Option<
+        alloc::sync::Arc<dyn Fn(&mut super::super::response::Response) -> crate::errors::error + Send + Sync>,
+    >,
+    /// Go: "an optional function that handles errors reaching the
+    /// backend or errors from ModifyResponse."
+    pub ErrorHandler: Option<
+        alloc::sync::Arc<
+            dyn Fn(
+                    &(dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static),
+                    &super::super::request::Request,
+                    crate::errors::error,
+                ) + Send
+                + Sync,
+        >,
+    >,
+}
+
+impl ReverseProxy {
+    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:684-692 ReverseProxy.logf
+    /// Go's signature is `logf(format string, args ...any)`; goish has
+    /// no variadic `any`, so callers format with `fmt::Sprintf!` and
+    /// pass the finished string. `args` is kept as an empty slice so
+    /// the arity matches and a future variadic form has somewhere to
+    /// land — the same shape `Server.logf` uses.
+    pub fn logf(
+        &self,
+        format: crate::string,
+        args: crate::goslice::slice<crate::string>,
+    ) {
+        // goish's Sprintv takes `slice<Arc<dyn Any>>`; the only caller
+        // today passes no args, so the formatted string arrives ready.
+        let _ = &args;
+        let msg = format;
+        match self.ErrorLog.as_ref() {
+            Some(l) => {
+                let _ = l.Output(2, msg);
+            }
+            None => {
+                crate::log::Printf!("%s", msg);
+            }
+        }
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:319-322 ReverseProxy.defaultErrorHandler
+    /// Go: log the error and answer 502. The STATUS is the contract —
+    /// a backend failure must not surface as a 500, which blames the
+    /// proxy, nor as the backend's own code, which it never sent.
+    pub fn defaultErrorHandler(
+        &self,
+        rw: &(dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static),
+        _req: &super::super::request::Request,
+        err: crate::errors::error,
+    ) {
+        self.logf(
+            crate::fmt::Sprintf!("http: proxy error: %v", err),
+            crate::goslice::slice::<crate::string>::new(),
+        );
+        rw.WriteHeader(super::super::status::StatusBadGateway);
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:607-624 ReverseProxy.flushInterval
+    /// Two cases force IMMEDIATE flushing regardless of the configured
+    /// interval, and both are streams that never end: a
+    /// `text/event-stream` response, and one with an unknown
+    /// ContentLength. Buffering either means the client sees nothing
+    /// until the backend closes — which for SSE is never.
+    pub fn flushInterval(
+        &self,
+        res: &super::super::response::Response,
+    ) -> crate::time::Duration {
+        let resCT = res.Header.Get(crate::string("Content-Type"));
+        let (baseCT, _, _) = crate::mime::ParseMediaType(resCT);
+        if baseCT == "text/event-stream" {
+            return crate::time::Duration(-1);
+        }
+        if res.ContentLength == -1 {
+            return crate::time::Duration(-1);
+        }
+        return self.FlushInterval;
+    }
+}
+
 // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:30-40 ProxyRequest
 /// Go: "A ProxyRequest contains a request to be rewritten by a
 /// ReverseProxy." `In` is the inbound request as received; `Out` is

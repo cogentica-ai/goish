@@ -15,7 +15,7 @@ extern crate goish;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::fmt;
-use goish::net::http::httputil::reverseproxy::ProxyRequest;
+use goish::net::http::httputil::reverseproxy::{ProxyRequest, ReverseProxy};
 use goish::net::http::{NewRequest, ParseURL};
 use goish::{slice, string};
 
@@ -92,6 +92,40 @@ fn run() {
         check("SetURL joins the paths and CLEARS Out.Host",
               out.URL.String() == "http://backend.internal/base/p" && out.Host.Len() == 0,
               fmt::Sprintf!("URL=%q Host=%q", out.URL.String(), out.Host.clone()));
+    }
+
+    // ── ReverseProxy.flushInterval ──
+    // Two cases force immediate flushing regardless of the configured
+    // interval, and both are streams that never end.
+    {
+        let rp = ReverseProxy {
+            FlushInterval: goish::time::Duration(250 * 1_000_000),
+            ..Default::default()
+        };
+        let mut sse = goish::net::http::Response::default();
+        sse.Header.Set(string("Content-Type"), string("text/event-stream"));
+        sse.ContentLength = 100;
+        let mut unknown = goish::net::http::Response::default();
+        unknown.Header.Set(string("Content-Type"), string("text/plain"));
+        unknown.ContentLength = -1;
+        let mut plain = goish::net::http::Response::default();
+        plain.Header.Set(string("Content-Type"), string("text/plain; charset=utf-8"));
+        plain.ContentLength = 100;
+        check("flushInterval: SSE and unknown-length flush immediately, others use the setting",
+              rp.flushInterval(&sse) == goish::time::Duration(-1)
+                  && rp.flushInterval(&unknown) == goish::time::Duration(-1)
+                  && rp.flushInterval(&plain) == goish::time::Duration(250 * 1_000_000),
+              fmt::Sprintf!("sse=%d unknown=%d plain=%d",
+                  rp.flushInterval(&sse).Nanoseconds(),
+                  rp.flushInterval(&unknown).Nanoseconds(),
+                  rp.flushInterval(&plain).Nanoseconds()));
+        // The media-type parse must ignore parameters: SSE with a
+        // charset is still SSE.
+        let mut sse2 = goish::net::http::Response::default();
+        sse2.Header.Set(string("Content-Type"), string("text/event-stream; charset=utf-8"));
+        sse2.ContentLength = 100;
+        check("and a charset parameter does not hide text/event-stream",
+              rp.flushInterval(&sse2) == goish::time::Duration(-1), string(""));
     }
 
     let p = PASSED.load(Ordering::Relaxed);
