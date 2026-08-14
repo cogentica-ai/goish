@@ -48,7 +48,7 @@ use crate::bufio;
 use crate::errors::{self, error};
 use crate::gonilable::nilable;
 use crate::goslice::slice;
-use crate::io::{self, Closer, Reader, Writer};
+use crate::io::{self, Closer, Reader};
 use crate::net;
 use crate::string;
 use crate::strings;
@@ -89,7 +89,7 @@ impl Reader for ConnSrc {
 }
 
 impl ConnSrc {
-    fn close_conn(&mut self) -> error {
+    pub(crate) fn close_conn(&mut self) -> error {
         match self {
             ConnSrc::Tcp(br) => br.__rd_mut().Close(),
             ConnSrc::Tls(br) => br.__rd_mut().Close(),
@@ -117,6 +117,16 @@ impl ConnSrc {
     // A TLS backend cannot be split this way (the record layer's
     // cipher state is one object), so it reports its unsupportedness
     // instead of corrupting a stream.
+    // go: none — goish-only: the TCPConn under a plain-HTTP source
+    // (request writes + deadline control). Panics on a TLS source —
+    // the plain RoundTrip arm is its only caller.
+    pub(crate) fn __tcp_mut(&mut self) -> &mut crate::net::TCPConn {
+        match self {
+            ConnSrc::Tcp(br) => br.__rd_mut(),
+            ConnSrc::Tls(_) => panic!("__tcp_mut on a TLS source"),
+        }
+    }
+
     pub(crate) fn split_for_upgrade(
         self,
     ) -> (Option<(ConnSrc, crate::net::TCPConn)>, error) {
@@ -167,6 +177,12 @@ enum FramedBody {
 
 struct BodyState {
     framing: FramedBody,
+    /// Go's bodyEOFSignal `fn` (transport.go:2978), goish-shaped: on
+    /// Close/Drop of a CLEANLY-FINISHED conn-backed body, the ConnSrc
+    /// is handed back for pool reuse instead of closed. An early
+    /// Close with unread framing falls through to the close (Go's
+    /// earlyCloseFn arm: the conn cannot be reused mid-message).
+    reuse_fn: Option<alloc::boxed::Box<dyn FnOnce(ConnSrc) + Send>>,
     /// Request ctx — a Read kicked out by the cancel watcher maps its
     /// wire error to ctx.Err(), like `ctx_err_or` on the head path.
     ctx: Option<Arc<dyn crate::context::Context>>,
@@ -248,6 +264,26 @@ fn close_locked(st: &mut BodyState) -> error {
     if let Some(w) = st.watch.take() {
         stop_cancel_watch(Some(w));
     }
+    // Go (bodyEOFSignal, transport.go:2978): a Content-Length body
+    // read to its exact boundary leaves the conn synchronized — hand
+    // it back to the pool instead of closing. Anything short of that
+    // (unread remainder, chunked (phase A), streaming errors) closes
+    // as before: reuse of a desynced conn is a response-smuggling
+    // hazard, never an optimization.
+    if let Some(bank) = st.reuse_fn.take() {
+        let clean = matches!(&st.framing, FramedBody::Cl { remaining, .. } if *remaining <= 0);
+        if clean {
+            if let FramedBody::Cl { src, .. } =
+                core::mem::replace(&mut st.framing, FramedBody::Closed)
+            {
+                bank(src);
+                if let Some(c) = st.cancel.take() {
+                    c();
+                }
+                return errors::nil;
+            }
+        }
+    }
     // An in-memory (Eager) body is Go's NopCloser shape — NewRequest
     // wraps *bytes.Reader/*strings.Reader in io.NopCloser, so Close is
     // a NO-OP and the bytes stay readable. transferWriter::writeBody
@@ -303,6 +339,7 @@ impl Body {
         Body {
             inner: Arc::new(crate::sync::Mutex::new(BodyState {
                 framing,
+                reuse_fn: None,
                 ctx,
                 watch,
                 cancel: None,
@@ -361,6 +398,13 @@ impl Body {
             off: 0,
         };
         (out, errors::nil)
+    }
+
+    // go: none — goish-only: install the bodyEOFSignal bank-back (see
+    // BodyState.reuse_fn).
+    pub(crate) fn __set_reuse(&self, f: alloc::boxed::Box<dyn FnOnce(ConnSrc) + Send>) {
+        self.inner.Lock().reuse_fn = Some(f);
+        return;
     }
 
     /// Crate-internal: Close through a shared handle (`&self`) — the
@@ -698,7 +742,7 @@ pub struct Transport {
     /// comments mark as guarded together. Keyed by
     /// `connectMethodKey.String()` because goish has no struct-keyed
     /// map. STAGED — nothing puts a conn in it yet.
-    pub(crate) __idle: crate::sync::Mutex<super::transport::idlePool>,
+    pub(crate) __idle: Arc<crate::sync::Mutex<super::transport::idlePool>>,
     /// Go's `connsPerHostMu` + `connsPerHost` + `connsPerHostWait`
     /// (transport.go:278-281) — the MaxConnsPerHost limiter, a
     /// separate lock from the idle pool in Go and kept separate here.
@@ -756,7 +800,7 @@ pub struct Transport {
 impl Default for Transport {
     fn default() -> Self {
         Transport {
-            __idle: crate::sync::Mutex::new(super::transport::idlePool::new()),
+            __idle: Arc::new(crate::sync::Mutex::new(super::transport::idlePool::new())),
             __conns_per_host: crate::sync::Mutex::new(
                 super::transport::connsPerHost::new(),
             ),
@@ -955,75 +999,177 @@ impl RoundTripper for Transport {
                 let _ = br.__rd_mut().Close();
                 return (resp, ctx_err_or(&ctx, rerr));
             }
-            attach_stream_body(&mut resp, kind, ConnSrc::Tls(br), ctx, watch);
+            attach_stream_body(&mut resp, kind, ConnSrc::Tls(br), ctx, watch, None);
             (resp, errors::nil)
         } else {
             // ── HTTP path ────────────────────────────────────────────────
             let dial_addr = ensure_default_port(&host, 80);
-
-            let (mut conn, derr) = net::Dial(string("tcp"), dial_addr);
-            if !derr.IsNil() {
-                return (Response::default(), derr);
-            }
-
-            // Deadline: Transport.Timeout tightened by the ctx deadline.
-            let dl = self.effective_deadline(&ctx);
-            if !dl.IsZero() {
-                let _ = conn.SetDeadline(dl);
-            }
-
-            // ctx-cancel watcher (see arm_cancel_watch).
-            let watch = arm_cancel_watch(&ctx, conn.__disconnect_watch_parts());
-
-            // Write the request: head, then stream the body (see the
-            // TLS arm above).
-            let (head, mut tw, serr) = serialize_request_head(req, &host, false);
-            if !serr.IsNil() {
-                stop_cancel_watch(watch);
-                let _ = conn.Close();
-                return (Response::default(), serr);
-            }
-            let (_, werr) = conn.Write(head);
-            if !werr.IsNil() {
-                stop_cancel_watch(watch);
-                let _ = conn.Close();
-                return (Response::default(), ctx_err_or(&ctx, werr));
-            }
-            let werr = {
-                let mut cw = &mut conn;
-                tw.writeBody(&mut cw)
+            // Go (getConn, transport.go:1487): try the idle pool
+            // before dialing. The staged wantConn/queueForIdleConn
+            // machinery pops a non-stale conn for this key.
+            let cm_key = super::transport::connectMethodKey {
+                proxy: string::new(),
+                scheme: string("http"),
+                addr: dial_addr.clone(),
+                onlyH1: false,
             };
-            if !werr.IsNil() {
-                stop_cancel_watch(watch);
-                let _ = conn.Close();
-                return (Response::default(), ctx_err_or(&ctx, werr));
-            }
 
-            // Read the response head; the conn moves into the bufio
-            // reader and onward into resp.Body, which streams the
-            // body bytes until the caller Closes it.
-            let mut br = bufio::NewReader(conn);
-            let (mut resp, kind, rerr) = read_response_head(&mut br, Some(req.clone()));
-            if !rerr.IsNil() {
-                stop_cancel_watch(watch);
-                let _ = br.__rd_mut().Close();
-                return (resp, ctx_err_or(&ctx, rerr));
+            // Retry loop — Go's transport.roundTrip: a request that
+            // failed on a REUSED conn (the server may have closed it
+            // while idle) is retried once on a fresh dial
+            // (shouldRetryRequest; pc.isReused is the gate).
+            let mut tried_pooled = false;
+            loop {
+                let mut pooled: Option<Arc<super::transport::persistConn>> = None;
+                if !self.DisableKeepAlives && !tried_pooled {
+                    let w = Arc::new(super::transport::wantConn::__new());
+                    w.__set_key(cm_key.clone());
+                    if self.queueForIdleConn(&w) {
+                        pooled = w.__delivered();
+                    }
+                }
+                let (mut src, watch, pc) = match pooled
+                    .and_then(|pc| pc.__take_src().map(|s| (pc, s)))
+                {
+                    Some((pc, src)) => {
+                        tried_pooled = true;
+                        let mut src = src;
+                        // Re-arm deadline + ctx watch on the pooled conn.
+                        let dl = self.effective_deadline(&ctx);
+                        let tcp = src.__tcp_mut();
+                        if !dl.IsZero() {
+                            let _ = tcp.SetDeadline(dl);
+                        } else {
+                            let _ = tcp.SetDeadline(time::Time::default());
+                        }
+                        let watch = arm_cancel_watch(&ctx, tcp.__disconnect_watch_parts());
+                        (src, watch, pc)
+                    }
+                    None => {
+                        tried_pooled = true;
+                        let (conn, derr) = net::Dial(string("tcp"), dial_addr.clone());
+                        if !derr.IsNil() {
+                            return (Response::default(), derr);
+                        }
+                        // Deadline: Transport.Timeout tightened by the
+                        // ctx deadline.
+                        let dl = self.effective_deadline(&ctx);
+                        if !dl.IsZero() {
+                            let _ = conn.SetDeadline(dl);
+                        }
+                        // ctx-cancel watcher (see arm_cancel_watch).
+                        let watch = arm_cancel_watch(&ctx, conn.__disconnect_watch_parts());
+                        let pc = Arc::new(super::transport::persistConn::__new(cm_key.clone()));
+                        (ConnSrc::Tcp(bufio::NewReader(conn)), watch, pc)
+                    }
+                };
+                let pc_reused = pc.isReused();
+
+                // Write the request: head, then stream the body (see
+                // the TLS arm above).
+                let (head, mut tw, serr) = serialize_request_head(req, &host, false);
+                if !serr.IsNil() {
+                    stop_cancel_watch(watch);
+                    let _ = src.close_conn();
+                    return (Response::default(), serr);
+                }
+                let (_, head_werr) = crate::io::Writer::Write(src.__tcp_mut(), head);
+                let (werr, head_failed) = if head_werr.IsNil() {
+                    let mut cw: &mut dyn crate::io::Writer = src.__tcp_mut();
+                    (tw.writeBody(&mut cw), false)
+                } else {
+                    (head_werr, true)
+                };
+                if !werr.IsNil() {
+                    stop_cancel_watch(watch);
+                    let _ = src.close_conn();
+                    // Go (writeLoop): a request whose FIRST write got
+                    // nothing onto a reused conn maps to
+                    // nothingWrittenError, which shouldRetryRequest
+                    // always retries.
+                    let mapped = if pc_reused && head_failed {
+                        super::transport::errNothingWritten.into()
+                    } else {
+                        werr.clone()
+                    };
+                    if super::transport::shouldRetryRequest(req, mapped, pc_reused) {
+                        continue;
+                    }
+                    return (Response::default(), ctx_err_or(&ctx, werr));
+                }
+
+                // Read the response head; the src moves onward into
+                // resp.Body, which streams until the caller Closes it.
+                let (mut resp, kind, rerr) = match &mut src {
+                    ConnSrc::Tcp(br) => read_response_head(br, Some(req.clone())),
+                    ConnSrc::Tls(_) => unreachable!("plain arm"),
+                };
+                if !rerr.IsNil() {
+                    stop_cancel_watch(watch);
+                    let _ = src.close_conn();
+                    // Go (readLoopPeekFailLocked, transport.go:2270):
+                    // an EOF where the response head should be, on a
+                    // REUSED conn, is "an unfortunate keep-alive
+                    // timeout" — errServerClosedIdle, retried.
+                    let mapped = if pc_reused
+                        && (errors::Is(rerr.clone(), io::EOF)
+                            || errors::Is(rerr.clone(), io::ErrUnexpectedEOF))
+                    {
+                        super::transport::errServerClosedIdle.into()
+                    } else {
+                        rerr.clone()
+                    };
+                    if super::transport::shouldRetryRequest(req, mapped, pc_reused) {
+                        continue;
+                    }
+                    return (resp, ctx_err_or(&ctx, rerr));
+                }
+
+                // Go's bodyEOFSignal bank-back: reusable when the
+                // server didn't ask to close and the framing has a
+                // clean end (Empty now, Content-Length at body Close).
+                let bank: Option<alloc::boxed::Box<dyn FnOnce(ConnSrc) + Send>> =
+                    if !self.DisableKeepAlives
+                        && !resp.Close
+                        && matches!(kind, BodyKind::Empty | BodyKind::Cl(_))
+                    {
+                        let idle = self.__idle.clone();
+                        let cfg = self.__bank_cfg();
+                        let pc2 = pc.clone();
+                        Some(alloc::boxed::Box::new(move |mut s: ConnSrc| {
+                            // Clear the per-request deadline before the
+                            // conn waits idle.
+                            let _ = s.__tcp_mut().SetDeadline(time::Time::default());
+                            pc2.__put_src(s);
+                            let e = super::transport::__try_put_idle(&idle, &cfg, &pc2);
+                            if !e.IsNil() {
+                                // Pool refused (full/closed): release.
+                                pc2.close(e);
+                            }
+                        }))
+                    } else {
+                        None
+                    };
+                attach_stream_body(&mut resp, kind, src, ctx, watch, bank);
+                return (resp, errors::nil);
             }
-            attach_stream_body(&mut resp, kind, ConnSrc::Tcp(br), ctx, watch);
-            (resp, errors::nil)
         }
     }
 }
 
-/// Wire a parsed head + owned conn into a streaming `resp.Body`. For
-/// `Empty` framing there is nothing left on the wire: the watcher
-/// stops and the conn closes immediately (v1 has no idle pool).
+/// Wire a parsed head + owned conn into a streaming `resp.Body`.
+/// `bank` is the pool hand-back (Go's bodyEOFSignal fn): an
+/// Empty-framed response's conn goes back immediately; a
+/// Content-Length body carries it and banks on clean Close. Framings
+/// that end only with the conn (UntilEof, 101) and chunked (phase A)
+/// drop the bank and close as before.
 fn attach_stream_body(
     resp: &mut Response,
     kind: BodyKind,
     mut src: ConnSrc,
     ctx: Option<Arc<dyn crate::context::Context>>,
     watch: Option<(crate::gochan::chan<()>, crate::gochan::chan<()>)>,
+    bank: Option<alloc::boxed::Box<dyn FnOnce(ConnSrc) + Send>>,
 ) {
     // Go (transport.go:2306): a 101 Switching Protocols response's
     // body IS the connection — attach it un-framed and detach the
@@ -1037,7 +1183,12 @@ fn attach_stream_body(
     match kind {
         BodyKind::Empty => {
             stop_cancel_watch(watch);
-            let _ = src.close_conn();
+            match bank {
+                Some(b) => b(src),
+                None => {
+                    let _ = src.close_conn();
+                }
+            }
             resp.Body = Body::default();
         }
         BodyKind::Cl(n) => {
@@ -1049,6 +1200,9 @@ fn attach_stream_body(
                 ctx,
                 watch,
             );
+            if let Some(b) = bank {
+                resp.Body.__set_reuse(b);
+            }
         }
         BodyKind::Chunked => {
             resp.Body = Body::from_parts(

@@ -1703,3 +1703,7 @@ path = "examples/http_transferwriter_smoke.rs"
 [[example]]
 name = "http_connreader_limit_smoke"
 path = "examples/http_connreader_limit_smoke.rs"
+
+[[example]]
+name = "http_client_reuse_smoke"
+path = "examples/http_client_reuse_smoke.rs"

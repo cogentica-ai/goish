@@ -679,6 +679,11 @@ pub struct persistConn {
     /// Go: `cacheKey connectMethodKey` — which pool bucket this is in.
     pub cacheKey: connectMethodKey,
     state: crate::sync::Mutex<pcState>,
+    /// Go: `conn net.Conn` + `br *bufio.Reader` — goish's ConnSrc is
+    /// exactly that pair (buffered remainder + conn). Present while
+    /// the conn is IDLE in the pool; taken out for the request in
+    /// flight (the response Body owns it until the bank-back).
+    src: crate::sync::Mutex<Option<super::client::ConnSrc>>,
 }
 
 // go: none — goish-only: the payload of Go's `mu sync.Mutex`, i.e. the
@@ -718,6 +723,7 @@ impl persistConn {
     pub fn __new(cacheKey: connectMethodKey) -> persistConn {
         return persistConn {
             cacheKey,
+            src: crate::sync::Mutex::new(None),
             state: crate::sync::Mutex::new(pcState {
                 reused: false,
                 broken: false,
@@ -731,6 +737,19 @@ impl persistConn {
     // go: sdk 1.25.5 net/http/transport.go:2134-2139 persistConn.isBroken
     pub fn isBroken(&self) -> bool {
         return !self.state.Lock().closed.IsNil();
+    }
+
+    // go: none — goish-only: Go's pc.conn/pc.br live as bare fields
+    // read by the loops; goish moves the pair in and out around each
+    // request (the Body owns it mid-flight).
+    pub(crate) fn __put_src(&self, src: super::client::ConnSrc) {
+        *self.src.Lock() = Some(src);
+        return;
+    }
+
+    // go: none — see __put_src.
+    pub(crate) fn __take_src(&self) -> Option<super::client::ConnSrc> {
+        return self.src.Lock().take();
     }
 
     // go: none — goish-only: read/stamp Go's `idleAt` field.
@@ -792,6 +811,12 @@ impl persistConn {
         st.broken = true;
         if st.closed.IsNil() {
             st.closed = err;
+        }
+        drop(st);
+        // Go: pc.conn.Close() — an evicted/broken idle conn must
+        // release its fd, not leak it in the src slot.
+        if let Some(mut src) = self.src.Lock().take() {
+            let _ = src.close_conn();
         }
         return;
     }
@@ -1022,40 +1047,19 @@ impl Transport {
     /// Staged: Go's HTTP/2 `pconn.alt` branch and the IdleConnTimeout
     /// timer are not ported — both need machinery that is not here.
     pub fn tryPutIdleConn(&self, pconn: &Arc<persistConn>) -> error {
-        if self.DisableKeepAlives || self.maxIdleConnsPerHost() < 0 {
-            return errKeepAlivesDisabled.into();
-        }
-        if pconn.isBroken() {
-            return errConnBroken.into();
-        }
-        pconn.markReused();
+        return __try_put_idle(&self.__idle, &self.__bank_cfg(), pconn);
+    }
 
-        let mut pool = self.__idle.Lock();
-        if pool.closeIdle {
-            return errCloseIdle.into();
-        }
-        let key = pconn.cacheKey.String();
-        let idles = pool.idleConn.Get(key.clone()).0;
-        if crate::int(crate::int64(idles.len())) >= self.maxIdleConnsPerHost() {
-            return errTooManyIdleHost.into();
-        }
-        for exist in idles.iter() {
-            if Arc::ptr_eq(exist, pconn) {
-                // Go: log.Fatalf("dup idle pconn %p in freelist").
-                panic!("dup idle pconn in freelist");
-            }
-        }
-        let mut idles = idles;
-        idles.push(pconn.clone());
-        pool.idleConn.Set(key, idles);
-        pool.idleLRU.add(pconn.clone());
-        if self.MaxIdleConns != 0 && pool.idleLRU.len() > self.MaxIdleConns {
-            if let Some(oldest) = pool.idleLRU.removeOldest() {
-                oldest.close(errTooManyIdle.into());
-                __removeIdleConnLocked(&mut pool, &oldest);
-            }
-        }
-        return errors::nil;
+    // go: none — goish-only: the Transport knobs tryPutIdleConn reads,
+    // snapshotted so a response Body that outlives the RoundTrip
+    // borrow can still bank its conn back (Go's bodyEOFSignal closes
+    // over the *Transport; goish closes over this + the Arc'd pool).
+    pub(crate) fn __bank_cfg(&self) -> idleBankCfg {
+        return idleBankCfg {
+            disable_keep_alives: self.DisableKeepAlives,
+            max_idle_conns: self.MaxIdleConns,
+            max_idle_per_host: self.maxIdleConnsPerHost(),
+        };
     }
 
     // go: sdk 1.25.5 net/http/transport.go:1596-1605 Transport.startDialConnForLocked
@@ -1376,6 +1380,62 @@ fn __removeIdleConnLocked(pool: &mut idlePool, pconn: &Arc<persistConn>) -> bool
 }
 
 // ─── retry decision ─────────────────────────────────────────────────
+
+// go: none — goish-only: see Transport::__bank_cfg.
+pub(crate) struct idleBankCfg {
+    pub(crate) disable_keep_alives: bool,
+    pub(crate) max_idle_conns: crate::types::int,
+    pub(crate) max_idle_per_host: crate::types::int,
+}
+
+// go: none — goish-only: the body of Transport::tryPutIdleConn
+// (transport.go:1052-1143), factored free so the response Body's
+// bank-back closure — which cannot borrow the Transport — can reach
+// it through the Arc'd pool + snapshotted knobs. The METHOD above is
+// the anchored port; this is its one implementation.
+pub(crate) fn __try_put_idle(
+    idle: &Arc<crate::sync::Mutex<idlePool>>,
+    cfg: &idleBankCfg,
+    pconn: &Arc<persistConn>,
+) -> error {
+    if cfg.disable_keep_alives || cfg.max_idle_per_host < 0 {
+        return errKeepAlivesDisabled.into();
+    }
+    if pconn.isBroken() {
+        return errConnBroken.into();
+    }
+    pconn.markReused();
+
+    let mut pool = idle.Lock();
+    if pool.closeIdle {
+        return errCloseIdle.into();
+    }
+    let key = pconn.cacheKey.String();
+    let idles = pool.idleConn.Get(key.clone()).0;
+    if crate::int(crate::int64(idles.len())) >= cfg.max_idle_per_host {
+        return errTooManyIdleHost.into();
+    }
+    for exist in idles.iter() {
+        if Arc::ptr_eq(exist, pconn) {
+            // Go: log.Fatalf("dup idle pconn %p in freelist").
+            panic!("dup idle pconn in freelist");
+        }
+    }
+    let mut idles = idles;
+    idles.push(pconn.clone());
+    pool.idleConn.Set(key, idles);
+    pool.idleLRU.add(pconn.clone());
+    // Go stamps idleAt here (pconn.idleAt = time.Now()); goish uses
+    // monotonic ns.
+    pconn.__set_idle_at(crate::runtime::sysmon::monotonic_ns());
+    if cfg.max_idle_conns != 0 && crate::int(crate::int64(pool.idleLRU.len())) > cfg.max_idle_conns {
+        if let Some(oldest) = pool.idleLRU.removeOldest() {
+            oldest.close(errTooManyIdle.into());
+            __removeIdleConnLocked(&mut pool, &oldest);
+        }
+    }
+    return errors::nil;
+}
 
 // go: sdk 1.25.5 net/http/transport.go:806-852 persistConn.shouldRetryRequest
 /// Go: "whether we should retry sending a failed HTTP request on a new
