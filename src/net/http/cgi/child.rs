@@ -80,7 +80,9 @@ pub fn RequestFromMap(params: &map<string, string>) -> (Request, error) {
         ContentLength: 0,
         Body: slice::<byte>::__from_vec(Vec::new()),
         RemoteAddr: string::new(),
-        path_values: map::<string, string>::new(),
+        pat: None,
+        matches: slice::<string>::__from_vec(alloc::vec::Vec::new()),
+        otherValues: map::<string, string>::new(),
         form_state: Arc::new(crate::sync::Mutex::new(Default::default())),
         ctx: None,
     };

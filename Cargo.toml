@@ -1671,3 +1671,7 @@ path = "examples/net_close_wakes_accept_smoke.rs"
 [[example]]
 name = "http_bufio_pool_smoke"
 path = "examples/http_bufio_pool_smoke.rs"
+
+[[example]]
+name = "http_misc_decls_smoke"
+path = "examples/http_misc_decls_smoke.rs"

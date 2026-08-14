@@ -53,10 +53,19 @@ pub struct Request {
     /// observable behavior with simpler lifetimes.
     pub Body: slice<byte>,
     pub RemoteAddr: string,
-    /// Wildcard pattern bindings (Go 1.22). Populated by `ServeMux`
-    /// when a `/users/{id}`-style pattern matches; queried via
-    /// `r.PathValue(name)`. Empty otherwise.
-    pub(crate) path_values: crate::gomap::map<string, string>,
+    // "The following fields are for requests matched by ServeMux."
+    // (request.go:334-338) — Go's pat/matches/otherValues trio, kept
+    // together so PathValue resolves exactly as Go's does.
+    /// Go: `pat *pattern` — the pattern that matched. Set by ServeMux
+    /// dispatch; consulted by `PathValue` via `patIndex`. Go shares a
+    /// pointer; goish clones the (Arc-backed-slice) pattern value.
+    pub(crate) pat: Option<super::pattern::pattern>,
+    /// Go: `matches []string` — values for the matching wildcards in
+    /// `pat`, positional, in wild-segment order.
+    pub(crate) matches: slice<string>,
+    /// Go: `otherValues map[string]string` — "for calls to
+    /// SetPathValue that don't match a wildcard".
+    pub(crate) otherValues: crate::gomap::map<string, string>,
     /// Lazy form-parse state. Wrapped in `Arc<Mutex<…>>` so
     /// `ParseForm`/`FormValue`/`PostFormValue` can be called from
     /// `&Request` (handlers receive `&Request`, not `&mut Request`,
@@ -211,54 +220,75 @@ impl Request {
         (super::cookie::Cookie::default(), ErrNoCookie.into())
     }
 
-    // go: sdk 1.25.5 net/http/request.go:1469-1474 Request.PathValue
+    // go: sdk 1.25.5 net/http/request.go:1465-1476 Request.PathValue
     /// `r.PathValue(name)` — look up a wildcard binding from a Go 1.22
     /// pattern match (e.g. `/users/{id}` → `r.PathValue("id")`).
-    /// Returns the empty string if no such binding exists. Mirrors
-    /// `(*Request).PathValue(name)` (request.go:472 in Go's source).
-    // NOTE — `patIndex` has no counterpart HERE by design, not by
-    // omission. Deliberately NOT suppressed with a
-    // `goishlint:ignore GOISH018`: that directive is FILE-scoped for
-    // this rule, so adding one here silently masked all 22 of
-    // request.rs's GOISH018 findings, not just this one. The other 21
-    // are real gaps and must stay visible; patIndex being listed is
-    // the acceptable cost. Go resolves a wildcard name by keeping
-    // the matched `pat *pattern` plus a positional `matches []string`
-    // and linear-scanning the pattern's segments (request.go:1491);
-    // goish stores the bindings directly in a `map<string,string>`, so
-    // the lookup below IS patIndex's job. Porting it would produce a
-    // function nothing can call — the same trap that made `exactMatch`
-    // an orphan earlier in this port.
-    //
-    // The divergence is data-structure-only: verified against goref
-    // via a real ServeMux that the observable behaviour is identical,
-    // including the cases where the two designs could plausibly differ
-    // — an unknown name and the empty name both give "", `{rest...}`
-    // yields the whole remaining path with slashes intact, and `{$}`
-    // is NOT addressable (PathValue("$") is ""). See
-    // examples/http_pathvalue_smoke.rs.
+    /// Returns the empty string if the request was not matched against
+    /// a pattern or there is no such wildcard in the pattern.
+    ///
+    /// (History: goish used to flatten bindings into a map at dispatch
+    /// and this method was the argument for why `patIndex` could not
+    /// be ported. Since the mux now carries Go's `pat` + positional
+    /// `matches` onto the request, the resolution IS Go's:
+    /// patIndex-scan first, `otherValues` fallback. The goref-verified
+    /// edge cases — unknown/empty name → "", `{rest...}` keeps its
+    /// slashes, `{$}` not addressable — are pinned by
+    /// examples/http_pathvalue_smoke.rs either way.)
     pub fn PathValue<S: Into<string>>(&self, name: S) -> string {
-        let (v, ok) = self.path_values.Get(name.into());
-        if ok {
-            v
-        } else {
-            string::new()
+        let name = name.into();
+        let i = self.patIndex(name.clone());
+        if i >= 0 {
+            return self.matches[i].clone();
         }
+        // Go: return r.otherValues[name] — a missing key reads as the
+        // zero value, which is what map::Get's first return is.
+        let (v, _) = self.otherValues.Get(name);
+        return v;
     }
 
     // go: sdk 1.25.5 net/http/request.go:1478-1487 Request.SetPathValue
-    /// `r.SetPathValue(name, value)` — set a wildcard binding for
-    /// testing or middleware use. Mirrors `(*Request).SetPathValue`.
+    /// `r.SetPathValue(name, value)` — set a wildcard binding so
+    /// subsequent `PathValue(name)` calls return `value`. A name that
+    /// is one of the pattern's wildcards overwrites its positional
+    /// match; any other name lands in `otherValues`. Mirrors
+    /// `(*Request).SetPathValue`.
     pub fn SetPathValue<K: Into<string>, V: Into<string>>(&mut self, name: K, value: V) {
-        self.path_values.Set(name.into(), value.into());
+        let name = name.into();
+        let i = self.patIndex(name.clone());
+        if i >= 0 {
+            self.matches[i] = value.into();
+        } else {
+            self.otherValues.Set(name, value.into());
+        }
     }
 
-    /// Internal: bulk-install path bindings from a successful pattern
-    /// match. Used by `ServeMux::ServeHTTP`; not part of the public
-    /// API since users would set bindings via `SetPathValue` instead.
-    #[doc(hidden)]
-    pub fn __set_path_values(&mut self, m: crate::gomap::map<string, string>) {
-        self.path_values = m;
+    // go: sdk 1.25.5 net/http/request.go:1489-1507 Request.patIndex
+    /// Go: "patIndex returns the index of name in the list of named
+    /// wildcards of the request's pattern, or -1 if there is no such
+    /// name." Go's comment on the shape: "The linear search seems
+    /// expensive compared to a map, but just creating the map takes a
+    /// lot of time, and most patterns will just have a couple of
+    /// wildcards."
+    pub(crate) fn patIndex(&self, name: string) -> int {
+        let pat = match &self.pat {
+            Some(p) => p,
+            None => return -1,
+        };
+        let mut i: int = 0;
+        let segs = &pat.segments;
+        let n = crate::len(segs);
+        let mut si: int = 0;
+        while si < n {
+            let seg = &segs[si];
+            si += 1;
+            if seg.wild && seg.s.Len() != 0 {
+                if name == seg.s {
+                    return i;
+                }
+                i += 1;
+            }
+        }
+        return -1;
     }
 
     // go: sdk 1.25.5 net/http/request.go:1327-1360 Request.ParseForm
@@ -975,7 +1005,9 @@ impl Default for Request {
             ContentLength: 0,
             Body: slice::<byte>::__from_vec(Vec::new()),
             RemoteAddr: string::new(),
-            path_values: crate::gomap::map::<string, string>::new(),
+            pat: None,
+            matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
+            otherValues: crate::gomap::map::<string, string>::new(),
             form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(FormCell::default())),
             ctx: None,
         };
@@ -1007,7 +1039,9 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         ContentLength: 0,
         Body: slice::<byte>::__from_vec(Vec::new()),
         RemoteAddr: string::new(),
-        path_values: crate::gomap::map::<string, string>::new(),
+        pat: None,
+        matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
+        otherValues: crate::gomap::map::<string, string>::new(),
         form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(FormCell::default())),
         ctx: None,
     };

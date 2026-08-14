@@ -914,8 +914,32 @@ impl ResponseWriter for response {
     }
 
     fn WriteHeader(&self, statusCode: int) {
+        // Go logs both misuse cases with the offending CALLER's frame
+        // (server.go:1186-1194) — the whole point of relevantCaller is
+        // that "some handler you wrote called this twice" names the
+        // handler, not net/http. Go routes through c.server.logf;
+        // goish's response carries no server pointer, so the package
+        // log fallback (what logf does with no ErrorLog) is used.
+        if self.__hijacked() {
+            let caller = super::server::relevantCaller();
+            crate::log::Printf!(
+                "http: response.WriteHeader on hijacked connection from %s (%s:%d)",
+                caller.Function,
+                crate::path::Base(caller.File),
+                caller.Line
+            );
+            return;
+        }
         let mut g = self.inner.Lock();
         if g.wrote_header {
+            drop(g);
+            let caller = super::server::relevantCaller();
+            crate::log::Printf!(
+                "http: superfluous response.WriteHeader call from %s (%s:%d)",
+                caller.Function,
+                crate::path::Base(caller.File),
+                caller.Line
+            );
             return;
         }
         g.wrote_header = true;

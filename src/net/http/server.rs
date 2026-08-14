@@ -251,22 +251,26 @@ impl ServeMux {
         r: &Request,
     ) -> (
         Arc<dyn Handler>,
-        crate::gomap::map<string, string>,
+        Option<super::pattern::pattern>,
+        crate::goslice::slice<string>,
     ) {
-        let (h, _pat, binds) = self.find_node(r);
-        return (h, binds);
+        let (h, _patstr, pat, matches) = self.find_node(r);
+        return (h, pat, matches);
     }
 
     /// Shared body of `match_handler` and `Handler`: resolve a request
     /// through the routing tree, returning the handler, the matched
-    /// pattern string and the wildcard bindings.
+    /// pattern string, the pattern itself and the POSITIONAL wildcard
+    /// matches (Go's `pat`/`matches` pair, request.go:335-336 — named
+    /// resolution happens lazily in `Request.patIndex`, not here).
     fn find_node(
         &self,
         r: &Request,
     ) -> (
         Arc<dyn Handler>,
         string,
-        crate::gomap::map<string, string>,
+        Option<super::pattern::pattern>,
+        crate::goslice::slice<string>,
     ) {
         let host = stripHostPort(r.Host.clone());
         let path = cleanPath(r.URL.Path.clone());
@@ -278,7 +282,8 @@ impl ServeMux {
             return (
                 RedirectHandler(target.clone(), super::status::StatusMovedPermanently),
                 target,
-                crate::gomap::map::<string, string>::new(),
+                None,
+                crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
             );
         }
         // Go: if path != escapedPath { redirect to the cleaned path }
@@ -305,41 +310,24 @@ impl ServeMux {
             return (
                 RedirectHandler(target.clone(), super::status::StatusMovedPermanently),
                 target,
-                crate::gomap::map::<string, string>::new(),
+                None,
+                crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
             );
         }
         let (n, matches) = s.tree.r#match(&host, &r.Method, &path);
         if let Some(n) = n {
             if let Some(h) = n.handler.clone() {
-                let pat = n.pattern.as_ref();
-                let mut binds: crate::gomap::map<string, string> =
-                    crate::gomap::map::<string, string>::new();
-                // The tree returns POSITIONAL matches; name them by
-                // zipping against the pattern's wild segments, in
-                // order, the way Go's ServeHTTP does with
-                // r.SetPathValue.
-                if let Some(p) = pat {
-                    let mut mi: int = 0;
-                    let segs = &p.segments;
-                    let sn = crate::len(segs);
-                    let mut si: int = 0;
-                    while si < sn {
-                        let seg = &segs[si];
-                        si += 1;
-                        if !seg.wild || seg.s.Len() == 0 {
-                            continue;
-                        }
-                        if mi < crate::len(&matches) {
-                            binds.Set(seg.s.clone(), matches[mi].clone());
-                            mi += 1;
-                        }
-                    }
-                }
-                let patstr = match pat {
+                // Go hands the request the raw pat/matches pair
+                // (ServeHTTP → findHandler, server.go:2854) and lets
+                // Request.patIndex resolve names LAZILY; the eager
+                // name→value zip that used to live here is gone with
+                // it.
+                let pat = n.pattern.clone();
+                let patstr = match &pat {
                     Some(p) => p.str.clone(),
                     None => string::new(),
                 };
-                return (h, patstr, binds);
+                return (h, patstr, pat, matches);
             }
         }
         // Go: no pattern matched this method, but one may match the
@@ -360,13 +348,15 @@ impl ServeMux {
             return (
                 Arc::new(methodNotAllowedHandler { allow: joined }) as Arc<dyn Handler>,
                 string::new(),
-                crate::gomap::map::<string, string>::new(),
+                None,
+                crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
             );
         }
         return (
             Arc::new(notFoundHandler) as Arc<dyn Handler>,
             string::new(),
-            crate::gomap::map::<string, string>::new(),
+            None,
+            crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
         );
     }
 }
@@ -472,7 +462,7 @@ impl ServeMux {
     /// for a missing trailing slash (`matchOrRedirect`); this does
     /// not.
     pub fn Handler(&self, r: &Request) -> (Arc<dyn Handler>, string) {
-        let (h, pat, _binds) = self.find_node(r);
+        let (h, pat, _p, _matches) = self.find_node(r);
         return (h, pat);
     }
 }
@@ -492,15 +482,17 @@ impl Handler for ServeMux {
             w.WriteHeader(super::status::StatusBadRequest);
             return;
         }
-        let (h, bindings) = self.match_handler(r);
-        if bindings.Len() == 0 {
+        let (h, pat, matches) = self.match_handler(r);
+        if pat.is_none() {
             h.ServeHTTP(w, r);
         } else {
-            // Clone the request and attach path-value bindings before
-            // dispatching, so r.PathValue(name) inside the handler
-            // sees the bindings from the matched pattern.
+            // Go: findHandler sets r.pat / r.matches on the request
+            // it dispatches (server.go:2854); r.PathValue resolves
+            // names lazily through patIndex. goish clones because the
+            // handler receives &Request.
             let mut r2 = r.clone();
-            r2.__set_path_values(bindings);
+            r2.pat = pat;
+            r2.matches = matches;
             h.ServeHTTP(w, &r2);
         }
     }
@@ -1449,6 +1441,42 @@ pub fn putBufioWriter<W: crate::io::Writer>(bw: bufio::Writer<W>) {
     // Other sizes: dropped, as in Go (bufioWriterPool returns nil).
 }
 
+// go: sdk 1.25.5 net/http/server.go:1166-1182 relevantCaller
+//
+/// Go: "relevantCaller searches the call stack for the first function
+/// outside of net/http. The purpose of this function is to provide
+/// more helpful error messages."
+///
+/// Two adaptations, both stated rather than silent:
+///  * Go tests `strings.HasPrefix(frame.Function, "net/http.")`;
+///    goish frames carry Rust symbol names (mangled v0 or demangled,
+///    depending on what the symboliser's table holds), where this
+///    package spells as `net4http` / `net::http`. A substring test
+///    covers both spellings.
+///  * Go SHADOWS `frame` inside its loop (`frame, more :=`), so when
+///    every frame is inside net/http the OUTER zero Frame is what the
+///    final return hands back — not the last frame seen. Mirrored
+///    faithfully, quirk included.
+pub fn relevantCaller() -> crate::runtime::Frame {
+    let mut pc = crate::goslice::slice::<crate::types::uintptr>::__from_vec(
+        alloc::vec![0; 16],
+    );
+    let n = crate::runtime::Callers(1, &mut pc);
+    let mut frames = crate::runtime::CallersFrames(pc.slice(0, n));
+    let frame = crate::runtime::Frame::default();
+    loop {
+        let (inner, more) = frames.Next();
+        let f: &str = inner.Function.as_ref();
+        if !(f.contains("net4http") || f.contains("net::http")) {
+            return inner;
+        }
+        if !more {
+            break;
+        }
+    }
+    return frame;
+}
+
 // go: sdk 1.25.5 net/http/server.go:1808-1810 closeWriter
 //
 /// Go: "closeWriter is an interface that implements CloseWrite." The
@@ -1466,6 +1494,101 @@ pub trait closeWriter {
 #[crate::interface] // goishlint:ignore GOISH022 - attribute macro path
 pub trait connectionStater {
     fn ConnectionState(&self) -> crate::crypto::tls::ConnectionState;
+}
+
+// goishlint:ignore GOISH021 loggingConn — same embedded-interface
+// shape as onceCloseListener below: Go embeds `net.Conn` anonymously,
+// GOISH019 reads goish's necessarily-named field as an addition, and
+// the only alternative waiver is file-wide. Anchor omitted on the
+// struct; everything callable stays anchored.
+//
+/// Go: "loggingConn is used for debugging." — a net.Conn wrapper
+/// that logs every Read/Write/Close with a unique per-wrap name
+/// (server.go:4016).
+pub struct loggingConn {
+    name: string,
+    /// Go embeds `net.Conn`; the delegation the embedding buys is
+    /// spelled out method-by-method in the impl below.
+    conn: alloc::boxed::Box<dyn net::Conn>,
+}
+
+// go: sdk 1.25.5 net/http/server.go:4022-4025 uniqNameMu
+// go: sdk 1.25.5 net/http/server.go:4022-4025 uniqNameNext
+//
+// One decl for Go's two: the var group pairs a mutex WITH the map it
+// guards, which is goish's `Mutex<map>` spelled as two names.
+fn uniqNameNext() -> &'static crate::sync::Mutex<crate::gomap::map<string, crate::types::int>> {
+    static NEXT: crate::lazy::Lazy<
+        crate::sync::Mutex<crate::gomap::map<string, crate::types::int>>,
+    > = crate::lazy::Lazy::new(|| {
+        crate::sync::Mutex::new(crate::gomap::map::<string, crate::types::int>::new())
+    });
+    return NEXT.get();
+}
+
+// go: sdk 1.25.5 net/http/server.go:4027-4035 newLoggingConn
+pub fn newLoggingConn(
+    baseName: string,
+    c: alloc::boxed::Box<dyn net::Conn>,
+) -> alloc::boxed::Box<dyn net::Conn> {
+    let mut next = uniqNameNext().Lock();
+    let (n, _) = next.Get(baseName.clone());
+    next.Set(baseName.clone(), n + 1);
+    return alloc::boxed::Box::new(loggingConn {
+        name: crate::fmt::Sprintf!("%s-%d", baseName, crate::int64(n + 1)),
+        conn: c,
+    });
+}
+
+impl net::Conn for loggingConn {
+    // go: sdk 1.25.5 net/http/server.go:4044-4049 loggingConn.Read
+    fn Read(&mut self, p: &mut crate::goslice::slice<crate::types::byte>) -> (int, error) {
+        crate::log::Printf!("%s.Read(%d) = ....", self.name, crate::int64(crate::len(&*p)));
+        let (n, err) = self.conn.Read(p);
+        crate::log::Printf!(
+            "%s.Read(%d) = %d, %v",
+            self.name,
+            crate::int64(crate::len(&*p)),
+            crate::int64(n),
+            err
+        );
+        return (n, err);
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:4037-4042 loggingConn.Write
+    fn Write(&mut self, p: crate::goslice::slice<crate::types::byte>) -> (int, error) {
+        let l = crate::int64(crate::len(&p));
+        crate::log::Printf!("%s.Write(%d) = ....", self.name, l);
+        let (n, err) = self.conn.Write(p);
+        crate::log::Printf!("%s.Write(%d) = %d, %v", self.name, l, crate::int64(n), err);
+        return (n, err);
+    }
+
+    // go: sdk 1.25.5 net/http/server.go:4051-4056 loggingConn.Close
+    fn Close(&mut self) -> error {
+        crate::log::Printf!("%s.Close() = ...", self.name);
+        let err = self.conn.Close();
+        crate::log::Printf!("%s.Close() = %v", self.name, err);
+        return err;
+    }
+
+    // go: none — Go gets these five by embedding net.Conn (no logging,
+    // no override); goish spells the plain delegation.
+    fn LocalAddr(&self) -> net::TCPAddr {
+        return self.conn.LocalAddr();
+    }
+    fn RemoteAddr(&self) -> net::TCPAddr {
+        return self.conn.RemoteAddr();
+    }
+    fn SetDeadline(&self, t: time::Time) -> error {
+        return self.conn.SetDeadline(t);
+    }
+    fn SetReadDeadline(&self, t: time::Time) -> error {
+        return self.conn.SetReadDeadline(t);
+    }
+    fn SetWriteDeadline(&self, t: time::Time) -> error {
+        return self.conn.SetWriteDeadline(t);
+    }
 }
 
 // goishlint:ignore GOISH021 onceCloseListener — the type IS ported,

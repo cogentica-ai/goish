@@ -1539,7 +1539,9 @@ impl Client {
                         ContentLength: 0,
                         Body: slice::<byte>::__from_vec(Vec::new()),
                         RemoteAddr: string::new(),
-                        path_values: crate::gomap::map::<string, string>::new(),
+                        pat: None,
+        matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
+        otherValues: crate::gomap::map::<string, string>::new(),
                         form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(super::request::FormCell::default())),
                         // Redirect hops inherit the original request's
                         // context (Go client.go:665: ireq.Context()).
@@ -1869,7 +1871,9 @@ pub fn NewRequest<M: Into<string>, U: Into<string>, B: __RequestBody>(
         ContentLength: body_len,
         Body: body,
         RemoteAddr: string::new(),
-        path_values: crate::gomap::map::<string, string>::new(),
+        pat: None,
+        matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
+        otherValues: crate::gomap::map::<string, string>::new(),
         form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(super::request::FormCell::default())),
         ctx: None,
     };
@@ -1892,7 +1896,9 @@ fn default_request() -> Request {
         ContentLength: 0,
         Body: slice::<byte>::__from_vec(Vec::new()),
         RemoteAddr: string::new(),
-        path_values: crate::gomap::map::<string, string>::new(),
+        pat: None,
+        matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
+        otherValues: crate::gomap::map::<string, string>::new(),
         form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(super::request::FormCell::default())),
         ctx: None,
     }
