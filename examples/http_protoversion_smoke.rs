@@ -152,6 +152,30 @@ fn run() -> ! {
         );
     }
 
+    // ── an Expect the server does not know is 417 + close ──
+    //
+    // Go 1.25.5 answers exactly:
+    //   HTTP/1.1 417 Expectation Failed\r\nConnection: close\r\n
+    //   Date: …\r\nContent-Length: 0\r\n\r\n
+    // (scripts/goref.sh). The `Connection: close` is the load-bearing
+    // half: the client is holding a body back waiting for a 100, so a
+    // kept-alive conn would carry that body into the next request's
+    // parse.
+    {
+        let raw = send(
+            port,
+            b"POST / HTTP/1.1\r\nHost: x\r\nExpect: banana\r\nContent-Length: 3\r\n\r\nabc",
+        );
+        let w: &str = raw.as_ref();
+        check(
+            "an unknown Expect value is 417 with Connection: close",
+            w.starts_with("HTTP/1.1 417 Expectation Failed")
+                && w.contains("Connection: close")
+                && !w.contains("served"),
+            raw,
+        );
+    }
+
     // ── the ordinary case is untouched ──
     {
         let raw = send(port, b"GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");

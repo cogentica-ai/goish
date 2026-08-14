@@ -2571,8 +2571,7 @@ impl Server {
                 // sendExpectationFailed, server.go:2103).
                 if errors::Is(err.clone(), super::request::ErrUnsupportedExpect) {
                     let w = response::new(conn);
-                    w.__set_keep_alive(false);
-                    w.WriteHeader(417);
+                    w.sendExpectationFailed();
                     let _ = w.close_conn();
                     return;
                 }

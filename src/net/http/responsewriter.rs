@@ -350,6 +350,34 @@ impl response {
         }
     }
 
+    /// `response.sendExpectationFailed` (server.go:2217).
+    ///
+    /// Prose, not an anchor: this file holds part of server.go's
+    /// declarations and the rest live in server.rs, so an anchor here
+    /// would put the file under per-file rules it cannot satisfy
+    /// without a decls manifest.
+    ///
+    /// RFC 7231 5.1.1: "A server that receives an Expect field-value
+    /// other than 100-continue MAY respond with a 417 (Expectation
+    /// Failed)". The `Connection: close` is not optional in practice —
+    /// the client is waiting for a 100 before it sends the body, so a
+    /// kept-alive conn would then carry a body nobody asked for into
+    /// the next request's parse.
+    ///
+    /// Both lines are belt and braces here: `response::new` starts
+    /// with keep_alive false, so the writer would emit
+    /// `Connection: close` anyway. They stay because they are what Go
+    /// states, and because that default is not this function's to
+    /// depend on.
+    pub fn sendExpectationFailed(&self) {
+        self.header
+            .lock()
+            .Set(string("Connection"), string("close"));
+        self.__set_keep_alive(false);
+        self.WriteHeader(super::status::StatusExpectationFailed);
+        return;
+    }
+
     /// Server hook: enable/disable HTTP keep-alive on this response.
     pub fn __set_keep_alive(&self, keep_alive: bool) {
         self.inner.lock().keep_alive = keep_alive;
