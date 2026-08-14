@@ -146,6 +146,140 @@ impl transferReader {
     }
 }
 
+// ─── transferWriter ─────────────────────────────────────────────────
+
+// goishlint:ignore GOISH019 transferWriter — Go's struct carries the
+// Body/ByteReadCloser/FlushHeaders machinery this slice stops short
+// of; what lands are the three fields its framing DECISIONS read.
+// go: sdk 1.25.5 net/http/transfer.go:61-76 transferWriter
+/// Go: "transferWriter inspects the fields of a user-supplied Request
+/// or Response, sanitizes them without changing the user object and
+/// provides methods for writing the respective header, body and
+/// trailer in wire format."
+///
+/// STAGED. `newTransferWriter`, `writeBody`, `probeRequestBody` and
+/// friends need the `io.ReadCloser` Body; the decision below does not,
+/// which is why my earlier "all sixteen are blocked on the Body
+/// redesign" was too broad.
+#[derive(Clone, Default)]
+pub struct transferWriter {
+    pub Method: string,
+    pub ContentLength: i64,
+    pub TransferEncoding: slice<string>,
+}
+
+impl transferWriter {
+    // go: sdk 1.25.5 net/http/transfer.go:254-276 transferWriter.shouldSendContentLength
+    /// Whether to emit a Content-Length header. Pure: it reads only
+    /// Method, ContentLength and TransferEncoding.
+    ///
+    /// The last clause is the surprising one. With ContentLength == 0
+    /// and NO Transfer-Encoding, POST/PUT/PATCH send `Content-Length:
+    /// 0` (many servers expect it) but GET/HEAD/DELETE do not. Add an
+    /// explicit `identity` encoding and DELETE flips to true, because
+    /// only GET and HEAD are excluded in that branch. Verified against
+    /// Go over 7 methods x 3 lengths x 3 encodings.
+    pub fn shouldSendContentLength(&self) -> bool {
+        if chunked(&self.TransferEncoding) {
+            return false;
+        }
+        if self.ContentLength > 0 {
+            return true;
+        }
+        if self.ContentLength < 0 {
+            return false;
+        }
+        // Go: "Many servers expect a Content-Length for these methods"
+        if self.Method == "POST" || self.Method == "PUT" || self.Method == "PATCH" {
+            return true;
+        }
+        if self.ContentLength == 0 && isIdentity(&self.TransferEncoding) {
+            if self.Method == "GET" || self.Method == "HEAD" {
+                return false;
+            }
+            return true;
+        }
+        return false;
+    }
+}
+
+// ─── body ───────────────────────────────────────────────────────────
+
+// goishlint:ignore GOISH019 body — Go's struct carries src/hdr/r/
+// closing/onHitEOF, the streaming half that needs io.ReadCloser. What
+// lands are the flags its state accessors read.
+// go: sdk 1.25.5 net/http/transfer.go:811-827 body
+/// Go: "body turns a Reader into a ReadCloser. Close ensures that the
+/// body has been fully read and then reads the trailer if necessary."
+///
+/// STAGED, same reason as transferWriter.
+pub struct body {
+    state: crate::sync::Mutex<bodyState>,
+}
+
+// go: none — goish-only: the payload of Go's `mu sync.Mutex` on body,
+// restricted to the fields this slice ports.
+struct bodyState {
+    sawEOF: bool,
+    /// Go: "true if Close called and we didn't read to the end of src"
+    earlyClose: bool,
+    onHitEOF: Option<alloc::boxed::Box<dyn Fn() + Send + Sync>>,
+}
+
+impl body {
+    // go: none — goish-only: Go builds `body` inside readTransfer.
+    pub fn __new() -> body {
+        return body {
+            state: crate::sync::Mutex::new(bodyState {
+                sawEOF: false,
+                earlyClose: false,
+                onHitEOF: None,
+            }),
+        };
+    }
+
+    // go: sdk 1.25.5 net/http/transfer.go:1012-1016 body.didEarlyClose
+    /// Whether Close was called before the source was drained. This is
+    /// what `response.closedRequestBodyEarly` consults to refuse
+    /// connection reuse — an undrained body would desync the next
+    /// keep-alive request.
+    pub fn didEarlyClose(&self) -> bool {
+        return self.state.Lock().earlyClose;
+    }
+
+    // go: sdk 1.25.5 net/http/transfer.go:1018-1024 body.bodyRemains
+    /// Go: "reports whether future Read calls might yield data."
+    pub fn bodyRemains(&self) -> bool {
+        return !self.state.Lock().sawEOF;
+    }
+
+    // go: sdk 1.25.5 net/http/transfer.go:1026-1030 body.registerOnHitEOF
+    pub fn registerOnHitEOF(&self, fn_: alloc::boxed::Box<dyn Fn() + Send + Sync>) {
+        self.state.Lock().onHitEOF = Some(fn_);
+        return;
+    }
+
+    // go: none — goish-only: drives the flags the accessors read until
+    // the streaming Read lands.
+    pub fn __mark_eof(&self) {
+        let cb = {
+            let mut st = self.state.Lock();
+            st.sawEOF = true;
+            st.onHitEOF.take()
+        };
+        if let Some(f) = cb {
+            f();
+        }
+        return;
+    }
+
+    // go: none — goish-only: same, for the early-close flag.
+    pub fn __mark_early_close(&self) {
+        self.state.Lock().earlyClose = true;
+        return;
+    }
+}
+
 // ─── status-driven rules ────────────────────────────────────────────
 
 // go: sdk 1.25.5 net/http/transfer.go:250-252 noResponseBodyExpected

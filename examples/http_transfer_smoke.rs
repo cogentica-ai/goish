@@ -14,7 +14,7 @@ extern crate goish;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::fmt;
-use goish::net::http::transfer::{
+use goish::net::http::transfer::{body, transferWriter, 
     bodyAllowedForStatus, chunked, fixLength, fixTrailer, isIdentity, isUnsupportedTEError,
     noResponseBodyExpected, parseContentLength, shouldClose, suppressedHeaders, transferReader,
 };
@@ -362,6 +362,58 @@ fn run() {
             !tr.Chunked && tr.Header.Values(string("Transfer-Encoding")).Len() == 0,
             string(""),
         );
+    }
+
+    // ── transferWriter.shouldSendContentLength ──
+    {
+        // (method, contentLength, transferEncoding, want)
+        let cases: &[(&'static str, i64, &[&'static str], bool)] = &[
+            ("GET", 5, &[], true),
+            ("GET", 5, &["chunked"], false),   // chunked always wins
+            ("GET", 0, &[], false),
+            ("GET", 0, &["identity"], false),  // GET/HEAD excluded here
+            ("HEAD", 0, &["identity"], false),
+            ("POST", 0, &[], true),            // servers expect CL: 0
+            ("PUT", 0, &[], true),
+            ("PATCH", 0, &[], true),
+            ("DELETE", 0, &[], false),         // ...but not DELETE
+            ("DELETE", 0, &["identity"], true),// unless identity is set
+            ("", 0, &["identity"], true),      // empty method too
+            ("POST", -1, &[], false),          // unknown length
+        ];
+        let mut bad = string("");
+        for (m, cl, te, want) in cases {
+            let tw = transferWriter {
+                Method: string(*m),
+                ContentLength: *cl,
+                TransferEncoding: strs(te),
+            };
+            if tw.shouldSendContentLength() != *want {
+                bad = fmt::Sprintf!("%s cl=%d -> %v", string(*m), *cl, tw.shouldSendContentLength());
+            }
+        }
+        check("shouldSendContentLength over 12 shapes", bad.Len() == 0, bad);
+    }
+
+    // ── body state flags ──
+    {
+        let b = body::__new();
+        check("a fresh body has data remaining and was not closed early",
+              b.bodyRemains() && !b.didEarlyClose(), string(""));
+        b.__mark_early_close();
+        check("didEarlyClose flips, and that is what refuses conn reuse",
+              b.didEarlyClose(), string(""));
+
+        let b2 = body::__new();
+        static HIT: AtomicUsize = AtomicUsize::new(0);
+        b2.registerOnHitEOF(alloc::boxed::Box::new(|| {
+            HIT.fetch_add(1, Ordering::Relaxed);
+        }));
+        b2.__mark_eof();
+        b2.__mark_eof();
+        check("registerOnHitEOF fires exactly once, and bodyRemains goes false",
+              !b2.bodyRemains() && HIT.load(Ordering::Relaxed) == 1,
+              fmt::Sprintf!("hits=%d", HIT.load(Ordering::Relaxed) as i64));
     }
 
     let p = PASSED.load(Ordering::Relaxed);
