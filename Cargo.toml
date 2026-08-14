@@ -1675,3 +1675,7 @@ path = "examples/http_bufio_pool_smoke.rs"
 [[example]]
 name = "http_misc_decls_smoke"
 path = "examples/http_misc_decls_smoke.rs"
+
+[[example]]
+name = "http_url_userinfo_smoke"
+path = "examples/http_url_userinfo_smoke.rs"

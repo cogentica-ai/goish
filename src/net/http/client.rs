@@ -1117,14 +1117,15 @@ pub fn refererForURL(lastReq: &URL, newReq: &URL, explicitRef: string) -> string
         return explicitRef;
     }
 
-    // Go strips `lastReq.User.String()+"@"` from the rendered URL
-    // here. goish's `url::URL` has NO `User` field — `Parse` splits the
-    // authority at the last '@' and DISCARDS the userinfo (url.rs:971)
-    // rather than storing it, so a goish URL can never render one and
-    // there is nothing to strip. If `URL.User` is ever added (it is a
-    // real GOISH019 field-parity gap, along with Opaque/OmitHost/
-    // ForceQuery), this function must grow that branch back.
-    return lastReq.String();
+    // Go: referer := lastReq.String(); if lastReq.User != nil {
+    //     auth := lastReq.User.String() + "@"
+    //     referer = strings.Replace(referer, auth, "", 1) }
+    let referer = lastReq.String();
+    if let Some(u) = &lastReq.User {
+        let auth = u.String() + "@";
+        return crate::strings::Replace(referer, auth, string(""), 1);
+    }
+    return referer;
 }
 
 // go: sdk 1.25.5 net/http/client.go:539-547 urlErrorOp
@@ -1186,12 +1187,17 @@ pub fn shouldCopyHeaderOnRedirect(initial: &URL, dest: &URL) -> bool {
 /// Redacts the password in a URL for error messages. An EMPTY password
 /// still counts as set: `http://u:@a.com` renders as `http://u:***@a.com`.
 pub fn stripPassword(u: &URL) -> string {
-    // Same `URL.User` gap as refererForURL above: goish's Parse
-    // discards userinfo, so a parsed URL never carries a password to
-    // redact and this reduces to String(). Kept as a named port so the
-    // rule is in one place when `URL.User` lands. Go's exact behaviour,
-    // for whoever adds it: an EMPTY password still counts as set —
-    // `http://u:@a.com` renders `http://u:***@a.com`.
+    if let Some(ui) = &u.User {
+        let (_, passSet) = ui.Password();
+        if passSet {
+            return crate::strings::Replace(
+                u.String(),
+                ui.String() + "@",
+                ui.Username() + ":***@",
+                1,
+            );
+        }
+    }
     return u.String();
 }
 

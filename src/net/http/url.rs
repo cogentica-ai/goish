@@ -144,6 +144,11 @@ pub struct URL {
     pub Fragment: string,
     /// Encoded fragment hint (used by `EscapedFragment`).
     pub RawFragment: string,
+    /// Go: `User *Userinfo` — "username and password information".
+    /// None models Go's nil pointer. Captured by Parse from the
+    /// authority (everything before the LAST '@'), rendered by
+    /// String()/Redacted(), stripped by net/http's refererForURL.
+    pub User: Option<Userinfo>,
 }
 
 impl URL {
@@ -156,6 +161,7 @@ impl URL {
             RawQuery: string::new(),
             Fragment: string::new(),
             RawFragment: string::new(),
+            User: None,
         }
     }
 
@@ -400,8 +406,17 @@ impl URL {
             out.extend_from_slice(self.Scheme.as_bytes());
             out.push(b':');
         }
-        if !self.Scheme.as_bytes().is_empty() || !self.Host.as_bytes().is_empty() {
+        if !self.Scheme.as_bytes().is_empty()
+            || !self.Host.as_bytes().is_empty()
+            || self.User.is_some()
+        {
             out.extend_from_slice(b"//");
+            // Go: if ui := u.User; ui != nil { buf.WriteString(ui.String());
+            //     buf.WriteByte('@') } (url.go:875-878)
+            if let Some(ui) = &self.User {
+                out.extend_from_slice(ui.String().as_bytes());
+                out.push(b'@');
+            }
             out.extend_from_slice(self.Host.as_bytes());
         }
         // Go: path := u.EscapedPath()  — NOT u.Path. Writing the raw
@@ -442,13 +457,17 @@ impl URL {
     // go: sdk 1.25.5 net/url/url.go:926-936 URL.Redacted
     //
     /// `(u *URL).Redacted()` (url.go line 926) — like `String()` but
-    /// replaces any password in the userinfo with `xxxxx`.
-    ///
-    /// Slim deviation: the goish URL struct has no `User` field, so
-    /// no userinfo can appear in the output. Redacted is therefore
-    /// equivalent to String() until a User field is added.
+    /// replaces any SET password in the userinfo with `xxxxx`. A
+    /// username-only userinfo renders unchanged, as Go's does.
     pub fn Redacted(&self) -> string {
-        self.String()
+        let mut ru = self.clone();
+        if let Some(ui) = &ru.User {
+            let (_, has) = ui.Password();
+            if has {
+                ru.User = Some(UserPassword(ui.Username(), string("xxxxx")));
+            }
+        }
+        return ru.String();
     }
 
     // go: sdk 1.25.5 net/url/url.go:1242-1244 URL.MarshalBinary
@@ -521,6 +540,7 @@ pub(crate) fn parse_request_uri(raw: &string) -> Result<URL, string> {
             RawQuery: string::new(),
             Fragment: string::new(),
             RawFragment: string::new(),
+            User: None,
         });
     }
 
@@ -569,6 +589,7 @@ pub(crate) fn parse_request_uri(raw: &string) -> Result<URL, string> {
         RawQuery: string::from_bytes(query),
         Fragment: string::new(),
         RawFragment: string::new(),
+        User: None,
     })
 }
 
@@ -702,19 +723,45 @@ impl Userinfo {
         (self.password.clone(), self.password_set)
     }
 
-    /// `(*Userinfo).String()` (url.go line 435) — "user[:pass]". Slim port:
-    /// uses PathEscape mode rather than encodeUserPassword.
+    /// `(*Userinfo).String()` (url.go line 435) — "user[:pass]",
+    /// escaped in encodeUserPassword mode (Go escapes only '@', '/',
+    /// '?', ':' there — PathEscape would over-escape ':' inside the
+    /// username into an unrecognisable form).
     pub fn String(&self) -> string {
         if self.password_set {
             let mut b = crate::strings::Builder::new();
-            let _ = b.WriteString(PathEscape(self.username.clone()));
+            let _ = b.WriteString(escape(self.username.clone(), EncodingMode::UserPassword));
             let _ = b.WriteByte(b':');
-            let _ = b.WriteString(PathEscape(self.password.clone()));
+            let _ = b.WriteString(escape(self.password.clone(), EncodingMode::UserPassword));
             b.String()
         } else {
-            PathEscape(self.username.clone())
+            escape(self.username.clone(), EncodingMode::UserPassword)
         }
     }
+}
+
+// go: sdk 1.25.5 net/url/url.go:1292-1323 validUserinfo
+//
+/// Go: "validUserinfo reports whether s is a valid userinfo string per
+/// RFC 3986 Section 3.2.1". The '@' acceptance is deliberate despite
+/// the RFC (go.dev/issue/3439, /22655): "username:p@ssword" must be
+/// treated as valid userinfo — Parse already split at the LAST '@'.
+fn validUserinfo(s: string) -> bool {
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        let r = b[i];
+        i += 1;
+        if (b'A'..=b'Z').contains(&r) || (b'a'..=b'z').contains(&r) || (b'0'..=b'9').contains(&r) {
+            continue;
+        }
+        match r {
+            b'-' | b'.' | b'_' | b':' | b'~' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')'
+            | b'*' | b'+' | b',' | b';' | b'=' | b'%' | b'@' => continue,
+            _ => return false,
+        }
+    }
+    return true;
 }
 
 // go: sdk 1.25.5 net/url/url.go:189-191 QueryUnescape
@@ -928,6 +975,7 @@ fn parse(raw_url: string, via_request: bool) -> (URL, error) {
                 RawQuery: raw_query,
                 Fragment: string::new(),
                 RawFragment: string::new(),
+                User: None,
             };
             return (u, errors::nil);
         }
@@ -941,6 +989,7 @@ fn parse(raw_url: string, via_request: bool) -> (URL, error) {
 
     // Go: if (url.Scheme != "" || !viaRequest && !strings.HasPrefix(rest, "///")) && strings.HasPrefix(rest, "//") { ... authority }
     let mut host = string::new();
+    let mut user: Option<Userinfo> = None;
     let mut path_rest = rest.clone();
     if (scheme.Len() != 0
         || (!via_request && !crate::strings::HasPrefix(rest.clone(), string("///"))))
@@ -954,25 +1003,47 @@ fn parse(raw_url: string, via_request: bool) -> (URL, error) {
             n => n,
         };
         let authority = string::from_bytes(&after.as_bytes()[..host_end as usize]);
-        // Go: parseAuthority splits userinfo off at the LAST '@' —
-        //     `if i := strings.LastIndex(authority, "@"); i >= 0 { … }`
-        // — and puts it in url.User, leaving Host clean.
-        //
-        // goish's URL has no `User` field (a documented slim
-        // deviation), and the userinfo was therefore being left IN
-        // Host. That is not merely incomplete: `NewRequest` copies
-        // URL.Host into `Request.Host`, which is written as the
-        // `Host:` header, so "http://user:pw@example.com/p" put the
-        // credentials on the wire in a header that must not carry
-        // them. Splitting at the last '@' matches Go's Host exactly;
-        // the userinfo is dropped rather than stored, which changes
-        // nothing today because no goish code ever read it.
+        // Go: parseAuthority (url.go:585) splits userinfo off at the
+        // LAST '@' and stores it in url.User, leaving Host clean.
+        // (Last, not first: "u:p@ss@host" carries an '@' INSIDE the
+        // userinfo — go.dev/issue/3439.) Host cleanliness is security-
+        // relevant here: NewRequest copies URL.Host into Request.Host,
+        // which goes on the wire as the `Host:` header.
         let ab = authority.as_bytes();
-        let host_start = match ab.iter().rposition(|&c| c == b'@') {
-            Some(i) => i + 1,
-            None => 0,
-        };
-        host = string::from_bytes(&ab[host_start..]);
+        match ab.iter().rposition(|&c| c == b'@') {
+            Some(i) => {
+                host = string::from_bytes(&ab[i + 1..]);
+                let userinfo = string::from_bytes(&ab[..i]);
+                if !validUserinfo(userinfo.clone()) {
+                    return (
+                        URL::empty(),
+                        errors::New(string("net/url: invalid userinfo")),
+                    );
+                }
+                if !crate::strings::Contains(userinfo.clone(), string(":")) {
+                    let (un, uerr) = unescape(userinfo, false);
+                    if !uerr.IsNil() {
+                        return (URL::empty(), uerr);
+                    }
+                    user = Some(User(un));
+                } else {
+                    let (username, password, _) =
+                        crate::strings::Cut(userinfo, string(":"));
+                    let (un, e1) = unescape(username, false);
+                    if !e1.IsNil() {
+                        return (URL::empty(), e1);
+                    }
+                    let (pw, e2) = unescape(password, false);
+                    if !e2.IsNil() {
+                        return (URL::empty(), e2);
+                    }
+                    user = Some(UserPassword(un, pw));
+                }
+            }
+            None => {
+                host = authority;
+            }
+        }
         path_rest = string::from_bytes(&after.as_bytes()[host_end as usize..]);
     }
 
@@ -990,6 +1061,7 @@ fn parse(raw_url: string, via_request: bool) -> (URL, error) {
         RawQuery: raw_query,
         Fragment: string::new(),
         RawFragment: string::new(),
+        User: user,
     };
     (u, errors::nil)
 }
@@ -1177,6 +1249,7 @@ pub fn ValuesDel<K: Into<string>>(
 enum EncodingMode {
     Path,
     PathSegment,
+    UserPassword,
     QueryComponent,
 }
 
@@ -1266,6 +1339,11 @@ fn shouldEscape(c: byte, mode: EncodingMode) -> bool {
             // Go: encodePathSegment — return c == '/' || c == ';' || c == ',' || c == '?'
             EncodingMode::PathSegment => {
                 return c == b'/' || c == b';' || c == b',' || c == b'?';
+            }
+            // Go: encodeUserPassword (§3.2.1) — "we must escape only
+            // '@', '/', and '?'" plus ':' (special in userinfo parsing).
+            EncodingMode::UserPassword => {
+                return c == b'@' || c == b'/' || c == b'?' || c == b':';
             }
             // Go: encodeQueryComponent — RFC reserves everything.
             EncodingMode::QueryComponent => return true,
