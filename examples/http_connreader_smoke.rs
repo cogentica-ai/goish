@@ -13,7 +13,9 @@ extern crate goish;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::fmt;
+use alloc::sync::Arc;
 use goish::net::http::server::connReader;
+use goish::net::http::{Handler, HandlerFunc, Request, ResponseWriter, ServeMux};
 use goish::string;
 
 static PASSED: AtomicUsize = AtomicUsize::new(0);
@@ -73,6 +75,27 @@ fn run() {
         cr.setReadLimit(1);
         check("the mutex is genuinely free again afterwards",
               !cr.hitReadLimit(), string(""));
+    }
+
+    // ── ServeMux.register ── Go's single registration choke point
+    {
+        let mux = ServeMux::new();
+        mux.register(
+            "/x",
+            Arc::new(HandlerFunc(
+                |w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request| {
+                    let _ = w.Write(goish::bytes("hit"));
+                },
+            )) as Arc<dyn Handler>,
+        );
+        // Registering the same pattern twice must panic in Go; here we
+        // only assert the first one took, which the mux reports by
+        // routing to it.
+        let (req, _) = goish::net::http::NewRequest(
+            string("GET"), string("http://h/x"), goish::slice::new());
+        let (_, pat) = mux.Handler(&req);
+        check("register routes the pattern it was given",
+              pat.Len() > 0, pat);
     }
 
     let p = PASSED.load(Ordering::Relaxed);

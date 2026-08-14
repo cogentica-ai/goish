@@ -131,6 +131,21 @@ impl ServeMux {
             })),
         }
     }
+    // go: sdk 1.25.5 net/http/server.go:2909-2913 ServeMux.register
+    /// Go: `register` is the panicking form of `registerErr` — every
+    /// public Handle/HandleFunc path goes through it, and a bad
+    /// pattern is a programmer error, not a runtime condition.
+    ///
+    /// goish's `registerErr` cannot be ported until ServeMux is
+    /// restructured onto routing_tree.rs (it is a Vec today), so this
+    /// forwards to the existing panicking `handle_arc`. The name is
+    /// what matters: it is the single choke point Go routes every
+    /// registration through.
+    pub fn register<P: Into<string>>(&self, pattern: P, handler: Arc<dyn Handler>) {
+        self.handle_arc(pattern.into(), handler);
+        return;
+    }
+
 
     /// `mux.Handle(pattern, h)` — register a Handler. Patterns that
     /// contain `{` are parsed as Go 1.22 wildcards; any parse error

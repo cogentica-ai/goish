@@ -313,6 +313,10 @@ struct respInner {
     closeAfterReply: bool,
     /// Go's `response.requestBodyLimitHit` (server.go:248).
     requestBodyLimitHit: bool,
+    /// Go's `canWriteContinue atomic.Bool` (server.go:244) — cleared
+    /// by disableWriteContinue so Request.Body.Read stops emitting an
+    /// automatic 100-Continue.
+    canWriteContinue: bool,
     /// Go's `response.trailers []string` (server.go:214) — trailer
     /// keys declared via the `Trailer` response header before the
     /// head is written. Populated by `declareTrailer`.
@@ -339,6 +343,7 @@ impl response {
                 is_head: false,
                 closeAfterReply: false,
                 requestBodyLimitHit: false,
+                canWriteContinue: true,
                 trailers: Vec::new(),
             }),
             header: Arc::new(SpinLock::new(h)),
@@ -458,6 +463,41 @@ impl response {
     // consults it after the handler returns.
     pub fn __close_after_reply(&self) -> bool {
         return self.inner.lock().closeAfterReply;
+    }
+
+    // `response.disableWriteContinue` — net/http/server.go line 574.
+    // Prose, not an anchor; see declareTrailer below.
+    //
+    /// Go: "stops Request.Body.Read from sending an automatic
+    /// 100-Continue. If a 100-Continue is being written, it waits for
+    /// it to complete before continuing." Go takes writeContinueMu to
+    /// get that wait; goish's flag lives under the response's own
+    /// lock, which serialises it against the writer the same way.
+    pub fn disableWriteContinue(&self) {
+        self.inner.lock().canWriteContinue = false;
+        return;
+    }
+
+    // `response.canWriteContinue` reader — goish-only, so the serve
+    // loop and tests can observe the flag.
+    pub fn __can_write_continue(&self) -> bool {
+        return self.inner.lock().canWriteContinue;
+    }
+
+    // `response.closedRequestBodyEarly` — net/http/server.go line 1751.
+    //
+    /// Go type-asserts `w.req.Body.(*body)` and asks it whether Close
+    /// beat EOF; `shouldReuseConnection` refuses the conn when it did,
+    /// because an undrained body desyncs the next keep-alive request.
+    ///
+    /// ALWAYS FALSE in goish today, and that is not a stub: a goish
+    /// Request owns its body as a `slice<byte>`, so there is no
+    /// `*body` to assert on and no early close to detect. The same
+    /// desync is prevented from the other end — MaxBytesReader and
+    /// MaxBytesHandler set closeAfterReply directly. This grows a real
+    /// body when Request.Body becomes an io.ReadCloser.
+    pub fn closedRequestBodyEarly(&self) -> bool {
+        return false;
     }
 
     // `response.declareTrailer` — net/http/server.go line 551.
