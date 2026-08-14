@@ -475,11 +475,23 @@ impl Server {
             Ok(c) => c,
             Err(e) => return e,
         };
+        return self.__serve_tls_arc(alloc::sync::Arc::new(ln), cfg);
+    }
+
+    // go: none — goish-only: the body of ServeTLS after the config is
+    // resolved, taking an already-shared listener and an explicit
+    // config. httptest holds `Arc<net::Listener>` and cannot mutate
+    // `Config.TLSConfig` through its `Arc<Server>`, so it needs both.
+    // ServeTLS itself is now the thin wrapper Go's is.
+    pub(crate) fn __serve_tls_arc(
+        self: Arc<Self>,
+        ln: Arc<net::Listener>,
+        cfg: tls::Config,
+    ) -> error {
         // Track the raw listener so `Shutdown`/`Close` can wake the
         // parked Accept and close the fd — the same install `Serve`
         // performs at entry (Go routes ServeTLS through Serve, which
         // tracks the listener; server.go:3540 → :3405).
-        let ln = Arc::new(ln);
         if !self.trackListener(&ln, true) {
             return super::server::ErrServerClosed.into();
         }

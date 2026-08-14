@@ -21,4 +21,4 @@ pub mod server;
 
 pub use httptest::{NewRequest, NewRequestWithContext};
 pub use recorder::{NewRecorder, ResponseRecorder, DefaultRemoteAddr};
-pub use server::{NewServer, NewUnstartedServer, Server};
+pub use server::{NewServer, NewTLSServer, NewUnstartedServer, Server};

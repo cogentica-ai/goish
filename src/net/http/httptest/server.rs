@@ -30,6 +30,11 @@ use crate::string;
 use crate::net;
 use alloc::sync::Arc;
 
+// goishlint:ignore GOISH019 Server — Go's httptest.Server exposes
+// URL, TLS and certificate as plain fields; goish holds all three
+// behind mutexes because Start/StartTLS write them through an
+// already-shared Arc (see the URL field comment). Same data, and the
+// accessors carry the Go names.
 // go: sdk 1.25.5 net/http/httptest/server.go:26-57 Server
 //
 // A Server is an HTTP server listening on a system-chosen port on
@@ -55,6 +60,15 @@ pub struct Server {
     /// uncontended in practice: `Start` is the only writer.
     URL: sync::Mutex<string>,
     pub Listener: Arc<net::Listener>,
+
+    /// Go's `TLS *tls.Config` — "the optional TLS configuration,
+    /// populated with a new config after TLS is started." Behind a
+    /// mutex for the same reason `URL` is: StartTLS writes it through
+    /// an already-shared Arc.
+    TLS: sync::Mutex<Option<crate::crypto::tls::Config>>,
+    /// Go's `certificate *x509.Certificate`, parsed from the config's
+    /// first cert so a test can trust it explicitly.
+    certificate: sync::Mutex<Option<crate::crypto::x509::Certificate>>,
 
     /// May be changed after calling `NewUnstartedServer` and before
     /// `Start`.
@@ -105,6 +119,14 @@ fn newLocalListener() -> net::Listener {
     return l;
 }
 
+// go: sdk 1.25.5 net/http/httptest/server.go:190-194 NewTLSServer
+/// Go: "starts and returns a new Server using TLS. The caller should
+/// call Close when finished, to shut it down."
+pub fn NewTLSServer(handler: Arc<dyn super::super::Handler>) -> Arc<Server> {
+    let ts = NewUnstartedServer(handler);
+    ts.clone().StartTLS();
+    return ts;
+}
 // go: sdk 1.25.5 net/http/httptest/server.go:105-109 NewServer
 //
 // Starts and returns a new Server. The caller should call `Close`
@@ -122,6 +144,8 @@ pub fn NewServer(handler: Arc<dyn super::super::Handler>) -> Arc<Server> {
 pub fn NewUnstartedServer(handler: Arc<dyn super::super::Handler>) -> Arc<Server> {
     return Arc::new(Server {
         URL: sync::Mutex::new(string("")),
+        TLS: sync::Mutex::new(None),
+        certificate: sync::Mutex::new(None),
         Listener: Arc::new(newLocalListener()),
         Config: Arc::new(super::super::Server {
             Handler: handler,
@@ -200,6 +224,76 @@ impl Server {
         return self.client.clone();
     }
 
+    // go: sdk 1.25.5 net/http/httptest/server.go:141-188 Server.StartTLS
+    /// Go: start the server with TLS, using the embedded localhost
+    /// certificate unless the caller supplied `TLS.Certificates`.
+    ///
+    /// Partial, and the omissions have no goish counterpart to have:
+    /// Go also sets NextProtos ("http/1.1", or "h2" when EnableHTTP2)
+    /// and builds a CertPool for `s.client`'s transport. goish has no
+    /// ALPN dispatch and httptest's Client is not TLS-configurable
+    /// yet, so callers verify with InsecureSkipVerify or
+    /// `Certificate()`.
+    pub fn StartTLS(self: Arc<Self>) {
+        {
+            let u = self.URL.Lock();
+            if *u != "" {
+                panic!("Server already started");
+            }
+        }
+        let (cert, err) = crate::crypto::tls::X509KeyPair(
+            &super::super::internal::testcert::LocalhostCert(),
+            &super::super::internal::testcert::LocalhostKey(),
+        );
+        if !err.IsNil() {
+            panic!("httptest: NewTLSServer: bad embedded certificate");
+        }
+        let mut cfg = self.TLS.Lock().clone().unwrap_or_default();
+        // Go: only install the test cert when the caller supplied none.
+        if cfg.Certificates.Len() == 0 {
+            cfg.Certificates =
+                crate::goslice::slice::<crate::crypto::tls::Certificate>::__from_vec(
+                    alloc::vec![cert],
+                );
+        }
+        // Go: `x509.ParseCertificate(s.TLS.Certificates[0].Certificate[0])`
+        let leaf = cfg.Certificates[crate::int(0)].Certificate[crate::int(0)].clone();
+        let (parsed, perr) = crate::crypto::x509::ParseCertificate(leaf);
+        if perr.IsNil() {
+            *self.certificate.Lock() = Some(parsed);
+        }
+        *self.TLS.Lock() = Some(cfg.clone());
+        {
+            let mut u = self.URL.Lock();
+            *u = crate::fmt::Sprintf!("https://%s", self.Listener.Addr().String());
+        }
+        self.goServeTLS(cfg);
+        return;
+    }
+
+    // go: sdk 1.25.5 net/http/httptest/server.go:295-297 Server.Certificate
+    /// Go: "returns the certificate used by the server, or nil if the
+    /// server doesn't use TLS."
+    pub fn Certificate(&self) -> Option<crate::crypto::x509::Certificate> {
+        return self.certificate.Lock().clone();
+    }
+
+    // go: none — goish-only: the TLS twin of goServe. Go reaches
+    // ServeTLS through `s.Config.Serve(tls.NewListener(…))`; goish's
+    // HTTPS loop is a separate function, so this calls the Arc-taking
+    // entry point with the config StartTLS just built.
+    fn goServeTLS(self: Arc<Self>, cfg: crate::crypto::tls::Config) {
+        self.wg.Add(1);
+        let me = self.clone();
+        crate::go!(stack(1024 * 1024), move || {
+            let _ = me
+                .Config
+                .clone()
+                .__serve_tls_arc(me.Listener.clone(), cfg);
+            me.wg.Done();
+        });
+        return;
+    }
     // go: sdk 1.25.5 net/http/httptest/server.go:307-313 Server.goServe
     fn goServe(self: Arc<Self>) {
         self.wg.Add(1);
