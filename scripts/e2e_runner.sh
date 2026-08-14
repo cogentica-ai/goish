@@ -65,7 +65,17 @@ FILTER="${FILTER:-.*}"
 # Default skips: HTTP servers that don't self-terminate, very-large
 # stress workloads that take >TIMEOUT seconds, and tests whose
 # success requires external drivers.
-EXCLUDE="${EXCLUDE:-^(http_hello|https_serve|spawn_million|spawn_density|preempt_sysmon|lockfree_ring_bench|segv_diagnostic_smoke)$}"
+# https_real_smoke is excluded for the same reason as http_hello and
+# https_serve: it is a LOCAL developer probe, not a test. Its own
+# header says so — it exists to "surface HTTP/TLS bugs locally without
+# the cluster build+deploy cycle" — and it dials three third-party
+# hosts (stefanprodan.github.io, raw.githubusercontent.com,
+# tls13.1d.pw). Measured 2026-08-14: it fails roughly 1 run in 4 on a
+# healthy network, independent of any code change, so leaving it in
+# makes a red e2e run mean "the internet moved", not "the port broke".
+# The TLS client path is covered in-process by https_server_smoke
+# (real ServeTLS + real TLS clients) and tls_server_smoke (50x tier).
+EXCLUDE="${EXCLUDE:-^(http_hello|https_serve|https_real_smoke|spawn_million|spawn_density|preempt_sysmon|lockfree_ring_bench|segv_diagnostic_smoke)$}"
 # Tests that talk to the REAL internet: a timeout is network latency,
 # not a runtime bug (the artifact still gets saved). Such a test fails
 # the suite only on panic/fail or if NO iteration succeeded. This
