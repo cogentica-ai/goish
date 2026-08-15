@@ -85,11 +85,11 @@ impl<T> Mutex<T> {
     ///
     ///     static MU: Mutex = Mutex::new(());
     pub const fn new(data: T) -> Self {
-        Mutex {
+        return Mutex {
             state: AtomicU32::new(0),
             sema: Sema::new(),
             data: UnsafeCell::new(data),
-        }
+        };
     }
 
     /// Lock acquires the mutex, blocking until available. Returns

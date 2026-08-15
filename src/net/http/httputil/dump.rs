@@ -1,4 +1,9 @@
 // net/http/httputil/dump.go — DumpRequest and DumpResponse.
+//
+// goishlint:ignore GOISH019 dumpConn — Go EMBEDS io.Writer and
+// io.Reader (anonymous fields); goish has no embedding, so they are
+// named `Writer` and `Reader`, which is the name Go's promotion gives
+// them anyway.
 
 #![allow(non_snake_case)]
 #![allow(dead_code)]

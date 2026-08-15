@@ -352,7 +352,7 @@ pub fn releasem() {
                 buf[0] = b' '; buf[1] = b'0'; buf[2] = b'x';
                 let mut v = pc;
                 let mut i = 18;
-                while i >= 3 { let nib = (v & 0xf) as u8;
+                while i >= 3 { let nib = crate::convert::uint8(v & 0xf);
                     buf[i] = if nib < 10 { b'0' + nib } else { b'a' + nib - 10 };
                     v >>= 4; i -= 1; }
                 crate::syscall::Write(crate::syscall::STDERR, buf.as_ptr(), buf.len());

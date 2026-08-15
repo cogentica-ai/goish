@@ -61,6 +61,8 @@ pub struct Sched {
 }
 
 impl Sched {
+    // go: none — Goish runtime: Go's `sched` is a package-level `schedt`
+    // that starts at its zero value, so there is no constructor to cite.
     pub const fn new() -> Self {
         Sched {
             runq: VecDeque::new(),
@@ -587,7 +589,7 @@ fn dispatch_g_trap_dump(label: &[u8], g_ptr: NonNull<G>) -> ! {
         buf[0] = b'0';
         buf[1] = b'x';
         for i in 0..16 {
-            let nib = ((v >> ((15 - i) * 4)) & 0xf) as u8;
+            let nib = crate::convert::uint8((v >> ((15 - i) * 4)) & 0xf);
             buf[2 + i] = if nib < 10 {
                 b'0' + nib
             } else {

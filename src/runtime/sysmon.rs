@@ -55,15 +55,19 @@ use crate::syscall::{
 
 // ─── Monotonic clock helper ───────────────────────────────────────
 
+// go: none — Goish runtime: Go reads the monotonic clock through
+// runtime.nanotime, a per-GOOS assembly/vDSO routine with no portable
+// Go body to cite. This is the syscall spelling of the same thing.
 /// Read CLOCK_MONOTONIC and return ns since an arbitrary fixed
 /// epoch. Used as the timer-heap deadline reference.
 #[inline]
 pub fn monotonic_ns() -> i64 {
     let mut ts = Timespec::default();
     let _ = ClockGettime(CLOCK_MONOTONIC, &mut ts);
-    ts.tv_sec
+    return ts
+        .tv_sec
         .wrapping_mul(1_000_000_000)
-        .wrapping_add(ts.tv_nsec)
+        .wrapping_add(ts.tv_nsec);
 }
 
 // ─── Timer heap ───────────────────────────────────────────────────
@@ -91,13 +95,18 @@ pub struct TimerToken {
 }
 
 impl TimerToken {
+    // go: none — Goish runtime: Go cancels a timer through the timer
+    // struct's own status word (runtime/time.go), which this port does
+    // not have; TimerToken is goish's stand-in and has no Go original.
     pub fn new() -> Arc<TimerToken> {
-        Arc::new(TimerToken {
+        let t = Arc::new(TimerToken {
             state: AtomicU8::new(TIMER_ARMED),
             g: AtomicPtr::new(core::ptr::null_mut()),
-        })
+        });
+        return t;
     }
 
+    // go: none — Goish runtime; see TimerToken::new.
     /// Re-arm a fired token for the next round (Ticker). Owner-only:
     /// must be called by the goroutine that parked, between wake-ups,
     /// never while a park is in flight. The G pointer is nulled FIRST
@@ -121,8 +130,10 @@ struct TimerEntry {
 unsafe impl Send for TimerEntry {}
 
 impl PartialEq for TimerEntry {
+    // go: none — Goish runtime: ordering glue for the BinaryHeap that
+    // stands in for Go's per-P timer array (runtime/time.go siftupTimer).
     fn eq(&self, other: &Self) -> bool {
-        self.deadline_ns == other.deadline_ns
+        return self.deadline_ns == other.deadline_ns;
     }
 }
 impl Eq for TimerEntry {}

@@ -10,6 +10,11 @@
 // Pending. NOT ported — Read/Write/Do, which drive the pipeline and
 // need `textproto.Pipeline` plus request/response serialisation over
 // a shared conn; and `Pending`'s counters only move once those do.
+//
+// goishlint:ignore GOISH019 ServerConn — the ten Go fields are guarded
+// by its `mu` and are reached only under it, so they live in one
+// `state` behind a goish Mutex rather than beside a bare `sync.Mutex`
+// field. The unported Read/Write/Do are what would touch the rest.
 
 #![allow(non_snake_case)]
 

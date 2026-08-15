@@ -2406,6 +2406,8 @@ impl ConnTrack {
     }
 
     // go: sdk 1.25.5 net/http/server.go:1865-1884 conn.setState
+    // goishlint:ignore GOISH020 setState — Go's `nc net.Conn` and
+    // `runHooks bool` are both dropped; see the note below.
     /// Go's `runHooks` parameter is not carried: its only `skipHooks`
     /// caller is the HTTP/2 handoff, which goish does not have, so
     /// every transition here is one Go would also report.
@@ -3834,6 +3836,9 @@ pub fn register_http_impls() {
 }
 
 // go: sdk 1.25.5 net/http/server.go:1596-1611 writeStatusLine
+// goishlint:ignore GOISH020 writeStatusLine — Go's `cw *chunkWriter`
+// receiver and `scratch []byte` are both dropped; see the two shape
+// divergences spelled out below.
 //
 /// Builds the response status line: `HTTP/1.x <code> <text>\r\n`.
 ///

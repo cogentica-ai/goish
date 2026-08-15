@@ -11,6 +11,16 @@
 // implements it directly, with its mutable fields behind one lock
 // instead of Go's &mut receiver. Verified byte-for-byte against Go by
 // driving the real unexported `response` over a bytes.Buffer.
+//
+// goishlint:ignore GOISH019 response — Go's `code`, `wroteHeader`,
+// `wroteCGIHeader` and `bufw` are reached through a `*response`
+// receiver; goish's ResponseWriter takes `&self`, so they live in a
+// `responseState` behind one Mutex. `req` is held as `req_url` because
+// only the URL is ever read from it (in Write's log line).
+// goishlint:ignore GOISH020 writeCGIHeader — takes the already-held
+// `&mut responseState` guard as its first parameter; Go reaches the
+// same fields through its `&mut` receiver. Dropping it would mean
+// re-locking a Mutex the caller already holds.
 
 #![allow(non_snake_case)]
 

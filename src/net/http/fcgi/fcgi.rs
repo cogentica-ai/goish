@@ -12,6 +12,11 @@
 // as its sink. Rust cannot alias that way, so the layer wants an
 // Arc<conn> with a Clone streamWriter, which is a design decision
 // rather than a transcription and is left for its own commit.
+//
+// goishlint:ignore GOISH019 conn, bufWriter — the two shapes named in
+// the note above. `conn`'s six Go fields sit in one `st` behind the
+// Mutex Go spells out field-by-field; `bufWriter` cannot hold the
+// aliased *streamWriter twice, so it carries the sink only.
 
 #![allow(non_snake_case)]
 
