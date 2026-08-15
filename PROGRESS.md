@@ -2,33 +2,39 @@
 
 Where the port actually stands, and how much of it is *proven* rather
 than merely counted. Numbers are regenerated with
-`scripts/port_coverage.py`; the last refresh was 2026-08-12.
+`scripts/port_coverage.py`; the last refresh was 2026-08-15.
 
-## The whole tree — 3156 / 7938 functions (39.8%)
+## The whole tree — 4432 / 11061 functions (40.1%)
 
-Across 179 in-scope packages of the Go 1.25.5 standard library: **134
-have a port, 86 are at 100%**, and there are **2358 provenance
-anchors**.
+Across the 169 packages of the Go 1.25.5 standard library that have a
+goish port: **88 are at 100%**, and there are **5434 `// go:`
+provenance lines**, 3450 of them `sdk` anchors citing the exact Go
+file and line range.
 
 The anchors are not spread evenly, and that is the single most important
-thing on this page. **`crypto/` holds 92% of them.** Coverage says a
-name exists; an anchor is what lets goishlint diff the port against the
-Go file it came from.
+thing on this page. **`crypto/`, `net/` and `testing/` together hold
+92% of them.** Coverage says a name exists; an anchor is what lets
+goishlint diff the port against the Go file it came from.
 
 | subtree | ported | % | anchors |
 |---|--:|--:|--:|
-| `crypto` | 1192/1452 | 82.1% | **2181** |
-| `net` | 308/1794 | 17.2% | 9 |
+| `crypto` | 1431/1447 | 98.9% | **3041** |
+| `net` | 788/1413 | 55.8% | **1570** |
 | `math` | 307/661 | 46.4% | 5 |
+| `testing` | 217/247 | 87.9% | 402 |
 | `encoding` | 210/1018 | 20.6% | 125 |
 | `compress` | 122/151 | 80.8% | 0 |
-| `os` | 112/366 | 30.6% | 2 |
+| `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
 | `strings` | 76/101 | 75.2% | 1 |
 | `archive` | 71/182 | 39.0% | 0 |
 | `time` | 71/184 | 38.6% | 4 |
-| `sync` | 66/126 | 52.4% | 0 |
+| `sync` | 66/126 | 52.4% | 3 |
 | `hash` | 65/114 | 57.0% | 26 |
+
+Within `net`, the entire jump since the last refresh is **`net/http`,
+now complete: 639/639 functions (100.0%) across all twelve of its
+packages, with 1476 `// go:` lines** — see its section below.
 
 So: `compress` at 80.8% and `crypto/x509` at 100% are not comparable
 claims. The first means 122 functions share a name with Go's; the second
@@ -36,26 +42,33 @@ means 158 functions were each diffed against the Go source and their
 outputs checked byte-for-byte against a running Go. Treat unanchored
 subtrees as working code, not as verified ports.
 
-`iter` (0/4) and `database` (0/137) have directories but no ported
+`iter` (0/4) and `database` (0/130) have directories but no ported
 functions. `iter` is a squatter — goish fakes Go 1.23 iterator support
 with slices wherever it is needed.
 
-## crypto/ — 1404 / 1452 functions (96.7%)
+## crypto/ — 1722 / 1722 declarations (100.0%)
 
-**65 of the 66 crypto packages are at 100%.** The single exception is
-`crypto/tls`, which holds all 48 remaining functions — and by
-declaration those split **35 real + 24 QUIC** (see below).
+**All 66 crypto packages are at 100% by receiver-qualified
+declaration**, with 26 declarations waived out of the denominator on
+in-tree justifications (24 of them the QUIC transport surface). The
+name-level counter reads 1431/1447 (98.9%) only because the QUIC
+waiver is recorded per declaration: the 16 residual *names*
+(`quicSetReadSecret`, `HandleData`, …) are exactly that waived
+surface. There is no unported non-QUIC function left.
 
 | | |
 |---|--:|
-| ported | 1404 |
-| remaining, portable | 48 |
+| ported (by declaration) | 1722 |
+| remaining, portable | 0 |
 | remaining, assembly stubs | 0 |
-| waived (resolved elsewhere by design) | 2 |
-| provenance anchors | 2919 |
+| waived (resolved elsewhere by design) | 26 |
+| provenance anchors | 3041 |
 | unverified names (see below) | 0 |
 
-Complete and byte-checked against Go: `x509` (158/158), `ecdsa`,
+Complete and byte-checked against Go: `tls` (the full client and
+server handshakes — `handshake_loopback` runs the ported client and
+server against each other), `x509` (158/158 by name, 169/169 by
+declaration), `ecdsa`,
 `ecdh`, `rsa`, `elliptic`, `cipher`, `aes`, `sha1/256/512/3`, `hmac`,
 `hkdf`, `pbkdf2`, `mlkem`, `nistec` + `fiat`, `bigmod`,
 `edwards25519`, `ed25519`, `dsa`, `rand`, `sysrand`, `drbg`, `entropy`,
@@ -68,6 +81,44 @@ is not something you port by reading Go. That column is now **zero** —
 turned out to be measurement, not assembly (see the `--by-decl` note
 below).
 
+## net/http — 639 / 639 functions (100.0%)
+
+**All twelve packages are at 100.0%**, with 1476 `// go:` lines (the
+root package alone carries 1085) and 33 declarations waived on in-tree
+justifications. This is an anchored port, not a name match: request
+and response bodies stream both directions through the ported
+`transfer.go` machinery, the client pools connections through Go's
+full `getConn`/`persistConn` call graph (idle reaping, GetBody rewind,
+sentinel-mapped retries, Expect: 100-continue), and the server runs
+`connReader` with Go's total-head byte limit (431/501 paths included).
+
+| package | ported | | package | ported |
+|---|--:|---|---|--:|
+| `.` (root) | 465/465 | | `cgi` | 15/15 |
+| `httputil` | 47/47 | | `pprof` | 13/13 |
+| `fcgi` | 28/28 | | `internal` | 12/12 |
+| `httptest` | 28/28 | | `internal/ascii` | 5/5 |
+| `cookiejar` | 21/21 | | `httptrace` | 4/4 |
+
+`net/http/pprof` serves from a new `runtime/pprof` user-registry
+(`Profile.Add` captures real stacks via `runtime::Callers`; `WriteTo`
+symbolizes live through `runtime::FuncForPC`); the CPU, trace and
+protobuf arms return Go-shaped unsupported errors rather than fake
+output.
+
+## testing/ — 217 / 247 functions (87.9%)
+
+The root package is at **141/149 (94.6%)**, and `fstest` (38/38),
+`iotest` (11/11) and `slogtest` (10/10) are complete; 402 `// go:`
+lines across the tree. `testing.B`, `testing.M` and `t.Parallel()` are
+ported. The root's eight missing functions are the fuzzing entry
+points (`testing.F` is not ported), the profiling hooks
+(`writeProfiles`/`before`/`after`) and the synctest bridge — excluding
+fuzzing and profiling, the tree reads 97.3%. Still open: `quick`
+(7/14, blocked on a real `reflect` redesign — goish's `reflect` is a
+value tree), `internal/testdeps` (10/21, the fuzz/profile plumbing),
+and `synctest` (0/4).
+
 ## The percentages are optimistic, and by how much
 
 `port_coverage.py` counts **unique names, not declarations**. Go methods
@@ -76,15 +127,15 @@ counts as ported when **any one** type implements it.
 
 | | |
 |---|--:|
-| crypto/ Go declarations (receiver-qualified) | 1780 |
-| unique names — what the metric counts | 1493 |
-| invisible to the metric | **287 (16%)** |
+| crypto/ Go declarations (receiver-qualified) | 1722 |
+| unique names — what the metric counts | 1447 |
+| invisible to the metric | **275 (16%)** |
 
-`crypto/tls` is the extreme case: **727 declarations behind 296 counted
+`crypto/tls` is the extreme case: **350 declarations behind 291 counted
 names**, because `marshal`/`unmarshal` repeat across fifteen message
-types. `handshake_messages.go` alone is 52 declarations → 17 names. So
-porting a seventh `marshal` method cannot move the number, and the
-first one made all fifteen look done.
+types. `handshake_messages.go` alone collapses 52 declarations → 17
+names. So porting a seventh `marshal` method cannot move the number,
+and the first one made all fifteen look done.
 
 This was found by measurement, not estimate: six verbatim message ports
 landed with byte-exact vectors and the percentage did not move.
@@ -93,8 +144,8 @@ landed with byte-exact vectors and the percentage did not move.
 
 | | by name | by declaration |
 |---|--:|--:|
-| crypto/ | 1404/1452 (96.7%) | **1674/1733 (96.6%)** |
-| crypto/tls | 248/296 (83.8%) | 315/374 (84.2%) |
+| crypto/ | 1431/1447 (98.9%) | **1722/1722 (100.0%)** |
+| crypto/tls | 275/291 (94.5%) | 350/350 (100.0%) |
 
 `--by-decl` had an understating defect of its own, found the same way:
 15 ported, anchored declarations read MISSING because goish ports a Go
@@ -103,9 +154,10 @@ method whose receiver is a `&mut` value type as a *free fn* (sha1's
 matcher only synthesized `Recv.Method` keys from Rust `impl` blocks.
 The fix credits an anchored `Recv.Method` when the fn exists in the
 same file — sound now that `anchor_check.py` verifies every range
-names exactly that declaration and `make lint` gates on it. With that,
-the residual gap is exactly the remaining tls work: 35 handshake/dial
-declarations plus 24 QUIC declarations awaiting a scope decision.
+names exactly that declaration and `make lint` gates on it. With the
+handshake/dial work now finished, the by-declaration residual is zero;
+the 24 QUIC declarations are waived with in-tree justifications (dead
+code without a QUIC transport).
 
 The first thing it found was concrete: `crypto/x509` read 100% by name
 while missing `CertificateRequest.CheckSignature` and
@@ -189,7 +241,7 @@ the only thing standing between this class of defect and a release.
 
 ## Test suite
 
-271 examples are declared in `Cargo.toml` and run by `make e2e` at
+417 examples are declared in `Cargo.toml` and run by `make e2e` at
 tiered loop counts — deterministic ones once, memory-subsystem ones ×10,
 and the race-sensitive scheduler/chan/select/timer/server families ×50.
 **Only declared examples run**; an `examples/*.rs` file without an
@@ -209,15 +261,12 @@ fixing file A cannot pay for a regression in file B. Current total:
 
 ## Known defects, open
 
-Each is reproduced and recorded rather than worked around. All three
-need `make e2e-full` to validate, so none is bundled into a port.
+Each is reproduced and recorded rather than worked around. Both need
+`make e2e-full` to validate, so neither is bundled into a port.
+(A third, `Timer::Stop()` leaving its sleeper goroutine pinned, was
+fixed in `3b97cc5` — one goroutine per timer, zero post-Stop lifetime,
+tripwired by `time_stop_no_pin_smoke`.)
 
-- **`Timer::Stop()` does not cancel the sleeping goroutine.** The
-  watcher exits; the `Sleep` under it runs to completion. Harmless to
-  program exit since main's return now terminates the process (Go's
-  rule), but a stopped timer still occupies a goroutine for its full
-  duration. Was previously fatal: it held ten examples for 60 s each
-  and turned CI red at `timeout: 10, fail: 0`.
 - **`goish::cast!` cannot succeed on a `goany::Any` carrier.** It
   resolves through the blanket `HasDynAny for T`, probing the wrapper's
   `TypeId` and never the payload's. Silent — a comma-ok assertion

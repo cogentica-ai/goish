@@ -9,7 +9,7 @@ single statically-linked binary with no `glibc`, no `ld.so`, no garbage collecto
 language runtime to initialize. Goish ships its own `_start`, page allocator, M:N scheduler,
 epoll netpoller and HTTP stack.
 
-- **Traceable crypto.** Every one of the 1709 declarations in `crypto/` names the Go source
+- **Traceable crypto.** Every one of the 1722 declarations in `crypto/` names the Go source
   file and line range it was translated from. CI re-opens the Go 1.25.5 tree on every push and
   checks that the citation still resolves. See [Provenance](#provenance).
 - **No GC, no libc.** Go's allocator design (mheap / mcentral / per-P mcache, 67 size classes)
@@ -66,9 +66,9 @@ and checks that the cited file and line range still resolve to the symbol named.
 
 | marker | count | meaning |
 |---|--:|---|
-| `// go: sdk 1.25.5 <file>:<lines> <Symbol>` | 1,956 | translated from Go, citation checked |
-| `// go: none — <reason>` | 1,118 | goish-only code, deliberately not a port |
-| `// go: waived <decl> — <reason>` | 26 | in Go, left out here, with a reason |
+| `// go: sdk 1.25.5 <file>:<lines> <Symbol>` | 3,450 | translated from Go, citation checked |
+| `// go: none — <reason>` | 1,548 | goish-only code, deliberately not a port |
+| `// go: waived <decl> — <reason>` | 80 | in Go, left out here, with a reason |
 
 Every ported function falls into one of those three categories, and goishlint fails on one
 that carries no marker at all.
@@ -100,7 +100,7 @@ Reproducible from a clean checkout:
 # Every anchor's cited file and line range still resolves in the Go tree.
 python3 scripts/anchor_check.py src
 
-# Per-declaration coverage, receiver-qualified (crypto/ reports 1709/1709).
+# Per-declaration coverage, receiver-qualified (crypto/ reports 1722/1722).
 python3 scripts/port_coverage.py crypto --by-decl
 
 # Generate ground truth by running the real Go code, then diff against it.
@@ -139,8 +139,9 @@ per-P, and an HTTP server with an allocation-free hot path.
 - **Linux `x86_64` only.** Other targets are out of scope for now.
 - **Not security-audited.** The TLS stack is a machine-checked port, but it has had no
   external review and no side-channel analysis. See [SECURITY.md](SECURITY.md).
-- **Not all of Go.** `crypto/` is complete. `net`, `encoding` and `os` are partial, and
-  outside `crypto/` most ports are name-level rather than anchor-verified; the
+- **Not all of Go.** `crypto/` and `net/http` are complete. The rest of `net`, `encoding`
+  and `os` are partial, and outside `crypto/`, `net/http` and `testing` most ports are
+  name-level rather than anchor-verified; the
   [coverage table](#coverage-measured) marks which is which.
 - **Not the Go compiler.** You write Rust that reads like Go, using goish's `string`,
   `slice<T>`, `map<K,V>` and macros. It does not compile `.go` files.
@@ -149,7 +150,7 @@ per-P, and an HTTP server with an allocation-free hot path.
 
 ## Status
 
-Active development. The e2e suite runs 281 declared examples at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines.
+Active development. The e2e suite runs 417 declared examples at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines.
 
 Goish is single-target: `x86_64-unknown-linux-gnu`.
 
@@ -213,19 +214,19 @@ ok	2 tests, 2 passed, 0 failed, 0 skipped
 That snippet is [`examples/testing_readme.rs`](examples/testing_readme.rs), built and run by
 the e2e suite so it cannot drift from the API. `testing.T` carries `Error`/`Errorf`,
 `Fatal`/`Fatalf`, `Log`/`Logf`, `Fail`/`FailNow`, `Skip`/`Skipf`/`SkipNow`, `Failed`,
-`Skipped`, `Helper`, `Cleanup`, `TempDir`, `Name` and `Run`. `testing/fstest` (47%) and
-`testing/iotest` (55%) are partially ported alongside it.
+`Skipped`, `Helper`, `Cleanup`, `TempDir`, `Name` and `Run`. `testing/fstest` (38/38),
+`testing/iotest` (11/11) and `testing/slogtest` (10/10) are complete alongside it.
 
 Each test body runs on its own goroutine, so `t.Fatal` and `t.Skip` end that test and leave
 the rest of the suite running — they are `runtime.Goexit` underneath, as in Go. A `Fatal` in
 a subtest spares its siblings.
 
-Three things to know before relying on it. Coverage is partial: the `testing` root package
-sits at 33/149 declarations, and only the parts carrying `// go:` anchors (`match.go` in
-full, plus the `FailNow`/`Skip`/`Run`/`tRunner` core) are diffed against Go — treat the rest
-as working code, not a verified port. There is no `testing.B`, `testing.M`, `testing.F` or
-`t.Parallel()`, so benchmarks, fuzzing and parallel tests are out, and `-run`/`-v` are not
-wired up even though the filter behind them is ported. Tests are registered by hand in a
+Three things to know before relying on it. The `testing` root package sits at 141/149
+declarations (94.6%), with 402 `// go:` anchors across the tree; `testing.B`, `testing.M`
+and `t.Parallel()` are ported. The eight missing root functions are the fuzzing entry
+points (`testing.F` is not ported), the profiling hooks and the synctest bridge, so
+fuzzing and `-test.*profile` are out; `testing/quick` (7/14) and `testing/synctest` (0/4)
+also remain. Tests are registered by hand in a
 slice rather than discovered, because goish has no compile-time reflection over modules. One
 API difference from Go: a subtest closure needs `Send + 'static`, since goish spawns through
 `go!()` and the body must own what it uses.
@@ -245,7 +246,7 @@ name matches.
 
 #### `crypto/` — complete, and on the live path
 
-`crypto/` is at **1709/1709 declarations (100%) across all 66 packages**,
+`crypto/` is at **1722/1722 declarations (100%) across all 66 packages**,
 counted by receiver-qualified declaration rather than collapsed names,
 each carrying a provenance anchor checked against Go 1.25.5. 26
 declarations are waived out of the denominator with in-tree
@@ -266,30 +267,41 @@ against ground truth generated by running the real Go code
 (`scripts/goref.sh`), and an in-memory loopback runs the ported client
 and server against each other over TLS 1.3 and TLS 1.2.
 
+#### `net/http` — complete
+
+`net/http` is at **639/639 functions (100.0%) across all twelve of its
+packages** (root, `httputil`, `fcgi`, `httptest`, `cookiejar`, `cgi`,
+`pprof`, `httptrace` and the internals), with 1476 `// go:` lines and
+33 declarations waived on in-tree justifications. Bodies stream both
+directions, the client pools connections through Go's
+`getConn`/`persistConn` call graph, and `net/http/pprof` serves from a
+new `runtime/pprof` user-registry with real captured stacks.
+
 | subtree | ported (by name) | `// go:` lines |
 |---|--:|--:|
 | `crypto` | **1431/1447 (98.9%)** — 100% by declaration | 3041 |
-| `net` | 308/1794 (17.2%) | 9 |
+| `net` | 788/1413 (55.8%) — `net/http` at 100% | 1570 |
 | `math` | 307/661 (46.4%) | 5 |
+| `testing` | 217/247 (87.9%) | 402 |
 | `encoding` | 210/1018 (20.6%) | 125 |
 | `compress` | 122/151 (80.8%) | 0 |
-| `os` | 112/366 (30.6%) | 2 |
+| `os` | 112/366 (30.6%) | 3 |
 
 The right-hand column counts *all* `// go:` lines, which is what
-`port_coverage.py` reports. It mixes the 1,956 `sdk` anchors with the
-1,118 `none` markers and 195 file-level manifests, so it runs larger than
-the number of functions actually traced to Go.
+`port_coverage.py` reports. It mixes the 3,450 `sdk` anchors with the
+1,548 `none` markers and the file/package manifests, so it runs larger
+than the number of functions actually traced to Go.
 
-Aggregate: **151 packages with a port, 77 at 100%, 1,956 source anchors.**
+Aggregate: **169 packages with a port, 88 at 100%, 3,450 source anchors.**
 The default counter tallies unique names rather than declarations, so Go
 methods sharing a name across types collapse; pass `--by-decl` for the
 receiver-qualified count.
 
-Two limits on those numbers. Outside `crypto/`, which holds 95% of all
-anchors, coverage is name-level: `net` has 9 anchors across 308 ported
-functions, and `sync`, `compress`, `archive` and `text` have none, so
-treat non-crypto ports as working code rather than verified ports. And
-998 anchors name a method without its receiver, so `anchor_check.py` can
+Two limits on those numbers. `crypto/`, `net/` and `testing/` hold 92%
+of all anchors; outside them coverage is mostly name-level — `sync`,
+`compress`, `archive` and `text` have almost none — so treat those
+ports as working code rather than verified ports. And some
+anchors name a method without its receiver, so `anchor_check.py` can
 confirm the file and line range but cannot bind the symbol uniquely.
 `--strict` fails on those; tightening them is open work.
 
@@ -297,7 +309,8 @@ confirm the file and line range but cannot bind the symbol uniquely.
 verification tiers mean.
 
 **[ROADMAP.md](ROADMAP.md)** — what is left and in what order. With
-`crypto/` complete, the frontier moves to `net`, `encoding` and `os`.
+`crypto/` and `net/http` complete, the frontier moves to the rest of
+`net`, `encoding` and `os`.
 
 **[CONTRIBUTING.md](CONTRIBUTING.md)** — the conventions a port must follow, and the pre-flight checks to run before starting one.
 
@@ -504,7 +517,7 @@ The book in `doc/` walks through the implementation chapter by chapter - bootstr
 | Standalone binary      | ✅ no glibc, no ld.so     | ✅ static linkable       | needs `std`           |
 | GC                     | none (manual mheap)       | concurrent mark+sweep    | none                  |
 | Memory safety          | Rust ownership            | GC + runtime checks      | Rust ownership        |
-| Per-function provenance to upstream source | ✅ CI-checked, 1,956 anchors | n/a (is upstream) | ✗ |
+| Per-function provenance to upstream source | ✅ CI-checked, 3,450 anchors | n/a (is upstream) | ✗ |
 | Freestanding (`no_std`) | ✅                       | ✗ (needs the Go runtime) | ✅ with `no_std` crates |
 
 Goish is **not** a clone of Go - it ports the runtime *idioms* into a Rust ownership model. Go's `morestack` (grow by copying the stack) is impossible here - relocating a Rust stack would require fixing up raw pointers the runtime cannot see - so goish grows the other way: bare `go!()` reserves 1 MiB of virtual address space per goroutine and lets the kernel commit physical pages on touch. Depth is transparent up to the reservation; physical cost tracks actual use; overflow faults into a guard page with a spawn-site diagnostic. `go!(stack(N), …)` remains the opt-in for sub-page density (the 1M-goroutine demo) or for goroutines needing more than 1 MiB. No GC either way.
@@ -519,7 +532,7 @@ Paid work that goes beyond that:
 - **Compliance evidence.** Provenance reports mapping a shipped binary back to upstream Go
   source, per function. The anchor data is already in the tree; packaging, attesting and
   signing it for a specific audit is the work.
-- **Prioritised porting.** `net`, `encoding` and `os` are partial and anchor-light. Sponsoring
+- **Prioritised porting.** Outside `net/http`, the `net`, `encoding` and `os` trees are partial. Sponsoring
   a package gets it built to the same standard as `crypto/`: anchors, goref-generated ground
   truth, e2e coverage.
 - **Support and SLA.** Guaranteed response, upgrade assistance, backports.
@@ -542,7 +555,7 @@ goish's own code (runtime, scheduler, allocator, macros, type system) is
 Substantial parts of `src/` are ports of the Go standard library and of
 `golang.org/x/crypto` / `x/text`, translated function by function from
 the Go 1.25 source. Those remain **BSD-3-Clause, © The Go Authors**
-([LICENSE-GO](LICENSE-GO)). The 1,956 provenance anchors across 190 files
+([LICENSE-GO](LICENSE-GO)). The 3,450 provenance anchors across 262 files
 identify which code that is, so they also answer which files carry the Go
 license. Both licenses must travel with any redistribution, source or
 binary.
