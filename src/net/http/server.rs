@@ -636,7 +636,7 @@ pub fn DefaultServeMux() -> Arc<ServeMux> {
 /// `http.Handle(pattern, h)` (server.go:2576) — register on
 /// DefaultServeMux. Mirrors the free function shape. Generic over
 /// `H: Handler + 'static` so callers can pass bare structs.
-pub fn Handle<H: Handler + 'static>(pattern: string, h: H) {
+pub fn Handle<P: Into<string>, H: Handler + 'static>(pattern: P, h: H) {
     DefaultServeMux().Handle(pattern, h);
 }
 
@@ -651,7 +651,7 @@ pub fn handler<H: Handler + 'static>(h: H) -> Arc<dyn Handler> {
 /// `http.HandleFunc(pattern, fn)` (server.go:2583) — register a
 /// closure on DefaultServeMux. Note this is a *free function*; the
 /// same-named method on `ServeMux` registers on a specific mux.
-pub fn HandleFunc<F>(pattern: string, f: F)
+pub fn HandleFunc<P: Into<string>, F>(pattern: P, f: F)
 where
     F: Fn(&(dyn ResponseWriter + Send + Sync + 'static), &Request) + Send + Sync + 'static,
 {
