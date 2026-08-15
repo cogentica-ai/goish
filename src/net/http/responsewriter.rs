@@ -1301,3 +1301,24 @@ fn push_dec_64(buf: &mut Vec<u8>, mut n: u64) {
     }
 }
 
+
+// go: none — goish-only bridge, and the reason it can exist where the
+// blanket impl above cannot: this is an impl on ONE concrete (if
+// unsized) type, `&dyn ResponseWriter`, not `impl<T: ResponseWriter>
+// io::Writer for T`. It therefore cannot overlap io's `&mut __T` or
+// `Arc<Mutex<W>>` impls, and coherence accepts it.
+//
+// With this, a handler writes Go's own line — `fmt::Fprintf!(w, …)` —
+// instead of wrapping in AsWriter. Go needs no equivalent: there a
+// ResponseWriter's method set already contains
+// `Write([]byte) (int, error)`, so it satisfies io.Writer structurally.
+//
+// `io::Writer::Write` takes `&mut self` while `ResponseWriter::Write`
+// takes `&self` (a response writer is shared and interior-mutable); the
+// `&mut` on the outer reference is simply unused, which is what lets
+// the two signatures meet here.
+impl crate::io::Writer for &(dyn ResponseWriter + Send + Sync + 'static) {
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        return (**self).Write(p);
+    }
+}
