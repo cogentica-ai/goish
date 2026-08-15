@@ -9,7 +9,6 @@
 #![allow(non_snake_case)]
 
 use goish::{fmt, strings, syscall, testing};
-use goish::gostring::string;
 use goish::types::int;
 
 fn TestAddition(t: &mut testing::T) {
@@ -20,14 +19,14 @@ fn TestAddition(t: &mut testing::T) {
 }
 
 fn TestSubtests(t: &mut testing::T) {
-    t.Run(string::from_static("upper"), |t| {
-        let got = strings::ToUpper(string::from_static("go"));
-        if got != string::from_static("GO") {
+    t.Run("upper", |t| {
+        let got = strings::ToUpper("go");
+        if got != "GO" {
             t.Error(fmt::Sprintf!("ToUpper(go) = %s, want GO", got));
         }
     });
 
-    t.Run(string::from_static("cleanup"), |t| {
+    t.Run("cleanup", |t| {
         // Cleanups run LIFO when the test function returns, as in Go.
         t.Cleanup(|| { fmt::Println!("second"); });
         t.Cleanup(|| { fmt::Println!("first"); });

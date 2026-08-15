@@ -114,7 +114,6 @@ Go's `testing` package is ported, so tests are written the Go way: `Test*` funct
 
 ```rust
 use goish::{fmt, strings, syscall, testing};
-use goish::gostring::string;
 use goish::types::int;
 
 fn TestAddition(t: &mut testing::T) {
@@ -125,14 +124,14 @@ fn TestAddition(t: &mut testing::T) {
 }
 
 fn TestSubtests(t: &mut testing::T) {
-    t.Run(string::from_static("upper"), |t| {
-        let got = strings::ToUpper(string::from_static("go"));
-        if got != string::from_static("GO") {
+    t.Run("upper", |t| {
+        let got = strings::ToUpper("go");
+        if got != "GO" {
             t.Error(fmt::Sprintf!("ToUpper(go) = %s, want GO", got));
         }
     });
 
-    t.Run(string::from_static("cleanup"), |t| {
+    t.Run("cleanup", |t| {
         // Cleanups run LIFO when the test function returns, as in Go.
         t.Cleanup(|| { fmt::Println!("second"); });
         t.Cleanup(|| { fmt::Println!("first"); });
@@ -150,18 +149,18 @@ fn main() {
 ```
 
 ```
-=== RUN  TestAddition
---- PASS: TestAddition
-=== RUN  TestSubtests
-    === RUN  TestSubtests/upper
-    --- PASS: TestSubtests/upper
-    === RUN  TestSubtests/cleanup
+=== RUN   TestAddition
+--- PASS: TestAddition (0.00s)
+=== RUN   TestSubtests
+=== RUN   TestSubtests/upper
+=== RUN   TestSubtests/cleanup
 first
 second
-    --- PASS: TestSubtests/cleanup
---- PASS: TestSubtests
+--- PASS: TestSubtests (0.00s)
+    --- PASS: TestSubtests/upper (0.00s)
+    --- PASS: TestSubtests/cleanup (0.00s)
 
-ok	2 tests, 2 passed, 0 failed, 0 skipped
+PASS
 ```
 
 That snippet is [`examples/testing_readme.rs`](examples/testing_readme.rs), built and run by
@@ -174,15 +173,18 @@ Each test body runs on its own goroutine, so `t.Fatal` and `t.Skip` end that tes
 the rest of the suite running — they are `runtime.Goexit` underneath, as in Go. A `Fatal` in
 a subtest spares its siblings.
 
-Three things to know before relying on it. The `testing` root package sits at 141/149
-declarations (94.6%), with 402 `// go:` anchors across the tree; `testing.B`, `testing.M`
-and `t.Parallel()` are ported. The eight missing root functions are the fuzzing entry
-points (`testing.F` is not ported), the profiling hooks and the synctest bridge, so
-fuzzing and `-test.*profile` are out; `testing/quick` (7/14) and `testing/synctest` (0/4)
-also remain. Tests are registered by hand in a
-slice rather than discovered, because goish has no compile-time reflection over modules. One
-API difference from Go: a subtest closure needs `Send + 'static`, since goish spawns through
-`go!()` and the body must own what it uses.
+Three things to know before relying on it:
+
+- **What is ported.** The `testing` root package sits at 141/149 declarations (94.6%), with
+  402 `// go:` anchors across the tree; `testing.B`, `testing.M` and `t.Parallel()` are all
+  there. The eight missing root functions are the fuzzing entry points (`testing.F` is not
+  ported), the profiling hooks and the synctest bridge — so fuzzing and `-test.*profile` are
+  out, as are `testing/quick` (7/14) and `testing/synctest` (0/4).
+- **Tests are registered by hand** in a slice rather than discovered, because goish has no
+  compile-time reflection over modules.
+- **A subtest closure needs `Send + 'static`.** goish spawns through `go!()`, so the body
+  must own what it uses — a `move` closure over owned data, not a borrow of the enclosing
+  test's locals. This is the one API difference from Go in the snippet above.
 
 `cargo test` itself does not work and is not the harness: its test binary links `std`, whose
 `panic_impl` lang item collides with goish's own. Tests build as examples and run through

@@ -347,7 +347,17 @@ impl T {
     /// through `go!()`, which requires an owned `'static` body, so a
     /// subtest closure must own what it uses. Non-capturing closures
     /// and `move` closures over owned data are unaffected.
-    pub fn Run<F: FnOnce(&mut T) + Send + 'static>(&mut self, name: string, f: F) -> bool {
+    ///
+    /// `name` is `impl Into<string>` rather than `string` so that a
+    /// subtest can be named with a literal, as in Go. Passing a
+    /// `string` still works — `From<string> for string` is the
+    /// identity — so this is additive.
+    pub fn Run<N: Into<string>, F: FnOnce(&mut T) + Send + 'static>(
+        &mut self,
+        name: N,
+        f: F,
+    ) -> bool {
+        let name = name.into();
         // Go: `testName, ok, _ := t.tstate.match.fullName(&t.common, name)`
         // — the matcher both FILTERS on -run/-skip and deduplicates
         // sibling names, so it has to be consulted before anything else
