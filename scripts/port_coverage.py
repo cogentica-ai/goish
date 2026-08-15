@@ -718,6 +718,14 @@ def main():
 
     tf = sum(r["go_funcs"] for r in rows)
     tp = sum(r["ported"] for r in rows)
+    if not tf:
+        # A mistyped subtree, or a --goroot that does not hold one, used
+        # to die in the percentage divide. That traceback reads like a
+        # broken script rather than "I found nothing there", which is
+        # the one thing the operator needs to know.
+        sys.exit(f"port_coverage: no Go declarations found under "
+                 f"{os.path.join(gr, 'src', subtree)!r} — check the "
+                 f"subtree name and --goroot")
     ta = sum(r["anchors"] for r in rows)
     tasm = sum(len(r["missing_asm"]) for r in rows)
     tport = sum(r["gap_portable"] for r in rows)

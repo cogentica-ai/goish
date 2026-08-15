@@ -60,7 +60,62 @@ def _goroot():
 
 
 GOROOT = _goroot()
-ANCHOR = re.compile(r"(//\s*go:\s*sdk\s+\S+\s+)(\S+):(\d+)-(\d+)(\s+)(\S+)")
+
+# Two source dialects, per ported-crates AGENTS.md §38.1:
+#   // go: sdk 1.25.5 crypto/tls/conn.go:31-46 Symbol
+#   // go: github.com/spf13/pflag@v1.0.10 flag.go:871-880 AddFlag
+# The alternation is NON-capturing and lives inside group 1 so the group
+# numbering the --fix/--qualify writeback depends on stays put: the
+# rewrite splices m.group(1) back verbatim, so a new capturing group here
+# would silently corrupt every anchor it touched.
+ANCHOR = re.compile(
+    r"(//\s*go:\s*(?:sdk\s+\S+|[\w.\-/~]+@\S+)\s+)(\S+):(\d+)-(\d+)(\s+)(\S+)")
+
+# Pulls the source spec back out of group 1 for root resolution.
+SRC_SPEC = re.compile(r"//\s*go:\s*(sdk\s+\S+|[\w.\-/~]+@\S+)")
+
+
+def _modcache():
+    """Root of the Go module cache, where `mod@rev` anchors resolve."""
+    return (os.environ.get("GOMODCACHE")
+            or os.path.join(os.path.expanduser("~"), "go", "pkg", "mod"))
+
+
+_root_cache = {}
+
+
+def root_for(prefix):
+    """Directory that an anchor's cited path is relative to.
+
+    `sdk <ver>` resolves against GOROOT/src; a `<module>@<rev>` spec
+    resolves against the module cache. Returns None when the module is
+    not vendored locally — the caller reports MISSING_FILE rather than
+    silently treating an unresolvable anchor as verified.
+    """
+    if prefix in _root_cache:
+        return _root_cache[prefix]
+    m = SRC_SPEC.match(prefix.strip())
+    spec = m.group(1) if m else ""
+    if spec.startswith("sdk"):
+        root = GOROOT
+    elif "@" in spec:
+        # Go escapes uppercase in cache paths as !lowercase.
+        esc = re.sub(r"([A-Z])", lambda c: "!" + c.group(1).lower(), spec)
+        root = os.path.join(_modcache(), *esc.split("/"))
+        if not os.path.isdir(root):
+            root = None
+    else:
+        root = None
+    _root_cache[prefix] = root
+    return root
+
+
+def resolve(prefix, gofile):
+    """Absolute path an anchor cites. os.path.join returns the second
+    argument unchanged when it is absolute, so downstream go_src() and
+    its caches work on this key with no change."""
+    root = root_for(prefix)
+    return os.path.join(root, gofile) if root else None
 
 _src_cache = {}
 _decl_cache = {}
@@ -224,7 +279,8 @@ def qualify(roots):
                     if not m or "." in m.group(6):
                         continue
                     gofile, sym = m.group(2), m.group(6)
-                    src = go_src(gofile)
+                    gopath = resolve(m.group(1), gofile)
+                    src = go_src(gopath) if gopath else None
                     if src is None:
                         continue
                     ty = enclosing_impl(lines, idx)
@@ -289,8 +345,17 @@ def main():
                         continue
                     gofile, a, b, sym = m.group(2), int(m.group(3)), int(m.group(4)), m.group(6)
                     stats["total"] += 1
+                    # `gofile` stays the CITED path — it is what --fix
+                    # splices back and what a reader greps for. `gopath`
+                    # is where it actually lives, which differs once the
+                    # anchor names a module rather than the SDK.
+                    gopath = resolve(m.group(1), gofile)
+                    if gopath is None:
+                        stats["MISSING_FILE"] += 1
+                        problems.append(("MISSING_FILE", p, idx + 1, sym, gofile, a, b, None))
+                        continue
                     free = "." not in sym and enclosing_impl(lines, idx) is None
-                    hits, bare = decl_hits(gofile, sym, free_only=free)
+                    hits, bare = decl_hits(gopath, sym, free_only=free)
                     if hits is None:
                         stats["MISSING_FILE"] += 1
                         problems.append(("MISSING_FILE", p, idx + 1, sym, gofile, a, b, None))
@@ -302,14 +367,14 @@ def main():
                         problems.append(("NOT_FOUND", p, idx + 1, sym, gofile, a, b, None))
                         continue
                     inside = [h for h in hits if a <= h <= b]
-                    covered = [d for d in decl_starts(gofile) if a <= d <= b]
+                    covered = [d for d in decl_starts(gopath) if a <= d <= b]
                     if not inside or len(covered) != 1:
                         kind = "RANGE_WRONG" if not inside else "RANGE_FAT"
                         stats[kind] += 1
                         problems.append((kind, p, idx + 1, sym, gofile, a, b, hits))
                         if fix and len(hits) == 1:
                             s = hits[0]
-                            e = decl_end(gofile, s)
+                            e = decl_end(gopath, s)
                             new = (line[:m.start()] + m.group(1) +
                                    f"{gofile}:{s}-{e}" + m.group(5) + sym +
                                    line[m.end():])
@@ -329,7 +394,7 @@ def main():
                                 stats["UNFIXABLE"] += 1
                         continue
                     s = inside[0]
-                    e = decl_end(gofile, s)
+                    e = decl_end(gopath, s)
                     if b < e - 1:
                         stats["END_SHORT"] += 1
                         problems.append(("END_SHORT", p, idx + 1, sym, gofile, a, b, [s, e]))
