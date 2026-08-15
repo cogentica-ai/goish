@@ -73,56 +73,9 @@ and checks that the cited file and line range still resolve to the symbol named.
 Every ported function falls into one of those three categories, and goishlint fails on one
 that carries no marker at all.
 
-### Why this matters in 2026
-
-Regulators are moving toward evidence that is machine-queryable and continuously verified
-rather than [assembled for an audit](https://cloudsmith.com/blog/the-2026-guide-to-software-supply-chain-security-from-static-sboms-to-agentic-governance).
-Four dates:
-
-| date | what changes |
-|---|---|
-| **11 Sep 2026** | [EU CRA reporting obligations bind](https://digital-strategy.ec.europa.eu/en/policies/cra-reporting): 24 h early warning and 72 h full notification on actively exploited vulnerabilities. Component-level inventory has to exist beforehand to meet a 24-hour window. Applies to non-EU manufacturers whose products reach the EU market. |
-| **21 Sep 2026** | [FIPS 140-2 certificates move to the Historical List](https://www.safelogic.com/blog/what-happens-on-september-21-2026). Existing deployments keep running; a Historical certificate no longer justifies a new federal procurement. |
-| **1 Jan 2027** | [CNSA 2.0 becomes the default for new NSS acquisitions](https://www.qusecure.com/cnsa-2-0-pqc-requirements-timelines-federal-impact/), with an exclusive-use requirement for software and firmware signing. |
-| **11 Dec 2027** | CRA essential requirements, including the machine-readable SBOM mandate. |
-
-All 35 `crypto/internal/fips140*` packages are ported at 100%, which is the code path Go's own
-FIPS 140-3 validation covers, and each function carries the upstream file and line it came
-from. Two limits on what that means: goish is not FIPS-validated, and a port of validated code
-is not itself validated. It supplies the traceability argument, in a form an auditor can
-re-run.
-
-### Verifying the claims
-
-Reproducible from a clean checkout:
-
-```bash
-# Every anchor's cited file and line range still resolves in the Go tree.
-python3 scripts/anchor_check.py src
-
-# Per-declaration coverage, receiver-qualified (crypto/ reports 1722/1722).
-python3 scripts/port_coverage.py crypto --by-decl
-
-# Generate ground truth by running the real Go code, then diff against it.
-scripts/goref.sh crypto/tls /path/to/ref.go
-```
-
-The first two run in CI on every push ([`provenance.yml`](.github/workflows/provenance.yml)).
-
-One gap: goishlint's `GOISH018` check, which diffs signature, arity and struct fields against
-the Go source, lives in a separate binary that is not in this repository. It runs locally
-through `make lint` as a ratchet against a per-file baseline, but it is not a CI gate, so that
-tier is currently unverifiable from outside.
-
 ---
 
 ## Who this is for
-
-**Regulated workloads facing the September 2026 deadlines.** FIPS 140-2 certificates go
-Historical on the 21st; CRA reporting binds on the 11th. Both push verifiable provenance down
-to every dependency, including the ones you did not choose. Goish ports Go's FIPS module and
-emits, per function, the Go file and line range it was translated from, re-checked in CI on
-every push. See [Provenance](#provenance) for what this does and does not amount to.
 
 **Minimal-attack-surface deployments.** `scratch`/distroless containers, confidential VMs,
 Nitro-style enclaves, appliance images. No libc, dynamic linker, interpreter or JIT: the
@@ -541,9 +494,6 @@ Paid work that goes beyond that:
 
 Commercial enquiries: **[hello@cogentica.ai](mailto:hello@cogentica.ai)** —
 [goish.cogentica.ai](https://goish.cogentica.ai)
-
-If you are inside one of the September 2026 windows, it helps to say which packages your
-crypto path touches and which auditor or programme you are answering to.
 
 ---
 
