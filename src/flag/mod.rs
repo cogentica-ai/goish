@@ -11,17 +11,17 @@
 //   pub struct FlagSet { ... }
 //   pub fn NewFlagSet() -> FlagSet;
 //   impl FlagSet {
-//     pub fn String(name, default, usage) -> Flag<string>;
-//     pub fn Int(name, default, usage) -> Flag<int>;
-//     pub fn Bool(name, default, usage) -> Flag<bool>;
-//     pub fn Float64(name, default, usage) -> Flag<float64>;
+//     pub fn String(name, default, usage) -> FlagHandle<string>;
+//     pub fn Int(name, default, usage) -> FlagHandle<int>;
+//     pub fn Bool(name, default, usage) -> FlagHandle<bool>;
+//     pub fn Float64(name, default, usage) -> FlagHandle<float64>;
 //     pub fn Parse(&mut self, args: &slice<string>) -> error;
 //     pub fn Args(&self) -> &slice<string>;
 //     pub fn NArg(&self) -> int;
 //     pub fn PrintDefaults(&self);
 //   }
 //
-// Each `String/Int/Bool/Float64` returns a typed `Flag<T>` whose `Get()`
+// Each `String/Int/Bool/Float64` returns a typed `FlagHandle<T>` whose `Get()`
 // reads the parsed value. Internally backed by `Arc<SpinLock<T>>` so the
 // caller can hold the handle while the `FlagSet` mutates state.
 //
@@ -55,24 +55,50 @@ use crate::runtime::spin::SpinLock;
 use crate::strconv;
 use crate::types::{byte, float64, int};
 
-// ─── Flag<T> handle ────────────────────────────────────────────────────
+// ─── FlagHandle<T> handle ────────────────────────────────────────────────────
 
-pub struct Flag<T: Clone> {
+pub struct FlagHandle<T: Clone> {
     cell: Arc<SpinLock<T>>,
 }
 
-impl<T: Clone> Flag<T> {
+impl<T: Clone> FlagHandle<T> {
     pub fn Get(&self) -> T {
         self.cell.lock().clone()
     }
 }
 
-impl<T: Clone> Clone for Flag<T> {
+impl<T: Clone> Clone for FlagHandle<T> {
     fn clone(&self) -> Self {
         Self {
             cell: self.cell.clone(),
         }
     }
+}
+
+// go: sdk 1.25.5 flag/flag.go:360-363 Value
+/// Go: "Value is the interface to the dynamic value stored in a flag."
+///
+/// This is the real `flag.Value`, and it had been absent: the name
+/// `Flag` was occupied by a goish-invented generic handle (now
+/// `FlagHandle<T>`), and no Value interface existed at all. Downstream
+/// ports that wrap the stdlib flag package — spf13-pflag's
+/// golangflag.go bridge — need both.
+pub trait Value: Send + Sync {
+    fn String(&self) -> string;
+    fn Set(&mut self, s: string) -> crate::error;
+}
+
+// go: sdk 1.25.5 flag/flag.go:408-413 Flag
+/// Go: "A Flag represents the state of a flag."
+pub struct Flag {
+    /// name as it appears on command line
+    pub Name: string,
+    /// help message
+    pub Usage: string,
+    /// value as set
+    pub Value: alloc::boxed::Box<dyn Value>,
+    /// default value (as text); for usage message
+    pub DefValue: string,
 }
 
 // ─── Internal flag entry ───────────────────────────────────────────────
@@ -121,14 +147,14 @@ impl FlagSet {
         name: N,
         default: D,
         usage: U,
-    ) -> Flag<string> {
+    ) -> FlagHandle<string> {
         let cell = Arc::new(SpinLock::new(default.into()));
         self.defs.push(FlagDef {
             name: name.into(),
             usage: usage.into(),
             kind: FlagKind::String(cell.clone()),
         });
-        Flag { cell }
+        FlagHandle { cell }
     }
 
     pub fn Int<N: Into<string>, U: Into<string>>(
@@ -136,14 +162,14 @@ impl FlagSet {
         name: N,
         default: int,
         usage: U,
-    ) -> Flag<int> {
+    ) -> FlagHandle<int> {
         let cell = Arc::new(SpinLock::new(default));
         self.defs.push(FlagDef {
             name: name.into(),
             usage: usage.into(),
             kind: FlagKind::Int(cell.clone()),
         });
-        Flag { cell }
+        FlagHandle { cell }
     }
 
     pub fn Bool<N: Into<string>, U: Into<string>>(
@@ -151,14 +177,14 @@ impl FlagSet {
         name: N,
         default: bool,
         usage: U,
-    ) -> Flag<bool> {
+    ) -> FlagHandle<bool> {
         let cell = Arc::new(SpinLock::new(default));
         self.defs.push(FlagDef {
             name: name.into(),
             usage: usage.into(),
             kind: FlagKind::Bool(cell.clone()),
         });
-        Flag { cell }
+        FlagHandle { cell }
     }
 
     pub fn Float64<N: Into<string>, U: Into<string>>(
@@ -166,14 +192,14 @@ impl FlagSet {
         name: N,
         default: float64,
         usage: U,
-    ) -> Flag<float64> {
+    ) -> FlagHandle<float64> {
         let cell = Arc::new(SpinLock::new(default));
         self.defs.push(FlagDef {
             name: name.into(),
             usage: usage.into(),
             kind: FlagKind::Float64(cell.clone()),
         });
-        Flag { cell }
+        FlagHandle { cell }
     }
 
 

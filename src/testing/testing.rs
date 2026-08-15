@@ -692,7 +692,7 @@ pub const testBinary: &str = "0";
 /// Go's package-level flag values, as `flag.Flag` handles.
 ///
 /// Go stores these in package vars typed `*bool` / `*string`; goish's
-/// flag hands back a `Flag<T>` whose `Get()` reads the parsed value, so
+/// flag hands back a `FlagHandle<T>` whose `Get()` reads the parsed value, so
 /// the shape is the same indirection with a different spelling.
 /// Registered but not yet consumed by the runner: `Main` does not act
 /// on count/timeout/parallel/failfast/shuffle/list yet. They are
@@ -702,24 +702,24 @@ pub const testBinary: &str = "0";
 /// work.
 #[allow(dead_code)]
 struct testFlags {
-    short: crate::flag::Flag<bool>,
-    chatty: crate::flag::Flag<bool>,
-    run: crate::flag::Flag<string>,
-    skip: crate::flag::Flag<string>,
-    count: crate::flag::Flag<crate::types::uint>,
-    timeout: crate::flag::Flag<crate::time::Duration>,
-    parallel: crate::flag::Flag<int>,
-    fullPath: crate::flag::Flag<bool>,
-    failFast: crate::flag::Flag<bool>,
-    shuffle: crate::flag::Flag<string>,
-    outputDir: crate::flag::Flag<string>,
-    list: crate::flag::Flag<string>,
+    short: crate::flag::FlagHandle<bool>,
+    chatty: crate::flag::FlagHandle<bool>,
+    run: crate::flag::FlagHandle<string>,
+    skip: crate::flag::FlagHandle<string>,
+    count: crate::flag::FlagHandle<crate::types::uint>,
+    timeout: crate::flag::FlagHandle<crate::time::Duration>,
+    parallel: crate::flag::FlagHandle<int>,
+    fullPath: crate::flag::FlagHandle<bool>,
+    failFast: crate::flag::FlagHandle<bool>,
+    shuffle: crate::flag::FlagHandle<string>,
+    outputDir: crate::flag::FlagHandle<string>,
+    list: crate::flag::FlagHandle<string>,
     /// Go: `matchBenchmarks = flag.String("test.bench", …)`, declared
     /// in benchmark.go. Registered here because goish keeps one flag
     /// struct; now honored, since the benchmark runner exists.
-    pub(crate) matchBenchmarks: crate::flag::Flag<string>,
+    pub(crate) matchBenchmarks: crate::flag::FlagHandle<string>,
     /// Go: `benchmarkMemory = flag.Bool("test.benchmem", …)`.
-    pub(crate) benchmarkMemory: crate::flag::Flag<bool>,
+    pub(crate) benchmarkMemory: crate::flag::FlagHandle<bool>,
 }
 
 static INIT_RAN: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);

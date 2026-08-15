@@ -23,7 +23,7 @@ use crate::gostring::string;
 use crate::runtime::spin::SpinLock;
 use crate::types::int;
 
-use super::{Flag, FlagDef, FlagKind, FlagSet, NewFlagSet};
+use super::{FlagHandle, FlagDef, FlagKind, FlagSet, NewFlagSet};
 
 impl FlagSet {
     // go: sdk 1.25.5 flag/flag.go:812-816 FlagSet.Int64
@@ -34,14 +34,14 @@ impl FlagSet {
         name: N,
         default: crate::types::int64,
         usage: U,
-    ) -> Flag<crate::types::int64> {
+    ) -> FlagHandle<crate::types::int64> {
         let cell = Arc::new(SpinLock::new(default));
         self.defs.push(FlagDef {
             name: name.into(),
             usage: usage.into(),
             kind: FlagKind::Int64(cell.clone()),
         });
-        return Flag { cell };
+        return FlagHandle { cell };
     }
 
     // go: sdk 1.25.5 flag/flag.go:838-842 FlagSet.Uint
@@ -52,14 +52,14 @@ impl FlagSet {
         name: N,
         default: crate::types::uint,
         usage: U,
-    ) -> Flag<crate::types::uint> {
+    ) -> FlagHandle<crate::types::uint> {
         let cell = Arc::new(SpinLock::new(default));
         self.defs.push(FlagDef {
             name: name.into(),
             usage: usage.into(),
             kind: FlagKind::Uint(cell.clone()),
         });
-        return Flag { cell };
+        return FlagHandle { cell };
     }
 
     // go: sdk 1.25.5 flag/flag.go:945-949 FlagSet.Duration
@@ -71,14 +71,14 @@ impl FlagSet {
         name: N,
         default: crate::time::Duration,
         usage: U,
-    ) -> Flag<crate::time::Duration> {
+    ) -> FlagHandle<crate::time::Duration> {
         let cell = Arc::new(SpinLock::new(default));
         self.defs.push(FlagDef {
             name: name.into(),
             usage: usage.into(),
             kind: FlagKind::Duration(cell.clone()),
         });
-        return Flag { cell };
+        return FlagHandle { cell };
     }
 
     // go: sdk 1.25.5 flag/flag.go:1192-1194 Parsed
@@ -121,14 +121,14 @@ pub static CommandLine: crate::sync::Mutex<FlagSet> = crate::sync::Mutex::new(Ne
 // go: sdk 1.25.5 flag/flag.go:768-772 Bool
 /// Go: "Bool defines a bool flag with specified name, default value,
 /// and usage string."
-pub fn Bool<N: Into<string>, U: Into<string>>(name: N, default: bool, usage: U) -> Flag<bool> {
+pub fn Bool<N: Into<string>, U: Into<string>>(name: N, default: bool, usage: U) -> FlagHandle<bool> {
     return CommandLine.Lock().Bool(name, default, usage);
 }
 
 // go: sdk 1.25.5 flag/flag.go:794-798 Int
 /// Go: "Int defines an int flag with specified name, default value,
 /// and usage string."
-pub fn Int<N: Into<string>, U: Into<string>>(name: N, default: int, usage: U) -> Flag<int> {
+pub fn Int<N: Into<string>, U: Into<string>>(name: N, default: int, usage: U) -> FlagHandle<int> {
     return CommandLine.Lock().Int(name, default, usage);
 }
 
@@ -139,7 +139,7 @@ pub fn Int64<N: Into<string>, U: Into<string>>(
     name: N,
     default: crate::types::int64,
     usage: U,
-) -> Flag<crate::types::int64> {
+) -> FlagHandle<crate::types::int64> {
     return CommandLine.Lock().Int64(name, default, usage);
 }
 
@@ -150,7 +150,7 @@ pub fn Uint<N: Into<string>, U: Into<string>>(
     name: N,
     default: crate::types::uint,
     usage: U,
-) -> Flag<crate::types::uint> {
+) -> FlagHandle<crate::types::uint> {
     return CommandLine.Lock().Uint(name, default, usage);
 }
 
@@ -161,7 +161,7 @@ pub fn String<N: Into<string>, D: Into<string>, U: Into<string>>(
     name: N,
     default: D,
     usage: U,
-) -> Flag<string> {
+) -> FlagHandle<string> {
     return CommandLine.Lock().String(name, default, usage);
 }
 
@@ -172,7 +172,7 @@ pub fn Duration<N: Into<string>, U: Into<string>>(
     name: N,
     default: crate::time::Duration,
     usage: U,
-) -> Flag<crate::time::Duration> {
+) -> FlagHandle<crate::time::Duration> {
     return CommandLine.Lock().Duration(name, default, usage);
 }
 
