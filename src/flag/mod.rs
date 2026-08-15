@@ -113,6 +113,81 @@ pub(crate) enum FlagKind {
     String(Arc<SpinLock<string>>),
 }
 
+// go: none — Goish glue: adapts one of the FlagSet's typed cells to the
+// `Value` interface, so Lookup/VisitAll can hand out Go-shaped Flags.
+// Go stores a Value in every flag directly; goish stores a typed cell,
+// so the adaptation happens here rather than at definition time.
+pub(crate) struct kindValue {
+    kind: FlagKind,
+}
+
+impl Value for kindValue {
+    fn String(&self) -> string {
+        match self.kind {
+            FlagKind::Bool(ref c) => if *c.lock() { crate::gostring::string::from_static("true") } else { crate::gostring::string::from_static("false") },
+            FlagKind::Int(ref c) => strconv::Itoa(*c.lock()),
+            FlagKind::Int64(ref c) => strconv::FormatInt(*c.lock(), 10),
+            FlagKind::Uint(ref c) => strconv::FormatUint(*c.lock(), 10),
+            FlagKind::Duration(ref c) => (*c.lock()).String(),
+            FlagKind::Float64(ref c) => strconv::FormatFloat(*c.lock(), b'g', -1, 64),
+            FlagKind::String(ref c) => (*c.lock()).clone(),
+        }
+    }
+
+    fn Set(&mut self, s: string) -> crate::error {
+        match self.kind {
+            FlagKind::Bool(ref c) => {
+                let (v, err) = strconv::ParseBool(s);
+                if err != crate::nil { return err; }
+                *c.lock() = v;
+            }
+            FlagKind::Int(ref c) => {
+                let (v, err) = strconv::Atoi(s);
+                if err != crate::nil { return err; }
+                *c.lock() = v;
+            }
+            FlagKind::Int64(ref c) => {
+                let (v, err) = strconv::ParseInt(s, 0, 64);
+                if err != crate::nil { return err; }
+                *c.lock() = v;
+            }
+            FlagKind::Uint(ref c) => {
+                let (v, err) = strconv::ParseUint(s, 0, 64);
+                if err != crate::nil { return err; }
+                *c.lock() = v;
+            }
+            FlagKind::Duration(ref c) => {
+                let (v, err) = crate::time::ParseDuration(s);
+                if err != crate::nil { return err; }
+                *c.lock() = v;
+            }
+            FlagKind::Float64(ref c) => {
+                let (v, err) = strconv::ParseFloat(s, 64);
+                if err != crate::nil { return err; }
+                *c.lock() = v;
+            }
+            FlagKind::String(ref c) => {
+                *c.lock() = s;
+            }
+        }
+        return crate::nil.into();
+    }
+}
+
+impl Clone for FlagKind {
+    fn clone(&self) -> Self {
+        match self {
+            FlagKind::Bool(c) => FlagKind::Bool(c.clone()),
+            FlagKind::Int(c) => FlagKind::Int(c.clone()),
+            FlagKind::Int64(c) => FlagKind::Int64(c.clone()),
+            FlagKind::Uint(c) => FlagKind::Uint(c.clone()),
+            FlagKind::Duration(c) => FlagKind::Duration(c.clone()),
+            FlagKind::Float64(c) => FlagKind::Float64(c.clone()),
+            FlagKind::String(c) => FlagKind::String(c.clone()),
+        }
+    }
+}
+
 pub(crate) struct FlagDef {
     name: string,
     usage: string,
@@ -142,6 +217,48 @@ impl Default for FlagSet {
 }
 
 impl FlagSet {
+    // go: none — Goish glue: builds a Go-shaped Flag from the port's
+    // typed FlagDef. Go's flags ARE Flags; goish's are typed cells, so
+    // the Flag is constructed on demand and returned owned rather than
+    // as the *Flag pointer Go hands out of its `formal` map.
+    fn __as_flag(d: &FlagDef) -> Flag {
+        let v = kindValue { kind: d.kind.clone() };
+        let def_value = Value::String(&v);
+        Flag {
+            Name: d.name.clone(),
+            Usage: d.usage.clone(),
+            Value: alloc::boxed::Box::new(v),
+            DefValue: def_value,
+        }
+    }
+
+    // go: sdk 1.25.5 flag/flag.go:483-485 FlagSet.Lookup
+    /// Go: "Lookup returns the Flag structure of the named flag,
+    /// returning nil if none exists."
+    pub fn Lookup<N: Into<string>>(&self, name: N) -> Option<Flag> {
+        let name = name.into();
+        for d in self.defs.iter() {
+            if d.name == name {
+                return Some(Self::__as_flag(d));
+            }
+        }
+        return None;
+    }
+
+    // go: sdk 1.25.5 flag/flag.go:456-460 FlagSet.VisitAll
+    /// Go: "VisitAll visits the flags in lexicographical order, calling
+    /// fn for each. It visits all flags, even those not set."
+    pub fn VisitAll<F: FnMut(&Flag)>(&self, mut fn_: F) {
+        let mut names: alloc::vec::Vec<string> =
+            self.defs.iter().map(|d| d.name.clone()).collect();
+        names.sort();
+        for n in names.iter() {
+            if let Some(d) = self.defs.iter().find(|d| &d.name == n) {
+                fn_(&Self::__as_flag(d));
+            }
+        }
+    }
+
     pub fn String<N: Into<string>, D: Into<string>, U: Into<string>>(
         &mut self,
         name: N,
