@@ -31,11 +31,10 @@ fn main() {
         // slice<string>>, so its Get is the map's comma-ok — the
         // first-or-empty step is explicit here.
         let (vals, ok) = r.URL.Query().Get("name");
-        let name = if ok && vals.Len() > 0 {
-            vals[0].clone()
-        } else {
-            string::new()
-        };
+        let mut name = string::new();
+        if ok && vals.Len() > 0 {
+            name = vals[0].clone();
+        }
         // Go's own line. It works because io::Writer is implemented for
         // &dyn ResponseWriter; the `mut` is needed only because the macro
         // takes its writer by &mut.
