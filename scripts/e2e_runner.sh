@@ -70,7 +70,7 @@ FILTER="${FILTER:-.*}"
 # stefanprodan.github.io (a personal GitHub Pages site) and one hung on
 # tls13.1d.pw. It now dials only raw.githubusercontent.com and
 # Cloudflare, and the HRR probe is not run — 6/6 clean, ~11s.
-EXCLUDE="${EXCLUDE:-^(http_hello|https_serve|spawn_million|spawn_density|preempt_sysmon|lockfree_ring_bench|segv_diagnostic_smoke)$}"
+EXCLUDE="${EXCLUDE:-^(hello_query|http_hello|https_serve|spawn_million|spawn_density|preempt_sysmon|lockfree_ring_bench|segv_diagnostic_smoke)$}"
 # Tests that talk to the REAL internet: a timeout is network latency,
 # not a runtime bug (the artifact still gets saved). Such a test fails
 # the suite only on panic/fail or if NO iteration succeeded. This

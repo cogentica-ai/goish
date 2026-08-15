@@ -1,5 +1,10 @@
 // hello_query — the classic Go hello-server, in goish.
 //
+// NOT a self-test: ListenAndServe runs until killed, so this example is
+// on e2e_runner.sh's EXCLUDE list beside http_hello and https_serve.
+// Declaring a non-terminating server without excluding it turns the
+// suite red with a timeout, which is exactly what it did once.
+//
 //   go run . & curl 'localhost:8080/hello?name=world'
 //   → Hello, world
 //
