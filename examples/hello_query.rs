@@ -32,7 +32,7 @@ fn main() {
         // first-or-empty step is explicit here.
         let (vals, ok) = r.URL.Query().Get("name");
         let name = if ok && vals.Len() > 0 {
-            vals[0 as goish::int].clone()
+            vals[0].clone()
         } else {
             string::new()
         };
