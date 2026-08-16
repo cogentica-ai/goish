@@ -277,12 +277,21 @@ impl T {
         crate::runtime::Goexit();
     }
 
-    // go: none — goish-only: the cleanup-and-signal step Go performs in
-    // `tRunner`'s deferred call during the Goexit unwind. goish has no
-    // unwind, so both the normal return path and the Goexit path call
-    // this explicitly. Idempotent: the `reported` flag makes a second
-    // call a no-op, so a `Cleanup` callback that itself calls `FailNow`
-    // cannot re-enter it.
+    // go: none — goish-only: tRunner's two deferred calls, which Go runs
+    // during the Goexit unwind. goish has no unwind, so both the normal
+    // return path and the Goexit path call this explicitly, on a live
+    // stack. Idempotent: the `reported` flag makes a second call a
+    // no-op, so a `Cleanup` callback that itself calls `FailNow` cannot
+    // re-enter it.
+    //
+    // **This has to run on the test's OWN goroutine, when its body is
+    // done.** Go's `<-t.signal` lives in the caller (`T.Run`,
+    // `runTests`) while the release below is deferred inside the test's
+    // goroutine, so the two cannot be confused. A test that calls
+    // `Parallel` signals TWICE — once when it parks, once when it
+    // finishes — and doing the release on the first signal releases
+    // nothing: the body has not run, `sub` is still empty, and a
+    // parallel subtest created later parks on a barrier nobody closes.
     fn finish_before_goexit(&self) {
         if self
             .state
@@ -291,12 +300,109 @@ impl T {
         {
             return;
         }
-        self.drain_cleanups();
-        // Wake whoever is waiting on this test. Buffered with capacity
-        // 1 and sent exactly once, so this never blocks — which matters,
-        // because parking here would strand a test that is on its way
-        // out.
-        self.state.signal.Send(true);
+        let state = &self.state;
+
+        // Go: tRunner's INNER deferred func, `if len(t.sub) == 0 {
+        // t.runCleanup(normalPanic) }`. It is deferred last, so it runs
+        // FIRST — a test with no parallel subtests tears down before
+        // the duration below is banked, and its cleanup time counts as
+        // its own. A test WITH subtests cleans up further down instead,
+        // once they have finished: Go's Cleanup contract is "when the
+        // test and all its subtests complete".
+        if state.sub.Lock().is_empty() {
+            self.drain_cleanups();
+        }
+
+        // Go: `t.checkRaces()` first in tRunner's outer deferred func —
+        // any race this test caused is attributed to it before it is
+        // reported.
+        state.checkRaces();
+
+        // Go: tRunner's deferred func, `if t.Failed() { numFailed.Add(1) }`.
+        if state.failed.load(Ordering::Acquire) {
+            numFailed.fetch_add(1, Ordering::AcqRel);
+        }
+
+        // Go: `t.duration += highPrecisionTimeSince(t.start)`, before
+        // the report — so the reported time is the test's own, not
+        // including any wait for serial tests.
+        {
+            let start = *state.start.Lock();
+            let mut d = state.duration.Lock();
+            *d = crate::time::Duration(d.0 + crate::time::Since(start).0);
+        }
+
+        // Go: tRunner's deferred func, `if len(t.sub) > 0`. Any subtest
+        // that called Parallel is parked on this test's barrier.
+        let subs: Vec<Arc<TState>> = state.sub.Lock().clone();
+        let ts = state.tstate.Lock().clone();
+        if !subs.is_empty() {
+            // Go: "Decrease the running count for this test and mark it
+            // as no longer running" — the parent gives up its slot so a
+            // parallel child can take it.
+            if let Some(ts) = ts.as_ref() {
+                ts.release();
+            }
+            // Go: `running.Delete(t.name)` — a test waiting on its
+            // subtests is not itself running.
+            running_delete(state.name.Lock().clone());
+
+            // Go: `close(t.barrier)` — "Release the parallel subtests."
+            // Closing rather than sending is what releases ALL of them;
+            // a send would wake exactly one and hang the rest.
+            state.barrier.Close();
+
+            // Go: "Wait for subtests to complete." Each one's status
+            // line is written here, now that its final state is known.
+            for sub in subs.iter() {
+                let _ = sub.signal.Recv();
+                report_parallel_sub(state, sub);
+            }
+
+            // Go: "Run any cleanup callbacks, now that the subtests
+            // have completed", and charge their time to this test.
+            let cleanupStart = crate::time::Now();
+            self.drain_cleanups();
+            {
+                let mut d = state.duration.Lock();
+                *d = crate::time::Duration(d.0 + crate::time::Since(cleanupStart).0);
+            }
+
+            // Go: "Reacquire the count for sequential tests."
+            if !state.isParallel.load(Ordering::Acquire) {
+                if let Some(ts) = ts.as_ref() {
+                    ts.waitParallel();
+                }
+            }
+        } else if state.isParallel.load(Ordering::Acquire) {
+            // Go: "Only release the count for this test if it was run
+            // as a parallel test."
+            if let Some(ts) = ts.as_ref() {
+                ts.release();
+            }
+        }
+
+        // Go: `t.report()` — "Report after all subtests have finished."
+        // A parallel subtest is reported by its parent instead, once the
+        // barrier has released it, so it is skipped here.
+        if !state.isParallel.load(Ordering::Acquire) {
+            state.report();
+            drain_chatty();
+        }
+
+        // Go: `running.Delete(t.name)` once the test is finished.
+        running_delete(state.name.Lock().clone());
+
+        // Go: `t.done = true` in tRunner's deferred func, once the test
+        // and all its subtests have completed. `destination` reads this
+        // to re-home late output onto the nearest still-running
+        // ancestor.
+        state.done.store(true, Ordering::Release);
+
+        // Go: `t.signal <- signal`, last in the deferred func. Wake
+        // whoever is waiting on this test — its own tRunner if it never
+        // parked, otherwise the parent that closed the barrier.
+        state.signal.Send(true);
     }
 
     // go: sdk 1.25.5 testing/testing.go:1223-1227 common.Skip
@@ -460,14 +566,16 @@ impl T {
 /// `Fatal` takes down everything after it. That was goish's behaviour
 /// until `runtime::Goexit` landed: `Skip` called `syscall::Exit(0)`.
 ///
-/// **Deviations.** Go's `tRunner` carries the parallel-subtest barrier,
-/// race-error accounting, and a deferred recover that re-panics after
-/// flushing output to the root. None of those exist here yet:
-/// `t.Parallel` is not ported, goish has no race detector, and a panic
-/// in a test is already isolated per-goroutine by the runtime's own
-/// recovery path. What remains is the part that matters for
-/// correctness — spawn, wait for exactly one signal, and let the caller
-/// read the outcome out of the shared state.
+/// **Deviations.** Go's `tRunner` IS the goroutine: it runs `fn(t)` and
+/// its deferred calls do the teardown — barrier, subtests, cleanups,
+/// report, signal — while the `<-t.signal` receive sits in the caller.
+/// goish has no unwind, so the deferred half is spelled out in
+/// `finish_before_goexit`, which the test's own goroutine calls on both
+/// exit paths; tRunner keeps the caller's half and folds the receive
+/// into itself, so `T.Run` does not have to repeat it. Go's deferred
+/// recover that re-panics after flushing output to the root has no
+/// counterpart: a panic in a test is already isolated per-goroutine by
+/// the runtime's own recovery path.
 pub(crate) fn tRunner<F: FnOnce(&mut T) + Send + 'static>(t: T, fn_: F) {
     let state = t.state.clone();
     // Go: tRunner records the name on the common and marks the test —
@@ -506,83 +614,21 @@ pub(crate) fn tRunner<F: FnOnce(&mut T) + Send + 'static>(t: T, fn_: F) {
         t.finish_before_goexit();
     });
 
-    // Go: `<-t.signal`. Exactly one send happens per test, from
-    // whichever path finished it — a normal finish, or T.Parallel
-    // handing control back before it parks.
+    // Go: `<-t.signal` — but in Go this receive lives in the CALLER
+    // (`T.Run`, `runTests`), not in tRunner, and that separation is
+    // load-bearing. Everything Go defers inside the test's goroutine —
+    // closing the barrier, waiting for the parallel subtests, the
+    // cleanups, the report — runs when the BODY is done, in
+    // `finish_before_goexit`. Waiting here and releasing afterwards
+    // would conflate "handed control back" with "finished", and a test
+    // that parked in `Parallel` hands control back before its body has
+    // run at all.
+    //
+    // So exactly one send arrives here: a normal finish, or T.Parallel
+    // handing control back before it parks. A parked test's second
+    // send — the real finish — is taken by the parent, in the loop that
+    // waits for its subtests.
     let _ = state.signal.Recv();
-
-    // Go: tRunner's deferred func, `if len(t.sub) > 0`. Any subtest
-    // that called Parallel is now parked on this test's barrier.
-    let subs: Vec<Arc<TState>> = state.sub.Lock().clone();
-    if !subs.is_empty() {
-        // Go: "Decrease the running count for this test and mark it as
-        // no longer running" — the parent gives up its slot so a
-        // parallel child can take it.
-        let ts = state.tstate.Lock().clone();
-        if let Some(ts) = ts.as_ref() {
-            ts.release();
-        }
-
-        // Go: `close(t.barrier)` — "Release the parallel subtests."
-        // Closing rather than sending is what releases ALL of them;
-        // a send would wake exactly one and hang the rest.
-        state.barrier.Close();
-
-        // Go: "Wait for subtests to complete." Each one's status line
-        // is written here, now that its final pass/fail state is known.
-        for sub in subs.iter() {
-            let _ = sub.signal.Recv();
-            report_parallel_sub(&state, sub);
-        }
-
-        // Go: "Reacquire the count for sequential tests."
-        if !state.isParallel.load(Ordering::Acquire) {
-            if let Some(ts) = ts.as_ref() {
-                ts.waitParallel();
-            }
-        }
-    } else if state.isParallel.load(Ordering::Acquire) {
-        // Go: "Only release the count for this test if it was run as a
-        // parallel test."
-        let ts = state.tstate.Lock().clone();
-        if let Some(ts) = ts {
-            ts.release();
-        }
-    }
-
-    // Go: `t.checkRaces()` first in tRunner's deferred func — any race
-    // this test caused is attributed to it before it is reported.
-    state.checkRaces();
-
-    // Go: `t.duration += highPrecisionTimeSince(t.start)` in tRunner's
-    // deferred func, before the report — so the reported time is the
-    // test's own, not including any wait for serial tests.
-    {
-        let start = *state.start.Lock();
-        let mut d = state.duration.Lock();
-        *d = crate::time::Duration(d.0 + crate::time::Since(start).0);
-    }
-
-    // Go: `t.report()` — "Report after all subtests have finished."
-    // A parallel subtest is reported by its parent instead, once the
-    // barrier has released it, so it is skipped here.
-    if !state.isParallel.load(Ordering::Acquire) {
-        state.report();
-        drain_chatty();
-    }
-
-    // Go: tRunner's deferred func, `if t.Failed() { numFailed.Add(1) }`.
-    if state.failed.load(Ordering::Acquire) {
-        numFailed.fetch_add(1, Ordering::AcqRel);
-    }
-
-    // Go: `running.Delete(t.name)` once the test is finished.
-    running_delete(state.name.Lock().clone());
-
-    // Go: `t.done = true` in tRunner's deferred func, once the test and
-    // all its subtests have completed. `destination` reads this to
-    // re-home late output onto the nearest still-running ancestor.
-    state.done.store(true, Ordering::Release);
 }
 
 // ─── chatty flag / printer ───────────────────────────────────────────
