@@ -47,6 +47,7 @@ loops_for() {
     chan_*|select_*|preempt_*|sched_*|sync_*|spawn_*|stack_*|lockfree_*|lookpath_*|\
     time_sleep|time_timer|stopwatch|signal_smoke|signal_winch_smoke|sigaltstack_offline_proof|\
     context_*|cmd_stdout_pipe_test|syscall_fswatch_smoke|m20_smoke|\
+    testing_parallel_smoke|testing_nested_parallel_smoke|\
     goginx|https_real_smoke|http_shutdown_smoke|http_keepalive_smoke|\
     http_stream_body_smoke|\
     http_panic_demo|production_http_server|tls_smoke|tls_server_smoke)
