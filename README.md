@@ -103,7 +103,7 @@ per-P, and an HTTP server with an allocation-free hot path.
 
 ## Status
 
-Active development. The e2e suite runs 417 declared examples at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines.
+Active development. The e2e suite runs 419 declared examples at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines.
 
 Goish is single-target: `x86_64-unknown-linux-gnu`.
 
@@ -239,7 +239,7 @@ new `runtime/pprof` user-registry with real captured stacks.
 | `math` | 307/661 (46.4%) | 5 |
 | `testing` | 217/247 (87.9%) | 402 |
 | `encoding` | 210/1018 (20.6%) | 125 |
-| `compress` | 122/151 (80.8%) | 0 |
+| `compress` | 142/151 (94.0%) | 42 |
 | `os` | 112/366 (30.6%) | 3 |
 
 The right-hand column counts *all* `// go:` lines, which is what
@@ -254,8 +254,10 @@ receiver-qualified count.
 
 Two limits on those numbers. `crypto/`, `net/` and `testing/` hold 92%
 of all anchors; outside them coverage is mostly name-level — `sync`,
-`compress`, `archive` and `text` have almost none — so treat those
-ports as working code rather than verified ports. And some
+`archive` and `text` have almost none — so treat those
+ports as working code rather than verified ports. `compress` is the
+exception in the making: `bzip2` is fully anchored (42), the other four
+packages are not. And some
 anchors name a method without its receiver, so `anchor_check.py` can
 confirm the file and line range but cannot bind the symbol uniquely.
 `--strict` fails on those; tightening them is open work.
@@ -311,7 +313,7 @@ side-channel analysis. Read this before trusting goish with anything.
 ### Standard library ports (Go 1.25-faithful)
 - **Core**: `bufio`, `bytes`, `cmp`, `context`, `errors`, `flag`, `fmt`, `io` + `io/fs`, `log` + `log/slog`, `maps`, `os` + `os/{exec, signal, user}`, `path` + `path/filepath`, `reflect` (3 tiers), `slices`, `sort`, `strconv`, `strings`, `sync` + `sync/atomic`, `syscall`, `testing` (+ `testing/fstest`), `time`, `unicode` (full case mapping) + `unicode/{utf8, utf16}`, `expvar`, `html`, `embed` (`//go:embed` as the `embed!` macro).
 - **Encoding**: `encoding/{ascii85, asn1, base32, base64, binary, csv, hex, json, pem}` - including the `encoding/json/v2` + `jsontext` port with compile-time struct codecs.
-- **Compression & archives**: `compress/{flate, gzip, lzw, zlib}`, `archive/tar`.
+- **Compression & archives**: `compress/{bzip2, flate, gzip, lzw, zlib}`, `archive/tar`.
 - **Crypto**: `crypto/{aes, cipher, chacha20, chacha20poly1305, des, ecdh, ecdsa, ed25519, hkdf, hmac, md5, pbkdf2, poly1305, rand, rc4, rsa, sha1, sha256, sha3, sha512, subtle, x509}`, plus `crypto/tls` (above) and a minimum-viable `crypto/ssh` SSH-2.0 client.
 - **Math, hashing & text**: `math` + `math/{big, bits, rand}`, `hash/{adler32, crc32, crc64, fnv, maphash}`, `container/{heap, list, ring}`, `regexp`, `mime` + `mime/{multipart, quotedprintable}`, `net/{mail, textproto, url}`, `text/tabwriter`.
 - **`golang.org/x` ports**: `x/term`, `x/sync/errgroup`, `x/text` (BCP 47 language tags + NFD normalization), plus `xxh3`.

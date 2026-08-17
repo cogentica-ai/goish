@@ -983,6 +983,10 @@ name = "gzip_smoke"
 path = "examples/gzip_smoke.rs"
 
 [[example]]
+name = "bzip2_smoke"
+path = "examples/bzip2_smoke.rs"
+
+[[example]]
 name = "runtime_callers_smoke"
 path = "examples/runtime_callers_smoke.rs"
 
