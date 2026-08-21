@@ -2,13 +2,14 @@
 
 Where the port actually stands, and how much of it is *proven* rather
 than merely counted. Numbers are regenerated with
-`scripts/port_coverage.py`; the last refresh was 2026-08-15.
+`scripts/port_coverage.py`; the last full refresh was 2026-08-15, with
+the `compress` row refreshed 2026-08-17.
 
-## The whole tree — 4432 / 11061 functions (40.1%)
+## The whole tree — 4452 / 11061 functions (40.3%)
 
 Across the 169 packages of the Go 1.25.5 standard library that have a
-goish port: **88 are at 100%**, and there are **5434 `// go:`
-provenance lines**, 3450 of them `sdk` anchors citing the exact Go
+goish port: **89 are at 100%**, and there are **5477 `// go:`
+provenance lines**, 3484 of them `sdk` anchors citing the exact Go
 file and line range.
 
 The anchors are not spread evenly, and that is the single most important
@@ -23,7 +24,7 @@ goishlint diff the port against the Go file it came from.
 | `math` | 307/661 | 46.4% | 5 |
 | `testing` | 217/247 | 87.9% | 402 |
 | `encoding` | 210/1018 | 20.6% | 125 |
-| `compress` | 122/151 | 80.8% | 0 |
+| `compress` | 142/151 | 94.0% | 42 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
 | `strings` | 76/101 | 75.2% | 1 |
@@ -36,11 +37,22 @@ Within `net`, the entire jump since the last refresh is **`net/http`,
 now complete: 639/639 functions (100.0%) across all twelve of its
 packages, with 1476 `// go:` lines** — see its section below.
 
-So: `compress` at 80.8% and `crypto/x509` at 100% are not comparable
-claims. The first means 122 functions share a name with Go's; the second
+So: `math` at 46.4% and `crypto/x509` at 100% are not comparable
+claims. The first means 307 functions share a name with Go's; the second
 means 158 functions were each diffed against the Go source and their
 outputs checked byte-for-byte against a running Go. Treat unanchored
 subtrees as working code, not as verified ports.
+
+`compress` is the clearest illustration of the gap, because both halves
+are now visible inside one subtree. Its 42 `// go:` lines — 34 of them
+`sdk` anchors — are **all** in `compress/bzip2`, ported 2026-08-17:
+20/20 functions by name and by declaration, every one citing
+its Go file and line range, and checked against Go's own test vectors
+plus seven `testdata/` corpora — 567 KB of English text, 16 KB of
+random bytes, a 1 MiB sawtooth and the issue-5747 overrun case — all
+byte-identical to a running Go. `flate`, `gzip`, `lzw` and `zlib` carry
+122 name-level ports and zero anchors between them. Same subtree, same
+percentage column, two different claims.
 
 `iter` (0/4) and `database` (0/130) have directories but no ported
 functions. `iter` is a squatter — goish fakes Go 1.23 iterator support
