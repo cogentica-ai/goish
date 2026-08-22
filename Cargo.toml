@@ -1719,3 +1719,7 @@ path = "examples/http_transport_loops_smoke.rs"
 [[example]]
 name = "hello_query"
 path = "examples/hello_query.rs"
+
+[[example]]
+name = "range_int_smoke"
+path = "examples/range_int_smoke.rs"

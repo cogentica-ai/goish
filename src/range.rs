@@ -24,6 +24,42 @@ pub trait RangeIter {
     fn range(self) -> Self::Iter;
 }
 
+// ─── int → int ─────────────────────────────────────────────────────
+
+/// Go 1.22 `for i := range n`: yields 0 through n-1, and yields no
+/// values when n is zero or negative.
+pub struct IntRangeIter {
+    next: int,
+    end: int,
+}
+
+impl Iterator for IntRangeIter {
+    type Item = int;
+
+    // goishlint:ignore GOISH014 — runtime primitive implementing Go 1.22 integer range.
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next >= self.end {
+            return None;
+        }
+        let result = self.next;
+        self.next += 1;
+        return Some(result);
+    }
+}
+
+impl RangeIter for &int {
+    type Item = int;
+    type Iter = IntRangeIter;
+
+    // goishlint:ignore GOISH014 — runtime primitive implementing Go 1.22 integer range.
+    fn range(self) -> Self::Iter {
+        return IntRangeIter {
+            next: 0,
+            end: *self,
+        };
+    }
+}
+
 #[macro_export]
 macro_rules! range {
     ($iter:expr) => {
