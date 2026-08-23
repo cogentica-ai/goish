@@ -7,8 +7,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::errors;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::{string, syscall};
 

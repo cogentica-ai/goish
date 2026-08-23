@@ -8,8 +8,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::os;
 use goish::{string, syscall};
 
@@ -47,11 +47,16 @@ fn main() {
                 }
             }
             if found_a && found_b {
-                fmt::Println!("[ 1] ReadDir /tmp              PASS", entries.Len(), "entries");
+                fmt::Println!(
+                    "[ 1] ReadDir /tmp              PASS",
+                    entries.Len(),
+                    "entries"
+                );
             } else {
                 fmt::Println!(
                     "[ 1] ReadDir /tmp              FAIL a={} b={}",
-                    found_a, found_b
+                    found_a,
+                    found_b
                 );
                 failed += 1;
             }
@@ -107,7 +112,11 @@ fn main() {
         if !has_dot && !has_dotdot {
             fmt::Println!("[ 4] . and .. skipped          PASS");
         } else {
-            fmt::Println!("[ 4] . and .. skipped          FAIL dot={} dotdot={}", has_dot, has_dotdot);
+            fmt::Println!(
+                "[ 4] . and .. skipped          FAIL dot={} dotdot={}",
+                has_dot,
+                has_dotdot
+            );
             failed += 1;
         }
     }

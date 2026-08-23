@@ -63,13 +63,20 @@ fn scan_events(buf: &[u8], want_mask: u32, want_name: &[u8]) -> bool {
 /// Poll `fd` for readability, then read into `buf`. Returns bytes
 /// read (0 if the poll timed out).
 fn poll_read(fd: goish::int, buf: &mut [u8], timeout_ms: goish::int) -> usize {
-    let mut fds = [syscall::PollFd { Fd: fd as i32, Events: syscall::POLLIN, Revents: 0 }];
+    let mut fds = [syscall::PollFd {
+        Fd: fd as i32,
+        Events: syscall::POLLIN,
+        Revents: 0,
+    }];
     let (n, err) = syscall::Poll(&mut fds, timeout_ms);
     check(err == goish::nil, b"poll err\n");
     if n == 0 {
         return 0;
     }
-    check(fds[0].Revents & syscall::POLLIN != 0, b"poll: POLLIN not set\n");
+    check(
+        fds[0].Revents & syscall::POLLIN != 0,
+        b"poll: POLLIN not set\n",
+    );
     let n = syscall::Read(fd as i32, buf.as_mut_ptr(), buf.len());
     check(n > 0, b"read after poll returned nothing\n");
     n as usize
@@ -83,7 +90,8 @@ fn main() {
     check(err == goish::nil, b"setup: MkdirAll\n");
 
     // ─── 1. inotify end-to-end ─────────────────────────────────────
-    let (ifd, err) = syscall::InotifyInit1((syscall::IN_CLOEXEC | syscall::IN_NONBLOCK) as goish::int);
+    let (ifd, err) =
+        syscall::InotifyInit1((syscall::IN_CLOEXEC | syscall::IN_NONBLOCK) as goish::int);
     check(err == goish::nil, b"t1: InotifyInit1\n");
     let mask = syscall::IN_CREATE
         | syscall::IN_MODIFY
@@ -132,18 +140,22 @@ fn main() {
     check(st.Bsize > 0, b"t2: bsize\n");
 
     // ─── 3. NameToHandleAt ─────────────────────────────────────────
-    let (fh, mount_id, err) = syscall::NameToHandleAt(
-        syscall::AT_FDCWD as goish::int,
-        root.clone(),
-        0,
-    );
+    let (fh, mount_id, err) =
+        syscall::NameToHandleAt(syscall::AT_FDCWD as goish::int, root.clone(), 0);
     if err == goish::nil {
         check(fh.Size() > 0, b"t3: empty handle\n");
         check(mount_id > 0, b"t3: mount id\n");
-        fmt::Println!("t3: NameToHandleAt ok, handle type/bytes:", fh.Type() as i64, fh.Size());
+        fmt::Println!(
+            "t3: NameToHandleAt ok, handle type/bytes:",
+            fh.Type() as i64,
+            fh.Size()
+        );
     } else {
         // Overlay/tmpfs variants without export support say EOPNOTSUPP.
-        fmt::Println!("t3: NameToHandleAt unsupported here (accepted):", err.Error());
+        fmt::Println!(
+            "t3: NameToHandleAt unsupported here (accepted):",
+            err.Error()
+        );
     }
 
     // ─── 4. fanotify: privileged path or clean fallback errno ──────
@@ -157,12 +169,18 @@ fn main() {
     if err != goish::nil {
         // Unprivileged: EPERM is the documented signal to fall back
         // to inotify — the exact branch typescript-go's watcher takes.
-        fmt::Println!("t4: fanotify unavailable (accepted, inotify fallback):", err.Error());
+        fmt::Println!(
+            "t4: fanotify unavailable (accepted, inotify fallback):",
+            err.Error()
+        );
     } else {
         let err = syscall::FanotifyMark(
             ffd,
             syscall::FAN_MARK_ADD | syscall::FAN_MARK_ONLYDIR,
-            syscall::FAN_CREATE | syscall::FAN_DELETE | syscall::FAN_ONDIR | syscall::FAN_EVENT_ON_CHILD,
+            syscall::FAN_CREATE
+                | syscall::FAN_DELETE
+                | syscall::FAN_ONDIR
+                | syscall::FAN_EVENT_ON_CHILD,
             syscall::AT_FDCWD as goish::int,
             root.clone(),
         );
@@ -171,12 +189,25 @@ fn main() {
         check(err == goish::nil, b"t4: WriteFile\n");
         let mut fbuf = [0u8; 4096];
         let n = poll_read(ffd, &mut fbuf, 2000);
-        check(n >= core::mem::size_of::<syscall::FanotifyEventMetadata>(), b"t4: no fanotify event\n");
+        check(
+            n >= core::mem::size_of::<syscall::FanotifyEventMetadata>(),
+            b"t4: no fanotify event\n",
+        );
         let meta: syscall::FanotifyEventMetadata =
             unsafe { core::ptr::read_unaligned(fbuf.as_ptr() as *const _) };
-        check(meta.Vers == syscall::FANOTIFY_METADATA_VERSION, b"t4: metadata version\n");
-        check(meta.Mask & syscall::FAN_CREATE != 0, b"t4: FAN_CREATE mask\n");
-        fmt::Println!("t4: fanotify event ok, mask/len:", meta.Mask as i64, meta.Event_len as i64);
+        check(
+            meta.Vers == syscall::FANOTIFY_METADATA_VERSION,
+            b"t4: metadata version\n",
+        );
+        check(
+            meta.Mask & syscall::FAN_CREATE != 0,
+            b"t4: FAN_CREATE mask\n",
+        );
+        fmt::Println!(
+            "t4: fanotify event ok, mask/len:",
+            meta.Mask as i64,
+            meta.Event_len as i64
+        );
         syscall::Close(ffd as i32);
     }
 

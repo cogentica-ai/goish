@@ -68,7 +68,10 @@ impl fs::FS for memFS {
     fn Open(&self, name: string) -> (Arc<dyn fs::File + Send + Sync>, goish::error) {
         if name.as_bytes() == b"hello.txt" {
             (
-                Arc::new(memFile { data: b"hello from memFS", pos: AtomicUsize::new(0) }),
+                Arc::new(memFile {
+                    data: b"hello from memFS",
+                    pos: AtomicUsize::new(0),
+                }),
                 goish::nil.into(),
             )
         } else {
@@ -105,7 +108,10 @@ fn main() {
     check(info.Size() == 6 && !info.IsDir(), b"t1b: Stat file\n");
     let (dinfo, err) = fs::Stat(&*fsys, "sub");
     check(err == goish::nil && dinfo.IsDir(), b"t1c: Stat dir\n");
-    check(dinfo.Mode().IsDir() && !dinfo.Mode().IsRegular(), b"t1c: Mode bits\n");
+    check(
+        dinfo.Mode().IsDir() && !dinfo.Mode().IsRegular(),
+        b"t1c: Mode bits\n",
+    );
 
     // ─── 2. DirFS: ReadDir sorted + WalkDir over the real tree ─────
     let (entries, err) = fs::ReadDir(&*fsys, "sub");
@@ -147,25 +153,40 @@ fn main() {
     check(err == goish::nil, b"t3: sub ReadFile err\n");
     check(data.as_ref() == b"bravo!", b"t3: sub ReadFile content\n");
     let (entries, err) = fs::ReadDir(&*sub, ".");
-    check(err == goish::nil && entries.as_ref().len() == 2, b"t3b: sub ReadDir\n");
+    check(
+        err == goish::nil && entries.as_ref().len() == 2,
+        b"t3b: sub ReadDir\n",
+    );
     let (same, err) = fs::Sub(fsys.clone(), ".");
     check(err == goish::nil, b"t3c: Sub dot err\n");
     let (data, err) = fs::ReadFile(&*same, "a.txt");
-    check(err == goish::nil && data.as_ref() == b"alpha", b"t3c: Sub dot identity\n");
+    check(
+        err == goish::nil && data.as_ref() == b"alpha",
+        b"t3c: Sub dot identity\n",
+    );
 
     // ─── 4. sentinel identity across os / fs ───────────────────────
     let (_, err) = fs::ReadFile(&*fsys, "missing.txt");
     check(err != goish::nil, b"t4: missing file errs\n");
-    check(errors::Is(err.clone(), fs::ErrNotExist), b"t4: errors.Is fs.ErrNotExist\n");
+    check(
+        errors::Is(err.clone(), fs::ErrNotExist),
+        b"t4: errors.Is fs.ErrNotExist\n",
+    );
     check(os::IsNotExist(err), b"t4: os.IsNotExist agrees\n");
 
     // ─── 5. custom FS through the generic ReadFile path ────────────
     let mem = memFS;
     let (data, err) = fs::ReadFile(&mem, "hello.txt");
     check(err == goish::nil, b"t5: memFS ReadFile err\n");
-    check(data.as_ref() == b"hello from memFS", b"t5: memFS ReadFile content\n");
+    check(
+        data.as_ref() == b"hello from memFS",
+        b"t5: memFS ReadFile content\n",
+    );
     let (_, err) = fs::ReadFile(&mem, "nope");
-    check(errors::Is(err, fs::ErrNotExist), b"t5: memFS not-exist identity\n");
+    check(
+        errors::Is(err, fs::ErrNotExist),
+        b"t5: memFS not-exist identity\n",
+    );
 
     // cleanup
     let _ = os::RemoveAll(root);

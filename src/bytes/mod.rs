@@ -443,7 +443,11 @@ where
 
     let delta = n_b.len() as int - o_b.len() as int;
     let cap_signed = s_b.len() as int + n * delta;
-    let cap_usize = if cap_signed > 0 { cap_signed as usize } else { 0 };
+    let cap_usize = if cap_signed > 0 {
+        cap_signed as usize
+    } else {
+        0
+    };
     let mut v: Vec<byte> = Vec::with_capacity(cap_usize);
 
     let mut start = 0usize;
@@ -851,7 +855,9 @@ impl Buffer {
             self.off -= 1;
             nil
         } else {
-            crate::errors::New("bytes.Buffer: UnreadByte: previous operation was not a successful read")
+            crate::errors::New(
+                "bytes.Buffer: UnreadByte: previous operation was not a successful read",
+            )
         }
     }
 
@@ -1162,7 +1168,10 @@ impl Reader {
         };
         // Go: if abs < 0 { return 0, error }
         if abs < 0 {
-            return (0, crate::errors::New("bytes.Reader.Seek: negative position"));
+            return (
+                0,
+                crate::errors::New("bytes.Reader.Seek: negative position"),
+            );
         }
         self.i = abs as usize;
         (abs, nil)
@@ -1199,7 +1208,10 @@ impl Reader {
     pub fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
         // Go: if off < 0 { return 0, errors.New("bytes.Reader.ReadAt: negative offset") }
         if off < 0 {
-            return (0, crate::errors::New("bytes.Reader.ReadAt: negative offset"));
+            return (
+                0,
+                crate::errors::New("bytes.Reader.ReadAt: negative offset"),
+            );
         }
         if off >= self.s.len() as i64 {
             return (0, io::EOF.into());
@@ -1401,10 +1413,7 @@ pub fn Fields<S: Into<slice<byte>>>(s: S) -> slice<slice<byte>> {
 }
 
 /// `bytes.FieldsFunc(s, f)` — split at every run of code points satisfying `f`.
-pub fn FieldsFunc<S: Into<slice<byte>>, F: Fn(rune) -> bool>(
-    s: S,
-    f: F,
-) -> slice<slice<byte>> {
+pub fn FieldsFunc<S: Into<slice<byte>>, F: Fn(rune) -> bool>(s: S, f: F) -> slice<slice<byte>> {
     let s = s.into();
     let bytes: alloc::vec::Vec<byte> = s.__into_vec();
     let mut out: alloc::vec::Vec<slice<byte>> = alloc::vec::Vec::new();

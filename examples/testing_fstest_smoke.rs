@@ -33,7 +33,7 @@ extern crate goish;
 use alloc::vec::Vec;
 use goish::gostring::string;
 use goish::testing::fstest::{
-    MapFile, MapFS, __shim_open_read_at, __shim_open_seek, __shim_open_seek2,
+    __shim_open_read_at, __shim_open_seek, __shim_open_seek2, MapFS, MapFile,
 };
 use goish::types::byte;
 use goish::{errors, fmt, make, slice, syscall};
@@ -74,7 +74,14 @@ fn main() {
             let got_err = err != errors::nil;
             if got != *want || got_err != *want_err {
                 fmt::Println!(
-                    "    Seek(", *off, ",", *whence, ") = ", got, " err=", got_err
+                    "    Seek(",
+                    *off,
+                    ",",
+                    *whence,
+                    ") = ",
+                    got,
+                    " err=",
+                    got_err
                 );
                 ok = false;
             }
@@ -133,8 +140,18 @@ fn main() {
             let is_err = err != errors::nil && !is_eof;
             if got_s != s(want) || is_eof != *want_eof || is_err != *want_err {
                 fmt::Println!(
-                    "    ReadAt(len=", *buflen, ",off=", *off, ") = ", n,
-                    " [", got_s, "] eof=", is_eof, " err=", is_err
+                    "    ReadAt(len=",
+                    *buflen,
+                    ",off=",
+                    *off,
+                    ") = ",
+                    n,
+                    " [",
+                    got_s,
+                    "] eof=",
+                    is_eof,
+                    " err=",
+                    is_err
                 );
                 ok = false;
             }

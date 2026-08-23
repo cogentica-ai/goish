@@ -9,9 +9,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
 use goish::convert::bytes as as_bytes;
+use goish::fmt;
 use goish::types::rune;
 use goish::{string, syscall};
 
@@ -22,7 +22,13 @@ fn main() {
     // 1. Runes("hello") → ['h','e','l','l','o'].
     {
         let r = bytes::Runes(as_bytes(string("hello")));
-        let want: [rune; 5] = [b'h' as rune, b'e' as rune, b'l' as rune, b'l' as rune, b'o' as rune];
+        let want: [rune; 5] = [
+            b'h' as rune,
+            b'e' as rune,
+            b'l' as rune,
+            b'l' as rune,
+            b'o' as rune,
+        ];
         let mut ok = r.Len() as usize == want.len();
         if ok {
             let mut i: i64 = 0;

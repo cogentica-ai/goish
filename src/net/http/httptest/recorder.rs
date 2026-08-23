@@ -37,10 +37,10 @@ use crate::strings;
 use crate::sync::Mutex;
 use crate::types::{byte, int};
 
-use super::super::header::Header;
-use super::super::responsewriter::{Flusher, HeaderHandle, ResponseWriter};
 use super::super::client::Body;
+use super::super::header::Header;
 use super::super::response::Response;
+use super::super::responsewriter::{Flusher, HeaderHandle, ResponseWriter};
 
 // go: sdk 1.25.5 net/http/httptest/recorder.go:61-61 DefaultRemoteAddr
 /// Go: "DefaultRemoteAddr is the default remote address to return in
@@ -356,7 +356,6 @@ fn parseContentLength(cl: string) -> int {
 // too many.
 use super::super::http::ValidTrailerHeader;
 use super::super::server::TrailerPrefix;
-
 
 // go: none — goish-only: silences the unused-import warning for the
 // bytes package, which Go's recorder uses for its *bytes.Buffer body

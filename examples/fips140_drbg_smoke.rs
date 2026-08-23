@@ -125,7 +125,11 @@ fn main() {
         }
         n += 1;
     }
-    check("Generate serves every length 1..64", fmt::Sprintf!("%v", lenOK), "true");
+    check(
+        "Generate serves every length 1..64",
+        fmt::Sprintf!("%v", lenOK),
+        "true",
+    );
 
     // ── drbg.Read and the reader wrappers (rand.go) ───────────────────
     //

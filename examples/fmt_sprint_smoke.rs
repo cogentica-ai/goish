@@ -10,8 +10,8 @@ extern crate goish;
 
 use goish::fmt;
 use goish::string;
+use goish::syscall;
 use goish::types::int;
-use goish::{syscall};
 
 #[goish::main]
 fn main() {

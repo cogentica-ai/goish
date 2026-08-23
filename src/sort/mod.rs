@@ -309,32 +309,36 @@ where
     let ptr = x.as_mut_ptr();
 
     // Heapsort using our Less closure.
-    let sift_down = |less: &mut F, ptr: *mut T, mut r: int, end: int| {
-        loop {
-            let mut child = r * 2 + 1;
-            if child >= end {
-                break;
-            }
-            if child + 1 < end && less(child, child + 1) {
-                child += 1;
-            }
-            if !less(r, child) {
-                break;
-            }
-            unsafe { core::ptr::swap(ptr.offset(r as isize), ptr.offset(child as isize)); }
-            r = child;
+    let sift_down = |less: &mut F, ptr: *mut T, mut r: int, end: int| loop {
+        let mut child = r * 2 + 1;
+        if child >= end {
+            break;
         }
+        if child + 1 < end && less(child, child + 1) {
+            child += 1;
+        }
+        if !less(r, child) {
+            break;
+        }
+        unsafe {
+            core::ptr::swap(ptr.offset(r as isize), ptr.offset(child as isize));
+        }
+        r = child;
     };
 
     let mut start = (n - 1) / 2;
     loop {
         sift_down(&mut less, ptr, start, n);
-        if start == 0 { break; }
+        if start == 0 {
+            break;
+        }
         start -= 1;
     }
     let mut end = n - 1;
     while end > 0 {
-        unsafe { core::ptr::swap(ptr, ptr.offset(end as isize)); }
+        unsafe {
+            core::ptr::swap(ptr, ptr.offset(end as isize));
+        }
         sift_down(&mut less, ptr, 0, end);
         end -= 1;
     }
@@ -381,7 +385,9 @@ where
             if k == i {
                 break;
             }
-            unsafe { core::ptr::swap(ptr.offset(j as isize), ptr.offset(k as isize)); }
+            unsafe {
+                core::ptr::swap(ptr.offset(j as isize), ptr.offset(k as isize));
+            }
             j = k;
         }
     }

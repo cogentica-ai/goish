@@ -159,14 +159,20 @@ pub fn decode_x509_ec_p256_pubkey(cert_der: &[byte]) -> (P256PublicKey, error) {
     // Certificate SEQUENCE -> TBSCertificate SEQUENCE.
     let (cert_rv, _, err) = asn1::ParseRaw(s(cert_der));
     if !err.IsNil() {
-        return (nil_key, errors::New("tls/x509: failed to parse Certificate"));
+        return (
+            nil_key,
+            errors::New("tls/x509: failed to parse Certificate"),
+        );
     }
     if cert_rv.Tag != asn1::TagSequence {
         return (nil_key, errors::New("tls/x509: not a SEQUENCE"));
     }
     let (tbs_rv, _, err) = asn1::ParseRaw(cert_rv.Bytes.clone());
     if !err.IsNil() {
-        return (nil_key, errors::New("tls/x509: failed to parse TBSCertificate"));
+        return (
+            nil_key,
+            errors::New("tls/x509: failed to parse TBSCertificate"),
+        );
     }
 
     let (spki_bytes, spki_err) = find_spki_in_tbs(&tbs_rv.Bytes);
@@ -182,7 +188,10 @@ pub fn decode_x509_ec_p256_pubkey(cert_der: &[byte]) -> (P256PublicKey, error) {
     // already matched the OID.
     let (_alg, rest, err) = asn1::ParseRaw(spki_rv.Bytes.clone());
     if !err.IsNil() {
-        return (nil_key, errors::New("tls/x509: failed to parse AlgorithmIdentifier"));
+        return (
+            nil_key,
+            errors::New("tls/x509: failed to parse AlgorithmIdentifier"),
+        );
     }
     let (bits_rv, _, err) = asn1::ParseRaw(rest.clone());
     if !err.IsNil() {

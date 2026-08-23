@@ -145,10 +145,7 @@ fn spawn_backend() -> goish::int {
 fn dial_pc(
     t: &Arc<http::Transport>,
     addr: goish::string,
-) -> (
-    Arc<persistConn>,
-    goish::net::http::transport::pcLoops,
-) {
+) -> (Arc<persistConn>, goish::net::http::transport::pcLoops) {
     let (conn, e) = net::Dial(string("tcp"), addr.clone());
     if !e.IsNil() {
         fmt::Printf!("dial failed: %v\n", e);
@@ -161,7 +158,9 @@ fn dial_pc(
         onlyH1: false,
     };
     let pc = Arc::new(persistConn::__new(key));
-    pc.__put_src(goish::net::http::client::ConnSrc::Tcp(goish::bufio::NewReader(conn)));
+    pc.__put_src(goish::net::http::client::ConnSrc::Tcp(
+        goish::bufio::NewReader(conn),
+    ));
     let t2 = t.clone();
     let bank: Arc<
         dyn Fn(&Arc<persistConn>, goish::net::http::client::ConnSrc) -> bool + Send + Sync,
@@ -181,7 +180,11 @@ fn make_parts(
     url: goish::string,
     body: goish::slice<goish::byte>,
     expect: bool,
-) -> (goish::slice<goish::byte>, goish::net::http::transfer::transferWriter, http::Request) {
+) -> (
+    goish::slice<goish::byte>,
+    goish::net::http::transfer::transferWriter,
+    http::Request,
+) {
     let (mut req, _) = http::NewRequest(string("POST"), url, body);
     if expect {
         req.Header.Set(string("Expect"), string("100-continue"));
@@ -224,8 +227,7 @@ fn run() -> ! {
             ch: wr_ch.clone(),
             continueCh: None,
         });
-        let resc: goish::gochan::chan<responseAndError> =
-            goish::make!(chan responseAndError, 1);
+        let resc: goish::gochan::chan<responseAndError> = goish::make!(chan responseAndError, 1);
         let _ = loops.reqch.Send(requestAndChan {
             req: Some(req),
             ch: resc.clone(),
@@ -257,7 +259,10 @@ fn run() -> ! {
         let delivered = t.queueForIdleConn(&w);
         check(
             "the clean body close banked the conn into the idle pool",
-            delivered && w.__delivered().map(|d| Arc::ptr_eq(&d, &pc)).unwrap_or(false),
+            delivered
+                && w.__delivered()
+                    .map(|d| Arc::ptr_eq(&d, &pc))
+                    .unwrap_or(false),
             fmt::Sprintf!("delivered=%v", delivered),
         );
         if let Some(d) = w.__delivered() {
@@ -280,8 +285,7 @@ fn run() -> ! {
             ch: wr_ch.clone(),
             continueCh: Some(continue_ch.clone()),
         });
-        let resc: goish::gochan::chan<responseAndError> =
-            goish::make!(chan responseAndError, 1);
+        let resc: goish::gochan::chan<responseAndError> = goish::make!(chan responseAndError, 1);
         let _ = loops.reqch.Send(requestAndChan {
             req: Some(req),
             ch: resc.clone(),
@@ -321,8 +325,7 @@ fn run() -> ! {
             ch: wr_ch.clone(),
             continueCh: None,
         });
-        let resc: goish::gochan::chan<responseAndError> =
-            goish::make!(chan responseAndError, 1);
+        let resc: goish::gochan::chan<responseAndError> = goish::make!(chan responseAndError, 1);
         let _ = loops.reqch.Send(requestAndChan {
             req: Some(req),
             ch: resc.clone(),

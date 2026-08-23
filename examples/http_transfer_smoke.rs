@@ -14,9 +14,10 @@ extern crate goish;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::fmt;
-use goish::net::http::transfer::{body, transferWriter, 
-    bodyAllowedForStatus, chunked, fixLength, fixTrailer, isIdentity, isUnsupportedTEError,
+use goish::net::http::transfer::{
+    body, bodyAllowedForStatus, chunked, fixLength, fixTrailer, isIdentity, isUnsupportedTEError,
     noResponseBodyExpected, parseContentLength, shouldClose, suppressedHeaders, transferReader,
+    transferWriter,
 };
 use goish::net::http::Header;
 use goish::{slice, string};
@@ -143,12 +144,12 @@ fn run() {
             (&[], -1, false),
             (&["0"], 0, false),
             (&["5"], 5, false),
-            (&[" 7 "], 7, false),      // trimmed
-            (&[""], 0, true),          // "invalid empty Content-Length"
-            (&["-1"], 0, true),        // ParseUint rejects the sign
+            (&[" 7 "], 7, false), // trimmed
+            (&[""], 0, true),     // "invalid empty Content-Length"
+            (&["-1"], 0, true),   // ParseUint rejects the sign
             (&["abc"], 0, true),
             (&["9223372036854775807"], 9223372036854775807, false),
-            (&["1", "2"], 1, false),   // only the first is consulted
+            (&["1", "2"], 1, false), // only the first is consulted
         ];
         let mut bad = string("");
         for (input, want_n, want_err) in cases {
@@ -163,14 +164,14 @@ fn run() {
     // ── shouldClose ── tokenised, not whole-value compare
     {
         let cases: &[(i64, i64, &[&'static str], bool)] = &[
-            (0, 9, &[], true),                      // major < 1 always closes
-            (1, 0, &[], true),                      // 1.0 defaults to close
+            (0, 9, &[], true), // major < 1 always closes
+            (1, 0, &[], true), // 1.0 defaults to close
             (1, 0, &["keep-alive"], false),
             (1, 0, &["close"], true),
-            (1, 1, &[], false),                     // 1.1 defaults to keep-alive
+            (1, 1, &[], false), // 1.1 defaults to keep-alive
             (1, 1, &["close"], true),
-            (1, 1, &["Close"], true),               // case-insensitive
-            (1, 1, &["keep-alive, close"], true),   // THE tokenising case
+            (1, 1, &["Close"], true),             // case-insensitive
+            (1, 1, &["keep-alive, close"], true), // THE tokenising case
             (1, 1, &["keep-alive"], false),
         ];
         let mut bad = string("");
@@ -182,10 +183,21 @@ fn run() {
             };
             let got = shouldClose(*maj as goish::int, *min as goish::int, &mut h, false);
             if got != *want {
-                bad = fmt::Sprintf!("%d.%d conn=%d -> %v want %v", *maj, *min, conn.len() as i64, got, *want);
+                bad = fmt::Sprintf!(
+                    "%d.%d conn=%d -> %v want %v",
+                    *maj,
+                    *min,
+                    conn.len() as i64,
+                    got,
+                    *want
+                );
             }
         }
-        check("shouldClose over 9 cases (incl. \"keep-alive, close\")", bad.Len() == 0, bad);
+        check(
+            "shouldClose over 9 cases (incl. \"keep-alive, close\")",
+            bad.Len() == 0,
+            bad,
+        );
     }
     // removeCloseHeader deletes Connection only when close is present
     {
@@ -219,7 +231,7 @@ fn run() {
             (false, 0, "POST", &[], true, -1, false),
             (true, 200, "GET", &["5", "5"], false, 5, false), // dup, agrees
             (true, 200, "GET", &["5", " 5 "], false, 5, false), // dup after trim
-            (true, 200, "GET", &["5", "6"], false, 0, true), // DISAGREES -> error
+            (true, 200, "GET", &["5", "6"], false, 0, true),  // DISAGREES -> error
             (true, 200, "GET", &["abc"], false, -1, true),
         ];
         let mut bad = string("");
@@ -233,7 +245,14 @@ fn run() {
             if n != *want_n || err.IsNil() == *want_err {
                 bad = fmt::Sprintf!(
                     "resp=%v st=%d m=%s ch=%v -> n=%d err=%v (want n=%d err=%v)",
-                    *is_resp, *st, string(*m), *ch, n, err, *want_n, *want_err
+                    *is_resp,
+                    *st,
+                    string(*m),
+                    *ch,
+                    n,
+                    err,
+                    *want_n,
+                    *want_err
                 );
             }
         }
@@ -246,7 +265,11 @@ fn run() {
         check(
             "fixLength deletes Content-Length when chunked (RFC 9112)",
             n == -1 && h.Values(string("Content-Length")).Len() == 0,
-            fmt::Sprintf!("n=%d cl_left=%d", n, h.Values(string("Content-Length")).Len() as i64),
+            fmt::Sprintf!(
+                "n=%d cl_left=%d",
+                n,
+                h.Values(string("Content-Length")).Len() as i64
+            ),
         );
     }
     // agreeing duplicates are DEDUPLICATED down to one value
@@ -294,7 +317,11 @@ fn run() {
                 bad = fmt::Sprintf!("%s accepted as a trailer key", string(k));
             }
         }
-        check("fixTrailer rejects the three forbidden keys", bad.Len() == 0, bad);
+        check(
+            "fixTrailer rejects the three forbidden keys",
+            bad.Len() == 0,
+            bad,
+        );
     }
 
     // ── parseTransferEncoding ── strict and simple, by design
@@ -369,17 +396,17 @@ fn run() {
         // (method, contentLength, transferEncoding, want)
         let cases: &[(&'static str, i64, &[&'static str], bool)] = &[
             ("GET", 5, &[], true),
-            ("GET", 5, &["chunked"], false),   // chunked always wins
+            ("GET", 5, &["chunked"], false), // chunked always wins
             ("GET", 0, &[], false),
-            ("GET", 0, &["identity"], false),  // GET/HEAD excluded here
+            ("GET", 0, &["identity"], false), // GET/HEAD excluded here
             ("HEAD", 0, &["identity"], false),
-            ("POST", 0, &[], true),            // servers expect CL: 0
+            ("POST", 0, &[], true), // servers expect CL: 0
             ("PUT", 0, &[], true),
             ("PATCH", 0, &[], true),
-            ("DELETE", 0, &[], false),         // ...but not DELETE
-            ("DELETE", 0, &["identity"], true),// unless identity is set
-            ("", 0, &["identity"], true),      // empty method too
-            ("POST", -1, &[], false),          // unknown length
+            ("DELETE", 0, &[], false),          // ...but not DELETE
+            ("DELETE", 0, &["identity"], true), // unless identity is set
+            ("", 0, &["identity"], true),       // empty method too
+            ("POST", -1, &[], false),           // unknown length
         ];
         let mut bad = string("");
         for (m, cl, te, want) in cases {
@@ -388,20 +415,35 @@ fn run() {
             tw.ContentLength = *cl;
             tw.TransferEncoding = strs(te);
             if tw.shouldSendContentLength() != *want {
-                bad = fmt::Sprintf!("%s cl=%d -> %v", string(*m), *cl, tw.shouldSendContentLength());
+                bad = fmt::Sprintf!(
+                    "%s cl=%d -> %v",
+                    string(*m),
+                    *cl,
+                    tw.shouldSendContentLength()
+                );
             }
         }
-        check("shouldSendContentLength over 12 shapes", bad.Len() == 0, bad);
+        check(
+            "shouldSendContentLength over 12 shapes",
+            bad.Len() == 0,
+            bad,
+        );
     }
 
     // ── body state flags ──
     {
         let b = body::__new();
-        check("a fresh body has data remaining and was not closed early",
-              b.bodyRemains() && !b.didEarlyClose(), string(""));
+        check(
+            "a fresh body has data remaining and was not closed early",
+            b.bodyRemains() && !b.didEarlyClose(),
+            string(""),
+        );
         b.__mark_early_close();
-        check("didEarlyClose flips, and that is what refuses conn reuse",
-              b.didEarlyClose(), string(""));
+        check(
+            "didEarlyClose flips, and that is what refuses conn reuse",
+            b.didEarlyClose(),
+            string(""),
+        );
 
         let b2 = body::__new();
         static HIT: AtomicUsize = AtomicUsize::new(0);
@@ -410,9 +452,11 @@ fn run() {
         }));
         b2.__mark_eof();
         b2.__mark_eof();
-        check("registerOnHitEOF fires exactly once, and bodyRemains goes false",
-              !b2.bodyRemains() && HIT.load(Ordering::Relaxed) == 1,
-              fmt::Sprintf!("hits=%d", HIT.load(Ordering::Relaxed) as i64));
+        check(
+            "registerOnHitEOF fires exactly once, and bodyRemains goes false",
+            !b2.bodyRemains() && HIT.load(Ordering::Relaxed) == 1,
+            fmt::Sprintf!("hits=%d", HIT.load(Ordering::Relaxed) as i64),
+        );
     }
 
     let p = PASSED.load(Ordering::Relaxed);

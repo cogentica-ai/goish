@@ -27,19 +27,28 @@ const R_MASK1: u64 = 0x0FFFFFFC0FFFFFFC;
 // ─── uint128 helpers ───────────────────────────────────────────────────
 
 #[derive(Copy, Clone)]
-struct U128 { lo: u64, hi: u64 }
+struct U128 {
+    lo: u64,
+    hi: u64,
+}
 
 #[inline(always)]
 fn mul64(a: u64, b: u64) -> U128 {
     let v = (a as u128) * (b as u128);
-    U128 { lo: v as u64, hi: (v >> 64) as u64 }
+    U128 {
+        lo: v as u64,
+        hi: (v >> 64) as u64,
+    }
 }
 
 #[inline(always)]
 fn add128(a: U128, b: U128) -> U128 {
     let lo = a.lo.wrapping_add(b.lo);
     let carry = if lo < a.lo { 1u64 } else { 0u64 };
-    U128 { lo, hi: a.hi.wrapping_add(b.hi).wrapping_add(carry) }
+    U128 {
+        lo,
+        hi: a.hi.wrapping_add(b.hi).wrapping_add(carry),
+    }
 }
 
 #[inline(always)]
@@ -92,14 +101,14 @@ fn read_u64_le(b: &[byte]) -> u64 {
 }
 
 fn mac_initialize(key: &[byte; 32], state: &mut MacState) {
-    state.r[0] = read_u64_le(&key[0..8])  & R_MASK0;
+    state.r[0] = read_u64_le(&key[0..8]) & R_MASK0;
     state.r[1] = read_u64_le(&key[8..16]) & R_MASK1;
     state.s[0] = read_u64_le(&key[16..24]);
     state.s[1] = read_u64_le(&key[24..32]);
     state.h = [0, 0, 0];
 }
 
-const MASK_LOW2: u64  = 0x0000000000000003;
+const MASK_LOW2: u64 = 0x0000000000000003;
 const MASK_NOT_LOW2: u64 = !MASK_LOW2;
 
 // 2^130 - 5 in little-endian limbs
@@ -153,13 +162,16 @@ fn update_generic(state: &mut MacState, msg: &[byte]) {
         let t0 = m0.lo;
         let (t1, c1) = adc(m1.lo, m0.hi, 0);
         let (t2, c2) = adc(m2.lo, m1.hi, c1);
-        let (t3, _ ) = adc(m3.lo, m2.hi, c2);
+        let (t3, _) = adc(m3.lo, m2.hi, c2);
 
         // Partial reduction mod 2^130 - 5
         h0 = t0;
         h1 = t1;
         h2 = t2 & MASK_LOW2;
-        let cc = U128 { lo: t2 & MASK_NOT_LOW2, hi: t3 };
+        let cc = U128 {
+            lo: t2 & MASK_NOT_LOW2,
+            hi: t3,
+        };
 
         let (lo, b1) = adc(h0, cc.lo, 0);
         h0 = lo;
@@ -194,7 +206,7 @@ fn finalize(out: &mut [byte; TagSize], h: &[u64; 3], s: &[u64; 2]) {
     // otherwise use hp = h - p.
     let (hp0, b0) = sbb(h0, P0, 0);
     let (hp1, b1) = sbb(h1, P1, b0);
-    let (_,   b2) = sbb(h2, P2, b1);
+    let (_, b2) = sbb(h2, P2, b1);
 
     // select64(v=1, a, b) → a, select64(v=0, a, b) → b.
     // b2 == 1 means underflow (h < p) — keep h. Else use hp.
@@ -212,7 +224,11 @@ fn finalize(out: &mut [byte; TagSize], h: &[u64; 3], s: &[u64; 2]) {
 impl MacGeneric {
     fn new_from_key(key: &[byte; 32]) -> Self {
         let mut m = MacGeneric {
-            state: MacState { h: [0; 3], r: [0; 2], s: [0; 2] },
+            state: MacState {
+                h: [0; 3],
+                r: [0; 2],
+                s: [0; 2],
+            },
             buffer: [0u8; TagSize],
             offset: 0,
         };
@@ -223,7 +239,11 @@ impl MacGeneric {
     fn write(&mut self, p: &[byte]) {
         let mut p = p;
         if self.offset > 0 {
-            let n = if TagSize - self.offset < p.len() { TagSize - self.offset } else { p.len() };
+            let n = if TagSize - self.offset < p.len() {
+                TagSize - self.offset
+            } else {
+                p.len()
+            };
             self.buffer[self.offset..self.offset + n].copy_from_slice(&p[..n]);
             p = &p[n..];
             self.offset += n;
@@ -291,7 +311,9 @@ impl MAC {
         let mut tag = [0u8; TagSize];
         self.inner.sum_into(&mut tag);
         self.finalized = true;
-        if expected.len() != TagSize { return false; }
+        if expected.len() != TagSize {
+            return false;
+        }
         // constant-time compare
         let mut diff = 0u8;
         for i in 0..TagSize {

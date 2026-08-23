@@ -113,7 +113,10 @@ fn test_tick_fires_periodically() {
     while DONE.load(Ordering::Acquire) == 0 {
         goish::runtime::sched::Gosched();
     }
-    check(TICKS.load(Ordering::Relaxed) == 3, b"tick: didn't see 3 ticks\n");
+    check(
+        TICKS.load(Ordering::Relaxed) == 3,
+        b"tick: didn't see 3 ticks\n",
+    );
 }
 
 // Suppress the unused `schedule` import warning by referencing it from

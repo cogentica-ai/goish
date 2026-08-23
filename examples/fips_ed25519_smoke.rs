@@ -24,11 +24,11 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::crypto::internal::fips140::ed25519::{
     GenerateKey, NewPrivateKey, NewPrivateKeyFromSeed, NewPublicKey, Sign, SignCtx, Verify,
     VerifyCtx,
 };
+use goish::fmt;
 use goish::types::byte;
 use goish::{slice, syscall};
 

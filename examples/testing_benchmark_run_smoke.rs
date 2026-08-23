@@ -31,8 +31,8 @@ extern crate alloc;
 extern crate goish;
 
 use core::sync::atomic::{AtomicI64, Ordering};
-use goish::testing::benchmark::{runBenchmarks, Benchmark, InternalBenchmark, B};
 use goish::gostring::string;
+use goish::testing::benchmark::{runBenchmarks, Benchmark, InternalBenchmark, B};
 use goish::{fmt, syscall};
 
 fn s(x: &str) -> string {
@@ -68,7 +68,12 @@ fn main() {
         if r.N as i64 == last && r.N > 0 {
             fmt::Println!("[ 1] reported N is executed N  PASS");
         } else {
-            fmt::Println!("[ 1] reported N is executed N  FAIL N=", r.N, " last=", last);
+            fmt::Println!(
+                "[ 1] reported N is executed N  FAIL N=",
+                r.N,
+                " last=",
+                last
+            );
             failed += 1;
         }
     }
@@ -144,8 +149,10 @@ fn main() {
             fmt::Println!("[ 4] StopTimer excludes work   PASS");
         } else {
             fmt::Println!(
-                "[ 4] StopTimer excludes work   FAIL cold=", cold.NsPerOp(),
-                " hot=", hot.NsPerOp()
+                "[ 4] StopTimer excludes work   FAIL cold=",
+                cold.NsPerOp(),
+                " hot=",
+                hot.NsPerOp()
             );
             failed += 1;
         }
@@ -218,7 +225,10 @@ fn main() {
         if ok && ITERS.load(Ordering::SeqCst) == 0 {
             fmt::Println!("[ 6] no -bench, no benchmarks  PASS");
         } else {
-            fmt::Println!("[ 6] no -bench, no benchmarks  FAIL ran=", ITERS.load(Ordering::SeqCst));
+            fmt::Println!(
+                "[ 6] no -bench, no benchmarks  FAIL ran=",
+                ITERS.load(Ordering::SeqCst)
+            );
             failed += 1;
         }
     }
@@ -252,7 +262,12 @@ fn main() {
         if iters > 0 && r.N as i64 == iters {
             fmt::Println!("[ 7] B.Loop ramps and commits  PASS");
         } else {
-            fmt::Println!("[ 7] B.Loop ramps and commits  FAIL N=", r.N, " iters=", iters);
+            fmt::Println!(
+                "[ 7] B.Loop ramps and commits  FAIL N=",
+                r.N,
+                " iters=",
+                iters
+            );
             failed += 1;
         }
     }

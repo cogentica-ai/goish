@@ -1144,7 +1144,6 @@ impl finishedMsg {
     }
 }
 
-
 // ─── Verbatim ports on the real cryptobyte ────────────────────────────
 //
 // Everything above is the pre-existing hand-written subset, built on the
@@ -1174,10 +1173,7 @@ const statusTypeOCSP: uint8 = 1;
 // go: sdk 1.25.5 crypto/tls/handshake_messages.go:55-57 readUint8LengthPrefixed
 /// Go: "readUint8LengthPrefixed acts like s.ReadUint8LengthPrefixed, but
 /// targets a []byte instead of a cryptobyte.String."
-pub(crate) fn readUint8LengthPrefixed(
-    s: &mut CBString,
-    out: &mut slice<byte>,
-) -> bool {
+pub(crate) fn readUint8LengthPrefixed(s: &mut CBString, out: &mut slice<byte>) -> bool {
     // Go: return s.ReadUint8LengthPrefixed((*cryptobyte.String)(out))
     let mut tmp = CBString::New(slice::__from_vec(Vec::new()));
     if !s.ReadUint8LengthPrefixed(&mut tmp) {
@@ -1189,10 +1185,7 @@ pub(crate) fn readUint8LengthPrefixed(
 
 // go: sdk 1.25.5 crypto/tls/handshake_messages.go:61-63 readUint16LengthPrefixed
 /// Go: the uint16 mirror of [`readUint8LengthPrefixed`].
-pub(crate) fn readUint16LengthPrefixed(
-    s: &mut CBString,
-    out: &mut slice<byte>,
-) -> bool {
+pub(crate) fn readUint16LengthPrefixed(s: &mut CBString, out: &mut slice<byte>) -> bool {
     // Go: return s.ReadUint16LengthPrefixed((*cryptobyte.String)(out))
     let mut tmp = CBString::New(slice::__from_vec(Vec::new()));
     if !s.ReadUint16LengthPrefixed(&mut tmp) {
@@ -1204,10 +1197,7 @@ pub(crate) fn readUint16LengthPrefixed(
 
 // go: sdk 1.25.5 crypto/tls/handshake_messages.go:67-69 readUint24LengthPrefixed
 /// Go: the uint24 mirror of [`readUint8LengthPrefixed`].
-pub(crate) fn readUint24LengthPrefixed(
-    s: &mut CBString,
-    out: &mut slice<byte>,
-) -> bool {
+pub(crate) fn readUint24LengthPrefixed(s: &mut CBString, out: &mut slice<byte>) -> bool {
     // Go: return s.ReadUint24LengthPrefixed((*cryptobyte.String)(out))
     let mut tmp = CBString::New(slice::__from_vec(Vec::new()));
     if !s.ReadUint24LengthPrefixed(&mut tmp) {
@@ -1351,7 +1341,6 @@ impl certificateStatusMsg {
     }
 }
 
-
 // The uint64 helpers Go writes because cryptobyte has no AddUint64 /
 // ReadUint64 of its own — it splits into two uint32 halves.
 
@@ -1400,7 +1389,6 @@ impl helloRequestMsg {
         return data.Len() == 4;
     }
 }
-
 
 /// Go: `type serverKeyExchangeMsg struct { key []byte }` — an opaque
 /// body whose contents depend on the key-exchange algorithm.
@@ -1525,9 +1513,8 @@ impl newSessionTicketMsg {
         }
         // Go: length := uint32(data[1])<<16 | uint32(data[2])<<8 | uint32(data[3])
         //     if uint32(len(data))-4 != length { return false }
-        let length = (crate::uint32(data[1]) << 16)
-            | (crate::uint32(data[2]) << 8)
-            | crate::uint32(data[3]);
+        let length =
+            (crate::uint32(data[1]) << 16) | (crate::uint32(data[2]) << 8) | crate::uint32(data[3]);
         if crate::uint32(data.Len()) - 4 != length {
             return false;
         }
@@ -1542,7 +1529,6 @@ impl newSessionTicketMsg {
         return true;
     }
 }
-
 
 /// Go: `type certificateMsg struct { certificates [][]byte }` — the
 /// TLS 1.2 Certificate message, a uint24-prefixed list of uint24-
@@ -1605,9 +1591,8 @@ impl certificateMsg {
         }
         // Go: certsLen := uint32(data[4])<<16 | uint32(data[5])<<8 | uint32(data[6])
         //     if uint32(len(data)) != certsLen+7 { return false }
-        let mut certsLen = (crate::uint32(data[4]) << 16)
-            | (crate::uint32(data[5]) << 8)
-            | crate::uint32(data[6]);
+        let mut certsLen =
+            (crate::uint32(data[4]) << 16) | (crate::uint32(data[5]) << 8) | crate::uint32(data[6]);
         if crate::uint32(data.Len()) != certsLen + 7 {
             return false;
         }
@@ -1621,9 +1606,8 @@ impl certificateMsg {
             if d.len() < 4 {
                 return false;
             }
-            let certLen = (crate::uint32(d[0]) << 16)
-                | (crate::uint32(d[1]) << 8)
-                | crate::uint32(d[2]);
+            let certLen =
+                (crate::uint32(d[0]) << 16) | (crate::uint32(d[1]) << 8) | crate::uint32(d[2]);
             // Go: if uint32(len(d)) < 3+certLen { return false }
             if crate::uint32(d.len() as crate::types::int) < 3 + certLen {
                 return false;
@@ -1647,7 +1631,6 @@ impl certificateMsg {
         return true;
     }
 }
-
 
 /// Go: `type newSessionTicketMsgTLS13 struct { … }` — RFC 8446 §4.6.1
 /// NewSessionTicket, with the optional early_data extension.
@@ -1749,7 +1732,6 @@ impl newSessionTicketMsgTLS13 {
         return true;
     }
 }
-
 
 /// Go: `type certificateRequestMsgTLS13 struct { … }` — RFC 8446 §4.3.2
 /// CertificateRequest.
@@ -1919,7 +1901,6 @@ impl certificateRequestMsgTLS13 {
     }
 }
 
-
 /// Go: `type certificateRequestMsg struct { … }` — the TLS 1.0-1.2
 /// CertificateRequest of RFC 4346 §7.4.4.
 ///
@@ -2001,9 +1982,8 @@ impl certificateRequestMsg {
         }
         let raw: &[byte] = &data;
         // Go: length := uint24(data[1..4]); if uint32(len(data))-4 != length { false }
-        let length = (crate::uint32(data[1]) << 16)
-            | (crate::uint32(data[2]) << 8)
-            | crate::uint32(data[3]);
+        let length =
+            (crate::uint32(data[1]) << 16) | (crate::uint32(data[2]) << 8) | crate::uint32(data[3]);
         if crate::uint32(data.Len()) - 4 != length {
             return false;
         }
@@ -2076,7 +2056,6 @@ impl certificateRequestMsg {
     }
 }
 
-
 // The `unmarshal` halves the hand-written subset above never needed:
 // it only ever WROTE these two messages. Ported verbatim on the real
 // cryptobyte, against the subset's existing structs, so a future
@@ -2128,7 +2107,6 @@ impl certificateVerifyMsg {
         return true;
     }
 }
-
 
 impl encryptedExtensionsMsg {
     // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1054-1119 encryptedExtensionsMsg.unmarshal
@@ -2215,17 +2193,13 @@ impl encryptedExtensionsMsg {
     }
 }
 
-
 // go: sdk 1.25.5 crypto/tls/handshake_messages.go:1539-1597 unmarshalCertificate
 /// Read a TLS 1.3 CertificateEntry list into `certificate`.
 ///
 /// Two rules that are easy to lose: OCSP and SCT extensions are only
 /// honoured on the LEAF (Go skips them once more than one certificate
 /// has been read), and an empty OCSP staple or SCT entry is rejected.
-pub(crate) fn unmarshalCertificate(
-    s: &mut CBString,
-    certificate: &mut super::Certificate,
-) -> bool {
+pub(crate) fn unmarshalCertificate(s: &mut CBString, certificate: &mut super::Certificate) -> bool {
     use super::common::{extensionSCT, extensionStatusRequest};
     // Go: var certList cryptobyte.String
     //     if !s.ReadUint24LengthPrefixed(&certList) { return false }
@@ -2234,8 +2208,7 @@ pub(crate) fn unmarshalCertificate(
         return false;
     }
     let mut chain: Vec<slice<byte>> = certificate.Certificate.clone().__into_vec();
-    let mut scts: Vec<slice<byte>> =
-        certificate.SignedCertificateTimestamps.clone().__into_vec();
+    let mut scts: Vec<slice<byte>> = certificate.SignedCertificateTimestamps.clone().__into_vec();
     // Go: for !certList.Empty() { … }
     while !certList.Empty() {
         let mut cert: slice<byte> = slice::__from_vec(Vec::new());
@@ -2300,7 +2273,6 @@ pub(crate) fn unmarshalCertificate(
     certificate.SignedCertificateTimestamps = slice::__from_vec(scts);
     return true;
 }
-
 
 // ─── clientHelloMsg encoding ──────────────────────────────────────────
 //
@@ -2815,7 +2787,6 @@ impl serverHelloDoneMsg {
     }
 }
 
-
 impl serverHelloMsg {
     // go: sdk 1.25.5 crypto/tls/handshake_messages.go:871-997 serverHelloMsg.unmarshal
     pub(crate) fn unmarshal(&mut self, data: slice<byte>) -> bool {
@@ -2912,8 +2883,7 @@ impl serverHelloMsg {
                     return false;
                 }
                 let pb: &[byte] = &proto.0;
-                self.alpnProtocol =
-                    String::from_utf8(pb.to_vec()).unwrap_or_default();
+                self.alpnProtocol = String::from_utf8(pb.to_vec()).unwrap_or_default();
             } else if extension == extensionSCT {
                 // Go: var sctList cryptobyte.String
                 //     if !extData.ReadUint16LengthPrefixed(&sctList) || sctList.Empty() {
@@ -3014,7 +2984,6 @@ impl serverHelloMsg {
 // Rust needs the impl spelled out, and every member forwards to the
 // inherent method of the same name. `asAny` and `asWithOriginalBytes`
 // are the two goish-only members documented on the trait in common.rs.
-
 
 impl super::common::handshakeMessage for helloRequestMsg {
     // go: none — goish-only: forwards to `helloRequestMsg::marshal`, which Go's

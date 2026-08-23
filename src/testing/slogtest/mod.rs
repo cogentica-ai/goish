@@ -8,6 +8,6 @@
 
 mod slogtest;
 pub use slogtest::{
-    cases, Run, check, hasAttr, hasKey, inGroup, missingKey, replace, testCase, wrapper,
+    cases, check, hasAttr, hasKey, inGroup, missingKey, replace, testCase, wrapper, Run,
     TestHandler,
 };

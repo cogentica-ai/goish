@@ -44,7 +44,10 @@ fn main() {
     // Read does NOT mutate the map (matches Go).
     let n = m["zeta"];
     check(n == 0, b"map: m[missing] must read as 0\n");
-    check(!m.Has(string("zeta")), b"map: m[missing] read must NOT insert\n");
+    check(
+        !m.Has(string("zeta")),
+        b"map: m[missing] read must NOT insert\n",
+    );
 
     // Read existing.
     let n = m["alpha"];
@@ -87,7 +90,9 @@ fn main() {
 
     // Values order follows Keys order — verify set not sequence.
     let mut total_v: int = 0;
-    for (_, v) in range!(m2) { total_v += v; }
+    for (_, v) in range!(m2) {
+        total_v += v;
+    }
     check(total_v == 6, b"map: Values sum wrong\n");
 
     // ─── range!(m) sum (order is undefined) ───────────────────────────
@@ -107,7 +112,9 @@ fn main() {
     // Verify all three values present (sum = 6).
     let vs = slices::Collect(maps::Values(&m2));
     let mut vsum: int = 0;
-    for (_, v) in range!(vs) { vsum += v; }
+    for (_, v) in range!(vs) {
+        vsum += v;
+    }
     check(vsum == 6, b"map: maps::Values sum wrong\n");
 
     let m3 = maps::Clone(&m2);
@@ -125,7 +132,7 @@ fn main() {
     let mut counter = make!(map[int]int);
     counter[1] = 100;
     counter[2] = 200;
-    counter[1] += 5;   // 105
+    counter[1] += 5; // 105
     check(counter[1] == 105, b"map<int,int>: m[k]+= wrong\n");
     check(counter[99] == 0, b"map<int,int>: m[missing] zero wrong\n");
 

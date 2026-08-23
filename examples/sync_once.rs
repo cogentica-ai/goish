@@ -44,11 +44,20 @@ fn test_single_do() {
     static O: Once = Once::new();
     static N: AtomicUsize = AtomicUsize::new(0);
 
-    O.Do(|| { N.fetch_add(1, Ordering::Relaxed); });
-    O.Do(|| { N.fetch_add(1, Ordering::Relaxed); });
-    O.Do(|| { N.fetch_add(1, Ordering::Relaxed); });
+    O.Do(|| {
+        N.fetch_add(1, Ordering::Relaxed);
+    });
+    O.Do(|| {
+        N.fetch_add(1, Ordering::Relaxed);
+    });
+    O.Do(|| {
+        N.fetch_add(1, Ordering::Relaxed);
+    });
 
-    check(N.load(Ordering::Relaxed) == 1, b"single-do: ran f more than once\n");
+    check(
+        N.load(Ordering::Relaxed) == 1,
+        b"single-do: ran f more than once\n",
+    );
 }
 
 // ── Test 2: N concurrent goroutines all racing on Do ─────────────
@@ -82,8 +91,14 @@ fn test_concurrent_race() {
     }
     schedule();
 
-    check(GS_DONE.load(Ordering::Relaxed) == N, b"concurrent: not all Gs done\n");
-    check(F_RAN.load(Ordering::Relaxed) == 1, b"concurrent: f ran more than once\n");
+    check(
+        GS_DONE.load(Ordering::Relaxed) == N,
+        b"concurrent: not all Gs done\n",
+    );
+    check(
+        F_RAN.load(Ordering::Relaxed) == 1,
+        b"concurrent: f ran more than once\n",
+    );
 }
 
 // ── Test 3: post-completion calls fast-path through, no f ────────
@@ -94,11 +109,18 @@ fn test_idempotent_after_complete() {
 
     F_RAN.store(0, Ordering::Relaxed);
 
-    O.Do(|| { F_RAN.fetch_add(1, Ordering::Relaxed); });
+    O.Do(|| {
+        F_RAN.fetch_add(1, Ordering::Relaxed);
+    });
     // f has run; subsequent Do() calls take the fast path.
     for _ in 0..1000 {
-        O.Do(|| { F_RAN.fetch_add(1, Ordering::Relaxed); });
+        O.Do(|| {
+            F_RAN.fetch_add(1, Ordering::Relaxed);
+        });
     }
 
-    check(F_RAN.load(Ordering::Relaxed) == 1, b"idempotent: f ran > once\n");
+    check(
+        F_RAN.load(Ordering::Relaxed) == 1,
+        b"idempotent: f ran > once\n",
+    );
 }

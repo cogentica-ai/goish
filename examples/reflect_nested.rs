@@ -5,8 +5,8 @@
 #![no_std]
 #![no_main]
 
-use goish::fmt;
 use goish::encoding::json;
+use goish::fmt;
 use goish::{int, reflect, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
@@ -97,7 +97,10 @@ fn main() {
         &mut u3,
     );
     check(err == goish::nil, b"nested: unmarshal err\n");
-    check(reflect::DeepEqual(&u, &u3), b"nested: DeepEqual round-trip\n");
+    check(
+        reflect::DeepEqual(&u, &u3),
+        b"nested: DeepEqual round-trip\n",
+    );
 
     const OK: &[u8] = b"reflect_nested: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

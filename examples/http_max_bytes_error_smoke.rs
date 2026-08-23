@@ -8,8 +8,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::io::Reader;
 use goish::net::http;
 use goish::types::byte;

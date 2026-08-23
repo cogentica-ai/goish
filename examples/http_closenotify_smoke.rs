@@ -91,7 +91,11 @@ fn run() -> ! {
         // The request context must agree — Go fires both from the same
         // read error.
         CTX_DONE.store(
-            if r.Context().Err() != goish::nil { 1 } else { 0 },
+            if r.Context().Err() != goish::nil {
+                1
+            } else {
+                0
+            },
             Ordering::Relaxed,
         );
         let _ = w.Write(goish::bytes("done"));
@@ -157,7 +161,10 @@ fn run() -> ! {
         check(
             "CloseNotify fires when the client goes away mid-handler",
             NOTIFIED.load(Ordering::Relaxed) == 1,
-            fmt::Sprintf!("state=%d (-2=no CloseNotifier, 0=timed out)", NOTIFIED.load(Ordering::Relaxed)),
+            fmt::Sprintf!(
+                "state=%d (-2=no CloseNotifier, 0=timed out)",
+                NOTIFIED.load(Ordering::Relaxed)
+            ),
         );
         check(
             "the request context is canceled by the same event",

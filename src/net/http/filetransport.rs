@@ -21,10 +21,10 @@ use crate::string;
 use crate::types::{byte, int};
 
 use super::client::{Body, RoundTripper};
-use super::response::Response;
 use super::fs::{fileHandler, FileSystem};
 use super::header::Header;
 use super::request::Request;
+use super::response::Response;
 use super::responsewriter::{HeaderHandle, ResponseWriter};
 use super::server::Handler;
 
@@ -49,9 +49,7 @@ pub fn NewFileTransport(fs: Arc<dyn FileSystem + Send + Sync>) -> Arc<dyn RoundT
 /// Go: "NewFileTransportFS returns a new RoundTripper, serving the
 /// provided file system fsys. […] The files provided by fsys must
 /// implement io.Seeker."
-pub fn NewFileTransportFS(
-    fsys: Arc<dyn crate::io::fs::FS + Send + Sync>,
-) -> Arc<dyn RoundTripper> {
+pub fn NewFileTransportFS(fsys: Arc<dyn crate::io::fs::FS + Send + Sync>) -> Arc<dyn RoundTripper> {
     return NewFileTransport(super::fs::FS(fsys));
 }
 

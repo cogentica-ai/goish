@@ -48,9 +48,9 @@
 use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use goish::syscall::{
-    self, syscall2, Sigaction, SigreturnTrampoline,
-    Timespec, MAP_ANONYMOUS, MAP_FAILED, MAP_PRIVATE, PROT_READ, PROT_WRITE, SA_RESTART,
-    SA_RESTORER, SA_SIGINFO, SIGURG, STDERR, STDOUT, SYS_NANOSLEEP, SYS_TGKILL,
+    self, syscall2, Sigaction, SigreturnTrampoline, Timespec, MAP_ANONYMOUS, MAP_FAILED,
+    MAP_PRIVATE, PROT_READ, PROT_WRITE, SA_RESTART, SA_RESTORER, SA_SIGINFO, SIGURG, STDERR,
+    STDOUT, SYS_NANOSLEEP, SYS_TGKILL,
 };
 
 // ─── kernel constants not yet in goish::syscall ───────────────────────
@@ -149,7 +149,11 @@ fn write_hex(label: &[u8], v: u64) {
     buf[1] = b'x';
     for i in 0..16 {
         let nib = ((v >> ((15 - i) * 4)) & 0xf) as u8;
-        buf[2 + i] = if nib < 10 { b'0' + nib } else { b'a' + (nib - 10) };
+        buf[2 + i] = if nib < 10 {
+            b'0' + nib
+        } else {
+            b'a' + (nib - 10)
+        };
     }
     syscall::Write(STDERR, buf.as_ptr(), buf.len());
     syscall::Write(STDERR, b"\n".as_ptr(), 1);

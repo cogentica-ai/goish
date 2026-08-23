@@ -54,15 +54,15 @@ fn run() {
         // (address, host, port, expect_err)
         let cases: &[(&'static str, &'static str, i64, bool)] = &[
             ("h:80", "h", 80, false),
-            ("h:0", "", 0, true),      // port must be >= 1
+            ("h:0", "", 0, true), // port must be >= 1
             ("h:1", "h", 1, false),
             ("h:65535", "h", 65535, false),
             ("h:65536", "", 0, true),
             ("h:-1", "", 0, true),
             ("h:x", "", 0, true),
-            ("h", "", 0, true),        // missing port
+            ("h", "", 0, true), // missing port
             ("1.2.3.4:443", "1.2.3.4", 443, false),
-            (":80", "", 80, false),    // empty host is fine
+            (":80", "", 80, false), // empty host is fine
         ];
         let mut bad = string("");
         for (addr, want_h, want_p, want_err) in cases {
@@ -107,7 +107,11 @@ fn run() {
         if socksReply(66).String() != "unknown code: 66" {
             bad = string("66 should be \"unknown code: 66\"");
         }
-        check("socksReply.String over all 9 codes + 2 unknown", bad.Len() == 0, bad);
+        check(
+            "socksReply.String over all 9 codes + 2 unknown",
+            bad.Len() == 0,
+            bad,
+        );
     }
 
     // ── socksAddr ──
@@ -242,7 +246,9 @@ fn run() {
                     let (_, _) = c.Read(&mut m);
                 }
                 // Reply: VER=5 METHOD=0 (no auth).
-                let _ = c.Write(goish::slice::<goish::byte>::__from_vec(alloc::vec![5u8, 0u8]));
+                let _ = c.Write(goish::slice::<goish::byte>::__from_vec(alloc::vec![
+                    5u8, 0u8
+                ]));
                 // CONNECT request: VER CMD RSV ATYP ADDR PORT
                 let mut req = goish::make!([]goish::byte, 4);
                 let (_, _) = c.Read(&mut req);

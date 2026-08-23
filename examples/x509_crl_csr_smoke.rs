@@ -75,16 +75,32 @@ fn main() {
     check("ParseRevocationList accepts Go's CRL", err == goish::nil);
     if let Some(rl) = rl {
         eq("Number == 7", rl.Number.Text(10), "7");
-        eq("Issuer.CommonName", rl.Issuer.CommonName.clone(), "goish CA");
-        check("ThisUpdate == 1500000000", rl.ThisUpdate.Unix() == 1500000000);
-        check("NextUpdate == 1600000000", rl.NextUpdate.Unix() == 1600000000);
+        eq(
+            "Issuer.CommonName",
+            rl.Issuer.CommonName.clone(),
+            "goish CA",
+        );
+        check(
+            "ThisUpdate == 1500000000",
+            rl.ThisUpdate.Unix() == 1500000000,
+        );
+        check(
+            "NextUpdate == 1600000000",
+            rl.NextUpdate.Unix() == 1600000000,
+        );
         check("1 revoked entry", rl.RevokedCertificateEntries.Len() == 1);
         if rl.RevokedCertificateEntries.Len() == 1 {
             let e = &rl.RevokedCertificateEntries[0];
             eq("entry0 serial == 42", e.SerialNumber.Text(10), "42");
-            check("entry0 time == 1400000000", e.RevocationTime.Unix() == 1400000000);
+            check(
+                "entry0 time == 1400000000",
+                e.RevocationTime.Unix() == 1400000000,
+            );
         }
-        check("SignatureAlgorithm is Ed25519", rl.SignatureAlgorithm == x509::PureEd25519);
+        check(
+            "SignatureAlgorithm is Ed25519",
+            rl.SignatureAlgorithm == x509::PureEd25519,
+        );
         check("2 CRL extensions", rl.Extensions.Len() == 2);
         check("AuthorityKeyId is 20 bytes", rl.AuthorityKeyId.Len() == 20);
         // The deprecated mirror must agree with the modern list.
@@ -125,7 +141,10 @@ fn main() {
     // Truncation must be an error, not a panic or a silent empty CRL.
     let raw: &[byte] = &der;
     let (_, err) = x509::ParseRevocationList(slice::__from_vec(raw[..raw.len() / 2].to_vec()));
-    check("ParseRevocationList rejects a truncated CRL", err != goish::nil);
+    check(
+        "ParseRevocationList rejects a truncated CRL",
+        err != goish::nil,
+    );
 
     unsafe {
         // See tls_common_smoke: copy before formatting so we never take

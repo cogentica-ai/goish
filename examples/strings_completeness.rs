@@ -48,29 +48,57 @@ fn main() {
     // ─── strings.Fields / FieldsFunc ─────────────────────────────────
     let fs = strings::Fields("  hello   world  foo ");
     check(fs.Len() == 3, b"strings: Fields count\n");
-    check(fs[0] == "hello" && fs[1] == "world" && fs[2] == "foo",
-          b"strings: Fields values\n");
+    check(
+        fs[0] == "hello" && fs[1] == "world" && fs[2] == "foo",
+        b"strings: Fields values\n",
+    );
 
-    let fs = strings::FieldsFunc("a,b;c,,d", |r: goish::rune| r == ',' as goish::rune || r == ';' as goish::rune);
+    let fs = strings::FieldsFunc("a,b;c,,d", |r: goish::rune| {
+        r == ',' as goish::rune || r == ';' as goish::rune
+    });
     check(fs.Len() == 4, b"strings: FieldsFunc count\n");
     check(fs[3] == "d", b"strings: FieldsFunc[3]\n");
 
     // ─── strings.IndexAny / LastIndexAny / LastIndexByte ─────────────
-    check(strings::IndexAny("hello", "xyzo") == 4, b"strings: IndexAny\n");
-    check(strings::IndexAny("abc", "xyz") == -1, b"strings: IndexAny miss\n");
-    check(strings::LastIndexAny("hello", "lo") == 4, b"strings: LastIndexAny\n");
-    check(strings::LastIndexByte("foobar", b'o') == 2, b"strings: LastIndexByte\n");
+    check(
+        strings::IndexAny("hello", "xyzo") == 4,
+        b"strings: IndexAny\n",
+    );
+    check(
+        strings::IndexAny("abc", "xyz") == -1,
+        b"strings: IndexAny miss\n",
+    );
+    check(
+        strings::LastIndexAny("hello", "lo") == 4,
+        b"strings: LastIndexAny\n",
+    );
+    check(
+        strings::LastIndexByte("foobar", b'o') == 2,
+        b"strings: LastIndexByte\n",
+    );
 
     // ─── strings.IndexFunc / LastIndexFunc / ContainsFunc ────────────
     let i = strings::IndexFunc("abc123", unicode::IsDigit);
     check(i == 3, b"strings: IndexFunc\n");
     let i = strings::LastIndexFunc("abc123x", unicode::IsDigit);
     check(i == 5, b"strings: LastIndexFunc\n");
-    check(strings::ContainsFunc("hello", unicode::IsLetter), b"strings: ContainsFunc\n");
-    check(!strings::ContainsFunc("12345", unicode::IsLetter), b"strings: !ContainsFunc\n");
+    check(
+        strings::ContainsFunc("hello", unicode::IsLetter),
+        b"strings: ContainsFunc\n",
+    );
+    check(
+        !strings::ContainsFunc("12345", unicode::IsLetter),
+        b"strings: !ContainsFunc\n",
+    );
 
-    check(strings::ContainsAny("hello", "xyzh"), b"strings: ContainsAny\n");
-    check(!strings::ContainsAny("abc", "xyz"), b"strings: !ContainsAny\n");
+    check(
+        strings::ContainsAny("hello", "xyzh"),
+        b"strings: ContainsAny\n",
+    );
+    check(
+        !strings::ContainsAny("abc", "xyz"),
+        b"strings: !ContainsAny\n",
+    );
 
     // ─── strings.TrimFunc / TrimLeftFunc / TrimRightFunc ─────────────
     let r = strings::TrimFunc("  hello  ", unicode::IsSpace);
@@ -84,7 +112,10 @@ fn main() {
     let r = strings::Map(unicode::ToUpper, "Hello");
     check(r == "HELLO", b"strings: Map ToUpper\n");
     // Drop digits via negative return.
-    let r = strings::Map(|c: goish::rune| if unicode::IsDigit(c) { -1 } else { c }, "a1b2c3");
+    let r = strings::Map(
+        |c: goish::rune| if unicode::IsDigit(c) { -1 } else { c },
+        "a1b2c3",
+    );
     check(r == "abc", b"strings: Map drop\n");
 
     // ─── strings.SplitAfter / SplitAfterN ────────────────────────────
@@ -105,7 +136,10 @@ fn main() {
     let mut buf: slice<goish::byte> = goish::make!([]byte, 3);
     let (n, err) = r.Read(&mut buf);
     check(err == goish::nil && n == 3, b"strings: Reader.Read 3\n");
-    check(buf[0] == b'h' && buf[2] == b'l', b"strings: Reader.Read content\n");
+    check(
+        buf[0] == b'h' && buf[2] == b'l',
+        b"strings: Reader.Read content\n",
+    );
 
     let (n, _) = r.Read(&mut buf);
     check(n == 2, b"strings: Reader.Read remaining\n");
@@ -121,11 +155,16 @@ fn main() {
     check(fs.Len() == 2, b"bytes: Fields count\n");
     check(fs[0].Len() == 3, b"bytes: Fields[0] len\n");
 
-    let r = bytes::TrimFunc(b"--abc--".as_slice(), |c: goish::rune| c == '-' as goish::rune);
+    let r = bytes::TrimFunc(b"--abc--".as_slice(), |c: goish::rune| {
+        c == '-' as goish::rune
+    });
     check(r.Len() == 3 && r[0] == b'a', b"bytes: TrimFunc\n");
 
     let r = bytes::Map(unicode::ToUpper, b"hi".as_slice());
-    check(r.Len() == 2 && r[0] == b'H' && r[1] == b'I', b"bytes: Map\n");
+    check(
+        r.Len() == 2 && r[0] == b'H' && r[1] == b'I',
+        b"bytes: Map\n",
+    );
 
     const OK: &[u8] = b"strings_completeness: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

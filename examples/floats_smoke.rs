@@ -28,19 +28,31 @@ fn main() {
     check(err == nil && v == 0.0, b"floats: ParseFloat(0) wrong\n");
 
     let (v, err) = strconv::ParseFloat("-3.14", 64);
-    check(err == nil && v == -3.14, b"floats: ParseFloat(-3.14) wrong\n");
+    check(
+        err == nil && v == -3.14,
+        b"floats: ParseFloat(-3.14) wrong\n",
+    );
 
     let (v, err) = strconv::ParseFloat("1e10", 64);
     check(err == nil && v == 1e10, b"floats: ParseFloat(1e10) wrong\n");
 
     let (v, err) = strconv::ParseFloat("1.5E-3", 64);
-    check(err == nil && v == 1.5e-3, b"floats: ParseFloat(1.5E-3) wrong\n");
+    check(
+        err == nil && v == 1.5e-3,
+        b"floats: ParseFloat(1.5E-3) wrong\n",
+    );
 
     // Special values.
     let (v, err) = strconv::ParseFloat("inf", 64);
-    check(err == nil && v.is_infinite() && v > 0.0, b"floats: ParseFloat(inf) wrong\n");
+    check(
+        err == nil && v.is_infinite() && v > 0.0,
+        b"floats: ParseFloat(inf) wrong\n",
+    );
     let (v, err) = strconv::ParseFloat("-Inf", 64);
-    check(err == nil && v.is_infinite() && v < 0.0, b"floats: ParseFloat(-Inf) wrong\n");
+    check(
+        err == nil && v.is_infinite() && v < 0.0,
+        b"floats: ParseFloat(-Inf) wrong\n",
+    );
     let (v, err) = strconv::ParseFloat("NaN", 64);
     check(err == nil && v.is_nan(), b"floats: ParseFloat(NaN) wrong\n");
 

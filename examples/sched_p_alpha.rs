@@ -130,11 +130,7 @@ fn test_per_p_binding() {
     check(bound == n, b"every P bound to an M\n");
     // All ids 0..n must be present in the seen bitmask.
     let seen = id_seen.load(Ordering::Relaxed);
-    let want = if n < 32 {
-        ((1u32 << n) - 1) as i32
-    } else {
-        -1
-    };
+    let want = if n < 32 { ((1u32 << n) - 1) as i32 } else { -1 };
     check(seen == want, b"unique M ids 0..n bound to Ps\n");
 
     // registered_m_count includes sysmon's M (registered for tgkill

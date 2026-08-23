@@ -47,7 +47,10 @@ pub use super::jsontext::Options;
 /// output. Goish map marshaling is already deterministic (see module
 /// header); the option is accepted for API compatibility.
 pub fn Deterministic(v: bool) -> Options {
-    Options { deterministic: Some(v), ..Options::default() }
+    Options {
+        deterministic: Some(v),
+        ..Options::default()
+    }
 }
 
 // ─── The two codec traits (arshal_methods.go) ───────────────────────
@@ -177,10 +180,7 @@ where
 
 /// `json.MarshalEncode(out, in)` (arshal.go) — encode onto an
 /// existing encoder, using its options.
-pub fn MarshalEncode<T: MarshalerTo + ?Sized>(
-    out: &mut jsontext::Encoder,
-    v: &T,
-) -> error {
+pub fn MarshalEncode<T: MarshalerTo + ?Sized>(out: &mut jsontext::Encoder, v: &T) -> error {
     v.MarshalJSONTo(out)
 }
 
@@ -221,8 +221,7 @@ pub fn Unmarshal<T: UnmarshalerFrom + ?Sized>(
     v: &mut T,
     opts: impl AsRef<[Options]>,
 ) -> error {
-    let mut dec =
-        jsontext::Decoder::__from_bytes(data.as_ref(), Options::__merged(opts.as_ref()));
+    let mut dec = jsontext::Decoder::__from_bytes(data.as_ref(), Options::__merged(opts.as_ref()));
     let err = v.UnmarshalJSONFrom(&mut dec);
     if err != nil {
         return err;

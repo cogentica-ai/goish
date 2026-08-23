@@ -91,10 +91,18 @@ fn ulp_apart(a: u64, b: u64) -> u64 {
     let fa = f64::from_bits(a);
     let fb = f64::from_bits(b);
     if fa.is_nan() || fb.is_nan() {
-        return if fa.is_nan() && fb.is_nan() { 0 } else { u64::MAX };
+        return if fa.is_nan() && fb.is_nan() {
+            0
+        } else {
+            u64::MAX
+        };
     }
     let key = |bits: u64| -> i64 {
-        if bits & (1 << 63) != 0 { (!bits).wrapping_add(1) as i64 } else { bits as i64 }
+        if bits & (1 << 63) != 0 {
+            (!bits).wrapping_add(1) as i64
+        } else {
+            bits as i64
+        }
     };
     (key(a) - key(b)).unsigned_abs()
 }
@@ -107,8 +115,10 @@ fn main() {
         let kind = it.next().unwrap_or("");
         match kind {
             "pow" | "powulp" => {
-                let x = f64::from_bits(u64::from_str_radix(it.next().unwrap_or(""), 16).unwrap_or(0));
-                let y = f64::from_bits(u64::from_str_radix(it.next().unwrap_or(""), 16).unwrap_or(0));
+                let x =
+                    f64::from_bits(u64::from_str_radix(it.next().unwrap_or(""), 16).unwrap_or(0));
+                let y =
+                    f64::from_bits(u64::from_str_radix(it.next().unwrap_or(""), 16).unwrap_or(0));
                 let want = u64::from_str_radix(it.next().unwrap_or(""), 16).unwrap_or(0);
                 let bits = math::Pow(x, y).to_bits();
                 got.push_str(kind);
@@ -128,7 +138,8 @@ fn main() {
                 }
             }
             "frexp" => {
-                let f = f64::from_bits(u64::from_str_radix(it.next().unwrap_or(""), 16).unwrap_or(0));
+                let f =
+                    f64::from_bits(u64::from_str_radix(it.next().unwrap_or(""), 16).unwrap_or(0));
                 let (frac, exp) = math::Frexp(f);
                 got.push_str("frexp ");
                 hex(&mut got, f.to_bits());
@@ -138,7 +149,8 @@ fn main() {
                 dec(&mut got, exp as i64);
             }
             "ldexp" => {
-                let f = f64::from_bits(u64::from_str_radix(it.next().unwrap_or(""), 16).unwrap_or(0));
+                let f =
+                    f64::from_bits(u64::from_str_radix(it.next().unwrap_or(""), 16).unwrap_or(0));
                 let e: i64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
                 got.push_str("ldexp ");
                 hex(&mut got, f.to_bits());

@@ -42,7 +42,6 @@
 
 extern crate alloc;
 
-
 use crate::types::byte;
 
 // ─── crypto/tls/handshake_server_tls13.go, ported verbatim ────────────
@@ -169,8 +168,7 @@ pub(crate) fn illegalClientHelloChange(
         || ch.cipherSuites.len() != ch1.cipherSuites.len()
         || ch.supportedCurves.len() != ch1.supportedCurves.len()
         || ch.supportedSignatureAlgorithms.len() != ch1.supportedSignatureAlgorithms.len()
-        || ch.supportedSignatureAlgorithmsCert.len()
-            != ch1.supportedSignatureAlgorithmsCert.len()
+        || ch.supportedSignatureAlgorithmsCert.len() != ch1.supportedSignatureAlgorithmsCert.len()
         || ch.alpnProtocols.len() != ch1.alpnProtocols.len()
     {
         return true;
@@ -205,7 +203,6 @@ pub(crate) fn illegalClientHelloChange(
         || ch.cookie != ch1.cookie
         || ch.pskModes != ch1.pskModes;
 }
-
 
 // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:474-497 cloneHash
 /// Go: "cloneHash clones the hash, or returns nil if the hash cannot be
@@ -253,7 +250,6 @@ pub(crate) fn cloneHash(
     }
     return Some(out);
 }
-
 
 impl serverHandshakeStateTLS13 {
     // go: sdk 1.25.5 crypto/tls/handshake_server_tls13.go:499-531 serverHandshakeStateTLS13.pickCertificate
@@ -463,9 +459,7 @@ impl serverHandshakeStateTLS13 {
             //         return unexpectedMessageError(certVerify, msg) }
             let msg = match msg {
                 Some(m) => m,
-                None => {
-                    return crate::errors::New("tls: internal error: no handshake message")
-                }
+                None => return crate::errors::New("tls: internal error: no handshake message"),
             };
             let certVerify = match msg
                 .asAny()
@@ -504,16 +498,13 @@ impl serverHandshakeStateTLS13 {
             }
             // Go: sigType, sigHash, err := typeAndHashFromSignatureScheme(certVerify.signatureAlgorithm)
             //     if err != nil { return c.sendAlert(alertInternalError) }
-            let (sigType, sigHash, err) =
-                super::auth::typeAndHashFromSignatureScheme(sigAlg);
+            let (sigType, sigHash, err) = super::auth::typeAndHashFromSignatureScheme(sigAlg);
             if err != crate::errors::nil {
                 return self.c.sendAlert(super::alert::alertInternalError);
             }
             // Go: if sigType == signaturePKCS1v15 || sigHash == crypto.SHA1 {
             //         return c.sendAlert(alertInternalError) }
-            if sigType == super::common::signaturePKCS1v15
-                || sigHash == crate::crypto::SHA1
-            {
+            if sigType == super::common::signaturePKCS1v15 || sigHash == crate::crypto::SHA1 {
                 return self.c.sendAlert(super::alert::alertInternalError);
             }
             // Go: signed := signedMessage(sigHash, clientSignatureContext, hs.transcript)
@@ -662,8 +653,7 @@ impl serverHandshakeStateTLS13 {
         let cert = self.cert.clone().unwrap_or_default();
         let mut certMsg = super::handshake_messages::certificateMsgTLS13::default();
         certMsg.certificate = cert.clone();
-        certMsg.scts =
-            self.clientHello.scts && cert.SignedCertificateTimestamps.Len() > 0;
+        certMsg.scts = self.clientHello.scts && cert.SignedCertificateTimestamps.Len() > 0;
         certMsg.ocspStapling = self.clientHello.ocspStapling && cert.OCSPStaple.Len() > 0;
 
         let (_, err) = {
@@ -748,7 +738,8 @@ impl serverHandshakeStateTLS13 {
         // Go: if _, err := hs.c.writeHandshakeRecord(certVerifyMsg, hs.transcript); err != nil { return err }
         let (_, err) = {
             let transcript = self.transcript.as_mut().unwrap();
-            self.c.writeHandshakeRecord(&certVerifyMsg, Some(transcript))
+            self.c
+                .writeHandshakeRecord(&certVerifyMsg, Some(transcript))
         };
         if err != crate::errors::nil {
             return err;
@@ -797,13 +788,9 @@ impl serverHandshakeStateTLS13 {
         //             break } }
         for id in self.clientHello.cipherSuites.iter() {
             if *id == super::cipher_suites::TLS_FALLBACK_SCSV {
-                if self.c.__vers()
-                    < self.c.config.maxSupportedVersion(super::common::roleServer)
-                {
+                if self.c.__vers() < self.c.config.maxSupportedVersion(super::common::roleServer) {
                     self.c.sendAlert(super::alert::alertInappropriateFallback);
-                    return crate::errors::New(
-                        "tls: client using inappropriate protocol fallback",
-                    );
+                    return crate::errors::New("tls: client using inappropriate protocol fallback");
                 }
                 break;
             }
@@ -817,9 +804,7 @@ impl serverHandshakeStateTLS13 {
             || self.clientHello.compressionMethods[0] != super::common::compressionNone
         {
             self.c.sendAlert(super::alert::alertIllegalParameter);
-            return crate::errors::New(
-                "tls: TLS 1.3 client supports illegal compression methods",
-            );
+            return crate::errors::New("tls: TLS 1.3 client supports illegal compression methods");
         }
 
         // Go: hs.hello.random = make([]byte, 32)
@@ -915,7 +900,9 @@ impl serverHandshakeStateTLS13 {
         //     hs.transcript = hs.suite.hash.New()
         self.c.__setCipherSuite(suite.id);
         self.hello.cipherSuite = suite.id;
-        self.transcript = Some(super::handshake_messages::transcriptHasher(suite.hash.New()));
+        self.transcript = Some(super::handshake_messages::transcriptHasher(
+            suite.hash.New(),
+        ));
 
         // Go: preferredGroups := c.config.curvePreferences(c.vers)
         //     preferredGroups = slices.DeleteFunc(preferredGroups, func(group CurveID) bool {
@@ -936,9 +923,7 @@ impl serverHandshakeStateTLS13 {
         //         return errors.New("tls: no key exchanges supported by both client and server") }
         if preferredGroups.Len() == 0 {
             self.c.sendAlert(super::alert::alertHandshakeFailure);
-            return crate::errors::New(
-                "tls: no key exchanges supported by both client and server",
-            );
+            return crate::errors::New("tls: no key exchanges supported by both client and server");
         }
         // Go: hasKeyShare := func(group CurveID) bool { … }
         let keyShares = self.clientHello.keyShares.clone();
@@ -955,18 +940,24 @@ impl serverHandshakeStateTLS13 {
         {
             let pg = preferredGroups.clone();
             let hks = hasKeyShare.clone();
-            crate::sort::SliceStable(&mut preferredGroups, |i: crate::types::int, j: crate::types::int| {
-                hks(pg[i as usize]) && !hks(pg[j as usize])
-            });
+            crate::sort::SliceStable(
+                &mut preferredGroups,
+                |i: crate::types::int, j: crate::types::int| {
+                    hks(pg[i as usize]) && !hks(pg[j as usize])
+                },
+            );
         }
         // Go: sort.SliceStable(preferredGroups, func(i, j int) bool {
         //         return isPQKeyExchange(preferredGroups[i]) && !isPQKeyExchange(preferredGroups[j]) })
         {
             let pg = preferredGroups.clone();
-            crate::sort::SliceStable(&mut preferredGroups, |i: crate::types::int, j: crate::types::int| {
-                super::common::isPQKeyExchange(pg[i as usize])
-                    && !super::common::isPQKeyExchange(pg[j as usize])
-            });
+            crate::sort::SliceStable(
+                &mut preferredGroups,
+                |i: crate::types::int, j: crate::types::int| {
+                    super::common::isPQKeyExchange(pg[i as usize])
+                        && !super::common::isPQKeyExchange(pg[j as usize])
+                },
+            );
         }
         // Go: selectedGroup := preferredGroups[0]
         let selectedGroup = preferredGroups[0];
@@ -1010,14 +1001,16 @@ impl serverHandshakeStateTLS13 {
         if selectedGroup == super::common::X25519MLKEM768 {
             ecdhGroup = super::common::X25519;
             if ecdhData.Len()
-                != crate::crypto::internal::fips140::mlkem::EncapsulationKeySize768 as crate::types::int
+                != crate::crypto::internal::fips140::mlkem::EncapsulationKeySize768
+                    as crate::types::int
                     + super::key_schedule::x25519PublicKeySize
             {
                 self.c.sendAlert(super::alert::alertIllegalParameter);
                 return crate::errors::New("tls: invalid X25519MLKEM768 client key share");
             }
             ecdhData = ecdhData.slice(
-                crate::crypto::internal::fips140::mlkem::EncapsulationKeySize768 as crate::types::int,
+                crate::crypto::internal::fips140::mlkem::EncapsulationKeySize768
+                    as crate::types::int,
                 ecdhData.Len(),
             );
         }
@@ -1027,9 +1020,7 @@ impl serverHandshakeStateTLS13 {
         let (_, ok) = super::key_schedule::curveForCurveID(ecdhGroup);
         if !ok {
             self.c.sendAlert(super::alert::alertInternalError);
-            return crate::errors::New(
-                "tls: CurvePreferences includes unsupported curve",
-            );
+            return crate::errors::New("tls: CurvePreferences includes unsupported curve");
         }
         // Go: key, err := generateECDHEKey(c.config.rand(), ecdhGroup)
         //     if err != nil { c.sendAlert(alertInternalError); return err }
@@ -1077,8 +1068,7 @@ impl serverHandshakeStateTLS13 {
                     [..crate::crypto::internal::fips140::mlkem::EncapsulationKeySize768]
                     .to_vec(),
             );
-            let (k, err) =
-                crate::crypto::internal::fips140::mlkem::NewEncapsulationKey768(ekBytes);
+            let (k, err) = crate::crypto::internal::fips140::mlkem::NewEncapsulationKey768(ekBytes);
             if err != crate::errors::nil {
                 self.c.sendAlert(super::alert::alertIllegalParameter);
                 return crate::errors::New("tls: invalid X25519MLKEM768 client key share");
@@ -1165,8 +1155,7 @@ impl serverHandshakeStateTLS13 {
                 &mut echTranscript,
                 slice::__from_vec(self.clientHello.original.clone()),
             );
-            let err =
-                super::handshake_messages::transcriptMsg(&self.hello, &mut echTranscript);
+            let err = super::handshake_messages::transcriptMsg(&self.hello, &mut echTranscript);
             if err != crate::errors::nil {
                 return err;
             }
@@ -1287,12 +1276,12 @@ impl serverHandshakeStateTLS13 {
 
         // Go: encryptedExtensions := new(encryptedExtensionsMsg)
         //     encryptedExtensions.alpnProtocol = c.clientProtocol
-        let mut encryptedExtensions =
-            super::handshake_messages::encryptedExtensionsMsg::default();
-        encryptedExtensions.alpnProtocol = match core::str::from_utf8(self.c.clientProtocol.as_bytes()) {
-            Ok(p) => p.into(),
-            Err(_) => Default::default(),
-        };
+        let mut encryptedExtensions = super::handshake_messages::encryptedExtensionsMsg::default();
+        encryptedExtensions.alpnProtocol =
+            match core::str::from_utf8(self.c.clientProtocol.as_bytes()) {
+                Ok(p) => p.into(),
+                Err(_) => Default::default(),
+            };
 
         // Go: if !hs.c.didResume && hs.clientHello.serverName != "" {
         //         encryptedExtensions.serverNameAck = true }
@@ -1334,7 +1323,8 @@ impl serverHandshakeStateTLS13 {
         // Go: if _, err := hs.c.writeHandshakeRecord(encryptedExtensions, hs.transcript); err != nil { return err }
         let (_, err) = {
             let transcript = self.transcript.as_mut().unwrap();
-            self.c.writeHandshakeRecord(&encryptedExtensions, Some(transcript))
+            self.c
+                .writeHandshakeRecord(&encryptedExtensions, Some(transcript))
         };
         if err != crate::errors::nil {
             return err;
@@ -1384,8 +1374,7 @@ impl serverHandshakeStateTLS13 {
         let serverSecret = {
             let transcript = self.transcript.as_ref().unwrap();
             let masterSecret = self.masterSecret.as_ref().unwrap();
-            self.trafficSecret =
-                masterSecret.ClientApplicationTrafficSecret(&*transcript.0);
+            self.trafficSecret = masterSecret.ClientApplicationTrafficSecret(&*transcript.0);
             masterSecret.ServerApplicationTrafficSecret(&*transcript.0)
         };
         self.c.out.setTrafficSecret(
@@ -1396,8 +1385,7 @@ impl serverHandshakeStateTLS13 {
 
         // Go: err := c.config.writeKeyLog(keyLogLabelClientTraffic, hs.clientHello.random, hs.trafficSecret)
         //     if err != nil { c.sendAlert(alertInternalError); return err }
-        let clientHelloRandom =
-            crate::goslice::slice::__from_vec(self.clientHello.random.clone());
+        let clientHelloRandom = crate::goslice::slice::__from_vec(self.clientHello.random.clone());
         let err = self.c.config.writeKeyLog(
             crate::gostring::string::from_static(super::common::keyLogLabelClientTraffic),
             clientHelloRandom.clone(),
@@ -1503,9 +1491,7 @@ impl Conn {
         //     if suite == nil { return errors.New("tls: internal error: unknown cipher suite") }
         let suite = match super::cipher_suites::cipherSuiteTLS13ByID(self.cipherSuite) {
             Some(s) => s,
-            None => {
-                return crate::errors::New("tls: internal error: unknown cipher suite")
-            }
+            None => return crate::errors::New("tls: internal error: unknown cipher suite"),
         };
         // Go: psk := tls13.ExpandLabel(suite.hash.New, c.resumptionSecret,
         //         "resumption", nil, suite.hash.Size())
@@ -1559,9 +1545,8 @@ impl Conn {
             m.label = label;
         }
         // Go: m.lifetime = uint32(maxSessionTicketLifetime / time.Second)
-        m.lifetime = crate::uint32(
-            (super::common::maxSessionTicketLifetime / crate::time::Second).0,
-        );
+        m.lifetime =
+            crate::uint32((super::common::maxSessionTicketLifetime / crate::time::Second).0);
 
         // Go: "ticket_age_add is a random 32-bit value. See RFC 8446,
         //      section 4.6.1. The value is not stored anywhere; we never
@@ -1570,8 +1555,7 @@ impl Conn {
         //     ageAdd := make([]byte, 4)
         //     if _, err := c.config.rand().Read(ageAdd); err != nil { return err }
         //     m.ageAdd = byteorder.LEUint32(ageAdd)
-        let mut ageAdd: slice<crate::types::byte> =
-            slice::__from_vec(alloc::vec![0u8; 4]);
+        let mut ageAdd: slice<crate::types::byte> = slice::__from_vec(alloc::vec![0u8; 4]);
         let mut r = self.config.rand();
         let (_, err) = r.Read(&mut ageAdd);
         if err != crate::errors::nil {
@@ -1657,8 +1641,7 @@ impl serverHandshakeStateTLS13 {
             if crate::int(i) >= maxClientPSKIdentities {
                 break;
             }
-            let identityLabel =
-                slice::__from_vec(self.clientHello.pskIdentities[i].label.clone());
+            let identityLabel = slice::__from_vec(self.clientHello.pskIdentities[i].label.clone());
 
             // Go: var sessionState *SessionState
             //     if c.config.UnwrapSession != nil {
@@ -1720,8 +1703,7 @@ impl serverHandshakeStateTLS13 {
 
             // Go: pskSuite := cipherSuiteTLS13ByID(sessionState.cipherSuite)
             //     if pskSuite == nil || pskSuite.hash != hs.suite.hash { continue }
-            let pskSuite =
-                super::cipher_suites::cipherSuiteTLS13ByID(sessionState.cipherSuite);
+            let pskSuite = super::cipher_suites::cipherSuiteTLS13ByID(sessionState.cipherSuite);
             match pskSuite {
                 None => {
                     i += 1;
@@ -1740,15 +1722,12 @@ impl serverHandshakeStateTLS13 {
             //      of client certs in the ticket is consistent with the
             //      configured requirements."
             let sessionHasClientCerts = sessionState.peerCertificates.Len() != 0;
-            let needClientCerts =
-                super::common::requiresClientCert(self.c.config.ClientAuth);
+            let needClientCerts = super::common::requiresClientCert(self.c.config.ClientAuth);
             if needClientCerts && !sessionHasClientCerts {
                 i += 1;
                 continue;
             }
-            if sessionHasClientCerts
-                && self.c.config.ClientAuth == super::common::NoClientCert
-            {
+            if sessionHasClientCerts && self.c.config.ClientAuth == super::common::NoClientCert {
                 i += 1;
                 continue;
             }
@@ -1782,14 +1761,11 @@ impl serverHandshakeStateTLS13 {
             //     transcript := cloneHash(hs.transcript, hs.suite.hash)
             //     if transcript == nil { c.sendAlert(alertInternalError)
             //         return errors.New("tls: internal error: failed to clone hash") }
-            let transcript =
-                cloneHash(&*self.transcript.as_ref().unwrap().0, suite.hash);
+            let transcript = cloneHash(&*self.transcript.as_ref().unwrap().0, suite.hash);
             let mut transcript = match transcript {
                 None => {
                     self.c.sendAlert(super::alert::alertInternalError);
-                    return crate::errors::New(
-                        "tls: internal error: failed to clone hash",
-                    );
+                    return crate::errors::New("tls: internal error: failed to clone hash");
                 }
                 Some(t) => super::handshake_messages::transcriptHasher(t),
             };
@@ -1905,10 +1881,8 @@ impl serverHandshakeStateTLS13 {
             let mut confTranscript = super::handshake_messages::transcriptHasher(
                 cloneHash(&*self.transcript.as_ref().unwrap().0, suite.hash).unwrap(),
             );
-            let err = super::handshake_messages::transcriptMsg(
-                &helloRetryRequest,
-                &mut confTranscript,
-            );
+            let err =
+                super::handshake_messages::transcriptMsg(&helloRetryRequest, &mut confTranscript);
             if err != crate::errors::nil {
                 return (None, err);
             }
@@ -1942,7 +1916,8 @@ impl serverHandshakeStateTLS13 {
         // Go: if _, err := hs.c.writeHandshakeRecord(helloRetryRequest, hs.transcript); err != nil { return nil, err }
         let (_, err) = {
             let transcript = self.transcript.as_mut().unwrap();
-            self.c.writeHandshakeRecord(&helloRetryRequest, Some(transcript))
+            self.c
+                .writeHandshakeRecord(&helloRetryRequest, Some(transcript))
         };
         if err != crate::errors::nil {
             return (None, err);
@@ -2009,17 +1984,14 @@ impl serverHandshakeStateTLS13 {
             //         parseECHExt(clientHello.encryptedClientHello)
             //     if err != nil { c.sendAlert(alertDecodeError)
             //         return nil, errors.New("tls: client sent invalid encrypted client hello extension") }
-            let (echType, echCiphersuite, configID, encap, payload, err) =
-                super::ech::parseECHExt(slice::__from_vec(
-                    clientHello.encryptedClientHello.clone(),
-                ));
+            let (echType, echCiphersuite, configID, encap, payload, err) = super::ech::parseECHExt(
+                slice::__from_vec(clientHello.encryptedClientHello.clone()),
+            );
             if err != crate::errors::nil {
                 self.c.sendAlert(super::alert::alertDecodeError);
                 return (
                     None,
-                    crate::errors::New(
-                        "tls: client sent invalid encrypted client hello extension",
-                    ),
+                    crate::errors::New("tls: client sent invalid encrypted client hello extension"),
                 );
             }
 
@@ -2104,9 +2076,7 @@ impl serverHandshakeStateTLS13 {
             self.c.sendAlert(super::alert::alertIllegalParameter);
             return (
                 None,
-                crate::errors::New(
-                    "tls: client didn't send one key share in second ClientHello",
-                ),
+                crate::errors::New("tls: client didn't send one key share in second ClientHello"),
             );
         }
         // Go: ks := &clientHello.keyShares[0]
@@ -2119,9 +2089,7 @@ impl serverHandshakeStateTLS13 {
             self.c.sendAlert(super::alert::alertIllegalParameter);
             return (
                 None,
-                crate::errors::New(
-                    "tls: client sent unexpected key share in second ClientHello",
-                ),
+                crate::errors::New("tls: client sent unexpected key share in second ClientHello"),
             );
         }
 
@@ -2132,9 +2100,7 @@ impl serverHandshakeStateTLS13 {
             self.c.sendAlert(super::alert::alertIllegalParameter);
             return (
                 None,
-                crate::errors::New(
-                    "tls: client indicated early data in second ClientHello",
-                ),
+                crate::errors::New("tls: client indicated early data in second ClientHello"),
             );
         }
 

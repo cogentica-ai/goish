@@ -39,9 +39,9 @@ use alloc::sync::Arc;
 
 // Go-shape package imports — `strings.HasPrefix(...)` reads as
 // `strings::HasPrefix(...)` once `strings` is in scope.
-use goish::fmt;
 use goish::bytes as gobytes;
 use goish::encoding::json;
+use goish::fmt;
 use goish::io;
 use goish::net;
 use goish::net::http;
@@ -79,7 +79,8 @@ fn healthz(w: &(dyn http::ResponseWriter + Send + Sync + 'static), _r: &http::Re
         http::Error(w, e.Error(), http::StatusInternalServerError);
         return;
     }
-    w.Header().Set("Content-Type", "application/json; charset=utf-8");
+    w.Header()
+        .Set("Content-Type", "application/json; charset=utf-8");
     w.Write(body);
 }
 
@@ -153,7 +154,8 @@ fn apiEcho(w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Req
         http::Error(w, e.Error(), http::StatusInternalServerError);
         return;
     }
-    w.Header().Set("Content-Type", "application/json; charset=utf-8");
+    w.Header()
+        .Set("Content-Type", "application/json; charset=utf-8");
     w.Write(body);
 }
 
@@ -185,7 +187,8 @@ fn apiStats(w: &(dyn http::ResponseWriter + Send + Sync + 'static), _r: &http::R
         http::Error(w, err.Error(), http::StatusInternalServerError);
         return;
     }
-    w.Header().Set("Content-Type", "application/json; charset=utf-8");
+    w.Header()
+        .Set("Content-Type", "application/json; charset=utf-8");
     w.Write(body);
 }
 
@@ -251,41 +254,48 @@ fn rootHandler(w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http:
 // `http::HandlerFunc`. No generic struct + trait-impl boilerplate.
 
 fn logging(next: Arc<dyn http::Handler>) -> Arc<dyn http::Handler> {
-    Arc::new(http::HandlerFunc(move |w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request| {
-        REQ_COUNT.Add(1);
-        // TODO(slog): emit structured access log with time::Since(started).
-        next.ServeHTTP(w, r);
-    }))
+    Arc::new(http::HandlerFunc(
+        move |w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request| {
+            REQ_COUNT.Add(1);
+            // TODO(slog): emit structured access log with time::Since(started).
+            next.ServeHTTP(w, r);
+        },
+    ))
 }
 
 fn bearerAuth<S: Into<string>>(token: S, next: Arc<dyn http::Handler>) -> Arc<dyn http::Handler> {
     let token: string = token.into();
-    Arc::new(http::HandlerFunc(move |w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request| {
-        let auth = r.Header.Get("Authorization");
-        if !strings::HasPrefix(&auth, "Bearer ") {
-            w.Header().Set("WWW-Authenticate", "Bearer");
-            http::Error(w, "unauthorized", http::StatusUnauthorized);
-            return;
-        }
-        let supplied = strings::TrimPrefix(auth, "Bearer ");
-        if supplied != token {
-            http::Error(w, "unauthorized", http::StatusUnauthorized);
-            return;
-        }
-        next.ServeHTTP(w, r);
-    }))
+    Arc::new(http::HandlerFunc(
+        move |w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request| {
+            let auth = r.Header.Get("Authorization");
+            if !strings::HasPrefix(&auth, "Bearer ") {
+                w.Header().Set("WWW-Authenticate", "Bearer");
+                http::Error(w, "unauthorized", http::StatusUnauthorized);
+                return;
+            }
+            let supplied = strings::TrimPrefix(auth, "Bearer ");
+            if supplied != token {
+                http::Error(w, "unauthorized", http::StatusUnauthorized);
+                return;
+            }
+            next.ServeHTTP(w, r);
+        },
+    ))
 }
 
 fn cors(next: Arc<dyn http::Handler>) -> Arc<dyn http::Handler> {
-    Arc::new(http::HandlerFunc(move |w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request| {
-        w.Header().Set("Access-Control-Allow-Origin", "*");
-        w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        if r.Method == "OPTIONS" {
-            w.WriteHeader(http::StatusNoContent);
-            return;
-        }
-        next.ServeHTTP(w, r);
-    }))
+    Arc::new(http::HandlerFunc(
+        move |w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request| {
+            w.Header().Set("Access-Control-Allow-Origin", "*");
+            w.Header()
+                .Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+            if r.Method == "OPTIONS" {
+                w.WriteHeader(http::StatusNoContent);
+                return;
+            }
+            next.ServeHTTP(w, r);
+        },
+    ))
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────
@@ -323,10 +333,10 @@ fn main() {
     // http.StripPrefix("/admin", adminMux))).
     let admin_mux = http::ServeMux::new();
     admin_mux.HandleFunc("/secret", adminSecret);
-    mux.Handle("/admin/", bearerAuth(
-        "s3cret",
-        http::StripPrefix("/admin", admin_mux),
-    ));
+    mux.Handle(
+        "/admin/",
+        bearerAuth("s3cret", http::StripPrefix("/admin", admin_mux)),
+    );
 
     // Server with timeouts. Wrap whole mux in CORS + Logging
     // (Go: srv.Handler = logging(cors(mux))).

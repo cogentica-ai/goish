@@ -26,9 +26,9 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::crypto::aes;
 use goish::crypto::cipher::{NewGCM, NewGCMWithNonceSize, NewGCMWithTagSize, AEAD};
+use goish::fmt;
 use goish::types::byte;
 use goish::{slice, syscall};
 
@@ -122,7 +122,15 @@ fn test_1_empty_pt() {
         0x58, 0xe2, 0xfc, 0xce, 0xfa, 0x7e, 0x30, 0x61, 0x36, 0x7f, 0x1d, 0x57, 0xa4, 0xe7, 0x45,
         0x5a,
     ];
-    run_seal(1, &key, &nonce, &pt, &aad, &want_tag, b"empty PT, empty AAD       ");
+    run_seal(
+        1,
+        &key,
+        &nonce,
+        &pt,
+        &aad,
+        &want_tag,
+        b"empty PT, empty AAD       ",
+    );
 }
 
 // NIST SP 800-38D Test Case 2: zero key, zero PT block.
@@ -138,7 +146,15 @@ fn test_2_zero_block() {
         0xab, 0x6e, 0x47, 0xd4, 0x2c, 0xec, 0x13, 0xbd, 0xf5, 0x3a, 0x67, 0xb2, 0x12, 0x57, 0xbd,
         0xdf, // tag
     ];
-    run_seal(2, &key, &nonce, &pt, &aad, &want, b"zero block PT             ");
+    run_seal(
+        2,
+        &key,
+        &nonce,
+        &pt,
+        &aad,
+        &want,
+        b"zero block PT             ",
+    );
 }
 
 // NIST SP 800-38D Test Case 3 (NIST GCM Validation System):
@@ -191,14 +207,7 @@ fn test_4_with_aad() {
     run_roundtrip(4, &key, &nonce, &pt, &aad, b"AES-256 GCM Seal+Open 96B+AAD");
 }
 
-fn run_roundtrip(
-    idx: u8,
-    key: &[u8],
-    nonce: &[u8],
-    pt: &[u8],
-    aad: &[u8],
-    label: &[u8],
-) {
+fn run_roundtrip(idx: u8, key: &[u8], nonce: &[u8], pt: &[u8], aad: &[u8], label: &[u8]) {
     let (cipher_opt, err) = aes::NewCipher(from_bytes(key));
     if !err.IsNil() || cipher_opt.is_none() {
         write_result(idx, label, false);
@@ -230,15 +239,7 @@ fn run_roundtrip(
     }
 }
 
-fn run_seal(
-    idx: u8,
-    key: &[u8],
-    nonce: &[u8],
-    pt: &[u8],
-    aad: &[u8],
-    want: &[u8],
-    label: &[u8],
-) {
+fn run_seal(idx: u8, key: &[u8], nonce: &[u8], pt: &[u8], aad: &[u8], want: &[u8], label: &[u8]) {
     let (cipher_opt, err) = aes::NewCipher(from_bytes(key));
     if !err.IsNil() || cipher_opt.is_none() {
         write_result(idx, label, false);

@@ -8,9 +8,9 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use goish::{byte, nil, slice, string, syscall};
-use goish::os::exec;
 use goish::io;
+use goish::os::exec;
+use goish::{byte, nil, slice, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -18,7 +18,9 @@ fn die(msg: &[u8]) -> ! {
 }
 
 fn check(cond: bool, msg: &[u8]) {
-    if !cond { die(msg); }
+    if !cond {
+        die(msg);
+    }
 }
 
 // Read everything from a reader into a Vec<u8> until EOF.
@@ -30,10 +32,17 @@ fn read_all(r: &mut dyn io::Reader) -> Vec<u8> {
         if n > 0 {
             let nn = n as usize;
             let mut i: usize = 0;
-            while i < nn { acc.push(buf[i as i64]); i += 1; }
+            while i < nn {
+                acc.push(buf[i as i64]);
+                i += 1;
+            }
         }
-        if err != nil { break; }
-        if n == 0 { break; }
+        if err != nil {
+            break;
+        }
+        if n == 0 {
+            break;
+        }
     }
     acc
 }
@@ -53,7 +62,10 @@ fn main() {
     check(err == nil, b"exec: Wait() after StdoutPipe error\n");
 
     // echo appends a trailing newline.
-    check(&got[..] == b"hi-from-stdout\n", b"exec: StdoutPipe content mismatch\n");
+    check(
+        &got[..] == b"hi-from-stdout\n",
+        b"exec: StdoutPipe content mismatch\n",
+    );
 
     // ── StderrPipe: sh -c 'echo err 1>&2' ─────────────────────────────
     let mut cmd2 = exec::Command(
@@ -67,7 +79,10 @@ fn main() {
     let got_err = read_all(&mut errpipe);
     let e3 = cmd2.Wait();
     check(e3 == nil, b"exec: Wait() after StderrPipe error\n");
-    check(&got_err[..] == b"err-from-stderr\n", b"exec: StderrPipe content mismatch\n");
+    check(
+        &got_err[..] == b"err-from-stderr\n",
+        b"exec: StderrPipe content mismatch\n",
+    );
 
     const OK: &[u8] = b"os/exec StdoutPipe/StderrPipe: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

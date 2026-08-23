@@ -30,11 +30,7 @@ static SEEN: sync::Mutex<alloc::vec::Vec<u8>> = sync::Mutex::new(alloc::vec::Vec
 
 struct Backend;
 impl http::Handler for Backend {
-    fn ServeHTTP(
-        &self,
-        w: &(dyn http::ResponseWriter + Send + Sync + 'static),
-        r: &http::Request,
-    ) {
+    fn ServeHTTP(&self, w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Request) {
         *SEEN.Lock() = r.Header.Get(string("X-Forwarded-For")).as_bytes().to_vec();
         let _ = w.Write(goish::slice::<u8>::__from_vec(b"ok".to_vec()));
     }
@@ -77,7 +73,12 @@ fn main() {
             fmt::Println!("FAIL plain GET: ", err.Error());
             bad += 1;
         }
-        eq(string::from_bytes(&SEEN.Lock()[..]), "127.0.0.1", "no client XFF", &mut bad);
+        eq(
+            string::from_bytes(&SEEN.Lock()[..]),
+            "127.0.0.1",
+            "no client XFF",
+            &mut bad,
+        );
 
         // 2. client SPOOFS an X-Forwarded-For — the real peer must
         //    still be appended after it.

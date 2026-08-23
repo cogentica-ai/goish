@@ -293,7 +293,12 @@ pub fn encrypt_record(
     let (cipher_opt, _) = aes::NewCipher(key_slice);
     let cipher = match cipher_opt {
         Some(c) => c,
-        None => return (slice::<byte>::__from_vec(Vec::new()), errors::New("tls: AES key error")),
+        None => {
+            return (
+                slice::<byte>::__from_vec(Vec::new()),
+                errors::New("tls: AES key error"),
+            )
+        }
     };
 
     let iv_slice = slice::<byte>::__from_vec(iv_buf.to_vec());
@@ -329,11 +334,17 @@ pub fn decrypt_record(
     fragment: &[byte],
 ) -> (slice<byte>, error) {
     if fragment.len() < AES_BLOCK_SIZE {
-        return (slice::<byte>::__from_vec(Vec::new()), errors::New("tls: fragment too short for IV"));
+        return (
+            slice::<byte>::__from_vec(Vec::new()),
+            errors::New("tls: fragment too short for IV"),
+        );
     }
     let (iv_bytes, ciphertext) = fragment.split_at(AES_BLOCK_SIZE);
     if ciphertext.is_empty() || ciphertext.len() % AES_BLOCK_SIZE != 0 {
-        return (slice::<byte>::__from_vec(Vec::new()), errors::New("tls: ciphertext not a multiple of block size"));
+        return (
+            slice::<byte>::__from_vec(Vec::new()),
+            errors::New("tls: ciphertext not a multiple of block size"),
+        );
     }
 
     // 1. AES-128-CBC decrypt
@@ -341,7 +352,12 @@ pub fn decrypt_record(
     let (cipher_opt, _) = aes::NewCipher(key_slice);
     let cipher = match cipher_opt {
         Some(c) => c,
-        None => return (slice::<byte>::__from_vec(Vec::new()), errors::New("tls: AES key error")),
+        None => {
+            return (
+                slice::<byte>::__from_vec(Vec::new()),
+                errors::New("tls: AES key error"),
+            )
+        }
     };
 
     let iv_slice = slice::<byte>::__from_vec(iv_bytes.to_vec());
@@ -354,24 +370,36 @@ pub fn decrypt_record(
 
     // 2. Strip PKCS7 padding
     if dst_vec.is_empty() {
-        return (slice::<byte>::__from_vec(Vec::new()), errors::New("tls: empty decrypted data"));
+        return (
+            slice::<byte>::__from_vec(Vec::new()),
+            errors::New("tls: empty decrypted data"),
+        );
     }
     let pad_byte = *dst_vec.last().unwrap();
     let pad_len = pad_byte as usize + 1; // goishlint:ignore GOISH005
     if pad_len > dst_vec.len() || pad_len > AES_BLOCK_SIZE {
-        return (slice::<byte>::__from_vec(Vec::new()), errors::New("tls: bad padding length"));
+        return (
+            slice::<byte>::__from_vec(Vec::new()),
+            errors::New("tls: bad padding length"),
+        );
     }
     let pad_start = dst_vec.len() - pad_len;
     for &b in &dst_vec[pad_start..] {
         if b != pad_byte {
-            return (slice::<byte>::__from_vec(Vec::new()), errors::New("tls: bad padding bytes"));
+            return (
+                slice::<byte>::__from_vec(Vec::new()),
+                errors::New("tls: bad padding bytes"),
+            );
         }
     }
     let without_pad = &dst_vec[..pad_start];
 
     // 3. Verify and strip MAC
     if without_pad.len() < SHA1_SIZE {
-        return (slice::<byte>::__from_vec(Vec::new()), errors::New("tls: too short after padding removal"));
+        return (
+            slice::<byte>::__from_vec(Vec::new()),
+            errors::New("tls: too short after padding removal"),
+        );
     }
     let mac_start = without_pad.len() - SHA1_SIZE;
     let plaintext = &without_pad[..mac_start];
@@ -385,7 +413,10 @@ pub fn decrypt_record(
         diff |= their_mac[i] ^ expected_mac[i];
     }
     if diff != 0 {
-        return (slice::<byte>::__from_vec(Vec::new()), errors::New("tls: MAC verification failed"));
+        return (
+            slice::<byte>::__from_vec(Vec::new()),
+            errors::New("tls: MAC verification failed"),
+        );
     }
 
     (slice::<byte>::__from_vec(plaintext.to_vec()), errors::nil)
@@ -445,19 +476,31 @@ pub fn decode_x509_rsa_pubkey(cert_der: &[byte]) -> (rsa::PublicKey, error) {
     // outer Certificate SEQUENCE
     let (cert_rv, _, err) = asn1::ParseRaw(der_slice);
     if !err.IsNil() {
-        return (nil_key, errors::New("tls/x509: failed to parse Certificate SEQUENCE"));
+        return (
+            nil_key,
+            errors::New("tls/x509: failed to parse Certificate SEQUENCE"),
+        );
     }
     if cert_rv.Tag != asn1::TagSequence {
-        return (nil_key, errors::New("tls/x509: Certificate is not a SEQUENCE"));
+        return (
+            nil_key,
+            errors::New("tls/x509: Certificate is not a SEQUENCE"),
+        );
     }
 
     // TBSCertificate SEQUENCE
     let (tbs_rv, _, err) = asn1::ParseRaw(cert_rv.Bytes.clone());
     if !err.IsNil() {
-        return (nil_key, errors::New("tls/x509: failed to parse TBSCertificate SEQUENCE"));
+        return (
+            nil_key,
+            errors::New("tls/x509: failed to parse TBSCertificate SEQUENCE"),
+        );
     }
     if tbs_rv.Tag != asn1::TagSequence {
-        return (nil_key, errors::New("tls/x509: TBSCertificate is not a SEQUENCE"));
+        return (
+            nil_key,
+            errors::New("tls/x509: TBSCertificate is not a SEQUENCE"),
+        );
     }
 
     // Walk TBSCertificate fields to find SubjectPublicKeyInfo.
@@ -472,25 +515,40 @@ pub fn decode_x509_rsa_pubkey(cert_der: &[byte]) -> (rsa::PublicKey, error) {
     // SubjectPublicKeyInfo SEQUENCE
     let (spki_rv, _, err) = asn1::ParseRaw(spki_bytes.clone());
     if !err.IsNil() {
-        return (nil_key, errors::New("tls/x509: failed to parse SubjectPublicKeyInfo"));
+        return (
+            nil_key,
+            errors::New("tls/x509: failed to parse SubjectPublicKeyInfo"),
+        );
     }
     if spki_rv.Tag != asn1::TagSequence {
-        return (nil_key, errors::New("tls/x509: SubjectPublicKeyInfo is not a SEQUENCE"));
+        return (
+            nil_key,
+            errors::New("tls/x509: SubjectPublicKeyInfo is not a SEQUENCE"),
+        );
     }
 
     // AlgorithmIdentifier SEQUENCE (skip it)
     let (_, rest_after_alg, err) = asn1::ParseRaw(spki_rv.Bytes.clone());
     if !err.IsNil() {
-        return (nil_key, errors::New("tls/x509: failed to parse AlgorithmIdentifier in SPKI"));
+        return (
+            nil_key,
+            errors::New("tls/x509: failed to parse AlgorithmIdentifier in SPKI"),
+        );
     }
 
     // BIT STRING containing RSAPublicKey
     let (bits_rv, _, err) = asn1::ParseRaw(rest_after_alg.clone());
     if !err.IsNil() {
-        return (nil_key, errors::New("tls/x509: failed to parse BIT STRING in SPKI"));
+        return (
+            nil_key,
+            errors::New("tls/x509: failed to parse BIT STRING in SPKI"),
+        );
     }
     if bits_rv.Tag != asn1::TagBitString {
-        return (nil_key, errors::New("tls/x509: expected BIT STRING in SPKI"));
+        return (
+            nil_key,
+            errors::New("tls/x509: expected BIT STRING in SPKI"),
+        );
     }
     // BIT STRING: first byte is unused-bits count; skip it
     let bs_bytes = bits_rv.Bytes;
@@ -503,34 +561,49 @@ pub fn decode_x509_rsa_pubkey(cert_der: &[byte]) -> (rsa::PublicKey, error) {
     // RSAPublicKey ::= SEQUENCE { modulus INTEGER, exponent INTEGER }
     let (rsa_rv, _, err) = asn1::ParseRaw(rsa_der.clone());
     if !err.IsNil() {
-        return (nil_key, errors::New("tls/x509: failed to parse RSAPublicKey SEQUENCE"));
+        return (
+            nil_key,
+            errors::New("tls/x509: failed to parse RSAPublicKey SEQUENCE"),
+        );
     }
     if rsa_rv.Tag != asn1::TagSequence {
-        return (nil_key, errors::New("tls/x509: RSAPublicKey is not a SEQUENCE"));
+        return (
+            nil_key,
+            errors::New("tls/x509: RSAPublicKey is not a SEQUENCE"),
+        );
     }
 
     let (n_rv, rest_rsa, err) = asn1::ParseRaw(rsa_rv.Bytes.clone());
     if !err.IsNil() || n_rv.Tag != asn1::TagInteger {
-        return (nil_key, errors::New("tls/x509: failed to parse RSA modulus"));
+        return (
+            nil_key,
+            errors::New("tls/x509: failed to parse RSA modulus"),
+        );
     }
     let (n_int, err) = asn1::ParseBigInt(n_rv.Bytes.clone());
     if !err.IsNil() {
-        return (nil_key, errors::New("tls/x509: failed to decode RSA modulus"));
+        return (
+            nil_key,
+            errors::New("tls/x509: failed to decode RSA modulus"),
+        );
     }
 
     let (e_rv, _, err) = asn1::ParseRaw(rest_rsa.clone());
     if !err.IsNil() || e_rv.Tag != asn1::TagInteger {
-        return (nil_key, errors::New("tls/x509: failed to parse RSA public exponent"));
+        return (
+            nil_key,
+            errors::New("tls/x509: failed to parse RSA public exponent"),
+        );
     }
     let (e_val, err) = asn1::ParseInt64(e_rv.Bytes.clone());
     if !err.IsNil() {
-        return (nil_key, errors::New("tls/x509: failed to decode RSA public exponent"));
+        return (
+            nil_key,
+            errors::New("tls/x509: failed to decode RSA public exponent"),
+        );
     }
 
-    (rsa::PublicKey {
-        N: n_int,
-        E: e_val,
-    }, errors::nil)
+    (rsa::PublicKey { N: n_int, E: e_val }, errors::nil)
 }
 
 /// Walk the TBSCertificate body to find the SubjectPublicKeyInfo element.
@@ -545,7 +618,10 @@ fn find_spki_in_tbs(tbs_body: &slice<byte>) -> (slice<byte>, error) {
     while rest.Len() > 0 {
         let (_rv, next_rest, err) = asn1::ParseRaw(rest.clone());
         if !err.IsNil() {
-            return (empty, errors::New("tls/x509: error parsing TBSCertificate field"));
+            return (
+                empty,
+                errors::New("tls/x509: error parsing TBSCertificate field"),
+            );
         }
 
         // version is optional and context-specific [0]
@@ -572,13 +648,19 @@ fn find_spki_in_tbs(tbs_body: &slice<byte>) -> (slice<byte>, error) {
             let rest_raw: &[byte] = &rest;
             let next_raw: &[byte] = &next_rest;
             let elem_len = rest_raw.len() - next_raw.len();
-            return (slice::<byte>::__from_vec(rest_raw[..elem_len].to_vec()), errors::nil);
+            return (
+                slice::<byte>::__from_vec(rest_raw[..elem_len].to_vec()),
+                errors::nil,
+            );
         }
 
         rest = next_rest;
     }
 
-    (empty, errors::New("tls/x509: SubjectPublicKeyInfo not found in TBSCertificate"))
+    (
+        empty,
+        errors::New("tls/x509: SubjectPublicKeyInfo not found in TBSCertificate"),
+    )
 }
 
 // ─── AES-128-GCM record layer ─────────────────────────────────────────
@@ -662,7 +744,12 @@ pub fn encrypt_record_aead(
     let (cipher_opt, _) = aes::NewCipher(key_slice);
     let cipher = match cipher_opt {
         Some(c) => c,
-        None => return (slice::<byte>::__from_vec(Vec::new()), errors::New("tls: AES-GCM key error")),
+        None => {
+            return (
+                slice::<byte>::__from_vec(Vec::new()),
+                errors::New("tls: AES-GCM key error"),
+            )
+        }
     };
 
     let (gcm_opt, gerr) = crate::crypto::cipher::NewGCM(cipher);
@@ -671,7 +758,12 @@ pub fn encrypt_record_aead(
     }
     let gcm = match gcm_opt {
         Some(g) => g,
-        None => return (slice::<byte>::__from_vec(Vec::new()), errors::New("tls: AES-GCM init error")),
+        None => {
+            return (
+                slice::<byte>::__from_vec(Vec::new()),
+                errors::New("tls: AES-GCM init error"),
+            )
+        }
     };
 
     use crate::crypto::cipher::AEAD as AEADTrait;
@@ -706,13 +798,19 @@ pub fn decrypt_record_aead(
     fragment: &[byte],
 ) -> (slice<byte>, error) {
     if fragment.len() < 8 {
-        return (slice::<byte>::__from_vec(Vec::new()), errors::New("tls: AEAD fragment too short for explicit nonce"));
+        return (
+            slice::<byte>::__from_vec(Vec::new()),
+            errors::New("tls: AEAD fragment too short for explicit nonce"),
+        );
     }
     let explicit_nonce = &fragment[..8];
     let ct_and_tag = &fragment[8..];
 
     if ct_and_tag.len() < 16 {
-        return (slice::<byte>::__from_vec(Vec::new()), errors::New("tls: AEAD ciphertext too short for tag"));
+        return (
+            slice::<byte>::__from_vec(Vec::new()),
+            errors::New("tls: AEAD ciphertext too short for tag"),
+        );
     }
 
     // Build 12-byte nonce
@@ -737,7 +835,12 @@ pub fn decrypt_record_aead(
     let (cipher_opt, _) = aes::NewCipher(key_slice);
     let cipher = match cipher_opt {
         Some(c) => c,
-        None => return (slice::<byte>::__from_vec(Vec::new()), errors::New("tls: AES-GCM key error")),
+        None => {
+            return (
+                slice::<byte>::__from_vec(Vec::new()),
+                errors::New("tls: AES-GCM key error"),
+            )
+        }
     };
 
     let (gcm_opt, gerr) = crate::crypto::cipher::NewGCM(cipher);
@@ -746,7 +849,12 @@ pub fn decrypt_record_aead(
     }
     let gcm = match gcm_opt {
         Some(g) => g,
-        None => return (slice::<byte>::__from_vec(Vec::new()), errors::New("tls: AES-GCM init error")),
+        None => {
+            return (
+                slice::<byte>::__from_vec(Vec::new()),
+                errors::New("tls: AES-GCM init error"),
+            )
+        }
     };
 
     use crate::crypto::cipher::AEAD as AEADTrait;
@@ -822,5 +930,9 @@ pub fn read_record(conn: &mut dyn crate::io::Reader) -> (byte, slice<byte>, erro
         read_off += nv;
     }
 
-    (content_type, slice::<byte>::__from_vec(payload), errors::nil)
+    (
+        content_type,
+        slice::<byte>::__from_vec(payload),
+        errors::nil,
+    )
 }

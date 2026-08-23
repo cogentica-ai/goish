@@ -15,8 +15,7 @@
 use alloc::vec::Vec;
 
 use super::dwarf_util::{
-    read_cstr, read_initial_length, read_sleb, read_u16, read_u32,
-    read_u64, read_u8, read_uleb,
+    read_cstr, read_initial_length, read_sleb, read_u16, read_u32, read_u64, read_u8, read_uleb,
 };
 
 #[derive(Clone, Copy)]
@@ -180,7 +179,15 @@ pub fn build(debug_line: &[u8], comp_dirs: &[(u64, Vec<u8>)]) -> Programs {
         if prog_end > debug_line.len() {
             break;
         }
-        match decode_program(debug_line, &mut off, prog_end, prog_start, programs.len() as u32, &mut rows, comp_dirs) {
+        match decode_program(
+            debug_line,
+            &mut off,
+            prog_end,
+            prog_start,
+            programs.len() as u32,
+            &mut rows,
+            comp_dirs,
+        ) {
             Some(p) => programs.push(p),
             None => {}
         }
@@ -207,11 +214,7 @@ fn decode_program(
     let header_length = read_u32(buf, off)? as usize;
     let opcode_base_off = *off + header_length; // start of opcodes
     let minimum_instruction_length = read_u8(buf, off)?;
-    let _max_ops_per_instr = if version >= 4 {
-        read_u8(buf, off)?
-    } else {
-        1
-    };
+    let _max_ops_per_instr = if version >= 4 { read_u8(buf, off)? } else { 1 };
     let default_is_stmt = read_u8(buf, off)?;
     let line_base = read_u8(buf, off)? as i8;
     let line_range = read_u8(buf, off)?;
@@ -360,7 +363,8 @@ fn decode_program(
                     // DW_LNS_const_add_pc
                     let adjusted = 255u32 - opcode_base as u32;
                     let op_adv = adjusted / line_range as u32;
-                    address = address.wrapping_add((op_adv as u64) * minimum_instruction_length as u64);
+                    address =
+                        address.wrapping_add((op_adv as u64) * minimum_instruction_length as u64);
                 }
                 9 => {
                     // DW_LNS_fixed_advance_pc

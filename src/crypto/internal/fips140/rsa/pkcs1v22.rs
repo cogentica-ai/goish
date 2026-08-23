@@ -37,8 +37,8 @@ extern crate alloc;
 
 use super::cast::fipsSelfTest;
 use super::rsa::{
-    decrypt, encrypt, nil_bytes, noCheck, read_with_reader, withCheck,
-    ErrDecryption, ErrMessageTooLong, ErrVerification, PrivateKey, PublicKey,
+    decrypt, encrypt, nil_bytes, noCheck, read_with_reader, withCheck, ErrDecryption,
+    ErrMessageTooLong, ErrVerification, PrivateKey, PublicKey,
 };
 use crate::bytes;
 use crate::crypto::internal::fips140;
@@ -463,8 +463,7 @@ pub fn EncryptOAEP(
     let hSize = lHash.len();
     let msg_v = msg.to_vec();
     // Signed comparison: k - 2*hSize - 2 can be negative for small keys.
-    let maxMsg =
-        int::try_from(k).unwrap_or(0) - 2 * int::try_from(hSize).unwrap_or(0) - 2;
+    let maxMsg = int::try_from(k).unwrap_or(0) - 2 * int::try_from(hSize).unwrap_or(0) - 2;
     if int::try_from(msg_v.len()).unwrap_or(int::MAX) > maxMsg {
         return (nil_bytes(), ErrMessageTooLong.into());
     }
@@ -598,8 +597,10 @@ pub fn DecryptOAEP(
 
     // We have to validate the plaintext in constant time in order to
     // avoid attacks like Manger's chosen-ciphertext attack on OAEP.
-    let lHash2Good =
-        crate::crypto::subtle::ConstantTimeCompare(&slice::<byte>::__from_vec(lHash.clone()), &slice::<byte>::__from_vec(lHash2));
+    let lHash2Good = crate::crypto::subtle::ConstantTimeCompare(
+        &slice::<byte>::__from_vec(lHash.clone()),
+        &slice::<byte>::__from_vec(lHash2),
+    );
 
     // The remainder of the plaintext must be zero or more 0x00, followed
     // by 0x01, followed by the message.
@@ -633,5 +634,8 @@ pub fn DecryptOAEP(
     }
 
     let msg_off = rest_start + usize::try_from(index).unwrap_or(0) + 1;
-    return (slice::<byte>::__from_vec(em[msg_off..].to_vec()), errors::nil);
+    return (
+        slice::<byte>::__from_vec(em[msg_off..].to_vec()),
+        errors::nil,
+    );
 }

@@ -9,12 +9,12 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
+use goish::fmt;
 use goish::string;
+use goish::syscall;
 use goish::text::tabwriter;
 use goish::types::byte;
-use goish::{syscall};
 
 // Format `body` through a fresh tabwriter and return the resulting string.
 fn run(
@@ -56,8 +56,7 @@ fn main() {
             b'\t',
             0,
         );
-        let want: goish::string =
-            "a\tb\tc\td\t\t.\n123\t12345\t1234567\t123456789\t.\n\n".into();
+        let want: goish::string = "a\tb\tc\td\t\t.\n123\t12345\t1234567\t123456789\t.\n\n".into();
         if got == want {
             fmt::Println!("[ 1] tab-padded minwidth=0      PASS");
         } else {
@@ -77,9 +76,7 @@ fn main() {
             b' ',
             tabwriter::AlignRight,
         );
-        let want = string(
-            "    a     b       c         d.\n  123 12345 1234567 123456789.\n\n",
-        );
+        let want = string("    a     b       c         d.\n  123 12345 1234567 123456789.\n\n");
         if got == want {
             fmt::Println!("[ 2] right-aligned minwidth=5   PASS");
         } else {
@@ -152,14 +149,7 @@ fn main() {
 
     // 7. Left-align, space-padded, minwidth=4 padding=2.
     {
-        let got = run(
-            "a\tb\nccc\tdd\n",
-            4,
-            0,
-            2,
-            b' ',
-            0,
-        );
+        let got = run("a\tb\nccc\tdd\n", 4, 0, 2, b' ', 0);
         // Column 0 widths: max(1+2, 3+2) = 5 → first col padded to 5.
         // "a" → 1 byte text + 4 spaces; "ccc" → 3 bytes + 2 spaces.
         let want: goish::string = "a    b\nccc  dd\n".into();

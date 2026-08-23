@@ -63,7 +63,11 @@ fn main() {
     check(fmt::Sprintf!("%.7f", 0.00099995f64), "0.0010000", "G %.7f");
     check(fmt::Sprintf!("%8d", 42i64), "      42", "H %8d");
     check(fmt::Sprintf!("%.2f", -3.14159f64), "-3.14", "I neg");
-    check(fmt::Sprintf!("%14.3f", 0.99995f64), "         1.000", "J %14.3f");
+    check(
+        fmt::Sprintf!("%14.3f", 0.99995f64),
+        "         1.000",
+        "J %14.3f",
+    );
     check(fmt::Sprintf!("%.2fs", 1.5f64), "1.50s", "K trailing text");
     check(fmt::Sprintf!("%.1f", 2.25f64), "2.2", "L half-to-even");
     check(fmt::Sprintf!("%.1f", 2.35f64), "2.4", "M half-to-even");

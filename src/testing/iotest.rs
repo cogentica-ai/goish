@@ -215,7 +215,10 @@ impl<W: io::Writer> io::Writer for writeLogger<W> {
 /// it logs (using log.Printf) each write to standard error, printing
 /// the prefix and the hexadecimal data written."
 pub fn NewWriteLogger<W: io::Writer>(prefix: string, w: W) -> writeLogger<W> {
-    return writeLogger { prefix: prefix, w: w };
+    return writeLogger {
+        prefix: prefix,
+        w: w,
+    };
 }
 
 // go: sdk 1.25.5 testing/iotest/logger.go:34-37 readLogger
@@ -245,7 +248,10 @@ impl<R: io::Reader> io::Reader for readLogger<R> {
 /// it logs (using log.Printf) each read to standard error, printing the
 /// prefix and the hexadecimal data read."
 pub fn NewReadLogger<R: io::Reader>(prefix: string, r: R) -> readLogger<R> {
-    return readLogger { prefix: prefix, r: r };
+    return readLogger {
+        prefix: prefix,
+        r: r,
+    };
 }
 
 // go: none — goish idiom: Go passes the sub-slice `p[0:n]` straight to

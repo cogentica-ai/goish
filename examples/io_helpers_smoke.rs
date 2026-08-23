@@ -8,8 +8,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::io::{self, Closer, Reader, Writer};
 use goish::types::byte;
 use goish::{errors, syscall};
@@ -57,8 +57,9 @@ fn main() {
     {
         let src = bytes("hello world");
         let r = goish::bytes::NewReader(src);
-        let mut sink =
-            goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(alloc::vec::Vec::new()));
+        let mut sink = goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(
+            alloc::vec::Vec::new(),
+        ));
         let mut tee = io::TeeReader(r, &mut sink);
         let mut out = goish::make!([]byte, 32);
         let (n, _) = tee.Read(&mut out);
@@ -66,7 +67,11 @@ fn main() {
         if n == 11 && mirror.Len() == 11 && mirror[0] == b'h' && mirror[10] == b'd' {
             fmt::Println!("[ 3] TeeReader mirrors         PASS");
         } else {
-            fmt::Println!("[ 3] TeeReader mirrors         FAIL n={} m={}", n, mirror.Len());
+            fmt::Println!(
+                "[ 3] TeeReader mirrors         FAIL n={} m={}",
+                n,
+                mirror.Len()
+            );
             failed += 1;
         }
     }
@@ -105,8 +110,9 @@ fn main() {
         let src = bytes("0123456789abcdef");
         let r = goish::bytes::NewReader(src);
         let mut lr = io::LimitReader(r, 7);
-        let mut sink =
-            goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(alloc::vec::Vec::new()));
+        let mut sink = goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(
+            alloc::vec::Vec::new(),
+        ));
         let (n, err) = io::Copy(&mut sink, &mut lr);
         if err.IsNil() && n == 7 && sink.Bytes().Len() == 7 {
             fmt::Println!("[ 6] Copy from LimitReader     PASS");

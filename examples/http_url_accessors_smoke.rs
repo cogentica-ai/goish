@@ -47,18 +47,36 @@ fn chk(raw: &'static str, want: &'static str, bad: &mut i32) {
 fn main() {
     let mut bad = 0i32;
 
-    chk("http://example.com/p",
-        "Hostname=example.com Port= RequestURI=/p EscapedPath=/p", &mut bad);
-    chk("http://example.com:8080/p",
-        "Hostname=example.com Port=8080 RequestURI=/p EscapedPath=/p", &mut bad);
-    chk("http://[::1]:8080/p",
-        "Hostname=::1 Port=8080 RequestURI=/p EscapedPath=/p", &mut bad);
-    chk("http://[::1]/p",
-        "Hostname=::1 Port= RequestURI=/p EscapedPath=/p", &mut bad);
-    chk("http://example.com/p?q=1&r=2",
-        "Hostname=example.com Port= RequestURI=/p?q=1&r=2 EscapedPath=/p", &mut bad);
-    chk("http://example.com",
-        "Hostname=example.com Port= RequestURI=/ EscapedPath=", &mut bad);
+    chk(
+        "http://example.com/p",
+        "Hostname=example.com Port= RequestURI=/p EscapedPath=/p",
+        &mut bad,
+    );
+    chk(
+        "http://example.com:8080/p",
+        "Hostname=example.com Port=8080 RequestURI=/p EscapedPath=/p",
+        &mut bad,
+    );
+    chk(
+        "http://[::1]:8080/p",
+        "Hostname=::1 Port=8080 RequestURI=/p EscapedPath=/p",
+        &mut bad,
+    );
+    chk(
+        "http://[::1]/p",
+        "Hostname=::1 Port= RequestURI=/p EscapedPath=/p",
+        &mut bad,
+    );
+    chk(
+        "http://example.com/p?q=1&r=2",
+        "Hostname=example.com Port= RequestURI=/p?q=1&r=2 EscapedPath=/p",
+        &mut bad,
+    );
+    chk(
+        "http://example.com",
+        "Hostname=example.com Port= RequestURI=/ EscapedPath=",
+        &mut bad,
+    );
 
     // ParseQuery — repeated keys accumulate in order.
     {

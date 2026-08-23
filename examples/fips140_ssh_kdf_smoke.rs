@@ -161,7 +161,11 @@ fn main() {
         32,
         64,
     );
-    check("SHA-1 server IV", hx(&iv), "1d2dff366e78cf8d69b1d67ebdf77f47");
+    check(
+        "SHA-1 server IV",
+        hx(&iv),
+        "1d2dff366e78cf8d69b1d67ebdf77f47",
+    );
     check(
         "SHA-1 server key",
         hx(&key),
@@ -185,7 +189,11 @@ fn main() {
         24,
         20,
     );
-    check("SHA-512 client IV", hx(&iv), "2dd6bdbd8eea5f0cdc7aef4ac3f2a979");
+    check(
+        "SHA-512 client IV",
+        hx(&iv),
+        "2dd6bdbd8eea5f0cdc7aef4ac3f2a979",
+    );
     check(
         "SHA-512 client key",
         hx(&key),
@@ -225,7 +233,11 @@ fn main() {
         1,
         1,
     );
-    check("zero-length key is empty", fmt::Sprintf!("%d", iv.Len()), "0");
+    check(
+        "zero-length key is empty",
+        fmt::Sprintf!("%d", iv.Len()),
+        "0",
+    );
 
     if unsafe { FAILED } {
         goish::syscall::Exit(1);

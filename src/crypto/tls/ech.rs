@@ -256,7 +256,6 @@ pub(crate) fn parseECHConfigList(data: slice<byte>) -> (slice<echConfig>, error)
     return (slice::__from_vec(configs), crate::errors::nil);
 }
 
-
 // go: sdk 1.25.5 crypto/tls/ech.go:238-244 skipUint8LengthPrefixed
 /// Consume a uint8-prefixed field without keeping it.
 pub(crate) fn skipUint8LengthPrefixed(s: &mut CBString) -> bool {
@@ -326,13 +325,10 @@ pub(crate) fn validDNSName(name: string) -> bool {
     return true;
 }
 
-
 // ─── Config selection and the encrypted_client_hello extension ────────
 
 use super::common::EncryptedClientHelloKey;
-use super::handshake_messages::{
-    clientHelloMsg, readUint16LengthPrefixed,
-};
+use super::handshake_messages::{clientHelloMsg, readUint16LengthPrefixed};
 use crate::crypto::cryptobyte;
 use crate::crypto::internal::hpke;
 use crate::types::int;
@@ -704,9 +700,7 @@ pub(crate) struct rawExtension {
 // go: sdk 1.25.5 crypto/tls/ech.go:259-283 extractRawExtensions
 /// Reparse the outer ClientHello's extensions in wire order, which is
 /// what ECH's outer-extension decompression needs.
-pub(crate) fn extractRawExtensions(
-    hello: &clientHelloMsg,
-) -> (slice<rawExtension>, crate::error) {
+pub(crate) fn extractRawExtensions(hello: &clientHelloMsg) -> (slice<rawExtension>, crate::error) {
     // Go: s := cryptobyte.String(hello.original)
     //     if !s.Skip(4+2+32) || // header, version, random
     //        !skipUint8LengthPrefixed(&s) || // session ID
@@ -803,7 +797,6 @@ pub(crate) fn encodeInnerClientHello(
     out.resize(out.len() + paddingLen as usize, 0);
     return (slice::__from_vec(out), crate::errors::nil);
 }
-
 
 // ─── Inner-hello reconstruction and payload decryption ────────────────
 

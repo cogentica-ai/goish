@@ -73,7 +73,9 @@ pub struct Int {
 impl Int {
     /// Construct a zero-valued `Int`.
     pub const fn new() -> Self {
-        Int { i: atomic::Int64::new(0) }
+        Int {
+            i: atomic::Int64::new(0),
+        }
     }
     // Go: expvar.go:58 — func (v *Int) Value() int64
     pub fn Value(&self) -> i64 {
@@ -115,7 +117,9 @@ pub struct Float {
 
 impl Float {
     pub const fn new() -> Self {
-        Float { f: atomic::Uint64::new(0) }
+        Float {
+            f: atomic::Uint64::new(0),
+        }
     }
     // Go: expvar.go:83 — func (v *Float) Value() float64
     pub fn Value(&self) -> f64 {
@@ -172,14 +176,16 @@ pub struct String {
 
 impl String {
     pub const fn new() -> Self {
-        String { s: atomic::Value::new() }
+        String {
+            s: atomic::Value::new(),
+        }
     }
     // Go: expvar.go:271 — func (v *String) Value() string
     pub fn Value(&self) -> string {
         self.s.Load().0
     }
     // Go: expvar.go:286 — func (v *String) Set(value string)
-    pub fn Set<V: Into<string>>(&self, value: V){
+    pub fn Set<V: Into<string>>(&self, value: V) {
         let value: string = value.into();
         self.s.Store(value);
     }
@@ -275,7 +281,7 @@ impl Map {
     //   func (v *Map) Set(key string, av Var) { ... }
     /// Sets `key` to `av`. If the key didn't exist, it's added to the
     /// sorted key list.
-    pub fn Set<K: Into<string>>(&self, key: K, av: Arc<dyn Var>){
+    pub fn Set<K: Into<string>>(&self, key: K, av: Arc<dyn Var>) {
         let key: string = key.into();
         let mut s = self.state.Lock();
         let new_key = !s.m.contains_key(&key);
@@ -306,7 +312,10 @@ impl Map {
         let s = self.state.Lock();
         for k in s.keys.iter() {
             if let Some(v) = s.m.get(k) {
-                f(KeyValue { Key: k.clone(), Value: v.clone() });
+                f(KeyValue {
+                    Key: k.clone(),
+                    Value: v.clone(),
+                });
             }
         }
     }
@@ -394,7 +403,7 @@ fn vars() -> &'static Map {
 //   }
 /// Declare a named exported variable. Panics if the name is already
 /// registered.
-pub fn Publish<N: Into<string>>(name: N, v: Arc<dyn Var>){
+pub fn Publish<N: Into<string>>(name: N, v: Arc<dyn Var>) {
     let name: string = name.into();
     let m = vars();
     let mut s = m.state.Lock();
@@ -499,10 +508,7 @@ static INIT_ONCE: Once = Once::new();
 /// `cmdline` Var (`os.Args`). Idempotent — safe to call multiple times.
 pub fn Init() {
     INIT_ONCE.Do(|| {
-        crate::net::http::HandleFunc(
-            string::from_static("GET /debug/vars"),
-            expvarHandler,
-        );
+        crate::net::http::HandleFunc(string::from_static("GET /debug/vars"), expvarHandler);
         // Publish cmdline as a static String snapshot.
         let cmdline_str = format_cmdline();
         let s = String::new();
@@ -523,7 +529,10 @@ fn format_cmdline() -> string {
             buf.push(b',');
             buf.push(b' ');
         }
-        let qs = appendJSONQuote(slice::__from_vec(core::mem::take(&mut buf)), args[i].clone());
+        let qs = appendJSONQuote(
+            slice::__from_vec(core::mem::take(&mut buf)),
+            args[i].clone(),
+        );
         buf = qs.__into_vec();
     }
     buf.push(b']');

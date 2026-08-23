@@ -59,7 +59,7 @@ fn slice_eq(got: &goish::goslice::slice<u8>, want: &[u8]) -> bool {
 fn main() {
     let mut failed = 0;
 
-    let gate = make!(chan (), 0);
+    let gate = make!(chan(), 0);
 
     // ── routes ───────────────────────────────────────────────────
     let mux = http::ServeMux::new();
@@ -207,7 +207,9 @@ fn main() {
                 });
                 let (_n2, e2) = resp.Body.Read(&mut dst);
                 if e2.IsNil() {
-                    fmt::Println!("[ 3] ctx cancel mid-body       FAIL read after cancel returned nil err");
+                    fmt::Println!(
+                        "[ 3] ctx cancel mid-body       FAIL read after cancel returned nil err"
+                    );
                     ok = false;
                 }
                 let _ = resp.Body.Close();

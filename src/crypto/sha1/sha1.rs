@@ -34,7 +34,6 @@ use alloc::vec::Vec;
 
 use super::sha1block_generic::block;
 
-
 // ─── Constants (sha1[go]:24-37) ────────────────────────────────────
 
 /// `sha1.Size` — SHA-1 checksum length in bytes.
@@ -50,7 +49,6 @@ const init1: u32 = 0xEFCDAB89;
 const init2: u32 = 0x98BADCFE;
 const init3: u32 = 0x10325476;
 const init4: u32 = 0xC3D2E1F0;
-
 
 // ─── digest (sha1[go]:40) ──────────────────────────────────────────
 
@@ -78,7 +76,6 @@ pub fn New() -> Digest {
     d.Reset();
     d
 }
-
 
 // ─── Marshaling (sha1[go]:46-49) ──────────────────────────────────────
 
@@ -115,7 +112,10 @@ impl Digest {
         out.extend_from_slice(&self.x[..self.nx]);
         out.resize(out.len() + (CHUNK - self.nx), 0);
         // Go: b = byteorder.BEAppendUint64(b, d.len); return b, nil
-        return (byteorder::BEAppendUint64(slice::__from_vec(out), self.len), nil);
+        return (
+            byteorder::BEAppendUint64(slice::__from_vec(out), self.len),
+            nil,
+        );
     }
 
     // go: sdk 1.25.5 crypto/sha1/sha1.go:69-86 digest.UnmarshalBinary
@@ -193,7 +193,10 @@ impl Digest {
 /// than wrapping, as an unexported cursor helper.
 fn consumeUint64(b: &[byte]) -> (&[byte], uint64) {
     // Go: return b[8:], byteorder.BEUint64(b[0:8])
-    return (&b[8..], byteorder::BEUint64(slice::__from_vec(b[..8].to_vec())));
+    return (
+        &b[8..],
+        byteorder::BEUint64(slice::__from_vec(b[..8].to_vec())),
+    );
 }
 
 // go: sdk 1.25.5 crypto/sha1/sha1.go:92-94 consumeUint32
@@ -201,7 +204,10 @@ fn consumeUint64(b: &[byte]) -> (&[byte], uint64) {
 /// [`consumeUint64`].
 fn consumeUint32(b: &[byte]) -> (&[byte], uint32) {
     // Go: return b[4:], byteorder.BEUint32(b[0:4])
-    return (&b[4..], byteorder::BEUint32(slice::__from_vec(b[..4].to_vec())));
+    return (
+        &b[4..],
+        byteorder::BEUint32(slice::__from_vec(b[..4].to_vec())),
+    );
 }
 
 // ─── Hash trait impls for Digest ──────────────────────────────────────

@@ -5,8 +5,6 @@
 use super::fe::{maskLow51Bits, Element};
 use crate::math::bits;
 
-
-
 /// `uint128` holds a 128-bit number as two 64-bit limbs, for use with
 /// the bits.Mul64 and bits.Add64 intrinsics.
 #[derive(Clone, Copy)]

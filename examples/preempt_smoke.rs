@@ -107,7 +107,10 @@ fn main() {
         DONE.store(1, Ordering::Release);
     });
     goish::runtime::sched::schedule();
-    check(DONE.load(Ordering::Acquire) == 1, b"preempt_smoke: WG.Wait didn't return\n");
+    check(
+        DONE.load(Ordering::Acquire) == 1,
+        b"preempt_smoke: WG.Wait didn't return\n",
+    );
     check(
         SIGNAL_DONE.load(Ordering::Acquire) == 1,
         b"preempt_smoke: signaler didn't finish\n",
@@ -119,7 +122,10 @@ fn main() {
     let expected: u64 = (0..ITERS).fold(0u64, |a, k| a.wrapping_add(k));
     for i in 0..N_SPINNERS {
         let got = SPINNER_RESULTS[i].load(Ordering::Acquire);
-        check(got == expected, b"preempt_smoke: spinner result wrong (register corruption)\n");
+        check(
+            got == expected,
+            b"preempt_smoke: spinner result wrong (register corruption)\n",
+        );
     }
 
     // Verify the handler fired and actually injected at least once.

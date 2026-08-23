@@ -94,8 +94,8 @@ use super::cert_pool::{potentialParent, CertPool};
 use super::oid::{OIDFromInts, OID};
 use super::parser::{domainNameValid, forEachSAN};
 use super::x509::{
-    nameTypeDNS, nameTypeEmail, nameTypeIP, nameTypeURI, Certificate, ExtKeyUsage,
-    ExtKeyUsageAny, ExtKeyUsageServerAuth, UnhandledCriticalExtension,
+    nameTypeDNS, nameTypeEmail, nameTypeIP, nameTypeURI, Certificate, ExtKeyUsage, ExtKeyUsageAny,
+    ExtKeyUsageServerAuth, UnhandledCriticalExtension,
 };
 use crate::crypto::cryptobyte::String as CBString;
 use crate::error;
@@ -587,10 +587,7 @@ pub(super) fn parseRFC2821Mailbox(in_: &string) -> (rfc2821Mailbox, bool) {
         let twoDots = slice::__from_vec(alloc::vec![b'.', b'.']);
         if localPartBytes[0] == b'.'
             || localPartBytes[localPartBytes.len() - 1] == b'.'
-            || crate::bytes::Contains(
-                slice::__from_vec(localPartBytes.clone()),
-                twoDots,
-            )
+            || crate::bytes::Contains(slice::__from_vec(localPartBytes.clone()), twoDots)
         {
             return (mailbox, false);
         }
@@ -662,7 +659,6 @@ pub(super) fn domainToReverseLabels(domain: &string) -> (slice<string>, bool) {
 
     return (reverseLabels, true);
 }
-
 
 // go: none — goish idiom: Go formats the offending constraint with
 // `%q`, which is a quoted string for the DNS / email / URI constraints
@@ -2282,7 +2278,8 @@ pub(super) fn policiesValid(chain: &slice<Certificate>, opts: &VerifyOptions) ->
                 let leaves = g.leaves();
                 for (_, p) in crate::range!(g.parents()) {
                     let p = *p;
-                    for (_, expected) in crate::range!(g.nodes[p as usize].expectedPolicySet.clone())
+                    for (_, expected) in
+                        crate::range!(g.nodes[p as usize].expectedPolicySet.clone())
                     {
                         let k = derKey(&expected);
                         let (_, present) = leaves.Get(k.clone());
@@ -2296,7 +2293,9 @@ pub(super) fn policiesValid(chain: &slice<Certificate>, opts: &VerifyOptions) ->
                 for (oidStr, parents) in crate::range!(missing) {
                     let node = newPolicyGraphNode(
                         g,
-                        OID { der: crate::convert::bytes(oidStr.clone()) },
+                        OID {
+                            der: crate::convert::bytes(oidStr.clone()),
+                        },
                         &parents,
                     );
                     g.insert(node);
@@ -2322,10 +2321,8 @@ pub(super) fn policiesValid(chain: &slice<Certificate>, opts: &VerifyOptions) ->
                             }
                             let k = derKey(&mapping.IssuerDomainPolicy);
                             let (cur, _) = mappings.Get(k.clone());
-                            mappings.Set(
-                                k,
-                                crate::append!(cur, mapping.SubjectDomainPolicy.clone()),
-                            );
+                            mappings
+                                .Set(k, crate::append!(cur, mapping.SubjectDomainPolicy.clone()));
                         } else {
                             // 6.1.4 (b) (3) (i) -- as updated by RFC 9618
                             g.deleteLeaf(&mapping.IssuerDomainPolicy);
@@ -2336,8 +2333,9 @@ pub(super) fn policiesValid(chain: &slice<Certificate>, opts: &VerifyOptions) ->
                     }
 
                     for (issuerStr, subjectPolicies) in crate::range!(mappings) {
-                        let issuerOID =
-                            OID { der: crate::convert::bytes(issuerStr.clone()) };
+                        let issuerOID = OID {
+                            der: crate::convert::bytes(issuerStr.clone()),
+                        };
                         // 6.1.4 (b) (1) -- as updated by RFC 9618
                         let matching = g.leafWithPolicy(&issuerOID);
                         if matching != -1 {

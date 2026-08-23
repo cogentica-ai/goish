@@ -17,9 +17,7 @@
 
 use alloc::vec::Vec;
 
-use super::dwarf_util::{
-    read_initial_length, read_u16, read_u32, read_u64, read_u8,
-};
+use super::dwarf_util::{read_initial_length, read_u16, read_u32, read_u64, read_u8};
 
 #[derive(Clone, Copy)]
 pub struct ArangeEntry {

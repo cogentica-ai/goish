@@ -48,7 +48,10 @@ fn main() {
         if string::from_bytes(&rec.Body()) == "hello " {
             fmt::Println!("[1] direct Write through AsWriter  PASS");
         } else {
-            fmt::Println!("[1] direct Write through AsWriter  FAIL got: ", string::from_bytes(&rec.Body()));
+            fmt::Println!(
+                "[1] direct Write through AsWriter  FAIL got: ",
+                string::from_bytes(&rec.Body())
+            );
             failed += 1;
         }
     }
@@ -70,7 +73,10 @@ fn main() {
         if string::from_bytes(&rec.Body()) == "copied body" {
             fmt::Println!("[2] io::Copy into a ResponseWriter  PASS");
         } else {
-            fmt::Println!("[2] io::Copy into a ResponseWriter  FAIL got: ", string::from_bytes(&rec.Body()));
+            fmt::Println!(
+                "[2] io::Copy into a ResponseWriter  FAIL got: ",
+                string::from_bytes(&rec.Body())
+            );
             failed += 1;
         }
     }

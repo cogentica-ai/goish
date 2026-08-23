@@ -210,11 +210,7 @@ pub fn matchMethodAndPath<'a>(
     }
     if *method == "HEAD" {
         // Go: "GET matches HEAD too."
-        let (l, m) = matchPath(
-            n.findChild(&string::from_static("GET")),
-            path,
-            slice::new(),
-        );
+        let (l, m) = matchPath(n.findChild(&string::from_static("GET")), path, slice::new());
         if l.is_some() {
             return (l, m);
         }
@@ -325,13 +321,14 @@ pub fn matchingMethodsPath(
     // that closure also hold `set` mutably while `n.children` is
     // borrowed, so the methods are collected first and applied after.
     let mut hits: Vec<string> = Vec::new();
-    n.children.eachPair(&mut |method: &string, c: &Box<routingNode>| {
-        let (p, _) = matchPath(Some(&**c), path, slice::new());
-        if p.is_some() {
-            hits.push(method.clone());
-        }
-        return true;
-    });
+    n.children
+        .eachPair(&mut |method: &string, c: &Box<routingNode>| {
+            let (p, _) = matchPath(Some(&**c), path, slice::new());
+            if p.is_some() {
+                hits.push(method.clone());
+            }
+            return true;
+        });
     for m in hits.into_iter() {
         set.Set(m, true);
     }

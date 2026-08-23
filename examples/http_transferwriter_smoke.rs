@@ -199,8 +199,7 @@ fn run() -> ! {
         check(
             "ContentLength=5 with 3-byte body is refused, naming both",
             !err.IsNil()
-                && (err.Error().as_ref() as &str)
-                    .contains("ContentLength=5 with Body length 3"),
+                && (err.Error().as_ref() as &str).contains("ContentLength=5 with Body length 3"),
             fmt::Sprintf!("err=%v", err),
         );
     }
@@ -209,9 +208,8 @@ fn run() -> ! {
     {
         let (mut req, _) =
             http::NewRequest(string("POST"), string("http://x.test/tr"), bytes("payload"));
-        req.TransferEncoding = goish::slice::<goish::string>::__from_vec(alloc::vec![string(
-            "chunked"
-        )]);
+        req.TransferEncoding =
+            goish::slice::<goish::string>::__from_vec(alloc::vec![string("chunked")]);
         req.ContentLength = 0;
         req.Trailer = http::Header::new();
         req.Trailer.Set(string("X-Checksum"), string("abc123"));
@@ -276,7 +274,11 @@ fn run() -> ! {
         let ts = http::httptest::NewServer(Arc::new(mux));
         let addr = goish::strings::TrimPrefix(ts.URL(), string("http://"));
         let (mut c, e) = goish::net::Dial(string("tcp"), addr);
-        check("dial for TE-smuggle probe", e.IsNil(), fmt::Sprintf!("%v", e));
+        check(
+            "dial for TE-smuggle probe",
+            e.IsNil(),
+            fmt::Sprintf!("%v", e),
+        );
         let _ = c.SetReadDeadline(time::Now().Add(time::Duration(5_000_000_000)));
         let _ = c.Write(bytes(
             "POST /x HTTP/1.1
@@ -319,7 +321,9 @@ Transfer-Encoding: gzip
         let wv: &str = wire.as_ref();
         check(
             "Response.Write: empty body → Content-Length: 0",
-            err.IsNil() && wv.starts_with("HTTP/1.1 200 OK\r\n") && wv.contains("Content-Length: 0"),
+            err.IsNil()
+                && wv.starts_with("HTTP/1.1 200 OK\r\n")
+                && wv.contains("Content-Length: 0"),
             wire.clone(),
         );
 

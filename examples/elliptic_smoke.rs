@@ -81,7 +81,11 @@ fn scal(n: usize) -> slice<byte> {
 fn run(name: &str, c: &'static (dyn Curve + Send + Sync), n: usize, want: &[&str; 14]) {
     let p = c.Params();
     check(&nm(name, "Name"), p.Name.clone(), want[0]);
-    check(&nm(name, "BitSize"), fmt::Sprintf!("%d", p.BitSize), want[1]);
+    check(
+        &nm(name, "BitSize"),
+        fmt::Sprintf!("%d", p.BitSize),
+        want[1],
+    );
 
     let m = elliptic::Marshal(c, &p.Gx, &p.Gy);
     check(&nm(name, "Marshal"), hx(&m), want[2]);
@@ -92,7 +96,11 @@ fn run(name: &str, c: &'static (dyn Curve + Send + Sync), n: usize, want: &[&str
     check(&nm(name, "Unmarshal ok"), fmt::Sprintf!("%v", ok), "true");
     check(&nm(name, "Unmarshal"), xy(&ux, &uy), want[4]);
     let (cx, cy, ok) = elliptic::UnmarshalCompressed(c, &mc);
-    check(&nm(name, "UnmarshalCompressed ok"), fmt::Sprintf!("%v", ok), "true");
+    check(
+        &nm(name, "UnmarshalCompressed ok"),
+        fmt::Sprintf!("%v", ok),
+        "true",
+    );
     check(&nm(name, "UnmarshalCompressed"), xy(&cx, &cy), want[5]);
 
     let (dx, dy) = c.Double(&p.Gx, &p.Gy);
@@ -106,12 +114,24 @@ fn run(name: &str, c: &'static (dyn Curve + Send + Sync), n: usize, want: &[&str
     let (sx, sy) = c.ScalarMult(&p.Gx, &p.Gy, &k);
     check(&nm(name, "ScalarMult"), xy(&sx, &sy), want[9]);
 
-    check(&nm(name, "IsOnCurve"), fmt::Sprintf!("%v", c.IsOnCurve(&bx, &by)), want[10]);
+    check(
+        &nm(name, "IsOnCurve"),
+        fmt::Sprintf!("%v", c.IsOnCurve(&bx, &by)),
+        want[10],
+    );
     let mut one = Int::default();
     one.SetInt64(1);
-    check(&nm(name, "IsOnCurve(1,1)"), fmt::Sprintf!("%v", c.IsOnCurve(&one, &one)), want[11]);
+    check(
+        &nm(name, "IsOnCurve(1,1)"),
+        fmt::Sprintf!("%v", c.IsOnCurve(&one, &one)),
+        want[11],
+    );
     let z = Int::default();
-    check(&nm(name, "IsOnCurve(0,0)"), fmt::Sprintf!("%v", c.IsOnCurve(&z, &z)), want[12]);
+    check(
+        &nm(name, "IsOnCurve(0,0)"),
+        fmt::Sprintf!("%v", c.IsOnCurve(&z, &z)),
+        want[12],
+    );
 
     let mut bad: Vec<byte> = {
         let r: &[byte] = &m;
@@ -120,15 +140,51 @@ fn run(name: &str, c: &'static (dyn Curve + Send + Sync), n: usize, want: &[&str
     let last = bad.len() - 1;
     bad[last] ^= 1;
     let (_, _, ok) = elliptic::Unmarshal(c, &slice::__from_vec(bad));
-    check(&nm(name, "corrupted point rejected"), fmt::Sprintf!("%v", !ok), want[13]);
+    check(
+        &nm(name, "corrupted point rejected"),
+        fmt::Sprintf!("%v", !ok),
+        want[13],
+    );
 }
 
 #[goish::main]
 fn main() {
-    run("p224", elliptic::P224(), 28, &[P224_NAME, P224_BITS, P224_MARSH, P224_MCOMP, P224_UNM, P224_UNCMP, P224_DBL, P224_ADD, P224_BASE, P224_MULT, P224_ONC, P224_OFF, P224_ZERO, P224_BADUN]);
-    run("p256", elliptic::P256(), 32, &[P256_NAME, P256_BITS, P256_MARSH, P256_MCOMP, P256_UNM, P256_UNCMP, P256_DBL, P256_ADD, P256_BASE, P256_MULT, P256_ONC, P256_OFF, P256_ZERO, P256_BADUN]);
-    run("p384", elliptic::P384(), 48, &[P384_NAME, P384_BITS, P384_MARSH, P384_MCOMP, P384_UNM, P384_UNCMP, P384_DBL, P384_ADD, P384_BASE, P384_MULT, P384_ONC, P384_OFF, P384_ZERO, P384_BADUN]);
-    run("p521", elliptic::P521(), 66, &[P521_NAME, P521_BITS, P521_MARSH, P521_MCOMP, P521_UNM, P521_UNCMP, P521_DBL, P521_ADD, P521_BASE, P521_MULT, P521_ONC, P521_OFF, P521_ZERO, P521_BADUN]);
+    run(
+        "p224",
+        elliptic::P224(),
+        28,
+        &[
+            P224_NAME, P224_BITS, P224_MARSH, P224_MCOMP, P224_UNM, P224_UNCMP, P224_DBL, P224_ADD,
+            P224_BASE, P224_MULT, P224_ONC, P224_OFF, P224_ZERO, P224_BADUN,
+        ],
+    );
+    run(
+        "p256",
+        elliptic::P256(),
+        32,
+        &[
+            P256_NAME, P256_BITS, P256_MARSH, P256_MCOMP, P256_UNM, P256_UNCMP, P256_DBL, P256_ADD,
+            P256_BASE, P256_MULT, P256_ONC, P256_OFF, P256_ZERO, P256_BADUN,
+        ],
+    );
+    run(
+        "p384",
+        elliptic::P384(),
+        48,
+        &[
+            P384_NAME, P384_BITS, P384_MARSH, P384_MCOMP, P384_UNM, P384_UNCMP, P384_DBL, P384_ADD,
+            P384_BASE, P384_MULT, P384_ONC, P384_OFF, P384_ZERO, P384_BADUN,
+        ],
+    );
+    run(
+        "p521",
+        elliptic::P521(),
+        66,
+        &[
+            P521_NAME, P521_BITS, P521_MARSH, P521_MCOMP, P521_UNM, P521_UNCMP, P521_DBL, P521_ADD,
+            P521_BASE, P521_MULT, P521_ONC, P521_OFF, P521_ZERO, P521_BADUN,
+        ],
+    );
 
     // The generic CurveParams path: P-224 in every respect except its
     // Name, so matchesSpecificCurve misses and the Jacobian arithmetic in
@@ -144,13 +200,21 @@ fn main() {
         gen.Gx = base.Gx.clone();
         gen.Gy = base.Gy.clone();
 
-        check("gen IsOnCurve", fmt::Sprintf!("%v", gen.IsOnCurve(&gen.Gx, &gen.Gy)), GEN_ONC);
+        check(
+            "gen IsOnCurve",
+            fmt::Sprintf!("%v", gen.IsOnCurve(&gen.Gx, &gen.Gy)),
+            GEN_ONC,
+        );
         let (dx, dy) = gen.Double(&gen.Gx, &gen.Gy);
         check("gen Double (generic Jacobian)", xy(&dx, &dy), GEN_DBL);
         let (ax, ay) = gen.Add(&dx, &dy, &gen.Gx, &gen.Gy);
         check("gen Add (generic Jacobian)", xy(&ax, &ay), GEN_ADD);
         let (sx, sy) = gen.ScalarBaseMult(&scal(28));
-        check("gen ScalarBaseMult (generic Jacobian)", xy(&sx, &sy), GEN_BASE);
+        check(
+            "gen ScalarBaseMult (generic Jacobian)",
+            xy(&sx, &sy),
+            GEN_BASE,
+        );
 
         // And it must land on the same point as the constant-time code.
         let (rx, ry) = elliptic::P224().ScalarBaseMult(&scal(28));

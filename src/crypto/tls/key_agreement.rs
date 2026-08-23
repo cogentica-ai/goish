@@ -112,18 +112,17 @@ pub(crate) fn hashForServerKeyExchange(
     return md5SHA1Hash(slices);
 }
 
-
 // ─── The keyAgreement interface and its two implementations ───────────
 
 use super::common::{
-    isSupportedSignatureAlgorithm, signaturePKCS1v15, signatureRSAPSS, CurveID, SignatureScheme,
-    Certificate,
+    isSupportedSignatureAlgorithm, signaturePKCS1v15, signatureRSAPSS, Certificate, CurveID,
+    SignatureScheme,
 };
-use super::Config;
 use super::handshake_messages::{
     clientHelloMsg, clientKeyExchangeMsg, serverHelloMsg, serverKeyExchangeMsg,
 };
 use super::key_schedule::{curveForCurveID, generateECDHEKey};
+use super::Config;
 use crate::crypto::ecdh;
 use crate::crypto::rsa;
 use crate::crypto::x509;
@@ -467,9 +466,7 @@ impl keyAgreement for ecdheKeyAgreement {
         if priv_.is_none() {
             return (
                 None,
-                crate::errors::New(
-                    "tls: certificate private key does not implement crypto.Signer",
-                ),
+                crate::errors::New("tls: certificate private key does not implement crypto.Signer"),
             );
         }
         let priv_ = priv_.unwrap();
@@ -521,7 +518,9 @@ impl keyAgreement for ecdheKeyAgreement {
         if ((sigType == signaturePKCS1v15) || (sigType == signatureRSAPSS)) != self.isRSA {
             return (
                 None,
-                crate::errors::New("tls: certificate cannot be used with the selected cipher suite"),
+                crate::errors::New(
+                    "tls: certificate cannot be used with the selected cipher suite",
+                ),
             );
         }
 
@@ -613,9 +612,7 @@ impl keyAgreement for ecdheKeyAgreement {
     ) -> (slice<byte>, error) {
         // Go: if len(ckx.ciphertext) == 0 || int(ckx.ciphertext[0]) != len(ckx.ciphertext)-1 {
         //         return nil, errClientKeyExchange }
-        if ckx.ciphertext.Len() == 0
-            || crate::int(ckx.ciphertext[0]) != ckx.ciphertext.Len() - 1
-        {
+        if ckx.ciphertext.Len() == 0 || crate::int(ckx.ciphertext[0]) != ckx.ciphertext.Len() - 1 {
             return (slice::__from_vec(Vec::new()), errClientKeyExchange.into());
         }
         if self.key.is_none() {
@@ -754,11 +751,11 @@ impl keyAgreement for ecdheKeyAgreement {
                 .iter()
                 .map(|v| SignatureScheme(*v))
                 .collect();
-            if !isSupportedSignatureAlgorithm(
-                self.signatureAlgorithm,
-                slice::__from_vec(peerAlgs),
-            ) {
-                return crate::errors::New("tls: certificate used with invalid signature algorithm");
+            if !isSupportedSignatureAlgorithm(self.signatureAlgorithm, slice::__from_vec(peerAlgs))
+            {
+                return crate::errors::New(
+                    "tls: certificate used with invalid signature algorithm",
+                );
             }
             // Go: sigType, sigHash, err = typeAndHashFromSignatureScheme(ka.signatureAlgorithm)
             let (st, sh, err) =

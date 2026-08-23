@@ -12,10 +12,10 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
+use crate::error;
 use crate::errors;
 use crate::goslice::slice;
 use crate::types::byte;
-use crate::error;
 
 // go: sdk 1.25.5 crypto/internal/fips140/nistec/p256_ordinv_noasm.go:11-13 P256OrdInverse
 pub fn P256OrdInverse(k: &slice<byte>) -> (slice<byte>, error) {

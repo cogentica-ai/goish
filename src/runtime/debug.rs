@@ -100,7 +100,7 @@ pub fn GOMAXPROCS(n: int) -> int {
         if cached != 0 {
             cached
         } else {
-            let init = cpu_count();
+            let init = super::sched::startup_procs();
             // Same benign-race tolerance as cpu_count().
             GOMAXPROCS_CACHE.store(init, Ordering::Release);
             init
@@ -270,8 +270,7 @@ pub fn SetMaxThreads(threads: int) -> int {
     prev as int
 }
 
-static PANIC_ON_FAULT: core::sync::atomic::AtomicBool =
-    core::sync::atomic::AtomicBool::new(false);
+static PANIC_ON_FAULT: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 /// `runtime/debug.SetPanicOnFault(enabled) -> previous`
 /// (garbage.go:155). Slim: remembers the value. Goish does not

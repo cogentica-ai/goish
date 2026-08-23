@@ -93,7 +93,10 @@ where
     }
     // Go: if debug { println("FIPS 140-3 PCT passed:", name) }
     if debug {
-        fmt::Printf!("FIPS 140-3 PCT passed: %s\n", string::from_bytes(name.as_bytes()));
+        fmt::Printf!(
+            "FIPS 140-3 PCT passed: %s\n",
+            string::from_bytes(name.as_bytes())
+        );
     }
 }
 

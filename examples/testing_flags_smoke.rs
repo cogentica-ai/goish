@@ -175,7 +175,13 @@ fn main() {
         if a.String() == s("42x") && b.String() == s("1.5s") {
             fmt::Println!("[ 7] String round-trips        PASS");
         } else {
-            fmt::Println!("[ 7] String round-trips        FAIL [", a.String(), "] [", b.String(), "]");
+            fmt::Println!(
+                "[ 7] String round-trips        FAIL [",
+                a.String(),
+                "] [",
+                b.String(),
+                "]"
+            );
             failed += 1;
         }
     }

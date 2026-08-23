@@ -29,12 +29,12 @@ extern crate alloc;
 
 use super::{
     TagBitString, TagBoolean, TagEnum, TagGeneralizedTime, TagIA5String, TagInteger,
-    TagNumericString, TagOID, TagOctetString, TagPrintableString, TagSequence, TagSet,
-    TagUTCTime, TagUTF8String,
+    TagNumericString, TagOID, TagOctetString, TagPrintableString, TagSequence, TagSet, TagUTCTime,
+    TagUTF8String,
 };
-use crate::reflect::{Kind, Type};
 use crate::gostring::string;
 use crate::int64;
+use crate::reflect::{Kind, Type};
 use crate::types::int;
 use crate::{strconv, strings};
 

@@ -38,9 +38,9 @@ const RW_MAX_READERS: i32 = 1 << 30;
 /// writer (no reader-starvation). Mirrors `sync.RWMutex`
 /// (rwmutex.go:39).
 pub struct RWMutex {
-    w: Mutex,           // writer-vs-writer
-    writer_sem: Sema,   // writer waits on draining readers
-    reader_sem: Sema,   // readers wait on a pending writer
+    w: Mutex,         // writer-vs-writer
+    writer_sem: Sema, // writer waits on draining readers
+    reader_sem: Sema, // readers wait on a pending writer
     reader_count: AtomicI32,
     reader_wait: AtomicI32,
 }

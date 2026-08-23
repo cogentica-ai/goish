@@ -123,9 +123,7 @@ const _: () = {
     assert!(3 * LOG_MAX_PACKED_VALUE + 1 <= 64);
     // Levels must span all heap-address bits above a chunk.
     assert!(
-        SUMMARY_L0_BITS
-            + (SUMMARY_LEVELS as u32 - 1) * SUMMARY_LEVEL_BITS
-            + LOG_PALLOC_CHUNK_BYTES
+        SUMMARY_L0_BITS + (SUMMARY_LEVELS as u32 - 1) * SUMMARY_LEVEL_BITS + LOG_PALLOC_CHUNK_BYTES
             == HEAP_ADDR_BITS
     );
     // Root summary must be able to represent its full page count.

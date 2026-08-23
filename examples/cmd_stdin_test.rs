@@ -11,11 +11,11 @@
 extern crate alloc;
 
 use alloc::sync::Arc;
+use goish::bytes;
+use goish::io;
+use goish::os::exec;
 use goish::sync::Mutex;
 use goish::{byte, nil, slice, string, syscall};
-use goish::bytes;
-use goish::os::exec;
-use goish::io;
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -23,7 +23,9 @@ fn die(msg: &[u8]) -> ! {
 }
 
 fn check(cond: bool, msg: &[u8]) {
-    if !cond { die(msg); }
+    if !cond {
+        die(msg);
+    }
 }
 
 fn write_msg(msg: &[u8]) {
@@ -85,7 +87,7 @@ fn test_stdin_pipe() {
     // Capture stdout.
     let out_arc: Arc<Mutex<core::cell::UnsafeCell<alloc::boxed::Box<dyn io::Writer + Send>>>> =
         Arc::new(Mutex::new(core::cell::UnsafeCell::new(
-            alloc::boxed::Box::new(bytes::Buffer::new())
+            alloc::boxed::Box::new(bytes::Buffer::new()),
         )));
     cmd.Stdout = Some(out_arc.clone());
 
@@ -130,7 +132,10 @@ fn test_start_wait() {
         let err = cmd.Start();
         check(err == nil, b"test_start_wait: Start(false) failed\n");
         let err = cmd.Wait();
-        check(err != nil, b"test_start_wait: Wait(false) should return error\n");
+        check(
+            err != nil,
+            b"test_start_wait: Wait(false) should return error\n",
+        );
     }
 
     write_msg(b"test_start_wait: pass\n");

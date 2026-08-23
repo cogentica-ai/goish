@@ -23,7 +23,7 @@ use crate::gostring::string;
 use crate::runtime::spin::SpinLock;
 use crate::types::int;
 
-use super::{FlagHandle, FlagDef, FlagKind, FlagSet, NewFlagSet};
+use super::{FlagDef, FlagHandle, FlagKind, FlagSet, NewFlagSet};
 
 impl FlagSet {
     // go: sdk 1.25.5 flag/flag.go:812-816 FlagSet.Int64
@@ -121,7 +121,11 @@ pub static CommandLine: crate::sync::Mutex<FlagSet> = crate::sync::Mutex::new(Ne
 // go: sdk 1.25.5 flag/flag.go:768-772 Bool
 /// Go: "Bool defines a bool flag with specified name, default value,
 /// and usage string."
-pub fn Bool<N: Into<string>, U: Into<string>>(name: N, default: bool, usage: U) -> FlagHandle<bool> {
+pub fn Bool<N: Into<string>, U: Into<string>>(
+    name: N,
+    default: bool,
+    usage: U,
+) -> FlagHandle<bool> {
     return CommandLine.Lock().Bool(name, default, usage);
 }
 
@@ -183,7 +187,11 @@ pub fn Duration<N: Into<string>, U: Into<string>>(
 pub fn Parse() -> error {
     let args = crate::os::Args();
     let n = args.Len();
-    let rest = if n > 1 { args.slice(1, n) } else { slice::new() };
+    let rest = if n > 1 {
+        args.slice(1, n)
+    } else {
+        slice::new()
+    };
     return CommandLine.Lock().Parse(&rest);
 }
 
@@ -312,7 +320,9 @@ impl FlagSet {
     // the Flag is constructed on demand and returned owned rather than
     // as the *Flag pointer Go hands out of its `formal` map.
     fn __as_flag(d: &FlagDef) -> Flag {
-        let v = kindValue { kind: d.kind.clone() };
+        let v = kindValue {
+            kind: d.kind.clone(),
+        };
         let def_value = Value::String(&v);
         let f = Flag {
             Name: d.name.clone(),
@@ -343,8 +353,7 @@ impl FlagSet {
     /// Go: "VisitAll visits the flags in lexicographical order, calling
     /// fn for each. It visits all flags, even those not set."
     pub fn VisitAll<F: FnMut(&Flag)>(&self, mut fn_: F) {
-        let mut names: alloc::vec::Vec<string> =
-            self.defs.iter().map(|d| d.name.clone()).collect();
+        let mut names: alloc::vec::Vec<string> = self.defs.iter().map(|d| d.name.clone()).collect();
         names.sort();
         for n in names.iter() {
             if let Some(d) = self.defs.iter().find(|d| &d.name == n) {

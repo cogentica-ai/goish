@@ -8,8 +8,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
+use goish::fmt;
 use goish::io;
 use goish::{make, string, syscall};
 
@@ -21,7 +21,10 @@ fn main() {
     {
         let mut b = bytes::NewBufferString(string("abcdefgh"));
         let head = b.Next(3);
-        if head.Len() == 3 && head[0] == b'a' && head[1] == b'b' && head[2] == b'c'
+        if head.Len() == 3
+            && head[0] == b'a'
+            && head[1] == b'b'
+            && head[2] == b'c'
             && b.String() == "defgh"
         {
             fmt::Println!("[ 1] Next(3)                   PASS");

@@ -834,8 +834,8 @@ pub struct Modulus {
 
     // If the modulus is even, the following fields are not set.
     odd: bool,
-    m0inv: uint,       // -nat.limbs[0]⁻¹ mod _W
-    rr: Option<Nat>,   // R*R for montgomeryRepresentation
+    m0inv: uint,     // -nat.limbs[0]⁻¹ mod _W
+    rr: Option<Nat>, // R*R for montgomeryRepresentation
 }
 
 impl Modulus {

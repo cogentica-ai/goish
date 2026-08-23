@@ -8,10 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bufio;
 use goish::bytes;
 use goish::errors;
+use goish::fmt;
 use goish::io;
 use goish::net::textproto;
 use goish::{string, syscall};
@@ -27,11 +27,7 @@ fn main() {
         let mut r = textproto::NewReader(br);
         let (l1, e1) = r.ReadLine();
         let (l2, e2) = r.ReadLine();
-        if e1.IsNil()
-            && e2.IsNil()
-            && l1 == string("Hello world")
-            && l2 == string("Second")
-        {
+        if e1.IsNil() && e2.IsNil() && l1 == string("Hello world") && l2 == string("Second") {
             fmt::Println!("[ 1] ReadLine                PASS");
         } else {
             fmt::Println!("[ 1] ReadLine                FAIL got '{}'/'{}'", l1, l2);
@@ -61,10 +57,7 @@ fn main() {
         let mut r = textproto::NewReader(br);
         let (l1, e1) = r.ReadContinuedLine();
         let (l2, e2) = r.ReadContinuedLine();
-        if e1.IsNil()
-            && e2.IsNil()
-            && l1 == string("Line 1 continued...")
-            && l2 == string("Line 2")
+        if e1.IsNil() && e2.IsNil() && l1 == string("Line 1 continued...") && l2 == string("Line 2")
         {
             fmt::Println!("[ 3] ReadContinuedLine       PASS");
         } else {
@@ -150,8 +143,7 @@ fn main() {
 
     // 8. validHeaderFieldByte / validHeaderValueByte sanity.
     {
-        let f_ok =
-            textproto::validHeaderFieldByte(b'A') && textproto::validHeaderFieldByte(b'!');
+        let f_ok = textproto::validHeaderFieldByte(b'A') && textproto::validHeaderFieldByte(b'!');
         let f_bad = !textproto::validHeaderFieldByte(b' ')
             && !textproto::validHeaderFieldByte(b':')
             && !textproto::validHeaderFieldByte(0x80);

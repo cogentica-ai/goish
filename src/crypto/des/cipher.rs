@@ -29,7 +29,7 @@
 #![allow(non_upper_case_globals)]
 
 use crate::crypto::cipher::Block as BlockTrait;
-use crate::errors::{ErrorTrait, Wrap, error, nil};
+use crate::errors::{error, nil, ErrorTrait, Wrap};
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::strconv;
@@ -91,7 +91,9 @@ pub fn NewCipher(key: slice<byte>) -> (Option<Cipher>, error) {
     if key.Len() != 8 {
         return (None, Wrap(KeySizeError(key.Len())));
     }
-    let mut c = Cipher { subkeys: [0u64; 16] };
+    let mut c = Cipher {
+        subkeys: [0u64; 16],
+    };
     generateSubkeys(&mut c, &key);
     (Some(c), nil)
 }
@@ -170,9 +172,15 @@ pub fn NewTripleDESCipher(key: slice<byte>) -> (Option<TripleDESCipher>, error) 
         return (None, Wrap(KeySizeError(key.Len())));
     }
     let mut c = TripleDESCipher {
-        cipher1: Cipher { subkeys: [0u64; 16] },
-        cipher2: Cipher { subkeys: [0u64; 16] },
-        cipher3: Cipher { subkeys: [0u64; 16] },
+        cipher1: Cipher {
+            subkeys: [0u64; 16],
+        },
+        cipher2: Cipher {
+            subkeys: [0u64; 16],
+        },
+        cipher3: Cipher {
+            subkeys: [0u64; 16],
+        },
     };
     let k1 = key.slice(0, 8);
     let k2 = key.slice(8, 16);

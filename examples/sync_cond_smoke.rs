@@ -76,7 +76,10 @@ fn run_tests() {
         if woke.load(Ordering::Acquire) == 5 {
             fmt::Println!("[ 2] Broadcast 5 waiters      PASS");
         } else {
-            fmt::Println!("[ 2] Broadcast 5 waiters      FAIL n={}", woke.load(Ordering::Acquire));
+            fmt::Println!(
+                "[ 2] Broadcast 5 waiters      FAIL n={}",
+                woke.load(Ordering::Acquire)
+            );
             failed += 1;
         }
     }
@@ -156,7 +159,10 @@ fn run_tests() {
         if phase.load(Ordering::Acquire) == 20 {
             fmt::Println!("[ 4] Ping-pong loop          PASS");
         } else {
-            fmt::Println!("[ 4] Ping-pong loop          FAIL phase={}", phase.load(Ordering::Acquire));
+            fmt::Println!(
+                "[ 4] Ping-pong loop          FAIL phase={}",
+                phase.load(Ordering::Acquire)
+            );
             failed += 1;
         }
     }

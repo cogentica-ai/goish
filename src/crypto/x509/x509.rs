@@ -80,14 +80,14 @@ use crate::encoding::asn1;
 use crate::error;
 use crate::errors;
 use crate::goany::Any;
-use crate::io;
 use crate::goslice::slice;
 use crate::gostring::string;
+use crate::int;
+use crate::io;
 use crate::math::big;
 use crate::net;
 use crate::net::url;
 use crate::time;
-use crate::int;
 use crate::types::byte;
 use crate::unicode;
 
@@ -385,23 +385,151 @@ fn sad(
 // `signingParamsForKey`, which is not ported either.
 pub(super) fn signatureAlgorithmDetails() -> slice<signatureAlgorithmDetail> {
     let mut v: Vec<signatureAlgorithmDetail> = Vec::with_capacity(16);
-    v.push(sad(MD5WithRSA, "MD5-RSA", oidSignatureMD5WithRSA(), emptyRawValue(), RSA, crypto::MD5, false));
-    v.push(sad(SHA1WithRSA, "SHA1-RSA", oidSignatureSHA1WithRSA(), asn1::NullRawValue(), RSA, crypto::SHA1, false));
-    v.push(sad(SHA1WithRSA, "SHA1-RSA", oidISOSignatureSHA1WithRSA(), asn1::NullRawValue(), RSA, crypto::SHA1, false));
-    v.push(sad(SHA256WithRSA, "SHA256-RSA", oidSignatureSHA256WithRSA(), asn1::NullRawValue(), RSA, crypto::SHA256, false));
-    v.push(sad(SHA384WithRSA, "SHA384-RSA", oidSignatureSHA384WithRSA(), asn1::NullRawValue(), RSA, crypto::SHA384, false));
-    v.push(sad(SHA512WithRSA, "SHA512-RSA", oidSignatureSHA512WithRSA(), asn1::NullRawValue(), RSA, crypto::SHA512, false));
-    v.push(sad(SHA256WithRSAPSS, "SHA256-RSAPSS", oidSignatureRSAPSS(), emptyRawValue(), RSA, crypto::SHA256, true));
-    v.push(sad(SHA384WithRSAPSS, "SHA384-RSAPSS", oidSignatureRSAPSS(), emptyRawValue(), RSA, crypto::SHA384, true));
-    v.push(sad(SHA512WithRSAPSS, "SHA512-RSAPSS", oidSignatureRSAPSS(), emptyRawValue(), RSA, crypto::SHA512, true));
-    v.push(sad(DSAWithSHA1, "DSA-SHA1", oidSignatureDSAWithSHA1(), emptyRawValue(), DSA, crypto::SHA1, false));
-    v.push(sad(DSAWithSHA256, "DSA-SHA256", oidSignatureDSAWithSHA256(), emptyRawValue(), DSA, crypto::SHA256, false));
-    v.push(sad(ECDSAWithSHA1, "ECDSA-SHA1", oidSignatureECDSAWithSHA1(), emptyRawValue(), ECDSA, crypto::SHA1, false));
-    v.push(sad(ECDSAWithSHA256, "ECDSA-SHA256", oidSignatureECDSAWithSHA256(), emptyRawValue(), ECDSA, crypto::SHA256, false));
-    v.push(sad(ECDSAWithSHA384, "ECDSA-SHA384", oidSignatureECDSAWithSHA384(), emptyRawValue(), ECDSA, crypto::SHA384, false));
-    v.push(sad(ECDSAWithSHA512, "ECDSA-SHA512", oidSignatureECDSAWithSHA512(), emptyRawValue(), ECDSA, crypto::SHA512, false));
+    v.push(sad(
+        MD5WithRSA,
+        "MD5-RSA",
+        oidSignatureMD5WithRSA(),
+        emptyRawValue(),
+        RSA,
+        crypto::MD5,
+        false,
+    ));
+    v.push(sad(
+        SHA1WithRSA,
+        "SHA1-RSA",
+        oidSignatureSHA1WithRSA(),
+        asn1::NullRawValue(),
+        RSA,
+        crypto::SHA1,
+        false,
+    ));
+    v.push(sad(
+        SHA1WithRSA,
+        "SHA1-RSA",
+        oidISOSignatureSHA1WithRSA(),
+        asn1::NullRawValue(),
+        RSA,
+        crypto::SHA1,
+        false,
+    ));
+    v.push(sad(
+        SHA256WithRSA,
+        "SHA256-RSA",
+        oidSignatureSHA256WithRSA(),
+        asn1::NullRawValue(),
+        RSA,
+        crypto::SHA256,
+        false,
+    ));
+    v.push(sad(
+        SHA384WithRSA,
+        "SHA384-RSA",
+        oidSignatureSHA384WithRSA(),
+        asn1::NullRawValue(),
+        RSA,
+        crypto::SHA384,
+        false,
+    ));
+    v.push(sad(
+        SHA512WithRSA,
+        "SHA512-RSA",
+        oidSignatureSHA512WithRSA(),
+        asn1::NullRawValue(),
+        RSA,
+        crypto::SHA512,
+        false,
+    ));
+    v.push(sad(
+        SHA256WithRSAPSS,
+        "SHA256-RSAPSS",
+        oidSignatureRSAPSS(),
+        emptyRawValue(),
+        RSA,
+        crypto::SHA256,
+        true,
+    ));
+    v.push(sad(
+        SHA384WithRSAPSS,
+        "SHA384-RSAPSS",
+        oidSignatureRSAPSS(),
+        emptyRawValue(),
+        RSA,
+        crypto::SHA384,
+        true,
+    ));
+    v.push(sad(
+        SHA512WithRSAPSS,
+        "SHA512-RSAPSS",
+        oidSignatureRSAPSS(),
+        emptyRawValue(),
+        RSA,
+        crypto::SHA512,
+        true,
+    ));
+    v.push(sad(
+        DSAWithSHA1,
+        "DSA-SHA1",
+        oidSignatureDSAWithSHA1(),
+        emptyRawValue(),
+        DSA,
+        crypto::SHA1,
+        false,
+    ));
+    v.push(sad(
+        DSAWithSHA256,
+        "DSA-SHA256",
+        oidSignatureDSAWithSHA256(),
+        emptyRawValue(),
+        DSA,
+        crypto::SHA256,
+        false,
+    ));
+    v.push(sad(
+        ECDSAWithSHA1,
+        "ECDSA-SHA1",
+        oidSignatureECDSAWithSHA1(),
+        emptyRawValue(),
+        ECDSA,
+        crypto::SHA1,
+        false,
+    ));
+    v.push(sad(
+        ECDSAWithSHA256,
+        "ECDSA-SHA256",
+        oidSignatureECDSAWithSHA256(),
+        emptyRawValue(),
+        ECDSA,
+        crypto::SHA256,
+        false,
+    ));
+    v.push(sad(
+        ECDSAWithSHA384,
+        "ECDSA-SHA384",
+        oidSignatureECDSAWithSHA384(),
+        emptyRawValue(),
+        ECDSA,
+        crypto::SHA384,
+        false,
+    ));
+    v.push(sad(
+        ECDSAWithSHA512,
+        "ECDSA-SHA512",
+        oidSignatureECDSAWithSHA512(),
+        emptyRawValue(),
+        ECDSA,
+        crypto::SHA512,
+        false,
+    ));
     // Ed25519 has no pre-hashing: crypto.Hash(0).
-    v.push(sad(PureEd25519, "Ed25519", oidSignatureEd25519(), emptyRawValue(), Ed25519, crypto::Hash(0), false));
+    v.push(sad(
+        PureEd25519,
+        "Ed25519",
+        oidSignatureEd25519(),
+        emptyRawValue(),
+        Ed25519,
+        crypto::Hash(0),
+        false,
+    ));
     return slice::__from_vec(v);
 }
 
@@ -896,7 +1024,10 @@ pub struct InsecureAlgorithmError(pub SignatureAlgorithm);
 impl InsecureAlgorithmError {
     // go: sdk 1.25.5 crypto/x509/x509.go:883-888 InsecureAlgorithmError.Error
     pub fn Error(&self) -> string {
-        return crate::fmt::Sprintf!("x509: cannot verify signature: insecure algorithm %v", self.0.String());
+        return crate::fmt::Sprintf!(
+            "x509: cannot verify signature: insecure algorithm %v",
+            self.0.String()
+        );
     }
 }
 
@@ -910,7 +1041,9 @@ pub struct ConstraintViolationError {}
 impl ConstraintViolationError {
     // go: sdk 1.25.5 crypto/x509/x509.go:892-894 ConstraintViolationError.Error
     pub fn Error(&self) -> string {
-        return string::from("x509: invalid signature: parent certificate cannot sign this kind of certificate");
+        return string::from(
+            "x509: invalid signature: parent certificate cannot sign this kind of certificate",
+        );
     }
 }
 
@@ -1329,9 +1462,7 @@ pub(super) struct pkixPublicKey {
 // go: sdk 1.25.5 crypto/x509/x509.go:85-140 marshalPublicKey
 /// The DER of `pub`'s public-key bit string, plus the algorithm
 /// identifier that names it.
-pub(super) fn marshalPublicKey(
-    pub_: &Any,
-) -> (slice<byte>, pkix::AlgorithmIdentifier, error) {
+pub(super) fn marshalPublicKey(pub_: &Any) -> (slice<byte>, pkix::AlgorithmIdentifier, error) {
     let publicKeyBytes: slice<byte>;
     let mut publicKeyAlgorithm = pkix::AlgorithmIdentifier::default();
 
@@ -1403,10 +1534,7 @@ pub(super) fn marshalPublicKey(
         return (
             slice::new(),
             pkix::AlgorithmIdentifier::default(),
-            crate::fmt::Errorf!(
-                "x509: unsupported public key type: %s",
-                pub_.TypeName()
-            ),
+            crate::fmt::Errorf!("x509: unsupported public key type: %s", pub_.TypeName()),
         );
     }
 
@@ -1732,8 +1860,7 @@ pub(super) fn buildCertExtensions(
     if (template.ExtKeyUsage.Len() > 0 || template.UnknownExtKeyUsage.Len() > 0)
         && !oidInExtensions(&oidExtensionExtendedKeyUsage(), &template.ExtraExtensions)
     {
-        let (e, err) =
-            marshalExtKeyUsage(&template.ExtKeyUsage, &template.UnknownExtKeyUsage);
+        let (e, err) = marshalExtKeyUsage(&template.ExtKeyUsage, &template.UnknownExtKeyUsage);
         if err != errors::nil {
             return (slice::new(), err);
         }
@@ -1744,11 +1871,8 @@ pub(super) fn buildCertExtensions(
     if template.BasicConstraintsValid
         && !oidInExtensions(&oidExtensionBasicConstraints(), &template.ExtraExtensions)
     {
-        let (e, err) = marshalBasicConstraints(
-            template.IsCA,
-            template.MaxPathLen,
-            template.MaxPathLenZero,
-        );
+        let (e, err) =
+            marshalBasicConstraints(template.IsCA, template.MaxPathLen, template.MaxPathLenZero);
         if err != errors::nil {
             return (slice::new(), err);
         }
@@ -1783,7 +1907,10 @@ pub(super) fn buildCertExtensions(
     }
 
     if (template.OCSPServer.Len() > 0 || template.IssuingCertificateURL.Len() > 0)
-        && !oidInExtensions(&oidExtensionAuthorityInfoAccess(), &template.ExtraExtensions)
+        && !oidInExtensions(
+            &oidExtensionAuthorityInfoAccess(),
+            &template.ExtraExtensions,
+        )
     {
         ret[n].Id = oidExtensionAuthorityInfoAccess();
         let mut aiaValues: slice<authorityInfoAccess> = slice::new();
@@ -1850,10 +1977,12 @@ pub(super) fn buildCertExtensions(
     let usePolicies = x509usepolicies() != "0";
     if ((!usePolicies && template.PolicyIdentifiers.Len() > 0)
         || (usePolicies && template.Policies.Len() > 0))
-        && !oidInExtensions(&oidExtensionCertificatePolicies(), &template.ExtraExtensions)
+        && !oidInExtensions(
+            &oidExtensionCertificatePolicies(),
+            &template.ExtraExtensions,
+        )
     {
-        let (e, err) =
-            marshalCertificatePolicies(&template.Policies, &template.PolicyIdentifiers);
+        let (e, err) = marshalCertificatePolicies(&template.Policies, &template.PolicyIdentifiers);
         if err != errors::nil {
             return (slice::new(), err);
         }
@@ -1973,9 +2102,8 @@ pub(super) fn buildCertExtensions(
 // file-private functions with the same names, bodies and order.
 fn ipAndMask(ipNet: &net::IPNet) -> slice<byte> {
     let maskedIP = ipNet.IP.Mask(ipNet.Mask.clone());
-    let mut ipAndMask: Vec<byte> = Vec::with_capacity(
-        (maskedIP.bytes.Len() + ipNet.Mask.bytes.Len()) as usize,
-    );
+    let mut ipAndMask: Vec<byte> =
+        Vec::with_capacity((maskedIP.bytes.Len() + ipNet.Mask.bytes.Len()) as usize);
     for (_, b) in crate::range!(maskedIP.bytes.clone()) {
         ipAndMask.push(*b);
     }
@@ -2167,9 +2295,7 @@ pub(super) fn marshalCertificatePolicies(
                         cbasn1::OBJECT_IDENTIFIER,
                         |child: &mut cryptobyte::Builder| {
                             if v.der.Len() == 0 {
-                                child.SetError(errors::New(
-                                    "invalid policy object identifier",
-                                ));
+                                child.SetError(errors::New("invalid policy object identifier"));
                                 return;
                             }
                             child.AddBytes(&v.der);
@@ -2203,9 +2329,7 @@ pub(super) fn marshalCertificatePolicies(
 }
 
 // go: sdk 1.25.5 crypto/x509/x509.go:1487-1504 buildCSRExtensions
-pub(super) fn buildCSRExtensions(
-    template: &CertificateRequest,
-) -> (slice<pkix::Extension>, error) {
+pub(super) fn buildCSRExtensions(template: &CertificateRequest) -> (slice<pkix::Extension>, error) {
     let mut ret: slice<pkix::Extension> = slice::new();
 
     if (template.DNSNames.Len() > 0
@@ -2499,9 +2623,7 @@ pub fn CreateCertificate(
         None => {
             return (
                 slice::new(),
-                errors::New(
-                    "x509: certificate private key does not implement crypto.Signer",
-                ),
+                errors::New("x509: certificate private key does not implement crypto.Signer"),
             )
         }
     };
@@ -2567,15 +2689,11 @@ pub fn CreateCertificate(
     if err != errors::nil {
         return (slice::new(), err);
     }
-    if getPublicKeyAlgorithmFromOID(&publicKeyAlgorithm.Algorithm) == UnknownPublicKeyAlgorithm
-    {
+    if getPublicKeyAlgorithmFromOID(&publicKeyAlgorithm.Algorithm) == UnknownPublicKeyAlgorithm {
         // Go: fmt.Errorf("x509: unsupported public key type: %T", pub).
         return (
             slice::new(),
-            crate::fmt::Errorf!(
-                "x509: unsupported public key type: %s",
-                pub_.TypeName()
-            ),
+            crate::fmt::Errorf!("x509: unsupported public key type: %s", pub_.TypeName()),
         );
     }
 
@@ -2767,9 +2885,7 @@ impl Certificate {
             None => {
                 return (
                     slice::new(),
-                    errors::New(
-                        "x509: certificate private key does not implement crypto.Signer",
-                    ),
+                    errors::New("x509: certificate private key does not implement crypto.Signer"),
                 )
             }
         };
@@ -3089,9 +3205,7 @@ pub fn CreateRevocationList(
     if issuer.SubjectKeyId.Len() == 0 {
         return (
             slice::new(),
-            errors::New(
-                "x509: issuer certificate doesn't contain a subject key identifier",
-            ),
+            errors::New("x509: issuer certificate doesn't contain a subject key identifier"),
         );
     }
     if template
@@ -3121,8 +3235,7 @@ pub fn CreateRevocationList(
     // Only process the deprecated RevokedCertificates field if it is
     // populated and the new RevokedCertificateEntries field is not
     // populated.
-    if template.RevokedCertificates.Len() > 0 && template.RevokedCertificateEntries.Len() == 0
-    {
+    if template.RevokedCertificates.Len() > 0 && template.RevokedCertificateEntries.Len() == 0 {
         // Force revocation times to UTC per RFC 5280.
         revokedCerts = crate::make!(
             []pkix::RevokedCertificate,
@@ -3150,9 +3263,7 @@ pub fn CreateRevocationList(
             if rce.RevocationTime.clone().IsZero() {
                 return (
                     slice::new(),
-                    errors::New(
-                        "x509: template contains entry with zero RevocationTime field",
-                    ),
+                    errors::New("x509: template contains entry with zero RevocationTime field"),
                 );
             }
 
@@ -3401,9 +3512,7 @@ pub fn CreateCertificateRequest(
         None => {
             return (
                 slice::new(),
-                errors::New(
-                    "x509: certificate private key does not implement crypto.Signer",
-                ),
+                errors::New("x509: certificate private key does not implement crypto.Signer"),
             )
         }
     };
@@ -3531,8 +3640,7 @@ pub fn CreateCertificateRequest(
             return (
                 slice::new(),
                 errors::New(
-                    string::from("x509: failed to serialise extensions attribute: ")
-                        + err.Error(),
+                    string::from("x509: failed to serialise extensions attribute: ") + err.Error(),
                 ),
             );
         }
@@ -3742,7 +3850,9 @@ impl crate::reflect::FromReflectValue for certificateRequest {
 /// Parse `RawAttributes` into `AttributeTypeAndValueSET`s, silently
 /// dropping any attribute that does not fit that shape (Go's comment:
 /// "i.e.: challengePassword or unstructuredName").
-fn parseRawAttributes(rawAttributes: slice<asn1::RawValue>) -> slice<pkix::AttributeTypeAndValueSET> {
+fn parseRawAttributes(
+    rawAttributes: slice<asn1::RawValue>,
+) -> slice<pkix::AttributeTypeAndValueSET> {
     // Go: var attributes []pkix.AttributeTypeAndValueSET
     let mut attributes: Vec<pkix::AttributeTypeAndValueSET> = Vec::new();
     // Go: for _, rawAttr := range rawAttributes {
@@ -3813,13 +3923,12 @@ impl crate::reflect::FromReflectValue for pkcs10Attribute {
 
 // go: sdk 1.25.5 crypto/x509/x509.go:1995-2035 parseCSRExtensions
 /// Parse the attributes from a CSR and extract any requested extensions.
-fn parseCSRExtensions(
-    rawAttributes: slice<asn1::RawValue>,
-) -> (slice<pkix::Extension>, error) {
+fn parseCSRExtensions(rawAttributes: slice<asn1::RawValue>) -> (slice<pkix::Extension>, error) {
     // Go: var ret []pkix.Extension
     //     requestedExts := make(map[string]bool)
     let mut ret: Vec<pkix::Extension> = Vec::new();
-    let mut requestedExts: crate::gomap::map<crate::gostring::string, bool> = crate::make!(map[crate::gostring::string]bool);
+    let mut requestedExts: crate::gomap::map<crate::gostring::string, bool> =
+        crate::make!(map[crate::gostring::string]bool);
     // Go: for _, rawAttr := range rawAttributes {
     for (_, rawAttr) in crate::range!(rawAttributes) {
         // Go: var attr pkcs10Attribute
@@ -3849,7 +3958,9 @@ fn parseCSRExtensions(
             if seen {
                 return (
                     slice::__from_vec(Vec::new()),
-                    errors::New("x509: certificate request contains duplicate requested extensions"),
+                    errors::New(
+                        "x509: certificate request contains duplicate requested extensions",
+                    ),
                 );
             }
             requestedExts.Set(oidStr, true);
@@ -3899,9 +4010,7 @@ fn parseCertificateRequest(in_: &certificateRequest) -> (Option<CertificateReque
         Signature: in_.SignatureValue.RightAlign(),
         SignatureAlgorithm: getSignatureAlgorithmFromAI(&in_.SignatureAlgorithm),
 
-        PublicKeyAlgorithm: getPublicKeyAlgorithmFromOID(
-            &in_.TBSCSR.PublicKey.Algorithm.Algorithm,
-        ),
+        PublicKeyAlgorithm: getPublicKeyAlgorithmFromOID(&in_.TBSCSR.PublicKey.Algorithm.Algorithm),
 
         Version: in_.TBSCSR.Version,
         Attributes: parseRawAttributes(in_.TBSCSR.RawAttributes.clone()),
@@ -3927,10 +4036,7 @@ fn parseCertificateRequest(in_: &certificateRequest) -> (Option<CertificateReque
         return (None, err);
     }
     if rest.Len() != 0 {
-        return (
-            None,
-            errors::New("x509: trailing data after X.509 Subject"),
-        );
+        return (None, errors::New("x509: trailing data after X.509 Subject"));
     }
 
     // Go: out.Subject.FillFromRDNSequence(&subject)

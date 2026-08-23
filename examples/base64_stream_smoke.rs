@@ -13,9 +13,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
 use goish::encoding::base64;
+use goish::fmt;
 use goish::types::byte;
 use goish::{slice, syscall};
 
@@ -90,8 +90,7 @@ fn main() {
         let mut buf = bytes::Buffer::new();
         {
             let mut e = base64::NewEncoder(base64::StdEncoding, &mut buf);
-            let payload: slice<byte> =
-                goish::slice::__from_vec(b"Hello, World!".to_vec());
+            let payload: slice<byte> = goish::slice::__from_vec(b"Hello, World!".to_vec());
             let (_, werr) = e.Write(payload);
             let cerr = e.Close();
             if !werr.IsNil() || !cerr.IsNil() {
@@ -153,8 +152,7 @@ fn main() {
         let mut buf = bytes::Buffer::new();
         {
             let mut e = base64::NewEncoder(base64::RawStdEncoding, &mut buf);
-            let payload: slice<byte> =
-                goish::slice::__from_vec(b"Hi".to_vec()); // 2 bytes → 3 chars no pad
+            let payload: slice<byte> = goish::slice::__from_vec(b"Hi".to_vec()); // 2 bytes → 3 chars no pad
             let _ = e.Write(payload);
             let _ = e.Close();
         }
@@ -176,8 +174,7 @@ fn main() {
         for i in 0..2049 {
             payload_v.push((i & 0xff) as byte);
         }
-        let payload_slice: slice<byte> =
-            goish::slice::__from_vec(payload_v.clone());
+        let payload_slice: slice<byte> = goish::slice::__from_vec(payload_v.clone());
 
         let want = base64::StdEncoding.EncodeToString(&payload_v);
 
@@ -199,8 +196,7 @@ fn main() {
     // 10. AppendDecode — invalid input surfaces error.
     {
         let prefix: slice<byte> = slice::new();
-        let enc: slice<byte> =
-            goish::slice::__from_vec(b"!!!!".to_vec()); // not in alphabet
+        let enc: slice<byte> = goish::slice::__from_vec(b"!!!!".to_vec()); // not in alphabet
         let (_out, err) = base64::StdEncoding.AppendDecode(prefix, enc);
         if !err.IsNil() {
             fmt::Println!("[10] AppendDecode error path    PASS");

@@ -12,8 +12,6 @@
 /// Go returns the bound method value `dialer.DialContext`; goish's
 /// `Dialer::DialContext()` already IS that closure-shaped handle
 /// (`DialContextFn`), so the port is the same one-liner.
-pub fn defaultTransportDialContext(
-    dialer: crate::net::Dialer,
-) -> super::client::DialContextFn {
+pub fn defaultTransportDialContext(dialer: crate::net::Dialer) -> super::client::DialContextFn {
     return dialer.DialContext();
 }

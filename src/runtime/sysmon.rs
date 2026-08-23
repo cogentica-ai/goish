@@ -37,8 +37,8 @@
 // exit, so a leaked 60 s sleeper used to pin process exit for 60 s).
 
 use alloc::boxed::Box;
-use alloc::sync::Arc;
 use alloc::collections::BinaryHeap;
+use alloc::sync::Arc;
 use core::cmp::{Ordering as CmpOrdering, Reverse};
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicPtr, AtomicU32, AtomicU8, Ordering};
@@ -48,9 +48,9 @@ use crate::runtime::sched::{
 };
 use crate::runtime::spin::{raw_lock, SpinLock};
 use crate::syscall::{
-    self, Clone, ClockGettime, Futex, Timespec, CLOCK_MONOTONIC, CLONE_THREAD_FLAGS,
-    FUTEX_WAIT_PRIVATE, FUTEX_WAKE_PRIVATE, MAP_ANONYMOUS, MAP_FAILED, MAP_PRIVATE,
-    PROT_READ, PROT_WRITE,
+    self, ClockGettime, Clone, Futex, Timespec, CLOCK_MONOTONIC, CLONE_THREAD_FLAGS,
+    FUTEX_WAIT_PRIVATE, FUTEX_WAKE_PRIVATE, MAP_ANONYMOUS, MAP_FAILED, MAP_PRIVATE, PROT_READ,
+    PROT_WRITE,
 };
 
 // ─── Monotonic clock helper ───────────────────────────────────────
@@ -150,8 +150,7 @@ impl PartialOrd for TimerEntry {
 
 // `Reverse` makes BinaryHeap behave as a min-heap (earliest
 // deadline first).
-static TIMER_HEAP: SpinLock<BinaryHeap<Reverse<TimerEntry>>> =
-    SpinLock::new(BinaryHeap::new());
+static TIMER_HEAP: SpinLock<BinaryHeap<Reverse<TimerEntry>>> = SpinLock::new(BinaryHeap::new());
 
 // Seqcount-style wake-counter for sysmon. fetch_add invalidates
 // any in-flight futex_wait sample.
@@ -244,7 +243,12 @@ pub fn timer_park_cancellable(ns: i64, tok: &Arc<TimerToken>) -> bool {
             }
             return tok
                 .state
-                .compare_exchange(TIMER_ARMED, TIMER_FIRED, Ordering::AcqRel, Ordering::Acquire)
+                .compare_exchange(
+                    TIMER_ARMED,
+                    TIMER_FIRED,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
                 .is_ok();
         }
     };
@@ -252,7 +256,12 @@ pub fn timer_park_cancellable(ns: i64, tok: &Arc<TimerToken>) -> bool {
         // Non-positive duration fires immediately (Go's sendTime path).
         return tok
             .state
-            .compare_exchange(TIMER_ARMED, TIMER_FIRED, Ordering::AcqRel, Ordering::Acquire)
+            .compare_exchange(
+                TIMER_ARMED,
+                TIMER_FIRED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
             .is_ok();
     }
     let deadline = monotonic_ns().wrapping_add(ns);
@@ -302,7 +311,12 @@ pub fn timer_cancel(tok: &Arc<TimerToken>) -> bool {
     }
     let won = tok
         .state
-        .compare_exchange(TIMER_ARMED, TIMER_CANCELLED, Ordering::AcqRel, Ordering::Acquire)
+        .compare_exchange(
+            TIMER_ARMED,
+            TIMER_CANCELLED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        )
         .is_ok();
     let gp = tok.g.load(Ordering::Acquire);
     unsafe {
@@ -355,10 +369,8 @@ const FORCE_PREEMPT_NS: i64 = 10 * 1_000_000; // 10 ms
 // goish v1 doesn't carry.
 
 // Diagnostic counters (read by tests).
-static SYSMON_SCAN_TICKS: core::sync::atomic::AtomicU64 =
-    core::sync::atomic::AtomicU64::new(0);
-static SYSMON_FORCE_PREEMPTS: core::sync::atomic::AtomicU64 =
-    core::sync::atomic::AtomicU64::new(0);
+static SYSMON_SCAN_TICKS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+static SYSMON_FORCE_PREEMPTS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
 /// Number of times sysmon ran its force-preempt scan loop.
 pub fn force_preempt_scan_ticks() -> u64 {
@@ -549,7 +561,7 @@ pub fn start_sysmon() {
             CLONE_THREAD_FLAGS,
             stack_top,
             sysmon_main,
-            storage.fs_base() as u64,
+            storage.tls_base() as u64,
         );
     }
 }

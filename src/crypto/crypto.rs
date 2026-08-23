@@ -23,10 +23,10 @@ use crate::error;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::hash::Hash as HashTrait;
+use crate::int;
 use crate::io;
 use crate::runtime::spin::SpinLock;
 use crate::strconv;
-use crate::int;
 use crate::types::{byte, uint};
 use alloc::boxed::Box;
 use core::any::Any;
@@ -159,14 +159,11 @@ type HashCtor = Box<dyn Fn() -> Box<dyn HashTrait + Send + Sync> + Send + Sync>;
 /// Registry of `Hash → constructor`. Entries are populated by per-algorithm
 /// modules at call time; goish has no `init()` so consumers register
 /// explicitly via `RegisterHash`.
-static HASH_REGISTRY: SpinLock<[Option<HashCtor>; maxHash.0 as usize]> =
-    SpinLock::new([
-        // 0 .. maxHash slots, all None.
-        None, None, None, None, None,
-        None, None, None, None, None,
-        None, None, None, None, None,
-        None, None, None, None, None,
-    ]);
+static HASH_REGISTRY: SpinLock<[Option<HashCtor>; maxHash.0 as usize]> = SpinLock::new([
+    // 0 .. maxHash slots, all None.
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None,
+]);
 
 // go: sdk 1.25.5 crypto/crypto.go:145-150 RegisterHash
 /// Registers a function that returns a new instance of the given hash

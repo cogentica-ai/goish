@@ -100,8 +100,7 @@ pub fn init() {
     if (base as isize) <= 0 {
         return;
     }
-    let bytes: &'static [u8] =
-        unsafe { core::slice::from_raw_parts(base, size) };
+    let bytes: &'static [u8] = unsafe { core::slice::from_raw_parts(base, size) };
 
     let elf = match ElfView::open(bytes) {
         Some(v) => v,

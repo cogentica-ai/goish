@@ -69,7 +69,16 @@ fn main() {
 
     schedule();
 
-    check(SEND.load(Ordering::Relaxed) == N, b"spawn_density: SEND wrong\n");
-    check(RECV.load(Ordering::Relaxed) == N, b"spawn_density: RECV wrong\n");
-    check(GS_DONE.load(Ordering::Relaxed) == 2, b"spawn_density: GS_DONE wrong\n");
+    check(
+        SEND.load(Ordering::Relaxed) == N,
+        b"spawn_density: SEND wrong\n",
+    );
+    check(
+        RECV.load(Ordering::Relaxed) == N,
+        b"spawn_density: RECV wrong\n",
+    );
+    check(
+        GS_DONE.load(Ordering::Relaxed) == 2,
+        b"spawn_density: GS_DONE wrong\n",
+    );
 }

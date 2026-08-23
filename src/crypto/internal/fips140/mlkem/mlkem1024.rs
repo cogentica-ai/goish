@@ -106,7 +106,9 @@ fn zeroDK1024() -> DecapsulationKey1024 {
             t: [zeroNTT1024(); k1024],
             a: [zeroNTT1024(); k1024 * k1024],
         },
-        decryptionKey1024: decryptionKey1024 { s: [zeroNTT1024(); k1024] },
+        decryptionKey1024: decryptionKey1024 {
+            s: [zeroNTT1024(); k1024],
+        },
     };
 }
 
@@ -335,7 +337,10 @@ fn newKeyFromSeed1024(
 ) -> (Box<DecapsulationKey1024>, error) {
     // Go: if len(seed) != SeedSize { return nil, errors.New("mlkem: invalid seed length") }
     if seed.Len() != int64(SeedSize) {
-        return (Box::new(zeroDK1024()), errors::New("mlkem: invalid seed length"));
+        return (
+            Box::new(zeroDK1024()),
+            errors::New("mlkem: invalid seed length"),
+        );
     }
     let mut dk = dk;
     // Go: d := (*[32]byte)(seed[:32]); z := (*[32]byte)(seed[32:])
@@ -489,7 +494,10 @@ fn kemKeyGen1024(dk: &mut DecapsulationKey1024, d: &[byte; 32], z: &[byte; 32]) 
         while j < k1024 {
             dk.encryptionKey1024.t[i] = polyAdd(
                 dk.encryptionKey1024.t[i],
-                nttMul(dk.encryptionKey1024.a[i * k1024 + j], dk.decryptionKey1024.s[j]),
+                nttMul(
+                    dk.encryptionKey1024.a[i * k1024 + j],
+                    dk.decryptionKey1024.s[j],
+                ),
             );
             j += 1;
         }
@@ -737,11 +745,7 @@ fn kemDecaps1024(dk: &DecapsulationKey1024, c: &[byte; CiphertextSize1024]) -> s
 
     // Go: subtle.ConstantTimeCopy(subtle.ConstantTimeCompare(c[:], c1), Kout, Kprime)
     let cs = slice::__from_vec(c.to_vec());
-    subtle::ConstantTimeCopy(
-        subtle::ConstantTimeCompare(&cs, &c1),
-        &mut Kout,
-        &Kprime,
-    );
+    subtle::ConstantTimeCopy(subtle::ConstantTimeCompare(&cs, &c1), &mut Kout, &Kprime);
     return Kout;
 }
 

@@ -19,8 +19,8 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-use crate::gostring::string;
 use crate::goslice::slice;
+use crate::gostring::string;
 use crate::lazy::Lazy;
 use crate::sync;
 use crate::types::byte;

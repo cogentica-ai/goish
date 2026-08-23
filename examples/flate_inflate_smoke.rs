@@ -25,11 +25,11 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::bytes;
 use goish::compress::flate;
 use goish::error;
 use goish::errors;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::io;
 use goish::runtime::sched::schedule;
@@ -144,7 +144,12 @@ fn check(idx: u8, raw: &[u8], compressed: &[u8], label: &[u8]) {
 
 fn test_1_empty() {
     // empty (5 bytes) — final empty stored block.
-    check(1, b"", b"\x01\x00\x00\xff\xff", b"empty input               ");
+    check(
+        1,
+        b"",
+        b"\x01\x00\x00\xff\xff",
+        b"empty input               ",
+    );
 }
 
 fn test_2_hello_default() {

@@ -37,7 +37,9 @@ crate::var! {
     pub ErrFieldCount: error = "wrong number of fields";
 }
 fn errInvalidDelim() -> error {
-    crate::errors::New(string::from_static("csv: invalid field or comment delimiter"))
+    crate::errors::New(string::from_static(
+        "csv: invalid field or comment delimiter",
+    ))
 }
 
 // Go: reader.go:98
@@ -536,7 +538,11 @@ impl<W: io::Writer> Writer<W> {
             while crate::builtin::len(&field) > 0 {
                 // Go: i := strings.IndexAny(field, "\"\r\n")
                 let i = strings::IndexAny(field.clone(), string::from_static("\"\r\n"));
-                let i = if i < 0 { crate::builtin::len(&field) } else { i };
+                let i = if i < 0 {
+                    crate::builtin::len(&field)
+                } else {
+                    i
+                };
                 // Go: writes field[:i] verbatim.
                 let head = string_slice(&field, 0, i);
                 let (_, err) = self.w.WriteString(head);

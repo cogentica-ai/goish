@@ -9,8 +9,7 @@
 use alloc::vec::Vec;
 
 use super::dwarf_util::{
-    read_initial_length, read_sleb, read_u16, read_u32, read_u64,
-    read_u8, read_uleb,
+    read_initial_length, read_sleb, read_u16, read_u32, read_u64, read_u8, read_uleb,
 };
 
 // DW_AT_*
@@ -106,13 +105,7 @@ fn parse_abbrev_table(buf: &[u8], start: usize) -> Vec<Abbrev> {
 /// Skip a single attribute value of the given DWARF form. Returns true
 /// on success. Used both when reading the CU DIE (for forms we don't
 /// care about) and for skipping attributes wholesale.
-fn skip_form(
-    info: &[u8],
-    off: &mut usize,
-    form: u64,
-    is_64bit: bool,
-    addr_size: u8,
-) -> bool {
+fn skip_form(info: &[u8], off: &mut usize, form: u64, is_64bit: bool, addr_size: u8) -> bool {
     match form {
         DW_FORM_ADDR => *off += addr_size as usize,
         DW_FORM_DATA1 | DW_FORM_REF1 | DW_FORM_FLAG => *off += 1,
@@ -318,7 +311,8 @@ pub fn collect_comp_dirs(
                 },
                 DW_AT_COMP_DIR => match form {
                     DW_FORM_STRP => {
-                        if let Some(s) = read_strp_value(debug_info, &mut off, is_64bit, debug_str) {
+                        if let Some(s) = read_strp_value(debug_info, &mut off, is_64bit, debug_str)
+                        {
                             comp_dir = Some(s.to_vec());
                         } else {
                             break;

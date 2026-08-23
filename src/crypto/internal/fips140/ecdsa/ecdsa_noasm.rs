@@ -7,9 +7,9 @@
 
 #![allow(non_snake_case)]
 
+use crate::error;
 use crate::goslice::slice;
 use crate::types::byte;
-use crate::error;
 
 use super::ecdsa::{signGeneric, verifyGeneric, Curve, Point, PrivateKey, PublicKey, Signature};
 use super::hmacdrbg::hmacDRBG;

@@ -116,7 +116,11 @@ fn main() {
             // Update peak (CAS loop).
             loop {
                 let p = peak_h.load(Ordering::SeqCst);
-                if cur <= p || peak_h.compare_exchange(p, cur, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+                if cur <= p
+                    || peak_h
+                        .compare_exchange(p, cur, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
+                {
                     break;
                 }
             }
@@ -162,7 +166,11 @@ fn main() {
             if done == 4 && p <= 2 {
                 fmt::Println!("[ 2] MaxConcurrentConns peak<=2 PASS done={}", done);
             } else {
-                fmt::Println!("[ 2] MaxConcurrentConns peak<=2 FAIL peak={} done={}", p, done);
+                fmt::Println!(
+                    "[ 2] MaxConcurrentConns peak<=2 FAIL peak={} done={}",
+                    p,
+                    done
+                );
                 failed += 1;
             }
             let _ = srv_arc.Shutdown(time::Second);

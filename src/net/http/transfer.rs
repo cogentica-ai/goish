@@ -297,8 +297,7 @@ pub(crate) fn readTransfer(msg: TransferMsgMut) -> (super::client::BodyKind, err
             rr.Header = t.Header;
             rr.ContentLength = t.ContentLength;
             if t.Chunked {
-                rr.TransferEncoding =
-                    slice::<string>::__from_vec(alloc::vec![string("chunked")]);
+                rr.TransferEncoding = slice::<string>::__from_vec(alloc::vec![string("chunked")]);
             }
             rr.Close = t.Close;
             rr.Trailer = t.Trailer;
@@ -307,8 +306,7 @@ pub(crate) fn readTransfer(msg: TransferMsgMut) -> (super::client::BodyKind, err
             rr.Header = t.Header;
             rr.ContentLength = t.ContentLength;
             if t.Chunked {
-                rr.TransferEncoding =
-                    slice::<string>::__from_vec(alloc::vec![string("chunked")]);
+                rr.TransferEncoding = slice::<string>::__from_vec(alloc::vec![string("chunked")]);
             }
             rr.Close = t.Close;
             rr.Trailer = t.Trailer;
@@ -369,9 +367,7 @@ pub(crate) fn readTrailer<R: crate::io::Reader>(
     // Go: "Make sure there's a header terminator coming up, to
     // prevent a DoS with an unbounded size Trailer."
     if !seeUpcomingDoubleCRLF(r) {
-        return errors::New(string(
-            "http: suspiciously long trailer after chunked body",
-        ));
+        return errors::New(string("http: suspiciously long trailer after chunked body"));
     }
 
     // Go: textproto.NewReader(b.r).ReadMIMEHeader()
@@ -1398,12 +1394,7 @@ pub fn fixLength(
 /// value list case-insensitively. goish has no httpguts; `hasToken`
 /// is the substitute and requires a LOWERCASE token, so the loop below
 /// passes `"close"` / `"keep-alive"` and never the header spelling.
-pub fn shouldClose(
-    major: int,
-    minor: int,
-    header: &mut Header,
-    removeCloseHeader: bool,
-) -> bool {
+pub fn shouldClose(major: int, minor: int, header: &mut Header, removeCloseHeader: bool) -> bool {
     if major < 1 {
         return true;
     }
@@ -1483,9 +1474,7 @@ pub fn mergeSetHeader(dst: &mut Header, src: Header) {
 // go: sdk 1.25.5 net/http/transfer.go:894-907 seeUpcomingDoubleCRLF
 /// Go: peek forward until the buffer is full, looking for the blank
 /// line that ends a trailer block.
-pub fn seeUpcomingDoubleCRLF<R: crate::io::Reader>(
-    r: &mut crate::bufio::Reader<R>,
-) -> bool {
+pub fn seeUpcomingDoubleCRLF<R: crate::io::Reader>(r: &mut crate::bufio::Reader<R>) -> bool {
     let mut peekSize: int = 4;
     loop {
         // Go: "This loop stops when Peek returns an error, which it

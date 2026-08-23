@@ -124,4 +124,3 @@ fn main() {
     syscall::Write(syscall::STDOUT, ok.as_ptr(), ok.len());
     syscall::Exit(0);
 }
-

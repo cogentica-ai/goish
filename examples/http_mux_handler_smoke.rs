@@ -8,8 +8,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::net::http;
 use goish::{string, syscall};
 
@@ -24,8 +24,7 @@ fn main() {
 
     // 1. Exact match returns the literal pattern.
     {
-        let (req, _) =
-            http::NewRequest(string("GET"), string("http://x/exact"), bytes(""));
+        let (req, _) = http::NewRequest(string("GET"), string("http://x/exact"), bytes(""));
         let (_h, pat) = mux.Handler(&req);
         if pat == "/exact" {
             fmt::Println!("[ 1] exact pattern             PASS");
@@ -50,11 +49,7 @@ fn main() {
 
     // 3. Wildcard pattern match returns the original pattern string.
     {
-        let (req, _) = http::NewRequest(
-            string("GET"),
-            string("http://x/api/users/42"),
-            bytes(""),
-        );
+        let (req, _) = http::NewRequest(string("GET"), string("http://x/api/users/42"), bytes(""));
         let (_h, pat) = mux.Handler(&req);
         if pat == "/api/users/{id}" {
             fmt::Println!("[ 3] wildcard pattern          PASS");
@@ -66,8 +61,7 @@ fn main() {
 
     // 4. No match → empty pattern + NotFoundHandler.
     {
-        let (req, _) =
-            http::NewRequest(string("GET"), string("http://x/nope"), bytes(""));
+        let (req, _) = http::NewRequest(string("GET"), string("http://x/nope"), bytes(""));
         let (_h, pat) = mux.Handler(&req);
         if pat.Len() == 0 {
             fmt::Println!("[ 4] no match → empty          PASS");

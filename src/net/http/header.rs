@@ -16,9 +16,9 @@ use alloc::vec::Vec;
 
 use crate::gomap::map;
 use crate::goslice::slice;
+use crate::len;
 use crate::string;
 use crate::types::{byte, int};
-use crate::len;
 
 /// Go's `net/http.Header` — `map<string, slice<string>>`.
 ///
@@ -295,7 +295,10 @@ impl Header {
         for (k, vv) in self.inner.__iter() {
             let (skip, _) = exclude.Get(k.clone());
             if !skip {
-                kvs.push(keyValues { key: k.clone(), values: vv.clone() });
+                kvs.push(keyValues {
+                    key: k.clone(),
+                    values: vv.clone(),
+                });
             }
         }
         // Go: slices.SortFunc(hs.kvs, func(a, b) int {
@@ -306,9 +309,7 @@ impl Header {
         // ordering is identical either way — strings.Compare is a plain
         // byte compare, and header keys are unique so the sort's
         // stability is not observable.
-        kvs.sort_by(|a, b| {
-            crate::strings::Compare(a.key.clone(), b.key.clone()).cmp(&0)
-        });
+        kvs.sort_by(|a, b| crate::strings::Compare(a.key.clone(), b.key.clone()).cmp(&0));
         hs.kvs = slice::__from_vec(kvs);
         return hs;
     }
@@ -437,17 +438,21 @@ pub fn ParseTime<T: Into<string>>(text: T) -> (crate::time::Time, crate::error) 
 }
 
 const HTTP_MONTH_NAMES: [&[byte; 3]; 12] = [
-    b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun",
-    b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
+    b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
 ];
 
 /// Three-letter weekday abbreviations, in Go's `time` order.
-const HTTP_DAY_ABBRS: [&[byte; 3]; 7] =
-    [b"Sun", b"Mon", b"Tue", b"Wed", b"Thu", b"Fri", b"Sat"];
+const HTTP_DAY_ABBRS: [&[byte; 3]; 7] = [b"Sun", b"Mon", b"Tue", b"Wed", b"Thu", b"Fri", b"Sat"];
 
 /// Full weekday names, same order.
 const HTTP_DAY_FULL: [&str; 7] = [
-    "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
 ];
 
 // go: none — goish-only scanner helper. Go reaches these
@@ -517,7 +522,14 @@ fn http_is_zone_abbr(b: &[byte]) -> bool {
 // go: none — goish-only scanner helper. Go reaches these
 // formats through time.Parse, whose layout engine goish does not
 // have for the day-name-comma forms; see ParseTime above.
-fn http_mk_time(year: u32, month_idx: u32, day: u32, hh: u32, mm: u32, ss: u32) -> Option<crate::time::Time> {
+fn http_mk_time(
+    year: u32,
+    month_idx: u32,
+    day: u32,
+    hh: u32,
+    mm: u32,
+    ss: u32,
+) -> Option<crate::time::Time> {
     if day == 0 || day > 31 || hh > 23 || mm > 59 || ss > 59 {
         return None;
     }

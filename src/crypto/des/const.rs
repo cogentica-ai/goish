@@ -1,4 +1,4 @@
-// go: file crypto/des/const.go decls: 
+// go: file crypto/des/const.go decls:
 //
 // DES tables: initial/final permutations, expansion function,
 // permutation function, permuted choices 1 and 2, S-boxes, and the
@@ -15,16 +15,11 @@ use crate::types::byte;
 // Referenced for provenance: `permuteInitialBlock` in block.rs is the
 // hand-unrolled equivalent Go also uses at runtime.
 #[allow(dead_code)] // declared in Go's const.go; the runtime path uses the
-// hand-unrolled permutation in block.rs, exactly as Go does.
+                    // hand-unrolled permutation in block.rs, exactly as Go does.
 pub(crate) const initialPermutation: [byte; 64] = [
-    6, 14, 22, 30, 38, 46, 54, 62,
-    4, 12, 20, 28, 36, 44, 52, 60,
-    2, 10, 18, 26, 34, 42, 50, 58,
-    0, 8, 16, 24, 32, 40, 48, 56,
-    7, 15, 23, 31, 39, 47, 55, 63,
-    5, 13, 21, 29, 37, 45, 53, 61,
-    3, 11, 19, 27, 35, 43, 51, 59,
-    1, 9, 17, 25, 33, 41, 49, 57,
+    6, 14, 22, 30, 38, 46, 54, 62, 4, 12, 20, 28, 36, 44, 52, 60, 2, 10, 18, 26, 34, 42, 50, 58, 0,
+    8, 16, 24, 32, 40, 48, 56, 7, 15, 23, 31, 39, 47, 55, 63, 5, 13, 21, 29, 37, 45, 53, 61, 3, 11,
+    19, 27, 35, 43, 51, 59, 1, 9, 17, 25, 33, 41, 49, 57,
 ];
 
 // go: sdk 1.25.5 crypto/des/const.go:27-36 finalPermutation
@@ -32,16 +27,11 @@ pub(crate) const initialPermutation: [byte; 64] = [
 // Final permutation of a 64-bit preoutput block; the inverse of
 // `initialPermutation`. `permuteFinalBlock` is the unrolled equivalent.
 #[allow(dead_code)] // declared in Go's const.go; the runtime path uses the
-// hand-unrolled permutation in block.rs, exactly as Go does.
+                    // hand-unrolled permutation in block.rs, exactly as Go does.
 pub(crate) const finalPermutation: [byte; 64] = [
-    24, 56, 16, 48, 8, 40, 0, 32,
-    25, 57, 17, 49, 9, 41, 1, 33,
-    26, 58, 18, 50, 10, 42, 2, 34,
-    27, 59, 19, 51, 11, 43, 3, 35,
-    28, 60, 20, 52, 12, 44, 4, 36,
-    29, 61, 21, 53, 13, 45, 5, 37,
-    30, 62, 22, 54, 14, 46, 6, 38,
-    31, 63, 23, 55, 15, 47, 7, 39,
+    24, 56, 16, 48, 8, 40, 0, 32, 25, 57, 17, 49, 9, 41, 1, 33, 26, 58, 18, 50, 10, 42, 2, 34, 27,
+    59, 19, 51, 11, 43, 3, 35, 28, 60, 20, 52, 12, 44, 4, 36, 29, 61, 21, 53, 13, 45, 5, 37, 30,
+    62, 22, 54, 14, 46, 6, 38, 31, 63, 23, 55, 15, 47, 7, 39,
 ];
 
 // go: sdk 1.25.5 crypto/des/const.go:40-47 expansionFunction
@@ -49,16 +39,11 @@ pub(crate) const finalPermutation: [byte; 64] = [
 // Expands a 32-bit input block to 48 bits. `feistel` applies this
 // expansion inline via shifts, which is what Go's runtime path does too.
 #[allow(dead_code)] // declared in Go's const.go; the runtime path uses the
-// hand-unrolled permutation in block.rs, exactly as Go does.
+                    // hand-unrolled permutation in block.rs, exactly as Go does.
 pub(crate) const expansionFunction: [byte; 48] = [
-    0, 31, 30, 29, 28, 27, 28, 27,
-    26, 25, 24, 23, 24, 23, 22, 21,
-    20, 19, 20, 19, 18, 17, 16, 15,
-    16, 15, 14, 13, 12, 11, 12, 11,
-    10, 9, 8, 7, 8, 7, 6, 5,
-    4, 3, 4, 3, 2, 1, 0, 31,
+    0, 31, 30, 29, 28, 27, 28, 27, 26, 25, 24, 23, 24, 23, 22, 21, 20, 19, 20, 19, 18, 17, 16, 15,
+    16, 15, 14, 13, 12, 11, 12, 11, 10, 9, 8, 7, 8, 7, 6, 5, 4, 3, 4, 3, 2, 1, 0, 31,
 ];
-
 
 // ─── const.go: DES permutation tables ──────────────────────────────
 
@@ -153,7 +138,6 @@ pub(crate) const sBoxes: [[[byte; 16]; 4]; 8] = [
 // Go: const.go:142 — `var ksRotations = [16]uint8{...}`. Per-round
 // circular-shift count for the key schedule.
 pub(crate) const ksRotations: [byte; 16] = [1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1];
-
 
 //
 // goish swap: a `SpinLock<Option<Box<[[u32; 64]; 8]>>>` materialised on

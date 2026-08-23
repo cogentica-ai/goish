@@ -20,9 +20,9 @@
 extern crate goish;
 
 use core::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
+use goish::go;
 use goish::runtime::sched::schedule;
 use goish::syscall;
-use goish::{go};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -122,12 +122,7 @@ fn main() {
     // Step 6-7: server accepts and writes.
     let mut peer = syscall::SockaddrIn::loopback(0);
     let mut peer_len: u32 = core::mem::size_of::<syscall::SockaddrIn>() as u32;
-    let conn = syscall::Accept4(
-        srv,
-        &mut peer,
-        &mut peer_len,
-        syscall::SOCK_CLOEXEC,
-    );
+    let conn = syscall::Accept4(srv, &mut peer, &mut peer_len, syscall::SOCK_CLOEXEC);
     check(conn >= 0, b"accept4 failed\n");
 
     let greeting: &[u8] = b"hello";

@@ -97,7 +97,11 @@ fn main() {
     // ── ECB single block (SP 800-38A F.1.1, first block) ───────────────
     let mut ct = zeros(16);
     b.Encrypt(&mut ct, unhex("6bc1bee22e409f96e93d7e117393172a"));
-    check("Block.Encrypt", tohex(&ct), goish::string::from("3ad77bb40d7a3660a89ecaf32466ef97"));
+    check(
+        "Block.Encrypt",
+        tohex(&ct),
+        goish::string::from("3ad77bb40d7a3660a89ecaf32466ef97"),
+    );
 
     let mut pt = zeros(16);
     b.Decrypt(&mut pt, ct.clone());
@@ -122,7 +126,11 @@ fn main() {
     );
     let mut out = zeros(64);
     enc.CryptBlocks(&mut out, &unhex(PT));
-    check("CBC encrypt (F.2.1)", tohex(&out), goish::string::from(want_cbc));
+    check(
+        "CBC encrypt (F.2.1)",
+        tohex(&out),
+        goish::string::from(want_cbc),
+    );
 
     let mut dec = aes::NewCBCDecrypter(&b, cbcIV);
     let mut back = zeros(64);
@@ -165,13 +173,21 @@ fn main() {
     let mut ctr = aes::NewCTR(&b, &ctrIV);
     let mut cout = zeros(64);
     ctr.XORKeyStream(&mut cout, &unhex(PT));
-    check("CTR encrypt (F.5.1)", tohex(&cout), goish::string::from(want_ctr));
+    check(
+        "CTR encrypt (F.5.1)",
+        tohex(&cout),
+        goish::string::from(want_ctr),
+    );
 
     // CTR is its own inverse.
     let mut ctr2 = aes::NewCTR(&b, &ctrIV);
     let mut cback = zeros(64);
     ctr2.XORKeyStream(&mut cback, &unhex(want_ctr));
-    check("CTR decrypt round-trip", tohex(&cback), goish::string::from(PT));
+    check(
+        "CTR decrypt round-trip",
+        tohex(&cback),
+        goish::string::from(PT),
+    );
 
     // Streaming in uneven pieces must equal one shot — this is what
     // exercises the partial-block path at both ends of XORKeyStreamAt.

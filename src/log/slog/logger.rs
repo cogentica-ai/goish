@@ -21,8 +21,8 @@
 
 extern crate alloc;
 
-use super::{Level, LevelDebug, LevelError, LevelInfo, LevelWarn, Logger, NewRecord};
 use super::Attr;
+use super::{Level, LevelDebug, LevelError, LevelInfo, LevelWarn, Logger, NewRecord};
 use crate::context;
 use crate::goslice::slice;
 use crate::gostring::string;
@@ -87,13 +87,7 @@ impl Logger {
     /// the recorded PC is the user's call site, not slog's internals.
     /// That count is load-bearing: one off, and every log line is
     /// attributed to slog itself.
-    fn logAttrs(
-        &self,
-        ctx: &dyn context::Context,
-        level: Level,
-        msg: string,
-        attrs: slice<Attr>,
-    ) {
+    fn logAttrs(&self, ctx: &dyn context::Context, level: Level, msg: string, attrs: slice<Attr>) {
         if !self.Enabled(ctx, level) {
             return;
         }

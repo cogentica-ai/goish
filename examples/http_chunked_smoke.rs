@@ -54,7 +54,11 @@ fn main() {
         if got.as_slice() == expected {
             fmt::Println!("[ 1] writer wire format        PASS");
         } else {
-            fmt::Println!("[ 1] writer wire format        FAIL got len={} expected len={}", got.len(), expected.len());
+            fmt::Println!(
+                "[ 1] writer wire format        FAIL got len={} expected len={}",
+                got.len(),
+                expected.len()
+            );
             failed += 1;
         }
     }
@@ -82,7 +86,10 @@ fn main() {
         if out.as_slice() == b"hello world" {
             fmt::Println!("[ 2] reader decode             PASS");
         } else {
-            fmt::Println!("[ 2] reader decode             FAIL got {} bytes", out.len());
+            fmt::Println!(
+                "[ 2] reader decode             FAIL got {} bytes",
+                out.len()
+            );
             failed += 1;
         }
     }
@@ -163,7 +170,8 @@ fn main() {
                         } else {
                             fmt::Println!(
                                 "[ 3] streaming response        FAIL has_te={} decoded.len={}",
-                                has_te, decoded.len()
+                                has_te,
+                                decoded.len()
                             );
                             failed += 1;
                         }
@@ -252,7 +260,9 @@ fn main() {
                 } else {
                     fmt::Println!(
                         "[ 4] chunked request upload    FAIL body_len={} cl={} match={}",
-                        body_len, cl, m
+                        body_len,
+                        cl,
+                        m
                     );
                     failed += 1;
                 }

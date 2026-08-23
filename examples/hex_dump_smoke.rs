@@ -8,13 +8,13 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
 use goish::encoding::hex::{Dump, Dumper};
+use goish::fmt;
 use goish::goslice::slice;
 use goish::io::{Closer, Writer};
-use goish::types::byte;
 use goish::strings;
+use goish::types::byte;
 use goish::{convert, string, syscall};
 
 #[goish::main]
@@ -49,11 +49,16 @@ fn main() {
         // ASCII: "ABCDEFGHIJKLMNOP"
         let data = convert::bytes("ABCDEFGHIJKLMNOP");
         let s = Dump(data);
-        let want = "00000000  41 42 43 44 45 46 47 48  49 4a 4b 4c 4d 4e 4f 50  |ABCDEFGHIJKLMNOP|\n";
+        let want =
+            "00000000  41 42 43 44 45 46 47 48  49 4a 4b 4c 4d 4e 4f 50  |ABCDEFGHIJKLMNOP|\n";
         if s == want {
             fmt::Println!("[ 3] 16-byte line            PASS");
         } else {
-            fmt::Println!("[ 3] 16-byte line            FAIL\n  got: {}\n  want: {}", s, want);
+            fmt::Println!(
+                "[ 3] 16-byte line            FAIL\n  got: {}\n  want: {}",
+                s,
+                want
+            );
             failed += 1;
         }
     }
@@ -101,7 +106,11 @@ fn main() {
         if s == want {
             fmt::Println!("[ 6] Dumper Buffer           PASS");
         } else {
-            fmt::Println!("[ 6] Dumper Buffer           FAIL\n  got: {}\n  want: {}", s, want);
+            fmt::Println!(
+                "[ 6] Dumper Buffer           FAIL\n  got: {}\n  want: {}",
+                s,
+                want
+            );
             failed += 1;
         }
     }

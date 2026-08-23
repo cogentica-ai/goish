@@ -11,8 +11,8 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use goish::fmt;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::io;
 use goish::net;
 use goish::net::http;
@@ -56,7 +56,8 @@ fn main() {
         } else {
             fmt::Println!(
                 "[ 1] full body 200             FAIL status={} len={}",
-                resp.StatusCode, body.Len()
+                resp.StatusCode,
+                body.Len()
             );
             failed += 1;
         }
@@ -76,7 +77,9 @@ fn main() {
         } else {
             fmt::Println!(
                 "[ 2] Range 0-9 → 206           FAIL status={} len={} cr={}",
-                resp.StatusCode, body.Len(), cr
+                resp.StatusCode,
+                body.Len(),
+                cr
             );
             failed += 1;
         }
@@ -114,7 +117,10 @@ fn main() {
         if resp.StatusCode == 416 {
             fmt::Println!("[ 4] OOB Range → 416           PASS");
         } else {
-            fmt::Println!("[ 4] OOB Range → 416           FAIL status={}", resp.StatusCode);
+            fmt::Println!(
+                "[ 4] OOB Range → 416           FAIL status={}",
+                resp.StatusCode
+            );
             failed += 1;
         }
     }
@@ -123,14 +129,19 @@ fn main() {
     {
         let mut req = make_req(&addr, "/file");
         // 2099-01-01 — definitely after the file's mtime.
-        req.Header
-            .Set(string("If-Modified-Since"), string("Thu, 01 Jan 2099 00:00:00 GMT"));
+        req.Header.Set(
+            string("If-Modified-Since"),
+            string("Thu, 01 Jan 2099 00:00:00 GMT"),
+        );
         let cli = http::Client::default();
         let (resp, _) = cli.Do(&req);
         if resp.StatusCode == 304 {
             fmt::Println!("[ 5] If-Modified-Since → 304   PASS");
         } else {
-            fmt::Println!("[ 5] If-Modified-Since → 304   FAIL status={}", resp.StatusCode);
+            fmt::Println!(
+                "[ 5] If-Modified-Since → 304   FAIL status={}",
+                resp.StatusCode
+            );
             failed += 1;
         }
     }

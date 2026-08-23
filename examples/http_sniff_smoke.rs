@@ -57,7 +57,10 @@ fn main() {
         (b"\x1f\x8b\x08\x00", "application/x-gzip"),
         (b"\x00asm\x01\x00\x00\x00", "application/wasm"),
         (b"hello world\n", "text/plain; charset=utf-8"),
-        (b"\x00\x01\x02\x03\x04\x05garbage", "application/octet-stream"),
+        (
+            b"\x00\x01\x02\x03\x04\x05garbage",
+            "application/octet-stream",
+        ),
         // Masked signatures whose mask has DON'T-CARE bytes in the
         // middle: "RIFF????WAVE". A matcher that compared the pattern
         // straight through would reject these.

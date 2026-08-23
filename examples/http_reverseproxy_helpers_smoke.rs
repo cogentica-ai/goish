@@ -29,6 +29,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::errors;
+use goish::goslice::slice;
+use goish::io::{Closer, Reader};
 use goish::net::http::header::Header;
 use goish::net::http::httputil::dump::{
     errNoBody, failureToReadBody, neverEnding, reqWriteExcludeHeaderDump,
@@ -36,9 +39,6 @@ use goish::net::http::httputil::dump::{
 use goish::net::http::httputil::reverseproxy::{
     copyHeader, ishex, removeHopByHopHeaders, singleJoiningSlash,
 };
-use goish::goslice::slice;
-use goish::io::{Closer, Reader};
-use goish::errors;
 use goish::{fmt, string, syscall};
 
 #[goish::main]
@@ -81,7 +81,8 @@ fn main() {
         copyHeader(&mut dst, &src);
         let x = dst.Values(string("X"));
         let y = dst.Values(string("Y"));
-        if x.Len() == 2 && x[0] == "1" && x[1] == "2" && y.Len() == 2 && y[0] == "a" && y[1] == "b" {
+        if x.Len() == 2 && x[0] == "1" && x[1] == "2" && y.Len() == 2 && y[0] == "a" && y[1] == "b"
+        {
             fmt::Println!("[2] copyHeader appends, not replaces  PASS");
         } else {
             fmt::Println!("[2] copyHeader  FAIL x=", x.Len(), " y=", y.Len());
@@ -128,8 +129,14 @@ fn main() {
         removeHopByHopHeaders(&mut h);
         // Go leaves exactly X-Keep.
         let gone = [
-            "Connection", "X-Custom", "Keep-Alive", "Proxy-Connection",
-            "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+            "Connection",
+            "X-Custom",
+            "Keep-Alive",
+            "Proxy-Connection",
+            "Te",
+            "Trailer",
+            "Transfer-Encoding",
+            "Upgrade",
         ];
         let mut bad = 0;
         for k in gone.iter() {
@@ -173,12 +180,19 @@ fn main() {
         let (h, _) = m.Get(string("Host"));
         let (ua, uaok) = m.Get(string("User-Agent"));
 
-        if n == 5 && e == goish::nil && got == "xxxxx"
-            && n0 == 0 && e0 == goish::nil
-            && nf == 0 && errors::Is(ef.clone(), errNoBody)
+        if n == 5
+            && e == goish::nil
+            && got == "xxxxx"
+            && n0 == 0
+            && e0 == goish::nil
+            && nf == 0
+            && errors::Is(ef.clone(), errNoBody)
             && ef.Error() == "sentinel error value"
             && cf == goish::nil
-            && m.Len() == 3 && h && !uaok && !ua
+            && m.Len() == 3
+            && h
+            && !uaok
+            && !ua
         {
             fmt::Println!("[5] neverEnding / failureToReadBody / dump excludes  PASS");
         } else {

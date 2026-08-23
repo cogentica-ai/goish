@@ -10,8 +10,8 @@ extern crate goish;
 
 use goish::fmt;
 use goish::strconv;
+use goish::syscall;
 use goish::types::rune;
-use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -38,8 +38,11 @@ fn main() {
 
     // 2. ASCII control chars not printable.
     {
-        if !strconv::IsPrint(0x00) && !strconv::IsPrint(0x07) && !strconv::IsPrint(0x1F)
-            && !strconv::IsPrint(0x7F) && !strconv::IsPrint(0x80)
+        if !strconv::IsPrint(0x00)
+            && !strconv::IsPrint(0x07)
+            && !strconv::IsPrint(0x1F)
+            && !strconv::IsPrint(0x7F)
+            && !strconv::IsPrint(0x80)
         {
             fmt::Println!("[ 2] IsPrint ASCII control     PASS");
         } else {
@@ -90,7 +93,9 @@ fn main() {
 
     // 7. CJK / emoji range valid → slim accepts as printable.
     {
-        if strconv::IsPrint(0x4E2D) /* 中 */ && strconv::IsPrint(0x1F600) /* 😀 */ {
+        if strconv::IsPrint(0x4E2D) /* 中 */ && strconv::IsPrint(0x1F600)
+        /* 😀 */
+        {
             fmt::Println!("[ 7] IsPrint slim CJK + emoji  PASS");
         } else {
             fmt::Println!("[ 7] IsPrint slim CJK + emoji  FAIL");
@@ -100,7 +105,9 @@ fn main() {
 
     // 8. IsGraphic same as IsPrint per slim defer.
     {
-        if strconv::IsGraphic(0x41) && strconv::IsGraphic(0xA1) && !strconv::IsGraphic(0x00)
+        if strconv::IsGraphic(0x41)
+            && strconv::IsGraphic(0xA1)
+            && !strconv::IsGraphic(0x00)
             && !strconv::IsGraphic(0xD800)
         {
             fmt::Println!("[ 8] IsGraphic parity          PASS");

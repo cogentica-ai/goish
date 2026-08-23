@@ -6,7 +6,12 @@
 //
 // Public API mirrors Go 1.25 archive/tar reader surface.
 
-#![allow(non_snake_case, non_upper_case_globals, non_camel_case_types, dead_code)]
+#![allow(
+    non_snake_case,
+    non_upper_case_globals,
+    non_camel_case_types,
+    dead_code
+)]
 
 extern crate alloc;
 use alloc::boxed::Box;
@@ -269,7 +274,10 @@ fn validateSparseEntries(sp: &sparseDatas, size: i64) -> bool {
     if size < 0 {
         return false;
     }
-    let mut pre = sparseEntry { Offset: 0, Length: 0 };
+    let mut pre = sparseEntry {
+        Offset: 0,
+        Length: 0,
+    };
     for (_, cur) in crate::range!(sp) {
         if cur.Offset < 0 || cur.Length < 0 {
             return false;
@@ -291,7 +299,10 @@ fn validateSparseEntries(sp: &sparseDatas, size: i64) -> bool {
 
 fn invertSparseEntries(src: &sparseDatas, size: i64) -> sparseHoles {
     let mut dst = sparseHoles::new();
-    let mut pre = sparseEntry { Offset: 0, Length: 0 };
+    let mut pre = sparseEntry {
+        Offset: 0,
+        Length: 0,
+    };
     for (_, cur) in crate::range!(src) {
         if cur.Length == 0 {
             continue;
@@ -316,7 +327,13 @@ fn alignSparseEntries(src: &sparseDatas, size: i64) -> sparseDatas {
             end -= blockPadding(-end);
         }
         if pos < end {
-            dst = crate::append!(dst, sparseEntry { Offset: pos, Length: end - pos });
+            dst = crate::append!(
+                dst,
+                sparseEntry {
+                    Offset: pos,
+                    Length: end - pos
+                }
+            );
         }
     }
     dst
@@ -345,33 +362,81 @@ impl block {
         slice::__from_vec(self.0[start as usize..end as usize].to_vec())
     }
 
-    pub fn v7_name(&self) -> slice<byte> { self.slice(0, 100) }
-    pub fn v7_mode(&self) -> slice<byte> { self.slice(100, 108) }
-    pub fn v7_uid(&self) -> slice<byte> { self.slice(108, 116) }
-    pub fn v7_gid(&self) -> slice<byte> { self.slice(116, 124) }
-    pub fn v7_size(&self) -> slice<byte> { self.slice(124, 136) }
-    pub fn v7_modTime(&self) -> slice<byte> { self.slice(136, 148) }
-    pub fn v7_chksum(&self) -> slice<byte> { self.slice(148, 156) }
-    pub fn v7_typeFlag(&self) -> slice<byte> { self.slice(156, 157) }
-    pub fn v7_linkName(&self) -> slice<byte> { self.slice(157, 257) }
+    pub fn v7_name(&self) -> slice<byte> {
+        self.slice(0, 100)
+    }
+    pub fn v7_mode(&self) -> slice<byte> {
+        self.slice(100, 108)
+    }
+    pub fn v7_uid(&self) -> slice<byte> {
+        self.slice(108, 116)
+    }
+    pub fn v7_gid(&self) -> slice<byte> {
+        self.slice(116, 124)
+    }
+    pub fn v7_size(&self) -> slice<byte> {
+        self.slice(124, 136)
+    }
+    pub fn v7_modTime(&self) -> slice<byte> {
+        self.slice(136, 148)
+    }
+    pub fn v7_chksum(&self) -> slice<byte> {
+        self.slice(148, 156)
+    }
+    pub fn v7_typeFlag(&self) -> slice<byte> {
+        self.slice(156, 157)
+    }
+    pub fn v7_linkName(&self) -> slice<byte> {
+        self.slice(157, 257)
+    }
 
-    pub fn ustar_magic(&self) -> slice<byte> { self.slice(257, 263) }
-    pub fn ustar_version(&self) -> slice<byte> { self.slice(263, 265) }
-    pub fn ustar_userName(&self) -> slice<byte> { self.slice(265, 297) }
-    pub fn ustar_groupName(&self) -> slice<byte> { self.slice(297, 329) }
-    pub fn ustar_devMajor(&self) -> slice<byte> { self.slice(329, 337) }
-    pub fn ustar_devMinor(&self) -> slice<byte> { self.slice(337, 345) }
-    pub fn ustar_prefix(&self) -> slice<byte> { self.slice(345, 500) }
+    pub fn ustar_magic(&self) -> slice<byte> {
+        self.slice(257, 263)
+    }
+    pub fn ustar_version(&self) -> slice<byte> {
+        self.slice(263, 265)
+    }
+    pub fn ustar_userName(&self) -> slice<byte> {
+        self.slice(265, 297)
+    }
+    pub fn ustar_groupName(&self) -> slice<byte> {
+        self.slice(297, 329)
+    }
+    pub fn ustar_devMajor(&self) -> slice<byte> {
+        self.slice(329, 337)
+    }
+    pub fn ustar_devMinor(&self) -> slice<byte> {
+        self.slice(337, 345)
+    }
+    pub fn ustar_prefix(&self) -> slice<byte> {
+        self.slice(345, 500)
+    }
 
-    pub fn gnu_accessTime(&self) -> slice<byte> { self.slice(345, 357) }
-    pub fn gnu_changeTime(&self) -> slice<byte> { self.slice(357, 369) }
-    pub fn gnu_sparse(&self) -> slice<byte> { self.slice(386, 483) }
-    pub fn gnu_realSize(&self) -> slice<byte> { self.slice(483, 495) }
+    pub fn gnu_accessTime(&self) -> slice<byte> {
+        self.slice(345, 357)
+    }
+    pub fn gnu_changeTime(&self) -> slice<byte> {
+        self.slice(357, 369)
+    }
+    pub fn gnu_sparse(&self) -> slice<byte> {
+        self.slice(386, 483)
+    }
+    pub fn gnu_realSize(&self) -> slice<byte> {
+        self.slice(483, 495)
+    }
 
-    pub fn star_prefix(&self) -> slice<byte> { self.slice(345, 476) }
-    pub fn star_accessTime(&self) -> slice<byte> { self.slice(476, 488) }
-    pub fn star_changeTime(&self) -> slice<byte> { self.slice(488, 500) }
-    pub fn star_trailer(&self) -> slice<byte> { self.slice(508, 512) }
+    pub fn star_prefix(&self) -> slice<byte> {
+        self.slice(345, 476)
+    }
+    pub fn star_accessTime(&self) -> slice<byte> {
+        self.slice(476, 488)
+    }
+    pub fn star_changeTime(&self) -> slice<byte> {
+        self.slice(488, 500)
+    }
+    pub fn star_trailer(&self) -> slice<byte> {
+        self.slice(508, 512)
+    }
 
     pub fn computeChecksum(&self) -> (i64, i64) {
         let mut unsigned: i64 = 0;
@@ -424,28 +489,68 @@ impl block {
         &mut self.0[start..end]
     }
 
-    pub fn v7m_name(&mut self) -> &mut [u8] { self.slice_mut(0, 100) }
-    pub fn v7m_mode(&mut self) -> &mut [u8] { self.slice_mut(100, 108) }
-    pub fn v7m_uid(&mut self) -> &mut [u8] { self.slice_mut(108, 116) }
-    pub fn v7m_gid(&mut self) -> &mut [u8] { self.slice_mut(116, 124) }
-    pub fn v7m_size(&mut self) -> &mut [u8] { self.slice_mut(124, 136) }
-    pub fn v7m_modTime(&mut self) -> &mut [u8] { self.slice_mut(136, 148) }
-    pub fn v7m_chksum(&mut self) -> &mut [u8] { self.slice_mut(148, 156) }
-    pub fn v7m_typeFlag(&mut self) -> &mut [u8] { self.slice_mut(156, 157) }
-    pub fn v7m_linkName(&mut self) -> &mut [u8] { self.slice_mut(157, 257) }
+    pub fn v7m_name(&mut self) -> &mut [u8] {
+        self.slice_mut(0, 100)
+    }
+    pub fn v7m_mode(&mut self) -> &mut [u8] {
+        self.slice_mut(100, 108)
+    }
+    pub fn v7m_uid(&mut self) -> &mut [u8] {
+        self.slice_mut(108, 116)
+    }
+    pub fn v7m_gid(&mut self) -> &mut [u8] {
+        self.slice_mut(116, 124)
+    }
+    pub fn v7m_size(&mut self) -> &mut [u8] {
+        self.slice_mut(124, 136)
+    }
+    pub fn v7m_modTime(&mut self) -> &mut [u8] {
+        self.slice_mut(136, 148)
+    }
+    pub fn v7m_chksum(&mut self) -> &mut [u8] {
+        self.slice_mut(148, 156)
+    }
+    pub fn v7m_typeFlag(&mut self) -> &mut [u8] {
+        self.slice_mut(156, 157)
+    }
+    pub fn v7m_linkName(&mut self) -> &mut [u8] {
+        self.slice_mut(157, 257)
+    }
 
-    pub fn ustarm_magic(&mut self) -> &mut [u8] { self.slice_mut(257, 263) }
-    pub fn ustarm_version(&mut self) -> &mut [u8] { self.slice_mut(263, 265) }
-    pub fn ustarm_userName(&mut self) -> &mut [u8] { self.slice_mut(265, 297) }
-    pub fn ustarm_groupName(&mut self) -> &mut [u8] { self.slice_mut(297, 329) }
-    pub fn ustarm_devMajor(&mut self) -> &mut [u8] { self.slice_mut(329, 337) }
-    pub fn ustarm_devMinor(&mut self) -> &mut [u8] { self.slice_mut(337, 345) }
-    pub fn ustarm_prefix(&mut self) -> &mut [u8] { self.slice_mut(345, 500) }
+    pub fn ustarm_magic(&mut self) -> &mut [u8] {
+        self.slice_mut(257, 263)
+    }
+    pub fn ustarm_version(&mut self) -> &mut [u8] {
+        self.slice_mut(263, 265)
+    }
+    pub fn ustarm_userName(&mut self) -> &mut [u8] {
+        self.slice_mut(265, 297)
+    }
+    pub fn ustarm_groupName(&mut self) -> &mut [u8] {
+        self.slice_mut(297, 329)
+    }
+    pub fn ustarm_devMajor(&mut self) -> &mut [u8] {
+        self.slice_mut(329, 337)
+    }
+    pub fn ustarm_devMinor(&mut self) -> &mut [u8] {
+        self.slice_mut(337, 345)
+    }
+    pub fn ustarm_prefix(&mut self) -> &mut [u8] {
+        self.slice_mut(345, 500)
+    }
 
-    pub fn gnum_accessTime(&mut self) -> &mut [u8] { self.slice_mut(345, 357) }
-    pub fn gnum_changeTime(&mut self) -> &mut [u8] { self.slice_mut(357, 369) }
-    pub fn gnum_magic(&mut self) -> &mut [u8] { self.slice_mut(257, 263) }
-    pub fn gnum_version(&mut self) -> &mut [u8] { self.slice_mut(263, 265) }
+    pub fn gnum_accessTime(&mut self) -> &mut [u8] {
+        self.slice_mut(345, 357)
+    }
+    pub fn gnum_changeTime(&mut self) -> &mut [u8] {
+        self.slice_mut(357, 369)
+    }
+    pub fn gnum_magic(&mut self) -> &mut [u8] {
+        self.slice_mut(257, 263)
+    }
+    pub fn gnum_version(&mut self) -> &mut [u8] {
+        self.slice_mut(263, 265)
+    }
 
     /// `blk.setFormat(f)` — stamp the magic+version for `f` (writer.go).
     pub fn setFormat(&mut self, f: Format) {
@@ -779,8 +884,10 @@ impl Reader {
                     let bytes: &[u8] = &*b;
                     !bytes.is_empty() && bytes[bytes.len() - 1] == 0
                 };
-                if !(nul(&self.blk.v7_size()) && nul(&self.blk.v7_mode())
-                    && nul(&self.blk.v7_uid()) && nul(&self.blk.v7_gid())
+                if !(nul(&self.blk.v7_size())
+                    && nul(&self.blk.v7_mode())
+                    && nul(&self.blk.v7_uid())
+                    && nul(&self.blk.v7_gid())
                     && nul(&self.blk.v7_modTime())
                     && nul(&self.blk.ustar_devMajor())
                     && nul(&self.blk.ustar_devMinor()))
@@ -987,9 +1094,17 @@ fn validPAXRecord(k: string, v: string) -> bool {
 fn parsePAXTime(s: string) -> (Time, error) {
     const maxNanoSecondDigits: int = 9;
     let parts = strings::SplitN(s, ".", 2);
-    let ss = if parts.Len() > 0 { parts[0].clone() } else { string::new() };
+    let ss = if parts.Len() > 0 {
+        parts[0].clone()
+    } else {
+        string::new()
+    };
     let has_dot = parts.Len() > 1;
-    let mut sn = if has_dot { parts[1].clone() } else { string::new() };
+    let mut sn = if has_dot {
+        parts[1].clone()
+    } else {
+        string::new()
+    };
 
     let ss_bytes = ss.as_bytes();
     let (secs, err) = strconv::ParseInt(&ss, 10, 64);
@@ -1345,9 +1460,8 @@ fn formatPAXRecord(k: &string, v: &string) -> (string, error) {
     const padding: int = 3; // ' ', '=', '\n'
     let mut size = (k.Len() as int) + (v.Len() as int) + padding;
     size += strconv::Itoa(size).Len() as int;
-    let build = |sz: int| -> string {
-        strconv::Itoa(sz) + " " + k.clone() + "=" + v.clone() + "\n"
-    };
+    let build =
+        |sz: int| -> string { strconv::Itoa(sz) + " " + k.clone() + "=" + v.clone() + "\n" };
     let mut record = build(size);
     // Final adjustment if the size field grew the record.
     if (record.Len() as int) != size {
@@ -1375,12 +1489,15 @@ impl Header {
         let mut preferPAX = false;
 
         // verifyString — mirror of common.go's closure.
-        let verify_string = |s: &string, size: int, _name: &'static str, paxKey: &'static str,
-                                 format: &mut Format,
-                                 whyNoGNU: &mut string,
-                                 whyNoUSTAR: &mut string,
-                                 whyNoPAX: &mut string,
-                                 paxHdrs: &mut map<string, string>| {
+        let verify_string = |s: &string,
+                             size: int,
+                             _name: &'static str,
+                             paxKey: &'static str,
+                             format: &mut Format,
+                             whyNoGNU: &mut string,
+                             whyNoUSTAR: &mut string,
+                             whyNoPAX: &mut string,
+                             paxHdrs: &mut map<string, string>| {
             let too_long = (s.Len() as int) > size;
             let allow_long_gnu = paxKey == paxPath || paxKey == paxLinkpath;
             if hasNUL(s) || (too_long && !allow_long_gnu) {
@@ -1407,12 +1524,15 @@ impl Header {
             }
         };
 
-        let verify_numeric = |n: i64, size: int, _name: &'static str, paxKey: &'static str,
-                                  format: &mut Format,
-                                  whyNoGNU: &mut string,
-                                  whyNoUSTAR: &mut string,
-                                  whyNoPAX: &mut string,
-                                  paxHdrs: &mut map<string, string>| {
+        let verify_numeric = |n: i64,
+                              size: int,
+                              _name: &'static str,
+                              paxKey: &'static str,
+                              format: &mut Format,
+                              whyNoGNU: &mut string,
+                              whyNoUSTAR: &mut string,
+                              whyNoPAX: &mut string,
+                              paxHdrs: &mut map<string, string>| {
             if !fitsInBase256(size, n) {
                 *whyNoGNU = crate::string("GNU cannot encode numeric");
                 format.mustNotBe(FormatGNU);
@@ -1433,13 +1553,16 @@ impl Header {
             }
         };
 
-        let verify_time = |ts: Time, size: int, _name: &'static str, paxKey: &'static str,
-                               format: &mut Format,
-                               whyNoGNU: &mut string,
-                               whyNoUSTAR: &mut string,
-                               whyNoPAX: &mut string,
-                               preferPAX: &mut bool,
-                               paxHdrs: &mut map<string, string>| {
+        let verify_time = |ts: Time,
+                           size: int,
+                           _name: &'static str,
+                           paxKey: &'static str,
+                           format: &mut Format,
+                           whyNoGNU: &mut string,
+                           whyNoUSTAR: &mut string,
+                           whyNoPAX: &mut string,
+                           preferPAX: &mut bool,
+                           paxHdrs: &mut map<string, string>| {
             if ts.IsZero() {
                 return;
             }
@@ -1471,40 +1594,169 @@ impl Header {
 
         // Check basic fields. Field sizes are fixed per the V7/USTAR/GNU
         // layout (common.go reads them off a zero block).
-        verify_string(&self.Name, 100, "Name", paxPath,
-            &mut format, &mut whyNoGNU, &mut whyNoUSTAR, &mut whyNoPAX, &mut paxHdrs);
-        verify_string(&self.Linkname, 100, "Linkname", paxLinkpath,
-            &mut format, &mut whyNoGNU, &mut whyNoUSTAR, &mut whyNoPAX, &mut paxHdrs);
-        verify_string(&self.Uname, 32, "Uname", paxUname,
-            &mut format, &mut whyNoGNU, &mut whyNoUSTAR, &mut whyNoPAX, &mut paxHdrs);
-        verify_string(&self.Gname, 32, "Gname", paxGname,
-            &mut format, &mut whyNoGNU, &mut whyNoUSTAR, &mut whyNoPAX, &mut paxHdrs);
-        verify_numeric(self.Mode, 8, "Mode", "",
-            &mut format, &mut whyNoGNU, &mut whyNoUSTAR, &mut whyNoPAX, &mut paxHdrs);
-        verify_numeric(self.Uid as i64, 8, "Uid", paxUid,
-            &mut format, &mut whyNoGNU, &mut whyNoUSTAR, &mut whyNoPAX, &mut paxHdrs);
-        verify_numeric(self.Gid as i64, 8, "Gid", paxGid,
-            &mut format, &mut whyNoGNU, &mut whyNoUSTAR, &mut whyNoPAX, &mut paxHdrs);
-        verify_numeric(self.Size, 12, "Size", paxSize,
-            &mut format, &mut whyNoGNU, &mut whyNoUSTAR, &mut whyNoPAX, &mut paxHdrs);
-        verify_numeric(self.Devmajor, 8, "Devmajor", "",
-            &mut format, &mut whyNoGNU, &mut whyNoUSTAR, &mut whyNoPAX, &mut paxHdrs);
-        verify_numeric(self.Devminor, 8, "Devminor", "",
-            &mut format, &mut whyNoGNU, &mut whyNoUSTAR, &mut whyNoPAX, &mut paxHdrs);
-        verify_time(self.ModTime, 12, "ModTime", paxMtime,
-            &mut format, &mut whyNoGNU, &mut whyNoUSTAR, &mut whyNoPAX, &mut preferPAX, &mut paxHdrs);
-        verify_time(self.AccessTime, 12, "AccessTime", paxAtime,
-            &mut format, &mut whyNoGNU, &mut whyNoUSTAR, &mut whyNoPAX, &mut preferPAX, &mut paxHdrs);
-        verify_time(self.ChangeTime, 12, "ChangeTime", paxCtime,
-            &mut format, &mut whyNoGNU, &mut whyNoUSTAR, &mut whyNoPAX, &mut preferPAX, &mut paxHdrs);
+        verify_string(
+            &self.Name,
+            100,
+            "Name",
+            paxPath,
+            &mut format,
+            &mut whyNoGNU,
+            &mut whyNoUSTAR,
+            &mut whyNoPAX,
+            &mut paxHdrs,
+        );
+        verify_string(
+            &self.Linkname,
+            100,
+            "Linkname",
+            paxLinkpath,
+            &mut format,
+            &mut whyNoGNU,
+            &mut whyNoUSTAR,
+            &mut whyNoPAX,
+            &mut paxHdrs,
+        );
+        verify_string(
+            &self.Uname,
+            32,
+            "Uname",
+            paxUname,
+            &mut format,
+            &mut whyNoGNU,
+            &mut whyNoUSTAR,
+            &mut whyNoPAX,
+            &mut paxHdrs,
+        );
+        verify_string(
+            &self.Gname,
+            32,
+            "Gname",
+            paxGname,
+            &mut format,
+            &mut whyNoGNU,
+            &mut whyNoUSTAR,
+            &mut whyNoPAX,
+            &mut paxHdrs,
+        );
+        verify_numeric(
+            self.Mode,
+            8,
+            "Mode",
+            "",
+            &mut format,
+            &mut whyNoGNU,
+            &mut whyNoUSTAR,
+            &mut whyNoPAX,
+            &mut paxHdrs,
+        );
+        verify_numeric(
+            self.Uid as i64,
+            8,
+            "Uid",
+            paxUid,
+            &mut format,
+            &mut whyNoGNU,
+            &mut whyNoUSTAR,
+            &mut whyNoPAX,
+            &mut paxHdrs,
+        );
+        verify_numeric(
+            self.Gid as i64,
+            8,
+            "Gid",
+            paxGid,
+            &mut format,
+            &mut whyNoGNU,
+            &mut whyNoUSTAR,
+            &mut whyNoPAX,
+            &mut paxHdrs,
+        );
+        verify_numeric(
+            self.Size,
+            12,
+            "Size",
+            paxSize,
+            &mut format,
+            &mut whyNoGNU,
+            &mut whyNoUSTAR,
+            &mut whyNoPAX,
+            &mut paxHdrs,
+        );
+        verify_numeric(
+            self.Devmajor,
+            8,
+            "Devmajor",
+            "",
+            &mut format,
+            &mut whyNoGNU,
+            &mut whyNoUSTAR,
+            &mut whyNoPAX,
+            &mut paxHdrs,
+        );
+        verify_numeric(
+            self.Devminor,
+            8,
+            "Devminor",
+            "",
+            &mut format,
+            &mut whyNoGNU,
+            &mut whyNoUSTAR,
+            &mut whyNoPAX,
+            &mut paxHdrs,
+        );
+        verify_time(
+            self.ModTime,
+            12,
+            "ModTime",
+            paxMtime,
+            &mut format,
+            &mut whyNoGNU,
+            &mut whyNoUSTAR,
+            &mut whyNoPAX,
+            &mut preferPAX,
+            &mut paxHdrs,
+        );
+        verify_time(
+            self.AccessTime,
+            12,
+            "AccessTime",
+            paxAtime,
+            &mut format,
+            &mut whyNoGNU,
+            &mut whyNoUSTAR,
+            &mut whyNoPAX,
+            &mut preferPAX,
+            &mut paxHdrs,
+        );
+        verify_time(
+            self.ChangeTime,
+            12,
+            "ChangeTime",
+            paxCtime,
+            &mut format,
+            &mut whyNoGNU,
+            &mut whyNoUSTAR,
+            &mut whyNoPAX,
+            &mut preferPAX,
+            &mut paxHdrs,
+        );
 
         // Check for header-only types.
         match self.Typeflag {
-            t if t == TypeReg || t == TypeChar || t == TypeBlock
-                || t == TypeFifo || t == TypeGNUSparse => {
+            t if t == TypeReg
+                || t == TypeChar
+                || t == TypeBlock
+                || t == TypeFifo
+                || t == TypeGNUSparse =>
+            {
                 if strings::HasSuffix(self.Name.clone(), "/") {
-                    return (FormatUnknown, map::new(),
-                        headerErr(alloc::vec![crate::string("filename may not have trailing slash")]));
+                    return (
+                        FormatUnknown,
+                        map::new(),
+                        headerErr(alloc::vec![crate::string(
+                            "filename may not have trailing slash"
+                        )]),
+                    );
                 }
             }
             t if t == TypeXHeader || t == TypeGNULongName || t == TypeGNULongLink => {
@@ -1513,14 +1765,26 @@ impl Header {
             }
             t if t == TypeXGlobalHeader => {
                 // Only PAXRecords (+ Name/Typeflag/Xattrs/Format) may be set.
-                if self.Linkname.Len() > 0 || self.Size != 0 || self.Mode != 0
-                    || self.Uid != 0 || self.Gid != 0
-                    || self.Uname.Len() > 0 || self.Gname.Len() > 0
-                    || !self.ModTime.IsZero() || !self.AccessTime.IsZero()
+                if self.Linkname.Len() > 0
+                    || self.Size != 0
+                    || self.Mode != 0
+                    || self.Uid != 0
+                    || self.Gid != 0
+                    || self.Uname.Len() > 0
+                    || self.Gname.Len() > 0
+                    || !self.ModTime.IsZero()
+                    || !self.AccessTime.IsZero()
                     || !self.ChangeTime.IsZero()
-                    || self.Devmajor != 0 || self.Devminor != 0 {
-                    return (FormatUnknown, map::new(), headerErr(alloc::vec![
-                        crate::string("only PAXRecords should be set for TypeXGlobalHeader")]));
+                    || self.Devmajor != 0
+                    || self.Devminor != 0
+                {
+                    return (
+                        FormatUnknown,
+                        map::new(),
+                        headerErr(alloc::vec![crate::string(
+                            "only PAXRecords should be set for TypeXGlobalHeader"
+                        )]),
+                    );
                 }
                 whyOnlyPAX = crate::string("only PAX supports TypeXGlobalHeader");
                 format.mayOnlyBe(FormatPAX);
@@ -1528,8 +1792,13 @@ impl Header {
             _ => {}
         }
         if !isHeaderOnlyType(self.Typeflag) && self.Size < 0 {
-            return (FormatUnknown, map::new(), headerErr(alloc::vec![
-                crate::string("negative size on header-only type")]));
+            return (
+                FormatUnknown,
+                map::new(),
+                headerErr(alloc::vec![crate::string(
+                    "negative size on header-only type"
+                )]),
+            );
         }
 
         // Check PAX records — Xattrs.
@@ -1557,8 +1826,11 @@ impl Header {
         }
         for (k, v) in crate::range!(&paxHdrs) {
             if !validPAXRecord(k.clone(), v.clone()) {
-                return (FormatUnknown, map::new(), headerErr(alloc::vec![
-                    crate::string("invalid PAX record")]));
+                return (
+                    FormatUnknown,
+                    map::new(),
+                    headerErr(alloc::vec![crate::string("invalid PAX record")]),
+                );
             }
         }
 
@@ -1576,16 +1848,26 @@ impl Header {
             if self.Format == FormatUSTAR {
                 err = headerErr(alloc::vec![
                     crate::string("Format specifies USTAR"),
-                    whyNoUSTAR, whyOnlyPAX, whyOnlyGNU]);
+                    whyNoUSTAR,
+                    whyOnlyPAX,
+                    whyOnlyGNU
+                ]);
             } else if self.Format == FormatPAX {
                 err = headerErr(alloc::vec![
-                    crate::string("Format specifies PAX"), whyNoPAX, whyOnlyGNU]);
+                    crate::string("Format specifies PAX"),
+                    whyNoPAX,
+                    whyOnlyGNU
+                ]);
             } else if self.Format == FormatGNU {
                 err = headerErr(alloc::vec![
-                    crate::string("Format specifies GNU"), whyNoGNU, whyOnlyPAX]);
+                    crate::string("Format specifies GNU"),
+                    whyNoGNU,
+                    whyOnlyPAX
+                ]);
             } else {
                 err = headerErr(alloc::vec![
-                    whyNoUSTAR, whyNoPAX, whyNoGNU, whyOnlyPAX, whyOnlyGNU]);
+                    whyNoUSTAR, whyNoPAX, whyNoGNU, whyOnlyPAX, whyOnlyGNU
+                ]);
             }
         }
         (format, paxHdrs, err)
@@ -1595,11 +1877,16 @@ impl Header {
 /// `basicKeys[k]` — the PAX keys with built-in Header support.
 fn basicKey(k: &string) -> bool {
     let kb = k.as_bytes();
-    kb == paxPath.as_bytes() || kb == paxLinkpath.as_bytes()
-        || kb == paxSize.as_bytes() || kb == paxUid.as_bytes()
-        || kb == paxGid.as_bytes() || kb == paxUname.as_bytes()
-        || kb == paxGname.as_bytes() || kb == paxMtime.as_bytes()
-        || kb == paxAtime.as_bytes() || kb == paxCtime.as_bytes()
+    kb == paxPath.as_bytes()
+        || kb == paxLinkpath.as_bytes()
+        || kb == paxSize.as_bytes()
+        || kb == paxUid.as_bytes()
+        || kb == paxGid.as_bytes()
+        || kb == paxUname.as_bytes()
+        || kb == paxGname.as_bytes()
+        || kb == paxMtime.as_bytes()
+        || kb == paxAtime.as_bytes()
+        || kb == paxCtime.as_bytes()
 }
 
 // ─── splitUSTARPath (writer.go:454) ──────────────────────────────────
@@ -1643,11 +1930,7 @@ impl regFileWriter {
     /// `Write` against the underlying writer `w`.
     fn write(&mut self, w: &mut dyn crate::io::Writer, b: &[u8]) -> (int, error) {
         let overwrite = (b.len() as i64) > self.nb;
-        let bb: &[u8] = if overwrite {
-            &b[..self.nb as usize]
-        } else {
-            b
-        };
+        let bb: &[u8] = if overwrite { &b[..self.nb as usize] } else { b };
         let mut n: int = 0;
         let mut err: error = nil;
         if !bb.is_empty() {
@@ -1844,16 +2127,14 @@ impl<W: crate::io::Writer> Writer<W> {
         const longName: &str = "././@LongLink";
         if (hdr.Name.Len() as int) > nameSize {
             let data = hdr.Name.clone() + "\x00";
-            let e = self.writeRawFile(
-                &crate::string(longName), &data, TypeGNULongName, FormatGNU);
+            let e = self.writeRawFile(&crate::string(longName), &data, TypeGNULongName, FormatGNU);
             if !e.IsNil() {
                 return e;
             }
         }
         if (hdr.Linkname.Len() as int) > nameSize {
             let data = hdr.Linkname.clone() + "\x00";
-            let e = self.writeRawFile(
-                &crate::string(longName), &data, TypeGNULongLink, FormatGNU);
+            let e = self.writeRawFile(&crate::string(longName), &data, TypeGNULongLink, FormatGNU);
             if !e.IsNil() {
                 return e;
             }
@@ -1936,8 +2217,7 @@ impl<W: crate::io::Writer> Writer<W> {
     }
 
     /// `writeRawFile` — writes a minimal file (used for PAX/GNU meta).
-    fn writeRawFile(&mut self, name: &string, data: &string, flag: byte,
-                    format: Format) -> error {
+    fn writeRawFile(&mut self, name: &string, data: &string, flag: byte, format: Format) -> error {
         self.blk.reset();
 
         // Best effort for the filename.
@@ -2166,9 +2446,15 @@ pub fn FileInfoHeader(
     } else if (fm & fs::ModeNamedPipe) != fs::FileMode(0) {
         h.Typeflag = TypeFifo;
     } else if (fm & fs::ModeSocket) != fs::FileMode(0) {
-        return (Header::new(), crate::errors::New("archive/tar: sockets not supported"));
+        return (
+            Header::new(),
+            crate::errors::New("archive/tar: sockets not supported"),
+        );
     } else {
-        return (Header::new(), crate::errors::New("archive/tar: unknown file mode"));
+        return (
+            Header::new(),
+            crate::errors::New("archive/tar: unknown file mode"),
+        );
     }
     if (fm & fs::ModeSetuid) != fs::FileMode(0) {
         h.Mode |= c_ISUID;

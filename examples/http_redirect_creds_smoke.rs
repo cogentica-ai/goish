@@ -159,13 +159,18 @@ fn run() {
             finish();
         }
         let mut req = req;
-        req.Header.Set(string("Authorization"), string("Bearer SECRET"));
+        req.Header
+            .Set(string("Authorization"), string("Bearer SECRET"));
         req.Header.Set(string("Cookie"), string("session=SECRET"));
         req.Header.Set(string("X-Harmless"), string("keep-me"));
         let (_resp, derr) = client.Do(&req);
         let g = seen.Lock();
         if !derr.IsNil() || g.hits == 0 {
-            fail(fmt::Sprintf!("cross redirect not followed: %v hits=%d", derr, g.hits));
+            fail(fmt::Sprintf!(
+                "cross redirect not followed: %v hits=%d",
+                derr,
+                g.hits
+            ));
         } else if g.auth.Len() == 0 && g.cookie.Len() == 0 {
             pass("cross-host redirect strips Authorization and Cookie");
         } else {
@@ -188,7 +193,8 @@ fn run() {
         let url = fmt::Sprintf!("http://127.0.0.1:%d/same", oport as i64);
         let (req, _) = http::NewRequest(string("GET"), url, goish::slice::new());
         let mut req = req;
-        req.Header.Set(string("Authorization"), string("Bearer SECRET"));
+        req.Header
+            .Set(string("Authorization"), string("Bearer SECRET"));
         let (_resp, derr) = client.Do(&req);
         let g = seen.Lock();
         if !derr.IsNil() || g.hits == 0 {
@@ -209,7 +215,8 @@ fn run() {
         let url = fmt::Sprintf!("http://127.0.0.1:%d/cross", oport as i64);
         let (req, _) = http::NewRequest(string("GET"), url, goish::slice::new());
         let mut req = req;
-        req.Header.Set(string("Authorization"), string("Bearer SECRET"));
+        req.Header
+            .Set(string("Authorization"), string("Bearer SECRET"));
         req.Header.Set(string("X-Harmless"), string("keep-me"));
         let (_resp, _) = client.Do(&req);
         // The target only records auth/cookie/referer/method, so assert
@@ -218,7 +225,11 @@ fn run() {
         if g.hits > 0 && g.referer.Len() > 0 {
             pass("non-sensitive headers (Referer) still reach a cross-host hop");
         } else {
-            fail(fmt::Sprintf!("referer missing: %q hits=%d", g.referer.clone(), g.hits));
+            fail(fmt::Sprintf!(
+                "referer missing: %q hits=%d",
+                g.referer.clone(),
+                g.hits
+            ));
         }
     }
 

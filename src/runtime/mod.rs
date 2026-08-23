@@ -21,8 +21,8 @@ pub mod flags;
 pub mod heap;
 pub mod lockfree_ring;
 pub mod mcentral;
-pub mod mheap;
 mod mem;
+pub mod mheap;
 pub mod netpoll;
 pub mod note;
 pub mod pkginit;
@@ -33,8 +33,8 @@ pub mod rt_section;
 pub mod sched;
 pub mod segv;
 pub mod signal;
-pub mod symbolize;
 pub mod spin;
+pub mod symbolize;
 pub mod sysmon;
 pub mod trace;
 pub use debug::{NumCPU, NumGoroutine, GOMAXPROCS};
@@ -182,7 +182,6 @@ pub fn Goexit() -> ! {
     }
     panic!("runtime::Goexit called outside a goroutine");
 }
-
 
 // go: sdk 1.25.5 runtime/mstats.go:55-335 MemStats
 /// Go: "A MemStats records statistics about the memory allocator."
@@ -371,7 +370,12 @@ fn collect_frames(out: &mut [u64; segv::MAX_FRAMES]) -> usize {
 /// `ok == true`, an empty `file`, and `line == 0`.
 pub fn Caller(
     skip: crate::types::int,
-) -> (crate::types::uintptr, crate::gostring::string, crate::types::int, bool) {
+) -> (
+    crate::types::uintptr,
+    crate::gostring::string,
+    crate::types::int,
+    bool,
+) {
     let empty = crate::gostring::string::from_static("");
     if skip < 0 {
         return (0, empty, 0, false);
@@ -531,7 +535,10 @@ pub struct Frames {
 /// and prepares to return function/file/line information. Do not change
 /// the slice until you are done with the [Frames]."
 pub fn CallersFrames(callers: crate::goslice::slice<crate::types::uintptr>) -> Frames {
-    return Frames { callers: callers, idx: 0 };
+    return Frames {
+        callers: callers,
+        idx: 0,
+    };
 }
 
 impl Frames {
@@ -619,7 +626,9 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // Parse GOISH_* env vars before any goroutine code runs. The kernel
     // ELF stack layout puts envp right after argv's null terminator,
     // so we recover envp = argv + argc + 1 here.
-    unsafe { flags::init_from_argv(argc, argv); }
+    unsafe {
+        flags::init_from_argv(argc, argv);
+    }
 
     // Plant the main M's TLS slot. After this, `current_m()` reads
     // `&MAIN_M.m` via `mov %fs:0, _` instead of the (legacy β1)
@@ -663,7 +672,7 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // Must follow the allocator coming online (Ps are leaked Box<P>)
     // and precede `bootstrap_workers` (each worker `acquirep`s
     // P[id] in its `mstart`).
-    let nprocs = sched::num_cpus();
+    let nprocs = sched::startup_procs();
     sched::bootstrap_ps(nprocs);
     if let Some(p0) = sched::p_at(0) {
         sched::acquirep(p0);
@@ -673,7 +682,7 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
     // already dispatching by the time `__goish_main` runs. Each
     // worker thread has its own MStorage with a fresh fs base; the
     // main M shares the global SCHED runq with them.
-    sched::bootstrap_workers();
+    sched::bootstrap_workers(nprocs);
 
     // Spawn the sysmon thread (M18a). Owns the global timer heap;
     // wakes timer-parked goroutines via `time::Sleep`. Must come
@@ -850,7 +859,10 @@ fn on_panic(info: &core::panic::PanicInfo) -> ! {
                 Ok(())
             }
         }
-        let mut buf = StderrBuf { buf: [0u8; 1024], len: 0 };
+        let mut buf = StderrBuf {
+            buf: [0u8; 1024],
+            len: 0,
+        };
         const PRE: &[u8] = b"  msg: ";
         syscall::Write(syscall::STDERR, PRE.as_ptr(), PRE.len());
         let _ = write!(&mut buf, "{}", info.message());
@@ -861,7 +873,10 @@ fn on_panic(info: &core::panic::PanicInfo) -> ! {
         // Dump SIGURG-handler counters + current m.locks at panic.
         // Helps separate "async-preempt was the trigger" from
         // "something else panicked" for race-class bugs.
-        let mut buf2 = StderrBuf { buf: [0u8; 1024], len: 0 };
+        let mut buf2 = StderrBuf {
+            buf: [0u8; 1024],
+            len: 0,
+        };
         let inv = crate::runtime::preempt::invocations();
         let inj = crate::runtime::preempt::injections();
         let (sk_locks, sk_tramp, sk_parking, sk_no_curg, sk_not_running, sk_sp) =
@@ -878,7 +893,10 @@ fn on_panic(info: &core::panic::PanicInfo) -> ! {
         let mut pcs = [0u64; 8];
         let n = crate::runtime::preempt::snapshot_injection_pcs(&mut pcs);
         if n > 0 {
-            let mut buf3 = StderrBuf { buf: [0u8; 1024], len: 0 };
+            let mut buf3 = StderrBuf {
+                buf: [0u8; 1024],
+                len: 0,
+            };
             let _ = write!(&mut buf3, "  inject_pcs(newest-first):");
             for k in 0..n {
                 let _ = write!(&mut buf3, " 0x{:x}", pcs[k]);
@@ -912,7 +930,8 @@ fn on_panic(info: &core::panic::PanicInfo) -> ! {
                 // `recover!()` inside `defer!` bodies can distinguish
                 // the panic path from normal scope exit. Cleared by
                 // `on_g_panic_aborted` after the gogo lands.
-                g.panicking.store(true, core::sync::atomic::Ordering::Release);
+                g.panicking
+                    .store(true, core::sync::atomic::Ordering::Release);
                 // Capture the panic value (rendered from `PanicInfo`)
                 // for `recover!()` to retrieve. We render through a
                 // bounded buffer to avoid allocator pressure during
@@ -935,7 +954,10 @@ fn on_panic(info: &core::panic::PanicInfo) -> ! {
                             Ok(())
                         }
                     }
-                    let mut cap_buf = CaptureBuf { buf: [0u8; 1024], len: 0 };
+                    let mut cap_buf = CaptureBuf {
+                        buf: [0u8; 1024],
+                        len: 0,
+                    };
                     let _ = write!(&mut cap_buf, "{}", info.message());
                     let s = core::str::from_utf8(&cap_buf.buf[..cap_buf.len]).unwrap_or("");
                     // Build an owned goish::string from the borrowed

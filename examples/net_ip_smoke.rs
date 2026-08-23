@@ -11,7 +11,7 @@ extern crate goish;
 use goish::fmt;
 use goish::net;
 use goish::string;
-use goish::{syscall};
+use goish::syscall;
 
 #[goish::main]
 fn main() {
@@ -55,14 +55,14 @@ fn main() {
     {
         let cases = [
             "",
-            "256.0.0.0",         // octet > 255
-            "1.2.3",             // too few octets
-            "1.2.3.4.5",         // too many
-            "1.2.3.4 ",          // trailing space
-            "1.2.3.04",          // leading zero in non-zero octet
-            "1.2.3.x",           // non-digit
-            "::1",               // IPv6 not supported in slim
-            "1234.0.0.0",        // 4 digits in an octet
+            "256.0.0.0",  // octet > 255
+            "1.2.3",      // too few octets
+            "1.2.3.4.5",  // too many
+            "1.2.3.4 ",   // trailing space
+            "1.2.3.04",   // leading zero in non-zero octet
+            "1.2.3.x",    // non-digit
+            "::1",        // IPv6 not supported in slim
+            "1234.0.0.0", // 4 digits in an octet
         ];
         let mut all_nil = true;
         let mut i = 0;

@@ -330,12 +330,7 @@ fn test_10_decrypt_go_ciphertext() {
 fn test_11_sign_matches_go() {
     let mut rng = RandReader;
     let key = test_key();
-    let (sig, err) = rsa::SignPKCS1v15(
-        &mut rng,
-        &key,
-        goish::crypto::SHA256,
-        sha256_digest(),
-    );
+    let (sig, err) = rsa::SignPKCS1v15(&mut rng, &key, goish::crypto::SHA256, sha256_digest());
     check(
         11,
         b"SignPKCS1v15 == Go signature ",

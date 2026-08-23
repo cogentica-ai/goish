@@ -24,7 +24,7 @@
 
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
-use crate::runtime::preempt::{REG_RBP, REG_RIP, REG_RSP, UcontextT};
+use crate::runtime::preempt::{UcontextT, REG_RBP, REG_RIP, REG_RSP};
 use crate::runtime::sched::G;
 use crate::syscall;
 
@@ -56,8 +56,7 @@ const SLOT_INIT: SpawnSlot = SpawnSlot {
     _pad: 0,
 };
 
-static SPAWN_TABLE: [SpawnSlot; SPAWN_TABLE_SIZE] =
-    [SLOT_INIT; SPAWN_TABLE_SIZE];
+static SPAWN_TABLE: [SpawnSlot; SPAWN_TABLE_SIZE] = [SLOT_INIT; SPAWN_TABLE_SIZE];
 
 #[inline]
 fn hash_g(g_addr: usize) -> usize {
@@ -141,10 +140,7 @@ pub(crate) fn lookup(g: *mut G) -> Option<(&'static str, u32)> {
             // `file!()` — the underlying bytes live in the binary's
             // rodata section for the program's lifetime.
             let s = unsafe {
-                core::str::from_utf8_unchecked(core::slice::from_raw_parts(
-                    ptr as *const u8,
-                    len,
-                ))
+                core::str::from_utf8_unchecked(core::slice::from_raw_parts(ptr as *const u8, len))
             };
             return Some((s, line));
         }
@@ -298,11 +294,7 @@ pub(crate) fn walk_frames(
         // Each frame needs 16 bytes ([rbp+0] saved RBP, [rbp+8] PC).
         // Reject frames that would read past the stack top, are below
         // the stack bottom, or aren't 8-byte aligned.
-        if rbp == 0
-            || rbp < stack_lo
-            || rbp + 16 > stack_hi
-            || (rbp & 0x7) != 0
-        {
+        if rbp == 0 || rbp < stack_lo || rbp + 16 > stack_hi || (rbp & 0x7) != 0 {
             break;
         }
         let saved_rbp = unsafe { (rbp as *const u64).read() };
@@ -325,11 +317,7 @@ pub(crate) fn walk_frames(
 
 // ─── Handler ──────────────────────────────────────────────────────────
 
-extern "C" fn goish_segv_sigtramp(
-    _sig: i32,
-    info: *const u8,
-    ctx: *mut UcontextT,
-) {
+extern "C" fn goish_segv_sigtramp(_sig: i32, info: *const u8, ctx: *mut UcontextT) {
     // `siginfo_t` for SIGSEGV (Linux x86_64): si_signo (4) + si_errno
     // (4) + si_code (4) + _pad (4) + 8-byte-aligned _sifields union;
     // for `_sigfault` the first member is `void *si_addr` at offset
@@ -339,11 +327,7 @@ extern "C" fn goish_segv_sigtramp(
     // Lock-free curg read via the per-M storage. The bootstrap thread
     // (and very early init) has no `curg` — chain to default so the
     // user gets the genuine SEGV behavior.
-    let g_opt = unsafe {
-        crate::runtime::sched::current_m()
-            .data_unchecked()
-            .curg
-    };
+    let g_opt = unsafe { crate::runtime::sched::current_m().data_unchecked().curg };
     let g_ptr = match g_opt {
         Some(g) => g,
         None => return chain_to_default(),
@@ -444,7 +428,9 @@ extern "C" fn goish_segv_sigtramp(
     write_str(b"\nremedy:\n");
     write_str(b"\tbump the spawn-site stack:    go!(stack(4 * MB), || ...)\n");
     write_str(b"\tor raise all bare-go stacks:  runtime::debug::SetMaxStack(64 * MB)\n");
-    write_str(b"\tor wrap the recursion site:   runtime::sched::maybe_grow(64 * KB, 4 * MB, || ...)\n");
+    write_str(
+        b"\tor wrap the recursion site:   runtime::sched::maybe_grow(64 * KB, 4 * MB, || ...)\n",
+    );
 
     syscall::Exit(2);
 }
@@ -514,11 +500,7 @@ fn chain_to_default() {
         sa_mask: 0,
     };
     unsafe {
-        let _ = syscall::RtSigaction(
-            syscall::SIGSEGV,
-            &sa as *const _,
-            core::ptr::null_mut(),
-        );
+        let _ = syscall::RtSigaction(syscall::SIGSEGV, &sa as *const _, core::ptr::null_mut());
     }
 }
 
@@ -527,18 +509,12 @@ fn chain_to_default() {
 pub fn install() {
     let sa = syscall::Sigaction {
         sa_handler: goish_segv_sigtramp as *const () as usize,
-        sa_flags: syscall::SA_SIGINFO
-            | syscall::SA_RESTORER
-            | syscall::SA_ONSTACK,
+        sa_flags: syscall::SA_SIGINFO | syscall::SA_RESTORER | syscall::SA_ONSTACK,
         sa_restorer: syscall::SigreturnTrampoline as *const () as usize,
         sa_mask: 0,
     };
     unsafe {
-        let r = syscall::RtSigaction(
-            syscall::SIGSEGV,
-            &sa as *const _,
-            core::ptr::null_mut(),
-        );
+        let r = syscall::RtSigaction(syscall::SIGSEGV, &sa as *const _, core::ptr::null_mut());
         if r != 0 {
             const MSG: &[u8] = b"goish: segv: rt_sigaction(SIGSEGV) failed\n";
             syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());

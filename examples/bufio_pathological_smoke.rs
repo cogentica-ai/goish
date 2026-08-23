@@ -26,8 +26,8 @@ use goish::errors;
 use goish::fmt;
 use goish::io;
 use goish::net::http;
-use goish::{int, nil, slice, string, syscall};
 use goish::types::byte;
+use goish::{int, nil, slice, string, syscall};
 
 // ─── MockReader implementations ─────────────────────────────────────────────
 
@@ -38,7 +38,10 @@ struct OneByte {
 }
 impl OneByte {
     fn new(s: &[u8]) -> Self {
-        Self { data: s.to_vec(), pos: 0 }
+        Self {
+            data: s.to_vec(),
+            pos: 0,
+        }
     }
 }
 impl io::Reader for OneByte {
@@ -134,7 +137,11 @@ struct EarlyEOFReader {
 }
 impl EarlyEOFReader {
     fn new(s: &[u8], eof_at: usize) -> Self {
-        Self { data: s.to_vec(), pos: 0, eof_at }
+        Self {
+            data: s.to_vec(),
+            pos: 0,
+            eof_at,
+        }
     }
 }
 impl io::Reader for EarlyEOFReader {
@@ -210,12 +217,15 @@ fn s2_variable_chunks() -> bool {
         return false;
     }
     if line.Len() != total_len as int {
-        fail_s("S2", fmt::Sprintf!("line.Len()=%d, want %d", line.Len(), total_len as i64));
+        fail_s(
+            "S2",
+            fmt::Sprintf!("line.Len()=%d, want %d", line.Len(), total_len as i64),
+        );
         return false;
     }
     // Last two bytes must be \r\n
     let lb = line.as_bytes();
-    if lb[lb.len()-2] != b'\r' || lb[lb.len()-1] != b'\n' {
+    if lb[lb.len() - 2] != b'\r' || lb[lb.len() - 1] != b'\n' {
         fail("S2", "line does not end with CRLF");
         return false;
     }
@@ -296,7 +306,10 @@ fn s5_readresponse_chunked_one_byte() -> bool {
         return false;
     }
     if resp.StatusCode != 200 {
-        fail_s("S5", fmt::Sprintf!("StatusCode=%d, want 200", resp.StatusCode));
+        fail_s(
+            "S5",
+            fmt::Sprintf!("StatusCode=%d, want 200", resp.StatusCode),
+        );
         return false;
     }
     let (body_bytes, _) = io::ReadAll(&mut resp.Body);
@@ -329,19 +342,28 @@ fn s6_readresponse_content_length_mixed_chunks() -> bool {
         return false;
     }
     if resp.StatusCode != 200 {
-        fail_s("S6", fmt::Sprintf!("StatusCode=%d, want 200", resp.StatusCode));
+        fail_s(
+            "S6",
+            fmt::Sprintf!("StatusCode=%d, want 200", resp.StatusCode),
+        );
         return false;
     }
     let (body, _) = io::ReadAll(&mut resp.Body);
     let _ = io::Closer::Close(&mut resp.Body);
     if body.Len() != body_len as int {
-        fail_s("S6", fmt::Sprintf!("body.Len()=%d, want %d", body.Len(), body_len as i64));
+        fail_s(
+            "S6",
+            fmt::Sprintf!("body.Len()=%d, want %d", body.Len(), body_len as i64),
+        );
         return false;
     }
     // All bytes should be 'z'.
     for i in 0..body.Len() {
         if body[i] != b'z' {
-            fail_s("S6", fmt::Sprintf!("body[%d]=%d, want %d", i, body[i] as i64, b'z' as i64));
+            fail_s(
+                "S6",
+                fmt::Sprintf!("body[%d]=%d, want %d", i, body[i] as i64, b'z' as i64),
+            );
             return false;
         }
     }
@@ -377,7 +399,10 @@ fn s7_drain_to_eof_zero_bytes() -> bool {
         return false;
     }
     if resp.StatusCode != 200 {
-        fail_s("S7", fmt::Sprintf!("StatusCode=%d, want 200", resp.StatusCode));
+        fail_s(
+            "S7",
+            fmt::Sprintf!("StatusCode=%d, want 200", resp.StatusCode),
+        );
         return false;
     }
     let (got_body, _) = io::ReadAll(&mut resp.Body);
@@ -385,7 +410,14 @@ fn s7_drain_to_eof_zero_bytes() -> bool {
     let got_len = got_body.Len();
     let want_len = body.len() as int;
     if got_len != want_len {
-        fail_s("S7", fmt::Sprintf!("body.Len()=%d, want %d (drain_to_eof stopped early on 0-byte read?)", got_len, want_len));
+        fail_s(
+            "S7",
+            fmt::Sprintf!(
+                "body.Len()=%d, want %d (drain_to_eof stopped early on 0-byte read?)",
+                got_len,
+                want_len
+            ),
+        );
         return false;
     }
     pass("S7: drain_to_eof handles 0-byte returns correctly");
@@ -412,9 +444,15 @@ fn main() {
     let total = 7usize;
 
     fmt::Println!(fmt::Sprintf!(""));
-    fmt::Println!(fmt::Sprintf!("=== Result: %d/%d passed ===", passed as i64, total as i64)); // goishlint:ignore GOISH005
+    fmt::Println!(fmt::Sprintf!(
+        "=== Result: %d/%d passed ===",
+        passed as i64,
+        total as i64
+    )); // goishlint:ignore GOISH005
     if passed == total {
-        fmt::Println!("VERDICT: PASS — goish bufio + http handle all pathological splits correctly.");
+        fmt::Println!(
+            "VERDICT: PASS — goish bufio + http handle all pathological splits correctly."
+        );
         syscall::Exit(0);
     } else {
         fmt::Println!("VERDICT: FAIL — some pathological splits are not handled.");

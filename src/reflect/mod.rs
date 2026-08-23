@@ -393,11 +393,7 @@ impl crate::gomap::GoHash for Type {
 impl Type {
     /// Internal constructor for `#[goish::reflect]` and built-in impls.
     #[doc(hidden)]
-    pub const fn __new(
-        kind: Kind,
-        name: &'static str,
-        fields: &'static [StructField],
-    ) -> Self {
+    pub const fn __new(kind: Kind, name: &'static str, fields: &'static [StructField]) -> Self {
         Self {
             kind,
             name,
@@ -410,13 +406,19 @@ impl Type {
     /// Builder hook for slice/pointer/map element types.
     #[doc(hidden)]
     pub const fn __with_elem(self, e: fn() -> Type) -> Self {
-        Self { elem: Some(e), ..self }
+        Self {
+            elem: Some(e),
+            ..self
+        }
     }
 
     /// Builder hook for map key types.
     #[doc(hidden)]
     pub const fn __with_key(self, k: fn() -> Type) -> Self {
-        Self { key: Some(k), ..self }
+        Self {
+            key: Some(k),
+            ..self
+        }
     }
 
     // go: none — goish-only: the read side of [`Type::__with_elem`].
@@ -561,7 +563,8 @@ impl Type {
                 self.Elem().AssignableTo(&u.Elem())
             }
             Kind::Map => {
-                if self.elem.is_none() || u.elem.is_none() || self.key.is_none() || u.key.is_none() {
+                if self.elem.is_none() || u.elem.is_none() || self.key.is_none() || u.key.is_none()
+                {
                     return false;
                 }
                 self.Key().AssignableTo(&u.Key()) && self.Elem().AssignableTo(&u.Elem())
@@ -801,22 +804,34 @@ impl PartialEq for Value {
             (Value::Float64(a), Value::Float64(b)) => a == b,
             (Value::String(a), Value::String(b)) => a == b,
             (
-                Value::Slice { elem_type: ea, items: ia },
-                Value::Slice { elem_type: eb, items: ib },
+                Value::Slice {
+                    elem_type: ea,
+                    items: ia,
+                },
+                Value::Slice {
+                    elem_type: eb,
+                    items: ib,
+                },
             ) => ea() == eb() && ia == ib,
             (
-                Value::Map { key_type: ka, value_type: va, entries: ea },
-                Value::Map { key_type: kb, value_type: vb, entries: eb },
+                Value::Map {
+                    key_type: ka,
+                    value_type: va,
+                    entries: ea,
+                },
+                Value::Map {
+                    key_type: kb,
+                    value_type: vb,
+                    entries: eb,
+                },
             ) => ka() == kb() && va() == vb() && ea == eb,
-            (
-                Value::Struct { ty: ta, fields: fa },
-                Value::Struct { ty: tb, fields: fb },
-            ) => ta == tb && fa == fb,
+            (Value::Struct { ty: ta, fields: fa }, Value::Struct { ty: tb, fields: fb }) => {
+                ta == tb && fa == fb
+            }
             (Value::Pointer(a), Value::Pointer(b)) => a == b,
-            (
-                Value::Named { ty: ta, inner: ia },
-                Value::Named { ty: tb, inner: ib },
-            ) => ta == tb && ia == ib,
+            (Value::Named { ty: ta, inner: ia }, Value::Named { ty: tb, inner: ib }) => {
+                ta == tb && ia == ib
+            }
             _ => false,
         };
     }
@@ -856,7 +871,11 @@ impl Value {
             Value::Slice { elem_type, .. } => {
                 Type::__new(Kind::Slice, "", &[]).__with_elem(*elem_type)
             }
-            Value::Map { key_type, value_type, .. } => Type::__new(Kind::Map, "", &[])
+            Value::Map {
+                key_type,
+                value_type,
+                ..
+            } => Type::__new(Kind::Map, "", &[])
                 .__with_key(*key_type)
                 .__with_elem(*value_type),
             _ => Type::__new(self.Kind(), self.Kind().__static_name(), &[]),
@@ -1748,11 +1767,7 @@ pub fn SetField<T: Settable>(target: &mut T, idx: int, v: Value) -> crate::error
 /// `reflect.SetFieldByName(&mut t, name, v)` — look up the field by
 /// declared name and write `v` into it. Returns an error if the field
 /// is not found.
-pub fn SetFieldByName<T: Settable + Reflect>(
-    target: &mut T,
-    name: &str,
-    v: Value,
-) -> crate::error {
+pub fn SetFieldByName<T: Settable + Reflect>(target: &mut T, name: &str, v: Value) -> crate::error {
     let ty = T::__reflect_type();
     for i in 0..ty.NumField() {
         if ty.Field(i).Name.as_bytes() == name.as_bytes() {
@@ -1776,12 +1791,18 @@ pub fn Indirect(v: Value) -> Value {
 /// receives an independent copy).
 pub fn Append(s: Value, items: &[Value]) -> Value {
     match s {
-        Value::Slice { elem_type, items: mut existing } => {
+        Value::Slice {
+            elem_type,
+            items: mut existing,
+        } => {
             existing.reserve(items.len());
             for x in items {
                 existing.push(x.clone());
             }
-            Value::Slice { elem_type, items: existing }
+            Value::Slice {
+                elem_type,
+                items: existing,
+            }
         }
         _ => panic!("reflect.Append: not a slice"),
     }
@@ -1882,10 +1903,7 @@ fn deep_value_equal(a: &Value, b: &Value) -> bool {
             }
             true
         }
-        (
-            Value::Struct { fields: af, ty: ta },
-            Value::Struct { fields: bf, ty: tb },
-        ) => {
+        (Value::Struct { fields: af, ty: ta }, Value::Struct { fields: bf, ty: tb }) => {
             // Distinct named struct types are never deeply equal — even
             // if their field shapes coincide.
             if ta.Name() != tb.Name() {
@@ -1921,7 +1939,9 @@ macro_rules! impl_primitive_reflect {
 }
 
 // Identity conversion (no-op).
-fn id<T>(x: T) -> T { x }
+fn id<T>(x: T) -> T {
+    x
+}
 
 impl_primitive_reflect!(bool, Kind::Bool, "bool", Bool, id);
 impl_primitive_reflect!(int, Kind::Int, "int", Int, id);

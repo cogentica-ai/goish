@@ -113,15 +113,9 @@ impl<T> ListInner<T> {
             },
         );
         // e.prev.next = e
-        self.nodes
-            .get_mut(&at)
-            .expect("at exists")
-            .next = new_id;
+        self.nodes.get_mut(&at).expect("at exists").next = new_id;
         // e.next.prev = e
-        self.nodes
-            .get_mut(&at_next)
-            .expect("at_next exists")
-            .prev = new_id;
+        self.nodes.get_mut(&at_next).expect("at_next exists").prev = new_id;
         self.len += 1;
         new_id
     }
@@ -170,14 +164,8 @@ impl<T> ListInner<T> {
             let n = self.nodes.get(&e).expect("e exists");
             (n.prev, n.next)
         };
-        self.nodes
-            .get_mut(&e_prev)
-            .expect("ep")
-            .next = e_next;
-        self.nodes
-            .get_mut(&e_next)
-            .expect("en")
-            .prev = e_prev;
+        self.nodes.get_mut(&e_prev).expect("ep").next = e_next;
+        self.nodes.get_mut(&e_next).expect("en").prev = e_prev;
         // Splice in after at.
         let at_next = self.nodes.get(&at).expect("at exists").next;
         {

@@ -318,8 +318,7 @@ impl PageAlloc {
             }
 
             if size >= npages {
-                let base_addr =
-                    self.arena_base + (i << LEVEL_SHIFT[l]) + (base << PAGE_SHIFT);
+                let base_addr = self.arena_base + (i << LEVEL_SHIFT[l]) + (base << PAGE_SHIFT);
                 return base_addr;
             }
 

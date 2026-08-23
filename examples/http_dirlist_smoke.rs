@@ -40,9 +40,21 @@ fn main() {
     let root = string("/tmp/goish_dirlist_smoke");
     let _ = os::RemoveAll(root.clone());
     let _ = os::MkdirAll(root.clone() + "/sub", 0o755);
-    let _ = os::WriteFile(root.clone() + "/hello.txt", convert::bytes(string("hi")), 0o644);
-    let _ = os::WriteFile(root.clone() + "/a?b#c.txt", convert::bytes(string("x")), 0o644);
-    let _ = os::WriteFile(root.clone() + "/<script>.txt", convert::bytes(string("x")), 0o644);
+    let _ = os::WriteFile(
+        root.clone() + "/hello.txt",
+        convert::bytes(string("hi")),
+        0o644,
+    );
+    let _ = os::WriteFile(
+        root.clone() + "/a?b#c.txt",
+        convert::bytes(string("x")),
+        0o644,
+    );
+    let _ = os::WriteFile(
+        root.clone() + "/<script>.txt",
+        convert::bytes(string("x")),
+        0o644,
+    );
 
     let want = "<!doctype html>\n\
                 <meta name=\"viewport\" content=\"width=device-width\">\n\

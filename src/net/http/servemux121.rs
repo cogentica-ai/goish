@@ -135,10 +135,7 @@ impl serveMux121 {
     /// Go: "Formerly ServeMux.HandleFunc."
     pub fn handleFunc<F>(&self, pattern: string, handler: F)
     where
-        F: Fn(&(dyn ResponseWriter + Send + Sync + 'static), &Request)
-            + Send
-            + Sync
-            + 'static,
+        F: Fn(&(dyn ResponseWriter + Send + Sync + 'static), &Request) + Send + Sync + 'static,
     {
         self.handle(pattern, Arc::new(HandlerFunc(handler)));
         return;
@@ -154,11 +151,7 @@ impl serveMux121 {
     pub fn findHandler(&self, r: &Request) -> (Arc<dyn Handler>, string) {
         // Go: "CONNECT requests are not canonicalized."
         if r.Method == "CONNECT" {
-            let (u, ok) = self.redirectToPathSlash(
-                r.URL.Host.clone(),
-                r.URL.Path.clone(),
-                &r.URL,
-            );
+            let (u, ok) = self.redirectToPathSlash(r.URL.Host.clone(), r.URL.Path.clone(), &r.URL);
             if ok {
                 return (
                     RedirectHandler(u.String(), StatusMovedPermanently),
@@ -188,10 +181,7 @@ impl serveMux121 {
             let mut u = URL::empty();
             u.Path = path;
             u.RawQuery = r.URL.RawQuery.clone();
-            return (
-                RedirectHandler(u.String(), StatusMovedPermanently),
-                pattern,
-            );
+            return (RedirectHandler(u.String(), StatusMovedPermanently), pattern);
         }
 
         return self.handler(host, r.URL.Path.clone());
@@ -278,7 +268,10 @@ fn __match(st: &mux121State, path: string) -> Option<(Arc<dyn Handler>, string)>
 // already-locked state so both the method and redirectToPathSlash can
 // call it without re-entering a non-reentrant Mutex.
 fn __shouldRedirectRLocked(st: &mux121State, host: string, path: string) -> bool {
-    let p = [path.clone(), crate::fmt::Sprintf!("%s%s", host, path.clone())];
+    let p = [
+        path.clone(),
+        crate::fmt::Sprintf!("%s%s", host, path.clone()),
+    ];
 
     for c in p.iter() {
         let (_, exist) = st.m.Get(c.clone());
@@ -320,4 +313,3 @@ pub fn appendSorted(es: slice<muxEntry>, e: muxEntry) -> slice<muxEntry> {
     v.insert(crate::builtin::__make_size(i), e);
     return slice::<muxEntry>::__from_vec(v);
 }
-

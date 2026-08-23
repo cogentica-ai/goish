@@ -208,13 +208,17 @@ fn main() {
     // one-byte length prefix — only the bound is exercised here.
     check(
         "context length bound is 255",
-        fmt::Sprintf!("%d", tls13::ExpandLabel(
-            sha256::NewHash,
-            b("s"),
-            "l",
-            slice::__from_vec(alloc::vec![0u8; 255]),
-            4,
-        ).Len()),
+        fmt::Sprintf!(
+            "%d",
+            tls13::ExpandLabel(
+                sha256::NewHash,
+                b("s"),
+                "l",
+                slice::__from_vec(alloc::vec![0u8; 255]),
+                4,
+            )
+            .Len()
+        ),
         "4",
     );
 

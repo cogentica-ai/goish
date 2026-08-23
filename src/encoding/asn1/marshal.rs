@@ -37,12 +37,12 @@
 extern crate alloc;
 
 use super::{isNumeric, isPrintable, BitString, StructuralError, TagAndLength};
-use crate::math::big::Int;
 use crate::errors::{error, nil};
-use crate::gostring::string;
 use crate::goslice::slice;
-use crate::types::byte;
+use crate::gostring::string;
 use crate::int;
+use crate::math::big::Int;
+use crate::types::byte;
 use crate::{byte as tobyte, int64, uint};
 use alloc::vec::Vec;
 
@@ -509,10 +509,7 @@ pub struct taggedEncoder {
 impl taggedEncoder {
     // go: none — goish idiom: Go builds it as a struct literal from
     // inside the package; the fields are private here.
-    pub fn New(
-        tag: alloc::boxed::Box<dyn encoder>,
-        body: alloc::boxed::Box<dyn encoder>,
-    ) -> Self {
+    pub fn New(tag: alloc::boxed::Box<dyn encoder>, body: alloc::boxed::Box<dyn encoder>) -> Self {
         return taggedEncoder {
             scratch: [0u8; 8],
             tag,
@@ -896,7 +893,10 @@ pub fn makeBody(
 
     // Go: switch value.Type() { case flagType: … case bigIntType: … }
     if typeNameIs(value, "Flag") {
-        return (Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))), nil);
+        return (
+            Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))),
+            nil,
+        );
     }
     if typeNameIs(value, "time.Time") {
         let t = timeFromValue(value);
@@ -909,7 +909,9 @@ pub fn makeBody(
     }
     if typeNameIs(value, "BitString") {
         return (
-            Some(alloc::boxed::Box::new(bitStringEncoder(bitStringFromValue(value)))),
+            Some(alloc::boxed::Box::new(bitStringEncoder(
+                bitStringFromValue(value),
+            ))),
             nil,
         );
     }
@@ -966,7 +968,10 @@ pub fn makeBody(
 
             let n = t.NumField();
             if n == 0 {
-                return (Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))), nil);
+                return (
+                    Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))),
+                    nil,
+                );
             }
 
             // Go: if t.Field(0).Type == rawContentsType { … }
@@ -978,7 +983,9 @@ pub fn makeBody(
                 if s.Len() > 0 {
                     let bytes = s.Bytes();
                     return (
-                        Some(alloc::boxed::Box::new(bytesEncoder(stripTagAndLength(bytes)))),
+                        Some(alloc::boxed::Box::new(bytesEncoder(stripTagAndLength(
+                            bytes,
+                        )))),
                         nil,
                     );
                 }
@@ -987,7 +994,10 @@ pub fn makeBody(
 
             let n1 = n - startingField;
             if n1 == 0 {
-                return (Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))), nil);
+                return (
+                    Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))),
+                    nil,
+                );
             }
             if n1 == 1 {
                 let f = t.Field(startingField);
@@ -1011,21 +1021,29 @@ pub fn makeBody(
                 i += 1;
             }
             return (
-                Some(alloc::boxed::Box::new(multiEncoder::New(slice::__from_vec(m)))),
+                Some(alloc::boxed::Box::new(multiEncoder::New(
+                    slice::__from_vec(m),
+                ))),
                 nil,
             );
         }
         Kind::Slice => {
             let sliceType = value.Type();
             if sliceType.Elem().Kind() == Kind::Uint8 {
-                return (Some(alloc::boxed::Box::new(bytesEncoder(value.Bytes()))), nil);
+                return (
+                    Some(alloc::boxed::Box::new(bytesEncoder(value.Bytes()))),
+                    nil,
+                );
             }
 
             let fp = super::fieldParameters::default();
 
             let l = value.Len();
             if l == 0 {
-                return (Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))), nil);
+                return (
+                    Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))),
+                    nil,
+                );
             }
             if l == 1 {
                 return makeField(&value.Index(0), &fp);
@@ -1042,12 +1060,16 @@ pub fn makeBody(
             }
             if params.set {
                 return (
-                    Some(alloc::boxed::Box::new(setEncoder::New(slice::__from_vec(m)))),
+                    Some(alloc::boxed::Box::new(setEncoder::New(slice::__from_vec(
+                        m,
+                    )))),
                     nil,
                 );
             }
             return (
-                Some(alloc::boxed::Box::new(multiEncoder::New(slice::__from_vec(m)))),
+                Some(alloc::boxed::Box::new(multiEncoder::New(
+                    slice::__from_vec(m),
+                ))),
                 nil,
             );
         }
@@ -1112,7 +1134,10 @@ pub fn makeField(
     // frame earlier). The recursion has nothing left to unwrap.
 
     if v.Kind() == Kind::Slice && v.Len() == 0 && params.omitEmpty {
-        return (Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))), nil);
+        return (
+            Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))),
+            nil,
+        );
     }
 
     if params.optional && params.defaultValue.is_some() && super::canHaveDefaultValue(v.Kind()) {
@@ -1124,7 +1149,10 @@ pub fn makeField(
         // reflected values are compared directly — which is what
         // `PartialEq for Value` exists for.
         if *v == defaultValue {
-            return (Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))), nil);
+            return (
+                Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))),
+                nil,
+            );
         }
     }
 
@@ -1134,14 +1162,20 @@ pub fn makeField(
     if params.optional && params.defaultValue.is_none() {
         // Go: reflect.DeepEqual(v.Interface(), reflect.Zero(v.Type()).Interface())
         if *v == crate::reflect::Zero(v.Type()) {
-            return (Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))), nil);
+            return (
+                Some(alloc::boxed::Box::new(bytesEncoder(slice::default()))),
+                nil,
+            );
         }
     }
 
     if typeNameIs(v, "RawValue") {
         let rv = rawValueFromValue(v);
         if rv.FullBytes.Len() != 0 {
-            return (Some(alloc::boxed::Box::new(bytesEncoder(rv.FullBytes))), nil);
+            return (
+                Some(alloc::boxed::Box::new(bytesEncoder(rv.FullBytes))),
+                nil,
+            );
         }
 
         let tag = bytesEncoder(appendTagAndLength(
@@ -1415,10 +1449,7 @@ pub fn MarshalAnyWithParams<S: Into<string>>(
 // and once in `MarshalWithParams`. goish has four entry points into it
 // (the `Any` pair as well), so it is a function.
 /// Encode an already-reflected value under `params`.
-fn marshalValue<S: Into<string>>(
-    v: &crate::reflect::Value,
-    params: S,
-) -> (slice<byte>, error) {
+fn marshalValue<S: Into<string>>(v: &crate::reflect::Value, params: S) -> (slice<byte>, error) {
     let (e, err) = makeField(v, &super::parseFieldParameters(params));
     if err != nil {
         return (slice::default(), err);

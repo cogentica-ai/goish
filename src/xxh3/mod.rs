@@ -68,7 +68,16 @@ const KEY: [u8; 192] = [
 
 #[inline(always)]
 fn read_u64(b: &[u8], o: usize) -> u64 {
-    u64::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3], b[o + 4], b[o + 5], b[o + 6], b[o + 7]])
+    u64::from_le_bytes([
+        b[o],
+        b[o + 1],
+        b[o + 2],
+        b[o + 3],
+        b[o + 4],
+        b[o + 5],
+        b[o + 6],
+        b[o + 7],
+    ])
 }
 
 #[inline(always)]
@@ -238,10 +247,7 @@ fn hash_any_64(p: &[u8]) -> u64 {
                 read_u64(p, l - 3 * 8) ^ k64(56),
             ));
         } // 32
-        acc = acc.wrapping_add(mul_fold64(
-            read_u64(p, 0) ^ k64(0),
-            read_u64(p, 8) ^ k64(8),
-        ));
+        acc = acc.wrapping_add(mul_fold64(read_u64(p, 0) ^ k64(0), read_u64(p, 8) ^ k64(8)));
         acc = acc.wrapping_add(mul_fold64(
             read_u64(p, l - 2 * 8) ^ k64(16),
             read_u64(p, l - 8) ^ k64(24),
@@ -385,7 +391,10 @@ fn hash_any_128(p: &[u8]) -> Uint128 {
             }
             _ => {
                 // 0
-                return Uint128 { Hi: 0x99aa06d3014798d8, Lo: 0x6001c324468d497f };
+                return Uint128 {
+                    Hi: 0x99aa06d3014798d8,
+                    Lo: 0x6001c324468d497f,
+                };
             }
         }
         acc.Hi = ((acc.Lo as u32).swap_bytes().rotate_left(13)) as u64;
@@ -406,7 +415,9 @@ fn hash_any_128(p: &[u8]) -> Uint128 {
                     let (in8, in7) = (read_u64(p, l - 8 * 8), read_u64(p, l - 7 * 8));
                     let (i6, i7) = (read_u64(p, 6 * 8), read_u64(p, 7 * 8));
 
-                    acc.Hi = acc.Hi.wrapping_add(mul_fold64(in8 ^ k64(112), in7 ^ k64(120)));
+                    acc.Hi = acc
+                        .Hi
+                        .wrapping_add(mul_fold64(in8 ^ k64(112), in7 ^ k64(120)));
                     acc.Hi ^= i6.wrapping_add(i7);
                     acc.Lo = acc.Lo.wrapping_add(mul_fold64(i6 ^ k64(96), i7 ^ k64(104)));
                     acc.Lo ^= in8.wrapping_add(in7);
@@ -414,7 +425,9 @@ fn hash_any_128(p: &[u8]) -> Uint128 {
                 let (in6, in5) = (read_u64(p, l - 6 * 8), read_u64(p, l - 5 * 8));
                 let (i4, i5) = (read_u64(p, 4 * 8), read_u64(p, 5 * 8));
 
-                acc.Hi = acc.Hi.wrapping_add(mul_fold64(in6 ^ k64(80), in5 ^ k64(88)));
+                acc.Hi = acc
+                    .Hi
+                    .wrapping_add(mul_fold64(in6 ^ k64(80), in5 ^ k64(88)));
                 acc.Hi ^= i4.wrapping_add(i5);
                 acc.Lo = acc.Lo.wrapping_add(mul_fold64(i4 ^ k64(64), i5 ^ k64(72)));
                 acc.Lo ^= in6.wrapping_add(in5);
@@ -422,7 +435,9 @@ fn hash_any_128(p: &[u8]) -> Uint128 {
             let (in4, in3) = (read_u64(p, l - 4 * 8), read_u64(p, l - 3 * 8));
             let (i2, i3) = (read_u64(p, 2 * 8), read_u64(p, 3 * 8));
 
-            acc.Hi = acc.Hi.wrapping_add(mul_fold64(in4 ^ k64(48), in3 ^ k64(56)));
+            acc.Hi = acc
+                .Hi
+                .wrapping_add(mul_fold64(in4 ^ k64(48), in3 ^ k64(56)));
             acc.Hi ^= i2.wrapping_add(i3);
             acc.Lo = acc.Lo.wrapping_add(mul_fold64(i2 ^ k64(32), i3 ^ k64(40)));
             acc.Lo ^= in4.wrapping_add(in3);
@@ -430,7 +445,9 @@ fn hash_any_128(p: &[u8]) -> Uint128 {
         let (in2, in1) = (read_u64(p, l - 2 * 8), read_u64(p, l - 1 * 8));
         let (i0, i1) = (read_u64(p, 0), read_u64(p, 8));
 
-        acc.Hi = acc.Hi.wrapping_add(mul_fold64(in2 ^ k64(16), in1 ^ k64(24)));
+        acc.Hi = acc
+            .Hi
+            .wrapping_add(mul_fold64(in2 ^ k64(16), in1 ^ k64(24)));
         acc.Hi ^= i0.wrapping_add(i1);
         acc.Lo = acc.Lo.wrapping_add(mul_fold64(i0 ^ k64(0), i1 ^ k64(8)));
         acc.Lo ^= in2.wrapping_add(in1);
@@ -461,9 +478,13 @@ fn hash_any_128(p: &[u8]) -> Uint128 {
                 read_u64(p, g * 32 + 24),
             );
             let ko = g * 32;
-            acc.Hi = acc.Hi.wrapping_add(mul_fold64(i2 ^ k64(ko + 16), i3 ^ k64(ko + 24)));
+            acc.Hi = acc
+                .Hi
+                .wrapping_add(mul_fold64(i2 ^ k64(ko + 16), i3 ^ k64(ko + 24)));
             acc.Hi ^= i0.wrapping_add(i1);
-            acc.Lo = acc.Lo.wrapping_add(mul_fold64(i0 ^ k64(ko), i1 ^ k64(ko + 8)));
+            acc.Lo = acc
+                .Lo
+                .wrapping_add(mul_fold64(i0 ^ k64(ko), i1 ^ k64(ko + 8)));
             acc.Lo ^= i2.wrapping_add(i3);
         }
 
@@ -480,8 +501,7 @@ fn hash_any_128(p: &[u8]) -> Uint128 {
                 read_u64(p, i + 16),
                 read_u64(p, i + 24),
             );
-            let (kk0, kk1, kk2, kk3) =
-                (k64(i - 125), k64(i - 117), k64(i - 109), k64(i - 101));
+            let (kk0, kk1, kk2, kk3) = (k64(i - 125), k64(i - 117), k64(i - 109), k64(i - 101));
 
             acc.Hi = acc.Hi.wrapping_add(mul_fold64(i2 ^ kk2, i3 ^ kk3));
             acc.Hi ^= i0.wrapping_add(i1);
@@ -498,9 +518,13 @@ fn hash_any_128(p: &[u8]) -> Uint128 {
                 read_u64(p, l - 16),
                 read_u64(p, l - 8),
             );
-            acc.Hi = acc.Hi.wrapping_add(mul_fold64(i0 ^ k64(119), i1 ^ k64(127)));
+            acc.Hi = acc
+                .Hi
+                .wrapping_add(mul_fold64(i0 ^ k64(119), i1 ^ k64(127)));
             acc.Hi ^= i2.wrapping_add(i3);
-            acc.Lo = acc.Lo.wrapping_add(mul_fold64(i2 ^ k64(103), i3 ^ k64(111)));
+            acc.Lo = acc
+                .Lo
+                .wrapping_add(mul_fold64(i2 ^ k64(103), i3 ^ k64(111)));
             acc.Lo ^= i0.wrapping_add(i1);
         }
 
@@ -533,17 +557,33 @@ const INITIAL_ACCS: [u64; 8] = [
 
 // hash128.go "merge accs" tail (also Sum128's blk>0 path).
 fn merge_accs_128(accs: &[u64; 8], mut acc: Uint128) -> Uint128 {
-    acc.Lo = acc.Lo.wrapping_add(mul_fold64(accs[0] ^ k64(11), accs[1] ^ k64(19)));
-    acc.Hi = acc.Hi.wrapping_add(mul_fold64(accs[0] ^ k64(117), accs[1] ^ k64(125)));
+    acc.Lo = acc
+        .Lo
+        .wrapping_add(mul_fold64(accs[0] ^ k64(11), accs[1] ^ k64(19)));
+    acc.Hi = acc
+        .Hi
+        .wrapping_add(mul_fold64(accs[0] ^ k64(117), accs[1] ^ k64(125)));
 
-    acc.Lo = acc.Lo.wrapping_add(mul_fold64(accs[2] ^ k64(27), accs[3] ^ k64(35)));
-    acc.Hi = acc.Hi.wrapping_add(mul_fold64(accs[2] ^ k64(133), accs[3] ^ k64(141)));
+    acc.Lo = acc
+        .Lo
+        .wrapping_add(mul_fold64(accs[2] ^ k64(27), accs[3] ^ k64(35)));
+    acc.Hi = acc
+        .Hi
+        .wrapping_add(mul_fold64(accs[2] ^ k64(133), accs[3] ^ k64(141)));
 
-    acc.Lo = acc.Lo.wrapping_add(mul_fold64(accs[4] ^ k64(43), accs[5] ^ k64(51)));
-    acc.Hi = acc.Hi.wrapping_add(mul_fold64(accs[4] ^ k64(149), accs[5] ^ k64(157)));
+    acc.Lo = acc
+        .Lo
+        .wrapping_add(mul_fold64(accs[4] ^ k64(43), accs[5] ^ k64(51)));
+    acc.Hi = acc
+        .Hi
+        .wrapping_add(mul_fold64(accs[4] ^ k64(149), accs[5] ^ k64(157)));
 
-    acc.Lo = acc.Lo.wrapping_add(mul_fold64(accs[6] ^ k64(59), accs[7] ^ k64(67)));
-    acc.Hi = acc.Hi.wrapping_add(mul_fold64(accs[6] ^ k64(165), accs[7] ^ k64(173)));
+    acc.Lo = acc
+        .Lo
+        .wrapping_add(mul_fold64(accs[6] ^ k64(59), accs[7] ^ k64(67)));
+    acc.Hi = acc
+        .Hi
+        .wrapping_add(mul_fold64(accs[6] ^ k64(165), accs[7] ^ k64(173)));
 
     acc.Lo = xxh3_avalanche(acc.Lo);
     acc.Hi = xxh3_avalanche(acc.Hi);
@@ -702,7 +742,10 @@ impl Hasher {
             return hash_any_64(&self.buf[..self.len]);
         }
 
-        let l = self.blk.wrapping_mul(BLOCK as u64).wrapping_add(self.len as u64);
+        let l = self
+            .blk
+            .wrapping_mul(BLOCK as u64)
+            .wrapping_add(self.len as u64);
         let acc = l.wrapping_mul(PRIME64_1);
         let mut accs = self.acc;
 
@@ -720,7 +763,10 @@ impl Hasher {
             return hash_any_128(&self.buf[..self.len]);
         }
 
-        let l = self.blk.wrapping_mul(BLOCK as u64).wrapping_add(self.len as u64);
+        let l = self
+            .blk
+            .wrapping_mul(BLOCK as u64)
+            .wrapping_add(self.len as u64);
         let acc = Uint128 {
             Lo: l.wrapping_mul(PRIME64_1),
             Hi: !(l.wrapping_mul(PRIME64_2)),

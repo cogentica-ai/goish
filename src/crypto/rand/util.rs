@@ -30,10 +30,7 @@ use crate::{byte, int, uint, uint8};
 /// Return a number of the given bit length that is prime with high
 /// probability. Prime will return error for any error returned by
 /// rand.Read or if `bits < 2`.
-pub fn Prime(
-    rand: &mut (dyn io::Reader + Send + Sync + 'static),
-    bits: int,
-) -> (big::Int, error) {
+pub fn Prime(rand: &mut (dyn io::Reader + Send + Sync + 'static), bits: int) -> (big::Int, error) {
     // Go: if fips140only.Enabled { return nil, errors.New(…) }
     if fips140only::Enabled {
         return (

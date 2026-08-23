@@ -17,14 +17,12 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use goish::fmt;
 use goish::math::rand;
+use goish::slice;
 use goish::strconv;
 use goish::syscall;
 use goish::types::{byte, int};
-use goish::{slice};
 
-const GOLDEN: &str = include_str!(
-    "../src/math/rand/testdata/golden.json"
-);
+const GOLDEN: &str = include_str!("../src/math/rand/testdata/golden.json");
 
 // ─── Tiny JSON walker (objects + integer arrays only) ────────────────
 
@@ -37,19 +35,25 @@ fn find_key(s: &str, name: &str) -> (usize, usize) {
     key_quoted.push('"');
     key_quoted.push_str(name);
     key_quoted.push('"');
-    let idx = s.find(key_quoted.as_str()).unwrap_or_else(|| panic!("key not found"));
+    let idx = s
+        .find(key_quoted.as_str())
+        .unwrap_or_else(|| panic!("key not found"));
     let after = idx + key_quoted.len();
     let bytes = s.as_bytes();
     // Skip whitespace + ':' + whitespace.
     let mut i = after;
-    while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t' || bytes[i] == b'\n' || bytes[i] == b'\r') {
+    while i < bytes.len()
+        && (bytes[i] == b' ' || bytes[i] == b'\t' || bytes[i] == b'\n' || bytes[i] == b'\r')
+    {
         i += 1;
     }
     if i >= bytes.len() || bytes[i] != b':' {
         panic!("missing ':'");
     }
     i += 1;
-    while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t' || bytes[i] == b'\n' || bytes[i] == b'\r') {
+    while i < bytes.len()
+        && (bytes[i] == b' ' || bytes[i] == b'\t' || bytes[i] == b'\n' || bytes[i] == b'\r')
+    {
         i += 1;
     }
     let open = bytes[i];
@@ -139,8 +143,15 @@ fn check_int63() -> bool {
             let got = r.Int63();
             if got as i128 != *want {
                 fmt::Println!(
-                    "    Int63 MISMATCH seed=", seed, " idx=", i,
-                    " got=", got, " want=", *want as i64);
+                    "    Int63 MISMATCH seed=",
+                    seed,
+                    " idx=",
+                    i,
+                    " got=",
+                    got,
+                    " want=",
+                    *want as i64
+                );
                 ok = false;
             }
         }
@@ -156,8 +167,15 @@ fn check_uint64() -> bool {
             let got = r.Uint64();
             if got as i128 != *want {
                 fmt::Println!(
-                    "    Uint64 MISMATCH seed=", seed, " idx=", i,
-                    " got=", got, " want=", *want as u64);
+                    "    Uint64 MISMATCH seed=",
+                    seed,
+                    " idx=",
+                    i,
+                    " got=",
+                    got,
+                    " want=",
+                    *want as u64
+                );
                 ok = false;
             }
         }
@@ -173,8 +191,15 @@ fn check_uint32() -> bool {
             let got = r.Uint32();
             if got as i128 != *want {
                 fmt::Println!(
-                    "    Uint32 MISMATCH seed=", seed, " idx=", i,
-                    " got=", got as u64, " want=", *want as u32 as u64);
+                    "    Uint32 MISMATCH seed=",
+                    seed,
+                    " idx=",
+                    i,
+                    " got=",
+                    got as u64,
+                    " want=",
+                    *want as u32 as u64
+                );
                 ok = false;
             }
         }
@@ -190,8 +215,15 @@ fn check_int31() -> bool {
             let got = r.Int31();
             if got as i128 != *want {
                 fmt::Println!(
-                    "    Int31 MISMATCH seed=", seed, " idx=", i,
-                    " got=", got as i64, " want=", *want as i64);
+                    "    Int31 MISMATCH seed=",
+                    seed,
+                    " idx=",
+                    i,
+                    " got=",
+                    got as i64,
+                    " want=",
+                    *want as i64
+                );
                 ok = false;
             }
         }
@@ -207,8 +239,15 @@ fn check_float64() -> bool {
             let got_bits = r.Float64().to_bits();
             if got_bits as i128 != *want {
                 fmt::Println!(
-                    "    Float64-bits MISMATCH seed=", seed, " idx=", i,
-                    " got=", got_bits, " want=", *want as u64);
+                    "    Float64-bits MISMATCH seed=",
+                    seed,
+                    " idx=",
+                    i,
+                    " got=",
+                    got_bits,
+                    " want=",
+                    *want as u64
+                );
                 ok = false;
             }
         }
@@ -224,8 +263,15 @@ fn check_float32() -> bool {
             let got_bits = r.Float32().to_bits();
             if got_bits as i128 != *want {
                 fmt::Println!(
-                    "    Float32-bits MISMATCH seed=", seed, " idx=", i,
-                    " got=", got_bits as u64, " want=", *want as u32 as u64);
+                    "    Float32-bits MISMATCH seed=",
+                    seed,
+                    " idx=",
+                    i,
+                    " got=",
+                    got_bits as u64,
+                    " want=",
+                    *want as u32 as u64
+                );
                 ok = false;
             }
         }
@@ -241,8 +287,15 @@ fn check_int63n() -> bool {
             let got = r.Int63n(100);
             if got as i128 != *want {
                 fmt::Println!(
-                    "    Int63n MISMATCH seed=", seed, " idx=", i,
-                    " got=", got, " want=", *want as i64);
+                    "    Int63n MISMATCH seed=",
+                    seed,
+                    " idx=",
+                    i,
+                    " got=",
+                    got,
+                    " want=",
+                    *want as i64
+                );
                 ok = false;
             }
         }
@@ -258,8 +311,15 @@ fn check_int31n() -> bool {
             let got = r.Int31n(100);
             if got as i128 != *want {
                 fmt::Println!(
-                    "    Int31n MISMATCH seed=", seed, " idx=", i,
-                    " got=", got as i64, " want=", *want as i64);
+                    "    Int31n MISMATCH seed=",
+                    seed,
+                    " idx=",
+                    i,
+                    " got=",
+                    got as i64,
+                    " want=",
+                    *want as i64
+                );
                 ok = false;
             }
         }
@@ -275,8 +335,15 @@ fn check_intn() -> bool {
             let got = r.Intn(100);
             if got as i128 != *want {
                 fmt::Println!(
-                    "    Intn MISMATCH seed=", seed, " idx=", i,
-                    " got=", got, " want=", *want as i64);
+                    "    Intn MISMATCH seed=",
+                    seed,
+                    " idx=",
+                    i,
+                    " got=",
+                    got,
+                    " want=",
+                    *want as i64
+                );
                 ok = false;
             }
         }
@@ -293,8 +360,15 @@ fn check_perm() -> bool {
             let g: i64 = got[i as int];
             if g as i128 != *want {
                 fmt::Println!(
-                    "    Perm MISMATCH seed=", seed, " idx=", i,
-                    " got=", g, " want=", *want as i64);
+                    "    Perm MISMATCH seed=",
+                    seed,
+                    " idx=",
+                    i,
+                    " got=",
+                    g,
+                    " want=",
+                    *want as i64
+                );
                 ok = false;
             }
         }
@@ -317,8 +391,15 @@ fn check_shuffle() -> bool {
         for (i, want) in want_row.iter().enumerate() {
             if a[i] as i128 != *want {
                 fmt::Println!(
-                    "    Shuffle MISMATCH seed=", seed, " idx=", i,
-                    " got=", a[i], " want=", *want as i64);
+                    "    Shuffle MISMATCH seed=",
+                    seed,
+                    " idx=",
+                    i,
+                    " got=",
+                    a[i],
+                    " want=",
+                    *want as i64
+                );
                 ok = false;
             }
         }
@@ -336,8 +417,15 @@ fn check_read() -> bool {
             let g: u8 = buf[i as int];
             if g as i128 != *want {
                 fmt::Println!(
-                    "    Read MISMATCH seed=", seed, " idx=", i,
-                    " got=", g as u64, " want=", *want as u64);
+                    "    Read MISMATCH seed=",
+                    seed,
+                    " idx=",
+                    i,
+                    " got=",
+                    g as u64,
+                    " want=",
+                    *want as u64
+                );
                 ok = false;
             }
         }
@@ -353,8 +441,15 @@ fn check_normfloat64() -> bool {
             let got_bits = r.NormFloat64().to_bits();
             if got_bits as i128 != *want {
                 fmt::Println!(
-                    "    NormFloat64-bits MISMATCH seed=", seed, " idx=", i,
-                    " got=", got_bits, " want=", *want as u64);
+                    "    NormFloat64-bits MISMATCH seed=",
+                    seed,
+                    " idx=",
+                    i,
+                    " got=",
+                    got_bits,
+                    " want=",
+                    *want as u64
+                );
                 ok = false;
             }
         }
@@ -370,8 +465,15 @@ fn check_expfloat64() -> bool {
             let got_bits = r.ExpFloat64().to_bits();
             if got_bits as i128 != *want {
                 fmt::Println!(
-                    "    ExpFloat64-bits MISMATCH seed=", seed, " idx=", i,
-                    " got=", got_bits, " want=", *want as u64);
+                    "    ExpFloat64-bits MISMATCH seed=",
+                    seed,
+                    " idx=",
+                    i,
+                    " got=",
+                    got_bits,
+                    " want=",
+                    *want as u64
+                );
                 ok = false;
             }
         }
@@ -406,20 +508,20 @@ fn check_global_seed() -> bool {
 fn main() {
     let mut failed = 0;
     let cases: &[(&str, fn() -> bool)] = &[
-        ("Int63",       check_int63),
-        ("Uint64",      check_uint64),
-        ("Uint32",      check_uint32),
-        ("Int31",       check_int31),
-        ("Float64",     check_float64),
-        ("Float32",     check_float32),
-        ("Int63n",      check_int63n),
-        ("Int31n",      check_int31n),
-        ("Intn",        check_intn),
-        ("Perm",        check_perm),
-        ("Shuffle",     check_shuffle),
-        ("Read",        check_read),
+        ("Int63", check_int63),
+        ("Uint64", check_uint64),
+        ("Uint32", check_uint32),
+        ("Int31", check_int31),
+        ("Float64", check_float64),
+        ("Float32", check_float32),
+        ("Int63n", check_int63n),
+        ("Int31n", check_int31n),
+        ("Intn", check_intn),
+        ("Perm", check_perm),
+        ("Shuffle", check_shuffle),
+        ("Read", check_read),
         ("NormFloat64", check_normfloat64),
-        ("ExpFloat64",  check_expfloat64),
+        ("ExpFloat64", check_expfloat64),
         ("global Seed", check_global_seed),
     ];
     for (name, f) in cases.iter() {

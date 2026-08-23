@@ -11,7 +11,7 @@
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
-use super::nat::{addMulVVW, _W_usize};
+use super::nat::{_W_usize, addMulVVW};
 use crate::types::uint;
 
 // go: sdk 1.25.5 crypto/internal/fips140/bigmod/nat_noasm.go:11-13 addMulVVW1024

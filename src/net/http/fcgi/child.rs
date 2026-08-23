@@ -106,15 +106,17 @@ struct responseState {
 pub fn newResponse(c: &alloc::sync::Arc<super::fcgi::conn>, req: &request) -> response {
     return response {
         reqId: req.reqId,
-        header: alloc::sync::Arc::new(crate::sync::Mutex::new(
-            super::super::header::Header::new(),
-        )),
+        header: alloc::sync::Arc::new(crate::sync::Mutex::new(super::super::header::Header::new())),
         state: crate::sync::Mutex::new(responseState {
             code: 0,
             wroteHeader: false,
             wroteCGIHeader: false,
         }),
-        w: crate::sync::Mutex::new(super::fcgi::newWriter(c, super::fcgi::typeStdout, req.reqId)),
+        w: crate::sync::Mutex::new(super::fcgi::newWriter(
+            c,
+            super::fcgi::typeStdout,
+            req.reqId,
+        )),
     };
 }
 
@@ -159,10 +161,7 @@ impl response {
             crate::strconv::Itoa(code),
             super::super::status::StatusText(code)
         );
-        let _ = crate::io::Writer::Write(
-            &mut *w,
-            crate::convert::bytes(head),
-        );
+        let _ = crate::io::Writer::Write(&mut *w, crate::convert::bytes(head));
         {
             let mut h = self.header.Lock();
             if code != super::super::status::StatusNotModified
@@ -184,9 +183,10 @@ impl response {
     /// Every write implies a 200 and a CGI header block, in that
     /// order. The header block is written from THIS call's bytes,
     /// because writeCGIHeader sniffs the Content-Type from them.
-    pub fn Write(&self, p: crate::goslice::slice<crate::types::byte>)
-        -> (crate::types::int, crate::errors::error)
-    {
+    pub fn Write(
+        &self,
+        p: crate::goslice::slice<crate::types::byte>,
+    ) -> (crate::types::int, crate::errors::error) {
         self.WriteHeader(super::super::status::StatusOK);
         if !self.state.Lock().wroteCGIHeader {
             self.writeCGIHeader(&p);
@@ -329,7 +329,6 @@ pub fn filterOutUsedEnvVars(envVars: &map<string, string>) -> map<string, string
 // a TODO about the mirror-image problem ("This blocks until the
 // handler reads from the pipe. If the handler takes a long time, it
 // might be a problem."), so neither shape is free.
-
 
 crate::var! {
     // go: sdk 1.25.5 net/http/fcgi/child.go:181-181 errCloseConn
@@ -489,12 +488,8 @@ impl child {
         if rec.h.Type == super::fcgi::typeGetValues {
             let mut values: map<string, string> = map::new();
             values.Set(string("FCGI_MPXS_CONNS"), string("1"));
-            let _ = super::fcgi::writePairs(
-                &self.conn,
-                super::fcgi::typeGetValuesResult,
-                0,
-                &values,
-            );
+            let _ =
+                super::fcgi::writePairs(&self.conn, super::fcgi::typeGetValuesResult, 0, &values);
             return crate::errors::nil;
         }
 
@@ -553,11 +548,8 @@ impl child {
             httpReq.Body = crate::net::http::Body::from_bytes(req.body.clone());
             httpReq.ContentLength = crate::int64(crate::len(&req.body));
             let withoutUsedEnvVars = filterOutUsedEnvVars(&req.params);
-            let envVarCtx = crate::context::WithValue(
-                httpReq.Context(),
-                envVarsContextKey,
-                withoutUsedEnvVars,
-            );
+            let envVarCtx =
+                crate::context::WithValue(httpReq.Context(), envVarsContextKey, withoutUsedEnvVars);
             let httpReq = httpReq.WithContext(envVarCtx);
             self.handler.ServeHTTP(&r, &httpReq);
         }
@@ -649,9 +641,10 @@ impl super::super::responsewriter::ResponseWriter for response {
         return response::Header(self);
     }
     // go: none — see above.
-    fn Write(&self, p: crate::goslice::slice<crate::types::byte>)
-        -> (crate::types::int, crate::errors::error)
-    {
+    fn Write(
+        &self,
+        p: crate::goslice::slice<crate::types::byte>,
+    ) -> (crate::types::int, crate::errors::error) {
         return response::Write(self, p);
     }
     // go: none — see above.

@@ -38,35 +38,35 @@ pub mod rand;
 
 // ─── Mathematical constants (math/const.go) ────────────────────────────
 
-pub const E:       f64 = core::f64::consts::E;
-pub const Pi:      f64 = core::f64::consts::PI;
-pub const Phi:     f64 = 1.618033988749894848204586834365638117720309179805762862135;
-pub const Sqrt2:   f64 = core::f64::consts::SQRT_2;
-pub const SqrtE:   f64 = 1.6487212707001281468486507878141635716537761007101480115750793116;
-pub const SqrtPi:  f64 = 1.7724538509055158819194275565678253546897498657741308796622734;
+pub const E: f64 = core::f64::consts::E;
+pub const Pi: f64 = core::f64::consts::PI;
+pub const Phi: f64 = 1.618033988749894848204586834365638117720309179805762862135;
+pub const Sqrt2: f64 = core::f64::consts::SQRT_2;
+pub const SqrtE: f64 = 1.6487212707001281468486507878141635716537761007101480115750793116;
+pub const SqrtPi: f64 = 1.7724538509055158819194275565678253546897498657741308796622734;
 pub const SqrtPhi: f64 = 1.272019649514068964252422461737491491715608778319659702868723;
-pub const Ln2:     f64 = core::f64::consts::LN_2;
-pub const Log2E:   f64 = core::f64::consts::LOG2_E;
-pub const Ln10:    f64 = core::f64::consts::LN_10;
-pub const Log10E:  f64 = core::f64::consts::LOG10_E;
+pub const Ln2: f64 = core::f64::consts::LN_2;
+pub const Log2E: f64 = core::f64::consts::LOG2_E;
+pub const Ln10: f64 = core::f64::consts::LN_10;
+pub const Log10E: f64 = core::f64::consts::LOG10_E;
 
-pub const MaxFloat32:            f32 = f32::MAX;
+pub const MaxFloat32: f32 = f32::MAX;
 pub const SmallestNonzeroFloat32: f32 = f32::MIN_POSITIVE * f32::EPSILON;
-pub const MaxFloat64:            f64 = f64::MAX;
+pub const MaxFloat64: f64 = f64::MAX;
 pub const SmallestNonzeroFloat64: f64 = 5e-324_f64;
 
-pub const MaxInt:   i64 = i64::MAX;
-pub const MinInt:   i64 = i64::MIN;
-pub const MaxInt8:  i8  = i8::MAX;
-pub const MinInt8:  i8  = i8::MIN;
+pub const MaxInt: i64 = i64::MAX;
+pub const MinInt: i64 = i64::MIN;
+pub const MaxInt8: i8 = i8::MAX;
+pub const MinInt8: i8 = i8::MIN;
 pub const MaxInt16: i16 = i16::MAX;
 pub const MinInt16: i16 = i16::MIN;
 pub const MaxInt32: i32 = i32::MAX;
 pub const MinInt32: i32 = i32::MIN;
 pub const MaxInt64: i64 = i64::MAX;
 pub const MinInt64: i64 = i64::MIN;
-pub const MaxUint:   u64 = u64::MAX;
-pub const MaxUint8:  u8  = u8::MAX;
+pub const MaxUint: u64 = u64::MAX;
+pub const MaxUint8: u8 = u8::MAX;
 pub const MaxUint16: u16 = u16::MAX;
 pub const MaxUint32: u32 = u32::MAX;
 pub const MaxUint64: u64 = u64::MAX;
@@ -92,7 +92,11 @@ pub fn IsInf(f: f64, sign: crate::types::int) -> bool {
 
 /// `math.Inf(sign int) float64` — returns positive or negative infinity.
 pub fn Inf(sign: crate::types::int) -> f64 {
-    if sign >= 0 { f64::INFINITY } else { f64::NEG_INFINITY }
+    if sign >= 0 {
+        f64::INFINITY
+    } else {
+        f64::NEG_INFINITY
+    }
 }
 
 /// `math.NaN() float64` — returns an IEEE 754 NaN.
@@ -402,19 +406,35 @@ pub fn Remainder(x: f64, y: f64) -> f64 {
 /// `math.Dim(x, y) float64` — max(x-y, 0).
 pub fn Dim(x: f64, y: f64) -> f64 {
     let d = x - y;
-    if d > 0.0 { d } else { 0.0 }
+    if d > 0.0 {
+        d
+    } else {
+        0.0
+    }
 }
 
 /// `math.Max(x, y) float64` — Go semantics: NaN propagates, +0 > -0.
 pub fn Max(x: f64, y: f64) -> f64 {
-    if x.is_nan() || y.is_nan() { return f64::NAN; }
-    if x > y { x } else { y }
+    if x.is_nan() || y.is_nan() {
+        return f64::NAN;
+    }
+    if x > y {
+        x
+    } else {
+        y
+    }
 }
 
 /// `math.Min(x, y) float64` — Go semantics: NaN propagates, -0 < +0.
 pub fn Min(x: f64, y: f64) -> f64 {
-    if x.is_nan() || y.is_nan() { return f64::NAN; }
-    if x < y { x } else { y }
+    if x.is_nan() || y.is_nan() {
+        return f64::NAN;
+    }
+    if x < y {
+        x
+    } else {
+        y
+    }
 }
 
 /// `math.Hypot(p, q) float64` — sqrt(p²+q²) without overflow.

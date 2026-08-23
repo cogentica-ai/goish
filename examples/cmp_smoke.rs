@@ -8,11 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::cmp;
+use goish::fmt;
 use goish::string;
+use goish::syscall;
 use goish::types::int;
-use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -46,10 +46,7 @@ fn main() {
     {
         let a: int = 1;
         let b: int = 2;
-        if cmp::Compare(&a, &b) == -1
-            && cmp::Compare(&b, &a) == 1
-            && cmp::Compare(&a, &a) == 0
-        {
+        if cmp::Compare(&a, &b) == -1 && cmp::Compare(&b, &a) == 1 && cmp::Compare(&a, &a) == 0 {
             fmt::Println!("[ 3] Compare int               PASS");
         } else {
             fmt::Println!("[ 3] Compare int               FAIL");

@@ -25,11 +25,7 @@ const N: i64 = 100_000;
 
 #[goish::main]
 fn main() {
-    let c: [chan<i64>; 3] = [
-        make!(chan i64),
-        make!(chan i64),
-        make!(chan i64),
-    ];
+    let c: [chan<i64>; 3] = [make!(chan i64), make!(chan i64), make!(chan i64)];
 
     static SEND_TOTAL: AtomicI64 = AtomicI64::new(0);
     static RECV_TOTAL: AtomicI64 = AtomicI64::new(0);
@@ -65,9 +61,18 @@ fn main() {
 
     schedule();
 
-    check(GS_DONE.load(Ordering::Relaxed) == 4, b"chan_micro_select_recv_only: not all done\n");
-    check(SEND_TOTAL.load(Ordering::Relaxed) == 3 * N, b"chan_micro_select_recv_only: send total wrong\n");
-    check(RECV_TOTAL.load(Ordering::Relaxed) == 3 * N, b"chan_micro_select_recv_only: recv total wrong\n");
+    check(
+        GS_DONE.load(Ordering::Relaxed) == 4,
+        b"chan_micro_select_recv_only: not all done\n",
+    );
+    check(
+        SEND_TOTAL.load(Ordering::Relaxed) == 3 * N,
+        b"chan_micro_select_recv_only: send total wrong\n",
+    );
+    check(
+        RECV_TOTAL.load(Ordering::Relaxed) == 3 * N,
+        b"chan_micro_select_recv_only: recv total wrong\n",
+    );
 
     const OK: &[u8] = b"chan_micro_select_recv_only: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

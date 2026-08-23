@@ -24,7 +24,7 @@ extern crate goish;
 use alloc::sync::Arc;
 use goish::gostring::string;
 use goish::io::fs;
-use goish::testing::fstest::{fsTester, MapFile, MapFS};
+use goish::testing::fstest::{fsTester, MapFS, MapFile};
 use goish::{errors, fmt, slice, syscall};
 
 fn s(x: &str) -> string {
@@ -54,7 +54,10 @@ fn main() {
         if t.Errors().Len() == 0 {
             fmt::Println!("[ 1] conforming file           PASS");
         } else {
-            fmt::Println!("[ 1] conforming file           FAIL ", t.Errors()[0].Error());
+            fmt::Println!(
+                "[ 1] conforming file           FAIL ",
+                t.Errors()[0].Error()
+            );
             failed += 1;
         }
     }

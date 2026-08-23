@@ -62,10 +62,26 @@ fn run() -> ! {
     check("username", ui.Username(), "user");
     let (pw, set) = ui.Password();
     check("password", pw, "pw");
-    check("password set", string(if set { "true" } else { "false" }), "true");
-    check("String round-trips", u.String(), "http://user:pw@example.com/p");
-    check("Redacted masks", u.Redacted(), "http://user:xxxxx@example.com/p");
-    check("stripPassword", stripPassword(&u), "http://user:***@example.com/p");
+    check(
+        "password set",
+        string(if set { "true" } else { "false" }),
+        "true",
+    );
+    check(
+        "String round-trips",
+        u.String(),
+        "http://user:pw@example.com/p",
+    );
+    check(
+        "Redacted masks",
+        u.Redacted(),
+        "http://user:xxxxx@example.com/p",
+    );
+    check(
+        "stripPassword",
+        stripPassword(&u),
+        "http://user:***@example.com/p",
+    );
 
     // ── '@' inside the password: split at the LAST '@' ──
     let (u2, _) = Parse("http://u:p@ss@example.com/p");
@@ -73,24 +89,56 @@ fn run() -> ! {
     let ui2 = u2.User.clone().unwrap();
     let (pw2, _) = ui2.Password();
     check("last-@ password", pw2, "p@ss");
-    check("last-@ String re-encodes", u2.String(), "http://u:p%40ss@example.com/p");
+    check(
+        "last-@ String re-encodes",
+        u2.String(),
+        "http://u:p%40ss@example.com/p",
+    );
 
     // ── username only: password NOT set ──
     let (u3, _) = Parse("http://justuser@example.com/p");
     let ui3 = u3.User.clone().unwrap();
     let (_, set3) = ui3.Password();
-    check("user-only not set", string(if set3 { "true" } else { "false" }), "false");
-    check("user-only Redacted unchanged", u3.Redacted(), "http://justuser@example.com/p");
-    check("user-only strip unchanged", stripPassword(&u3), "http://justuser@example.com/p");
+    check(
+        "user-only not set",
+        string(if set3 { "true" } else { "false" }),
+        "false",
+    );
+    check(
+        "user-only Redacted unchanged",
+        u3.Redacted(),
+        "http://justuser@example.com/p",
+    );
+    check(
+        "user-only strip unchanged",
+        stripPassword(&u3),
+        "http://justuser@example.com/p",
+    );
 
     // ── empty password still counts as set ──
     let (u4, _) = Parse("http://u:@example.com/p");
     let ui4 = u4.User.clone().unwrap();
     let (_, set4) = ui4.Password();
-    check("empty pw is set", string(if set4 { "true" } else { "false" }), "true");
-    check("empty pw String keeps colon", u4.String(), "http://u:@example.com/p");
-    check("empty pw Redacted masks", u4.Redacted(), "http://u:xxxxx@example.com/p");
-    check("empty pw strip masks", stripPassword(&u4), "http://u:***@example.com/p");
+    check(
+        "empty pw is set",
+        string(if set4 { "true" } else { "false" }),
+        "true",
+    );
+    check(
+        "empty pw String keeps colon",
+        u4.String(),
+        "http://u:@example.com/p",
+    );
+    check(
+        "empty pw Redacted masks",
+        u4.Redacted(),
+        "http://u:xxxxx@example.com/p",
+    );
+    check(
+        "empty pw strip masks",
+        stripPassword(&u4),
+        "http://u:***@example.com/p",
+    );
 
     // ── percent-decoding at Parse, re-encoding at String ──
     let (u5, _) = Parse("http://a%20b:c%2Fd@example.com/");
@@ -98,7 +146,11 @@ fn run() -> ! {
     check("decoded username", ui5.Username(), "a b");
     let (pw5, _) = ui5.Password();
     check("decoded password", pw5, "c/d");
-    check("re-encoded String", u5.String(), "http://a%20b:c%2Fd@example.com/");
+    check(
+        "re-encoded String",
+        u5.String(),
+        "http://a%20b:c%2Fd@example.com/",
+    );
 
     // ── invalid userinfo is a parse error ──
     let (_, e6) = Parse("http://bad^user@example.com/");
@@ -174,7 +226,8 @@ fn run() -> ! {
 
         let url2 = fmt::Sprintf!("http://user:pw@%s/auth", base);
         let (mut req, _) = goish::net::http::NewRequest(string("GET"), url2, goish::nil);
-        req.Header.Set(string("Authorization"), string("Bearer mine"));
+        req.Header
+            .Set(string("Authorization"), string("Bearer mine"));
         let client = goish::net::http::Client::default();
         let (mut resp, err) = client.Do(&req);
         if err.IsNil() {

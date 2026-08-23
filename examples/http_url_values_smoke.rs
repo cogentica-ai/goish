@@ -49,16 +49,31 @@ fn main() {
     let mut v: map<string, slice<string>> = map::new();
 
     eq(url::ValuesGet(&v, string("a")), "", "empty Get", &mut bad);
-    eqb(url::ValuesHas(&v, string("a")), false, "empty Has", &mut bad);
+    eqb(
+        url::ValuesHas(&v, string("a")),
+        false,
+        "empty Has",
+        &mut bad,
+    );
 
     url::ValuesSet(&mut v, string("a"), string("1"));
     eq(url::ValuesGet(&v, string("a")), "1", "after Set", &mut bad);
-    eqb(url::ValuesHas(&v, string("a")), true, "Has after Set", &mut bad);
+    eqb(
+        url::ValuesHas(&v, string("a")),
+        true,
+        "Has after Set",
+        &mut bad,
+    );
     eq(joined(&v, "a"), "1", "list after Set", &mut bad);
 
     // Add APPENDS; Get still returns the first.
     url::ValuesAdd(&mut v, string("a"), string("2"));
-    eq(url::ValuesGet(&v, string("a")), "1", "Get after Add is first", &mut bad);
+    eq(
+        url::ValuesGet(&v, string("a")),
+        "1",
+        "Get after Add is first",
+        &mut bad,
+    );
     eq(joined(&v, "a"), "1,2", "list after Add", &mut bad);
 
     // Set REPLACES the whole list.
@@ -69,16 +84,41 @@ fn main() {
     eq(url::ValuesEncode(v.clone()), "a=3&b=x", "encode", &mut bad);
 
     url::ValuesDel(&mut v, string("a"));
-    eq(url::ValuesGet(&v, string("a")), "", "Get after Del", &mut bad);
-    eqb(url::ValuesHas(&v, string("a")), false, "Has after Del", &mut bad);
-    eq(url::ValuesEncode(v.clone()), "b=x", "encode after Del", &mut bad);
+    eq(
+        url::ValuesGet(&v, string("a")),
+        "",
+        "Get after Del",
+        &mut bad,
+    );
+    eqb(
+        url::ValuesHas(&v, string("a")),
+        false,
+        "Has after Del",
+        &mut bad,
+    );
+    eq(
+        url::ValuesEncode(v.clone()),
+        "b=x",
+        "encode after Del",
+        &mut bad,
+    );
 
     // present-but-empty: Get is "" but Has is TRUE.
     {
         let mut v2: map<string, slice<string>> = map::new();
         v2.Set(string("e"), slice::<string>::new());
-        eq(url::ValuesGet(&v2, string("e")), "", "empty slice Get", &mut bad);
-        eqb(url::ValuesHas(&v2, string("e")), true, "empty slice Has", &mut bad);
+        eq(
+            url::ValuesGet(&v2, string("e")),
+            "",
+            "empty slice Get",
+            &mut bad,
+        );
+        eqb(
+            url::ValuesHas(&v2, string("e")),
+            true,
+            "empty slice Has",
+            &mut bad,
+        );
     }
 
     if bad == 0 {

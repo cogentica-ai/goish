@@ -46,30 +46,59 @@ fn eq(got: string, want: &str, what: &str, bad: &mut i32) {
 fn main() {
     let mut bad = 0i32;
 
-    eq(httputil::upgradeType(&hdr("Upgrade", "websocket")), "websocket",
-       "upgradeType Connection=Upgrade", &mut bad);
-    eq(httputil::upgradeType(&hdr("upgrade", "websocket")), "websocket",
-       "upgradeType Connection=upgrade (lowercase token)", &mut bad);
-    eq(httputil::upgradeType(&hdr("keep-alive, Upgrade", "websocket")), "websocket",
-       "upgradeType Connection=keep-alive, Upgrade (multi-token)", &mut bad);
-    eq(httputil::upgradeType(&hdr("keep-alive", "websocket")), "",
-       "upgradeType Connection=keep-alive only", &mut bad);
-    eq(httputil::upgradeType(&hdr("", "websocket")), "",
-       "upgradeType no Connection", &mut bad);
-    eq(httputil::upgradeType(&hdr("Upgrade", "")), "",
-       "upgradeType no Upgrade header", &mut bad);
+    eq(
+        httputil::upgradeType(&hdr("Upgrade", "websocket")),
+        "websocket",
+        "upgradeType Connection=Upgrade",
+        &mut bad,
+    );
+    eq(
+        httputil::upgradeType(&hdr("upgrade", "websocket")),
+        "websocket",
+        "upgradeType Connection=upgrade (lowercase token)",
+        &mut bad,
+    );
+    eq(
+        httputil::upgradeType(&hdr("keep-alive, Upgrade", "websocket")),
+        "websocket",
+        "upgradeType Connection=keep-alive, Upgrade (multi-token)",
+        &mut bad,
+    );
+    eq(
+        httputil::upgradeType(&hdr("keep-alive", "websocket")),
+        "",
+        "upgradeType Connection=keep-alive only",
+        &mut bad,
+    );
+    eq(
+        httputil::upgradeType(&hdr("", "websocket")),
+        "",
+        "upgradeType no Connection",
+        &mut bad,
+    );
+    eq(
+        httputil::upgradeType(&hdr("Upgrade", "")),
+        "",
+        "upgradeType no Upgrade header",
+        &mut bad,
+    );
 
     let cq: [(&'static str, &str); 7] = [
         ("a=1&b=2", "a=1&b=2"),
         ("", ""),
-        ("a=1;b=2", ""),   // semicolon: not a separator since Go 1.17
-        ("a=%zz", ""),     // malformed escape
-        ("a=%2", ""),      // truncated escape
-        ("a=%2Fb", "a=%2Fb"), // valid escape passes through untouched
+        ("a=1;b=2", ""),        // semicolon: not a separator since Go 1.17
+        ("a=%zz", ""),          // malformed escape
+        ("a=%2", ""),           // truncated escape
+        ("a=%2Fb", "a=%2Fb"),   // valid escape passes through untouched
         ("b=2&a=1", "b=2&a=1"), // order preserved when already safe
     ];
     for (q, want) in cq.iter() {
-        eq(httputil::cleanQueryParams(string(*q)), want, "cleanQueryParams", &mut bad);
+        eq(
+            httputil::cleanQueryParams(string(*q)),
+            want,
+            "cleanQueryParams",
+            &mut bad,
+        );
     }
 
     if bad == 0 {

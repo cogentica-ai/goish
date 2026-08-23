@@ -11,9 +11,9 @@ extern crate goish;
 use alloc::vec::Vec;
 use goish::fmt;
 use goish::goslice::slice;
+use goish::syscall;
 use goish::types::rune;
 use goish::unicode::utf16;
-use goish::{syscall};
 
 fn slice_u16(v: Vec<u16>) -> slice<u16> {
     slice::<u16>::__from_vec(v)

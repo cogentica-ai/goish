@@ -60,7 +60,9 @@ pub struct Ring<T> {
 
 impl<T> Clone for Ring<T> {
     fn clone(&self) -> Self {
-        Ring { inner: Rc::clone(&self.inner) }
+        Ring {
+            inner: Rc::clone(&self.inner),
+        }
     }
 }
 
@@ -94,7 +96,9 @@ impl<T> Ring<T> {
         let mut inner = self.inner.borrow_mut();
         inner.next = Some(Rc::clone(&self_rc));
         inner.prev = Some(self_rc);
-        Ring { inner: Rc::clone(&self.inner) }
+        Ring {
+            inner: Rc::clone(&self.inner),
+        }
     }
 
     // Go: ring.go:25

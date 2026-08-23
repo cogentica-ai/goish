@@ -9,12 +9,12 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
 use goish::convert::bytes as to_bytes;
-use goish::strings;
+use goish::fmt;
 use goish::string;
-use goish::{syscall};
+use goish::strings;
+use goish::syscall;
 
 #[goish::main]
 fn main() {

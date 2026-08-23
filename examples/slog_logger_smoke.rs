@@ -83,10 +83,13 @@ fn main() {
     // 1. Info reaches the handler, with the right level and attrs.
     {
         HANDLED.store(0, Ordering::SeqCst);
-        l.InfoAttrs(s("hello"), attrs(alloc::vec![
-            slog::String(s("k"), s("v")),
-            slog::Int(s("n"), 3),
-        ]));
+        l.InfoAttrs(
+            s("hello"),
+            attrs(alloc::vec![
+                slog::String(s("k"), s("v")),
+                slog::Int(s("n"), 3),
+            ]),
+        );
         let lvl = LAST_LEVEL.load(Ordering::SeqCst) as i64 - 100;
         if HANDLED.load(Ordering::SeqCst) == 1
             && lvl == slog::LevelInfo.0

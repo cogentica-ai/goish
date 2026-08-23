@@ -31,12 +31,12 @@ use alloc::vec::Vec;
 
 use crate::crypto::internal::fips140only;
 use crate::crypto::internal::randutil;
+use crate::error;
 use crate::errors;
 use crate::goslice::slice;
 use crate::io;
 use crate::math::big::{Int, NewInt};
 use crate::types::{byte, int};
-use crate::error;
 
 // Go: dsa.go:21-24
 //   type Parameters struct { P, Q, G *big.Int }

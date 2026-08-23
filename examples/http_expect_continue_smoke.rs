@@ -88,9 +88,7 @@ fn spawn_backend() -> goish::int {
                         "HTTP/1.1 417 Expectation Failed\r\nContent-Length: 0\r\n\r\n",
                     ));
                     // Watch briefly for body bytes that must not come.
-                    let _ = c.SetReadDeadline(
-                        time::Now().Add(time::Duration(400 * 1_000_000)),
-                    );
+                    let _ = c.SetReadDeadline(time::Now().Add(time::Duration(400 * 1_000_000)));
                     let mut b = goish::make!([]goish::byte, 256);
                     let (n, _) = c.Read(&mut b);
                     BODY_BYTES_SEEN
@@ -167,11 +165,8 @@ fn run() -> ! {
         let mut tr = http::Transport::default();
         tr.ExpectContinueTimeout = time::Duration(2_000_000_000);
         client.Transport = Arc::new(tr);
-        let (mut req, _) = http::NewRequest(
-            string("POST"),
-            ts.URL() + string("/up"),
-            bytes("expect-me"),
-        );
+        let (mut req, _) =
+            http::NewRequest(string("POST"), ts.URL() + string("/up"), bytes("expect-me"));
         req.Header.Set(string("Expect"), string("100-continue"));
         let (mut resp, err) = client.Do(&req);
         if err.IsNil() {
@@ -203,16 +198,13 @@ fn run() -> ! {
     {
         REFUSE.store(true, Ordering::SeqCst);
         let client = mk_client();
-        let (mut req, _) =
-            http::NewRequest(string("POST"), url.clone(), bytes("must-not-arrive"));
+        let (mut req, _) = http::NewRequest(string("POST"), url.clone(), bytes("must-not-arrive"));
         req.Header.Set(string("Expect"), string("100-continue"));
         let (resp, err) = client.Do(&req);
         time::Sleep(time::Duration(600 * 1_000_000)); // let the backend's watch window close
         check(
             "417 instead of 100: status surfaces and NO body bytes were sent",
-            err.IsNil()
-                && resp.StatusCode == 417
-                && BODY_BYTES_SEEN.load(Ordering::SeqCst) == 0,
+            err.IsNil() && resp.StatusCode == 417 && BODY_BYTES_SEEN.load(Ordering::SeqCst) == 0,
             fmt::Sprintf!(
                 "err=%v status=%d leaked=%d",
                 err,
@@ -227,8 +219,7 @@ fn run() -> ! {
     {
         let client = mk_client();
         let started = time::Now();
-        let (mut req, _) =
-            http::NewRequest(string("POST"), url.clone(), bytes("after-timeout"));
+        let (mut req, _) = http::NewRequest(string("POST"), url.clone(), bytes("after-timeout"));
         req.Header.Set(string("Expect"), string("100-continue"));
         let (mut resp, err) = client.Do(&req);
         let elapsed = time::Now().Sub(started);

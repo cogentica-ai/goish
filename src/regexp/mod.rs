@@ -43,12 +43,12 @@
 extern crate alloc;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 use alloc::vec;
+use alloc::vec::Vec;
 
 use crate::errors::{self, error};
-use crate::gostring::string;
 use crate::goslice::slice;
+use crate::gostring::string;
 use crate::types::{byte, int};
 
 // ─── QuoteMeta ─────────────────────────────────────────────────────────
@@ -57,8 +57,20 @@ use crate::types::{byte, int};
 fn is_meta(b: byte) -> bool {
     matches!(
         b,
-        b'\\' | b'.' | b'+' | b'*' | b'?' | b'(' | b')' | b'|' | b'[' | b']'
-        | b'{' | b'}' | b'^' | b'$'
+        b'\\'
+            | b'.'
+            | b'+'
+            | b'*'
+            | b'?'
+            | b'('
+            | b')'
+            | b'|'
+            | b'['
+            | b']'
+            | b'{'
+            | b'}'
+            | b'^'
+            | b'$'
     )
 }
 
@@ -97,7 +109,10 @@ enum Node {
     /// `.` — matches any single byte (Goish v1 doesn't special-case `\n`).
     AnyByte,
     /// `[...]` or shorthand class. `negate` flips membership.
-    Class { negate: bool, ranges: Vec<(byte, byte)> },
+    Class {
+        negate: bool,
+        ranges: Vec<(byte, byte)>,
+    },
     /// Capturing group. `idx` is the 1-based capture slot (slot 0 is
     /// whole match). The inner Node is whatever the group contains
     /// (typically a Concat or Alt).
@@ -110,7 +125,11 @@ enum Node {
     /// Alternation. Tries branches left-to-right.
     Alt(Vec<Node>),
     /// `node{min,max}` greedy. `max == usize::MAX` for unbounded.
-    Repeat { node: Box<Node>, min: usize, max: usize },
+    Repeat {
+        node: Box<Node>,
+        min: usize,
+        max: usize,
+    },
     /// `^` — text start (Goish v1: matches only at offset 0).
     AnchorStart,
     /// `$` — text end (matches only at end-of-input).
@@ -128,7 +147,12 @@ enum Node {
     /// began — so the next invocation can detect a zero-width match
     /// (current pos == last_pos) and terminate the chain instead of
     /// recursing forever.
-    RepeatTail { node: Box<Node>, min: usize, max: usize, last_pos: usize },
+    RepeatTail {
+        node: Box<Node>,
+        min: usize,
+        max: usize,
+        last_pos: usize,
+    },
 }
 
 // ─── Parser ────────────────────────────────────────────────────────────
@@ -150,7 +174,12 @@ struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     fn new(src: &'a [u8]) -> Self {
-        Self { src, pos: 0, next_cap: 1, fold: false }
+        Self {
+            src,
+            pos: 0,
+            next_cap: 1,
+            fold: false,
+        }
     }
 
     fn peek(&self) -> Option<byte> {
@@ -213,13 +242,38 @@ impl<'a> Parser<'a> {
             return Err("missing argument to repetition operator");
         }
         match self.peek() {
-            Some(b'*') => { self.bump(); Ok(Node::Repeat { node: Box::new(atom), min: 0, max: usize::MAX }) }
-            Some(b'+') => { self.bump(); Ok(Node::Repeat { node: Box::new(atom), min: 1, max: usize::MAX }) }
-            Some(b'?') => { self.bump(); Ok(Node::Repeat { node: Box::new(atom), min: 0, max: 1 }) }
+            Some(b'*') => {
+                self.bump();
+                Ok(Node::Repeat {
+                    node: Box::new(atom),
+                    min: 0,
+                    max: usize::MAX,
+                })
+            }
+            Some(b'+') => {
+                self.bump();
+                Ok(Node::Repeat {
+                    node: Box::new(atom),
+                    min: 1,
+                    max: usize::MAX,
+                })
+            }
+            Some(b'?') => {
+                self.bump();
+                Ok(Node::Repeat {
+                    node: Box::new(atom),
+                    min: 0,
+                    max: 1,
+                })
+            }
             Some(b'{') => {
                 self.bump();
                 let (min, max) = self.parse_brace_count()?;
-                Ok(Node::Repeat { node: Box::new(atom), min, max })
+                Ok(Node::Repeat {
+                    node: Box::new(atom),
+                    min,
+                    max,
+                })
             }
             _ => Ok(atom),
         }
@@ -230,17 +284,23 @@ impl<'a> Parser<'a> {
         let mut n: usize = 0;
         let mut have_n = false;
         while let Some(b) = self.peek() {
-            if !b.is_ascii_digit() { break; }
+            if !b.is_ascii_digit() {
+                break;
+            }
             self.bump();
             n = n.saturating_mul(10).saturating_add((b - b'0') as usize);
             have_n = true;
         }
-        if !have_n { return Err("missing number in {n,m}"); }
+        if !have_n {
+            return Err("missing number in {n,m}");
+        }
         if self.peek() == Some(b'}') {
             self.bump();
             return Ok((n, n));
         }
-        if self.peek() != Some(b',') { return Err("expected ',' or '}' in {n,m}"); }
+        if self.peek() != Some(b',') {
+            return Err("expected ',' or '}' in {n,m}");
+        }
         self.bump();
         if self.peek() == Some(b'}') {
             self.bump();
@@ -249,13 +309,19 @@ impl<'a> Parser<'a> {
         let mut m: usize = 0;
         let mut have_m = false;
         while let Some(b) = self.peek() {
-            if !b.is_ascii_digit() { break; }
+            if !b.is_ascii_digit() {
+                break;
+            }
             self.bump();
             m = m.saturating_mul(10).saturating_add((b - b'0') as usize);
             have_m = true;
         }
-        if !have_m { return Err("missing upper bound in {n,m}"); }
-        if self.peek() != Some(b'}') { return Err("expected '}' in {n,m}"); }
+        if !have_m {
+            return Err("missing upper bound in {n,m}");
+        }
+        if self.peek() != Some(b'}') {
+            return Err("expected '}' in {n,m}");
+        }
         self.bump();
         Ok((n, m))
     }
@@ -276,7 +342,9 @@ impl<'a> Parser<'a> {
                     // The group body's flags do not escape it.
                     let saved = self.fold;
                     let inner = self.parse_alt()?;
-                    if self.peek() != Some(b')') { return Err("unmatched '('"); }
+                    if self.peek() != Some(b')') {
+                        return Err("unmatched '('");
+                    }
                     self.bump();
                     self.fold = saved;
                     return Ok(Node::NonCap(Box::new(inner)));
@@ -285,18 +353,32 @@ impl<'a> Parser<'a> {
                 self.next_cap += 1;
                 let saved = self.fold;
                 let inner = self.parse_alt()?;
-                if self.peek() != Some(b')') { return Err("unmatched '('"); }
+                if self.peek() != Some(b')') {
+                    return Err("unmatched '('");
+                }
                 self.bump();
                 self.fold = saved;
-                Ok(Node::Group { idx, inner: Box::new(inner) })
+                Ok(Node::Group {
+                    idx,
+                    inner: Box::new(inner),
+                })
             }
             b'[' => {
                 self.bump();
                 self.parse_class()
             }
-            b'.' => { self.bump(); Ok(Node::AnyByte) }
-            b'^' => { self.bump(); Ok(Node::AnchorStart) }
-            b'$' => { self.bump(); Ok(Node::AnchorEnd) }
+            b'.' => {
+                self.bump();
+                Ok(Node::AnyByte)
+            }
+            b'^' => {
+                self.bump();
+                Ok(Node::AnchorStart)
+            }
+            b'$' => {
+                self.bump();
+                Ok(Node::AnchorEnd)
+            }
             b'\\' => {
                 self.bump();
                 let nb = self.bump().ok_or("trailing backslash")?;
@@ -309,10 +391,11 @@ impl<'a> Parser<'a> {
                 // with `(?i)q` inside goish.
                 Ok(self.fold_node(escape_to_node(nb)))
             }
-            b')' | b'|' | b'*' | b'+' | b'?' | b'{' | b'}' => {
-                Err("unexpected metacharacter")
+            b')' | b'|' | b'*' | b'+' | b'?' | b'{' | b'}' => Err("unexpected metacharacter"),
+            _ => {
+                self.bump();
+                Ok(self.fold_node(Node::Literal(b)))
             }
-            _ => { self.bump(); Ok(self.fold_node(Node::Literal(b))) }
         }
     }
 
@@ -329,14 +412,23 @@ impl<'a> Parser<'a> {
         let mut sawFlag = false;
         loop {
             match self.peek() {
-                Some(b'i') => { self.bump(); fold = !neg; sawFlag = true; }
-                Some(b'-') if !neg => { self.bump(); neg = true; }
+                Some(b'i') => {
+                    self.bump();
+                    fold = !neg;
+                    sawFlag = true;
+                }
+                Some(b'-') if !neg => {
+                    self.bump();
+                    neg = true;
+                }
                 Some(b':') | Some(b')') => break,
                 _ => return Err("unsupported (?...) construct"),
             }
         }
         // Go: `(?)` and `(?-)` are "invalid or unsupported Perl syntax".
-        if !sawFlag { return Err("unsupported (?...) construct"); }
+        if !sawFlag {
+            return Err("unsupported (?...) construct");
+        }
         match self.bump() {
             // `(?flags)` — applies to the rest of the enclosing group.
             // Matches the empty string, which an empty Concat already is.
@@ -348,7 +440,9 @@ impl<'a> Parser<'a> {
             Some(b':') => {
                 self.fold = fold;
                 let inner = self.parse_alt()?;
-                if self.peek() != Some(b')') { return Err("unmatched '('"); }
+                if self.peek() != Some(b')') {
+                    return Err("unmatched '('");
+                }
                 self.bump();
                 self.fold = saved;
                 Ok(Node::NonCap(Box::new(inner)))
@@ -392,7 +486,10 @@ impl<'a> Parser<'a> {
                 None => return Err("unterminated character class"),
                 // `]` closes the class — except when it appears as the
                 // first character (Go: `[]]` is the class containing `]`).
-                Some(b']') if !first => { self.bump(); break; }
+                Some(b']') if !first => {
+                    self.bump();
+                    break;
+                }
                 _ => {}
             }
             first = false;
@@ -416,7 +513,9 @@ impl<'a> Parser<'a> {
                             ClassAtom::Byte(b) => b,
                             ClassAtom::Expanded(_) => return Err("invalid character range"),
                         };
-                        if hi < lo { return Err("invalid character range"); }
+                        if hi < lo {
+                            return Err("invalid character range");
+                        }
                         ranges.push((lo, hi));
                     } else {
                         ranges.push((lo, lo));
@@ -453,27 +552,32 @@ impl<'a> Parser<'a> {
             let nb = self.bump().ok_or("trailing backslash in class")?;
             match nb {
                 b'd' => return Ok(ClassAtom::Expanded(vec![(b'0', b'9')])),
-                b'D' => return Ok(ClassAtom::Expanded(vec![(0u8, b'0'-1), (b'9'+1, 255u8)])),
+                b'D' => {
+                    return Ok(ClassAtom::Expanded(vec![
+                        (0u8, b'0' - 1),
+                        (b'9' + 1, 255u8),
+                    ]))
+                }
                 b'w' => return Ok(ClassAtom::Expanded(word_ranges())),
                 b'W' => {
                     // complement of word_ranges: [^0-9A-Z_a-z]
                     return Ok(ClassAtom::Expanded(vec![
-                        (0u8, b'0'-1),
-                        (b'9'+1, b'A'-1),
-                        (b'Z'+1, b'_'-1),
-                        (b'_'+1, b'a'-1),
-                        (b'z'+1, 255u8),
+                        (0u8, b'0' - 1),
+                        (b'9' + 1, b'A' - 1),
+                        (b'Z' + 1, b'_' - 1),
+                        (b'_' + 1, b'a' - 1),
+                        (b'z' + 1, 255u8),
                     ]));
                 }
                 b's' => return Ok(ClassAtom::Expanded(space_ranges())),
                 b'S' => {
                     return Ok(ClassAtom::Expanded(vec![
-                        (0u8, b'\t'-1),
-                        (b'\t'+1, b'\n'-1),
-                        (b'\n'+1, b'\x0C'-1),
-                        (b'\x0C'+1, b'\r'-1),
-                        (b'\r'+1, b' '-1),
-                        (b' '+1, 255u8),
+                        (0u8, b'\t' - 1),
+                        (b'\t' + 1, b'\n' - 1),
+                        (b'\n' + 1, b'\x0C' - 1),
+                        (b'\x0C' + 1, b'\r' - 1),
+                        (b'\r' + 1, b' ' - 1),
+                        (b' ' + 1, 255u8),
                     ]));
                 }
                 _ => return Ok(ClassAtom::Byte(escape_byte(nb))),
@@ -538,16 +642,34 @@ enum ClassAtom {
 /// like `\d` expand to a class node; literal escapes return a Literal.
 fn escape_to_node(b: byte) -> Node {
     match b {
-        b'd' => Node::Class { negate: false, ranges: vec![(b'0', b'9')] },
-        b'D' => Node::Class { negate: true,  ranges: vec![(b'0', b'9')] },
-        b'w' => Node::Class { negate: false, ranges: word_ranges() },
-        b'W' => Node::Class { negate: true,  ranges: word_ranges() },
-        b's' => Node::Class { negate: false, ranges: space_ranges() },
-        b'S' => Node::Class { negate: true,  ranges: space_ranges() },
+        b'd' => Node::Class {
+            negate: false,
+            ranges: vec![(b'0', b'9')],
+        },
+        b'D' => Node::Class {
+            negate: true,
+            ranges: vec![(b'0', b'9')],
+        },
+        b'w' => Node::Class {
+            negate: false,
+            ranges: word_ranges(),
+        },
+        b'W' => Node::Class {
+            negate: true,
+            ranges: word_ranges(),
+        },
+        b's' => Node::Class {
+            negate: false,
+            ranges: space_ranges(),
+        },
+        b'S' => Node::Class {
+            negate: true,
+            ranges: space_ranges(),
+        },
         b'n' => Node::Literal(b'\n'),
         b'r' => Node::Literal(b'\r'),
         b't' => Node::Literal(b'\t'),
-        _    => Node::Literal(b),
+        _ => Node::Literal(b),
     }
 }
 
@@ -558,16 +680,24 @@ fn escape_byte(b: byte) -> byte {
         b'n' => b'\n',
         b'r' => b'\r',
         b't' => b'\t',
-        _    => b,
+        _ => b,
     }
 }
 
-#[inline] fn word_ranges() -> Vec<(byte, byte)> {
+#[inline]
+fn word_ranges() -> Vec<(byte, byte)> {
     vec![(b'0', b'9'), (b'A', b'Z'), (b'_', b'_'), (b'a', b'z')]
 }
 
-#[inline] fn space_ranges() -> Vec<(byte, byte)> {
-    vec![(b'\t', b'\t'), (b'\n', b'\n'), (b'\x0C', b'\x0C'), (b'\r', b'\r'), (b' ', b' ')]
+#[inline]
+fn space_ranges() -> Vec<(byte, byte)> {
+    vec![
+        (b'\t', b'\t'),
+        (b'\n', b'\n'),
+        (b'\x0C', b'\x0C'),
+        (b'\r', b'\r'),
+        (b' ', b' '),
+    ]
 }
 
 // ─── Regexp (compiled) ─────────────────────────────────────────────────
@@ -583,7 +713,9 @@ pub struct Regexp {
 }
 
 impl Regexp {
-    fn n_groups(&self) -> usize { self.n_caps + 1 }
+    fn n_groups(&self) -> usize {
+        self.n_caps + 1
+    }
 
     /// `Regexp.String() string` — returns the source text of the
     /// pattern. Mirrors Go's `regexp.Regexp.String()`.
@@ -601,7 +733,11 @@ pub fn Compile<S: Into<string>>(expr: S) -> (Regexp, error) {
     let expr_s = expr.into();
     if !crate::unicode::utf8::Valid(expr_s.as_bytes()) {
         return (
-            Regexp { root: Arc::new(Node::Concat(Vec::new())), n_caps: 0, pattern: expr_s.clone() },
+            Regexp {
+                root: Arc::new(Node::Concat(Vec::new())),
+                n_caps: 0,
+                pattern: expr_s.clone(),
+            },
             compile_err(&expr_s, "invalid UTF-8"),
         );
     }
@@ -610,14 +746,29 @@ pub fn Compile<S: Into<string>>(expr: S) -> (Regexp, error) {
         Ok(node) => {
             if p.pos != p.src.len() {
                 return (
-                    Regexp { root: Arc::new(Node::Concat(Vec::new())), n_caps: 0, pattern: expr_s.clone() },
+                    Regexp {
+                        root: Arc::new(Node::Concat(Vec::new())),
+                        n_caps: 0,
+                        pattern: expr_s.clone(),
+                    },
                     compile_err(&expr_s, "trailing junk in pattern"),
                 );
             }
-            (Regexp { root: Arc::new(node), n_caps: p.next_cap - 1, pattern: expr_s }, crate::nilval::nil.into())
+            (
+                Regexp {
+                    root: Arc::new(node),
+                    n_caps: p.next_cap - 1,
+                    pattern: expr_s,
+                },
+                crate::nilval::nil.into(),
+            )
         }
         Err(why) => (
-            Regexp { root: Arc::new(Node::Concat(Vec::new())), n_caps: 0, pattern: expr_s.clone() },
+            Regexp {
+                root: Arc::new(Node::Concat(Vec::new())),
+                n_caps: 0,
+                pattern: expr_s.clone(),
+            },
             compile_err(&expr_s, why),
         ),
     }
@@ -682,16 +833,11 @@ fn compile_err(expr: &string, why: &'static str) -> error {
 // `backtrack.go` semantics; see exec.go:339 InstAlt and
 // backtrack.go:171 InstAlt for the equivalent reference behaviour.
 
-type Capture = (i32, i32);   // (-1, -1) = unset
+type Capture = (i32, i32); // (-1, -1) = unset
 
 /// Walk the continuation: if empty, the match has succeeded at `pos`;
 /// otherwise dispatch to the head item with the rest as its cont.
-fn match_cont(
-    text: &[u8],
-    pos: usize,
-    caps: &mut Vec<Capture>,
-    cont: &[Node],
-) -> Option<usize> {
+fn match_cont(text: &[u8], pos: usize, caps: &mut Vec<Capture>, cont: &[Node]) -> Option<usize> {
     if cont.is_empty() {
         return Some(pos);
     }
@@ -725,11 +871,16 @@ fn try_match(
             }
         }
         Node::Class { negate, ranges } => {
-            if pos >= text.len() { return None; }
+            if pos >= text.len() {
+                return None;
+            }
             let c = text[pos];
             let mut hit = false;
             for &(lo, hi) in ranges {
-                if c >= lo && c <= hi { hit = true; break; }
+                if c >= lo && c <= hi {
+                    hit = true;
+                    break;
+                }
             }
             if hit ^ *negate {
                 match_cont(text, pos + 1, caps, cont)
@@ -738,10 +889,18 @@ fn try_match(
             }
         }
         Node::AnchorStart => {
-            if pos == 0 { match_cont(text, pos, caps, cont) } else { None }
+            if pos == 0 {
+                match_cont(text, pos, caps, cont)
+            } else {
+                None
+            }
         }
         Node::AnchorEnd => {
-            if pos == text.len() { match_cont(text, pos, caps, cont) } else { None }
+            if pos == text.len() {
+                match_cont(text, pos, caps, cont)
+            } else {
+                None
+            }
         }
         Node::Concat(items) => {
             if items.is_empty() {
@@ -789,9 +948,12 @@ fn try_match(
         Node::Repeat { node, min, max } => {
             match_repeat(node, *min, *max, text, pos, caps, cont, None)
         }
-        Node::RepeatTail { node, min, max, last_pos } => {
-            match_repeat(node, *min, *max, text, pos, caps, cont, Some(*last_pos))
-        }
+        Node::RepeatTail {
+            node,
+            min,
+            max,
+            last_pos,
+        } => match_repeat(node, *min, *max, text, pos, caps, cont, Some(*last_pos)),
         Node::EndGroup(idx) => {
             let prev_end = caps[*idx].1;
             caps[*idx].1 = pos as i32;
@@ -836,7 +998,11 @@ fn match_repeat(
     }
 
     let next_min = if min == 0 { 0 } else { min - 1 };
-    let next_max = if max == usize::MAX { usize::MAX } else { max - 1 };
+    let next_max = if max == usize::MAX {
+        usize::MAX
+    } else {
+        max - 1
+    };
 
     let mut rep_cont: Vec<Node> = Vec::with_capacity(1 + cont.len());
     rep_cont.push(Node::RepeatTail {
@@ -888,7 +1054,9 @@ impl Regexp {
             if let Some((end, caps)) = self.match_at(text, start) {
                 return Some((start, end, caps));
             }
-            if start >= text.len() { return None; }
+            if start >= text.len() {
+                return None;
+            }
             start += 1;
         }
     }
@@ -904,12 +1072,7 @@ impl Regexp {
     ///    an extra empty at each seam;
     ///  - after any empty match the scan advances one RUNE, not one
     ///    byte, so a multi-byte character is never split.
-    fn all_matches(
-        &self,
-        text: &[u8],
-        n: int,
-        deliver: &mut dyn FnMut(usize, usize, &[Capture]),
-    ) {
+    fn all_matches(&self, text: &[u8], n: int, deliver: &mut dyn FnMut(usize, usize, &[Capture])) {
         // Go: `if n < 0 { n = len(s) + 1 }` at each caller.
         let max = if n < 0 { text.len() + 1 } else { n as usize };
         let end = text.len();
@@ -928,7 +1091,11 @@ impl Regexp {
                     accept = false;
                 }
                 let width = rune_width(text, pos);
-                if width > 0 { pos += width; } else { pos = end + 1; }
+                if width > 0 {
+                    pos += width;
+                } else {
+                    pos = end + 1;
+                }
             } else {
                 pos = hi;
             }
@@ -993,7 +1160,11 @@ impl Regexp {
         self.all_matches(text, n, &mut |lo, hi, _| {
             out.push(string::from_bytes(&text[lo..hi]));
         });
-        if out.is_empty() { slice::new() } else { slice::__from_vec(out) }
+        if out.is_empty() {
+            slice::new()
+        } else {
+            slice::__from_vec(out)
+        }
     }
 
     /// Go: `func (re *Regexp) FindAllStringIndex(s string, n int) [][]int`
@@ -1006,7 +1177,11 @@ impl Regexp {
         self.all_matches(text, n, &mut |lo, hi, _| {
             out.push(slice::__from_vec(alloc::vec![lo as int, hi as int]));
         });
-        if out.is_empty() { slice::new() } else { slice::__from_vec(out) }
+        if out.is_empty() {
+            slice::new()
+        } else {
+            slice::__from_vec(out)
+        }
     }
 
     /// Go: `func (re *Regexp) Split(s string, n int) []string`
@@ -1049,34 +1224,34 @@ impl Regexp {
             out.push(string::from_bytes(&text[beg..]));
         }
 
-        if out.is_empty() { slice::new() } else { slice::__from_vec(out) }
+        if out.is_empty() {
+            slice::new()
+        } else {
+            slice::__from_vec(out)
+        }
     }
 
     /// Go: `func (re *Regexp) FindAllStringSubmatch(s string, n int) [][]string`
     /// (regexp.go:1126).
-    pub fn FindAllStringSubmatch<S: Into<string>>(
-        &self,
-        s: S,
-        n: int,
-    ) -> slice<slice<string>> {
+    pub fn FindAllStringSubmatch<S: Into<string>>(&self, s: S, n: int) -> slice<slice<string>> {
         let s = s.into();
         let text = s.as_bytes();
         let mut out: Vec<slice<string>> = Vec::new();
         self.all_matches(text, n, &mut |_, _, caps| {
             out.push(self.caps_to_row(text, caps));
         });
-        if out.is_empty() { slice::new() } else { slice::__from_vec(out) }
+        if out.is_empty() {
+            slice::new()
+        } else {
+            slice::__from_vec(out)
+        }
     }
 
     /// Go: `func (re *Regexp) ReplaceAllString(src, repl string) string`
     /// (regexp.go:822). Replacement is treated as literal text — `$1`
     /// group expansion isn't supported in the v1 subset (extend when a
     /// port surfaces the need).
-    pub fn ReplaceAllString<S: Into<string>, R: Into<string>>(
-        &self,
-        src: S,
-        repl: R,
-    ) -> string {
+    pub fn ReplaceAllString<S: Into<string>, R: Into<string>>(&self, src: S, repl: R) -> string {
         let src = src.into();
         let repl = repl.into();
         let text = src.as_bytes();
@@ -1089,7 +1264,9 @@ impl Regexp {
                 if end > i {
                     i = end;
                 } else {
-                    if i < text.len() { out.push(text[i]); }
+                    if i < text.len() {
+                        out.push(text[i]);
+                    }
                     i += 1;
                 }
             } else if i < text.len() {

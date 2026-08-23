@@ -181,9 +181,18 @@ fn main() {
     // wg.Wait()
     schedule();
 
-    check(GS_DONE.load(Ordering::Relaxed) == 10, b"select_stress: not all 10 Gs done\n");
-    check(SEND_TOTAL.load(Ordering::Relaxed) == 8 * N, b"select_stress: send total wrong\n");
-    check(RECV_TOTAL.load(Ordering::Relaxed) == 8 * N, b"select_stress: recv total wrong\n");
+    check(
+        GS_DONE.load(Ordering::Relaxed) == 10,
+        b"select_stress: not all 10 Gs done\n",
+    );
+    check(
+        SEND_TOTAL.load(Ordering::Relaxed) == 8 * N,
+        b"select_stress: send total wrong\n",
+    );
+    check(
+        RECV_TOTAL.load(Ordering::Relaxed) == 8 * N,
+        b"select_stress: recv total wrong\n",
+    );
 
     const OK: &[u8] = b"chan_select_stress: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

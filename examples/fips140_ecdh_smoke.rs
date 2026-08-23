@@ -26,8 +26,8 @@ use goish::crypto::internal::fips140::ecdh;
 use goish::encoding::hex;
 use goish::fmt;
 use goish::goslice::slice;
-use goish::io;
 use goish::int;
+use goish::io;
 use goish::types::byte;
 
 static mut FAILED: bool = false;
@@ -86,33 +86,69 @@ fn key(n: usize, seed: byte) -> slice<byte> {
 /// Everything the Go reference does per curve, in the same order.
 fn one<P: ecdh::Point>(name: &str, c: &ecdh::Curve<P>, n: usize, want: &[&str; 9]) {
     let (a, err) = ecdh::NewPrivateKey(c, &key(n, 0x00));
-    check(&nm(name, "NewPrivateKey a"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        &nm(name, "NewPrivateKey a"),
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     let (b, err) = ecdh::NewPrivateKey(c, &key(n, 0x5a));
-    check(&nm(name, "NewPrivateKey b"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        &nm(name, "NewPrivateKey b"),
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
 
     check(&nm(name, "pubA"), hx(&a.PublicKey().Bytes()), want[0]);
     check(&nm(name, "pubB"), hx(&b.PublicKey().Bytes()), want[1]);
 
     let (ab, err) = ecdh::ECDH(c, &a, &b.PublicKey());
-    check(&nm(name, "ECDH ab err"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        &nm(name, "ECDH ab err"),
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     check(&nm(name, "shared ab"), hx(&ab), want[2]);
     let (ba, err) = ecdh::ECDH(c, &b, &a.PublicKey());
-    check(&nm(name, "ECDH ba err"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        &nm(name, "ECDH ba err"),
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     check(&nm(name, "shared ba"), hx(&ba), want[3]);
 
     let (pk, err) = ecdh::NewPublicKey(c, &a.PublicKey().Bytes());
-    check(&nm(name, "NewPublicKey err"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        &nm(name, "NewPublicKey err"),
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     check(&nm(name, "public key round trip"), hx(&pk.Bytes()), want[4]);
 
     let zero = slice::__from_vec(alloc::vec![0u8; n]);
     let (_, err) = ecdh::NewPrivateKey(c, &zero);
-    check(&nm(name, "zero key rejected"), fmt::Sprintf!("%v", err.Error()), want[5]);
+    check(
+        &nm(name, "zero key rejected"),
+        fmt::Sprintf!("%v", err.Error()),
+        want[5],
+    );
     let (_, err) = ecdh::NewPrivateKey(c, &c.N);
-    check(&nm(name, "key == order rejected"), fmt::Sprintf!("%v", err.Error()), want[6]);
+    check(
+        &nm(name, "key == order rejected"),
+        fmt::Sprintf!("%v", err.Error()),
+        want[6],
+    );
     let (_, err) = ecdh::NewPrivateKey(c, &slice::__from_vec(alloc::vec![0u8; n - 1]));
-    check(&nm(name, "short key rejected"), fmt::Sprintf!("%v", err.Error()), want[7]);
+    check(
+        &nm(name, "short key rejected"),
+        fmt::Sprintf!("%v", err.Error()),
+        want[7],
+    );
     let (_, err) = ecdh::NewPublicKey(c, &slice::__from_vec(alloc::vec![0u8; 1]));
-    check(&nm(name, "identity public key rejected"), fmt::Sprintf!("%v", err.Error()), want[8]);
+    check(
+        &nm(name, "identity public key rejected"),
+        fmt::Sprintf!("%v", err.Error()),
+        want[8],
+    );
 }
 
 /// `check` takes a &str name; this joins the curve to the case without
@@ -153,11 +189,23 @@ impl io::Reader for counter {
 fn generated<P: ecdh::Point>(name: &str, c: &ecdh::Curve<P>, n: usize) {
     let mut r = counter { n: 7 };
     let (k, err) = ecdh::GenerateKey(c, &mut r);
-    check(&nm(name, "GenerateKey err"), fmt::Sprintf!("%v", err != goish::nil), "false");
-    check(&nm(name, "GenerateKey length"), fmt::Sprintf!("%v", k.Bytes().Len()), &itoa(n));
+    check(
+        &nm(name, "GenerateKey err"),
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
+    check(
+        &nm(name, "GenerateKey length"),
+        fmt::Sprintf!("%v", k.Bytes().Len()),
+        &itoa(n),
+    );
 
     let (k2, err) = ecdh::NewPrivateKey(c, &k.Bytes());
-    check(&nm(name, "regenerate err"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        &nm(name, "regenerate err"),
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     checkSame(
         &nm(name, "generated key re-derives its public key"),
         hx(&k2.PublicKey().Bytes()),
@@ -166,7 +214,11 @@ fn generated<P: ecdh::Point>(name: &str, c: &ecdh::Curve<P>, n: usize) {
 
     // And it is a usable ECDH key: both sides must reach the same secret.
     let (peer, err) = ecdh::NewPrivateKey(c, &key(n, 0x11));
-    check(&nm(name, "peer err"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        &nm(name, "peer err"),
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     let (s1, _) = ecdh::ECDH(c, &k, &peer.PublicKey());
     let (s2, _) = ecdh::ECDH(c, &peer, &k.PublicKey());
     checkSame(
@@ -197,28 +249,40 @@ fn main() {
         "p224",
         &ecdh::P224(),
         28,
-        &[P224_PUBA, P224_PUBB, P224_AB, P224_BA, P224_RTPK, P224_ZERO, P224_ORDR, P224_SHRT, P224_INF],
+        &[
+            P224_PUBA, P224_PUBB, P224_AB, P224_BA, P224_RTPK, P224_ZERO, P224_ORDR, P224_SHRT,
+            P224_INF,
+        ],
     );
 
     one(
         "p256",
         &ecdh::P256(),
         32,
-        &[P256_PUBA, P256_PUBB, P256_AB, P256_BA, P256_RTPK, P256_ZERO, P256_ORDR, P256_SHRT, P256_INF],
+        &[
+            P256_PUBA, P256_PUBB, P256_AB, P256_BA, P256_RTPK, P256_ZERO, P256_ORDR, P256_SHRT,
+            P256_INF,
+        ],
     );
 
     one(
         "p384",
         &ecdh::P384(),
         48,
-        &[P384_PUBA, P384_PUBB, P384_AB, P384_BA, P384_RTPK, P384_ZERO, P384_ORDR, P384_SHRT, P384_INF],
+        &[
+            P384_PUBA, P384_PUBB, P384_AB, P384_BA, P384_RTPK, P384_ZERO, P384_ORDR, P384_SHRT,
+            P384_INF,
+        ],
     );
 
     one(
         "p521",
         &ecdh::P521(),
         66,
-        &[P521_PUBA, P521_PUBB, P521_AB, P521_BA, P521_RTPK, P521_ZERO, P521_ORDR, P521_SHRT, P521_INF],
+        &[
+            P521_PUBA, P521_PUBB, P521_AB, P521_BA, P521_RTPK, P521_ZERO, P521_ORDR, P521_SHRT,
+            P521_INF,
+        ],
     );
 
     generated("p224", &ecdh::P224(), 28);

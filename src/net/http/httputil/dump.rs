@@ -15,8 +15,8 @@ use crate::string;
 use crate::strings;
 use crate::types::byte;
 
-use super::super::response::Response;
 use super::super::request::Request;
+use super::super::response::Response;
 
 // go: sdk 1.25.5 net/http/httputil/dump.go:25-38 drainBody
 /// Go: "drainBody reads all of b to memory and then returns two
@@ -301,7 +301,6 @@ pub fn DumpResponse(resp: &Response, body: bool) -> (slice<byte>, error) {
 
 // ─── ReverseProxy (slim port of reverseproxy.go) ─────────────────────
 
-
 // go: sdk 1.25.5 net/http/httputil/dump.go:53-53 neverEnding
 //
 /// A byte that reads forever. Go: `type neverEnding byte`, whose Read
@@ -444,12 +443,18 @@ where
 
     // go: sdk 1.25.5 net/http/httputil/dump.go:47-47 dumpConn.LocalAddr
     fn LocalAddr(&self) -> crate::net::TCPAddr {
-        return crate::net::TCPAddr { IP: [0, 0, 0, 0], Port: 0 };
+        return crate::net::TCPAddr {
+            IP: [0, 0, 0, 0],
+            Port: 0,
+        };
     }
 
     // go: sdk 1.25.5 net/http/httputil/dump.go:48-48 dumpConn.RemoteAddr
     fn RemoteAddr(&self) -> crate::net::TCPAddr {
-        return crate::net::TCPAddr { IP: [0, 0, 0, 0], Port: 0 };
+        return crate::net::TCPAddr {
+            IP: [0, 0, 0, 0],
+            Port: 0,
+        };
     }
 
     // go: sdk 1.25.5 net/http/httputil/dump.go:49-49 dumpConn.SetDeadline

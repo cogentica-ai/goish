@@ -12,11 +12,13 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::errors;
 use goish::fmt;
-use goish::net::http::fs::{countingWriter, errNoOverlap, httpRange, parseRange, rangesMIMESize, sumRangesSize};
 use goish::goslice::slice;
 use goish::io;
-use goish::errors;
+use goish::net::http::fs::{
+    countingWriter, errNoOverlap, httpRange, parseRange, rangesMIMESize, sumRangesSize,
+};
 use goish::{string, syscall};
 
 #[goish::main]
@@ -91,7 +93,10 @@ fn main() {
 
     // 7. ContentRange formatting.
     {
-        let r = httpRange { start: 0, length: 100 };
+        let r = httpRange {
+            start: 0,
+            length: 100,
+        };
         let s = r.contentRange(1000);
         if s == "bytes 0-99/1000" {
             fmt::Println!("[ 7] contentRange format       PASS");
@@ -100,7 +105,6 @@ fn main() {
             failed += 1;
         }
     }
-
 
     // Cases 8-14 are pinned to Go 1.25.5 output, captured by running
     // parseRange inside a writable GOROOT (scripts/goref.sh net/http).
@@ -134,9 +138,12 @@ fn main() {
     {
         let (a, ae) = parseRange(string("bytes=\t0-99"), 1000);
         let (b, be) = parseRange(string("bytes=\n0-99"), 1000);
-        if ae == goish::nil && be == goish::nil
-            && a.Len() == 1 && b.Len() == 1
-            && a[0].length == 100 && b[0].length == 100
+        if ae == goish::nil
+            && be == goish::nil
+            && a.Len() == 1
+            && b.Len() == 1
+            && a[0].length == 100
+            && b[0].length == 100
         {
             fmt::Println!("[10] tab/newline are trimmed  PASS");
         } else {
@@ -199,7 +206,12 @@ fn main() {
         let cases: &[(&'static str, &'static str, i64, i64)] = &[
             ("bytes=0-99", "text/plain", 1000, 292),
             ("bytes=0-99,200-299", "text/plain", 1000, 521),
-            ("bytes=0-99,200-299,400-499", "application/octet-stream", 1000, 792),
+            (
+                "bytes=0-99,200-299,400-499",
+                "application/octet-stream",
+                1000,
+                792,
+            ),
             ("bytes=-50", "text/html; charset=utf-8", 1000, 259),
             ("bytes=0-0", "a", 1, 180),
         ];

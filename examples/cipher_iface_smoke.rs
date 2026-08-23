@@ -13,9 +13,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
-use goish::crypto::cipher::{AEAD, Block, BlockMode, Stream};
+use goish::crypto::cipher::{Block, BlockMode, Stream, AEAD};
 use goish::errors::{error, nil};
+use goish::fmt;
 use goish::types::{byte, int};
 use goish::{slice, syscall};
 
@@ -126,10 +126,7 @@ impl AEAD for ToyAEAD {
             );
         }
         if ciphertext[0] != self.key {
-            return (
-                slice::new(),
-                goish::errors::New("toy AEAD: bad tag"),
-            );
+            return (slice::new(), goish::errors::New("toy AEAD: bad tag"));
         }
         let mut v: alloc::vec::Vec<byte> = dst.__into_vec();
         let n = ciphertext.Len();
@@ -155,18 +152,18 @@ fn main() {
 
     // 1. Block::Encrypt + Decrypt round-trip via generic bound.
     {
-        let b = XorBlock { key: 0x5A, block_size: 4 };
+        let b = XorBlock {
+            key: 0x5A,
+            block_size: 4,
+        };
         if block_size_of(&b) != 4 {
             fmt::Println!("[ 1] Block::BlockSize bound      FAIL");
             failed += 1;
         } else {
-            let src: slice<byte> =
-                slice::__from_vec(alloc::vec![0x10, 0x20, 0x30, 0x40]);
-            let mut enc: slice<byte> =
-                slice::__from_vec(alloc::vec![0u8; 4]);
+            let src: slice<byte> = slice::__from_vec(alloc::vec![0x10, 0x20, 0x30, 0x40]);
+            let mut enc: slice<byte> = slice::__from_vec(alloc::vec![0u8; 4]);
             b.Encrypt(&mut enc, src.clone());
-            let mut dec: slice<byte> =
-                slice::__from_vec(alloc::vec![0u8; 4]);
+            let mut dec: slice<byte> = slice::__from_vec(alloc::vec![0u8; 4]);
             b.Decrypt(&mut dec, enc);
             let dec_v: alloc::vec::Vec<byte> = dec.__into_vec();
             let src_v: alloc::vec::Vec<byte> = src.__into_vec();
@@ -182,10 +179,8 @@ fn main() {
     // 2. Stream::XORKeyStream advances internal state.
     {
         let mut s = CounterStream { counter: 0 };
-        let src: slice<byte> =
-            slice::__from_vec(alloc::vec![0u8; 4]);
-        let mut dst: slice<byte> =
-            slice::__from_vec(alloc::vec![0u8; 4]);
+        let src: slice<byte> = slice::__from_vec(alloc::vec![0u8; 4]);
+        let mut dst: slice<byte> = slice::__from_vec(alloc::vec![0u8; 4]);
         s.XORKeyStream(&mut dst, src);
         let dst_v: alloc::vec::Vec<byte> = dst.__into_vec();
         let want: alloc::vec::Vec<byte> = alloc::vec![0, 1, 2, 3];
@@ -194,10 +189,8 @@ fn main() {
             failed += 1;
         } else {
             // Second call must continue counter from 4, not reset.
-            let src2: slice<byte> =
-                slice::__from_vec(alloc::vec![0u8; 3]);
-            let mut dst2: slice<byte> =
-                slice::__from_vec(alloc::vec![0u8; 3]);
+            let src2: slice<byte> = slice::__from_vec(alloc::vec![0u8; 3]);
+            let mut dst2: slice<byte> = slice::__from_vec(alloc::vec![0u8; 3]);
             s.XORKeyStream(&mut dst2, src2);
             let dst2_v: alloc::vec::Vec<byte> = dst2.__into_vec();
             let want2: alloc::vec::Vec<byte> = alloc::vec![4, 5, 6];
@@ -212,20 +205,20 @@ fn main() {
 
     // 3. BlockMode round-trip + BlockSize().
     {
-        let mut m = XorBlockMode { key: 0xA5, block_size: 8 };
+        let mut m = XorBlockMode {
+            key: 0xA5,
+            block_size: 8,
+        };
         if m.BlockSize() != 8 {
             fmt::Println!("[ 3] BlockMode::BlockSize       FAIL");
             failed += 1;
         } else {
-            let src: slice<byte> = slice::__from_vec(
-                alloc::vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88],
-            );
-            let mut enc: slice<byte> =
-                slice::__from_vec(alloc::vec![0u8; 8]);
+            let src: slice<byte> =
+                slice::__from_vec(alloc::vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]);
+            let mut enc: slice<byte> = slice::__from_vec(alloc::vec![0u8; 8]);
             m.CryptBlocks(&mut enc, src.clone());
             // XOR is symmetric — encrypting again yields plaintext.
-            let mut dec: slice<byte> =
-                slice::__from_vec(alloc::vec![0u8; 8]);
+            let mut dec: slice<byte> = slice::__from_vec(alloc::vec![0u8; 8]);
             m.CryptBlocks(&mut dec, enc);
             if dec.__into_vec() == src.__into_vec() {
                 fmt::Println!("[ 3] BlockMode XOR RT           PASS");
@@ -243,10 +236,8 @@ fn main() {
             fmt::Println!("[ 4] AEAD sizes                 FAIL");
             failed += 1;
         } else {
-            let nonce: slice<byte> =
-                slice::__from_vec(alloc::vec![1, 2, 3, 4]);
-            let plain: slice<byte> =
-                slice::__from_vec(alloc::vec![b'h', b'i', b'!']);
+            let nonce: slice<byte> = slice::__from_vec(alloc::vec![1, 2, 3, 4]);
+            let plain: slice<byte> = slice::__from_vec(alloc::vec![b'h', b'i', b'!']);
             let aad: slice<byte> = slice::new();
             let ct = a.Seal(slice::new(), nonce.clone(), plain.clone(), aad.clone());
             let (got, err) = a.Open(slice::new(), nonce, ct, aad);
@@ -262,11 +253,9 @@ fn main() {
     // 5. AEAD::Seal preserves dst prefix (Go contract — appends).
     {
         let a = ToyAEAD { key: 0x42 };
-        let prefix: slice<byte> =
-            slice::__from_vec(alloc::vec![b'>', b' ']);
+        let prefix: slice<byte> = slice::__from_vec(alloc::vec![b'>', b' ']);
         let plain: slice<byte> = slice::__from_vec(alloc::vec![b'X']);
-        let nonce: slice<byte> =
-            slice::__from_vec(alloc::vec![0, 0, 0, 0]);
+        let nonce: slice<byte> = slice::__from_vec(alloc::vec![0, 0, 0, 0]);
         let aad: slice<byte> = slice::new();
         let out = a.Seal(prefix, nonce, plain, aad);
         let out_v: alloc::vec::Vec<byte> = out.__into_vec();
@@ -282,10 +271,8 @@ fn main() {
     // 6. AEAD::Open returns error on bad tag.
     {
         let a = ToyAEAD { key: 0x42 };
-        let nonce: slice<byte> =
-            slice::__from_vec(alloc::vec![0, 0, 0, 0]);
-        let bad: slice<byte> =
-            slice::__from_vec(alloc::vec![0x00, b'X']);
+        let nonce: slice<byte> = slice::__from_vec(alloc::vec![0, 0, 0, 0]);
+        let bad: slice<byte> = slice::__from_vec(alloc::vec![0x00, b'X']);
         let aad: slice<byte> = slice::new();
         let (_got, err) = a.Open(slice::new(), nonce, bad, aad);
         if !err.IsNil() {

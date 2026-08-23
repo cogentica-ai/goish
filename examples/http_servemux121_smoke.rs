@@ -58,15 +58,15 @@ fn run() {
         let cases: &[(&'static str, &'static str, &'static str, &'static str)] = &[
             ("GET", "x.com", "/exact", "/exact"),
             ("GET", "x.com", "/tree/", "/tree/"),
-            ("GET", "x.com", "/tree", "/tree/"),           // -> /tree/ redirect
-            ("GET", "x.com", "/tree/deep/er", "/tree/"),   // longest prefix
+            ("GET", "x.com", "/tree", "/tree/"), // -> /tree/ redirect
+            ("GET", "x.com", "/tree/deep/er", "/tree/"), // longest prefix
             ("GET", "x.com", "/nope", "/"),
-            ("GET", "x.com", "//double", "/"),             // cleanPath, then redirect
-            ("GET", "x.com", "/a/../exact", "/exact"),     // cleanPath resolves ..
+            ("GET", "x.com", "//double", "/"), // cleanPath, then redirect
+            ("GET", "x.com", "/a/../exact", "/exact"), // cleanPath resolves ..
             ("GET", "example.com", "/host", "example.com/host"), // host wins
-            ("GET", "x.com:8080", "/exact", "/exact"),     // port stripped
-            ("CONNECT", "x.com", "/tree", "/tree/"),       // redirect still applies
-            ("CONNECT", "x.com", "//double", "/"),         // but NOT cleaned
+            ("GET", "x.com:8080", "/exact", "/exact"), // port stripped
+            ("CONNECT", "x.com", "/tree", "/tree/"), // redirect still applies
+            ("CONNECT", "x.com", "//double", "/"), // but NOT cleaned
             // The discriminating pairs: CONNECT skips cleanPath, so
             // the SAME path resolves to a different handler.
             ("CONNECT", "x.com", "//tree/", "/"),
@@ -98,13 +98,17 @@ fn run() {
                 );
             }
         }
-        check("findHandler over 15 cases (incl. the CONNECT/GET pairs)", bad.Len() == 0, bad);
+        check(
+            "findHandler over 15 cases (incl. the CONNECT/GET pairs)",
+            bad.Len() == 0,
+            bad,
+        );
     }
 
     // ── shouldRedirectRLocked ──
     {
         let cases: &[(&'static str, &'static str, bool)] = &[
-            ("x.com", "/tree", true),      // /tree/ registered, /tree not
+            ("x.com", "/tree", true), // /tree/ registered, /tree not
             ("x.com", "/tree/", false),
             ("x.com", "/exact", false),
             ("x.com", "/nope", false),
@@ -115,7 +119,13 @@ fn run() {
         for (host, path, want) in cases {
             let got = mux.shouldRedirectRLocked(string(*host), string(*path));
             if got != *want {
-                bad = fmt::Sprintf!("%s %q -> %v want %v", string(*host), string(*path), got, *want);
+                bad = fmt::Sprintf!(
+                    "%s %q -> %v want %v",
+                    string(*host),
+                    string(*path),
+                    got,
+                    *want
+                );
             }
         }
         check("shouldRedirectRLocked over 6 cases", bad.Len() == 0, bad);

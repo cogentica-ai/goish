@@ -29,9 +29,7 @@ use crate::runtime::spin::SpinLock;
 use crate::types::byte;
 
 use super::cipher::Cipher;
-use super::konst::{
-    ksRotations, permutationFunction, permutedChoice1, permutedChoice2, sBoxes,
-};
+use super::konst::{ksRotations, permutationFunction, permutedChoice1, permutedChoice2, sBoxes};
 
 // go: sdk 1.25.5 crypto/des/block.go:72-72 feistelBox
 //
@@ -142,40 +140,28 @@ pub(crate) fn feistel(mut l: u32, mut r: u32, k0: u64, k1: u64) -> (u32, u32) {
     // Go: block.go:44
     //   l ^= feistelBox[7][t&0x3f] ^ feistelBox[5][(t>>8)&0x3f]
     //        ^ feistelBox[3][(t>>16)&0x3f] ^ feistelBox[1][(t>>24)&0x3f]
-    l ^= fb_lookup(7, t)
-        ^ fb_lookup(5, t >> 8)
-        ^ fb_lookup(3, t >> 16)
-        ^ fb_lookup(1, t >> 24);
+    l ^= fb_lookup(7, t) ^ fb_lookup(5, t >> 8) ^ fb_lookup(3, t >> 16) ^ fb_lookup(1, t >> 24);
 
     // Go: block.go:49 — t = ((r << 28) | (r >> 4)) ^ uint32(k0)
     t = ((r << 28) | (r >> 4)) ^ (k0 as u32);
     // Go: block.go:50
     //   l ^= feistelBox[6][t&0x3f] ^ feistelBox[4][(t>>8)&0x3f]
     //        ^ feistelBox[2][(t>>16)&0x3f] ^ feistelBox[0][(t>>24)&0x3f]
-    l ^= fb_lookup(6, t)
-        ^ fb_lookup(4, t >> 8)
-        ^ fb_lookup(2, t >> 16)
-        ^ fb_lookup(0, t >> 24);
+    l ^= fb_lookup(6, t) ^ fb_lookup(4, t >> 8) ^ fb_lookup(2, t >> 16) ^ fb_lookup(0, t >> 24);
 
     // Go: block.go:55 — t = l ^ uint32(k1>>32)
     t = l ^ ((k1 >> 32) as u32);
     // Go: block.go:56
     //   r ^= feistelBox[7][t&0x3f] ^ feistelBox[5][(t>>8)&0x3f]
     //        ^ feistelBox[3][(t>>16)&0x3f] ^ feistelBox[1][(t>>24)&0x3f]
-    r ^= fb_lookup(7, t)
-        ^ fb_lookup(5, t >> 8)
-        ^ fb_lookup(3, t >> 16)
-        ^ fb_lookup(1, t >> 24);
+    r ^= fb_lookup(7, t) ^ fb_lookup(5, t >> 8) ^ fb_lookup(3, t >> 16) ^ fb_lookup(1, t >> 24);
 
     // Go: block.go:61 — t = ((l << 28) | (l >> 4)) ^ uint32(k1)
     t = ((l << 28) | (l >> 4)) ^ (k1 as u32);
     // Go: block.go:62
     //   r ^= feistelBox[6][t&0x3f] ^ feistelBox[4][(t>>8)&0x3f]
     //        ^ feistelBox[2][(t>>16)&0x3f] ^ feistelBox[0][(t>>24)&0x3f]
-    r ^= fb_lookup(6, t)
-        ^ fb_lookup(4, t >> 8)
-        ^ fb_lookup(2, t >> 16)
-        ^ fb_lookup(0, t >> 24);
+    r ^= fb_lookup(6, t) ^ fb_lookup(4, t >> 8) ^ fb_lookup(2, t >> 16) ^ fb_lookup(0, t >> 24);
 
     (l, r)
 }
@@ -385,7 +371,12 @@ pub(crate) fn generateSubkeys(c: &mut Cipher, keyBytes: &slice<byte>) {
 //       preOutput := (uint64(right) << 32) | uint64(left)
 //       byteorder.BEPutUint64(dst, permuteFinalBlock(preOutput))
 //   }
-pub(crate) fn cryptBlock(subkeys: &[u64; 16], dst: &mut slice<byte>, src: &slice<byte>, decrypt: bool) {
+pub(crate) fn cryptBlock(
+    subkeys: &[u64; 16],
+    dst: &mut slice<byte>,
+    src: &slice<byte>,
+    decrypt: bool,
+) {
     // Go: block.go:13 — b := byteorder.BEUint64(src)
     let mut b = beUint64(src);
     // Go: block.go:14 — b = permuteInitialBlock(b)

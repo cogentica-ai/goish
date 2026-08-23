@@ -121,47 +121,40 @@ macro_rules! make {
         $crate::gomap::map::<$kt, $vt>::new()
     };
     // make!(map[K]V, hint) — hint accepted for parity, currently ignored.
-    (map[$kt:ty]$vt:ty, $hint:expr) => {
-        {
-            let _ = $hint;
-            $crate::gomap::map::<$kt, $vt>::new()
-        }
-    };
+    (map[$kt:ty]$vt:ty, $hint:expr) => {{
+        let _ = $hint;
+        $crate::gomap::map::<$kt, $vt>::new()
+    }};
     // make!([]T, 0)  — empty, no Default needed.
-    ([] $t:ty, 0) => {
-        {
-            let v: $crate::slice<$t> = $crate::slice::__from_vec($crate::__macro_alloc::Vec::<$t>::new());
-            v
-        }
-    };
+    ([] $t:ty, 0) => {{
+        let v: $crate::slice<$t> =
+            $crate::slice::__from_vec($crate::__macro_alloc::Vec::<$t>::new());
+        v
+    }};
     // make!([]T, 0, cap)  — empty with capacity, no Default needed.
-    ([] $t:ty, 0, $cap:expr) => {
-        {
-            let __cap: usize = $crate::builtin::__make_size($cap);
-            let v: $crate::slice<$t> =
-                $crate::slice::__from_vec($crate::__macro_alloc::Vec::<$t>::with_capacity(__cap));
-            v
-        }
-    };
+    ([] $t:ty, 0, $cap:expr) => {{
+        let __cap: usize = $crate::builtin::__make_size($cap);
+        let v: $crate::slice<$t> =
+            $crate::slice::__from_vec($crate::__macro_alloc::Vec::<$t>::with_capacity(__cap));
+        v
+    }};
     // make!([]T, len, cap)
-    ([] $t:ty, $len:expr, $cap:expr) => {
-        {
-            let __len: usize = $crate::builtin::__make_size($len);
-            let __cap: usize = $crate::builtin::__make_size($cap);
-            let mut __v: $crate::__macro_alloc::Vec<$t> = $crate::__macro_alloc::Vec::with_capacity(__cap);
-            __v.resize_with(__len, <$t as ::core::default::Default>::default);
-            $crate::slice::__from_vec(__v)
-        }
-    };
+    ([] $t:ty, $len:expr, $cap:expr) => {{
+        let __len: usize = $crate::builtin::__make_size($len);
+        let __cap: usize = $crate::builtin::__make_size($cap);
+        let mut __v: $crate::__macro_alloc::Vec<$t> =
+            $crate::__macro_alloc::Vec::with_capacity(__cap);
+        __v.resize_with(__len, <$t as ::core::default::Default>::default);
+        $crate::slice::__from_vec(__v)
+    }};
     // make!([]T, len)
-    ([] $t:ty, $len:expr) => {
-        {
-            let __len: usize = $crate::builtin::__make_size($len);
-            let mut __v: $crate::__macro_alloc::Vec<$t> = $crate::__macro_alloc::Vec::with_capacity(__len);
-            __v.resize_with(__len, <$t as ::core::default::Default>::default);
-            $crate::slice::__from_vec(__v)
-        }
-    };
+    ([] $t:ty, $len:expr) => {{
+        let __len: usize = $crate::builtin::__make_size($len);
+        let mut __v: $crate::__macro_alloc::Vec<$t> =
+            $crate::__macro_alloc::Vec::with_capacity(__len);
+        __v.resize_with(__len, <$t as ::core::default::Default>::default);
+        $crate::slice::__from_vec(__v)
+    }};
 }
 
 // ─── array!([N]T) / array!([N]T{...}) / array!([...]T{...}) ─────────
@@ -446,7 +439,9 @@ impl<T> __CopySource<T> for crate::slice<T> {
 
 impl<T> __CopySource<T> for [T] {
     #[inline]
-    fn __copy_src(&self) -> &[T] { self }
+    fn __copy_src(&self) -> &[T] {
+        self
+    }
 }
 
 // String → byte-slice source, used when the dest is `slice<byte>` and

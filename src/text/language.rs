@@ -90,7 +90,12 @@ const fn sub4(s: &str) -> [u8; 4] {
 }
 
 const fn tag(lang: &str, script: &str, region: &str) -> Tag {
-    Tag { lang: sub3(lang), script: sub4(script), region: sub3(region), rest: None }
+    Tag {
+        lang: sub3(lang),
+        script: sub4(script),
+        region: sub3(region),
+        rest: None,
+    }
 }
 
 fn sub_str(b: &[u8]) -> &str {
@@ -119,7 +124,11 @@ impl Tag {
         let priv_only = lang.is_empty()
             && self.script_str().is_empty()
             && self.region_str().is_empty()
-            && self.rest.as_deref().map(|r| r.starts_with("x-")).unwrap_or(false);
+            && self
+                .rest
+                .as_deref()
+                .map(|r| r.starts_with("x-"))
+                .unwrap_or(false);
         if !priv_only {
             s.push_str(if lang.is_empty() { "und" } else { lang });
             if !self.script_str().is_empty() {
@@ -323,11 +332,15 @@ fn lookup2<'a>(t: &'a [(&str, &str)], key: &str) -> Option<&'a str> {
 }
 
 fn lookup3<'a>(t: &'a [(&str, &str, &str)], k0: &str, k1: &str) -> Option<&'a str> {
-    t.binary_search_by(|e| (e.0, e.1).cmp(&(k0, k1))).ok().map(|i| t[i].2)
+    t.binary_search_by(|e| (e.0, e.1).cmp(&(k0, k1)))
+        .ok()
+        .map(|i| t[i].2)
 }
 
 fn lookup3_pair<'a>(t: &'a [(&str, &str, &str)], key: &str) -> Option<(&'a str, &'a str)> {
-    t.binary_search_by_key(&key, |e| e.0).ok().map(|i| (t[i].1, t[i].2))
+    t.binary_search_by_key(&key, |e| e.0)
+        .ok()
+        .map(|i| (t[i].1, t[i].2))
 }
 
 fn region_group(region: &str) -> u8 {
@@ -450,7 +463,11 @@ impl WTag {
             lang: sub3(&self.lang),
             script: sub4(&self.script),
             region: sub3(&self.region),
-            rest: if rest.is_empty() { None } else { Some(Arc::from(rest.as_str())) },
+            rest: if rest.is_empty() {
+                None
+            } else {
+                Some(Arc::from(rest.as_str()))
+            },
         }
     }
 }
@@ -499,7 +516,9 @@ fn canonicalize(w: &mut WTag, flags: u8) {
     }
     // Language alias loop (x/text canonicalize canonLang).
     loop {
-        let Some(i) = tables::LANG_ALIASES.binary_search_by_key(&w.lang.as_str(), |e| e.0).ok()
+        let Some(i) = tables::LANG_ALIASES
+            .binary_search_by_key(&w.lang.as_str(), |e| e.0)
+            .ok()
         else {
             break;
         };
@@ -547,7 +566,13 @@ fn parse_inner(input: &str) -> (WTag, bool) {
 
     let lowered: String = input
         .chars()
-        .map(|c| if c == '_' { '-' } else { c.to_ascii_lowercase() })
+        .map(|c| {
+            if c == '_' {
+                '-'
+            } else {
+                c.to_ascii_lowercase()
+            }
+        })
         .collect();
 
     if lowered.is_empty() {
@@ -631,7 +656,9 @@ fn parse_inner(input: &str) -> (WTag, bool) {
     if i < toks.len() && toks[i].len() == 4 && is_alpha(toks[i]) {
         let sc = title_case(toks[i]);
         match lookup2(tables::VALID_SCRIPTS, &sc) {
-            Some(canon) => w.script = String::from(if canon.is_empty() { sc.as_str() } else { canon }),
+            Some(canon) => {
+                w.script = String::from(if canon.is_empty() { sc.as_str() } else { canon })
+            }
             None => ok = false, // unknown script: dropped + error
         }
         i += 1;
@@ -643,7 +670,9 @@ fn parse_inner(input: &str) -> (WTag, bool) {
     {
         let rg = toks[i].to_ascii_uppercase();
         match lookup2(tables::VALID_REGIONS, &rg) {
-            Some(canon) => w.region = String::from(if canon.is_empty() { rg.as_str() } else { canon }),
+            Some(canon) => {
+                w.region = String::from(if canon.is_empty() { rg.as_str() } else { canon })
+            }
             None => ok = false,
         }
         i += 1;
@@ -788,8 +817,8 @@ fn to_conf(d: u8) -> Confidence {
 
 #[derive(Clone)]
 struct HaveTag {
-    w: WTag,     // parse-canonical supported tag
-    index: int,  // index in the original supported list
+    w: WTag,    // parse-canonical supported tag
+    index: int, // index in the original supported list
     conf: Confidence,
     max_script: String,
     max_region: String,
@@ -1056,7 +1085,14 @@ struct BestMatch {
 
 impl BestMatch {
     #[allow(clippy::too_many_arguments)]
-    fn update(&mut self, have: &HaveTag, tag: &WTag, max_script: &str, max_region: &str, pin: bool) {
+    fn update(
+        &mut self,
+        have: &HaveTag,
+        tag: &WTag,
+        max_script: &str,
+        max_region: &str,
+        pin: bool,
+    ) {
         let mut c = have.conf;
         if c < self.conf {
             return;
@@ -1065,8 +1101,12 @@ impl BestMatch {
             return;
         }
         if tag.lang == self.want.lang && self.same_region_group {
-            let (_, same_group) =
-                region_group_dist(&self.pinned_region, &have.max_region, &have.max_script, &tag.lang);
+            let (_, same_group) = region_group_dist(
+                &self.pinned_region,
+                &have.max_region,
+                &have.max_script,
+                &tag.lang,
+            );
             if !same_group {
                 return;
             }
@@ -1206,7 +1246,12 @@ impl Matcher {
                     w.region = cw.region.clone();
                 }
                 let (l, s, r) = maximize(&cw);
-                max = WTag { lang: l, script: s, region: r, ..WTag::default() };
+                max = WTag {
+                    lang: l,
+                    script: s,
+                    region: r,
+                    ..WTag::default()
+                };
             } else {
                 // No base language.
                 if let Some(h) = self.index.get("") {
@@ -1220,7 +1265,12 @@ impl Matcher {
                     continue;
                 }
                 let (l, s, r) = maximize(&w);
-                max = WTag { lang: l.clone(), script: s, region: r, ..WTag::default() };
+                max = WTag {
+                    lang: l.clone(),
+                    script: s,
+                    region: r,
+                    ..WTag::default()
+                };
                 if !self.index.contains_key(l.as_str()) {
                     continue;
                 }

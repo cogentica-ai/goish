@@ -27,12 +27,12 @@ use alloc::vec::Vec;
 use crate::crypto::internal::fips140::ecdh as fips;
 use crate::crypto::internal::fips140::nistec;
 use crate::crypto::internal::fips140only;
+use crate::error;
 use crate::errors;
 use crate::goslice::slice;
 use crate::io;
 use crate::string;
 use crate::types::byte;
-use crate::error;
 
 use super::ecdh::{Curve, PrivateKey, PublicKey};
 
@@ -61,7 +61,9 @@ impl Curve for nistCurve {
         if fips140only::Enabled && !fips140only::ApprovedRandomReader(rand) {
             return (
                 zeroPrivateKey(self.me()),
-                errors::New("crypto/ecdh: only crypto/rand.Reader is allowed in FIPS 140-only mode"),
+                errors::New(
+                    "crypto/ecdh: only crypto/rand.Reader is allowed in FIPS 140-only mode",
+                ),
             );
         }
 

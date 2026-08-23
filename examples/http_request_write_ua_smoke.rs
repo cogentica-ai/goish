@@ -44,9 +44,15 @@ fn main() {
 
     // 1. Absent User-Agent gets Go's default.
     {
-        let (r, _) = http::NewRequest(string("GET"), string("http://example.com/p?q=1"), goish::nil);
+        let (r, _) = http::NewRequest(
+            string("GET"),
+            string("http://example.com/p?q=1"),
+            goish::nil,
+        );
         let got = write_of(&r);
-        if got == "GET /p?q=1 HTTP/1.1\r\nHost: example.com\r\nUser-Agent: Go-http-client/1.1\r\n\r\n" {
+        if got
+            == "GET /p?q=1 HTTP/1.1\r\nHost: example.com\r\nUser-Agent: Go-http-client/1.1\r\n\r\n"
+        {
             fmt::Println!("[1] absent UA -> Go-http-client/1.1  PASS");
         } else {
             fmt::Println!("[1] absent UA  FAIL:\n", got);
@@ -89,7 +95,8 @@ fn main() {
     //    wrong about Go, not about the code.
     {
         let (mut r, _) = http::NewRequest(string("GET"), string("http://example.com/"), goish::nil);
-        r.Header.Set(string("User-Agent"), string("evil\r\nX-Injected: yes"));
+        r.Header
+            .Set(string("User-Agent"), string("evil\r\nX-Injected: yes"));
         let got = write_of(&r);
         // The check is exact equality, not "does not contain
         // X-Injected" — the SANITIZED User-Agent line legitimately

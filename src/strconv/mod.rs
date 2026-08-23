@@ -367,7 +367,11 @@ pub fn ParseInt<S: Into<string>>(s: S, base: int, bit_size: int) -> (int, error)
             return (0, syntaxError(FN, s0));
         }
         // Range error: clamp to the signed bound on the appropriate side.
-        let cutoff_abs: u64 = if bs == 64 { 1u64 << 63 } else { 1u64 << (bs - 1) };
+        let cutoff_abs: u64 = if bs == 64 {
+            1u64 << 63
+        } else {
+            1u64 << (bs - 1)
+        };
         if neg {
             return ((cutoff_abs as i64).wrapping_neg(), rangeError(FN, s0));
         } else {
@@ -376,7 +380,11 @@ pub fn ParseInt<S: Into<string>>(s: S, base: int, bit_size: int) -> (int, error)
     }
 
     // Range-check the magnitude against signed bounds for `bs`.
-    let cutoff_abs: u64 = if bs == 64 { 1u64 << 63 } else { 1u64 << (bs - 1) };
+    let cutoff_abs: u64 = if bs == 64 {
+        1u64 << 63
+    } else {
+        1u64 << (bs - 1)
+    };
     let un64 = un as u64;
     if !neg && un64 >= cutoff_abs {
         return ((cutoff_abs - 1) as int, rangeError(FN, s0));
@@ -462,9 +470,7 @@ fn underscoreOK(s: &[u8]) -> bool {
         hex = lower(s[1]) == b'x';
     }
     while i < s.len() {
-        if (b'0' <= s[i] && s[i] <= b'9')
-            || (hex && b'a' <= lower(s[i]) && lower(s[i]) <= b'f')
-        {
+        if (b'0' <= s[i] && s[i] <= b'9') || (hex && b'a' <= lower(s[i]) && lower(s[i]) <= b'f') {
             saw = b'0';
             i += 1;
             continue;
@@ -1026,14 +1032,15 @@ fn unquote_impl(in_s: string, unescape: bool) -> (string, string, error) {
             let has_nl = head.contains(&b'\n');
             if !has_bs && !has_nl {
                 let valid: bool = match quote {
-                    b'"' => crate::unicode::utf8::ValidString(&string::from_bytes(&head[1..end - 1])),
+                    b'"' => {
+                        crate::unicode::utf8::ValidString(&string::from_bytes(&head[1..end - 1]))
+                    }
                     b'\'' => {
                         let inner = &head[1..end - 1];
                         let (r, n) = crate::unicode::utf8::DecodeRune(inner);
                         let n_us = n as usize;
                         // Go: valid = len("'")+n+len("'") == end && (r != utf8.RuneError || n != 1)
-                        2 + n_us == end
-                            && (r != crate::unicode::utf8::RuneError || n != 1)
+                        2 + n_us == end && (r != crate::unicode::utf8::RuneError || n != 1)
                     }
                     _ => false,
                 };
@@ -1050,7 +1057,11 @@ fn unquote_impl(in_s: string, unescape: bool) -> (string, string, error) {
             }
 
             // Go: handle quoted strings with escape sequences.
-            let mut buf: Vec<byte> = if unescape { Vec::with_capacity(3 * end / 2) } else { Vec::new() };
+            let mut buf: Vec<byte> = if unescape {
+                Vec::with_capacity(3 * end / 2)
+            } else {
+                Vec::new()
+            };
             let in0 = in_s.clone();
             // Go: in = in[1:]; skip starting quote.
             let mut cur = string::from_bytes(&in_bs[1..]);

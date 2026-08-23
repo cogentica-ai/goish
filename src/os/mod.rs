@@ -32,12 +32,12 @@ use crate::gonilable::nilable;
 use crate::goslice::slice;
 // `crate::string` resolves both the type (gostring) and the function
 // (convert) — different namespaces, both re-exported at root.
-use crate::string;
+use crate::errors::{self, nil};
 use crate::io;
 use crate::runtime;
+use crate::string;
 use crate::syscall;
 use crate::types::{byte, int};
-use crate::errors::{self, nil};
 
 extern crate alloc;
 use alloc::vec::Vec;
@@ -55,7 +55,7 @@ use alloc::vec::Vec;
 /// FileMode methods (`IsDir`, `IsRegular`, `Perm`, `Type`, `String`)
 /// resolve identically regardless of import path.
 pub use crate::io::fs::FileMode;
-pub use crate::io::fs::{ModeDir, ModePerm, ModeSymlink, ModeSocket};
+pub use crate::io::fs::{ModeDir, ModePerm, ModeSocket, ModeSymlink};
 
 // Go: os/types.go declares these as untyped int. Goish ships them
 // as `int` (= i64) so port-side `var flag int = os.O_RDWR | os.O_TRUNC`
@@ -204,8 +204,20 @@ impl FileInfo for FileInfoData {
 // `.as_dyn_FileInfo()` step.
 impl FileInfoData {
     /// Construct a FileInfoData from raw parts (for in-memory filesystem implementations).
-    pub fn new(name: string, size: int, mode: FileMode, mod_time: crate::time::Time, is_dir: bool) -> FileInfoData {
-        FileInfoData { name, size, mode, mod_time, is_dir }
+    pub fn new(
+        name: string,
+        size: int,
+        mode: FileMode,
+        mod_time: crate::time::Time,
+        is_dir: bool,
+    ) -> FileInfoData {
+        FileInfoData {
+            name,
+            size,
+            mode,
+            mod_time,
+            is_dir,
+        }
     }
 
     pub fn Name(&self) -> string {
@@ -272,7 +284,11 @@ pub fn Create<N: Into<string>>(name: N) -> (nilable<File>, error) {
 /// per-callsite `FileMode(…)` wrapping. FileMode-typed call sites
 /// (e.g. `lockedfile.OpenFile(name, flag, perm)`) flow through the
 /// identity `From<FileMode> for FileMode`.
-pub fn OpenFile<N: Into<string>, M: Into<FileMode>>(name: N, flag: int, perm: M) -> (nilable<File>, error) {
+pub fn OpenFile<N: Into<string>, M: Into<FileMode>>(
+    name: N,
+    flag: int,
+    perm: M,
+) -> (nilable<File>, error) {
     let name: string = name.into();
     let perm: FileMode = perm.into();
     // Build a NUL-terminated path for the kernel.
@@ -280,7 +296,11 @@ pub fn OpenFile<N: Into<string>, M: Into<FileMode>>(name: N, flag: int, perm: M)
     let nb = bytes_of(&name);
     buf.extend_from_slice(nb);
     buf.push(0);
-    let fd = syscall::Open(buf.as_ptr(), (flag as i32) | syscall::O_CLOEXEC, perm.0 as i32);
+    let fd = syscall::Open(
+        buf.as_ptr(),
+        (flag as i32) | syscall::O_CLOEXEC,
+        perm.0 as i32,
+    );
     if fd < 0 {
         let err: error = if -fd == syscall::ENOENT {
             ErrNotExist.into()
@@ -465,8 +485,7 @@ pub fn ReadFile<N: Into<string>>(name: N) -> (slice<byte>, error) {
     let mut body = slice::<byte>::__from_vec(alloc::vec![0u8; want as usize]);
     let mut got: int = 0;
     while got < want {
-        let mut chunk =
-            slice::<byte>::__from_vec(alloc::vec![0u8; (want - got) as usize]);
+        let mut chunk = slice::<byte>::__from_vec(alloc::vec![0u8; (want - got) as usize]);
         let (n, rerr) = f.Read(&mut chunk);
         if n > 0 {
             for i in 0..n {
@@ -691,9 +710,7 @@ pub fn UserCacheDir() -> (string, error) {
         if home.Len() == 0 {
             return (
                 string::new(),
-                errors::New(string(
-                    "neither $XDG_CACHE_HOME nor $HOME are defined",
-                )),
+                errors::New(string("neither $XDG_CACHE_HOME nor $HOME are defined")),
             );
         }
         let mut b = crate::strings::Builder::new();
@@ -727,9 +744,7 @@ pub fn UserConfigDir() -> (string, error) {
         if home.Len() == 0 {
             return (
                 string::new(),
-                errors::New(string(
-                    "neither $XDG_CONFIG_HOME nor $HOME are defined",
-                )),
+                errors::New(string("neither $XDG_CONFIG_HOME nor $HOME are defined")),
             );
         }
         let mut b = crate::strings::Builder::new();
@@ -772,7 +787,10 @@ pub fn Getwd() -> (string, error) {
         }
         size *= 2;
     }
-    (string::new(), errors::New(string("getwd: cwd path too long")))
+    (
+        string::new(),
+        errors::New(string("getwd: cwd path too long")),
+    )
 }
 
 /// Line-by-line port of `os.Chdir(name)` (file.go) — change the
@@ -863,7 +881,10 @@ pub fn Readlink<N: Into<string>>(name: N) -> (string, error) {
         len_ *= 2;
         // Hard cap to prevent runaway: 1 MiB is more than any realistic symlink.
         if len_ > 1 << 20 {
-            return (string::new(), errors::New(string("readlink: target too long")));
+            return (
+                string::new(),
+                errors::New(string("readlink: target too long")),
+            );
         }
     }
 }
@@ -897,11 +918,17 @@ pub fn Chtimes<N: Into<string>>(
     let set = |t: crate::time::Time| -> syscall::Timespec {
         if t.IsZero() {
             // Go: utimes[i] = syscall.Timespec{Sec: _UTIME_OMIT, Nsec: _UTIME_OMIT}
-            syscall::Timespec { tv_sec: syscall::UTIME_OMIT, tv_nsec: syscall::UTIME_OMIT }
+            syscall::Timespec {
+                tv_sec: syscall::UTIME_OMIT,
+                tv_nsec: syscall::UTIME_OMIT,
+            }
         } else {
             // Go: utimes[i] = syscall.NsecToTimespec(t.UnixNano())
             let ns = t.UnixNano() as i64;
-            syscall::Timespec { tv_sec: ns / 1_000_000_000, tv_nsec: ns % 1_000_000_000 }
+            syscall::Timespec {
+                tv_sec: ns / 1_000_000_000,
+                tv_nsec: ns % 1_000_000_000,
+            }
         }
     };
     let utimes = [set(atime), set(mtime)];
@@ -1452,12 +1479,18 @@ fn temp_path(dir: &string, pattern: &string) -> string {
         }
     }
     // LCG step (constants from Knuth / Numerical Recipes 64-bit).
-    s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    s = s
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     STATE.store(s, Ordering::Relaxed);
     // Take the top bits — they have higher quality than the low ones.
     let n = (s >> 32) % 1_000_000_000;
 
-    let base = if dir.Len() == 0 { TempDir() } else { dir.clone() };
+    let base = if dir.Len() == 0 {
+        TempDir()
+    } else {
+        dir.clone()
+    };
     let pb = bytes_of(pattern);
 
     // Find the last '*' in the pattern; if absent insert the number at the end.
@@ -1489,10 +1522,7 @@ fn temp_path(dir: &string, pattern: &string) -> string {
 ///
 /// Matches Go's retry-on-EEXIST behavior — up to 10000 attempts before
 /// surfacing the underlying error.
-pub fn MkdirTemp<S1: Into<string>, S2: Into<string>>(
-    dir: S1,
-    pattern: S2,
-) -> (string, error) {
+pub fn MkdirTemp<S1: Into<string>, S2: Into<string>>(dir: S1, pattern: S2) -> (string, error) {
     let dir: string = dir.into();
     let pattern: string = pattern.into();
     let mut tries = 0;
@@ -1579,7 +1609,10 @@ pub struct File {
 
 impl Default for File {
     fn default() -> Self {
-        File { fd: -1, name: string::from_static("") }
+        File {
+            fd: -1,
+            name: string::from_static(""),
+        }
     }
 }
 
@@ -1629,7 +1662,7 @@ impl File {
     /// if the underlying fsync syscall fails.
     pub fn Sync(&mut self) -> error {
         if self.fd < 0 {
-            return errors::New("file already closed")
+            return errors::New("file already closed");
         }
         let rc = unsafe { syscall::syscall1(syscall::SYS_FSYNC, self.fd as usize) };
         if rc < 0 {
@@ -1929,7 +1962,10 @@ impl crate::io::fs::FS for dirFS {
     fn Open(
         &self,
         name: string,
-    ) -> (alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>, error) {
+    ) -> (
+        alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>,
+        error,
+    ) {
         let (full, err) = self.join("open", &name);
         if !err.IsNil() {
             return (crate::nil.into(), err);
@@ -1954,14 +1990,14 @@ impl crate::io::fs::StatFS for dirFS {
     fn Open(
         &self,
         name: string,
-    ) -> (alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>, error) {
+    ) -> (
+        alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>,
+        error,
+    ) {
         crate::io::fs::FS::Open(self, name)
     }
     // Go: dirFS.Stat (os/file.go:806).
-    fn Stat(
-        &self,
-        name: string,
-    ) -> (alloc::sync::Arc<dyn FileInfo + Send + Sync>, error) {
+    fn Stat(&self, name: string) -> (alloc::sync::Arc<dyn FileInfo + Send + Sync>, error) {
         let (full, err) = self.join("stat", &name);
         if !err.IsNil() {
             return (crate::nil.into(), err);
@@ -1981,7 +2017,10 @@ impl crate::io::fs::ReadFileFS for dirFS {
     fn Open(
         &self,
         name: string,
-    ) -> (alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>, error) {
+    ) -> (
+        alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>,
+        error,
+    ) {
         crate::io::fs::FS::Open(self, name)
     }
     // Go: dirFS.ReadFile (os/file.go:782).
@@ -2001,7 +2040,10 @@ impl crate::io::fs::ReadDirFS for dirFS {
     fn Open(
         &self,
         name: string,
-    ) -> (alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>, error) {
+    ) -> (
+        alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>,
+        error,
+    ) {
         crate::io::fs::FS::Open(self, name)
     }
     // Go: dirFS.ReadDir (os/file.go:794).
@@ -2032,9 +2074,7 @@ fn register_dirfs_impls() {
 /// `StatFS` / `ReadFileFS` / `ReadDirFS` paths, so `fs::Stat`,
 /// `fs::ReadFile`, `fs::ReadDir`, and `fs::WalkDir` all route through
 /// the direct os calls.
-pub fn DirFS<S: Into<string>>(
-    dir: S,
-) -> alloc::sync::Arc<dyn crate::io::fs::FS + Send + Sync> {
+pub fn DirFS<S: Into<string>>(dir: S) -> alloc::sync::Arc<dyn crate::io::fs::FS + Send + Sync> {
     register_os_fs_impls();
     register_dirfs_impls();
     alloc::sync::Arc::new(dirFS { dir: dir.into() })
@@ -2046,8 +2086,7 @@ pub fn DirFS<S: Into<string>>(
 /// called from `goish::init()`.
 pub fn register_os_impls() {
     use crate::io::{
-        __goish_register_Closer_impl, __goish_register_Reader_impl,
-        __goish_register_Writer_impl,
+        __goish_register_Closer_impl, __goish_register_Reader_impl, __goish_register_Writer_impl,
     };
     __goish_register_Reader_impl::<File>();
     __goish_register_Writer_impl::<File>();

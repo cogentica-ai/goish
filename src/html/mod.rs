@@ -172,10 +172,7 @@ fn unescapeEntity(b: &mut Vec<byte>, dst: int, src: int) -> (int, int) {
         // Go: escape.go:112 — Windows-1252 replacement.
         if x >= 0x80 && x <= 0x9F {
             x = replacementTable[(x - 0x80) as usize];
-        } else if x == 0
-            || (x >= 0xD800 && x <= 0xDFFF)
-            || x > 0x10FFFF
-        {
+        } else if x == 0 || (x >= 0xD800 && x <= 0xDFFF) || x > 0x10FFFF {
             // Go: escape.go:115 — Replace invalid characters with U+FFFD.
             x = '\u{FFFD}' as rune;
         }

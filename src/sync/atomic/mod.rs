@@ -28,9 +28,8 @@
 #![allow(non_snake_case)]
 
 use core::sync::atomic::{
-    AtomicBool as CoreBool, AtomicI32 as CoreI32, AtomicI64 as CoreI64,
-    AtomicU32 as CoreU32, AtomicU64 as CoreU64, AtomicUsize as CoreUsize,
-    Ordering,
+    AtomicBool as CoreBool, AtomicI32 as CoreI32, AtomicI64 as CoreI64, AtomicU32 as CoreU32,
+    AtomicU64 as CoreU64, AtomicUsize as CoreUsize, Ordering,
 };
 
 const ORD: Ordering = Ordering::SeqCst;
@@ -293,8 +292,8 @@ impl Bool {
 //     The Mutex path is correct and matches the public API exactly.
 
 extern crate alloc;
-use alloc::sync::Arc;
 use crate::sync::Mutex;
+use alloc::sync::Arc;
 
 // Go: value.go:16
 //   type Value struct { v any }
@@ -311,7 +310,9 @@ pub struct Value<T: Clone + Default + Send + 'static> {
 impl<T: Clone + Default + Send + 'static> Value<T> {
     /// Build an empty Value.
     pub const fn new() -> Self {
-        Value { inner: Mutex::new(None) }
+        Value {
+            inner: Mutex::new(None),
+        }
     }
 
     // Go: value.go:28
@@ -410,7 +411,9 @@ pub struct Pointer<T: Send + Sync + 'static> {
 impl<T: Send + Sync + 'static> Pointer<T> {
     /// Build an empty Pointer (Go: zero value is nil `*T`).
     pub const fn new() -> Self {
-        Pointer { inner: Mutex::new(None) }
+        Pointer {
+            inner: Mutex::new(None),
+        }
     }
 
     // Go: type.go:58

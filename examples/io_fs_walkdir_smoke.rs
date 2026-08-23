@@ -24,14 +24,14 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::errors::{self, error};
+use goish::fmt;
 use goish::io::fs;
 use goish::runtime::spin::SpinLock;
 use goish::slice;
 use goish::string;
+use goish::syscall;
 use goish::types::{byte, int};
-use goish::{syscall};
 
 const TOTAL: usize = 12;
 
@@ -335,7 +335,11 @@ impl fs::ReadDirFS for mapFS {
         <Self as fs::FS>::Open(self, name)
     }
     fn ReadDir(&self, name: string) -> (slice<Arc<dyn fs::DirEntry + Send + Sync>>, error) {
-        let dir = if name == "." { string::new() } else { name.clone() };
+        let dir = if name == "." {
+            string::new()
+        } else {
+            name.clone()
+        };
         // Surface a missing directory as an error.
         if name != "." && self.find(&name).is_none() {
             return (
@@ -480,8 +484,7 @@ fn run_tests() {
 
     // 4. WalkDir visits everything, root first, lexical order.
     {
-        let visited: Arc<SpinLock<Vec<RustString>>> =
-            Arc::new(SpinLock::new(Vec::new()));
+        let visited: Arc<SpinLock<Vec<RustString>>> = Arc::new(SpinLock::new(Vec::new()));
         let v2 = visited.clone();
         let err = fs::WalkDir(&fsys, ".", move |path, _d, e| {
             if e == errors::nil {
@@ -499,8 +502,7 @@ fn run_tests() {
 
     // 5. SkipDir prunes a subtree.
     {
-        let visited: Arc<SpinLock<Vec<RustString>>> =
-            Arc::new(SpinLock::new(Vec::new()));
+        let visited: Arc<SpinLock<Vec<RustString>>> = Arc::new(SpinLock::new(Vec::new()));
         let v2 = visited.clone();
         let err = fs::WalkDir(&fsys, ".", move |path, d, e| {
             if e != errors::nil {
@@ -523,8 +525,7 @@ fn run_tests() {
 
     // 6. SkipAll stops the whole walk.
     {
-        let visited: Arc<SpinLock<Vec<RustString>>> =
-            Arc::new(SpinLock::new(Vec::new()));
+        let visited: Arc<SpinLock<Vec<RustString>>> = Arc::new(SpinLock::new(Vec::new()));
         let v2 = visited.clone();
         let err = fs::WalkDir(&fsys, ".", move |path, _d, e| {
             if e != errors::nil {
@@ -558,7 +559,10 @@ fn run_tests() {
             calls.load(Ordering::Acquire) == 1 && *saw_err.lock(),
             b"missing root: fn called once with the error",
         );
-        check(err != errors::nil, b"missing root: WalkDir returns the error");
+        check(
+            err != errors::nil,
+            b"missing root: WalkDir returns the error",
+        );
     }
 }
 

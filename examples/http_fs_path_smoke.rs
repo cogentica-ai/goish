@@ -19,9 +19,9 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::io::fs as iofs;
 use goish::net::http::fs::{containsDotDot, errInvalidUnsafePath, errSeeker, toHTTPError};
 use goish::net::http::status::{StatusForbidden, StatusInternalServerError, StatusNotFound};
-use goish::io::fs as iofs;
 use goish::{errors, fmt, string, syscall};
 
 #[goish::main]
@@ -68,10 +68,14 @@ fn main() {
         let (m2, s2) = toHTTPError(iofs::ErrPermission.into());
         let (m3, s3) = toHTTPError(errInvalidUnsafePath.into());
         let (m4, s4) = toHTTPError(errors::New(string("something else")));
-        if m1 == "404 page not found" && s1 == StatusNotFound
-            && m2 == "403 Forbidden" && s2 == StatusForbidden
-            && m3 == "404 page not found" && s3 == StatusNotFound
-            && m4 == "500 Internal Server Error" && s4 == StatusInternalServerError
+        if m1 == "404 page not found"
+            && s1 == StatusNotFound
+            && m2 == "403 Forbidden"
+            && s2 == StatusForbidden
+            && m3 == "404 page not found"
+            && s3 == StatusNotFound
+            && m4 == "500 Internal Server Error"
+            && s4 == StatusInternalServerError
         {
             fmt::Println!("[2] toHTTPError maps all four cases  PASS");
         } else {
@@ -97,9 +101,7 @@ fn main() {
     {
         let e1: errors::error = errInvalidUnsafePath.into();
         let e2: errors::error = errSeeker.into();
-        if e1.Error() == "http: invalid or unsafe file path"
-            && e2.Error() == "seeker can't seek"
-        {
+        if e1.Error() == "http: invalid or unsafe file path" && e2.Error() == "seeker can't seek" {
             fmt::Println!("[4] sentinel texts match Go  PASS");
         } else {
             fmt::Println!("[4] sentinel texts  FAIL");

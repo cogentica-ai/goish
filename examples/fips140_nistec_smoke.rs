@@ -80,7 +80,6 @@ fn scalarOf(n: usize) -> slice<byte> {
 
 #[goish::main]
 fn main() {
-
     // ---- P-224
     {
         let mut g = nistec::NewP224Point();
@@ -88,30 +87,50 @@ fn main() {
         check("p224 G", hx(&g.Bytes()), P224_G);
         check("p224 Gcompressed", hx(&g.BytesCompressed()), P224_GC);
         let (gx, err) = g.BytesX();
-        check("p224 BytesX err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p224 BytesX err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p224 Gx", hx(&gx), P224_GX);
 
         let s = scalarOf(28);
         let mut p = nistec::NewP224Point();
         let err = p.ScalarBaseMult(&s);
-        check("p224 ScalarBaseMult err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p224 ScalarBaseMult err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p224 sG (base)", hx(&p.Bytes()), P224_SGB);
 
         let mut q = nistec::NewP224Point();
         let err = q.ScalarMult(g, &s);
-        check("p224 ScalarMult err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p224 ScalarMult err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p224 sG (mult)", hx(&q.Bytes()), P224_SGM);
 
         let c = p.BytesCompressed();
         let mut r = nistec::NewP224Point();
         let err = r.SetBytes(&c);
-        check("p224 SetBytes(compressed) err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p224 SetBytes(compressed) err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p224 round trip (compressed)", hx(&r.Bytes()), P224_RTC);
 
         let u8s = p.Bytes();
         let mut u = nistec::NewP224Point();
         let err = u.SetBytes(&u8s);
-        check("p224 SetBytes(uncompressed) err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p224 SetBytes(uncompressed) err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p224 round trip (uncompressed)", hx(&u.Bytes()), P224_RTU);
 
         let inf = nistec::NewP224Point();
@@ -128,7 +147,11 @@ fn main() {
         // the only length check in the package.
         let mut bad = nistec::NewP224Point();
         let err = bad.ScalarBaseMult(&scalarOf(28 - 1));
-        check("p224 short scalar rejected", fmt::Sprintf!("%v", err.Error()), "invalid scalar length");
+        check(
+            "p224 short scalar rejected",
+            fmt::Sprintf!("%v", err.Error()),
+            "invalid scalar length",
+        );
 
         // A point encoding of the right length that is not on the curve.
         let mut off = Vec::<byte>::with_capacity(1 + 2 * 28);
@@ -140,7 +163,11 @@ fn main() {
         }
         let mut nope = nistec::NewP224Point();
         let err = nope.SetBytes(&slice::__from_vec(off));
-        check("p224 off-curve rejected", fmt::Sprintf!("%v", err.Error()), "P224 point not on curve");
+        check(
+            "p224 off-curve rejected",
+            fmt::Sprintf!("%v", err.Error()),
+            "P224 point not on curve",
+        );
     }
 
     // ---- P-384
@@ -150,30 +177,50 @@ fn main() {
         check("p384 G", hx(&g.Bytes()), P384_G);
         check("p384 Gcompressed", hx(&g.BytesCompressed()), P384_GC);
         let (gx, err) = g.BytesX();
-        check("p384 BytesX err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p384 BytesX err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p384 Gx", hx(&gx), P384_GX);
 
         let s = scalarOf(48);
         let mut p = nistec::NewP384Point();
         let err = p.ScalarBaseMult(&s);
-        check("p384 ScalarBaseMult err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p384 ScalarBaseMult err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p384 sG (base)", hx(&p.Bytes()), P384_SGB);
 
         let mut q = nistec::NewP384Point();
         let err = q.ScalarMult(g, &s);
-        check("p384 ScalarMult err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p384 ScalarMult err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p384 sG (mult)", hx(&q.Bytes()), P384_SGM);
 
         let c = p.BytesCompressed();
         let mut r = nistec::NewP384Point();
         let err = r.SetBytes(&c);
-        check("p384 SetBytes(compressed) err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p384 SetBytes(compressed) err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p384 round trip (compressed)", hx(&r.Bytes()), P384_RTC);
 
         let u8s = p.Bytes();
         let mut u = nistec::NewP384Point();
         let err = u.SetBytes(&u8s);
-        check("p384 SetBytes(uncompressed) err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p384 SetBytes(uncompressed) err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p384 round trip (uncompressed)", hx(&u.Bytes()), P384_RTU);
 
         let inf = nistec::NewP384Point();
@@ -190,7 +237,11 @@ fn main() {
         // the only length check in the package.
         let mut bad = nistec::NewP384Point();
         let err = bad.ScalarBaseMult(&scalarOf(48 - 1));
-        check("p384 short scalar rejected", fmt::Sprintf!("%v", err.Error()), "invalid scalar length");
+        check(
+            "p384 short scalar rejected",
+            fmt::Sprintf!("%v", err.Error()),
+            "invalid scalar length",
+        );
 
         // A point encoding of the right length that is not on the curve.
         let mut off = Vec::<byte>::with_capacity(1 + 2 * 48);
@@ -202,7 +253,11 @@ fn main() {
         }
         let mut nope = nistec::NewP384Point();
         let err = nope.SetBytes(&slice::__from_vec(off));
-        check("p384 off-curve rejected", fmt::Sprintf!("%v", err.Error()), "P384 point not on curve");
+        check(
+            "p384 off-curve rejected",
+            fmt::Sprintf!("%v", err.Error()),
+            "P384 point not on curve",
+        );
     }
 
     // ---- P-521
@@ -212,30 +267,50 @@ fn main() {
         check("p521 G", hx(&g.Bytes()), P521_G);
         check("p521 Gcompressed", hx(&g.BytesCompressed()), P521_GC);
         let (gx, err) = g.BytesX();
-        check("p521 BytesX err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p521 BytesX err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p521 Gx", hx(&gx), P521_GX);
 
         let s = scalarOf(66);
         let mut p = nistec::NewP521Point();
         let err = p.ScalarBaseMult(&s);
-        check("p521 ScalarBaseMult err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p521 ScalarBaseMult err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p521 sG (base)", hx(&p.Bytes()), P521_SGB);
 
         let mut q = nistec::NewP521Point();
         let err = q.ScalarMult(g, &s);
-        check("p521 ScalarMult err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p521 ScalarMult err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p521 sG (mult)", hx(&q.Bytes()), P521_SGM);
 
         let c = p.BytesCompressed();
         let mut r = nistec::NewP521Point();
         let err = r.SetBytes(&c);
-        check("p521 SetBytes(compressed) err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p521 SetBytes(compressed) err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p521 round trip (compressed)", hx(&r.Bytes()), P521_RTC);
 
         let u8s = p.Bytes();
         let mut u = nistec::NewP521Point();
         let err = u.SetBytes(&u8s);
-        check("p521 SetBytes(uncompressed) err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p521 SetBytes(uncompressed) err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p521 round trip (uncompressed)", hx(&u.Bytes()), P521_RTU);
 
         let inf = nistec::NewP521Point();
@@ -252,7 +327,11 @@ fn main() {
         // the only length check in the package.
         let mut bad = nistec::NewP521Point();
         let err = bad.ScalarBaseMult(&scalarOf(66 - 1));
-        check("p521 short scalar rejected", fmt::Sprintf!("%v", err.Error()), "invalid scalar length");
+        check(
+            "p521 short scalar rejected",
+            fmt::Sprintf!("%v", err.Error()),
+            "invalid scalar length",
+        );
 
         // A point encoding of the right length that is not on the curve.
         let mut off = Vec::<byte>::with_capacity(1 + 2 * 66);
@@ -264,7 +343,11 @@ fn main() {
         }
         let mut nope = nistec::NewP521Point();
         let err = nope.SetBytes(&slice::__from_vec(off));
-        check("p521 off-curve rejected", fmt::Sprintf!("%v", err.Error()), "P521 point not on curve");
+        check(
+            "p521 off-curve rejected",
+            fmt::Sprintf!("%v", err.Error()),
+            "P521 point not on curve",
+        );
     }
 
     // ---- P-256 (the purego p256.go, not the assembly one)
@@ -274,33 +357,57 @@ fn main() {
         check("p256 G", hx(&g.Bytes()), P256_G);
         check("p256 Gcompressed", hx(&g.BytesCompressed()), P256_GC);
         let (gx, err) = g.BytesX();
-        check("p256 BytesX err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p256 BytesX err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p256 Gx", hx(&gx), P256_GX);
 
         let s = scalarOf(32);
         let mut p = nistec::NewP256Point();
         let err = p.ScalarBaseMult(&s);
-        check("p256 ScalarBaseMult err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p256 ScalarBaseMult err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p256 sG (base)", hx(&p.Bytes()), P256_SGB);
 
         let mut q = nistec::NewP256Point();
         let err = q.ScalarMult(g, &s);
-        check("p256 ScalarMult err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p256 ScalarMult err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p256 sG (mult)", hx(&q.Bytes()), P256_SGM);
 
         let c = p.BytesCompressed();
         let mut r = nistec::NewP256Point();
         let err = r.SetBytes(&c);
-        check("p256 SetBytes(compressed) err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p256 SetBytes(compressed) err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p256 round trip (compressed)", hx(&r.Bytes()), P256_RTC);
 
         let ub = p.Bytes();
         let mut u = nistec::NewP256Point();
         let err = u.SetBytes(&ub);
-        check("p256 SetBytes(uncompressed) err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p256 SetBytes(uncompressed) err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p256 round trip (uncompressed)", hx(&u.Bytes()), P256_RTU);
 
-        check("p256 infinity", hx(&nistec::NewP256Point().Bytes()), P256_INF);
+        check(
+            "p256 infinity",
+            hx(&nistec::NewP256Point().Bytes()),
+            P256_INF,
+        );
 
         let mut d = nistec::NewP256Point();
         d.Double(g);
@@ -318,24 +425,40 @@ fn main() {
         let one = slice::__from_vec(small.clone());
         let mut p1 = nistec::NewP256Point();
         let err = p1.ScalarBaseMult(&one);
-        check("p256 [1]G base err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p256 [1]G base err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p256 [1]G (base)", hx(&p1.Bytes()), P256_G1B);
 
         let mut p1m = nistec::NewP256Point();
         let err = p1m.ScalarMult(g, &one);
-        check("p256 [1]G mult err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p256 [1]G mult err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p256 [1]G (mult)", hx(&p1m.Bytes()), P256_G1M);
 
         small[31] = 0;
         let zero = slice::__from_vec(small);
         let mut p0 = nistec::NewP256Point();
         let err = p0.ScalarBaseMult(&zero);
-        check("p256 [0]G base err", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "p256 [0]G base err",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
         check("p256 [0]G (base)", hx(&p0.Bytes()), P256_G0B);
 
         let mut bad = nistec::NewP256Point();
         let err = bad.ScalarBaseMult(&scalarOf(31));
-        check("p256 short scalar rejected", fmt::Sprintf!("%v", err.Error()), "invalid scalar length");
+        check(
+            "p256 short scalar rejected",
+            fmt::Sprintf!("%v", err.Error()),
+            "invalid scalar length",
+        );
 
         let mut off = Vec::<byte>::with_capacity(1 + 2 * 32);
         off.push(4);
@@ -346,7 +469,11 @@ fn main() {
         }
         let mut nope = nistec::NewP256Point();
         let err = nope.SetBytes(&slice::__from_vec(off));
-        check("p256 off-curve rejected", fmt::Sprintf!("%v", err.Error()), "P256 point not on curve");
+        check(
+            "p256 off-curve rejected",
+            fmt::Sprintf!("%v", err.Error()),
+            "P256 point not on curve",
+        );
     }
 
     if unsafe { FAILED } {

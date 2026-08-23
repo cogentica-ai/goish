@@ -188,7 +188,11 @@ fn test_timer_stop() {
     // Drain to baseline so the next test starts clean. Allow ≤ d.
     let n = wait_drop_to(baseline, 2500);
     if n > baseline {
-        report_fail(b"timer: did not drain to baseline in d window;", baseline, n);
+        report_fail(
+            b"timer: did not drain to baseline in d window;",
+            baseline,
+            n,
+        );
     }
 }
 
@@ -233,7 +237,11 @@ fn test_ticker_stop() {
     // Drain to baseline (≤ d for in-flight spawn_fire).
     let n = wait_drop_to(baseline, 1500);
     if n > baseline {
-        report_fail(b"ticker: did not drain to baseline in d window;", baseline, n);
+        report_fail(
+            b"ticker: did not drain to baseline in d window;",
+            baseline,
+            n,
+        );
     }
 }
 

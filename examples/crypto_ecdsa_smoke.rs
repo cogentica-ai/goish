@@ -171,7 +171,10 @@ fn runCurve(v: &Vector) {
     check(eq(&priv_.PublicKey.Y.Bytes(), v.y), "Y matches Go");
 
     let (pb, err) = priv_.Bytes();
-    check(err == goish::nil && eq(&pb, v.d), "PrivateKey.Bytes matches Go");
+    check(
+        err == goish::nil && eq(&pb, v.d),
+        "PrivateKey.Bytes matches Go",
+    );
 
     let (qb, err) = priv_.PublicKey.Bytes();
     let qbOK = err == goish::nil;
@@ -240,7 +243,10 @@ fn runCurve(v: &Vector) {
     );
     if v.ecdhOK {
         let (ek, err) = priv_.ECDH();
-        check(err == goish::nil && eq(&ek.Bytes(), v.d), "ecdh priv matches Go");
+        check(
+            err == goish::nil && eq(&ek.Bytes(), v.d),
+            "ecdh priv matches Go",
+        );
         let (pk, err) = priv_.PublicKey.ECDH();
         check(
             err == goish::nil && eq(&pk.Bytes(), v.pubBytes),
@@ -282,8 +288,7 @@ fn errorPaths() {
     let h = crypto::SHA256;
     let (_, err) = k.Sign(None, &slice::__from_vec(alloc::vec![1, 2, 3]), Some(&h));
     check(
-        err != goish::nil
-            && errIs(&err, "ecdsa: hash length does not match hash function"),
+        err != goish::nil && errIs(&err, "ecdsa: hash length does not match hash function"),
         "wrong digest length rejected with Go's message",
     );
 
@@ -295,7 +300,10 @@ fn errorPaths() {
         X: k.PublicKey.X.clone(),
         Y: k.PublicKey.Y.clone(),
     };
-    check(unsupported.Equal(&k.PublicKey), "PublicKey literal round-trips");
+    check(
+        unsupported.Equal(&k.PublicKey),
+        "PublicKey literal round-trips",
+    );
 }
 
 #[goish::main]
@@ -314,7 +322,11 @@ fn main() {
     if failed == 0 {
         fmt::Printf!("crypto_ecdsa_smoke OK %d/%d\n", ran as i64, ran as i64);
     } else {
-        fmt::Printf!("crypto_ecdsa_smoke FAILED %d of %d\n", failed as i64, ran as i64);
+        fmt::Printf!(
+            "crypto_ecdsa_smoke FAILED %d of %d\n",
+            failed as i64,
+            ran as i64
+        );
         goish::syscall::Exit(1);
     }
 }

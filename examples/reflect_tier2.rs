@@ -39,11 +39,17 @@ fn main() {
     let v = reflect::ValueOf(&o);
     let path: &[int] = &[0, 0]; // Outer.Sub.A
     let inner_a = v.FieldByIndex(path);
-    check(inner_a.Int() == 11, b"tier2: Value.FieldByIndex Outer.Sub.A\n");
+    check(
+        inner_a.Int() == 11,
+        b"tier2: Value.FieldByIndex Outer.Sub.A\n",
+    );
 
     let path: &[int] = &[0, 1]; // Outer.Sub.B
     let inner_b = v.FieldByIndex(path);
-    check(inner_b.Int() == 22, b"tier2: Value.FieldByIndex Outer.Sub.B\n");
+    check(
+        inner_b.Int() == 22,
+        b"tier2: Value.FieldByIndex Outer.Sub.B\n",
+    );
 
     let path: &[int] = &[1]; // Outer.Tag
     let tag = v.FieldByIndex(path);
@@ -73,12 +79,21 @@ fn main() {
     check(i8_t.OverflowInt(-200), b"tier2: i8 OverflowInt(-200)\n");
 
     let int_t = reflect::TypeOf(&0i64);
-    check(!int_t.OverflowInt(i64::MAX), b"tier2: i64 !OverflowInt(MAX)\n");
+    check(
+        !int_t.OverflowInt(i64::MAX),
+        b"tier2: i64 !OverflowInt(MAX)\n",
+    );
 
     // OverflowUint
     let u16_t = reflect::TypeOf(&0u16);
-    check(u16_t.OverflowUint(70_000), b"tier2: u16 OverflowUint(70000)\n");
-    check(!u16_t.OverflowUint(65_535), b"tier2: u16 !OverflowUint(MAX)\n");
+    check(
+        u16_t.OverflowUint(70_000),
+        b"tier2: u16 OverflowUint(70000)\n",
+    );
+    check(
+        !u16_t.OverflowUint(65_535),
+        b"tier2: u16 !OverflowUint(MAX)\n",
+    );
 
     // OverflowFloat
     let f32_t = reflect::TypeOf(&0f32);
@@ -94,19 +109,13 @@ fn main() {
     // ─── reflect::Append / AppendSlice ───────────────────────────────
     let xs: slice<int> = goish::slice!([]int{1, 2, 3});
     let v = reflect::ValueOf(&xs);
-    let extended = reflect::Append(
-        v,
-        &[reflect::Value::Int(4), reflect::Value::Int(5)],
-    );
+    let extended = reflect::Append(v, &[reflect::Value::Int(4), reflect::Value::Int(5)]);
     check(extended.Len() == 5, b"tier2: Append len\n");
     check(extended.Index(3).Int() == 4, b"tier2: Append[3]\n");
     check(extended.Index(4).Int() == 5, b"tier2: Append[4]\n");
 
     let ys: slice<int> = goish::slice!([]int{10, 20});
-    let combined = reflect::AppendSlice(
-        reflect::ValueOf(&xs),
-        reflect::ValueOf(&ys),
-    );
+    let combined = reflect::AppendSlice(reflect::ValueOf(&xs), reflect::ValueOf(&ys));
     check(combined.Len() == 5, b"tier2: AppendSlice len\n");
     check(combined.Index(4).Int() == 20, b"tier2: AppendSlice[4]\n");
 

@@ -110,7 +110,11 @@ macro_rules! curve_checks {
         check(concat!($tag, " 1/a"), hx(&inv.Bytes()), $inv);
         let mut prod = fiat::$C::New();
         prod.Mul(a, inv);
-        check(concat!($tag, " a*(1/a) == 1"), hx(&prod.Bytes()), hx(&one.Bytes()).as_ref());
+        check(
+            concat!($tag, " a*(1/a) == 1"),
+            hx(&prod.Bytes()),
+            hx(&one.Bytes()).as_ref(),
+        );
 
         // Go documents 1/0 = 0 rather than an error.
         let mut z = fiat::$C::New();
@@ -157,10 +161,46 @@ const P521_NEG1: &str = "01fffffffffffffffffffffffffffffffffffffffffffffffffffff
 
 #[goish::main]
 fn main() {
-    curve_checks!(P224Element, 28, "P-224", P224_A, P224_MUL, P224_ADD, P224_NEG1, P224_INV);
-    curve_checks!(P256Element, 32, "P-256", P256_A, P256_MUL, P256_ADD, P256_NEG1, P256_INV);
-    curve_checks!(P384Element, 48, "P-384", P384_A, P384_MUL, P384_ADD, P384_NEG1, P384_INV);
-    curve_checks!(P521Element, 66, "P-521", P521_A, P521_MUL, P521_ADD, P521_NEG1, P521_INV);
+    curve_checks!(
+        P224Element,
+        28,
+        "P-224",
+        P224_A,
+        P224_MUL,
+        P224_ADD,
+        P224_NEG1,
+        P224_INV
+    );
+    curve_checks!(
+        P256Element,
+        32,
+        "P-256",
+        P256_A,
+        P256_MUL,
+        P256_ADD,
+        P256_NEG1,
+        P256_INV
+    );
+    curve_checks!(
+        P384Element,
+        48,
+        "P-384",
+        P384_A,
+        P384_MUL,
+        P384_ADD,
+        P384_NEG1,
+        P384_INV
+    );
+    curve_checks!(
+        P521Element,
+        66,
+        "P-521",
+        P521_A,
+        P521_MUL,
+        P521_ADD,
+        P521_NEG1,
+        P521_INV
+    );
 
     // ── Select, Equal, IsZero, and the encoding checks (P-256) ────────
     let mut a = fiat::P256Element::New();
@@ -196,7 +236,10 @@ fn main() {
     let mut e = fiat::P256Element::New();
     check(
         "short encoding rejected",
-        fmt::Sprintf!("%v", e.SetBytes(slice::__from_vec(alloc::vec![0u8; 31])).Error()),
+        fmt::Sprintf!(
+            "%v",
+            e.SetBytes(slice::__from_vec(alloc::vec![0u8; 31])).Error()
+        ),
         "invalid P256Element encoding",
     );
     check(

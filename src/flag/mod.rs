@@ -42,9 +42,7 @@
 #![allow(non_snake_case)]
 
 mod flag;
-pub use flag::{
-    Bool, CommandLine, Duration, Flag, Int, Int64, Parse, Parsed, String, Uint, Value,
-};
+pub use flag::{Bool, CommandLine, Duration, Flag, Int, Int64, Parse, Parsed, String, Uint, Value};
 
 extern crate alloc;
 use alloc::sync::Arc;
@@ -196,7 +194,6 @@ impl FlagSet {
         FlagHandle { cell }
     }
 
-
     pub fn Args(&self) -> slice<string> {
         slice::__from_vec(self.args.clone())
     }
@@ -226,7 +223,11 @@ impl FlagSet {
                 break;
             }
             // Strip leading `-` or `--`.
-            let strip = if bytes.len() >= 2 && bytes[1] == b'-' { 2 } else { 1 };
+            let strip = if bytes.len() >= 2 && bytes[1] == b'-' {
+                2
+            } else {
+                1
+            };
             let body = &bytes[strip..];
             // Look for `=value`.
             let mut eq_pos: Option<usize> = None;

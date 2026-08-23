@@ -61,7 +61,7 @@ use super::ctr::streamBufferSize;
 pub struct OFB<B: Block> {
     b: B,
     cipher: Vec<byte>,
-    out: Vec<byte>,    // capacity = bufSize, length = valid keystream bytes
+    out: Vec<byte>, // capacity = bufSize, length = valid keystream bytes
     out_used: usize,
 }
 
@@ -104,7 +104,12 @@ pub fn NewOFB<B: Block>(b: B, iv: slice<byte>) -> OFB<B> {
     // Pre-fill capacity so refill can reslice up to cap() (Go pattern).
     out.resize(0, 0u8);
     // Go: copy(x.cipher, iv)
-    let mut x = OFB { b, cipher, out, out_used: 0 };
+    let mut x = OFB {
+        b,
+        cipher,
+        out,
+        out_used: 0,
+    };
     let iv_v = iv.__into_vec();
     let n = (iv_v.len()).min(x.cipher.len());
     x.cipher[..n].copy_from_slice(&iv_v[..n]);
@@ -140,7 +145,8 @@ impl<B: Block> OFB<B> {
         // Go: copy(x.out, x.out[x.outUsed:])
         // — shift unused tail to start.
         if remain > 0 {
-            self.out.copy_within(self.out_used..self.out_used + remain, 0);
+            self.out
+                .copy_within(self.out_used..self.out_used + remain, 0);
         }
         // Go: x.out = x.out[:cap(x.out)]
         let cap = self.out.capacity();
@@ -219,4 +225,3 @@ impl<B: Block> Stream for OFB<B> {
         }
     }
 }
-

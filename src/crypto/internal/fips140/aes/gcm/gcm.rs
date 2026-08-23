@@ -245,8 +245,7 @@ impl GCM {
         }
 
         // Go: if err := open(out, g, nonce, ciphertext, data); err != nil { clear(out); return nil, err }
-        let mut outbuf: Vec<byte> =
-            alloc::vec![0u8; (ciphertext.Len() - self.tagSize) as usize];
+        let mut outbuf: Vec<byte> = alloc::vec![0u8; (ciphertext.Len() - self.tagSize) as usize];
         let err = open(&mut outbuf, self, &nonce, &ciphertext, &data);
         if err != crate::errors::nil {
             // We sometimes decrypt and authenticate concurrently, so the

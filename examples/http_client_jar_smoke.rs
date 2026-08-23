@@ -90,7 +90,12 @@ fn main() {
 
         // A cookie set BY the 302 must reach the redirected request.
         let (_, _) = c.Get(url.clone() + string("/redir"));
-        eq(seen(), "sid=abc; hop=1", "cookie set through a 302", &mut bad);
+        eq(
+            seen(),
+            "sid=abc; hop=1",
+            "cookie set through a 302",
+            &mut bad,
+        );
 
         // A client with no jar sends nothing.
         let c2 = http::Client::default();

@@ -12,8 +12,8 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use goish::fmt;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::io;
 use goish::net;
 use goish::net::http;
@@ -27,8 +27,7 @@ fn main() {
     // ── Backend ──
     let backend_mux = http::NewServeMux();
     backend_mux.HandleFunc(string("/api/echo"), |w, r| {
-        w.Header()
-            .Set(string("X-Backend"), string("goish"));
+        w.Header().Set(string("X-Backend"), string("goish"));
         let _ = w.Write(bytes("backend says hello "));
         let _ = w.Write(bytes(r.URL.Path.clone()));
     });
@@ -84,7 +83,8 @@ fn main() {
         } else {
             fmt::Println!(
                 "[ 1] proxy passthrough         FAIL status={} body={}",
-                resp.StatusCode, body
+                resp.StatusCode,
+                body
             );
             failed += 1;
         }
@@ -114,7 +114,10 @@ fn main() {
         if resp.StatusCode == 404 {
             fmt::Println!("[ 3] 404 propagates            PASS");
         } else {
-            fmt::Println!("[ 3] 404 propagates            FAIL status={}", resp.StatusCode);
+            fmt::Println!(
+                "[ 3] 404 propagates            FAIL status={}",
+                resp.StatusCode
+            );
             failed += 1;
         }
     }

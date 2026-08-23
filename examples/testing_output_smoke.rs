@@ -74,7 +74,14 @@ fn output_test(t: &mut testing::T) {
         // A newline-free write is held back entirely.
         let (n1, e1) = w.Write(b("half"));
         num("n1", n1);
-        record("e1", if e1 == goish::errors::nil { s("nil") } else { s("err") });
+        record(
+            "e1",
+            if e1 == goish::errors::nil {
+                s("nil")
+            } else {
+                s("err")
+            },
+        );
 
         // …and the next write concatenates onto it.
         let (n2, _) = w.Write(b(" line\n"));
@@ -112,7 +119,11 @@ fn output_rehomes(t: &mut testing::T) {
         num("rehome.n", n);
         record(
             "rehome.e",
-            if e == goish::errors::nil { s("nil") } else { s("err") },
+            if e == goish::errors::nil {
+                s("nil")
+            } else {
+                s("err")
+            },
         );
     });
 }
@@ -122,10 +133,7 @@ fn main() {
     let mut failed = 0;
 
     fmt::Println!("--- test tree output follows:");
-    let code = testing::Main(&[
-        ("Output", output_test),
-        ("Rehome", output_rehomes),
-    ]);
+    let code = testing::Main(&[("Output", output_test), ("Rehome", output_rehomes)]);
     fmt::Println!("--- end of test tree output");
 
     // 1. The tree ran green.
@@ -156,7 +164,13 @@ fn main() {
         if get("n2") == s("6") && get("n3") == s("8") {
             fmt::Println!("[ 3] counts stay exact         PASS");
         } else {
-            fmt::Println!("[ 3] counts stay exact         FAIL [", get("n2"), "] [", get("n3"), "]");
+            fmt::Println!(
+                "[ 3] counts stay exact         FAIL [",
+                get("n2"),
+                "] [",
+                get("n3"),
+                "]"
+            );
             failed += 1;
         }
     }

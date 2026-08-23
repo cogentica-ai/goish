@@ -84,7 +84,11 @@ fn run_tests() {
         if actual == 100 && loaded && after == 100 {
             fmt::Println!("[ 5] LoadOrStore present     PASS");
         } else {
-            fmt::Println!("[ 5] LoadOrStore present     FAIL actual={} after={}", actual, after);
+            fmt::Println!(
+                "[ 5] LoadOrStore present     FAIL actual={} after={}",
+                actual,
+                after
+            );
             failed += 1;
         }
     }
@@ -157,7 +161,10 @@ fn run_tests() {
         if counter.load(Ordering::Relaxed) == 6 {
             fmt::Println!("[10] Range visits all        PASS");
         } else {
-            fmt::Println!("[10] Range visits all        FAIL sum={}", counter.load(Ordering::Relaxed));
+            fmt::Println!(
+                "[10] Range visits all        FAIL sum={}",
+                counter.load(Ordering::Relaxed)
+            );
             failed += 1;
         }
     }
@@ -178,7 +185,10 @@ fn run_tests() {
         if counter.load(Ordering::Relaxed) == 1 {
             fmt::Println!("[11] Range short-circuit     PASS");
         } else {
-            fmt::Println!("[11] Range short-circuit     FAIL count={}", counter.load(Ordering::Relaxed));
+            fmt::Println!(
+                "[11] Range short-circuit     FAIL count={}",
+                counter.load(Ordering::Relaxed)
+            );
             failed += 1;
         }
     }
@@ -222,7 +232,10 @@ fn run_tests() {
         if counter.load(Ordering::Relaxed) == 200 {
             fmt::Println!("[13] Concurrent Store        PASS");
         } else {
-            fmt::Println!("[13] Concurrent Store        FAIL n={}", counter.load(Ordering::Relaxed));
+            fmt::Println!(
+                "[13] Concurrent Store        FAIL n={}",
+                counter.load(Ordering::Relaxed)
+            );
             failed += 1;
         }
     }

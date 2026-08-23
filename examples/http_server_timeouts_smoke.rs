@@ -35,7 +35,13 @@ fn ms(n: i64) -> time::Duration {
     return time::Duration(n * 1_000_000);
 }
 
-fn srv(rh: time::Duration, rt: time::Duration, wt: time::Duration, it: time::Duration, mhb: i64) -> Server {
+fn srv(
+    rh: time::Duration,
+    rt: time::Duration,
+    wt: time::Duration,
+    it: time::Duration,
+    mhb: i64,
+) -> Server {
     let mut s = Server::default();
     s.ReadHeaderTimeout = rh;
     s.ReadTimeout = rt;
@@ -54,22 +60,85 @@ fn main() {
     // (rh, rt, wt, it, mhb) -> (maxHeaderBytes, initialReadLimitSize,
     //                           tlsHandshakeTimeout, idleTimeout,
     //                           readHeaderTimeout)
-    let cases: &[(time::Duration, time::Duration, time::Duration, time::Duration, i64,
-                  i64, i64, time::Duration, time::Duration, time::Duration)] = &[
-        (z, z, z, z, 0,       def, def + 4096, z,      z,      z),
-        (z, z, z, z, 4096,    4096, 8192,       z,      z,      z),
-        (z, z, z, z, -1,      def, def + 4096, z,      z,      z),
-        (ms(30), ms(20), ms(10), z, 0,  def, def + 4096, ms(10), ms(20), ms(30)),
-        (ms(10), ms(20), ms(30), z, 0,  def, def + 4096, ms(10), ms(20), ms(10)),
-        (z, ms(20), ms(30), z, 0,       def, def + 4096, ms(20), ms(20), ms(20)),
-        (z, z, ms(30), z, 0,            def, def + 4096, ms(30), z,      z),
-        (time::Duration(-1_000_000_000), ms(20), z, z, 0,
-                                        def, def + 4096, ms(20), ms(20),
-                                        time::Duration(-1_000_000_000)),
-        (ms(5), ms(20), ms(5), z, 0,    def, def + 4096, ms(5),  ms(20), ms(5)),
-        (z, ms(7), z, ms(9), 0,         def, def + 4096, ms(7),  ms(9),  ms(7)),
-        (z, ms(7), z, z, 0,             def, def + 4096, ms(7),  ms(7),  ms(7)),
-        (ms(3), ms(7), z, z, 0,         def, def + 4096, ms(3),  ms(7),  ms(3)),
+    let cases: &[(
+        time::Duration,
+        time::Duration,
+        time::Duration,
+        time::Duration,
+        i64,
+        i64,
+        i64,
+        time::Duration,
+        time::Duration,
+        time::Duration,
+    )] = &[
+        (z, z, z, z, 0, def, def + 4096, z, z, z),
+        (z, z, z, z, 4096, 4096, 8192, z, z, z),
+        (z, z, z, z, -1, def, def + 4096, z, z, z),
+        (
+            ms(30),
+            ms(20),
+            ms(10),
+            z,
+            0,
+            def,
+            def + 4096,
+            ms(10),
+            ms(20),
+            ms(30),
+        ),
+        (
+            ms(10),
+            ms(20),
+            ms(30),
+            z,
+            0,
+            def,
+            def + 4096,
+            ms(10),
+            ms(20),
+            ms(10),
+        ),
+        (
+            z,
+            ms(20),
+            ms(30),
+            z,
+            0,
+            def,
+            def + 4096,
+            ms(20),
+            ms(20),
+            ms(20),
+        ),
+        (z, z, ms(30), z, 0, def, def + 4096, ms(30), z, z),
+        (
+            time::Duration(-1_000_000_000),
+            ms(20),
+            z,
+            z,
+            0,
+            def,
+            def + 4096,
+            ms(20),
+            ms(20),
+            time::Duration(-1_000_000_000),
+        ),
+        (
+            ms(5),
+            ms(20),
+            ms(5),
+            z,
+            0,
+            def,
+            def + 4096,
+            ms(5),
+            ms(20),
+            ms(5),
+        ),
+        (z, ms(7), z, ms(9), 0, def, def + 4096, ms(7), ms(9), ms(7)),
+        (z, ms(7), z, z, 0, def, def + 4096, ms(7), ms(7), ms(7)),
+        (ms(3), ms(7), z, z, 0, def, def + 4096, ms(3), ms(7), ms(3)),
     ];
 
     let mut bad = 0;
@@ -78,23 +147,48 @@ fn main() {
         let c = &cases[i];
         let s = srv(c.0, c.1, c.2, c.3, c.4);
         if s.maxHeaderBytes() != c.5 {
-            fmt::Println!("     case ", i as i64, " maxHeaderBytes got=", s.maxHeaderBytes());
+            fmt::Println!(
+                "     case ",
+                i as i64,
+                " maxHeaderBytes got=",
+                s.maxHeaderBytes()
+            );
             bad += 1;
         }
         if s.initialReadLimitSize() != c.6 {
-            fmt::Println!("     case ", i as i64, " initialReadLimitSize got=", s.initialReadLimitSize());
+            fmt::Println!(
+                "     case ",
+                i as i64,
+                " initialReadLimitSize got=",
+                s.initialReadLimitSize()
+            );
             bad += 1;
         }
         if s.tlsHandshakeTimeout() != c.7 {
-            fmt::Println!("     case ", i as i64, " tlsHandshakeTimeout got=", s.tlsHandshakeTimeout().0);
+            fmt::Println!(
+                "     case ",
+                i as i64,
+                " tlsHandshakeTimeout got=",
+                s.tlsHandshakeTimeout().0
+            );
             bad += 1;
         }
         if s.idleTimeout() != c.8 {
-            fmt::Println!("     case ", i as i64, " idleTimeout got=", s.idleTimeout().0);
+            fmt::Println!(
+                "     case ",
+                i as i64,
+                " idleTimeout got=",
+                s.idleTimeout().0
+            );
             bad += 1;
         }
         if s.readHeaderTimeout() != c.9 {
-            fmt::Println!("     case ", i as i64, " readHeaderTimeout got=", s.readHeaderTimeout().0);
+            fmt::Println!(
+                "     case ",
+                i as i64,
+                " readHeaderTimeout got=",
+                s.readHeaderTimeout().0
+            );
             bad += 1;
         }
         i += 1;
@@ -111,7 +205,10 @@ fn main() {
         if DefaultMaxHeaderBytes == 1048576 {
             fmt::Println!("[2] DefaultMaxHeaderBytes == 1 MB  PASS");
         } else {
-            fmt::Println!("[2] DefaultMaxHeaderBytes  FAIL got=", DefaultMaxHeaderBytes);
+            fmt::Println!(
+                "[2] DefaultMaxHeaderBytes  FAIL got=",
+                DefaultMaxHeaderBytes
+            );
             failed += 1;
         }
     }

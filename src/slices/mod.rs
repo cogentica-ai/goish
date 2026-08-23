@@ -498,11 +498,7 @@ where
     for i in 0..n {
         let c = cmp(&a[i], &b[i]);
         if c != 0 {
-            return if c < 0 {
-                -1
-            } else {
-                1
-            };
+            return if c < 0 { -1 } else { 1 };
         }
     }
     if a.len() < b.len() {

@@ -32,10 +32,10 @@ extern crate goish;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::compress::gzip;
 use goish::error;
 use goish::errors;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::io;
 use goish::runtime::sched::schedule;
@@ -223,8 +223,7 @@ fn mixed_kb() -> Vec<u8> {
 // Round-trip the 4 standard inputs at one level.
 fn test_level(idx: u8, level: int, label: &[u8]) {
     let kb = mixed_kb();
-    let repetitive: &[u8] =
-        b"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc";
+    let repetitive: &[u8] = b"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc";
     let inputs: [&[u8]; 4] = [b"", b"hello, gzip!", repetitive, kb.as_slice()];
 
     let mut ok = true;
@@ -253,8 +252,7 @@ fn test_6_header_fields() {
     let extra: &[u8] = &[0xde, 0xad, 0xbe, 0xef, 0x01, 0x02];
     let mtime: int = 1_700_000_000; // a fixed Unix second
 
-    let (mut w, err) =
-        gzip::NewWriterLevel(bytes::NewBuffer(slice::new()), gzip::BestCompression);
+    let (mut w, err) = gzip::NewWriterLevel(bytes::NewBuffer(slice::new()), gzip::BestCompression);
     let mut ok = err.IsNil();
     if ok {
         w.Header.Name = name.into();

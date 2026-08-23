@@ -31,15 +31,27 @@ use goish::{bytes, string};
 fn main() {
     let port = {
         let p = os::Getenv("PORT");
-        if p.Len() > 0 { p } else { string("8443") }
+        if p.Len() > 0 {
+            p
+        } else {
+            string("8443")
+        }
     };
     let cert = {
         let c = os::Getenv("CERT");
-        if c.Len() > 0 { c } else { string("cert.pem") }
+        if c.Len() > 0 {
+            c
+        } else {
+            string("cert.pem")
+        }
     };
     let key = {
         let k = os::Getenv("KEY");
-        if k.Len() > 0 { k } else { string("key.pem") }
+        if k.Len() > 0 {
+            k
+        } else {
+            string("key.pem")
+        }
     };
 
     // Register specific routes before the `GET /` catch-all: goish's

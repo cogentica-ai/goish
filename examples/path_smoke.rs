@@ -146,8 +146,14 @@ fn test_isabs() {
     check(path::IsAbs("/"), b"IsAbs(/) want true\n");
     check(!path::IsAbs("usr/local"), b"IsAbs(usr/local) want false\n");
     check(!path::IsAbs(""), b"IsAbs() want false\n");
-    check(filepath::IsAbs("/etc"), b"filepath::IsAbs(/etc) want true\n");
-    check(!filepath::IsAbs("etc"), b"filepath::IsAbs(etc) want false\n");
+    check(
+        filepath::IsAbs("/etc"),
+        b"filepath::IsAbs(/etc) want true\n",
+    );
+    check(
+        !filepath::IsAbs("etc"),
+        b"filepath::IsAbs(etc) want false\n",
+    );
 }
 
 fn test_join() {
@@ -219,9 +225,15 @@ fn test_islocal_localize() {
 }
 
 fn test_volume_toslash() {
-    check(filepath::VolumeName("/usr/local") == "", b"VolumeName empty on unix\n");
+    check(
+        filepath::VolumeName("/usr/local") == "",
+        b"VolumeName empty on unix\n",
+    );
     check(filepath::ToSlash("a/b/c") == "a/b/c", b"ToSlash identity\n");
-    check(filepath::FromSlash("a/b/c") == "a/b/c", b"FromSlash identity\n");
+    check(
+        filepath::FromSlash("a/b/c") == "a/b/c",
+        b"FromSlash identity\n",
+    );
 }
 
 fn test_splitlist() {

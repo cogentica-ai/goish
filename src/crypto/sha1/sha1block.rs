@@ -67,10 +67,7 @@ pub(crate) fn blockGeneric(dig: &mut Digest, mut p: &[byte]) {
         }
         // Round 1 cont: i = 16..20, with w expansion.
         while i < 20 {
-            let tmp = w[(i - 3) & 0xf]
-                ^ w[(i - 8) & 0xf]
-                ^ w[(i - 14) & 0xf]
-                ^ w[i & 0xf];
+            let tmp = w[(i - 3) & 0xf] ^ w[(i - 8) & 0xf] ^ w[(i - 14) & 0xf] ^ w[i & 0xf];
             w[i & 0xf] = bits::RotateLeft32(tmp, 1);
             let f = (b & c) | ((!b) & d);
             let t = bits::RotateLeft32(a, 5)
@@ -87,10 +84,7 @@ pub(crate) fn blockGeneric(dig: &mut Digest, mut p: &[byte]) {
         }
         // Round 2: i = 20..40.
         while i < 40 {
-            let tmp = w[(i - 3) & 0xf]
-                ^ w[(i - 8) & 0xf]
-                ^ w[(i - 14) & 0xf]
-                ^ w[i & 0xf];
+            let tmp = w[(i - 3) & 0xf] ^ w[(i - 8) & 0xf] ^ w[(i - 14) & 0xf] ^ w[i & 0xf];
             w[i & 0xf] = bits::RotateLeft32(tmp, 1);
             let f = b ^ c ^ d;
             let t = bits::RotateLeft32(a, 5)
@@ -107,10 +101,7 @@ pub(crate) fn blockGeneric(dig: &mut Digest, mut p: &[byte]) {
         }
         // Round 3: i = 40..60.
         while i < 60 {
-            let tmp = w[(i - 3) & 0xf]
-                ^ w[(i - 8) & 0xf]
-                ^ w[(i - 14) & 0xf]
-                ^ w[i & 0xf];
+            let tmp = w[(i - 3) & 0xf] ^ w[(i - 8) & 0xf] ^ w[(i - 14) & 0xf] ^ w[i & 0xf];
             w[i & 0xf] = bits::RotateLeft32(tmp, 1);
             // Go: f := ((b | c) & d) | (b & c)
             let f = ((b | c) & d) | (b & c);
@@ -128,10 +119,7 @@ pub(crate) fn blockGeneric(dig: &mut Digest, mut p: &[byte]) {
         }
         // Round 4: i = 60..80.
         while i < 80 {
-            let tmp = w[(i - 3) & 0xf]
-                ^ w[(i - 8) & 0xf]
-                ^ w[(i - 14) & 0xf]
-                ^ w[i & 0xf];
+            let tmp = w[(i - 3) & 0xf] ^ w[(i - 8) & 0xf] ^ w[(i - 14) & 0xf] ^ w[i & 0xf];
             w[i & 0xf] = bits::RotateLeft32(tmp, 1);
             let f = b ^ c ^ d;
             let t = bits::RotateLeft32(a, 5)

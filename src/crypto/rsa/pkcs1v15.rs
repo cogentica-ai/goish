@@ -43,8 +43,8 @@ use crate::nilval::nil;
 use crate::types::{byte, int};
 
 use super::rsa::{
-    checkPublicKeySize, fipsPrivateKey, fipsPublicKey, ErrDecryption, ErrMessageTooLong, PrivateKey,
-    PublicKey,
+    checkPublicKeySize, fipsPrivateKey, fipsPublicKey, ErrDecryption, ErrMessageTooLong,
+    PrivateKey, PublicKey,
 };
 
 // Go: pkcs1v15.go:21-27
@@ -224,10 +224,7 @@ pub fn DecryptPKCS1v15SessionKey(
 /// maintain constant memory access patterns. If the plaintext was valid
 /// then `index` contains the index of the original message in `em`, to
 /// allow constant time padding removal.
-fn decryptPKCS1v15(
-    priv_: &PrivateKey,
-    ciphertext: slice<byte>,
-) -> (int, slice<byte>, int, error) {
+fn decryptPKCS1v15(priv_: &PrivateKey, ciphertext: slice<byte>) -> (int, slice<byte>, int, error) {
     if fips140only::Enabled {
         return (
             0,

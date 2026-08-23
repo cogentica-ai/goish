@@ -24,9 +24,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::crypto::cipher;
 use goish::crypto::cipher::{Block, BlockMode};
+use goish::fmt;
 use goish::types::{byte, int};
 use goish::{slice, syscall};
 
@@ -62,15 +62,11 @@ fn main() {
     let mk_block = || ToyBlock {
         key: alloc::vec![0xa5, 0x5a, 0xc3, 0x3c, 0xf0, 0x0f, 0x96, 0x69],
     };
-    let iv: alloc::vec::Vec<byte> =
-        alloc::vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+    let iv: alloc::vec::Vec<byte> = alloc::vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
 
     // 1. CBC encrypt produces non-trivial ciphertext.
     {
-        let mut e = cipher::NewCBCEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut e = cipher::NewCBCEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let plain: alloc::vec::Vec<byte> = (0..16u8).collect();
         let mut ct = slice::__from_vec(alloc::vec![0u8; 16]);
         e.CryptBlocks(&mut ct, slice::__from_vec(plain.clone()));
@@ -89,18 +85,12 @@ fn main() {
         let plain: alloc::vec::Vec<byte> = (0..24u8).collect();
         let n = plain.len();
 
-        let mut enc = cipher::NewCBCEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut enc = cipher::NewCBCEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut ct = slice::__from_vec(alloc::vec![0u8; n]);
         enc.CryptBlocks(&mut ct, slice::__from_vec(plain.clone()));
         let ct_v = ct.__into_vec();
 
-        let mut dec = cipher::NewCBCDecrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut dec = cipher::NewCBCDecrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut pt2 = slice::__from_vec(alloc::vec![0u8; n]);
         dec.CryptBlocks(&mut pt2, slice::__from_vec(ct_v));
         if pt2.__into_vec() == plain {
@@ -116,18 +106,12 @@ fn main() {
     {
         let plain: alloc::vec::Vec<byte> = (0..40u8).collect();
 
-        let mut s1 = cipher::NewCBCEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut s1 = cipher::NewCBCEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut ct1 = slice::__from_vec(alloc::vec![0u8; 40]);
         s1.CryptBlocks(&mut ct1, slice::__from_vec(plain.clone()));
         let want = ct1.__into_vec();
 
-        let mut s2 = cipher::NewCBCEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut s2 = cipher::NewCBCEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut got: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(40);
         // Encrypt in 8-byte (single-block) and 16-byte (two-block)
         // chunks; total 40 bytes = 5 blocks.
@@ -148,23 +132,16 @@ fn main() {
 
     // 4. Long payload (1 KiB = 128 blocks) — encrypt + decrypt holds.
     {
-        let mut plain: alloc::vec::Vec<byte> =
-            alloc::vec::Vec::with_capacity(1024);
+        let mut plain: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(1024);
         for i in 0..1024u32 {
             plain.push((i.wrapping_mul(31) & 0xff) as byte);
         }
-        let mut enc = cipher::NewCBCEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut enc = cipher::NewCBCEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut ct = slice::__from_vec(alloc::vec![0u8; 1024]);
         enc.CryptBlocks(&mut ct, slice::__from_vec(plain.clone()));
         let ct_v = ct.__into_vec();
 
-        let mut dec = cipher::NewCBCDecrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut dec = cipher::NewCBCDecrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut pt2 = slice::__from_vec(alloc::vec![0u8; 1024]);
         dec.CryptBlocks(&mut pt2, slice::__from_vec(ct_v));
         if pt2.__into_vec() == plain {
@@ -177,14 +154,8 @@ fn main() {
 
     // 5. BlockSize() reports the underlying block size.
     {
-        let e = cipher::NewCBCEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
-        let d = cipher::NewCBCDecrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let e = cipher::NewCBCEncrypter(mk_block(), slice::__from_vec(iv.clone()));
+        let d = cipher::NewCBCDecrypter(mk_block(), slice::__from_vec(iv.clone()));
         if e.BlockSize() == 8 && d.BlockSize() == 8 {
             fmt::Println!("[ 5] CBC BlockSize reports 8    PASS");
         } else {
@@ -196,17 +167,11 @@ fn main() {
     // 6. Same key+iv on two encrypters → identical ciphertext.
     {
         let plain: alloc::vec::Vec<byte> = (0..32u8).collect();
-        let mut s1 = cipher::NewCBCEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut s1 = cipher::NewCBCEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut ct1 = slice::__from_vec(alloc::vec![0u8; 32]);
         s1.CryptBlocks(&mut ct1, slice::__from_vec(plain.clone()));
 
-        let mut s2 = cipher::NewCBCEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut s2 = cipher::NewCBCEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut ct2 = slice::__from_vec(alloc::vec![0u8; 32]);
         s2.CryptBlocks(&mut ct2, slice::__from_vec(plain));
 
@@ -231,10 +196,7 @@ fn main() {
         let block_b: alloc::vec::Vec<byte> = (8..16u8).collect();
 
         // Path A: one encrypter, SetIV between.
-        let mut a = cipher::NewCBCEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut a = cipher::NewCBCEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut ct_a1 = slice::__from_vec(alloc::vec![0u8; 8]);
         a.CryptBlocks(&mut ct_a1, slice::__from_vec(block_a.clone()));
         a.SetIV(slice::__from_vec(iv2.clone()));
@@ -242,16 +204,10 @@ fn main() {
         a.CryptBlocks(&mut ct_a2, slice::__from_vec(block_b.clone()));
 
         // Path B: two encrypters with explicit iv1 / iv2.
-        let mut b1 = cipher::NewCBCEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut b1 = cipher::NewCBCEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut ct_b1 = slice::__from_vec(alloc::vec![0u8; 8]);
         b1.CryptBlocks(&mut ct_b1, slice::__from_vec(block_a));
-        let mut b2 = cipher::NewCBCEncrypter(
-            mk_block(),
-            slice::__from_vec(iv2),
-        );
+        let mut b2 = cipher::NewCBCEncrypter(mk_block(), slice::__from_vec(iv2));
         let mut ct_b2 = slice::__from_vec(alloc::vec![0u8; 8]);
         b2.CryptBlocks(&mut ct_b2, slice::__from_vec(block_b));
 
@@ -267,10 +223,7 @@ fn main() {
 
     // 8. Empty src is a no-op for decrypt.
     {
-        let mut d = cipher::NewCBCDecrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut d = cipher::NewCBCDecrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut dst = slice::__from_vec(alloc::vec![0u8; 8]);
         let before = dst.clone().__into_vec();
         d.CryptBlocks(&mut dst, slice::__from_vec(alloc::vec![]));

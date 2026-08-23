@@ -9,9 +9,9 @@ extern crate alloc;
 extern crate goish;
 
 use goish::fmt;
+use goish::syscall;
 use goish::types::rune;
 use goish::unicode;
-use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -19,9 +19,12 @@ fn main() {
 
     // 1. IsControl: 0x00 (NUL), 0x09 (TAB), 0x1F, 0x7F (DEL), 0x80, 0x9F.
     {
-        if unicode::IsControl(0x00) && unicode::IsControl(0x09)
-            && unicode::IsControl(0x1F) && unicode::IsControl(0x7F)
-            && unicode::IsControl(0x80) && unicode::IsControl(0x9F)
+        if unicode::IsControl(0x00)
+            && unicode::IsControl(0x09)
+            && unicode::IsControl(0x1F)
+            && unicode::IsControl(0x7F)
+            && unicode::IsControl(0x80)
+            && unicode::IsControl(0x9F)
         {
             fmt::Println!("[ 1] IsControl ctrl chars      PASS");
         } else {
@@ -32,8 +35,10 @@ fn main() {
 
     // 2. IsControl: NOT for printable ASCII or > 0x9F.
     {
-        if !unicode::IsControl(b'A' as rune) && !unicode::IsControl(b' ' as rune)
-            && !unicode::IsControl(0xA0) && !unicode::IsControl(-1)
+        if !unicode::IsControl(b'A' as rune)
+            && !unicode::IsControl(b' ' as rune)
+            && !unicode::IsControl(0xA0)
+            && !unicode::IsControl(-1)
         {
             fmt::Println!("[ 2] IsControl non-ctrl        PASS");
         } else {
@@ -44,7 +49,8 @@ fn main() {
 
     // 3. IsPrint: ASCII printable.
     {
-        if unicode::IsPrint(b' ' as rune) && unicode::IsPrint(b'~' as rune)
+        if unicode::IsPrint(b' ' as rune)
+            && unicode::IsPrint(b'~' as rune)
             && unicode::IsPrint(b'A' as rune)
         {
             fmt::Println!("[ 3] IsPrint ASCII             PASS");
@@ -56,8 +62,10 @@ fn main() {
 
     // 4. IsPrint: NOT for control or out-of-range.
     {
-        if !unicode::IsPrint(0x00) && !unicode::IsPrint(0x7F)
-            && !unicode::IsPrint(-1) && !unicode::IsPrint(0x110000)
+        if !unicode::IsPrint(0x00)
+            && !unicode::IsPrint(0x7F)
+            && !unicode::IsPrint(-1)
+            && !unicode::IsPrint(0x110000)
         {
             fmt::Println!("[ 4] IsPrint non-printable     PASS");
         } else {
@@ -78,8 +86,10 @@ fn main() {
 
     // 6. IsGraphic: agrees with IsPrint elsewhere.
     {
-        if unicode::IsGraphic(b'A' as rune) && unicode::IsGraphic(b'!' as rune)
-            && !unicode::IsGraphic(0x00) && !unicode::IsGraphic(0x7F)
+        if unicode::IsGraphic(b'A' as rune)
+            && unicode::IsGraphic(b'!' as rune)
+            && !unicode::IsGraphic(0x00)
+            && !unicode::IsGraphic(0x7F)
         {
             fmt::Println!("[ 6] IsGraphic agrees w/ Print PASS");
         } else {
@@ -90,9 +100,12 @@ fn main() {
 
     // 7. IsPunct: ASCII punctuation chars.
     {
-        if unicode::IsPunct(b'!' as rune) && unicode::IsPunct(b'.' as rune)
-            && unicode::IsPunct(b':' as rune) && unicode::IsPunct(b'?' as rune)
-            && unicode::IsPunct(b'[' as rune) && unicode::IsPunct(b'{' as rune)
+        if unicode::IsPunct(b'!' as rune)
+            && unicode::IsPunct(b'.' as rune)
+            && unicode::IsPunct(b':' as rune)
+            && unicode::IsPunct(b'?' as rune)
+            && unicode::IsPunct(b'[' as rune)
+            && unicode::IsPunct(b'{' as rune)
         {
             fmt::Println!("[ 7] IsPunct ASCII punct       PASS");
         } else {
@@ -103,8 +116,10 @@ fn main() {
 
     // 8. IsPunct: NOT for letters/digits/space/control.
     {
-        if !unicode::IsPunct(b'A' as rune) && !unicode::IsPunct(b'0' as rune)
-            && !unicode::IsPunct(b' ' as rune) && !unicode::IsPunct(0x00)
+        if !unicode::IsPunct(b'A' as rune)
+            && !unicode::IsPunct(b'0' as rune)
+            && !unicode::IsPunct(b' ' as rune)
+            && !unicode::IsPunct(0x00)
         {
             fmt::Println!("[ 8] IsPunct non-punct         PASS");
         } else {
@@ -115,8 +130,10 @@ fn main() {
 
     // 9. IsTitle: ASCII slim returns false for everything.
     {
-        if !unicode::IsTitle(b'A' as rune) && !unicode::IsTitle(b'a' as rune)
-            && !unicode::IsTitle(0x01C5) /* LJ-titlecase */
+        if !unicode::IsTitle(b'A' as rune)
+            && !unicode::IsTitle(b'a' as rune)
+            && !unicode::IsTitle(0x01C5)
+        /* LJ-titlecase */
         {
             fmt::Println!("[ 9] IsTitle ASCII slim        PASS");
         } else {

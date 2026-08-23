@@ -20,16 +20,16 @@
 #![allow(unused_mut)]
 
 extern crate alloc;
-use alloc::vec::Vec;
-use alloc::vec;
 use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use super::dnsconfig::{dns_read_config, DnsConfig};
+use super::dnsmessage as dns;
 use crate::errors::{self, error};
 use crate::gostring::string;
 use crate::syscall;
-use super::dnsmessage as dns;
-use super::dnsconfig::{DnsConfig, dns_read_config};
 
 // ─── Error sentinels ───────────────────────────────────────────────────────
 
@@ -57,7 +57,9 @@ fn rand_u64() -> u64 {
     let mut x = RAND_STATE.load(Ordering::Relaxed);
     // Mix in clock to seed variance across calls
     let mut ts: [i64; 2] = [0, 0];
-    unsafe { syscall::syscall2(228, 1, ts.as_mut_ptr() as usize); } // CLOCK_GETTIME
+    unsafe {
+        syscall::syscall2(228, 1, ts.as_mut_ptr() as usize);
+    } // CLOCK_GETTIME
     x ^= (ts[1] as u64).wrapping_add(ts[0] as u64 * 1_000_000_000);
     x ^= x << 13;
     x ^= x >> 7;
@@ -76,30 +78,46 @@ fn rand_u16() -> u16 {
 /// udpReq is the bare DNS message; tcpReq has a 2-byte length prefix.
 pub fn new_request(q: dns::Question, ad: bool) -> (u16, Vec<u8>, Vec<u8>, error) {
     let id = rand_u16();
-    let mut buf = vec![0u8; 2]; buf.resize(2, 0); // 2-byte placeholder for TCP len prefix
-    let mut b = dns::NewBuilder(buf, dns::Header {
-        ID: id,
-        RecursionDesired: true,
-        AuthenticData: ad,
-        ..Default::default()
-    });
+    let mut buf = vec![0u8; 2];
+    buf.resize(2, 0); // 2-byte placeholder for TCP len prefix
+    let mut b = dns::NewBuilder(
+        buf,
+        dns::Header {
+            ID: id,
+            RecursionDesired: true,
+            AuthenticData: ad,
+            ..Default::default()
+        },
+    );
 
     let e = b.StartQuestions();
-    if e != errors::nil { return (0, Vec::new(), Vec::new(), errCannotMarshalDNSMessage.into()); }
+    if e != errors::nil {
+        return (0, Vec::new(), Vec::new(), errCannotMarshalDNSMessage.into());
+    }
     let e = b.Question(q);
-    if e != errors::nil { return (0, Vec::new(), Vec::new(), errCannotMarshalDNSMessage.into()); }
+    if e != errors::nil {
+        return (0, Vec::new(), Vec::new(), errCannotMarshalDNSMessage.into());
+    }
 
     // Add EDNS0 OPT record (Accept packets up to MAX_DNS_PACKET_SIZE, RFC 6891)
     let e = b.StartAdditionals();
-    if e != errors::nil { return (0, Vec::new(), Vec::new(), errCannotMarshalDNSMessage.into()); }
+    if e != errors::nil {
+        return (0, Vec::new(), Vec::new(), errCannotMarshalDNSMessage.into());
+    }
     let mut rh = dns::ResourceHeader::default();
     let e = rh.SetEDNS0(MAX_DNS_PACKET_SIZE, dns::RCodeSuccess, false);
-    if e != errors::nil { return (0, Vec::new(), Vec::new(), errCannotMarshalDNSMessage.into()); }
+    if e != errors::nil {
+        return (0, Vec::new(), Vec::new(), errCannotMarshalDNSMessage.into());
+    }
     let e = b.OPTResource(rh, dns::OPTResource::default());
-    if e != errors::nil { return (0, Vec::new(), Vec::new(), errCannotMarshalDNSMessage.into()); }
+    if e != errors::nil {
+        return (0, Vec::new(), Vec::new(), errCannotMarshalDNSMessage.into());
+    }
 
     let (mut tcp_req, e) = b.Finish();
-    if e != errors::nil { return (0, Vec::new(), Vec::new(), errCannotMarshalDNSMessage.into()); }
+    if e != errors::nil {
+        return (0, Vec::new(), Vec::new(), errCannotMarshalDNSMessage.into());
+    }
 
     // tcp_req[0..2] are the placeholder bytes; fill in length
     let l = (tcp_req.len() - 2) as u16;
@@ -112,23 +130,44 @@ pub fn new_request(q: dns::Question, ad: bool) -> (u16, Vec<u8>, Vec<u8>, error)
 
 // ─── checkResponse ─────────────────────────────────────────────────────────
 
-fn check_response(req_id: u16, req_q: &dns::Question, resp_hdr: &dns::Header, resp_q: &dns::Question) -> bool {
-    if !resp_hdr.Response { return false; }
-    if req_id != resp_hdr.ID { return false; }
-    if req_q.Type != resp_q.Type || req_q.Class != resp_q.Class { return false; }
-    if !equal_ascii_name(&req_q.Name, &resp_q.Name) { return false; }
+fn check_response(
+    req_id: u16,
+    req_q: &dns::Question,
+    resp_hdr: &dns::Header,
+    resp_q: &dns::Question,
+) -> bool {
+    if !resp_hdr.Response {
+        return false;
+    }
+    if req_id != resp_hdr.ID {
+        return false;
+    }
+    if req_q.Type != resp_q.Type || req_q.Class != resp_q.Class {
+        return false;
+    }
+    if !equal_ascii_name(&req_q.Name, &resp_q.Name) {
+        return false;
+    }
     true
 }
 
 fn equal_ascii_name(x: &dns::Name, y: &dns::Name) -> bool {
-    if x.Length != y.Length { return false; }
+    if x.Length != y.Length {
+        return false;
+    }
     let len = x.Length as usize;
     for i in 0..len {
         let mut a = x.Data[i];
         let mut b = y.Data[i];
-        if a >= b'A' && a <= b'Z' { a += 0x20; }
-        if b >= b'A' && b <= b'Z' { b += 0x20; }
-        if a != b { return false; }
+        if a >= b'A' && a <= b'Z' {
+            a += 0x20;
+        }
+        if b >= b'A' && b <= b'Z' {
+            b += 0x20;
+        }
+        if a != b {
+            return false;
+        }
     }
     true
 }
@@ -142,7 +181,7 @@ fn parse_server_addr(server: &str) -> Option<([u8; 4], u16)> {
     // For IPv4 only (our syscall layer is IPv4-only in v1)
     let colon = server.rfind(':')?;
     let host = &server[..colon];
-    let port_str = &server[colon+1..];
+    let port_str = &server[colon + 1..];
     let port: u16 = port_str.parse().ok()?;
     // Strip brackets if present (IPv6 literal)
     let host = if host.starts_with('[') && host.ends_with(']') {
@@ -151,7 +190,9 @@ fn parse_server_addr(server: &str) -> Option<([u8; 4], u16)> {
         host
     };
     let parts: Vec<&str> = host.split('.').collect();
-    if parts.len() != 4 { return None; }
+    if parts.len() != 4 {
+        return None;
+    }
     let mut octets = [0u8; 4];
     for (i, p) in parts.iter().enumerate() {
         octets[i] = p.parse().ok()?;
@@ -170,14 +211,25 @@ fn dns_packet_round_trip(
 ) -> (dns::Parser, dns::Header, error) {
     let fd = syscall::Socket(syscall::AF_INET, syscall::SOCK_DGRAM, syscall::IPPROTO_UDP);
     if fd < 0 {
-        return (dns::Parser::new(), dns::Header::default(), errors::New("socket: failed"));
+        return (
+            dns::Parser::new(),
+            dns::Header::default(),
+            errors::New("socket: failed"),
+        );
     }
 
     // Set receive timeout
     let tv: [i64; 2] = [timeout_secs as i64, 0];
     unsafe {
-        syscall::syscall6(syscall::SYS_SETSOCKOPT, fd as usize, 1, 20,
-            tv.as_ptr() as usize, 16, 0);
+        syscall::syscall6(
+            syscall::SYS_SETSOCKOPT,
+            fd as usize,
+            1,
+            20,
+            tv.as_ptr() as usize,
+            16,
+            0,
+        );
     }
 
     let sent = unsafe {
@@ -192,8 +244,14 @@ fn dns_packet_round_trip(
         )
     };
     if sent < 0 {
-        unsafe { syscall::syscall1(syscall::SYS_CLOSE, fd as usize); }
-        return (dns::Parser::new(), dns::Header::default(), errors::New("sendto: failed"));
+        unsafe {
+            syscall::syscall1(syscall::SYS_CLOSE, fd as usize);
+        }
+        return (
+            dns::Parser::new(),
+            dns::Header::default(),
+            errors::New("sendto: failed"),
+        );
     }
 
     let mut buf = vec![0u8; MAX_DNS_PACKET_SIZE];
@@ -204,22 +262,40 @@ fn dns_packet_round_trip(
                 fd as usize,
                 buf.as_mut_ptr() as usize,
                 buf.len(),
-                0, 0, 0,
+                0,
+                0,
+                0,
             )
         };
-        if n == -4 { continue; }  // EINTR — Go auto-retries
+        if n == -4 {
+            continue;
+        } // EINTR — Go auto-retries
         if n < 0 {
-            unsafe { syscall::syscall1(syscall::SYS_CLOSE, fd as usize); }
-            return (dns::Parser::new(), dns::Header::default(), errors::New("recvfrom: timeout"));
+            unsafe {
+                syscall::syscall1(syscall::SYS_CLOSE, fd as usize);
+            }
+            return (
+                dns::Parser::new(),
+                dns::Header::default(),
+                errors::New("recvfrom: timeout"),
+            );
         }
         let recv = &buf[..n as usize];
         let mut p = dns::Parser::new();
         let (h, e) = p.Start(recv.to_vec());
-        if e != errors::nil { continue; }
+        if e != errors::nil {
+            continue;
+        }
         let (q, e) = p.Question();
-        if e != errors::nil { continue; }
-        if !check_response(id, query, &h, &q) { continue; }
-        unsafe { syscall::syscall1(syscall::SYS_CLOSE, fd as usize); }
+        if e != errors::nil {
+            continue;
+        }
+        if !check_response(id, query, &h, &q) {
+            continue;
+        }
+        unsafe {
+            syscall::syscall1(syscall::SYS_CLOSE, fd as usize);
+        }
         return (p, h, errors::nil);
     }
 }
@@ -231,11 +307,19 @@ fn tcp_read_exact_n(fd: i32, buf: &mut Vec<u8>, n: usize) -> bool {
     let mut off = 0usize;
     while off < n {
         let r = unsafe {
-            syscall::syscall3(syscall::SYS_READ, fd as usize,
-                buf.as_mut_ptr() as usize + start + off, n - off) as isize
+            syscall::syscall3(
+                syscall::SYS_READ,
+                fd as usize,
+                buf.as_mut_ptr() as usize + start + off,
+                n - off,
+            ) as isize
         };
-        if r == -4 { continue; }  // EINTR — Go auto-retries
-        if r <= 0 { return false; }
+        if r == -4 {
+            continue;
+        } // EINTR — Go auto-retries
+        if r <= 0 {
+            return false;
+        }
         off += r as usize;
     }
     true
@@ -255,29 +339,68 @@ fn dns_stream_round_trip(
         syscall::IPPROTO_TCP,
     );
     if fd < 0 {
-        return (dns::Parser::new(), dns::Header::default(), errors::New("tcp: socket failed"));
+        return (
+            dns::Parser::new(),
+            dns::Header::default(),
+            errors::New("tcp: socket failed"),
+        );
     }
 
     let tv: [i64; 2] = [timeout_secs as i64, 0];
     unsafe {
-        syscall::syscall6(syscall::SYS_SETSOCKOPT, fd as usize, 1, 20,
-            tv.as_ptr() as usize, 16, 0);
-        syscall::syscall6(syscall::SYS_SETSOCKOPT, fd as usize, 1, 21,
-            tv.as_ptr() as usize, 16, 0);
+        syscall::syscall6(
+            syscall::SYS_SETSOCKOPT,
+            fd as usize,
+            1,
+            20,
+            tv.as_ptr() as usize,
+            16,
+            0,
+        );
+        syscall::syscall6(
+            syscall::SYS_SETSOCKOPT,
+            fd as usize,
+            1,
+            21,
+            tv.as_ptr() as usize,
+            16,
+            0,
+        );
     }
 
-    let cr = syscall::Connect(fd, ns_addr, core::mem::size_of::<syscall::SockaddrIn>() as u32);
+    let cr = syscall::Connect(
+        fd,
+        ns_addr,
+        core::mem::size_of::<syscall::SockaddrIn>() as u32,
+    );
     if cr < 0 {
-        unsafe { syscall::syscall1(syscall::SYS_CLOSE, fd as usize); }
-        return (dns::Parser::new(), dns::Header::default(), errors::New("tcp: connect failed"));
+        unsafe {
+            syscall::syscall1(syscall::SYS_CLOSE, fd as usize);
+        }
+        return (
+            dns::Parser::new(),
+            dns::Header::default(),
+            errors::New("tcp: connect failed"),
+        );
     }
 
     let wn = unsafe {
-        syscall::syscall3(syscall::SYS_WRITE, fd as usize, tcp_req.as_ptr() as usize, tcp_req.len()) as isize
+        syscall::syscall3(
+            syscall::SYS_WRITE,
+            fd as usize,
+            tcp_req.as_ptr() as usize,
+            tcp_req.len(),
+        ) as isize
     };
     if wn < 0 || (wn as usize) < tcp_req.len() {
-        unsafe { syscall::syscall1(syscall::SYS_CLOSE, fd as usize); }
-        return (dns::Parser::new(), dns::Header::default(), errors::New("tcp: write failed"));
+        unsafe {
+            syscall::syscall1(syscall::SYS_CLOSE, fd as usize);
+        }
+        return (
+            dns::Parser::new(),
+            dns::Header::default(),
+            errors::New("tcp: write failed"),
+        );
     }
 
     // Read 2-byte length prefix. Per Go runtime, retry on EINTR (-4).
@@ -285,14 +408,32 @@ fn dns_stream_round_trip(
     let mut loff = 0usize;
     while loff < 2 {
         let r = unsafe {
-            syscall::syscall3(syscall::SYS_READ, fd as usize,
-                lenbuf.as_mut_ptr() as usize + loff, 2 - loff) as isize
+            syscall::syscall3(
+                syscall::SYS_READ,
+                fd as usize,
+                lenbuf.as_mut_ptr() as usize + loff,
+                2 - loff,
+            ) as isize
         };
-        if r == -4 { continue; }  // EINTR — Go auto-retries
+        if r == -4 {
+            continue;
+        } // EINTR — Go auto-retries
         if r <= 0 {
-            crate::fmt::Println!(crate::gostring::string::from_static("[dns-debug] tcp: read len failed: read returned ") + crate::strconv::Itoa(r as i64) + crate::gostring::string::from_static(" loff=") + crate::strconv::Itoa(loff as i64));
-            unsafe { syscall::syscall1(syscall::SYS_CLOSE, fd as usize); }
-            return (dns::Parser::new(), dns::Header::default(), errors::New("tcp: read len failed"));
+            crate::fmt::Println!(
+                crate::gostring::string::from_static(
+                    "[dns-debug] tcp: read len failed: read returned "
+                ) + crate::strconv::Itoa(r as i64)
+                    + crate::gostring::string::from_static(" loff=")
+                    + crate::strconv::Itoa(loff as i64)
+            );
+            unsafe {
+                syscall::syscall1(syscall::SYS_CLOSE, fd as usize);
+            }
+            return (
+                dns::Parser::new(),
+                dns::Header::default(),
+                errors::New("tcp: read len failed"),
+            );
         }
         loff += r as usize;
     }
@@ -303,29 +444,55 @@ fn dns_stream_round_trip(
     let mut roff = 0usize;
     while roff < rlen {
         let r = unsafe {
-            syscall::syscall3(syscall::SYS_READ, fd as usize,
-                rbuf.as_mut_ptr() as usize + roff, rlen - roff) as isize
+            syscall::syscall3(
+                syscall::SYS_READ,
+                fd as usize,
+                rbuf.as_mut_ptr() as usize + roff,
+                rlen - roff,
+            ) as isize
         };
-        if r == -4 { continue; }  // EINTR — Go auto-retries
+        if r == -4 {
+            continue;
+        } // EINTR — Go auto-retries
         if r <= 0 {
-            unsafe { syscall::syscall1(syscall::SYS_CLOSE, fd as usize); }
-            return (dns::Parser::new(), dns::Header::default(), errors::New("tcp: read body failed"));
+            unsafe {
+                syscall::syscall1(syscall::SYS_CLOSE, fd as usize);
+            }
+            return (
+                dns::Parser::new(),
+                dns::Header::default(),
+                errors::New("tcp: read body failed"),
+            );
         }
         roff += r as usize;
     }
-    unsafe { syscall::syscall1(syscall::SYS_CLOSE, fd as usize); }
+    unsafe {
+        syscall::syscall1(syscall::SYS_CLOSE, fd as usize);
+    }
 
     let mut p = dns::Parser::new();
     let (h, e) = p.Start(rbuf);
     if e != errors::nil {
-        return (dns::Parser::new(), dns::Header::default(), errCannotUnmarshalDNSMessage.into());
+        return (
+            dns::Parser::new(),
+            dns::Header::default(),
+            errCannotUnmarshalDNSMessage.into(),
+        );
     }
     let (q, e) = p.Question();
     if e != errors::nil {
-        return (dns::Parser::new(), dns::Header::default(), errCannotUnmarshalDNSMessage.into());
+        return (
+            dns::Parser::new(),
+            dns::Header::default(),
+            errCannotUnmarshalDNSMessage.into(),
+        );
     }
     if !check_response(id, query, &h, &q) {
-        return (dns::Parser::new(), dns::Header::default(), errInvalidDNSResponse.into());
+        return (
+            dns::Parser::new(),
+            dns::Header::default(),
+            errInvalidDNSResponse.into(),
+        );
     }
     (p, h, errors::nil)
 }
@@ -347,14 +514,21 @@ fn exchange(
 
     let (id, udp_req, tcp_req, e) = new_request(q.clone(), ad);
     if e != errors::nil {
-        return (dns::Parser::new(), dns::Header::default(), errCannotMarshalDNSMessage.into());
+        return (
+            dns::Parser::new(),
+            dns::Header::default(),
+            errCannotMarshalDNSMessage.into(),
+        );
     }
 
     let (octets, port) = match parse_server_addr(server) {
         Some(v) => v,
         None => {
-            return (dns::Parser::new(), dns::Header::default(),
-                errors::New("dns: unsupported server address format"));
+            return (
+                dns::Parser::new(),
+                dns::Header::default(),
+                errors::New("dns: unsupported server address format"),
+            );
         }
     };
     let ns_addr = syscall::SockaddrIn::ipv4(octets, port);
@@ -362,10 +536,16 @@ fn exchange(
     if use_tcp {
         // TCP only
         let (mut p, h, e) = dns_stream_round_trip(&ns_addr, id, &q, &tcp_req, timeout_secs);
-        if e != errors::nil { return (p, h, e); }
+        if e != errors::nil {
+            return (p, h, e);
+        }
         let e2 = p.SkipQuestion();
         if e2 != dns::ErrSectionDone {
-            return (dns::Parser::new(), dns::Header::default(), errInvalidDNSResponse.into());
+            return (
+                dns::Parser::new(),
+                dns::Header::default(),
+                errInvalidDNSResponse.into(),
+            );
         }
         return (p, h, errors::nil);
     }
@@ -373,7 +553,11 @@ fn exchange(
     // Try UDP first
     let (mut p, h, e) = dns_packet_round_trip(&ns_addr, id, &q, &udp_req, timeout_secs);
     if e != errors::nil {
-        crate::fmt::Println!(crate::gostring::string::from_static("[dns-debug] UDP failed: ") + e.Error() + crate::gostring::string::from_static(" — trying TCP fallback"));
+        crate::fmt::Println!(
+            crate::gostring::string::from_static("[dns-debug] UDP failed: ")
+                + e.Error()
+                + crate::gostring::string::from_static(" — trying TCP fallback")
+        );
         // UDP failed — try TCP
         let (mut p2, h2, e2) = dns_stream_round_trip(&ns_addr, id, &q, &tcp_req, timeout_secs);
         if e2 != errors::nil {
@@ -381,14 +565,22 @@ fn exchange(
         }
         let e3 = p2.SkipQuestion();
         if e3 != dns::ErrSectionDone {
-            return (dns::Parser::new(), dns::Header::default(), errInvalidDNSResponse.into());
+            return (
+                dns::Parser::new(),
+                dns::Header::default(),
+                errInvalidDNSResponse.into(),
+            );
         }
         return (p2, h2, errors::nil);
     }
 
     let e2 = p.SkipQuestion();
     if e2 != dns::ErrSectionDone {
-        return (dns::Parser::new(), dns::Header::default(), errInvalidDNSResponse.into());
+        return (
+            dns::Parser::new(),
+            dns::Header::default(),
+            errInvalidDNSResponse.into(),
+        );
     }
 
     // UDP truncated → retry over TCP (RFC 5966)
@@ -400,7 +592,11 @@ fn exchange(
         }
         let e3 = p2.SkipQuestion();
         if e3 != dns::ErrSectionDone {
-            return (dns::Parser::new(), dns::Header::default(), errInvalidDNSResponse.into());
+            return (
+                dns::Parser::new(),
+                dns::Header::default(),
+                errInvalidDNSResponse.into(),
+            );
         }
         return (p2, h2, errors::nil);
     }
@@ -423,8 +619,11 @@ fn check_header(p: &mut dns::Parser, h: &dns::Header) -> error {
     }
 
     // Lame referral: success but no authority, no recursion, no answers
-    if rcode == dns::RCodeSuccess && !h.Authoritative && !h.RecursionAvailable
-        && e == dns::ErrSectionDone && !has_add
+    if rcode == dns::RCodeSuccess
+        && !h.Authoritative
+        && !h.RecursionAvailable
+        && e == dns::ErrSectionDone
+        && !has_add
     {
         return errLameReferral.into();
     }
@@ -486,11 +685,7 @@ fn skip_to_answer(p: &mut dns::Parser, qtype: dns::Type) -> error {
 
 /// Try a single FQDN against all configured nameservers × attempts.
 /// Returns (Parser, server_used, error).
-pub fn try_one_name(
-    cfg: &DnsConfig,
-    name: &str,
-    qtype: dns::Type,
-) -> (dns::Parser, String, error) {
+pub fn try_one_name(cfg: &DnsConfig, name: &str, qtype: dns::Type) -> (dns::Parser, String, error) {
     let mut last_err: error = errors::New("dns: no servers");
     let server_offset = cfg.server_offset();
     let s_len = cfg.servers.len() as u32;
@@ -500,12 +695,15 @@ pub fn try_one_name(
 
     let (n, e) = dns::NewName(name);
     if e != errors::nil {
-        return (dns::Parser::new(), String::new(),
-            errors::New("dns: invalid name"));
+        return (
+            dns::Parser::new(),
+            String::new(),
+            errors::New("dns: invalid name"),
+        );
     }
     let q = dns::Question {
-        Name:  n,
-        Type:  qtype,
+        Name: n,
+        Type: qtype,
         Class: dns::ClassINET,
     };
 
@@ -516,7 +714,13 @@ pub fn try_one_name(
             let idx = ((server_offset + j) % s_len) as usize;
             let server = &cfg.servers[idx];
 
-            let (mut p, h, e) = exchange(server, q.clone(), cfg.timeout_secs, cfg.use_tcp, cfg.trust_ad);
+            let (mut p, h, e) = exchange(
+                server,
+                q.clone(),
+                cfg.timeout_secs,
+                cfg.use_tcp,
+                cfg.trust_ad,
+            );
             if e != errors::nil {
                 last_err = e;
                 j += 1;
@@ -577,10 +781,14 @@ pub fn lookup(cfg: &DnsConfig, name: &str, qtype: dns::Type) -> (dns::Parser, St
 // ─── isDomainName (verbatim from Go) ──────────────────────────────────────
 
 fn is_domain_name(s: &str) -> bool {
-    if s == "." { return true; }
+    if s == "." {
+        return true;
+    }
     let l = s.len();
     let s = s.as_bytes();
-    if l == 0 || l > 254 || (l == 254 && s[l-1] != b'.') { return false; }
+    if l == 0 || l > 254 || (l == 254 && s[l - 1] != b'.') {
+        return false;
+    }
     let mut last = b'.';
     let mut non_numeric = false;
     let mut part_len = 0usize;
@@ -591,22 +799,32 @@ fn is_domain_name(s: &str) -> bool {
                 non_numeric = true;
                 part_len += 1;
             }
-            b'0'..=b'9' => { part_len += 1; }
+            b'0'..=b'9' => {
+                part_len += 1;
+            }
             b'-' => {
-                if last == b'.' { return false; }
+                if last == b'.' {
+                    return false;
+                }
                 part_len += 1;
                 non_numeric = true;
             }
             b'.' => {
-                if last == b'.' || last == b'-' { return false; }
-                if part_len > 63 || part_len == 0 { return false; }
+                if last == b'.' || last == b'-' {
+                    return false;
+                }
+                if part_len > 63 || part_len == 0 {
+                    return false;
+                }
                 part_len = 0;
             }
             _ => return false,
         }
         last = c;
     }
-    if last == b'-' || part_len > 63 { return false; }
+    if last == b'-' || part_len > 63 {
+        return false;
+    }
     non_numeric
 }
 
@@ -620,7 +838,9 @@ pub struct IPAddr {
 }
 
 impl IPAddr {
-    pub fn is_ipv4(&self) -> bool { self.ip.len() == 4 }
+    pub fn is_ipv4(&self) -> bool {
+        self.ip.len() == 4
+    }
     pub fn as_ipv4(&self) -> Option<[u8; 4]> {
         if self.ip.len() == 4 {
             let mut a = [0u8; 4];
@@ -641,14 +861,14 @@ impl IPAddr {
 /// Returns (addrs, cname_str, error).
 pub fn go_lookup_ip_cname_order(
     cfg: &DnsConfig,
-    network: &str,    // "ip", "ip4", "ip6", or "CNAME"
+    network: &str, // "ip", "ip4", "ip6", or "CNAME"
     name: &str,
 ) -> (Vec<IPAddr>, String, error) {
     // Determine which qtypes to query
     let qtypes: &[dns::Type] = match network_ip_version(network) {
         b'4' => &[dns::TypeA],
         b'6' => &[dns::TypeAAAA],
-        _    => &[dns::TypeA, dns::TypeAAAA],
+        _ => &[dns::TypeA, dns::TypeAAAA],
     };
 
     let mut addrs: Vec<IPAddr> = Vec::new();
@@ -677,48 +897,69 @@ pub fn go_lookup_ip_cname_order(
             // Parse answers
             'answer_loop: loop {
                 let (h, e) = p.AnswerHeader();
-                if e == dns::ErrSectionDone { break 'answer_loop; }
-                if e != errors::nil { break 'answer_loop; }
+                if e == dns::ErrSectionDone {
+                    break 'answer_loop;
+                }
+                if e != errors::nil {
+                    break 'answer_loop;
+                }
 
                 match h.Type {
                     dns::TypeA => {
                         let (a, e2) = p.AResource();
-                        if e2 != errors::nil { break 'answer_loop; }
+                        if e2 != errors::nil {
+                            break 'answer_loop;
+                        }
                         addrs.push(IPAddr { ip: a.A.to_vec() });
                         if cname.is_empty() && h.Name.Length > 0 {
-                            let s = core::str::from_utf8(&h.Name.Data[..h.Name.Length as usize]).unwrap_or("");
+                            let s = core::str::from_utf8(&h.Name.Data[..h.Name.Length as usize])
+                                .unwrap_or("");
                             cname = String::from(s);
                         }
                         got_answer = true;
                     }
                     dns::TypeAAAA => {
                         let (a, e2) = p.AAAAResource();
-                        if e2 != errors::nil { break 'answer_loop; }
-                        addrs.push(IPAddr { ip: a.AAAA.to_vec() });
+                        if e2 != errors::nil {
+                            break 'answer_loop;
+                        }
+                        addrs.push(IPAddr {
+                            ip: a.AAAA.to_vec(),
+                        });
                         if cname.is_empty() && h.Name.Length > 0 {
-                            let s = core::str::from_utf8(&h.Name.Data[..h.Name.Length as usize]).unwrap_or("");
+                            let s = core::str::from_utf8(&h.Name.Data[..h.Name.Length as usize])
+                                .unwrap_or("");
                             cname = String::from(s);
                         }
                         got_answer = true;
                     }
                     dns::TypeCNAME => {
                         let (c, e2) = p.CNAMEResource();
-                        if e2 != errors::nil { break 'answer_loop; }
+                        if e2 != errors::nil {
+                            break 'answer_loop;
+                        }
                         if cname.is_empty() && c.CNAME.Length > 0 {
-                            let s = core::str::from_utf8(&c.CNAME.Data[..c.CNAME.Length as usize]).unwrap_or("");
+                            let s = core::str::from_utf8(&c.CNAME.Data[..c.CNAME.Length as usize])
+                                .unwrap_or("");
                             cname = String::from(s);
                         }
                     }
                     _ => {
                         let e2 = p.SkipAnswer();
-                        if e2 != errors::nil { break 'answer_loop; }
+                        if e2 != errors::nil {
+                            break 'answer_loop;
+                        }
                     }
                 }
             }
         }
 
-        if !addrs.is_empty() { break; }
-        if got_answer { break; }
+        if !addrs.is_empty() {
+            break;
+        }
+        if got_answer {
+            break;
+        }
     }
 
     // Sort addrs: IPv4 first, then IPv6 (simplified RFC 6724)
@@ -736,9 +977,15 @@ pub fn go_lookup_ip_cname_order(
 }
 
 fn network_ip_version(network: &str) -> u8 {
-    if network.is_empty() { return 0; }
+    if network.is_empty() {
+        return 0;
+    }
     let last = network.as_bytes()[network.len() - 1];
-    if last == b'4' || last == b'6' { last } else { 0 }
+    if last == b'4' || last == b'6' {
+        last
+    } else {
+        0
+    }
 }
 
 // ─── Public API ────────────────────────────────────────────────────────────
@@ -784,7 +1031,12 @@ pub fn lookup_a(host: &str) -> Result<[u8; 4], string> {
     let cfg = get_system_dns_config();
     let (addrs, _cname, e) = go_lookup_ip_cname_order(&cfg, "ip4", host);
     if e != errors::nil {
-        crate::fmt::Println!(crate::gostring::string::from_static("[dns-debug] go_lookup_ip_cname_order err=") + e.Error() + crate::gostring::string::from_static(" host=") + crate::gostring::string::from_bytes(host.as_bytes()));
+        crate::fmt::Println!(
+            crate::gostring::string::from_static("[dns-debug] go_lookup_ip_cname_order err=")
+                + e.Error()
+                + crate::gostring::string::from_static(" host=")
+                + crate::gostring::string::from_bytes(host.as_bytes())
+        );
         let msg = e.Error();
         return Err(msg);
     }
@@ -793,7 +1045,9 @@ pub fn lookup_a(host: &str) -> Result<[u8; 4], string> {
             return Ok(v4);
         }
     }
-    Err(crate::gostring::string::from_static("net: dns: no such host"))
+    Err(crate::gostring::string::from_static(
+        "net: dns: no such host",
+    ))
 }
 
 /// Parse an IP literal (IPv4 or IPv6 in bracket form) — no DNS.
@@ -806,10 +1060,15 @@ fn parse_ip_literal(s: &str) -> Option<Vec<u8>> {
         for (i, p) in parts.iter().enumerate() {
             match p.parse::<u8>() {
                 Ok(v) => octets[i] = v,
-                Err(_) => { ok = false; break; }
+                Err(_) => {
+                    ok = false;
+                    break;
+                }
             }
         }
-        if ok { return Some(octets.to_vec()); }
+        if ok {
+            return Some(octets.to_vec());
+        }
     }
     // IPv6 bracket form or bare — not supported yet
     None
@@ -847,15 +1106,17 @@ fn ip_to_string(ip: &[u8]) -> String {
         // Very basic IPv6 hex representation
         let mut s = String::new();
         for (i, chunk) in ip.chunks(2).enumerate() {
-            if i > 0 { s.push(':'); }
+            if i > 0 {
+                s.push(':');
+            }
             let v = ((chunk[0] as u16) << 8) | chunk[1] as u16;
             let hex: Vec<u8> = {
                 let mut h = Vec::new();
                 let digits = b"0123456789abcdef";
                 h.push(digits[((v >> 12) & 0xF) as usize]);
-                h.push(digits[((v >>  8) & 0xF) as usize]);
-                h.push(digits[((v >>  4) & 0xF) as usize]);
-                h.push(digits[(v         & 0xF) as usize]);
+                h.push(digits[((v >> 8) & 0xF) as usize]);
+                h.push(digits[((v >> 4) & 0xF) as usize]);
+                h.push(digits[(v & 0xF) as usize]);
                 h
             };
             s.push_str(core::str::from_utf8(&hex).unwrap_or(""));

@@ -23,18 +23,18 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::bytes;
+use goish::errors;
+use goish::errors::ErrorTrait;
 use goish::goslice::slice;
 use goish::net::http::server::{
-    cleanPath, foreachHeaderElement, numLeadingCRorLF, stripHostPort,
-    tlsRecordHeaderLooksLikeHTTP, validNextProto, bufferBeforeChunkingSize, copyBufPoolSize,
-    debugServerConnections, errTooLarge, extraHeaderKeys, maxPostHandlerReadBytes,
-    nextProtoUnencryptedHTTP2, rstAvoidanceDelay, shutdownPollIntervalMax, ConnStateString,
-    StateActive, StateClosed, StateHijacked, StateIdle, StateNew, TrailerPrefix, badRequestError,
-    extraHeader, getCopyBuf, htmlReplacer, putCopyBuf, statusError,
+    badRequestError, bufferBeforeChunkingSize, cleanPath, copyBufPoolSize, debugServerConnections,
+    errTooLarge, extraHeader, extraHeaderKeys, foreachHeaderElement, getCopyBuf, htmlReplacer,
+    maxPostHandlerReadBytes, nextProtoUnencryptedHTTP2, numLeadingCRorLF, putCopyBuf,
+    rstAvoidanceDelay, shutdownPollIntervalMax, statusError, stripHostPort,
+    tlsRecordHeaderLooksLikeHTTP, validNextProto, ConnStateString, StateActive, StateClosed,
+    StateHijacked, StateIdle, StateNew, TrailerPrefix,
 };
-use goish::bytes;
-use goish::errors::ErrorTrait;
-use goish::errors;
 use goish::time;
 use goish::{fmt, string, syscall};
 
@@ -56,9 +56,18 @@ fn main() {
     // 1. cleanPath — trailing slash preserved.
     {
         let cases: &[(&str, &str)] = &[
-            ("", "/"), ("/", "/"), ("a", "/a"), ("/a", "/a"), ("/a/", "/a/"),
-            ("//a//b//", "/a/b/"), ("/a/./b", "/a/b"), ("/a/../b", "/b"),
-            ("/a/..", "/"), ("/..", "/"), ("a/b/", "/a/b/"), ("/a//", "/a/"),
+            ("", "/"),
+            ("/", "/"),
+            ("a", "/a"),
+            ("/a", "/a"),
+            ("/a/", "/a/"),
+            ("//a//b//", "/a/b/"),
+            ("/a/./b", "/a/b"),
+            ("/a/../b", "/b"),
+            ("/a/..", "/"),
+            ("/..", "/"),
+            ("a/b/", "/a/b/"),
+            ("/a//", "/a/"),
             ("/./", "/"),
         ];
         let mut bad = 0;
@@ -129,8 +138,11 @@ fn main() {
     // 4. validNextProto — case-sensitive, so "HTTP/1.1" IS a next proto.
     {
         let cases: &[(&str, bool)] = &[
-            ("", false), ("http/1.1", false), ("http/1.0", false),
-            ("h2", true), ("HTTP/1.1", true),
+            ("", false),
+            ("http/1.1", false),
+            ("http/1.0", false),
+            ("h2", true),
+            ("HTTP/1.1", true),
         ];
         let mut bad = 0;
         for (p, want) in cases {
@@ -145,8 +157,12 @@ fn main() {
     // 5. numLeadingCRorLF — counts only the LEADING run.
     {
         let cases: &[(&str, i64)] = &[
-            ("", 0), ("\r\n\r\nGET", 4), ("GET", 0), ("\nGET", 1),
-            ("\r", 1), ("x\r\n", 0),
+            ("", 0),
+            ("\r\n\r\nGET", 4),
+            ("GET", 0),
+            ("\nGET", 1),
+            ("\r", 1),
+            ("x\r\n", 0),
         ];
         let mut bad = 0;
         for (v, want) in cases {
@@ -219,16 +235,34 @@ fn main() {
     //    documented goref trap, caught here in the wild.
     {
         let mut bad = 0;
-        if TrailerPrefix != "Trailer:" { bad += 1; }
-        if bufferBeforeChunkingSize != 2048 { bad += 1; }
-        if debugServerConnections { bad += 1; }
-        if copyBufPoolSize != 32768 { bad += 1; }
-        if maxPostHandlerReadBytes != 262144 { bad += 1; }
-        if nextProtoUnencryptedHTTP2 != "unencrypted_http2" { bad += 1; }
+        if TrailerPrefix != "Trailer:" {
+            bad += 1;
+        }
+        if bufferBeforeChunkingSize != 2048 {
+            bad += 1;
+        }
+        if debugServerConnections {
+            bad += 1;
+        }
+        if copyBufPoolSize != 32768 {
+            bad += 1;
+        }
+        if maxPostHandlerReadBytes != 262144 {
+            bad += 1;
+        }
+        if nextProtoUnencryptedHTTP2 != "unencrypted_http2" {
+            bad += 1;
+        }
         let e: errors::error = errTooLarge.into();
-        if e.Error() != "http: request too large" { bad += 1; }
-        if rstAvoidanceDelay() != time::Duration(500_000_000) { bad += 1; }
-        if shutdownPollIntervalMax() != time::Duration(500_000_000) { bad += 1; }
+        if e.Error() != "http: request too large" {
+            bad += 1;
+        }
+        if rstAvoidanceDelay() != time::Duration(500_000_000) {
+            bad += 1;
+        }
+        if shutdownPollIntervalMax() != time::Duration(500_000_000) {
+            bad += 1;
+        }
         let ks = extraHeaderKeys();
         if ks.Len() != 3
             || string::from_bytes(&ks[0]) != "Content-Type"
@@ -252,15 +286,36 @@ fn main() {
     {
         let mut bad = 0;
         if badRequestError(string("missing required Host header")).Error()
-            != "Bad Request: missing required Host header" { bad += 1; }
+            != "Bad Request: missing required Host header"
+        {
+            bad += 1;
+        }
         if badRequestError(string("invalid header name")).Error()
-            != "Bad Request: invalid header name" { bad += 1; }
-        let e404 = statusError { code: 404, text: string("nope") };
-        let e500 = statusError { code: 500, text: string("boom") };
-        let e999 = statusError { code: 999, text: string("x") };
-        if e404.Error() != "Not Found: nope" { bad += 1; }
-        if e500.Error() != "Internal Server Error: boom" { bad += 1; }
-        if e999.Error() != ": x" { bad += 1; }
+            != "Bad Request: invalid header name"
+        {
+            bad += 1;
+        }
+        let e404 = statusError {
+            code: 404,
+            text: string("nope"),
+        };
+        let e500 = statusError {
+            code: 500,
+            text: string("boom"),
+        };
+        let e999 = statusError {
+            code: 999,
+            text: string("x"),
+        };
+        if e404.Error() != "Not Found: nope" {
+            bad += 1;
+        }
+        if e500.Error() != "Internal Server Error: boom" {
+            bad += 1;
+        }
+        if e999.Error() != ": x" {
+            bad += 1;
+        }
         check!("[9] statusError / badRequestError vs Go", bad);
     }
 
@@ -321,7 +376,12 @@ fn main() {
     //     all, which is why date/contentLength are byte slices in Go:
     //     absent and empty must be distinguishable.
     {
-        let mk = |ct: &'static str, conn: &'static str, te: &'static str, date: &'static str, cl: &'static str| -> string {
+        let mk = |ct: &'static str,
+                  conn: &'static str,
+                  te: &'static str,
+                  date: &'static str,
+                  cl: &'static str|
+         -> string {
             let h = extraHeader {
                 contentType: string(ct),
                 connection: string(conn),

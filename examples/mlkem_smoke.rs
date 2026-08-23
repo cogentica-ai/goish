@@ -108,23 +108,27 @@ fn main() {
         fmt::Sprintf!("%v", err != goish::nil),
         "false",
     );
-    check("768 encapsulation key parse round trip", sha(&ek2.Bytes()), EK768_SHA);
+    check(
+        "768 encapsulation key parse round trip",
+        sha(&ek2.Bytes()),
+        EK768_SHA,
+    );
 
     // Encapsulate is randomised, so it is checked by the property that
     // matters: the sender's shared key is the one the receiver derives.
     let (sk, ct) = ek2.Encapsulate();
-    check(
-        "768 shared key length",
-        fmt::Sprintf!("%d", sk.Len()),
-        "32",
-    );
+    check("768 shared key length", fmt::Sprintf!("%d", sk.Len()), "32");
     check(
         "768 ciphertext length",
         fmt::Sprintf!("%d", ct.Len()),
         "1088",
     );
     let (sk2, err) = dk.Decapsulate(&ct);
-    check("768 Decapsulate err", fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        "768 Decapsulate err",
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     checkSame("768 encapsulate/decapsulate agree", hx(&sk), hx(&sk2));
 
     // Length checks.
@@ -179,16 +183,32 @@ fn main() {
         "1568",
     );
     let (sk1b, err) = dk1.Decapsulate(&ct1);
-    check("1024 Decapsulate err", fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        "1024 Decapsulate err",
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     checkSame("1024 encapsulate/decapsulate agree", hx(&sk1), hx(&sk1b));
 
     // GenerateKey draws from crypto/rand, so only its shape and its own
     // round trip are checkable.
     let (g, err) = mlkem::GenerateKey768();
-    check("768 GenerateKey768 err", fmt::Sprintf!("%v", err != goish::nil), "false");
-    check("768 generated seed length", fmt::Sprintf!("%d", g.Bytes().Len()), "64");
+    check(
+        "768 GenerateKey768 err",
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
+    check(
+        "768 generated seed length",
+        fmt::Sprintf!("%d", g.Bytes().Len()),
+        "64",
+    );
     let (g2, err) = mlkem::NewDecapsulationKey768(&g.Bytes());
-    check("768 regenerate err", fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        "768 regenerate err",
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     checkSame(
         "768 generated key re-expands identically",
         sha(&g2.EncapsulationKey().Bytes()),

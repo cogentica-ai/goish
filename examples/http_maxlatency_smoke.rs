@@ -227,7 +227,8 @@ fn run() -> ! {
         let err = p.copyResponse(rw.clone(), &mut src, time::Duration(0));
         check(
             "a zero interval copies straight through and never flushes",
-            err.IsNil() && WRITTEN.load(Ordering::Relaxed) == 10
+            err.IsNil()
+                && WRITTEN.load(Ordering::Relaxed) == 10
                 && FLUSHES.load(Ordering::Relaxed) == 0,
             fmt::Sprintf!(
                 "wrote=%d flushes=%d",
@@ -290,10 +291,7 @@ fn run() -> ! {
     // ── maxLatencyWriter: a positive latency defers, then fires ───
     {
         FLUSHES.store(0, Ordering::Relaxed);
-        let mlw = __newMaxLatencyWriter(
-            rw.clone(),
-            time::Duration(120 * 1_000_000),
-        );
+        let mlw = __newMaxLatencyWriter(rw.clone(), time::Duration(120 * 1_000_000));
         // The deadline belongs to the FIRST write of a pending run.
         // A later write must not push it out — that is what Go's
         // `if m.flushPending { return }` buys, and without it a busy
@@ -319,10 +317,7 @@ fn run() -> ! {
     // ── stop() cancels a pending flush ────────────────────────────
     {
         FLUSHES.store(0, Ordering::Relaxed);
-        let mlw = __newMaxLatencyWriter(
-            rw.clone(),
-            time::Duration(120 * 1_000_000),
-        );
+        let mlw = __newMaxLatencyWriter(rw.clone(), time::Duration(120 * 1_000_000));
         let _ = mlw.Write(goish::bytes("a"));
         mlw.stop();
         time::Sleep(time::Duration(300 * 1_000_000));

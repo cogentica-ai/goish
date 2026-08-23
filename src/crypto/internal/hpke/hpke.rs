@@ -64,9 +64,8 @@ impl hkdfKDF {
         label: &str,
         inputKey: &slice<byte>,
     ) -> (slice<byte>, error) {
-        let mut labeledIKM: Vec<byte> = Vec::with_capacity(
-            7 + sid.Len() as usize + label.len() + inputKey.Len() as usize,
-        );
+        let mut labeledIKM: Vec<byte> =
+            Vec::with_capacity(7 + sid.Len() as usize + label.len() + inputKey.Len() as usize);
         labeledIKM.extend_from_slice(b"HPKE-v1");
         labeledIKM.extend_from_slice(sid);
         labeledIKM.extend_from_slice(label.as_bytes());
@@ -135,7 +134,11 @@ pub const DHKEM_X25519_HKDF_SHA256: uint16 = 0x0020;
 // file header for why this is a lookup rather than a map.
 pub(crate) fn SupportedKEMs(
     kemID: uint16,
-) -> Option<(&'static (dyn ecdh::Curve + Send + Sync), crypto::Hash, uint16)> {
+) -> Option<(
+    &'static (dyn ecdh::Curve + Send + Sync),
+    crypto::Hash,
+    uint16,
+)> {
     if kemID == DHKEM_X25519_HKDF_SHA256 {
         return Some((ecdh::X25519(), crypto::SHA256, 32));
     }
@@ -166,9 +169,9 @@ impl dhKEM {
         dhKey: &slice<byte>,
         kemContext: &slice<byte>,
     ) -> (slice<byte>, error) {
-        let (eaePRK, err) =
-            self.kdf
-                .LabeledExtract(&self.suiteID, &empty(), "eae_prk", dhKey);
+        let (eaePRK, err) = self
+            .kdf
+            .LabeledExtract(&self.suiteID, &empty(), "eae_prk", dhKey);
         if err != crate::nil {
             return (empty(), err);
         }
@@ -388,13 +391,8 @@ fn newContext(
         return (None, err);
     }
     // Nh - hash output size of the kdf
-    let (exporterSecret, err) = kdf.LabeledExpand(
-        &sid,
-        &secret,
-        "exp",
-        &ksContext,
-        uint16(kdf.hash.Size()),
-    );
+    let (exporterSecret, err) =
+        kdf.LabeledExpand(&sid, &secret, "exp", &ksContext, uint16(kdf.hash.Size()));
     if err != crate::nil {
         return (None, err);
     }

@@ -195,7 +195,9 @@ struct connState {
 }
 
 // go: sdk 1.25.5 net/http/fcgi/fcgi.go:112-114 newConn
-pub fn newConn(rwc: alloc::boxed::Box<dyn ReadWriteCloser + Send + Sync>) -> alloc::sync::Arc<conn> {
+pub fn newConn(
+    rwc: alloc::boxed::Box<dyn ReadWriteCloser + Send + Sync>,
+) -> alloc::sync::Arc<conn> {
     return alloc::sync::Arc::new(conn {
         st: crate::sync::Mutex::new(connState {
             rwc,
@@ -259,7 +261,8 @@ impl conn {
         g.buf.Write(b.clone());
         let padLen = g.h.PaddingLength as usize;
         let zeros = [0u8; 8];
-        g.buf.Write(slice::<byte>::__from_vec(zeros[..padLen].to_vec()));
+        g.buf
+            .Write(slice::<byte>::__from_vec(zeros[..padLen].to_vec()));
 
         let out = g.buf.Bytes();
         let (_, err) = g.rwc.Write(out);
@@ -358,7 +361,9 @@ impl crate::io::Closer for streamWriter {
     //
     /// Sends an empty record to close the stream.
     fn Close(&mut self) -> error {
-        return self.c.writeRecord(self.recType, self.reqId, &slice::<byte>::new());
+        return self
+            .c
+            .writeRecord(self.recType, self.reqId, &slice::<byte>::new());
     }
 }
 
@@ -384,7 +389,10 @@ pub struct bufWriter {
 // the child response needs are forwarded explicitly.
 impl crate::io::Writer for bufWriter {
     // go: none — forwards to the embedded bufio.Writer.
-    fn Write(&mut self, p: crate::goslice::slice<crate::types::byte>) -> (crate::types::int, error) {
+    fn Write(
+        &mut self,
+        p: crate::goslice::slice<crate::types::byte>,
+    ) -> (crate::types::int, error) {
         return crate::io::Writer::Write(&mut self.w, p);
     }
 }
@@ -419,11 +427,7 @@ impl bufWriter {
 }
 
 // go: sdk 1.25.5 net/http/fcgi/fcgi.go:244-248 newWriter
-pub fn newWriter(
-    c: &alloc::sync::Arc<conn>,
-    recType_: recType,
-    reqId: uint16,
-) -> bufWriter {
+pub fn newWriter(c: &alloc::sync::Arc<conn>, recType_: recType, reqId: uint16) -> bufWriter {
     let s = streamWriter {
         c: c.clone(),
         recType: recType_,

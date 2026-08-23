@@ -137,18 +137,19 @@ fn main() {
     );
 
     // ── A keyLen that truncates mid-block ─────────────────────────────
-    let out = tls12::PRF(
-        sha256::NewHash,
-        unhex("010203"),
-        label(),
-        unhex("0405"),
-        12,
+    let out = tls12::PRF(sha256::NewHash, unhex("010203"), label(), unhex("0405"), 12);
+    check(
+        "PRF truncates to keyLen",
+        hx(&out),
+        "7edea117c898c94b7ac192ea",
     );
-    check("PRF truncates to keyLen", hx(&out), "7edea117c898c94b7ac192ea");
 
     check(
         "PRF keyLen 0 yields empty",
-        fmt::Sprintf!("%d", tls12::PRF(sha256::NewHash, unhex("00"), label(), unhex("00"), 0).Len()),
+        fmt::Sprintf!(
+            "%d",
+            tls12::PRF(sha256::NewHash, unhex("00"), label(), unhex("00"), 0).Len()
+        ),
         "0",
     );
 
@@ -161,8 +162,7 @@ fn main() {
         "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\
          202122232425262728292a2b2c2d2e2f",
     );
-    let transcript =
-        unhex("54e6289e14c7b0e7ad9acc2dfc4c1e3d027d0eef7f5c4c3fe7c292761d0e06a6");
+    let transcript = unhex("54e6289e14c7b0e7ad9acc2dfc4c1e3d027d0eef7f5c4c3fe7c292761d0e06a6");
     let ms = tls12::MasterSecret(sha256::NewHash, pms.clone(), transcript.clone());
     check(
         "MasterSecret SHA-256 is 48 bytes",

@@ -120,7 +120,9 @@ fn run() {
     if conn_survives_second_request(port, b"GET /ok HTTP/1.1\r\nHost: x\r\n\r\n") {
         pass("control: HTTP/1.1 with no Connection header keeps the conn");
     } else {
-        fail(string("control: plain HTTP/1.1 request did not keep the conn"));
+        fail(string(
+            "control: plain HTTP/1.1 request did not keep the conn",
+        ));
     }
 
     // ── control: a bare `Connection: close` closes it ──

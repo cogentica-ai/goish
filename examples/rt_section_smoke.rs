@@ -42,7 +42,11 @@ fn write_hex(label: &[u8], v: u64) {
     let x = v;
     for i in 0..16 {
         let nib = ((x >> ((15 - i) * 4)) & 0xf) as u8;
-        buf[2 + i] = if nib < 10 { b'0' + nib } else { b'a' + (nib - 10) };
+        buf[2 + i] = if nib < 10 {
+            b'0' + nib
+        } else {
+            b'a' + (nib - 10)
+        };
     }
     let _ = x;
     syscall::Write(syscall::STDERR, buf.as_ptr(), buf.len());
@@ -70,14 +74,30 @@ fn main() {
     let untagged_in = rt_section::is_in_runtime(untagged_pc);
 
     if tagged_in {
-        syscall::Write(syscall::STDERR, b"tagged    : in goish_rt_text\n".as_ptr(), 30);
+        syscall::Write(
+            syscall::STDERR,
+            b"tagged    : in goish_rt_text\n".as_ptr(),
+            30,
+        );
     } else {
-        syscall::Write(syscall::STDERR, b"tagged    : NOT IN section (BUG)\n".as_ptr(), 33);
+        syscall::Write(
+            syscall::STDERR,
+            b"tagged    : NOT IN section (BUG)\n".as_ptr(),
+            33,
+        );
     }
     if !untagged_in {
-        syscall::Write(syscall::STDERR, b"untagged  : outside section\n".as_ptr(), 28);
+        syscall::Write(
+            syscall::STDERR,
+            b"untagged  : outside section\n".as_ptr(),
+            28,
+        );
     } else {
-        syscall::Write(syscall::STDERR, b"untagged  : INSIDE section (false positive)\n".as_ptr(), 45);
+        syscall::Write(
+            syscall::STDERR,
+            b"untagged  : INSIDE section (false positive)\n".as_ptr(),
+            45,
+        );
     }
 
     if tagged_in && !untagged_in && len > 0 && len < 0x1000_0000 {

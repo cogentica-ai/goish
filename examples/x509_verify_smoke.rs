@@ -43,8 +43,8 @@ extern crate goish;
 
 use goish::crypto;
 use goish::crypto::x509::{
-    ExtKeyUsageClientAuth, MD5WithRSA, NewCertPool, ParseCertificate, SHA1WithRSA,
-    VerifyOptions, ECDSAWithSHA256,
+    ECDSAWithSHA256, ExtKeyUsageClientAuth, MD5WithRSA, NewCertPool, ParseCertificate, SHA1WithRSA,
+    VerifyOptions,
 };
 use goish::encoding::pem;
 use goish::fmt;
@@ -215,13 +215,21 @@ fn test_check_signature_from() -> bool {
     // goref: CheckSignatureFrom(leaf, ca) err = <nil>
     let e = leaf.CheckSignatureFrom(&ca);
     if e != goish::nil {
-        fmt::Println!("[1] CheckSignatureFrom(leaf, ca) =", errText(&e), "want <nil> — FAIL");
+        fmt::Println!(
+            "[1] CheckSignatureFrom(leaf, ca) =",
+            errText(&e),
+            "want <nil> — FAIL"
+        );
         return false;
     }
     // goref: CheckSignatureFrom(ca, ca) err = <nil>  (self-signed root)
     let e = ca.CheckSignatureFrom(&ca);
     if e != goish::nil {
-        fmt::Println!("[1] CheckSignatureFrom(ca, ca) =", errText(&e), "want <nil> — FAIL");
+        fmt::Println!(
+            "[1] CheckSignatureFrom(ca, ca) =",
+            errText(&e),
+            "want <nil> — FAIL"
+        );
         return false;
     }
     // goref: CheckSignatureFrom(ca, leaf) err = x509: invalid signature:
@@ -373,7 +381,13 @@ fn test_verify_hostname() -> bool {
     for h in accepted.iter() {
         let e = leaf.VerifyHostname(*h);
         if e != goish::nil {
-            fmt::Println!("[4] VerifyHostname(", *h, ") =", errText(&e), "want <nil> — FAIL");
+            fmt::Println!(
+                "[4] VerifyHostname(",
+                *h,
+                ") =",
+                errText(&e),
+                "want <nil> — FAIL"
+            );
             return false;
         }
     }
@@ -436,7 +450,13 @@ fn test_name_constraints() -> bool {
         ..Default::default()
     });
     if err != goish::nil || chains.Len() != 1 {
-        fmt::Println!("[5] Verify(nc ok) =", errText(&err), "chains =", chains.Len(), "— FAIL");
+        fmt::Println!(
+            "[5] Verify(nc ok) =",
+            errText(&err),
+            "chains =",
+            chains.Len(),
+            "— FAIL"
+        );
         return false;
     }
 
@@ -495,13 +515,21 @@ fn test_rsa_sha256_arm() -> bool {
 
     // goref: rsa SignatureAlgorithm = SHA256-RSA
     if cert.SignatureAlgorithm.String() != string::from("SHA256-RSA") {
-        fmt::Println!("[7] SignatureAlgorithm =", cert.SignatureAlgorithm.String(), "— FAIL");
+        fmt::Println!(
+            "[7] SignatureAlgorithm =",
+            cert.SignatureAlgorithm.String(),
+            "— FAIL"
+        );
         return false;
     }
     // goref: rsa CheckSignatureFrom(self) err = <nil>
     let e = cert.CheckSignatureFrom(&cert);
     if e != goish::nil {
-        fmt::Println!("[7] CheckSignatureFrom(self) =", errText(&e), "want <nil> — FAIL");
+        fmt::Println!(
+            "[7] CheckSignatureFrom(self) =",
+            errText(&e),
+            "want <nil> — FAIL"
+        );
         return false;
     }
     // goref: rsa CheckSignature(valid) err = <nil>
@@ -511,7 +539,11 @@ fn test_rsa_sha256_arm() -> bool {
         cert.Signature.clone(),
     );
     if e != goish::nil {
-        fmt::Println!("[7] CheckSignature(valid) =", errText(&e), "want <nil> — FAIL");
+        fmt::Println!(
+            "[7] CheckSignature(valid) =",
+            errText(&e),
+            "want <nil> — FAIL"
+        );
         return false;
     }
 
@@ -570,7 +602,8 @@ fn test_rsa_sha256_arm() -> bool {
         cert.Signature.clone(),
     );
     let got = errText(&e);
-    let wantPrefix = "x509: signature algorithm specifies an ECDSA public key, but have public key of type ";
+    let wantPrefix =
+        "x509: signature algorithm specifies an ECDSA public key, but have public key of type ";
     if !got.as_bytes().starts_with(wantPrefix.as_bytes()) {
         fmt::Println!("[7] CheckSignature(algo mismatch) =", got, "— FAIL");
         return false;
@@ -586,7 +619,13 @@ fn test_rsa_sha256_arm() -> bool {
         ..Default::default()
     });
     if err != goish::nil || chains.Len() != 1 {
-        fmt::Println!("[7] Verify(rsa) =", errText(&err), "chains =", chains.Len(), "— FAIL");
+        fmt::Println!(
+            "[7] Verify(rsa) =",
+            errText(&err),
+            "chains =",
+            chains.Len(),
+            "— FAIL"
+        );
         return false;
     }
 
@@ -602,13 +641,21 @@ fn test_ecdsa_sha256_arm() -> bool {
 
     // goref: ec SignatureAlgorithm = ECDSA-SHA256
     if ecLeaf.SignatureAlgorithm.String() != string::from("ECDSA-SHA256") {
-        fmt::Println!("[8] SignatureAlgorithm =", ecLeaf.SignatureAlgorithm.String(), "— FAIL");
+        fmt::Println!(
+            "[8] SignatureAlgorithm =",
+            ecLeaf.SignatureAlgorithm.String(),
+            "— FAIL"
+        );
         return false;
     }
     // goref: ec CheckSignatureFrom(leaf, ca) err = <nil>
     let e = ecLeaf.CheckSignatureFrom(&ecCA);
     if e != goish::nil {
-        fmt::Println!("[8] CheckSignatureFrom(leaf, ca) =", errText(&e), "want <nil> — FAIL");
+        fmt::Println!(
+            "[8] CheckSignatureFrom(leaf, ca) =",
+            errText(&e),
+            "want <nil> — FAIL"
+        );
         return false;
     }
 
@@ -636,7 +683,13 @@ fn test_ecdsa_sha256_arm() -> bool {
         ..Default::default()
     });
     if err != goish::nil || chains.Len() != 1 || chains[0].Len() != 2 {
-        fmt::Println!("[8] Verify(ec) =", errText(&err), "chains =", chains.Len(), "— FAIL");
+        fmt::Println!(
+            "[8] Verify(ec) =",
+            errText(&err),
+            "chains =",
+            chains.Len(),
+            "— FAIL"
+        );
         return false;
     }
 

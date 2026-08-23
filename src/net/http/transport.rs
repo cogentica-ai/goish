@@ -823,9 +823,7 @@ pub fn is408Message(buf: &slice<crate::types::byte>) -> bool {
 // go: sdk 1.25.5 net/http/transport.go:503-509 ProxyURL
 /// Go: "ProxyURL returns a proxy function (for use in a Transport)
 /// that always returns the same URL."
-pub fn ProxyURL(
-    fixedURL: URL,
-) -> Arc<dyn Fn(&Request) -> (URL, error) + Send + Sync> {
+pub fn ProxyURL(fixedURL: URL) -> Arc<dyn Fn(&Request) -> (URL, error) + Send + Sync> {
     return Arc::new(move |_r: &Request| -> (URL, error) {
         return (fixedURL.clone(), errors::nil);
     });
@@ -1084,15 +1082,15 @@ impl persistConn {
             // when the timer beat the handshake; goish's deadline
             // form recognizes the same event by the timeout error
             // under an armed TLSHandshakeTimeout.
-            if t.TLSHandshakeTimeout.0 > 0
-                && (herr.Error().as_ref() as &str).contains("timeout")
-            {
+            if t.TLSHandshakeTimeout.0 > 0 && (herr.Error().as_ref() as &str).contains("timeout") {
                 return errors::Wrap(tlsHandshakeTimeoutError);
             }
             return herr;
         }
         let _ = tls_conn.SetDeadline(crate::time::Time::default());
-        self.__put_src(super::client::ConnSrc::Tls(crate::bufio::NewReader(tls_conn)));
+        self.__put_src(super::client::ConnSrc::Tls(crate::bufio::NewReader(
+            tls_conn,
+        )));
         return errors::nil;
     }
 
@@ -1112,7 +1110,11 @@ impl persistConn {
     /// wrapped and terminal. The reason lands in `closed` via
     /// closeLocked, exactly like Go — read it back with
     /// `__closed_reason`.
-    pub(crate) fn readLoopPeekFailLocked(&self, peekErr: error, buffered: &slice<crate::types::byte>) {
+    pub(crate) fn readLoopPeekFailLocked(
+        &self,
+        peekErr: error,
+        buffered: &slice<crate::types::byte>,
+    ) {
         if !self.state.Lock().closed.IsNil() {
             return;
         }
@@ -1446,7 +1448,7 @@ impl persistConn {
         let loops = pcLoops {
             writech: crate::make!(chan writeRequest, 1),
             reqch: crate::make!(chan requestAndChan, 1),
-            closech: crate::make!(chan (), 1),
+            closech: crate::make!(chan(), 1),
             writeErrCh: crate::make!(chan error, 1),
         };
         {
@@ -1563,10 +1565,7 @@ impl persistConn {
     /// pool when the timer fires, evict and close it; a conn that was
     /// taken (or re-banked, which re-arms a fresh timer) is left
     /// alone.
-    pub(crate) fn closeConnIfStillIdle(
-        self: &Arc<Self>,
-        idle: &Arc<crate::sync::Mutex<idlePool>>,
-    ) {
+    pub(crate) fn closeConnIfStillIdle(self: &Arc<Self>, idle: &Arc<crate::sync::Mutex<idlePool>>) {
         {
             let mut pool = idle.Lock();
             if !pool.idleLRU.contains(self) {
@@ -2041,8 +2040,7 @@ impl Transport {
                     let _ = conn.SetDeadline(dl);
                 }
             }
-            let watch =
-                super::client::arm_cancel_watch(&ctx, conn.__disconnect_watch_parts());
+            let watch = super::client::arm_cancel_watch(&ctx, conn.__disconnect_watch_parts());
             let name = super::client::host_without_port(&key.addr);
             let aerr = pc.addTLS(self, name, conn);
             super::client::stop_cancel_watch(watch);
@@ -2079,11 +2077,7 @@ impl Transport {
     /// has no wrapper yet, so the Request arrives directly — the arity
     /// and the role are Go's. Nothing here reads it today; Go uses it
     /// for the httptrace hooks and the dial context.
-    pub fn getConn(
-        &self,
-        req: &Request,
-        cm: &connectMethod,
-    ) -> (Option<Arc<persistConn>>, error) {
+    pub fn getConn(&self, req: &Request, cm: &connectMethod) -> (Option<Arc<persistConn>>, error) {
         let w = Arc::new(wantConn::__new());
         w.__set_key(cm.key());
 
@@ -2161,8 +2155,7 @@ impl Transport {
         // Go: "If IdleConnTimeout is set, calculate the oldest
         // persistConn.idleAt time we're willing to use."
         let old_ns: i64 = if self.IdleConnTimeout > crate::time::Duration(0) {
-            crate::runtime::sysmon::monotonic_ns()
-                .wrapping_sub(self.IdleConnTimeout.Nanoseconds())
+            crate::runtime::sysmon::monotonic_ns().wrapping_sub(self.IdleConnTimeout.Nanoseconds())
         } else {
             0
         };
@@ -2186,7 +2179,11 @@ impl Transport {
                     pool.idleLRU.remove(&pconn);
                     continue;
                 }
-                delivered = w.tryDeliver(Some(pconn.clone()), errors::nil, crate::time::Time::default());
+                delivered = w.tryDeliver(
+                    Some(pconn.clone()),
+                    errors::nil,
+                    crate::time::Time::default(),
+                );
                 if delivered {
                     // Go: "HTTP/1: only one client can use pconn.
                     // Remove it from the list."
@@ -2414,7 +2411,8 @@ pub(crate) fn __try_put_idle(
     // Go stamps idleAt here (pconn.idleAt = time.Now()); goish uses
     // monotonic ns.
     pconn.__set_idle_at(crate::runtime::sysmon::monotonic_ns());
-    if cfg.max_idle_conns != 0 && crate::int(crate::int64(pool.idleLRU.len())) > cfg.max_idle_conns {
+    if cfg.max_idle_conns != 0 && crate::int(crate::int64(pool.idleLRU.len())) > cfg.max_idle_conns
+    {
         if let Some(oldest) = pool.idleLRU.removeOldest() {
             oldest.close(errTooManyIdle.into());
             removeIdleConnLocked(&mut pool, &oldest);
@@ -2471,11 +2469,7 @@ pub(crate) fn rewindBody(req: &Request) -> (Request, error) {
 /// up on us because it doesn't like our request". And nothing-written
 /// is checked BEFORE replayability, because a request that never
 /// reached the wire is safe to re-send whatever its method.
-pub fn shouldRetryRequest(
-    req: &Request,
-    err: error,
-    isReused: bool,
-) -> bool {
+pub fn shouldRetryRequest(req: &Request, err: error, isReused: bool) -> bool {
     if errors::Is(err.clone(), super::request::errMissingHost.clone()) {
         // Go: "User error."
         return false;
@@ -2655,7 +2649,13 @@ impl Transport {
 // pair into one Mutex<Option<…>> slot — same once-semantics, and it
 // lets resetProxyConfig actually reset (Go overwrites the Once).
 fn envProxyFuncValue() -> &'static crate::sync::Mutex<
-    Option<alloc::sync::Arc<dyn Fn(&super::url::URL) -> (Option<super::url::URL>, crate::errors::error) + Send + Sync>>,
+    Option<
+        alloc::sync::Arc<
+            dyn Fn(&super::url::URL) -> (Option<super::url::URL>, crate::errors::error)
+                + Send
+                + Sync,
+        >,
+    >,
 > {
     static SLOT: crate::lazy::Lazy<
         crate::sync::Mutex<
@@ -2700,9 +2700,7 @@ pub fn resetProxyConfig() {
 /// Go: "newReadWriteCloserBody wraps a io.ReadWriteCloser as the
 /// http.Response.Body … for the caller to speak the switched protocol
 /// on" — a 101 response, where the connection becomes the body.
-pub(crate) fn newReadWriteCloserBody(
-    src: super::client::ConnSrc,
-) -> super::client::Body {
+pub(crate) fn newReadWriteCloserBody(src: super::client::ConnSrc) -> super::client::Body {
     return super::client::__new_upgraded_body(src);
 }
 

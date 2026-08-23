@@ -60,15 +60,60 @@ fn main() {
     expect(0, 0x99aa06d3014798d8, 0x6001c324468d497f, b"t1: empty\n");
     expect(1, 0x22e0f229e62f4dfa, 0xf538d79fd227fb5a, b"t1: len 1\n");
     expect(3, 0xb7ff0aed4fe98ff5, 0xa923e223fb2db579, b"t1: len 3\n");
-    expect(8, 0xb19d0b5570d4f7c2, 0x4cc884410fc431b0, b"t1: len 8 (4-8 class)\n");
-    expect(16, 0xd59f7d8a670a120c, 0xda104e0e92b92ab5, b"t1: len 16 (9-16 class)\n");
-    expect(100, 0x7578ee648027fe8b, 0x47e5e246671542c7, b"t1: len 100 (17-128)\n");
-    expect(240, 0x900a1bc3b8998817, 0x46a9f03f26915c0a, b"t1: len 240 (129-240)\n");
-    expect(241, 0xb98e6930da993da1, 0x15d313c6669c668c, b"t1: len 241 (long head)\n");
-    expect(1024, 0x42b9fc9a5558669d, 0x167a4ff2b7f6e8df, b"t1: len 1024 (block edge)\n");
-    expect(1025, 0xf841813c059e8d32, 0x175b38b1d35c8b95, b"t1: len 1025\n");
-    expect(1089, 0x598bf64e567f555c, 0xcf5fb001e32a4dd5, b"t1: len 1089 (buf edge)\n");
-    expect(100000, 0x1fdfe43dfad48aa0, 0x37ae5ab7973f0fce, b"t1: len 100000\n");
+    expect(
+        8,
+        0xb19d0b5570d4f7c2,
+        0x4cc884410fc431b0,
+        b"t1: len 8 (4-8 class)\n",
+    );
+    expect(
+        16,
+        0xd59f7d8a670a120c,
+        0xda104e0e92b92ab5,
+        b"t1: len 16 (9-16 class)\n",
+    );
+    expect(
+        100,
+        0x7578ee648027fe8b,
+        0x47e5e246671542c7,
+        b"t1: len 100 (17-128)\n",
+    );
+    expect(
+        240,
+        0x900a1bc3b8998817,
+        0x46a9f03f26915c0a,
+        b"t1: len 240 (129-240)\n",
+    );
+    expect(
+        241,
+        0xb98e6930da993da1,
+        0x15d313c6669c668c,
+        b"t1: len 241 (long head)\n",
+    );
+    expect(
+        1024,
+        0x42b9fc9a5558669d,
+        0x167a4ff2b7f6e8df,
+        b"t1: len 1024 (block edge)\n",
+    );
+    expect(
+        1025,
+        0xf841813c059e8d32,
+        0x175b38b1d35c8b95,
+        b"t1: len 1025\n",
+    );
+    expect(
+        1089,
+        0x598bf64e567f555c,
+        0xcf5fb001e32a4dd5,
+        b"t1: len 1089 (buf edge)\n",
+    );
+    expect(
+        100000,
+        0x1fdfe43dfad48aa0,
+        0x37ae5ab7973f0fce,
+        b"t1: len 100000\n",
+    );
 
     // ─── 2. streaming == one-shot, any chunking ────────────────────
     let b = fill(100000);
@@ -115,7 +160,10 @@ fn main() {
     // `entry.Hash == xxh3.Uint128{}`).
     let zero = xxh3::Uint128::default();
     check(zero != u, b"t3b: zero != real hash\n");
-    check(zero == xxh3::Uint128 { Hi: 0, Lo: 0 }, b"t3b: zero compare\n");
+    check(
+        zero == xxh3::Uint128 { Hi: 0, Lo: 0 },
+        b"t3b: zero compare\n",
+    );
 
     // Hasher reuse via Reset (checker hashWrite shape: many small
     // writes of binary values).

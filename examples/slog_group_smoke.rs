@@ -137,7 +137,10 @@ fn main() {
             (goish::Any::new(9u8), slog::KindUint64),
             (goish::Any::new(11u64), slog::KindUint64),
             (goish::Any::new(1.5f64), slog::KindFloat64),
-            (goish::Any::new(goish::time::Duration(5)), slog::KindDuration),
+            (
+                goish::Any::new(goish::time::Duration(5)),
+                slog::KindDuration,
+            ),
         ];
         let mut ok = true;
         for (v, want) in cases.iter() {

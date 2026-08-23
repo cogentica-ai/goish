@@ -1,13 +1,13 @@
 // go: package crypto/internal/fips140/aes
 
 mod aes;
-pub mod gcm;
 mod aes_generic;
 mod aes_noasm;
 mod cbc;
 mod cbc_noasm;
 mod ctr;
 mod ctr_noasm;
+pub mod gcm;
 // `const` is a Rust keyword; mount const.rs under a legal name. The file
 // stem still matches Go's const.go, which is what GOISH015 checks.
 #[path = "const.rs"]

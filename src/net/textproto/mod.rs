@@ -26,8 +26,8 @@ use alloc::vec::Vec;
 
 use crate::bufio;
 use crate::errors::{error, nil, ErrorTrait};
-use crate::goslice::slice;
 use crate::gomap::map;
+use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
 use crate::types::{byte, int};
@@ -147,7 +147,7 @@ pub fn CanonicalMIMEHeaderKey<S: Into<string>>(s: S) -> string {
 }
 
 /// `(MIMEHeader).Add(key, value)` (header.go:13).
-pub fn Add<K: Into<string>, V: Into<string>>(h: &mut MIMEHeader, key: K, value: V){
+pub fn Add<K: Into<string>, V: Into<string>>(h: &mut MIMEHeader, key: K, value: V) {
     let key: string = key.into();
     let value: string = value.into();
     let k = CanonicalMIMEHeaderKey(key);
@@ -162,7 +162,7 @@ pub fn Add<K: Into<string>, V: Into<string>>(h: &mut MIMEHeader, key: K, value: 
 }
 
 /// `(MIMEHeader).Set(key, value)` (header.go:21).
-pub fn Set<K: Into<string>, V: Into<string>>(h: &mut MIMEHeader, key: K, value: V){
+pub fn Set<K: Into<string>, V: Into<string>>(h: &mut MIMEHeader, key: K, value: V) {
     let key: string = key.into();
     let value: string = value.into();
     let k = CanonicalMIMEHeaderKey(key);
@@ -194,7 +194,7 @@ pub fn Values<K: Into<string>>(h: &MIMEHeader, key: K) -> slice<string> {
 }
 
 /// `(MIMEHeader).Del(key)` (header.go:54).
-pub fn Del<K: Into<string>>(h: &mut MIMEHeader, key: K){
+pub fn Del<K: Into<string>>(h: &mut MIMEHeader, key: K) {
     let key: string = key.into();
     let k = CanonicalMIMEHeaderKey(key);
     h.Delete(k);
@@ -214,7 +214,10 @@ pub struct Writer<W: io::Writer> {
 
 /// `textproto.NewWriter(w)` (writer.go:21).
 pub fn NewWriter<W: io::Writer>(w: bufio::Writer<W>) -> Writer<W> {
-    Writer { W: w, in_dot: false }
+    Writer {
+        W: w,
+        in_dot: false,
+    }
 }
 
 const CRNL: &[byte] = &[b'\r', b'\n'];
@@ -408,8 +411,8 @@ impl<'a, W: io::Writer> DotWriter<'a, W> {
 // ─── Reader (reader.go) ─────────────────────────────────────────────
 
 mod reader;
-pub use reader::{NewReader, Reader, validHeaderFieldByte, validHeaderValueByte};
 pub(crate) use reader::__new_reader_with_scratch;
+pub use reader::{validHeaderFieldByte, validHeaderValueByte, NewReader, Reader};
 
 // ─── Pipeline (pipeline.go) ─────────────────────────────────────────
 

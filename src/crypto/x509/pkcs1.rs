@@ -435,9 +435,8 @@ impl reflect::FromReflectValue for pkcs1PrivateKey {
         let bigs: [(int, usize); 7] = [(1, 0), (3, 1), (4, 2), (5, 3), (6, 4), (7, 5), (8, 6)];
         let mut vals: [big::Int; 7] = core::array::from_fn(|_| big::Int::new());
         for (idx, slot) in bigs.iter() {
-            let (n, err) = <big::Int as reflect::FromReflectValue>::from_reflect_value(
-                v.Field(*idx),
-            );
+            let (n, err) =
+                <big::Int as reflect::FromReflectValue>::from_reflect_value(v.Field(*idx));
             if err != errors::nil {
                 return (pkcs1PrivateKey::default(), err);
             }
@@ -518,8 +517,7 @@ impl reflect::FromReflectValue for pkcs1AdditionalRSAPrime {
                 errors::New("x509: expected pkcs1AdditionalRSAPrime"),
             );
         }
-        let (prime, err) =
-            <big::Int as reflect::FromReflectValue>::from_reflect_value(v.Field(0));
+        let (prime, err) = <big::Int as reflect::FromReflectValue>::from_reflect_value(v.Field(0));
         if err != errors::nil {
             return (pkcs1AdditionalRSAPrime::default(), err);
         }

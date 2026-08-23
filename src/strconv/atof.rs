@@ -652,8 +652,7 @@ pub fn ParseFloat<S: Into<string>>(s: S, bit_size: int) -> (f64, error) {
     // If we didn't consume the full input and there was no other error,
     // it's a syntax error.
     if n != bytes.len() {
-        let is_syntax = err == nil
-            || !crate::errors::Is(err.clone(), super::ErrRange);
+        let is_syntax = err == nil || !crate::errors::Is(err.clone(), super::ErrRange);
         if is_syntax {
             return (0.0, syntaxError(FN_PARSE_FLOAT, s));
         }

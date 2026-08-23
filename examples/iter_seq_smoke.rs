@@ -95,7 +95,10 @@ struct Walker {
 fn main() {
     // ─── 1. User iterators + break semantics ───────────────────────
     let collected = slices::Collect(Countdown(5));
-    check(collected.as_ref() == [5, 4, 3, 2, 1], b"t1: countdown collect\n");
+    check(
+        collected.as_ref() == [5, 4, 3, 2, 1],
+        b"t1: countdown collect\n",
+    );
 
     // Early stop: Go `for v := range seq { if v == 3 { break } }`
     // lowers to a yield that returns false (RANGE_OVER_FUNC.md §3.4).
@@ -108,8 +111,16 @@ fn main() {
 
     let tree = Tree {
         value: 2,
-        left: Some(alloc::boxed::Box::new(Tree { value: 1, left: None, right: None })),
-        right: Some(alloc::boxed::Box::new(Tree { value: 3, left: None, right: None })),
+        left: Some(alloc::boxed::Box::new(Tree {
+            value: 1,
+            left: None,
+            right: None,
+        })),
+        right: Some(alloc::boxed::Box::new(Tree {
+            value: 3,
+            left: None,
+            right: None,
+        })),
     };
     let mut inorder_v: alloc::vec::Vec<int> = alloc::vec::Vec::new();
     tree.walk_inner(&mut |v| {
@@ -138,7 +149,7 @@ fn main() {
     let mut backward: int = 0;
     slices::Backward(&s).run(&mut |i, v| {
         backward = i * 1000 + v; // last assignment wins = first element
-        false                    // stop immediately: yields (2, 30) only
+        false // stop immediately: yields (2, 30) only
     });
     check(backward == 2030, b"t2c: Backward starts at the end\n");
 
@@ -154,7 +165,10 @@ fn main() {
 
     // Compat: a &slice is itself a seq source.
     let direct = slices::Sorted(&desc);
-    check(direct.as_ref() == [10, 20, 30], b"t2g: Sorted(&slice) compat\n");
+    check(
+        direct.as_ref() == [10, 20, 30],
+        b"t2g: Sorted(&slice) compat\n",
+    );
 
     // ─── 3. maps seq surface ───────────────────────────────────────
     let mut m: map<string, int> = map::new();
@@ -162,7 +176,11 @@ fn main() {
     m.Set("a", 1);
     m.Set("c", 3);
     let keys = slices::SortedFunc(maps::Keys(&m), |a: &string, b: &string| {
-        if a.as_bytes() < b.as_bytes() { -1 } else { 1 }
+        if a.as_bytes() < b.as_bytes() {
+            -1
+        } else {
+            1
+        }
     });
     check(keys.as_ref().len() == 3, b"t3: Keys count\n");
     check(
@@ -191,7 +209,10 @@ fn main() {
     // Empty separator: UTF-8 sequence split (2-byte é stays whole).
     let runes = slices::Collect(strings::SplitSeq("h\u{e9}!", ""));
     check(runes.as_ref().len() == 3, b"t4b: empty-sep rune count\n");
-    check(runes.as_ref()[1].as_bytes() == "\u{e9}".as_bytes(), b"t4b: rune boundaries\n");
+    check(
+        runes.as_ref()[1].as_bytes() == "\u{e9}".as_bytes(),
+        b"t4b: rune boundaries\n",
+    );
 
     let after = slices::Collect(strings::SplitAfterSeq("x.y.", "."));
     check(
@@ -219,9 +240,14 @@ fn main() {
     check(first.as_bytes() == b"alpha", b"t4f: lazy early stop\n");
 
     // ─── 5. Iterator values as data ────────────────────────────────
-    let w = Walker { visit: Arc::new(Countdown(3)) };
+    let w = Walker {
+        visit: Arc::new(Countdown(3)),
+    };
     let via_field = slices::Collect(w.visit.clone());
-    check(via_field.as_ref() == [3, 2, 1], b"t5: Arc<dyn Seq> field into sink\n");
+    check(
+        via_field.as_ref() == [3, 2, 1],
+        b"t5: Arc<dyn Seq> field into sink\n",
+    );
 
     let msg = b"ITER_SEQ_OK all 5 test groups passed\n";
     syscall::Write(syscall::STDOUT, msg.as_ptr(), msg.len());

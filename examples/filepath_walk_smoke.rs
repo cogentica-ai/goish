@@ -9,9 +9,9 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
-use goish::fmt;
 use goish::convert::bytes;
 use goish::errors;
+use goish::fmt;
 use goish::os;
 use goish::path::filepath;
 use goish::{nil, string, syscall};
@@ -29,8 +29,16 @@ fn main() {
     let _ = os::WriteFile(string("/tmp/goish-walk-smoke/a.txt"), bytes("a"), 0o644);
     let _ = os::WriteFile(string("/tmp/goish-walk-smoke/b.txt"), bytes("b"), 0o644);
     let _ = os::WriteFile(string("/tmp/goish-walk-smoke/sub/c.txt"), bytes("c"), 0o644);
-    let _ = os::WriteFile(string("/tmp/goish-walk-smoke/sub/inner/d.txt"), bytes("d"), 0o644);
-    let _ = os::WriteFile(string("/tmp/goish-walk-smoke/skipme/secret.txt"), bytes("s"), 0o644);
+    let _ = os::WriteFile(
+        string("/tmp/goish-walk-smoke/sub/inner/d.txt"),
+        bytes("d"),
+        0o644,
+    );
+    let _ = os::WriteFile(
+        string("/tmp/goish-walk-smoke/skipme/secret.txt"),
+        bytes("s"),
+        0o644,
+    );
 
     // 1. WalkDir visits every entry (root + 3 dirs + 4 files + skipme/secret = 9).
     {

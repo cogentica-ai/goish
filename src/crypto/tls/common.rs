@@ -244,7 +244,6 @@ pub const PKCS1WithSHA1: SignatureScheme = SignatureScheme(0x0201);
 /// Legacy: ECDSA with SHA-1 (TLS 1.2 only).
 pub const ECDSAWithSHA1: SignatureScheme = SignatureScheme(0x0203);
 
-
 // ─── Version, signature-algorithm and error helpers ───────────────────
 //
 // The free functions of common.go — the ones that do not reach into
@@ -264,12 +263,8 @@ use crate::goslice::slice;
 
 // Go: common.go:1156-1161
 //   var supportedVersions = []uint16{ VersionTLS13, VersionTLS12, VersionTLS11, VersionTLS10 }
-pub(crate) const supportedVersions: &[uint16] = &[
-    VersionTLS13,
-    VersionTLS12,
-    VersionTLS11,
-    VersionTLS10,
-];
+pub(crate) const supportedVersions: &[uint16] =
+    &[VersionTLS13, VersionTLS12, VersionTLS11, VersionTLS10];
 
 // go: sdk 1.25.5 crypto/tls/common.go:1208-1217 supportedVersionsFromMax
 /// The supported versions derived from a legacy maximum version value.
@@ -461,7 +456,6 @@ pub(crate) fn unexpectedMessageError(
     );
 }
 
-
 // Go: common.go:1559-1579
 //   type Certificate struct { Certificate [][]byte; PrivateKey crypto.PrivateKey
 //                             SupportedSignatureAlgorithms []SignatureScheme
@@ -526,7 +520,6 @@ impl Certificate {
     }
 }
 
-
 // ─── Config: version, curve and cipher-suite negotiation ──────────────
 //
 // The `Config` record itself still lives in mod[rs] — it is the type the
@@ -577,8 +570,6 @@ impl crate::io::Reader for sharedRandReader {
 }
 
 impl Config {
-
-
     // go: sdk 1.25.5 crypto/tls/common.go:1124-1130 Config.time
     /// The current time, as the handshake sees it.
     ///
@@ -614,9 +605,8 @@ impl Config {
         let mut key = ticketKey::default();
         key.aesKey
             .copy_from_slice(&hashed[legacyTicketKeyNameLen..legacyTicketKeyNameLen + 16]);
-        key.hmacKey.copy_from_slice(
-            &hashed[legacyTicketKeyNameLen + 16..legacyTicketKeyNameLen + 32],
-        );
+        key.hmacKey
+            .copy_from_slice(&hashed[legacyTicketKeyNameLen + 16..legacyTicketKeyNameLen + 32]);
         key.created = self.time();
         // Go: return key
         return key;
@@ -657,7 +647,6 @@ impl Config {
             }
         }
     }
-
 
     // go: sdk 1.25.5 crypto/tls/common.go:995-1021 Config.initLegacySessionTicketKeyRLocked
     /// Seed `sessionTicketKeys` from the deprecated `SessionTicketKey`
@@ -705,8 +694,7 @@ impl Config {
             self.SessionTicketKey.copy_from_slice(raw);
             let dep = deprecatedSessionTicketKey;
             self.SessionTicketKey[..dep.len()].copy_from_slice(dep);
-        } else if !hasDeprecatedPrefix(&self.SessionTicketKey)
-            && self.sessionTicketKeys.Len() == 0
+        } else if !hasDeprecatedPrefix(&self.SessionTicketKey) && self.sessionTicketKeys.Len() == 0
         {
             let k = self.ticketKeyFromBytes(self.SessionTicketKey);
             self.sessionTicketKeys = slice::__from_vec(alloc::vec![k]);
@@ -1074,8 +1062,6 @@ pub struct EncryptedClientHelloKey {
     pub SendAsRetry: bool,
 }
 
-
-
 // Go: common.go:917-922
 //   type ticketKey struct { aesKey [16]byte; hmacKey [16]byte; created time.Time }
 #[derive(Clone, Default)]
@@ -1160,7 +1146,6 @@ pub(crate) fn fipsAllowChain(chain: slice<crate::crypto::x509::Certificate>) -> 
     return true;
 }
 
-
 // Go: common.go:907-913
 //   const ( ticketKeyLifetime = 7 * 24 * time.Hour
 //           ticketKeyRotation = 24 * time.Hour )
@@ -1187,7 +1172,6 @@ fn hasDeprecatedPrefix(key: &[byte; 32]) -> bool {
     let dep = deprecatedSessionTicketKey;
     return key.len() >= dep.len() && &key[..dep.len()] == dep;
 }
-
 
 // Go: common.go — `const pointFormatUncompressed uint8 = 0`
 /// The only ECPointFormat this library supports (RFC 8422 §5.1.2).
@@ -1257,7 +1241,6 @@ pub struct ClientHelloInfo {
 }
 
 impl ClientHelloInfo {
-
     // go: none — goish-only: `config` is unexported in Go, where
     // handshake_server.go is in the same package.
     #[doc(hidden)]
@@ -1615,7 +1598,6 @@ impl CertificateRequestInfo {
     }
 }
 
-
 // ─── The client session cache ─────────────────────────────────────────
 
 // Go: common.go:594-604
@@ -1630,8 +1612,10 @@ impl CertificateRequestInfo {
 pub trait ClientSessionCache: Send + Sync {
     /// Go: "Get searches for a ClientSessionState associated with the
     /// given key. On return, ok is true if one was found."
-    fn Get(&mut self, sessionKey: crate::gostring::string)
-        -> (Option<super::ticket::ClientSessionState>, bool);
+    fn Get(
+        &mut self,
+        sessionKey: crate::gostring::string,
+    ) -> (Option<super::ticket::ClientSessionState>, bool);
 
     /// Go: "Put adds the ClientSessionState to the cache with the given
     /// key. It might get called multiple times in a connection if a TLS
@@ -1779,7 +1763,6 @@ impl ClientSessionCache for lruSessionCache {
     }
 }
 
-
 // ─── ConnectionState and the remaining Config accessors ───────────────
 
 // Go: common.go:236-320
@@ -1837,12 +1820,14 @@ pub struct ConnectionState {
     /// Go: "indicates if Encrypted Client Hello was offered and
     /// successfully accepted by the server."
     pub ECHAccepted: bool,
-    pub(crate) ekm:
-        Option<alloc::sync::Arc<dyn Fn(crate::gostring::string, slice<byte>, int) -> (slice<byte>, error) + Send + Sync>>,
+    pub(crate) ekm: Option<
+        alloc::sync::Arc<
+            dyn Fn(crate::gostring::string, slice<byte>, int) -> (slice<byte>, error) + Send + Sync,
+        >,
+    >,
 }
 
 impl ConnectionState {
-
     // go: none — goish-only: `ekm` is unexported in Go, where the tests
     // are in-package. Selects one of prf[rs]'s two refusal hooks.
     #[doc(hidden)]
@@ -1858,13 +1843,18 @@ impl ConnectionState {
         }
     }
 
-
     // go: none — goish-only: see `__setEKM`. Installs the connection's
     // own exporter, which is what Go's `state.ekm = c.ekm` does.
     #[doc(hidden)]
     pub fn __setEKMHook(
         &mut self,
-        f: Option<alloc::sync::Arc<dyn Fn(crate::gostring::string, slice<byte>, int) -> (slice<byte>, error) + Send + Sync>>,
+        f: Option<
+            alloc::sync::Arc<
+                dyn Fn(crate::gostring::string, slice<byte>, int) -> (slice<byte>, error)
+                    + Send
+                    + Sync,
+            >,
+        >,
     ) {
         self.ekm = f;
     }
@@ -1911,10 +1901,7 @@ impl Config {
     /// Deviation: Go consults the `GetCertificate` callback first; goish's
     /// Config has no such field, so that branch is unreachable and the
     /// selection starts at `c.Certificates`.
-    pub(crate) fn getCertificate(
-        &self,
-        clientHello: &ClientHelloInfo,
-    ) -> (Certificate, error) {
+    pub(crate) fn getCertificate(&self, clientHello: &ClientHelloInfo) -> (Certificate, error) {
         // Go: if c.GetCertificate != nil && (len(c.Certificates) == 0 ||
         //         len(clientHello.ServerName) > 0) {
         //         cert, err := c.GetCertificate(clientHello)
@@ -2011,7 +1998,6 @@ pub(crate) fn keyLogLine(
     );
     return slice::__from_vec(line.as_bytes().to_vec());
 }
-
 
 // Go: common.go:529-542
 //   type RenegotiationSupport int

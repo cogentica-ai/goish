@@ -90,8 +90,7 @@ impl<'a> ElfView<'a> {
             return None;
         }
         let shstr_hdr_off = shoff + shstrndx * shentsize;
-        let shstr_hdr =
-            unsafe { *(bytes.as_ptr().add(shstr_hdr_off) as *const Elf64Shdr) };
+        let shstr_hdr = unsafe { *(bytes.as_ptr().add(shstr_hdr_off) as *const Elf64Shdr) };
         let shstr_off = shstr_hdr.sh_offset as usize;
         let shstr_size = shstr_hdr.sh_size as usize;
         if shstr_off.checked_add(shstr_size)? > bytes.len() {

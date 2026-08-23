@@ -27,6 +27,7 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
+use crate::append;
 use crate::crypto::internal::fips140::hkdf;
 use crate::crypto::internal::fips140deps::byteorder;
 use crate::goslice::slice;
@@ -34,7 +35,6 @@ use crate::gostring::string;
 use crate::hash::{Hash, HashFunc, IntoHashFunc};
 use crate::io;
 use crate::types::{byte, int};
-use crate::append;
 
 /// The hash factory every key-schedule stage carries. Go spells it
 /// `func() hash.Hash`.

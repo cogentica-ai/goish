@@ -14,12 +14,12 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::encoding::{
-    BinaryAppender, BinaryMarshaler, BinaryUnmarshaler, TextAppender,
-    TextMarshaler, TextUnmarshaler,
+    BinaryAppender, BinaryMarshaler, BinaryUnmarshaler, TextAppender, TextMarshaler,
+    TextUnmarshaler,
 };
 use goish::errors::{error, nil};
+use goish::fmt;
 use goish::types::byte;
 use goish::{slice, syscall};
 
@@ -50,10 +50,7 @@ impl BinaryUnmarshaler for Pair {
 }
 
 impl BinaryAppender for Pair {
-    fn AppendBinary(
-        &self,
-        b: slice<byte>,
-    ) -> (slice<byte>, error) {
+    fn AppendBinary(&self, b: slice<byte>) -> (slice<byte>, error) {
         let mut v: alloc::vec::Vec<byte> = b.__into_vec();
         v.push(self.hi);
         v.push(self.lo);
@@ -110,10 +107,7 @@ impl TextUnmarshaler for Pair {
 }
 
 impl TextAppender for Pair {
-    fn AppendText(
-        &self,
-        b: slice<byte>,
-    ) -> (slice<byte>, error) {
+    fn AppendText(&self, b: slice<byte>) -> (slice<byte>, error) {
         let mut v: alloc::vec::Vec<byte> = b.__into_vec();
         v.push(hex_nyb(self.hi >> 4));
         v.push(hex_nyb(self.hi & 0x0f));
@@ -157,8 +151,7 @@ fn main() {
     {
         let p = Pair { hi: 0xAB, lo: 0xCD };
         let text = marshal_text(&p);
-        let want_text: alloc::vec::Vec<byte> =
-            alloc::vec![b'A', b'B', b':', b'C', b'D'];
+        let want_text: alloc::vec::Vec<byte> = alloc::vec![b'A', b'B', b':', b'C', b'D'];
         let text_v: alloc::vec::Vec<byte> = text.clone().__into_vec();
         if text_v != want_text {
             fmt::Println!("[ 2] TextMarshaler RT          FAIL marshal");
@@ -177,12 +170,10 @@ fn main() {
 
     // 3. BinaryAppender — appends to existing buffer (does not clear).
     {
-        let prefix: slice<byte> =
-            slice::__from_vec(alloc::vec![b'>', b' ']);
+        let prefix: slice<byte> = slice::__from_vec(alloc::vec![b'>', b' ']);
         let p = Pair { hi: 0x12, lo: 0x34 };
         let (out, err) = p.AppendBinary(prefix);
-        let want: alloc::vec::Vec<byte> =
-            alloc::vec![b'>', b' ', 0x12, 0x34];
+        let want: alloc::vec::Vec<byte> = alloc::vec![b'>', b' ', 0x12, 0x34];
         let out_v: alloc::vec::Vec<byte> = out.__into_vec();
         if err.IsNil() && out_v == want {
             fmt::Println!("[ 3] BinaryAppender             PASS");
@@ -194,13 +185,10 @@ fn main() {
 
     // 4. TextAppender — appends textual form.
     {
-        let prefix: slice<byte> =
-            slice::__from_vec(alloc::vec![b'k', b'=']);
+        let prefix: slice<byte> = slice::__from_vec(alloc::vec![b'k', b'=']);
         let p = Pair { hi: 0xAB, lo: 0xCD };
         let (out, err) = p.AppendText(prefix);
-        let want: alloc::vec::Vec<byte> = alloc::vec![
-            b'k', b'=', b'A', b'B', b':', b'C', b'D'
-        ];
+        let want: alloc::vec::Vec<byte> = alloc::vec![b'k', b'=', b'A', b'B', b':', b'C', b'D'];
         let out_v: alloc::vec::Vec<byte> = out.__into_vec();
         if err.IsNil() && out_v == want {
             fmt::Println!("[ 4] TextAppender               PASS");
@@ -225,9 +213,7 @@ fn main() {
 
     // 6. UnmarshalText — wrong format returns an error.
     {
-        let bad: slice<byte> = slice::__from_vec(alloc::vec![
-            b'A', b'B', b'-', b'C', b'D'
-        ]);
+        let bad: slice<byte> = slice::__from_vec(alloc::vec![b'A', b'B', b'-', b'C', b'D']);
         let mut p = Pair { hi: 0, lo: 0 };
         let err = p.UnmarshalText(bad);
         if !err.IsNil() {

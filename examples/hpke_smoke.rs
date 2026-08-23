@@ -107,10 +107,18 @@ fn main() {
 
     let (pt, err) = recip.Open(&aad, &unhex(CT));
     check("Open err", fmt::Sprintf!("%v", err != goish::nil), "false");
-    check("decrypted Go's first message", goish::string::from_bytes(&pt), "hello hpke");
+    check(
+        "decrypted Go's first message",
+        goish::string::from_bytes(&pt),
+        "hello hpke",
+    );
 
     let (pt2, err) = recip.Open(&aad, &unhex(CT2));
-    check("Open (2nd) err", fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        "Open (2nd) err",
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     check(
         "decrypted Go's second message (nonce advanced)",
         goish::string::from_bytes(&pt2),
@@ -165,7 +173,11 @@ fn main() {
     );
     let mut recipG = recipG.unwrap();
     let (ptG, err) = recipG.Open(&aad, &ctG);
-    check("round trip err", fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        "round trip err",
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     check(
         "goish sender round trip",
         goish::string::from_bytes(&ptG),
@@ -173,7 +185,13 @@ fn main() {
     );
 
     // Unsupported suite ids.
-    let (_, _, err) = hpke::SetupSender(0x9999, hpke::KDF_HKDF_SHA256, hpke::AEAD_AES_128_GCM, &pubKey, &info);
+    let (_, _, err) = hpke::SetupSender(
+        0x9999,
+        hpke::KDF_HKDF_SHA256,
+        hpke::AEAD_AES_128_GCM,
+        &pubKey,
+        &info,
+    );
     check(
         "unsupported KEM rejected",
         fmt::Sprintf!("%v", err.Error()),

@@ -8,9 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
 use goish::encoding::pem::{self, Block, Decode, Encode, EncodeToMemory};
+use goish::fmt;
 use goish::goslice::slice;
 use goish::types::byte;
 use goish::{convert, string, syscall};
@@ -21,8 +21,7 @@ fn main() {
 
     // Reference test certificate (10 random bytes encoded base64).
     // Bytes: \x00\x01\x02\x03\x04\x05\x06\x07\x08\x09 → "AAECAwQFBgcICQ=="
-    let test_pem =
-        "-----BEGIN TEST-----\nAAECAwQFBgcICQ==\n-----END TEST-----\n";
+    let test_pem = "-----BEGIN TEST-----\nAAECAwQFBgcICQ==\n-----END TEST-----\n";
 
     // 1. Decode a basic PEM block.
     {
@@ -171,7 +170,10 @@ fn main() {
         let s = core::str::from_utf8(raw).unwrap();
         // Expect 3 newlines from base64 lines + 1 from BEGIN line + 1 from END line.
         let nl_count = s.matches('\n').count();
-        if nl_count == 5 && s.starts_with("-----BEGIN BIG-----\n") && s.ends_with("-----END BIG-----\n") {
+        if nl_count == 5
+            && s.starts_with("-----BEGIN BIG-----\n")
+            && s.ends_with("-----END BIG-----\n")
+        {
             fmt::Println!("[ 8] line wrap 64-col         PASS");
         } else {
             fmt::Println!("[ 8] line wrap 64-col         FAIL nl={}", nl_count);

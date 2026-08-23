@@ -419,7 +419,9 @@ impl PartialEq<error> for __SkipDirMarker {
 }
 impl errors::IsTarget for __SkipDirMarker {
     #[inline]
-    fn __resolve(&self) -> error { __skipdir_error() }
+    fn __resolve(&self) -> error {
+        __skipdir_error()
+    }
 }
 
 /// `filepath.SkipAll` (path.go:264) — sentinel returned from a
@@ -462,7 +464,9 @@ impl PartialEq<error> for __SkipAllMarker {
 }
 impl errors::IsTarget for __SkipAllMarker {
     #[inline]
-    fn __resolve(&self) -> error { __skipall_error() }
+    fn __resolve(&self) -> error {
+        __skipall_error()
+    }
 }
 
 // `filepathDirEnt` — a concrete `fs.DirEntry` synthesised for the
@@ -487,7 +491,12 @@ impl crate::os::DirEntry for filepathDirEnt {
     fn Type(&self) -> crate::os::FileMode {
         self.mode.Type()
     }
-    fn Info(&self) -> (alloc::sync::Arc<dyn crate::os::FileInfo + Send + Sync>, error) {
+    fn Info(
+        &self,
+    ) -> (
+        alloc::sync::Arc<dyn crate::os::FileInfo + Send + Sync>,
+        error,
+    ) {
         let (info, err) = crate::os::Lstat(self.full.clone());
         if !err.IsNil() {
             return (crate::nil.into(), err);
@@ -676,7 +685,7 @@ fn walk_symlinks(path0: string) -> (string, error) {
     let mut path = path0;
     let vol_len: usize = 0;
     let _ = vol_len; // Linux: always 0; kept for parity.
-    // Go: if volLen < len(path) && os.IsPathSeparator(path[volLen]) { volLen++ }
+                     // Go: if volLen < len(path) && os.IsPathSeparator(path[volLen]) { volLen++ }
     let pb = path.as_bytes();
     let mut vol_len_eff: usize = 0;
     if vol_len_eff < pb.len() && pb[vol_len_eff] == Separator {
@@ -724,8 +733,8 @@ fn walk_symlinks(path0: string) -> (string, error) {
                 r -= 1;
             }
             // Go: if r < volLen || dest[r+1:] == ".."
-            let tail_is_dotdot = (r + 1) <= dest.len() as isize
-                && &dest[(r + 1) as usize..] == b"..";
+            let tail_is_dotdot =
+                (r + 1) <= dest.len() as isize && &dest[(r + 1) as usize..] == b"..";
             if r < vol_len_eff as isize || tail_is_dotdot {
                 // Go: if len(dest) > volLen { dest += pathSeparator }
                 if dest.len() > vol_len_eff {
@@ -742,9 +751,7 @@ fn walk_symlinks(path0: string) -> (string, error) {
         }
         // Ordinary path component. Add it to result.
         // Go: if len(dest) > VolumeNameLen(dest) && !IsPathSeparator(dest[last]) { dest += pathSeparator }
-        if dest.len() > vol_len_eff
-            && (dest.is_empty() || dest[dest.len() - 1] != Separator)
-        {
+        if dest.len() > vol_len_eff && (dest.is_empty() || dest[dest.len() - 1] != Separator) {
             dest.push(Separator);
         }
         // Go: dest += path[start:end]
@@ -760,7 +767,10 @@ fn walk_symlinks(path0: string) -> (string, error) {
         if (fi.Mode() & crate::os::ModeSymlink) == 0 {
             // Go: if !fi.Mode().IsDir() && end < len(path) { return "", syscall.ENOTDIR }
             if !fi.IsDir() && end < path.as_bytes().len() {
-                return (string::new(), errors::New(string::from_static("not a directory")));
+                return (
+                    string::new(),
+                    errors::New(string::from_static("not a directory")),
+                );
             }
             start = end;
             continue;
@@ -769,7 +779,10 @@ fn walk_symlinks(path0: string) -> (string, error) {
         links_walked += 1;
         // Go: if linksWalked > 255 { return "", errors.New("EvalSymlinks: too many links") }
         if links_walked > 255 {
-            return (string::new(), errors::New(string::from_static("EvalSymlinks: too many links")));
+            return (
+                string::new(),
+                errors::New(string::from_static("EvalSymlinks: too many links")),
+            );
         }
         // Go: link, err := os.Readlink(dest)
         let (link, err) = crate::os::Readlink(dest_s);
@@ -895,4 +908,3 @@ fn rel_err(basepath: &string, targpath: &string) -> error {
     v.extend_from_slice(basepath.as_bytes());
     errors::New(string::__from_vec(v))
 }
-

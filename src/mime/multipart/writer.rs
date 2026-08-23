@@ -62,8 +62,7 @@ impl<W: IoWriter> Writer<W> {
         let end = bs.len() - 1;
         for (i, b) in bs.iter().enumerate() {
             let c = *b;
-            if (b'A' <= c && c <= b'Z') || (b'a' <= c && c <= b'z') || (b'0' <= c && c <= b'9')
-            {
+            if (b'A' <= c && c <= b'Z') || (b'a' <= c && c <= b'z') || (b'0' <= c && c <= b'9') {
                 continue;
             }
             match c {
@@ -88,10 +87,7 @@ impl<W: IoWriter> Writer<W> {
     pub fn FormDataContentType(&self) -> string {
         let b = self.boundary.clone();
         // Go: if strings.ContainsAny(b, `()<>@,;:\"/[]?= `) { b = `"`+b+`"` }
-        let needs_quote = strings::ContainsAny(
-            b.clone(),
-            string("()<>@,;:\\\"/[]?= "),
-        );
+        let needs_quote = strings::ContainsAny(b.clone(), string("()<>@,;:\\\"/[]?= "));
         let mut out = strings::Builder::new();
         let _ = out.WriteString("multipart/form-data; boundary=");
         if needs_quote {
@@ -155,7 +151,11 @@ impl<W: IoWriter> Writer<W> {
 
     /// `(*Writer).CreateFormField + Write` (writer.go:145, :160) —
     /// emit a `form-data; name=…` part with the given string value.
-    pub fn WriteField<F: Into<string>, V: Into<string>>(&mut self, fieldname: F, value: V) -> error {
+    pub fn WriteField<F: Into<string>, V: Into<string>>(
+        &mut self,
+        fieldname: F,
+        value: V,
+    ) -> error {
         let fieldname: string = fieldname.into();
         let value: string = value.into();
         let mut h = Header::new();
@@ -170,7 +170,12 @@ impl<W: IoWriter> Writer<W> {
     /// `(*Writer).CreateFormFile + Write` (writer.go:136). Emit a
     /// `form-data; name=…; filename=…` part with body and
     /// `Content-Type: application/octet-stream`.
-    pub fn WriteFile<F: Into<string>, F1: Into<string>>(&mut self, fieldname: F, filename: F1, body: slice<byte>) -> error {
+    pub fn WriteFile<F: Into<string>, F1: Into<string>>(
+        &mut self,
+        fieldname: F,
+        filename: F1,
+        body: slice<byte>,
+    ) -> error {
         let fieldname: string = fieldname.into();
         let filename: string = filename.into();
         let mut h = Header::new();
@@ -178,10 +183,7 @@ impl<W: IoWriter> Writer<W> {
             string("Content-Disposition"),
             FileContentDisposition(fieldname, filename),
         );
-        h.Set(
-            string("Content-Type"),
-            string("application/octet-stream"),
-        );
+        h.Set(string("Content-Type"), string("application/octet-stream"));
         self.WritePart(h, body)
     }
 
@@ -197,7 +199,10 @@ impl<W: IoWriter> Writer<W> {
 }
 
 /// `multipart.FileContentDisposition(field, filename)` (writer.go:154).
-pub fn FileContentDisposition<F: Into<string>, F1: Into<string>>(fieldname: F, filename: F1) -> string {
+pub fn FileContentDisposition<F: Into<string>, F1: Into<string>>(
+    fieldname: F,
+    filename: F1,
+) -> string {
     let fieldname: string = fieldname.into();
     let filename: string = filename.into();
     let mut b = strings::Builder::new();

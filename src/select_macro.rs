@@ -548,7 +548,9 @@ macro_rules! __select_release_all {
         while __ui < $count {
             let __atom = $atoms[__ui];
             if !__atom.is_null() {
-                unsafe { $crate::runtime::spin::raw_unlock(__atom); }
+                unsafe {
+                    $crate::runtime::spin::raw_unlock(__atom);
+                }
             }
             __ui += 1;
         }

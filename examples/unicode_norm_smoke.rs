@@ -50,11 +50,17 @@ static NFD_VECS: &[(&str, &str)] = &[
     ("\u{ac00}", "\u{1100}\u{1161}"),
     ("\u{ac01}", "\u{1100}\u{1161}\u{11a8}"),
     ("\u{d7a3}", "\u{1112}\u{1175}\u{11c2}"),
-    ("\u{d55c}\u{ae00}", "\u{1112}\u{1161}\u{11ab}\u{1100}\u{1173}\u{11af}"),
+    (
+        "\u{d55c}\u{ae00}",
+        "\u{1112}\u{1161}\u{11ab}\u{1100}\u{1173}\u{11af}",
+    ),
     // CJK compatibility ideograph (singleton)
     ("\u{f900}", "\u{8c48}"),
     // mixed real-world text
-    ("Ti\u{1ebf}ng Vi\u{1ec7}t", "Tie\u{302}\u{301}ng Vie\u{323}\u{302}t"),
+    (
+        "Ti\u{1ebf}ng Vi\u{1ec7}t",
+        "Tie\u{302}\u{301}ng Vie\u{323}\u{302}t",
+    ),
     ("\u{110b}\u{1161}", "\u{110b}\u{1161}"),
 ];
 

@@ -397,9 +397,8 @@ impl B {
     /// want to measure."
     pub fn StopTimer(&mut self) {
         if self.timerOn {
-            self.duration = crate::time::Duration(
-                self.duration.0 + crate::time::Since(self.start).0,
-            );
+            self.duration =
+                crate::time::Duration(self.duration.0 + crate::time::Since(self.start).0);
             let mut memStats = crate::runtime::MemStats::default();
             crate::runtime::ReadMemStats(&mut memStats);
             self.netAllocs += memStats.Mallocs - self.startAllocs;
@@ -536,9 +535,7 @@ impl durationOrCountFlag {
             let body = s.slice(0, crate::types::int64::from(s.Len()) - 1);
             let (n, err) = crate::strconv::ParseInt(body, 10, 0);
             if err != crate::errors::nil || n < 0 || (!self.allowZero && n == 0) {
-                return crate::errors::New(crate::gostring::string::from_static(
-                    "invalid count",
-                ));
+                return crate::errors::New(crate::gostring::string::from_static("invalid count"));
             }
             *self = durationOrCountFlag {
                 n: crate::int(n),
@@ -551,9 +548,7 @@ impl durationOrCountFlag {
             || d < crate::time::Duration(0)
             || (!self.allowZero && d == crate::time::Duration(0))
         {
-            return crate::errors::New(crate::gostring::string::from_static(
-                "invalid duration",
-            ));
+            return crate::errors::New(crate::gostring::string::from_static("invalid duration"));
         }
         *self = durationOrCountFlag {
             d,
@@ -590,8 +585,7 @@ impl B {
         // Go: "The aggregated BenchmarkResults resemble running all
         // subbenchmarks as in sequence in a single benchmark."
         self.result.N = 1;
-        self.result.T =
-            crate::time::Duration(self.result.T.0 + other.NsPerOp());
+        self.result.T = crate::time::Duration(self.result.T.0 + other.NsPerOp());
         if other.Bytes == 0 {
             self.missingBytes = true;
             self.result.Bytes = 0;
@@ -699,7 +693,10 @@ impl B {
     // delegation is written out. The port of common.Failed itself lives
     // in testing.rs.
     pub fn Failed(&self) -> bool {
-        return self.state.failed.load(core::sync::atomic::Ordering::Acquire);
+        return self
+            .state
+            .failed
+            .load(core::sync::atomic::Ordering::Acquire);
     }
 
     // go: sdk 1.25.5 testing/benchmark.go:945-984 B.RunParallel
@@ -724,8 +721,7 @@ impl B {
         // ~100µs."
         let mut grain: crate::types::uint64 = 0;
         if self.previousN > 0 && self.previousDuration > crate::time::Duration(0) {
-            grain = 100000 * crate::uint64(self.previousN)
-                / crate::uint64(self.previousDuration.0);
+            grain = 100000 * crate::uint64(self.previousN) / crate::uint64(self.previousDuration.0);
         }
         if grain < 1 {
             grain = 1;
@@ -1028,19 +1024,15 @@ impl benchState {
                 if benchmarkMemory || b.showAllocResult {
                     results = crate::fmt::Sprintf!("%s\t%s", results, r.MemString());
                 }
-                crate::fmt::Println!(
-                    crate::fmt::Sprintf!("%s\t%s", benchName.clone(), results)
-                );
+                crate::fmt::Println!(crate::fmt::Sprintf!("%s\t%s", benchName.clone(), results));
 
                 let p = crate::runtime::GOMAXPROCS(-1);
                 if p != *procs {
-                    crate::fmt::Println!(
-                        crate::fmt::Sprintf!(
-                            "testing: %s left GOMAXPROCS set to %d",
-                            benchName.clone(),
-                            p
-                        )
-                    );
+                    crate::fmt::Println!(crate::fmt::Sprintf!(
+                        "testing: %s left GOMAXPROCS set to %d",
+                        benchName.clone(),
+                        p
+                    ));
                 }
                 let _ = (i, j);
             }
@@ -1150,8 +1142,16 @@ impl B {
         }
         // Go: "Only print the output if we know we are not going to
         // proceed. Otherwise it is printed in processBench."
-        let finished = self.state.finished.load(core::sync::atomic::Ordering::Acquire);
-        if self.state.hasSub.load(core::sync::atomic::Ordering::Acquire) || finished {
+        let finished = self
+            .state
+            .finished
+            .load(core::sync::atomic::Ordering::Acquire);
+        if self
+            .state
+            .hasSub
+            .load(core::sync::atomic::Ordering::Acquire)
+            || finished
+        {
             return false;
         }
         return true;

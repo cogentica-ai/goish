@@ -726,7 +726,11 @@ impl projLookupTable {
             // Set dest = j*Q if |x| = j.
             let cond = ConstantTimeByteEq(xabs, u8::try_from(j).unwrap());
             let destCopy = *dest;
-            dest.Select(&self.points[usize::try_from(j - 1).unwrap()], &destCopy, cond);
+            dest.Select(
+                &self.points[usize::try_from(j - 1).unwrap()],
+                &destCopy,
+                cond,
+            );
         }
         // Now dest = |x|*Q, conditionally negate to get x*Q.
         dest.CondNeg(int::from(xmask & 1));
@@ -756,7 +760,11 @@ impl affineLookupTable {
         for j in 1..=8i32 {
             let cond = ConstantTimeByteEq(xabs, u8::try_from(j).unwrap());
             let destCopy = *dest;
-            dest.Select(&self.points[usize::try_from(j - 1).unwrap()], &destCopy, cond);
+            dest.Select(
+                &self.points[usize::try_from(j - 1).unwrap()],
+                &destCopy,
+                cond,
+            );
         }
         dest.CondNeg(int::from(xmask & 1));
     }
@@ -946,12 +954,7 @@ impl Point {
     /// the canonical generator, and returns v.
     ///
     /// Execution time depends on the inputs.
-    pub fn VarTimeDoubleScalarBaseMult(
-        &mut self,
-        a: &Scalar,
-        A: &Point,
-        b: &Scalar,
-    ) -> &mut Point {
+    pub fn VarTimeDoubleScalarBaseMult(&mut self, a: &Scalar, A: &Point, b: &Scalar) -> &mut Point {
         checkInitialized(&[A]);
 
         let basepointNafTable = basepointNafTable();

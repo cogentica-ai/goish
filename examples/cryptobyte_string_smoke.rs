@@ -130,21 +130,49 @@ fn main() {
     let mut u24v: uint32 = 0;
     let mut u32v: uint32 = 0;
     let mut u48v: uint64 = 0;
-    check("ReadUint8 ok", fmt::Sprintf!("%v", s.ReadUint8(&mut u8v)), "true");
+    check(
+        "ReadUint8 ok",
+        fmt::Sprintf!("%v", s.ReadUint8(&mut u8v)),
+        "true",
+    );
     check("ReadUint8", fmt::Sprintf!("%d", u8v), "161");
-    check("ReadUint16 ok", fmt::Sprintf!("%v", s.ReadUint16(&mut u16v)), "true");
+    check(
+        "ReadUint16 ok",
+        fmt::Sprintf!("%v", s.ReadUint16(&mut u16v)),
+        "true",
+    );
     check("ReadUint16", fmt::Sprintf!("%d", u16v), "45763");
-    check("ReadUint24 ok", fmt::Sprintf!("%v", s.ReadUint24(&mut u24v)), "true");
+    check(
+        "ReadUint24 ok",
+        fmt::Sprintf!("%v", s.ReadUint24(&mut u24v)),
+        "true",
+    );
     check("ReadUint24", fmt::Sprintf!("%d", u24v), "13952502");
-    check("ReadUint32 ok", fmt::Sprintf!("%v", s.ReadUint32(&mut u32v)), "true");
+    check(
+        "ReadUint32 ok",
+        fmt::Sprintf!("%v", s.ReadUint32(&mut u32v)),
+        "true",
+    );
     check("ReadUint32", fmt::Sprintf!("%d", u32v), "119023930");
-    check("ReadUint48 ok", fmt::Sprintf!("%v", s.ReadUint48(&mut u48v)), "true");
+    check(
+        "ReadUint48 ok",
+        fmt::Sprintf!("%v", s.ReadUint48(&mut u48v)),
+        "true",
+    );
     check("ReadUint48", fmt::Sprintf!("%d", u48v), "82860346085264");
 
     let mut s2 = cryptobyte::String::New(data());
     let mut u64v: uint64 = 0;
-    check("ReadUint64 ok", fmt::Sprintf!("%v", s2.ReadUint64(&mut u64v)), "true");
-    check("ReadUint64", fmt::Sprintf!("%d", u64v), "11651590505119483672");
+    check(
+        "ReadUint64 ok",
+        fmt::Sprintf!("%v", s2.ReadUint64(&mut u64v)),
+        "true",
+    );
+    check(
+        "ReadUint64",
+        fmt::Sprintf!("%d", u64v),
+        "11651590505119483672",
+    );
 
     // Length-prefixed children: 0x03 then three bytes, then 0x0002 then two.
     let mut s3 = cryptobyte::String::New(tail(16));
@@ -162,19 +190,35 @@ fn main() {
         "true",
     );
     check("16-bit prefixed child", hx(&child2.0), "4455");
-    check("Empty after consuming all", fmt::Sprintf!("%v", s3.Empty()), "true");
+    check(
+        "Empty after consuming all",
+        fmt::Sprintf!("%v", s3.Empty()),
+        "true",
+    );
 
     // Skip, and the two ways it must refuse.
     let mut s4 = cryptobyte::String::New(data());
     check("Skip(20)", fmt::Sprintf!("%v", s4.Skip(20)), "true");
-    check("Skip past the end refuses", fmt::Sprintf!("%v", s4.Skip(100)), "false");
+    check(
+        "Skip past the end refuses",
+        fmt::Sprintf!("%v", s4.Skip(100)),
+        "false",
+    );
     let mut out = slice::__from_vec(Vec::<byte>::new());
-    check("ReadBytes ok", fmt::Sprintf!("%v", s4.ReadBytes(&mut out, 4)), "true");
+    check(
+        "ReadBytes ok",
+        fmt::Sprintf!("%v", s4.ReadBytes(&mut out, 4)),
+        "true",
+    );
     check("ReadBytes value", hx(&out), "00024455");
 
     let mut s5 = cryptobyte::String::New(data());
     let mut buf = slice::__from_vec(alloc::vec![0u8; 5]);
-    check("CopyBytes ok", fmt::Sprintf!("%v", s5.CopyBytes(&mut buf)), "true");
+    check(
+        "CopyBytes ok",
+        fmt::Sprintf!("%v", s5.CopyBytes(&mut buf)),
+        "true",
+    );
     check("CopyBytes value", hx(&buf), "a1b2c3d4e5");
 
     let mut s6 = cryptobyte::String::New(slice::__from_vec(alloc::vec![1u8]));
@@ -202,7 +246,11 @@ fn main() {
         b.AddBytes(&slice::__from_vec(alloc::vec![0xaau8, 0xbb]));
         let (out, err) = b.Bytes();
         check("Builder fixed-width appends", hx(&out), FLAT);
-        check("Builder no error", fmt::Sprintf!("%v", err != goish::nil), "false");
+        check(
+            "Builder no error",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "false",
+        );
     }
     {
         let mut b = cryptobyte::NewBuilder(slice::__from_vec(Vec::<byte>::new()));
@@ -259,8 +307,16 @@ fn main() {
         b.SetError(goish::errors::New("test"));
         b.AddUint8(2);
         let (out, err) = b.Bytes();
-        check("SetError reported", fmt::Sprintf!("%v", err != goish::nil), "true");
-        check("SetError yields no bytes", fmt::Sprintf!("%d", out.Len()), "0");
+        check(
+            "SetError reported",
+            fmt::Sprintf!("%v", err != goish::nil),
+            "true",
+        );
+        check(
+            "SetError yields no bytes",
+            fmt::Sprintf!("%d", out.Len()),
+            "0",
+        );
     }
 
     // ---- ASN.1: the exact shape crypto/ecdsa's encodeSignature and
@@ -283,10 +339,26 @@ fn main() {
         check("outer consumed", fmt::Sprintf!("%v", input.Empty()), "true");
         let mut pr = slice::__from_vec(Vec::<byte>::new());
         let mut ps = slice::__from_vec(Vec::<byte>::new());
-        check("ReadASN1Integer r", fmt::Sprintf!("%v", inner.ReadASN1Integer(&mut pr)), "true");
-        check("ReadASN1Integer s", fmt::Sprintf!("%v", inner.ReadASN1Integer(&mut ps)), "true");
-        check("round-tripped r", hx(&pr), "a795910512841e8fd1f1b8731ca6bd837d5661988ab0aea8d0d6da50c78280e3");
-        check("round-tripped s", hx(&ps), "6b52761927fc4093746587d082c09c53d9b16d8623840b7431dc66bed0e25727");
+        check(
+            "ReadASN1Integer r",
+            fmt::Sprintf!("%v", inner.ReadASN1Integer(&mut pr)),
+            "true",
+        );
+        check(
+            "ReadASN1Integer s",
+            fmt::Sprintf!("%v", inner.ReadASN1Integer(&mut ps)),
+            "true",
+        );
+        check(
+            "round-tripped r",
+            hx(&pr),
+            "a795910512841e8fd1f1b8731ca6bd837d5661988ab0aea8d0d6da50c78280e3",
+        );
+        check(
+            "round-tripped s",
+            hx(&ps),
+            "6b52761927fc4093746587d082c09c53d9b16d8623840b7431dc66bed0e25727",
+        );
         check("inner consumed", fmt::Sprintf!("%v", inner.Empty()), "true");
 
         // High bit set gets a 0x00 pad, per DER.
@@ -304,7 +376,11 @@ fn main() {
             slice::__from_vec(raw[..8].to_vec())
         };
         check("long-form header", hx(&head), "3081ce0281c81111");
-        check("long-form total length", fmt::Sprintf!("%d", longSig.Len()), "209");
+        check(
+            "long-form total length",
+            fmt::Sprintf!("%d", longSig.Len()),
+            "209",
+        );
         let mut ls = cryptobyte::String::New(longSig);
         let mut li = cryptobyte::String::default();
         check(

@@ -199,11 +199,7 @@ fn test_10_format_dispatch() {
     let v_name = fmt::Sprintf!("%v", w);
     let d_num = fmt::Sprintf!("%d", m);
     let d_num_w = fmt::Sprintf!("%d", w);
-    if s_name == s("October")
-        && v_name == s("Tuesday")
-        && d_num == s("10")
-        && d_num_w == s("2")
-    {
+    if s_name == s("October") && v_name == s("Tuesday") && d_num == s("10") && d_num_w == s("2") {
         ok_line(b"[10] Sprintf %s/%v/%d dispatch   PASS\n");
     } else {
         ok_line(b"[10] Sprintf %s/%v/%d dispatch   FAIL\n");

@@ -29,10 +29,10 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::crypto::rand::RandReader;
 use goish::crypto::rsa::{self, PrivateKey, PublicKey};
 use goish::crypto::{sha1, sha256};
+use goish::fmt;
 use goish::math::big;
 use goish::types::byte;
 use goish::{slice, syscall};
@@ -158,7 +158,11 @@ fn run_tests() {
 fn test_1_size() {
     let key = test_key();
     // 512-bit modulus -> 64-byte size.
-    check(1, b"PublicKey.Size() == 64       ", key.PublicKey.Size() == 64);
+    check(
+        1,
+        b"PublicKey.Size() == 64       ",
+        key.PublicKey.Size() == 64,
+    );
 }
 
 fn test_2_precompute() {
@@ -190,9 +194,8 @@ fn test_4_validate_missing_primes() {
 fn test_5_public() {
     let key = test_key();
     let pub_key = key.Public();
-    let ok = pub_key.Equal(&key.PublicKey)
-        && pub_key.N.Cmp(&key.PublicKey.N) == 0
-        && pub_key.E == 65537;
+    let ok =
+        pub_key.Equal(&key.PublicKey) && pub_key.N.Cmp(&key.PublicKey.N) == 0 && pub_key.E == 65537;
     check(5, b"Public() == embedded pub     ", ok);
 }
 
@@ -242,8 +245,7 @@ fn test_9_pkcs1v15_sign() {
     let mut rng = RandReader;
 
     let digest = sha256_digest();
-    let (sig, e1) =
-        rsa::SignPKCS1v15(&mut rng, &key, goish::crypto::SHA256, digest.clone());
+    let (sig, e1) = rsa::SignPKCS1v15(&mut rng, &key, goish::crypto::SHA256, digest.clone());
     let ev = rsa::VerifyPKCS1v15(&key.PublicKey, goish::crypto::SHA256, digest, sig);
 
     let ok = e1 == goish::nil && ev == goish::nil;
@@ -256,8 +258,7 @@ fn test_10_pkcs1v15_verify_reject() {
     let mut rng = RandReader;
 
     let digest = sha256_digest();
-    let (sig, _) =
-        rsa::SignPKCS1v15(&mut rng, &key, goish::crypto::SHA256, digest.clone());
+    let (sig, _) = rsa::SignPKCS1v15(&mut rng, &key, goish::crypto::SHA256, digest.clone());
     // Tamper with the signature.
     let mut sv: alloc::vec::Vec<byte> = (0..sig.Len()).map(|i| sig[i]).collect();
     sv[0] ^= 0xff;
@@ -274,8 +275,13 @@ fn test_11_oaep() {
     // SHA-1 OAEP fits a 512-bit key: maxMsg = 64 - 2*20 - 2 = 22 bytes.
     let plain = from_bytes(b"oaep round-trip");
     let mut h = sha1::New();
-    let (ct, e1) =
-        rsa::EncryptOAEP(&mut h, &mut rng, &key.PublicKey, plain.clone(), slice::new());
+    let (ct, e1) = rsa::EncryptOAEP(
+        &mut h,
+        &mut rng,
+        &key.PublicKey,
+        plain.clone(),
+        slice::new(),
+    );
     let mut h2 = sha1::New();
     let (pt, e2) = rsa::DecryptOAEP(&mut h2, &mut rng, &key, ct, slice::new());
 
@@ -289,20 +295,8 @@ fn test_12_pss() {
     let mut rng = RandReader;
 
     let digest = sha256_digest();
-    let (sig, e1) = rsa::SignPSS(
-        &mut rng,
-        &key,
-        goish::crypto::SHA256,
-        digest.clone(),
-        None,
-    );
-    let ev = rsa::VerifyPSS(
-        &key.PublicKey,
-        goish::crypto::SHA256,
-        digest,
-        sig,
-        None,
-    );
+    let (sig, e1) = rsa::SignPSS(&mut rng, &key, goish::crypto::SHA256, digest.clone(), None);
+    let ev = rsa::VerifyPSS(&key.PublicKey, goish::crypto::SHA256, digest, sig, None);
     let ok = e1 == goish::nil && ev == goish::nil;
     check(12, b"SignPSS->VerifyPSS           ", ok);
 }
@@ -313,13 +307,7 @@ fn test_13_pss_verify_reject() {
     let mut rng = RandReader;
 
     let digest = sha256_digest();
-    let (sig, _) = rsa::SignPSS(
-        &mut rng,
-        &key,
-        goish::crypto::SHA256,
-        digest.clone(),
-        None,
-    );
+    let (sig, _) = rsa::SignPSS(&mut rng, &key, goish::crypto::SHA256, digest.clone(), None);
     let mut sv: alloc::vec::Vec<byte> = (0..sig.Len()).map(|i| sig[i]).collect();
     sv[10] ^= 0xff;
     let bad = slice::<byte>::__from_vec(sv);
@@ -338,9 +326,8 @@ fn test_14_generatekey() {
         return;
     }
 
-    let mut ok = key.PublicKey.E == 65537
-        && key.Primes.Len() == 2
-        && key.PublicKey.N.BitLen() == 512;
+    let mut ok =
+        key.PublicKey.E == 65537 && key.Primes.Len() == 2 && key.PublicKey.N.BitLen() == 512;
 
     // The generated key must Validate and round-trip a PKCS1v15 message.
     if ok {

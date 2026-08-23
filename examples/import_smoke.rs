@@ -22,7 +22,9 @@ fn die(msg: &[u8]) -> ! {
 }
 
 fn check(cond: bool, msg: &[u8]) {
-    if !cond { die(msg); }
+    if !cond {
+        die(msg);
+    }
 }
 
 // Counters that the inline ports' init() functions tick. Using a
@@ -68,19 +70,27 @@ fn main() {
     // By the time main is reached, #[goish::main]'s prelude has
     // already called `goish::__run_pkg_inits()` which walked
     // `.init_array` and dispatched both fake_port_*::init() bodies.
-    check(FAKE_PORT_A_RAN.load(Ordering::Relaxed) == 1,
-          b"import: fake_port_a init ran wrong number of times\n");
-    check(FAKE_PORT_B_RAN.load(Ordering::Relaxed) == 1,
-          b"import: fake_port_b init ran wrong number of times\n");
+    check(
+        FAKE_PORT_A_RAN.load(Ordering::Relaxed) == 1,
+        b"import: fake_port_a init ran wrong number of times\n",
+    );
+    check(
+        FAKE_PORT_B_RAN.load(Ordering::Relaxed) == 1,
+        b"import: fake_port_b init ran wrong number of times\n",
+    );
 
     // Aliases resolve at function scope too. Re-calling init() is
     // idempotent — state machine returns immediately.
     fpa::init();
     fpb::init();
-    check(FAKE_PORT_A_RAN.load(Ordering::Relaxed) == 1,
-          b"import: alias re-ran fake_port_a init\n");
-    check(FAKE_PORT_B_RAN.load(Ordering::Relaxed) == 1,
-          b"import: alias re-ran fake_port_b init\n");
+    check(
+        FAKE_PORT_A_RAN.load(Ordering::Relaxed) == 1,
+        b"import: alias re-ran fake_port_a init\n",
+    );
+    check(
+        FAKE_PORT_B_RAN.load(Ordering::Relaxed) == 1,
+        b"import: alias re-ran fake_port_b init\n",
+    );
 
     const OK: &[u8] = b"import_smoke: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

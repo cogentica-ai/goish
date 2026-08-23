@@ -11,7 +11,7 @@ extern crate goish;
 
 use goish::fmt;
 use goish::math::bits;
-use goish::{syscall};
+use goish::syscall;
 
 #[goish::main]
 fn main() {

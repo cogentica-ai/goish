@@ -19,14 +19,22 @@ fn main() {
     let mut failed = 0;
 
     // Helper: run resolvePath(base, ref) and compare to want.
-    let check = |idx: i32, base: &'static str, reference: &'static str, want: &'static str, fail: &mut i32| {
+    let check = |idx: i32,
+                 base: &'static str,
+                 reference: &'static str,
+                 want: &'static str,
+                 fail: &mut i32| {
         let got = http::ResolvePath(string(base), string(reference));
         if got == want {
             fmt::Println!("[{}] resolvePath PASS", idx);
         } else {
             fmt::Println!(
                 "[{}] resolvePath FAIL base={} ref={} got={} want={}",
-                idx, base, reference, got, want
+                idx,
+                base,
+                reference,
+                got,
+                want
             );
             *fail += 1;
         }

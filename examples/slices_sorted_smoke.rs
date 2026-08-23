@@ -12,8 +12,8 @@ use goish::fmt;
 use goish::goslice::slice;
 use goish::slices;
 use goish::string;
+use goish::syscall;
 use goish::types::int;
-use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -100,13 +100,8 @@ fn main() {
     {
         // Pairs of (key, value); sort by key only — stable preserves
         // value ordering for equal keys.
-        let pairs: slice<(int, int)> = slice::__from_vec(alloc::vec![
-            (1, 10),
-            (2, 20),
-            (1, 11),
-            (2, 21),
-            (1, 12),
-        ]);
+        let pairs: slice<(int, int)> =
+            slice::__from_vec(alloc::vec![(1, 10), (2, 20), (1, 11), (2, 21), (1, 12),]);
         let out = slices::SortedStableFunc(&pairs, |a, b| a.0 - b.0);
         let raw: &[(int, int)] = &out;
         if raw == [(1, 10), (1, 11), (1, 12), (2, 20), (2, 21)] {

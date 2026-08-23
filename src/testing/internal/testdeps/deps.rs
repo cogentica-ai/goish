@@ -8,7 +8,6 @@
 
 extern crate alloc;
 
-
 use crate::gostring::string;
 
 // go: sdk 1.25.5 testing/internal/testdeps/deps.go:34 TestDeps
@@ -116,9 +115,8 @@ impl TestDeps {
 /// result is still valid.
 #[allow(non_camel_case_types)]
 pub struct testLog {
-    pub(crate) w: Option<
-        crate::bufio::Writer<alloc::boxed::Box<dyn crate::io::Writer + Send + Sync>>,
-    >,
+    pub(crate) w:
+        Option<crate::bufio::Writer<alloc::boxed::Box<dyn crate::io::Writer + Send + Sync>>>,
     pub(crate) set: bool,
 }
 

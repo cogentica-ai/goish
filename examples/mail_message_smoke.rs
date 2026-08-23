@@ -8,10 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
 use goish::error;
 use goish::errors;
+use goish::fmt;
 use goish::io::{self, Reader};
 use goish::net::mail;
 use goish::{string, syscall};

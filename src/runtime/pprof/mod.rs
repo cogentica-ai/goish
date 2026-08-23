@@ -36,8 +36,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::errors::{self, error};
-use crate::string;
 use crate::gostring::string as gostring_ty;
+use crate::string;
 use crate::types::{int, uintptr};
 
 // go: sdk 1.25.5 runtime/pprof/pprof.go:172-178 Profile
@@ -268,9 +268,7 @@ pub fn lostProfileEvent() {
 /// platforms without profiling support — and net/http/pprof's
 /// Profile handler serves it exactly as Go serves profiler failures.
 pub fn StartCPUProfile(_w: &mut dyn crate::io::Writer) -> error {
-    return errors::New(string(
-        "cpu profiling not supported by the goish runtime",
-    ));
+    return errors::New(string("cpu profiling not supported by the goish runtime"));
 }
 
 // go: sdk 1.25.5 runtime/pprof/pprof.go:884-894 StopCPUProfile

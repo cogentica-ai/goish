@@ -52,10 +52,10 @@ use crate::types::uint16;
 use crate::{append, byte, error, int64};
 
 use super::field::{
-    inverseNTT, nttElement, nttMul, ntt, polyAdd, polyByteDecode, polyByteEncode, polySub,
+    inverseNTT, ntt, nttElement, nttMul, polyAdd, polyByteDecode, polyByteEncode, polySub,
     ringCompressAndEncode1, ringCompressAndEncode10, ringCompressAndEncode4,
     ringDecodeAndDecompress1, ringDecodeAndDecompress10, ringDecodeAndDecompress4, ringElement,
-    samplePolyCBD, sampleNTT,
+    sampleNTT, samplePolyCBD,
 };
 
 // Go: mlkem768.go:35-53 — ML-KEM global constants.
@@ -405,7 +405,10 @@ fn newKeyFromSeed(
 ) -> (Box<DecapsulationKey768>, error) {
     // Go: if len(seed) != SeedSize { return nil, errors.New("mlkem: invalid seed length") }
     if seed.Len() != int64(SeedSize) {
-        return (Box::new(zeroDK()), errors::New("mlkem: invalid seed length"));
+        return (
+            Box::new(zeroDK()),
+            errors::New("mlkem: invalid seed length"),
+        );
     }
     let mut dk = dk;
     // Go: d := (*[32]byte)(seed[:32]); z := (*[32]byte)(seed[32:])
@@ -807,11 +810,7 @@ fn kemDecaps(dk: &DecapsulationKey768, c: &[byte; CiphertextSize768]) -> slice<b
 
     // Go: subtle.ConstantTimeCopy(subtle.ConstantTimeCompare(c[:], c1), Kout, Kprime)
     let cs = slice::__from_vec(c.to_vec());
-    subtle::ConstantTimeCopy(
-        subtle::ConstantTimeCompare(&cs, &c1),
-        &mut Kout,
-        &Kprime,
-    );
+    subtle::ConstantTimeCopy(subtle::ConstantTimeCompare(&cs, &c1), &mut Kout, &Kprime);
     return Kout;
 }
 

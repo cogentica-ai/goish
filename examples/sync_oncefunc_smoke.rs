@@ -12,8 +12,8 @@ use core::sync::atomic::{AtomicI32, Ordering};
 use goish::fmt;
 use goish::string;
 use goish::sync;
+use goish::syscall;
 use goish::types::int;
-use goish::{syscall};
 
 static CALLS: AtomicI32 = AtomicI32::new(0);
 static EXPENSIVE: AtomicI32 = AtomicI32::new(0);
@@ -34,7 +34,10 @@ fn main() {
         if CALLS.load(Ordering::SeqCst) == 1 {
             fmt::Println!("[ 1] OnceFunc once             PASS");
         } else {
-            fmt::Println!("[ 1] OnceFunc once             FAIL: ", CALLS.load(Ordering::SeqCst));
+            fmt::Println!(
+                "[ 1] OnceFunc once             FAIL: ",
+                CALLS.load(Ordering::SeqCst)
+            );
             failed += 1;
         }
     }
@@ -49,11 +52,7 @@ fn main() {
         let a = v();
         let b = v();
         let c = v();
-        if a == 42
-            && b == 42
-            && c == 42
-            && EXPENSIVE.load(Ordering::SeqCst) == 1
-        {
+        if a == 42 && b == 42 && c == 42 && EXPENSIVE.load(Ordering::SeqCst) == 1 {
             fmt::Println!("[ 2] OnceValue once            PASS");
         } else {
             fmt::Println!("[ 2] OnceValue once            FAIL");
@@ -63,9 +62,7 @@ fn main() {
 
     // 3. OnceValue — string result.
     {
-        let v = sync::OnceValue(|| -> string {
-            string("hello")
-        });
+        let v = sync::OnceValue(|| -> string { string("hello") });
         let a = v();
         let b = v();
         if a == string("hello") && b == string("hello") {
@@ -98,9 +95,7 @@ fn main() {
 
     // 5. OnceValues — replays both values across calls.
     {
-        let p = sync::OnceValues(|| -> (int, string) {
-            (7, string("widgets"))
-        });
+        let p = sync::OnceValues(|| -> (int, string) { (7, string("widgets")) });
         let (a, b) = p();
         let (c, d) = p();
         if a == 7 && c == 7 && b == string("widgets") && d == string("widgets") {

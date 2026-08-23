@@ -145,7 +145,14 @@ fn main() {
         for (input, want) in cases {
             let got = goish::net::http::header::CanonicalHeaderKey(string(*input));
             if got != *want {
-                fmt::Println!("     CanonicalHeaderKey(", *input, ") = ", got, " want ", *want);
+                fmt::Println!(
+                    "     CanonicalHeaderKey(",
+                    *input,
+                    ") = ",
+                    got,
+                    " want ",
+                    *want
+                );
                 bad += 1;
             }
         }

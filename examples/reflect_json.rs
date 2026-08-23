@@ -42,7 +42,7 @@ pub struct Bag {
 
 #[goish::reflect]
 pub struct Bare {
-    Field: int,    // no tag — falls back to field name
+    Field: int, // no tag — falls back to field name
 }
 
 #[goish::main]
@@ -58,7 +58,10 @@ fn main() {
         check(err == goish::nil, b"reflect-json: marshal err\n");
         let got = string::from_bytes(&b.__into_vec());
         // Field order = declaration order. Hidden is "-".
-        check(got == r#"{"name":"alice","age":30}"#, b"reflect-json: person body\n");
+        check(
+            got == r#"{"name":"alice","age":30}"#,
+            b"reflect-json: person body\n",
+        );
     }
 
     // ─── omitempty skips zero values ─────────────────────────────────
@@ -119,7 +122,10 @@ fn main() {
         let (b, err) = json::Marshal(&m);
         check(err == goish::nil, b"reflect-json: map err\n");
         let got = string::from_bytes(&b.__into_vec());
-        check(got == r#"{"alpha":1,"mu":2,"zeta":3}"#, b"reflect-json: map body\n");
+        check(
+            got == r#"{"alpha":1,"mu":2,"zeta":3}"#,
+            b"reflect-json: map body\n",
+        );
     }
 
     // ─── json::Value still flows through Marshal — round-trip ────────
@@ -138,7 +144,11 @@ fn main() {
 
     // ─── Unmarshal: tag-driven into a typed struct ───────────────────
     {
-        let mut p = Person { Name: string::new(), Age: 0, Hidden: 0 };
+        let mut p = Person {
+            Name: string::new(),
+            Age: 0,
+            Hidden: 0,
+        };
         let err = json::Unmarshal(br#"{"name":"alice","age":30}"#, &mut p);
         check(err == goish::nil, b"reflect-json: unmarshal err\n");
         check(p.Name == "alice", b"reflect-json: unmarshal Name\n");
@@ -147,7 +157,11 @@ fn main() {
 
     // ─── Unmarshal: missing fields stay at zero ──────────────────────
     {
-        let mut p = Person { Name: string::new(), Age: 0, Hidden: 0 };
+        let mut p = Person {
+            Name: string::new(),
+            Age: 0,
+            Hidden: 0,
+        };
         let err = json::Unmarshal(br#"{"name":"bob"}"#, &mut p);
         check(err == goish::nil, b"reflect-json: missing-field err\n");
         check(p.Name == "bob", b"reflect-json: missing-field Name\n");
@@ -156,7 +170,11 @@ fn main() {
 
     // ─── Unmarshal: "-" tag drops fields on input too ────────────────
     {
-        let mut p = Person { Name: string::new(), Age: 0, Hidden: 0 };
+        let mut p = Person {
+            Name: string::new(),
+            Age: 0,
+            Hidden: 0,
+        };
         let err = json::Unmarshal(br#"{"name":"x","Hidden":99}"#, &mut p);
         check(err == goish::nil, b"reflect-json: dash err\n");
         // Hidden has json:"-" — must NOT be populated.
@@ -165,11 +183,11 @@ fn main() {
 
     // ─── Unmarshal: nested slice<string> field ───────────────────────
     {
-        let mut bag = Bag { Items: goish::slice!([]string{}), Count: 0 };
-        let err = json::Unmarshal(
-            br#"{"items":["x","y","z"],"count":3}"#,
-            &mut bag,
-        );
+        let mut bag = Bag {
+            Items: goish::slice!([]string{}),
+            Count: 0,
+        };
+        let err = json::Unmarshal(br#"{"items":["x","y","z"],"count":3}"#, &mut bag);
         check(err == goish::nil, b"reflect-json: bag err\n");
         check(bag.Count == 3, b"reflect-json: bag Count\n");
         check(bag.Items.Len() == 3, b"reflect-json: bag Items len\n");
@@ -183,7 +201,10 @@ fn main() {
         check(err == goish::nil, b"reflect-json: dynamic err\n");
         let (b, _) = json::Marshal(&v);
         let got = string::from_bytes(&b.__into_vec());
-        check(got == r#"{"a":1,"b":[2,3]}"#, b"reflect-json: dynamic round-trip\n");
+        check(
+            got == r#"{"a":1,"b":[2,3]}"#,
+            b"reflect-json: dynamic round-trip\n",
+        );
     }
 
     const OK: &[u8] = b"reflect-json: ok\n";

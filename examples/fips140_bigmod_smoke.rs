@@ -97,7 +97,11 @@ macro_rules! curve {
         check(concat!($tag, " a*b"), hx(&acc.Mul(&b, &m).Bytes(&m)), $mul);
 
         let mut e = bigmod::Nat::NewNat();
-        check(concat!($tag, " a^b"), hx(&e.Exp(&a, bB, &m).Bytes(&m)), $exp);
+        check(
+            concat!($tag, " a^b"),
+            hx(&e.Exp(&a, bB, &m).Bytes(&m)),
+            $exp,
+        );
         let mut e = bigmod::Nat::NewNat();
         check(
             concat!($tag, " a^65537"),
@@ -140,7 +144,9 @@ macro_rules! curve {
 
 #[goish::main]
 fn main() {
-    curve!(256, "256",
+    curve!(
+        256,
+        "256",
         "0b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde5",
         "28364452606e7c8a98a6b4c2d0deecfb09172533414f5d6b798795a3b1bfcddc",
         "70f7ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cb",
@@ -149,8 +155,11 @@ fn main() {
         "02c75996b41cb3210c77d06a118ae55ffda676ddb37606984a17d03d6f075fcb",
         "true",
         "62c56e0fad0098e971aa23a87b532e191c2df35f7889875d0bf88ac963180856",
-        "32 256");
-    curve!(1024, "1024",
+        "32 256"
+    );
+    curve!(
+        1024,
+        "1024",
         "0b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4\
          ebf2f900070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4\
          cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4\
@@ -180,8 +189,11 @@ fn main() {
          ae7bf2000a7406e6f6207ffde065fab67a3b234609875dc031f7db4c14083d82\
          5a6dd585ae5eb86416560e336a7bd71ca89a74116ef2f4199d7c8c6226589fc6\
          e977dea54ba2f461ac07e1648dd0df5c46d181ecca441cbbff75cfda3f5de8af",
-        "128 1024");
-    curve!(2048, "2048",
+        "128 1024"
+    );
+    curve!(
+        2048,
+        "2048",
         "0b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4\
          ebf2f900070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4\
          cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4\
@@ -232,7 +244,8 @@ fn main() {
          3db4d1eadf81287ffadd0427429d0af361067de946e5c6b497071ceb78f3b93b",
         "false",
         "",
-        "256 2048");
+        "256 2048"
+    );
 
     if unsafe { FAILED } {
         goish::syscall::Exit(1);

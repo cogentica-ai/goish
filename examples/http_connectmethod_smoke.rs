@@ -34,21 +34,31 @@ fn check(name: &'static str, ok: bool, detail: goish::string) {
 
 #[goish::main]
 fn main() {
-    goish::go!(stack(512 * 1024), move || { run(); });
-    loop { goish::runtime::sched::Gosched(); }
+    goish::go!(stack(512 * 1024), move || {
+        run();
+    });
+    loop {
+        goish::runtime::sched::Gosched();
+    }
 }
 
 fn run() {
     // ── schemePort ──
     {
         let cases: &[(&str, &str)] = &[
-            ("http", "80"), ("https", "443"), ("socks5", "1080"),
-            ("socks5h", "1080"), ("ftp", ""), ("", ""),
+            ("http", "80"),
+            ("https", "443"),
+            ("socks5", "1080"),
+            ("socks5h", "1080"),
+            ("ftp", ""),
+            ("", ""),
         ];
         let mut bad = string("");
         for (s, want) in cases {
             let got = schemePort(string(*s));
-            if got != *want { bad = fmt::Sprintf!("%s -> %q", string(*s), got); }
+            if got != *want {
+                bad = fmt::Sprintf!("%s -> %q", string(*s), got);
+            }
         }
         check("schemePort over 6 schemes", bad.Len() == 0, bad);
     }
@@ -66,7 +76,9 @@ fn run() {
         for (u, want) in cases {
             let (url, _) = ParseURL(string(*u));
             let got = canonicalAddr(&url);
-            if got != *want { bad = fmt::Sprintf!("%s -> %q want %q", string(*u), got, string(*want)); }
+            if got != *want {
+                bad = fmt::Sprintf!("%s -> %q want %q", string(*u), got, string(*want));
+            }
         }
         check("canonicalAddr over 5 URLs", bad.Len() == 0, bad);
     }
@@ -77,17 +89,44 @@ fn run() {
             ("", "http", "foo.com:80", false, "|http|foo.com:80"),
             ("", "https", "foo.com:443", false, "|https|foo.com:443"),
             ("", "https", "foo.com:443", true, "|https,h1|foo.com:443"),
-            ("http://proxy.com", "https", "foo.com:443", false,
-             "http://proxy.com|https|foo.com:443"),
+            (
+                "http://proxy.com",
+                "https",
+                "foo.com:443",
+                false,
+                "http://proxy.com|https|foo.com:443",
+            ),
             // THE case: http proxy + http target drops the destination,
             // because one socket serves every destination.
-            ("http://proxy.com", "http", "foo.com:80", false, "http://proxy.com|http|"),
-            ("https://proxy.com", "http", "foo.com:80", false, "https://proxy.com|http|"),
+            (
+                "http://proxy.com",
+                "http",
+                "foo.com:80",
+                false,
+                "http://proxy.com|http|",
+            ),
+            (
+                "https://proxy.com",
+                "http",
+                "foo.com:80",
+                false,
+                "https://proxy.com|http|",
+            ),
             // socks5 does NOT drop it — the proxy dials the target.
-            ("socks5://proxy.com", "http", "foo.com:80", false,
-             "socks5://proxy.com|http|foo.com:80"),
-            ("socks5://proxy.com", "https", "foo.com:443", false,
-             "socks5://proxy.com|https|foo.com:443"),
+            (
+                "socks5://proxy.com",
+                "http",
+                "foo.com:80",
+                false,
+                "socks5://proxy.com|http|foo.com:80",
+            ),
+            (
+                "socks5://proxy.com",
+                "https",
+                "foo.com:443",
+                false,
+                "socks5://proxy.com|https|foo.com:443",
+            ),
         ];
         let mut bad = string("");
         for (proxy, target, addr, h1, want) in cases {
@@ -120,8 +159,7 @@ fn run() {
         };
         check(
             "first-hop scheme/addr come from the proxy, tlsHost from the target",
-            cm.scheme() == "socks5" && cm.addr() == "proxy.com:1080"
-                && cm.tlsHost() == "foo.com",
+            cm.scheme() == "socks5" && cm.addr() == "proxy.com:1080" && cm.tlsHost() == "foo.com",
             fmt::Sprintf!("%q %q %q", cm.scheme(), cm.addr(), cm.tlsHost()),
         );
         let direct = connectMethod {
@@ -140,7 +178,10 @@ fn run() {
     let p = PASSED.load(Ordering::Relaxed);
     let f = FAILED.load(Ordering::Relaxed);
     fmt::Printf!("\n%d passed, %d failed\n", p as i64, f as i64);
-    if f == 0 { fmt::Printf!("HTTP_CONNECTMETHOD_SMOKE_OK\n"); goish::os::Exit(0); }
+    if f == 0 {
+        fmt::Printf!("HTTP_CONNECTMETHOD_SMOKE_OK\n");
+        goish::os::Exit(0);
+    }
     fmt::Printf!("HTTP_CONNECTMETHOD_SMOKE_FAIL\n");
     goish::os::Exit(1);
 }

@@ -56,7 +56,6 @@
 
 extern crate alloc;
 
-
 mod asn1;
 mod common;
 mod marshal;
@@ -65,10 +64,12 @@ mod marshal;
 // names; everything else in asn1.go's decode path is unexported there and
 // is re-exported `__`-prefixed only so examples can reach it — the same
 // convention marshal.rs's internals already follow.
-pub use asn1::{invalidUnmarshalError, ParseGeneralizedTime, ParseUTCTime, Unmarshal, UnmarshalWithParams};
 pub use asn1::{
     invalidLength as __invalidLength, parseField as __parseField,
     parseSequenceOf as __parseSequenceOf, setDefaultValue as __setDefaultValue,
+};
+pub use asn1::{
+    invalidUnmarshalError, ParseGeneralizedTime, ParseUTCTime, Unmarshal, UnmarshalWithParams,
 };
 
 // go: none — goish-only: these five are unexported in Go
@@ -87,23 +88,22 @@ pub use common::{fieldParameters, getUniversalType, parseFieldParameters};
 // `Marshal(val any)` is already the type-erased form, and goish's
 // `Marshal` cannot be, because `Reflect` is not object safe. See the
 // note above `MarshalAny` in marshal.rs.
-pub use marshal::{Marshal, MarshalAny, MarshalAnyWithParams, MarshalWithParams};
-pub use marshal::{makeBody as __makeBody, makeField as __makeField};
 pub use marshal::{
     appendBase128Int as __appendBase128Int, appendLength as __appendLength,
     appendTagAndLength as __appendTagAndLength, base128IntLength as __base128IntLength,
     bitStringEncoder as __bitStringEncoder, byteEncoder as __byteEncoder,
     bytesEncoder as __bytesEncoder, encoder as __encoder, int64Encoder as __int64Encoder,
-    lengthLength as __lengthLength, makeIA5String as __makeIA5String,
+    lengthLength as __lengthLength, makeBigInt as __makeBigInt,
+    makeGeneralizedTime as __makeGeneralizedTime, makeIA5String as __makeIA5String,
     makeNumericString as __makeNumericString, makeObjectIdentifier as __makeObjectIdentifier,
-    makePrintableString as __makePrintableString, makeUTF8String as __makeUTF8String,
-    multiEncoder as __multiEncoder, oidEncoder as __oidEncoder,
-    setEncoder as __setEncoder, stringEncoder as __stringEncoder,
-    makeBigInt as __makeBigInt, makeGeneralizedTime as __makeGeneralizedTime,
-    makeUTCTime as __makeUTCTime, outsideUTCRange as __outsideUTCRange,
-    stripTagAndLength as __stripTagAndLength,
+    makePrintableString as __makePrintableString, makeUTCTime as __makeUTCTime,
+    makeUTF8String as __makeUTF8String, multiEncoder as __multiEncoder, oidEncoder as __oidEncoder,
+    outsideUTCRange as __outsideUTCRange, setEncoder as __setEncoder,
+    stringEncoder as __stringEncoder, stripTagAndLength as __stripTagAndLength,
     taggedEncoder as __taggedEncoder,
 };
+pub use marshal::{makeBody as __makeBody, makeField as __makeField};
+pub use marshal::{Marshal, MarshalAny, MarshalAnyWithParams, MarshalWithParams};
 
 use crate::errors::{error, ErrorTrait};
 use crate::goslice::slice;
@@ -356,10 +356,7 @@ pub fn ParseBitString(bytes: slice<byte>) -> (BitString, error) {
     let n = bytes.Len();
     let last = bytes[n - 1];
     let mask: byte = ((1u32 << bytes[0 as int]) - 1) as byte;
-    if paddingBits > 7
-        || (n == 1 && paddingBits > 0)
-        || (last & mask) != 0
-    {
+    if paddingBits > 7 || (n == 1 && paddingBits > 0) || (last & mask) != 0 {
         return (empty, syntax("invalid padding bits in BIT STRING"));
     }
     // Go: ret.BitLength = (len(bytes)-1)*8 - paddingBits
@@ -483,7 +480,10 @@ pub fn ParseObjectIdentifier(bytes: slice<byte>) -> (ObjectIdentifier, error) {
     // Go: if len(bytes) == 0 { … "zero length OBJECT IDENTIFIER" }
     if bytes.Len() == 0 {
         let empty: alloc::vec::Vec<int> = alloc::vec::Vec::new();
-        return (ObjectIdentifier(slice::__from_vec(empty)), syntax("zero length OBJECT IDENTIFIER"));
+        return (
+            ObjectIdentifier(slice::__from_vec(empty)),
+            syntax("zero length OBJECT IDENTIFIER"),
+        );
     }
     // Go: s = make([]int, len(bytes)+1)
     let mut s: alloc::vec::Vec<int> = alloc::vec::Vec::with_capacity((bytes.Len() + 1) as usize);
@@ -562,7 +562,6 @@ impl crate::reflect::Reflect for Flag {
         };
     }
 }
-
 
 // ─── parseBase128Int (asn1.go:300) ────────────────────────────────────
 
@@ -696,7 +695,8 @@ pub fn ParseIA5String(bytes: slice<byte>) -> (string, error) {
 /// to UTF-8 (matches Go and BoringSSL).
 pub fn ParseT61String(bytes: slice<byte>) -> (string, error) {
     // Go: buf := make([]byte, 0, len(bytes))
-    let mut buf: slice<byte> = slice::__from_vec(alloc::vec::Vec::with_capacity(bytes.Len() as usize));
+    let mut buf: slice<byte> =
+        slice::__from_vec(alloc::vec::Vec::with_capacity(bytes.Len() as usize));
     let n = bytes.Len();
     let mut i: int = 0;
     while i < n {
@@ -901,7 +901,11 @@ pub fn ParseTagAndLength(bytes: slice<byte>, init_offset: int) -> (TagAndLength,
             ret.length |= b as int;
             // Go: if ret.length == 0 { err = StructuralError{"superfluous leading zeros in length"} }
             if ret.length == 0 {
-                return (ret, offset, structural("superfluous leading zeros in length"));
+                return (
+                    ret,
+                    offset,
+                    structural("superfluous leading zeros in length"),
+                );
             }
             i += 1;
         }
@@ -1064,12 +1068,8 @@ fn slice_to_bytes(s: &slice<byte>) -> alloc::vec::Vec<byte> {
 impl crate::reflect::Reflect for ObjectIdentifier {
     // go: none — goish-only: the reflect descriptor. See the banner above.
     fn __reflect_type() -> crate::reflect::Type {
-        return crate::reflect::Type::__new(
-            crate::reflect::Kind::Slice,
-            "ObjectIdentifier",
-            &[],
-        )
-        .__with_elem(<int as crate::reflect::Reflect>::__reflect_type);
+        return crate::reflect::Type::__new(crate::reflect::Kind::Slice, "ObjectIdentifier", &[])
+            .__with_elem(<int as crate::reflect::Reflect>::__reflect_type);
     }
 
     // go: none — goish-only: the reflect descriptor. See the banner above.
@@ -1083,8 +1083,8 @@ impl crate::reflect::Reflect for ObjectIdentifier {
         return crate::reflect::Value::Named {
             ty: <ObjectIdentifier as crate::reflect::Reflect>::__reflect_type(),
             inner: alloc::boxed::Box::new(crate::reflect::Value::Slice {
-            elem_type: <int as crate::reflect::Reflect>::__reflect_type,
-            items,
+                elem_type: <int as crate::reflect::Reflect>::__reflect_type,
+                items,
             }),
         };
     }

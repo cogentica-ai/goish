@@ -25,7 +25,10 @@ fn check(cond: bool, msg: &[u8]) {
 fn main() {
     // ─── Duration constants & arithmetic ──────────────────────────────
 
-    check(time::Nanosecond.Nanoseconds() == 1, b"time: Nanosecond const wrong\n");
+    check(
+        time::Nanosecond.Nanoseconds() == 1,
+        b"time: Nanosecond const wrong\n",
+    );
     check(
         time::Microsecond.Nanoseconds() == 1_000,
         b"time: Microsecond const wrong\n",
@@ -54,14 +57,29 @@ fn main() {
     check(d.Milliseconds() == 750, b"time: Second - 250ms wrong\n");
 
     // Constructors
-    check(time::Milliseconds(42).Milliseconds() == 42, b"time: Milliseconds(42) wrong\n");
-    check(time::Microseconds(7).Microseconds() == 7, b"time: Microseconds(7) wrong\n");
-    check(time::Seconds(3).Nanoseconds() == 3_000_000_000, b"time: Seconds(3) wrong\n");
+    check(
+        time::Milliseconds(42).Milliseconds() == 42,
+        b"time: Milliseconds(42) wrong\n",
+    );
+    check(
+        time::Microseconds(7).Microseconds() == 7,
+        b"time: Microseconds(7) wrong\n",
+    );
+    check(
+        time::Seconds(3).Nanoseconds() == 3_000_000_000,
+        b"time: Seconds(3) wrong\n",
+    );
 
     // ─── Duration.String() across magnitudes ──────────────────────────
 
-    check(time::Duration(0).String() == "0s", b"time: Duration(0).String wrong\n");
-    check(time::Nanoseconds(5).String() == "5ns", b"time: 5ns String wrong\n");
+    check(
+        time::Duration(0).String() == "0s",
+        b"time: Duration(0).String wrong\n",
+    );
+    check(
+        time::Nanoseconds(5).String() == "5ns",
+        b"time: 5ns String wrong\n",
+    );
     check(
         time::Microseconds(123).String() == "123us",
         b"time: 123us String wrong\n",
@@ -70,7 +88,10 @@ fn main() {
         time::Milliseconds(250).String() == "250ms",
         b"time: 250ms String wrong\n",
     );
-    check(time::Seconds(5).String() == "5s", b"time: 5s String wrong\n");
+    check(
+        time::Seconds(5).String() == "5s",
+        b"time: 5s String wrong\n",
+    );
     check(
         (time::Minute + time::Second * 30).String() == "1m30s",
         b"time: 1m30s String wrong\n",
@@ -93,7 +114,10 @@ fn main() {
 
     let t = time::Unix(1_700_000_000, 500_000_000); // 1.7e9 sec + 0.5s
     check(t.Unix() == 1_700_000_000, b"time: Unix() wrong\n");
-    check(t.UnixMilli() == 1_700_000_000_500, b"time: UnixMilli wrong\n");
+    check(
+        t.UnixMilli() == 1_700_000_000_500,
+        b"time: UnixMilli wrong\n",
+    );
     check(
         t.UnixNano() == 1_700_000_000_500_000_000,
         b"time: UnixNano wrong\n",

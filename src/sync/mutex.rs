@@ -130,7 +130,12 @@ impl<T> Mutex<T> {
             // directly without re-CAS.
             if self
                 .state
-                .compare_exchange(old, old + M_WAITER_UNIT, Ordering::Relaxed, Ordering::Relaxed)
+                .compare_exchange(
+                    old,
+                    old + M_WAITER_UNIT,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                )
                 .is_err()
             {
                 continue;

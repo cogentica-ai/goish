@@ -41,8 +41,7 @@ pub(crate) struct CoverState {
     pub snapshotcov: Option<crate::testing::testing::SnapCovFunc>,
 }
 
-pub(crate) static cover: crate::sync::Mutex<Option<CoverState>> =
-    crate::sync::Mutex::new(None);
+pub(crate) static cover: crate::sync::Mutex<Option<CoverState>> = crate::sync::Mutex::new(None);
 
 // go: sdk 1.25.5 testing/newcover.go:26-34 registerCover
 /// Go: "registerCover is invoked during 'go test -cover' runs. It is

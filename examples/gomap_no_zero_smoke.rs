@@ -18,7 +18,9 @@ fn die(msg: &[u8]) -> ! {
 }
 
 fn check(cond: bool, msg: &[u8]) {
-    if !cond { die(msg); }
+    if !cond {
+        die(msg);
+    }
 }
 
 // User-defined trait — stands in for any Go interface used as a map
@@ -30,37 +32,55 @@ trait Hasher {
 
 struct H7;
 impl Hasher for H7 {
-    fn name(&self) -> int { 7 }
+    fn name(&self) -> int {
+        7
+    }
 }
 
 struct H42;
 impl Hasher for H42 {
-    fn name(&self) -> int { 42 }
+    fn name(&self) -> int {
+        42
+    }
 }
 
 #[goish::main]
 fn main() {
     // Ctor — works without V: Default
-    let mut hashers: goish::map<string, Box<dyn Hasher + Send + Sync>>
-        = goish::map::new_no_zero();
+    let mut hashers: goish::map<string, Box<dyn Hasher + Send + Sync>> = goish::map::new_no_zero();
     check(len(&hashers) == 0, b"no-zero map: initial len != 0\n");
 
     // Has() works — answer is false for any key when the map is empty
-    check(!hashers.Has(string::from_static("seven")),
-          b"no-zero map: Has(seven) wrong on empty\n");
+    check(
+        !hashers.Has(string::from_static("seven")),
+        b"no-zero map: Has(seven) wrong on empty\n",
+    );
 
     // Insert via Set (IndexMut still requires V: Default, so use Set
     // for non-Default V). Box<dyn Trait> is not Clone either, so the
     // existing `m["k"] = v` IndexMut path doesn't apply anyway.
-    hashers.Set(string::from_static("seven"), Box::new(H7) as Box<dyn Hasher + Send + Sync>);
-    hashers.Set(string::from_static("forty-two"), Box::new(H42) as Box<dyn Hasher + Send + Sync>);
-    check(len(&hashers) == 2, b"no-zero map: len after 2 inserts != 2\n");
+    hashers.Set(
+        string::from_static("seven"),
+        Box::new(H7) as Box<dyn Hasher + Send + Sync>,
+    );
+    hashers.Set(
+        string::from_static("forty-two"),
+        Box::new(H42) as Box<dyn Hasher + Send + Sync>,
+    );
+    check(
+        len(&hashers) == 2,
+        b"no-zero map: len after 2 inserts != 2\n",
+    );
 
     // Has() — present
-    check(hashers.Has(string::from_static("seven")),
-          b"no-zero map: Has(seven) wrong\n");
-    check(hashers.Has(string::from_static("forty-two")),
-          b"no-zero map: Has(forty-two) wrong\n");
+    check(
+        hashers.Has(string::from_static("seven")),
+        b"no-zero map: Has(seven) wrong\n",
+    );
+    check(
+        hashers.Has(string::from_static("forty-two")),
+        b"no-zero map: Has(forty-two) wrong\n",
+    );
 
     // Read via Index (panics on missing — caller must Has() first)
     if hashers.Has(string::from_static("seven")) {
@@ -74,7 +94,10 @@ fn main() {
 
     // GetRef — borrow-form comma-ok, no V: Clone / Default bounds.
     let (h_opt, ok) = hashers.GetRef(string::from_static("seven"));
-    check(ok && h_opt.unwrap().name() == 7, b"no-zero map: GetRef(seven) wrong\n");
+    check(
+        ok && h_opt.unwrap().name() == 7,
+        b"no-zero map: GetRef(seven) wrong\n",
+    );
 
     let (_, ok2) = hashers.GetRef(string::from_static("missing"));
     check(!ok2, b"no-zero map: GetRef(missing) ok must be false\n");

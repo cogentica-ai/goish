@@ -12,6 +12,8 @@ pub mod utf8;
 mod tables;
 pub use tables::{Mn, Zs};
 
+mod category_tables;
+
 use crate::types::{int, rune};
 
 // Go: unicode/letter.go:9-14.
@@ -167,9 +169,19 @@ pub fn IsSpace(r: rune) -> bool {
     matches!(r, 0x09 | 0x0A | 0x0B | 0x0C | 0x0D | 0x20 | 0x85 | 0xA0)
 }
 
-/// `unicode.IsLetter(r)` — ASCII letters only in v1.
+/// `unicode.IsLetter(r)` — whether the rune has Unicode category L.
 pub fn IsLetter(r: rune) -> bool {
-    (r >= b'A' as rune && r <= b'Z' as rune) || (r >= b'a' as rune && r <= b'z' as rune)
+    Is(&category_tables::LETTER, r)
+}
+
+/// `unicode.IsMark(r)` — whether the rune has Unicode category M.
+pub fn IsMark(r: rune) -> bool {
+    Is(&category_tables::MARK, r)
+}
+
+/// `unicode.IsNumber(r)` — whether the rune has Unicode category N.
+pub fn IsNumber(r: rune) -> bool {
+    Is(&category_tables::NUMBER, r)
 }
 
 /// `unicode.IsDigit(r)` — ASCII '0'..'9' only in v1.
@@ -311,4 +323,3 @@ pub fn IsTitle(_r: rune) -> bool {
     // Go: if r <= MaxLatin1 { return false }; return isExcludingLatin(Title, r)
     false
 }
-

@@ -125,7 +125,11 @@ fn main() {
             off: 0,
         };
         let err = TestReader(r, content());
-        let m = if err != errors::nil { err.Error() } else { s("") };
+        let m = if err != errors::nil {
+            err.Error()
+        } else {
+            s("")
+        };
         let ms: &str = m.as_ref();
         if err != errors::nil && ms.starts_with("Read(0) =") {
             fmt::Println!("[ 3] EOF-on-empty rejected     PASS");
@@ -143,7 +147,11 @@ fn main() {
             off: 0,
         };
         let err = TestReader(r, content());
-        let m = if err != errors::nil { err.Error() } else { s("") };
+        let m = if err != errors::nil {
+            err.Error()
+        } else {
+            s("")
+        };
         let ms: &str = m.as_ref();
         if err != errors::nil && ms.starts_with("ReadAll(small amounts)") {
             fmt::Println!("[ 4] lossy reader rejected     PASS");

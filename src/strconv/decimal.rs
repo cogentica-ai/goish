@@ -289,67 +289,250 @@ struct LeftCheat {
 }
 
 const LEFT_CHEATS: &[LeftCheat] = &[
-    LeftCheat { delta: 0, cutoff: b"" },
-    LeftCheat { delta: 1, cutoff: b"5" },
-    LeftCheat { delta: 1, cutoff: b"25" },
-    LeftCheat { delta: 1, cutoff: b"125" },
-    LeftCheat { delta: 2, cutoff: b"625" },
-    LeftCheat { delta: 2, cutoff: b"3125" },
-    LeftCheat { delta: 2, cutoff: b"15625" },
-    LeftCheat { delta: 3, cutoff: b"78125" },
-    LeftCheat { delta: 3, cutoff: b"390625" },
-    LeftCheat { delta: 3, cutoff: b"1953125" },
-    LeftCheat { delta: 4, cutoff: b"9765625" },
-    LeftCheat { delta: 4, cutoff: b"48828125" },
-    LeftCheat { delta: 4, cutoff: b"244140625" },
-    LeftCheat { delta: 4, cutoff: b"1220703125" },
-    LeftCheat { delta: 5, cutoff: b"6103515625" },
-    LeftCheat { delta: 5, cutoff: b"30517578125" },
-    LeftCheat { delta: 5, cutoff: b"152587890625" },
-    LeftCheat { delta: 6, cutoff: b"762939453125" },
-    LeftCheat { delta: 6, cutoff: b"3814697265625" },
-    LeftCheat { delta: 6, cutoff: b"19073486328125" },
-    LeftCheat { delta: 7, cutoff: b"95367431640625" },
-    LeftCheat { delta: 7, cutoff: b"476837158203125" },
-    LeftCheat { delta: 7, cutoff: b"2384185791015625" },
-    LeftCheat { delta: 7, cutoff: b"11920928955078125" },
-    LeftCheat { delta: 8, cutoff: b"59604644775390625" },
-    LeftCheat { delta: 8, cutoff: b"298023223876953125" },
-    LeftCheat { delta: 8, cutoff: b"1490116119384765625" },
-    LeftCheat { delta: 9, cutoff: b"7450580596923828125" },
-    LeftCheat { delta: 9, cutoff: b"37252902984619140625" },
-    LeftCheat { delta: 9, cutoff: b"186264514923095703125" },
-    LeftCheat { delta: 10, cutoff: b"931322574615478515625" },
-    LeftCheat { delta: 10, cutoff: b"4656612873077392578125" },
-    LeftCheat { delta: 10, cutoff: b"23283064365386962890625" },
-    LeftCheat { delta: 10, cutoff: b"116415321826934814453125" },
-    LeftCheat { delta: 11, cutoff: b"582076609134674072265625" },
-    LeftCheat { delta: 11, cutoff: b"2910383045673370361328125" },
-    LeftCheat { delta: 11, cutoff: b"14551915228366851806640625" },
-    LeftCheat { delta: 12, cutoff: b"72759576141834259033203125" },
-    LeftCheat { delta: 12, cutoff: b"363797880709171295166015625" },
-    LeftCheat { delta: 12, cutoff: b"1818989403545856475830078125" },
-    LeftCheat { delta: 13, cutoff: b"9094947017729282379150390625" },
-    LeftCheat { delta: 13, cutoff: b"45474735088646411895751953125" },
-    LeftCheat { delta: 13, cutoff: b"227373675443232059478759765625" },
-    LeftCheat { delta: 13, cutoff: b"1136868377216160297393798828125" },
-    LeftCheat { delta: 14, cutoff: b"5684341886080801486968994140625" },
-    LeftCheat { delta: 14, cutoff: b"28421709430404007434844970703125" },
-    LeftCheat { delta: 14, cutoff: b"142108547152020037174224853515625" },
-    LeftCheat { delta: 15, cutoff: b"710542735760100185871124267578125" },
-    LeftCheat { delta: 15, cutoff: b"3552713678800500929355621337890625" },
-    LeftCheat { delta: 15, cutoff: b"17763568394002504646778106689453125" },
-    LeftCheat { delta: 16, cutoff: b"88817841970012523233890533447265625" },
-    LeftCheat { delta: 16, cutoff: b"444089209850062616169452667236328125" },
-    LeftCheat { delta: 16, cutoff: b"2220446049250313080847263336181640625" },
-    LeftCheat { delta: 16, cutoff: b"11102230246251565404236316680908203125" },
-    LeftCheat { delta: 17, cutoff: b"55511151231257827021181583404541015625" },
-    LeftCheat { delta: 17, cutoff: b"277555756156289135105907917022705078125" },
-    LeftCheat { delta: 17, cutoff: b"1387778780781445675529539585113525390625" },
-    LeftCheat { delta: 18, cutoff: b"6938893903907228377647697925567626953125" },
-    LeftCheat { delta: 18, cutoff: b"34694469519536141888238489627838134765625" },
-    LeftCheat { delta: 18, cutoff: b"173472347597680709441192448139190673828125" },
-    LeftCheat { delta: 19, cutoff: b"867361737988403547205962240695953369140625" },
+    LeftCheat {
+        delta: 0,
+        cutoff: b"",
+    },
+    LeftCheat {
+        delta: 1,
+        cutoff: b"5",
+    },
+    LeftCheat {
+        delta: 1,
+        cutoff: b"25",
+    },
+    LeftCheat {
+        delta: 1,
+        cutoff: b"125",
+    },
+    LeftCheat {
+        delta: 2,
+        cutoff: b"625",
+    },
+    LeftCheat {
+        delta: 2,
+        cutoff: b"3125",
+    },
+    LeftCheat {
+        delta: 2,
+        cutoff: b"15625",
+    },
+    LeftCheat {
+        delta: 3,
+        cutoff: b"78125",
+    },
+    LeftCheat {
+        delta: 3,
+        cutoff: b"390625",
+    },
+    LeftCheat {
+        delta: 3,
+        cutoff: b"1953125",
+    },
+    LeftCheat {
+        delta: 4,
+        cutoff: b"9765625",
+    },
+    LeftCheat {
+        delta: 4,
+        cutoff: b"48828125",
+    },
+    LeftCheat {
+        delta: 4,
+        cutoff: b"244140625",
+    },
+    LeftCheat {
+        delta: 4,
+        cutoff: b"1220703125",
+    },
+    LeftCheat {
+        delta: 5,
+        cutoff: b"6103515625",
+    },
+    LeftCheat {
+        delta: 5,
+        cutoff: b"30517578125",
+    },
+    LeftCheat {
+        delta: 5,
+        cutoff: b"152587890625",
+    },
+    LeftCheat {
+        delta: 6,
+        cutoff: b"762939453125",
+    },
+    LeftCheat {
+        delta: 6,
+        cutoff: b"3814697265625",
+    },
+    LeftCheat {
+        delta: 6,
+        cutoff: b"19073486328125",
+    },
+    LeftCheat {
+        delta: 7,
+        cutoff: b"95367431640625",
+    },
+    LeftCheat {
+        delta: 7,
+        cutoff: b"476837158203125",
+    },
+    LeftCheat {
+        delta: 7,
+        cutoff: b"2384185791015625",
+    },
+    LeftCheat {
+        delta: 7,
+        cutoff: b"11920928955078125",
+    },
+    LeftCheat {
+        delta: 8,
+        cutoff: b"59604644775390625",
+    },
+    LeftCheat {
+        delta: 8,
+        cutoff: b"298023223876953125",
+    },
+    LeftCheat {
+        delta: 8,
+        cutoff: b"1490116119384765625",
+    },
+    LeftCheat {
+        delta: 9,
+        cutoff: b"7450580596923828125",
+    },
+    LeftCheat {
+        delta: 9,
+        cutoff: b"37252902984619140625",
+    },
+    LeftCheat {
+        delta: 9,
+        cutoff: b"186264514923095703125",
+    },
+    LeftCheat {
+        delta: 10,
+        cutoff: b"931322574615478515625",
+    },
+    LeftCheat {
+        delta: 10,
+        cutoff: b"4656612873077392578125",
+    },
+    LeftCheat {
+        delta: 10,
+        cutoff: b"23283064365386962890625",
+    },
+    LeftCheat {
+        delta: 10,
+        cutoff: b"116415321826934814453125",
+    },
+    LeftCheat {
+        delta: 11,
+        cutoff: b"582076609134674072265625",
+    },
+    LeftCheat {
+        delta: 11,
+        cutoff: b"2910383045673370361328125",
+    },
+    LeftCheat {
+        delta: 11,
+        cutoff: b"14551915228366851806640625",
+    },
+    LeftCheat {
+        delta: 12,
+        cutoff: b"72759576141834259033203125",
+    },
+    LeftCheat {
+        delta: 12,
+        cutoff: b"363797880709171295166015625",
+    },
+    LeftCheat {
+        delta: 12,
+        cutoff: b"1818989403545856475830078125",
+    },
+    LeftCheat {
+        delta: 13,
+        cutoff: b"9094947017729282379150390625",
+    },
+    LeftCheat {
+        delta: 13,
+        cutoff: b"45474735088646411895751953125",
+    },
+    LeftCheat {
+        delta: 13,
+        cutoff: b"227373675443232059478759765625",
+    },
+    LeftCheat {
+        delta: 13,
+        cutoff: b"1136868377216160297393798828125",
+    },
+    LeftCheat {
+        delta: 14,
+        cutoff: b"5684341886080801486968994140625",
+    },
+    LeftCheat {
+        delta: 14,
+        cutoff: b"28421709430404007434844970703125",
+    },
+    LeftCheat {
+        delta: 14,
+        cutoff: b"142108547152020037174224853515625",
+    },
+    LeftCheat {
+        delta: 15,
+        cutoff: b"710542735760100185871124267578125",
+    },
+    LeftCheat {
+        delta: 15,
+        cutoff: b"3552713678800500929355621337890625",
+    },
+    LeftCheat {
+        delta: 15,
+        cutoff: b"17763568394002504646778106689453125",
+    },
+    LeftCheat {
+        delta: 16,
+        cutoff: b"88817841970012523233890533447265625",
+    },
+    LeftCheat {
+        delta: 16,
+        cutoff: b"444089209850062616169452667236328125",
+    },
+    LeftCheat {
+        delta: 16,
+        cutoff: b"2220446049250313080847263336181640625",
+    },
+    LeftCheat {
+        delta: 16,
+        cutoff: b"11102230246251565404236316680908203125",
+    },
+    LeftCheat {
+        delta: 17,
+        cutoff: b"55511151231257827021181583404541015625",
+    },
+    LeftCheat {
+        delta: 17,
+        cutoff: b"277555756156289135105907917022705078125",
+    },
+    LeftCheat {
+        delta: 17,
+        cutoff: b"1387778780781445675529539585113525390625",
+    },
+    LeftCheat {
+        delta: 18,
+        cutoff: b"6938893903907228377647697925567626953125",
+    },
+    LeftCheat {
+        delta: 18,
+        cutoff: b"34694469519536141888238489627838134765625",
+    },
+    LeftCheat {
+        delta: 18,
+        cutoff: b"173472347597680709441192448139190673828125",
+    },
+    LeftCheat {
+        delta: 19,
+        cutoff: b"867361737988403547205962240695953369140625",
+    },
 ];
 
 /// Is the leading prefix of b lexicographically less than s?

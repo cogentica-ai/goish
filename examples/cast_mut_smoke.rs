@@ -109,7 +109,9 @@ fn main() {
     }
 
     if bad == 0 {
-        fmt::Println!(string::from_static("PASS: cast!(&mut x, J) mutable interface assertion works"));
+        fmt::Println!(string::from_static(
+            "PASS: cast!(&mut x, J) mutable interface assertion works"
+        ));
         syscall::Exit(0);
     } else {
         fmt::Println!(string::from_static("FAIL"));

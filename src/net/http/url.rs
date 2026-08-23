@@ -44,7 +44,11 @@ impl Error {
     pub fn new<O: Into<string>, U: Into<string>>(op: O, url: U, err: error) -> error {
         let op: string = op.into();
         let url: string = url.into();
-        errors::Wrap(Error { Op: op, URL: url, Err: err })
+        errors::Wrap(Error {
+            Op: op,
+            URL: url,
+            Err: err,
+        })
     }
 }
 
@@ -498,10 +502,7 @@ impl URL {
     //
     /// `(u *URL).UnmarshalBinary(text)` (url.go line 1250) — parse bytes
     /// into self in place. Returns any parse error.
-    pub fn UnmarshalBinary(
-        &mut self,
-        text: crate::goslice::slice<crate::types::byte>,
-    ) -> error {
+    pub fn UnmarshalBinary(&mut self, text: crate::goslice::slice<crate::types::byte>) -> error {
         // u1, err := Parse(string(text))
         let s = string::from_bytes(&text);
         let (u1, err) = Parse(s);
@@ -756,8 +757,8 @@ fn validUserinfo(s: string) -> bool {
             continue;
         }
         match r {
-            b'-' | b'.' | b'_' | b':' | b'~' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')'
-            | b'*' | b'+' | b',' | b';' | b'=' | b'%' | b'@' => continue,
+            b'-' | b'.' | b'_' | b':' | b'~' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*'
+            | b'+' | b',' | b';' | b'=' | b'%' | b'@' => continue,
             _ => return false,
         }
     }
@@ -980,10 +981,7 @@ fn parse(raw_url: string, via_request: bool) -> (URL, error) {
             return (u, errors::nil);
         }
         if via_request {
-            return (
-                URL::empty(),
-                errors::New(string("invalid URI for request")),
-            );
+            return (URL::empty(), errors::New(string("invalid URI for request")));
         }
     }
 
@@ -1027,8 +1025,7 @@ fn parse(raw_url: string, via_request: bool) -> (URL, error) {
                     }
                     user = Some(User(un));
                 } else {
-                    let (username, password, _) =
-                        crate::strings::Cut(userinfo, string(":"));
+                    let (username, password, _) = crate::strings::Cut(userinfo, string(":"));
                     let (un, e1) = unescape(username, false);
                     if !e1.IsNil() {
                         return (URL::empty(), e1);
@@ -1368,8 +1365,8 @@ fn validEncoded(s: string, mode: EncodingMode) -> bool {
         let c: byte = s[i];
         // Go: switch s[i] { case '!','$','&','\'','(',')','*','+',',',';','=',':','@': /* ok */
         match c {
-            b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b','
-            | b';' | b'=' | b':' | b'@' => { /* ok */ }
+            b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' | b':'
+            | b'@' => { /* ok */ }
             // Go: case '[', ']': // ok — left alone by modern browsers
             b'[' | b']' => { /* ok */ }
             // Go: case '%': // ok — percent encoded, will decode
@@ -1452,8 +1449,7 @@ fn splitHostPort(host_port: string) -> (string, string) {
         if validOptionalPort(suffix.clone()) {
             // Go: host, port = host[:colon], host[colon+1:]
             let pre = string::from_bytes(&host.as_bytes()[..colon as usize]);
-            let post =
-                string::from_bytes(&host.as_bytes()[(colon as usize) + 1..]);
+            let post = string::from_bytes(&host.as_bytes()[(colon as usize) + 1..]);
             host = pre;
             port = post;
         }

@@ -25,9 +25,9 @@ extern crate alloc;
 use alloc::sync::Arc;
 
 use crate::errors::error;
+use crate::errors::nil;
 use crate::gochan::chan;
 use crate::goslice::slice;
-use crate::errors::nil;
 use crate::sync::{Mutex, Once};
 use crate::types::{byte, int};
 
@@ -52,7 +52,9 @@ struct OnceError {
 
 impl OnceError {
     const fn new() -> Self {
-        OnceError { inner: Mutex::new(nil) }
+        OnceError {
+            inner: Mutex::new(nil),
+        }
     }
     // Go: func (a *onceError) Store(err error)
     fn Store(&self, err: error) {
@@ -354,8 +356,5 @@ pub fn Pipe() -> (PipeReader, PipeWriter) {
         werr: OnceError::new(),
     });
     // Go: return &pw.r, pw
-    (
-        PipeReader { p: p.clone() },
-        PipeWriter { p },
-    )
+    (PipeReader { p: p.clone() }, PipeWriter { p })
 }

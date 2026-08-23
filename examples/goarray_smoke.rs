@@ -35,7 +35,10 @@ fn main() {
     // ── array!([N]T{e1, ..., eN}) — full literal ────────────────────
     let a = goish::array!([3]int{1, 2, 3});
     check(a.Len() == 3, b"goarray: full Len != 3\n");
-    check(a[0] == 1 && a[1] == 2 && a[2] == 3, b"goarray: full values\n");
+    check(
+        a[0] == 1 && a[1] == 2 && a[2] == 3,
+        b"goarray: full values\n",
+    );
 
     // ── array!([N]T{e1, e2}) — partial (rest zero) ──────────────────
     let p = goish::array!([6]int{10, 20, 30, 40});
@@ -53,7 +56,10 @@ fn main() {
     m[0] = 100;
     m[1] = 200;
     m[2] = 300;
-    check(m[0] == 100 && m[1] == 200 && m[2] == 300, b"goarray: IndexMut\n");
+    check(
+        m[0] == 100 && m[1] == 200 && m[2] == 300,
+        b"goarray: IndexMut\n",
+    );
 
     // ── range! over array ───────────────────────────────────────────
     let mut sum: int = 0;
@@ -73,7 +79,10 @@ fn main() {
     // ── slice(low, high) — copy semantics ──────────────────────────
     let mid = inf.slice(1, 4);
     check(len(&mid) == 3, b"goarray: slice(1,4) len\n");
-    check(mid[0] == 8 && mid[1] == 9 && mid[2] == 10, b"goarray: slice values\n");
+    check(
+        mid[0] == 8 && mid[1] == 9 && mid[2] == 10,
+        b"goarray: slice values\n",
+    );
 
     // ── nil equality (zero-array == nil) ───────────────────────────
     check(z == nil, b"goarray: zero-array != nil\n");
@@ -88,7 +97,10 @@ fn main() {
     let grid: array<array<int, 2>, 3> = goish::array!([3]array<int, 2>{row0, row1, row2});
     check(grid.Len() == 3, b"goarray: grid outer Len\n");
     check(grid[0].Len() == 2, b"goarray: grid inner Len\n");
-    check(grid[0][0] == 1 && grid[2][1] == 6, b"goarray: grid corners\n");
+    check(
+        grid[0][0] == 1 && grid[2][1] == 6,
+        b"goarray: grid corners\n",
+    );
 
     // ── byte arrays — common port shape ─────────────────────────────
     let buf: array<byte, 12> = goish::array!([12]byte);

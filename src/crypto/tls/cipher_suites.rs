@@ -204,7 +204,6 @@ pub(crate) fn isTDESCipher(c: uint16) -> bool {
     return contains(tdesCiphers, c);
 }
 
-
 // ─── The public CipherSuite surface ───────────────────────────────────
 
 // Go: cipher_suites.go:44-46
@@ -256,19 +255,84 @@ fn cs(id: uint16, name: &'static str, vers: &[uint16], insecure: bool) -> Cipher
 /// captured by a static list, and might not match those returned here.
 pub fn CipherSuites() -> crate::goslice::slice<CipherSuite> {
     return crate::goslice::slice::__from_vec(alloc::vec![
-        cs(TLS_AES_128_GCM_SHA256, "TLS_AES_128_GCM_SHA256", supportedOnlyTLS13, false),
-        cs(TLS_AES_256_GCM_SHA384, "TLS_AES_256_GCM_SHA384", supportedOnlyTLS13, false),
-        cs(TLS_CHACHA20_POLY1305_SHA256, "TLS_CHACHA20_POLY1305_SHA256", supportedOnlyTLS13, false),
-        cs(TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA", supportedUpToTLS12, false),
-        cs(TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA", supportedUpToTLS12, false),
-        cs(TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA", supportedUpToTLS12, false),
-        cs(TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA, "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA", supportedUpToTLS12, false),
-        cs(TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", supportedOnlyTLS12, false),
-        cs(TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", supportedOnlyTLS12, false),
-        cs(TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", supportedOnlyTLS12, false),
-        cs(TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384", supportedOnlyTLS12, false),
-        cs(TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256, "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256", supportedOnlyTLS12, false),
-        cs(TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256", supportedOnlyTLS12, false),
+        cs(
+            TLS_AES_128_GCM_SHA256,
+            "TLS_AES_128_GCM_SHA256",
+            supportedOnlyTLS13,
+            false
+        ),
+        cs(
+            TLS_AES_256_GCM_SHA384,
+            "TLS_AES_256_GCM_SHA384",
+            supportedOnlyTLS13,
+            false
+        ),
+        cs(
+            TLS_CHACHA20_POLY1305_SHA256,
+            "TLS_CHACHA20_POLY1305_SHA256",
+            supportedOnlyTLS13,
+            false
+        ),
+        cs(
+            TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+            "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA",
+            supportedUpToTLS12,
+            false
+        ),
+        cs(
+            TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+            "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA",
+            supportedUpToTLS12,
+            false
+        ),
+        cs(
+            TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+            "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+            supportedUpToTLS12,
+            false
+        ),
+        cs(
+            TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+            "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
+            supportedUpToTLS12,
+            false
+        ),
+        cs(
+            TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+            "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+            supportedOnlyTLS12,
+            false
+        ),
+        cs(
+            TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+            "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+            supportedOnlyTLS12,
+            false
+        ),
+        cs(
+            TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+            supportedOnlyTLS12,
+            false
+        ),
+        cs(
+            TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+            "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+            supportedOnlyTLS12,
+            false
+        ),
+        cs(
+            TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+            "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+            supportedOnlyTLS12,
+            false
+        ),
+        cs(
+            TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+            "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+            supportedOnlyTLS12,
+            false
+        ),
     ]);
 }
 
@@ -282,18 +346,78 @@ pub fn InsecureCipherSuites() -> crate::goslice::slice<CipherSuite> {
     // Go: This list includes legacy RSA kex, RC4, CBC_SHA256, and 3DES
     // cipher suites. See cipherSuitesPreferenceOrder for details.
     return crate::goslice::slice::__from_vec(alloc::vec![
-        cs(TLS_RSA_WITH_RC4_128_SHA, "TLS_RSA_WITH_RC4_128_SHA", supportedUpToTLS12, true),
-        cs(TLS_RSA_WITH_3DES_EDE_CBC_SHA, "TLS_RSA_WITH_3DES_EDE_CBC_SHA", supportedUpToTLS12, true),
-        cs(TLS_RSA_WITH_AES_128_CBC_SHA, "TLS_RSA_WITH_AES_128_CBC_SHA", supportedUpToTLS12, true),
-        cs(TLS_RSA_WITH_AES_256_CBC_SHA, "TLS_RSA_WITH_AES_256_CBC_SHA", supportedUpToTLS12, true),
-        cs(TLS_RSA_WITH_AES_128_CBC_SHA256, "TLS_RSA_WITH_AES_128_CBC_SHA256", supportedOnlyTLS12, true),
-        cs(TLS_RSA_WITH_AES_128_GCM_SHA256, "TLS_RSA_WITH_AES_128_GCM_SHA256", supportedOnlyTLS12, true),
-        cs(TLS_RSA_WITH_AES_256_GCM_SHA384, "TLS_RSA_WITH_AES_256_GCM_SHA384", supportedOnlyTLS12, true),
-        cs(TLS_ECDHE_ECDSA_WITH_RC4_128_SHA, "TLS_ECDHE_ECDSA_WITH_RC4_128_SHA", supportedUpToTLS12, true),
-        cs(TLS_ECDHE_RSA_WITH_RC4_128_SHA, "TLS_ECDHE_RSA_WITH_RC4_128_SHA", supportedUpToTLS12, true),
-        cs(TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA, "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA", supportedUpToTLS12, true),
-        cs(TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256", supportedOnlyTLS12, true),
-        cs(TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256, "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256", supportedOnlyTLS12, true),
+        cs(
+            TLS_RSA_WITH_RC4_128_SHA,
+            "TLS_RSA_WITH_RC4_128_SHA",
+            supportedUpToTLS12,
+            true
+        ),
+        cs(
+            TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+            "TLS_RSA_WITH_3DES_EDE_CBC_SHA",
+            supportedUpToTLS12,
+            true
+        ),
+        cs(
+            TLS_RSA_WITH_AES_128_CBC_SHA,
+            "TLS_RSA_WITH_AES_128_CBC_SHA",
+            supportedUpToTLS12,
+            true
+        ),
+        cs(
+            TLS_RSA_WITH_AES_256_CBC_SHA,
+            "TLS_RSA_WITH_AES_256_CBC_SHA",
+            supportedUpToTLS12,
+            true
+        ),
+        cs(
+            TLS_RSA_WITH_AES_128_CBC_SHA256,
+            "TLS_RSA_WITH_AES_128_CBC_SHA256",
+            supportedOnlyTLS12,
+            true
+        ),
+        cs(
+            TLS_RSA_WITH_AES_128_GCM_SHA256,
+            "TLS_RSA_WITH_AES_128_GCM_SHA256",
+            supportedOnlyTLS12,
+            true
+        ),
+        cs(
+            TLS_RSA_WITH_AES_256_GCM_SHA384,
+            "TLS_RSA_WITH_AES_256_GCM_SHA384",
+            supportedOnlyTLS12,
+            true
+        ),
+        cs(
+            TLS_ECDHE_ECDSA_WITH_RC4_128_SHA,
+            "TLS_ECDHE_ECDSA_WITH_RC4_128_SHA",
+            supportedUpToTLS12,
+            true
+        ),
+        cs(
+            TLS_ECDHE_RSA_WITH_RC4_128_SHA,
+            "TLS_ECDHE_RSA_WITH_RC4_128_SHA",
+            supportedUpToTLS12,
+            true
+        ),
+        cs(
+            TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
+            "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
+            supportedUpToTLS12,
+            true
+        ),
+        cs(
+            TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
+            "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256",
+            supportedOnlyTLS12,
+            true
+        ),
+        cs(
+            TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
+            "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256",
+            supportedOnlyTLS12,
+            true
+        ),
     ]);
 }
 
@@ -316,7 +440,6 @@ pub fn CipherSuiteName(id: uint16) -> crate::gostring::string {
     // Go: return fmt.Sprintf("0x%04X", id)
     return crate::fmt::Sprintf!("0x%04X", id);
 }
-
 
 // ─── The AEAD, MAC and TLS 1.3 suite records ──────────────────────────
 //
@@ -629,7 +752,10 @@ fn xorIntoNonceMask(mask: &mut [byte; aeadNonceLength as usize], nonce: slice<by
 
 // go: sdk 1.25.5 crypto/tls/cipher_suites.go:517-539 aeadAESGCM
 /// AES-GCM with TLS 1.2's explicit-nonce discipline (RFC 5288).
-pub(crate) fn aeadAESGCM(key: slice<byte>, noncePrefix: slice<byte>) -> Box<dyn aead + Send + Sync> {
+pub(crate) fn aeadAESGCM(
+    key: slice<byte>,
+    noncePrefix: slice<byte>,
+) -> Box<dyn aead + Send + Sync> {
     // Go: if len(noncePrefix) != noncePrefixLength { panic(…) }
     if noncePrefix.Len() != noncePrefixLength {
         panic!("tls: internal error: wrong nonce length");
@@ -791,9 +917,7 @@ impl Hash for cthWrapper {
 /// spell on a boxed `hash::Hash`. The parameter is therefore typed as
 /// the constructor Go's assertion demands, which moves the same failure
 /// from a panic to a compile error.
-pub(crate) fn newConstantTimeHash(
-    h: fn() -> Box<dyn constantTimeHash + Send + Sync>,
-) -> HashFunc {
+pub(crate) fn newConstantTimeHash(h: fn() -> Box<dyn constantTimeHash + Send + Sync>) -> HashFunc {
     // Go: boring.Unreachable()
     // Go: return func() hash.Hash { return &cthWrapper{h().(constantTimeHash)} }
     return HashFunc::New(move || {
@@ -932,7 +1056,6 @@ pub(crate) fn cipherSuiteTLS13ByID(id: uint16) -> Option<&'static cipherSuiteTLS
     return None;
 }
 
-
 // ─── The TLS 1.0-1.2 cipherSuite record ───────────────────────────────
 
 use super::key_agreement::{ecdheKeyAgreement, keyAgreement, rsaKeyAgreement};
@@ -1068,34 +1191,264 @@ const fn cs12(
     mac: Option<fn(slice<byte>) -> Box<dyn Hash + Send + Sync>>,
     aead: Option<fn(slice<byte>, slice<byte>) -> Box<dyn aead + Send + Sync>>,
 ) -> cipherSuite {
-    return cipherSuite { id, keyLen, macLen, ivLen, ka, flags, cipher, mac, aead };
+    return cipherSuite {
+        id,
+        keyLen,
+        macLen,
+        ivLen,
+        ka,
+        flags,
+        cipher,
+        mac,
+        aead,
+    };
 }
 
 // Go: cipher_suites.go:151-174
 //   var cipherSuites = []*cipherSuite{ … }
 pub(crate) static cipherSuites: &[cipherSuite] = &[
-    cs12(TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305, 32, 0, 12, ecdheRSAKA, suiteECDHE | suiteTLS12, None, None, Some(aeadChaCha20Poly1305)),
-    cs12(TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305, 32, 0, 12, ecdheECDSAKA, suiteECDHE | suiteECSign | suiteTLS12, None, None, Some(aeadChaCha20Poly1305)),
-    cs12(TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, 16, 0, 4, ecdheRSAKA, suiteECDHE | suiteTLS12, None, None, Some(aeadAESGCM)),
-    cs12(TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, 16, 0, 4, ecdheECDSAKA, suiteECDHE | suiteECSign | suiteTLS12, None, None, Some(aeadAESGCM)),
-    cs12(TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, 32, 0, 4, ecdheRSAKA, suiteECDHE | suiteTLS12 | suiteSHA384, None, None, Some(aeadAESGCM)),
-    cs12(TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, 32, 0, 4, ecdheECDSAKA, suiteECDHE | suiteECSign | suiteTLS12 | suiteSHA384, None, None, Some(aeadAESGCM)),
-    cs12(TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256, 16, 32, 16, ecdheRSAKA, suiteECDHE | suiteTLS12, Some(cipherAES), Some(macSHA256), None),
-    cs12(TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, 16, 20, 16, ecdheRSAKA, suiteECDHE, Some(cipherAES), Some(macSHA1), None),
-    cs12(TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, 16, 32, 16, ecdheECDSAKA, suiteECDHE | suiteECSign | suiteTLS12, Some(cipherAES), Some(macSHA256), None),
-    cs12(TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, 16, 20, 16, ecdheECDSAKA, suiteECDHE | suiteECSign, Some(cipherAES), Some(macSHA1), None),
-    cs12(TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA, 32, 20, 16, ecdheRSAKA, suiteECDHE, Some(cipherAES), Some(macSHA1), None),
-    cs12(TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, 32, 20, 16, ecdheECDSAKA, suiteECDHE | suiteECSign, Some(cipherAES), Some(macSHA1), None),
-    cs12(TLS_RSA_WITH_AES_128_GCM_SHA256, 16, 0, 4, rsaKA, suiteTLS12, None, None, Some(aeadAESGCM)),
-    cs12(TLS_RSA_WITH_AES_256_GCM_SHA384, 32, 0, 4, rsaKA, suiteTLS12 | suiteSHA384, None, None, Some(aeadAESGCM)),
-    cs12(TLS_RSA_WITH_AES_128_CBC_SHA256, 16, 32, 16, rsaKA, suiteTLS12, Some(cipherAES), Some(macSHA256), None),
-    cs12(TLS_RSA_WITH_AES_128_CBC_SHA, 16, 20, 16, rsaKA, 0, Some(cipherAES), Some(macSHA1), None),
-    cs12(TLS_RSA_WITH_AES_256_CBC_SHA, 32, 20, 16, rsaKA, 0, Some(cipherAES), Some(macSHA1), None),
-    cs12(TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA, 24, 20, 8, ecdheRSAKA, suiteECDHE, Some(cipher3DES), Some(macSHA1), None),
-    cs12(TLS_RSA_WITH_3DES_EDE_CBC_SHA, 24, 20, 8, rsaKA, 0, Some(cipher3DES), Some(macSHA1), None),
-    cs12(TLS_RSA_WITH_RC4_128_SHA, 16, 20, 0, rsaKA, 0, Some(cipherRC4), Some(macSHA1), None),
-    cs12(TLS_ECDHE_RSA_WITH_RC4_128_SHA, 16, 20, 0, ecdheRSAKA, suiteECDHE, Some(cipherRC4), Some(macSHA1), None),
-    cs12(TLS_ECDHE_ECDSA_WITH_RC4_128_SHA, 16, 20, 0, ecdheECDSAKA, suiteECDHE | suiteECSign, Some(cipherRC4), Some(macSHA1), None),
+    cs12(
+        TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+        32,
+        0,
+        12,
+        ecdheRSAKA,
+        suiteECDHE | suiteTLS12,
+        None,
+        None,
+        Some(aeadChaCha20Poly1305),
+    ),
+    cs12(
+        TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+        32,
+        0,
+        12,
+        ecdheECDSAKA,
+        suiteECDHE | suiteECSign | suiteTLS12,
+        None,
+        None,
+        Some(aeadChaCha20Poly1305),
+    ),
+    cs12(
+        TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+        16,
+        0,
+        4,
+        ecdheRSAKA,
+        suiteECDHE | suiteTLS12,
+        None,
+        None,
+        Some(aeadAESGCM),
+    ),
+    cs12(
+        TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+        16,
+        0,
+        4,
+        ecdheECDSAKA,
+        suiteECDHE | suiteECSign | suiteTLS12,
+        None,
+        None,
+        Some(aeadAESGCM),
+    ),
+    cs12(
+        TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+        32,
+        0,
+        4,
+        ecdheRSAKA,
+        suiteECDHE | suiteTLS12 | suiteSHA384,
+        None,
+        None,
+        Some(aeadAESGCM),
+    ),
+    cs12(
+        TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+        32,
+        0,
+        4,
+        ecdheECDSAKA,
+        suiteECDHE | suiteECSign | suiteTLS12 | suiteSHA384,
+        None,
+        None,
+        Some(aeadAESGCM),
+    ),
+    cs12(
+        TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
+        16,
+        32,
+        16,
+        ecdheRSAKA,
+        suiteECDHE | suiteTLS12,
+        Some(cipherAES),
+        Some(macSHA256),
+        None,
+    ),
+    cs12(
+        TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+        16,
+        20,
+        16,
+        ecdheRSAKA,
+        suiteECDHE,
+        Some(cipherAES),
+        Some(macSHA1),
+        None,
+    ),
+    cs12(
+        TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
+        16,
+        32,
+        16,
+        ecdheECDSAKA,
+        suiteECDHE | suiteECSign | suiteTLS12,
+        Some(cipherAES),
+        Some(macSHA256),
+        None,
+    ),
+    cs12(
+        TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+        16,
+        20,
+        16,
+        ecdheECDSAKA,
+        suiteECDHE | suiteECSign,
+        Some(cipherAES),
+        Some(macSHA1),
+        None,
+    ),
+    cs12(
+        TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+        32,
+        20,
+        16,
+        ecdheRSAKA,
+        suiteECDHE,
+        Some(cipherAES),
+        Some(macSHA1),
+        None,
+    ),
+    cs12(
+        TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+        32,
+        20,
+        16,
+        ecdheECDSAKA,
+        suiteECDHE | suiteECSign,
+        Some(cipherAES),
+        Some(macSHA1),
+        None,
+    ),
+    cs12(
+        TLS_RSA_WITH_AES_128_GCM_SHA256,
+        16,
+        0,
+        4,
+        rsaKA,
+        suiteTLS12,
+        None,
+        None,
+        Some(aeadAESGCM),
+    ),
+    cs12(
+        TLS_RSA_WITH_AES_256_GCM_SHA384,
+        32,
+        0,
+        4,
+        rsaKA,
+        suiteTLS12 | suiteSHA384,
+        None,
+        None,
+        Some(aeadAESGCM),
+    ),
+    cs12(
+        TLS_RSA_WITH_AES_128_CBC_SHA256,
+        16,
+        32,
+        16,
+        rsaKA,
+        suiteTLS12,
+        Some(cipherAES),
+        Some(macSHA256),
+        None,
+    ),
+    cs12(
+        TLS_RSA_WITH_AES_128_CBC_SHA,
+        16,
+        20,
+        16,
+        rsaKA,
+        0,
+        Some(cipherAES),
+        Some(macSHA1),
+        None,
+    ),
+    cs12(
+        TLS_RSA_WITH_AES_256_CBC_SHA,
+        32,
+        20,
+        16,
+        rsaKA,
+        0,
+        Some(cipherAES),
+        Some(macSHA1),
+        None,
+    ),
+    cs12(
+        TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
+        24,
+        20,
+        8,
+        ecdheRSAKA,
+        suiteECDHE,
+        Some(cipher3DES),
+        Some(macSHA1),
+        None,
+    ),
+    cs12(
+        TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+        24,
+        20,
+        8,
+        rsaKA,
+        0,
+        Some(cipher3DES),
+        Some(macSHA1),
+        None,
+    ),
+    cs12(
+        TLS_RSA_WITH_RC4_128_SHA,
+        16,
+        20,
+        0,
+        rsaKA,
+        0,
+        Some(cipherRC4),
+        Some(macSHA1),
+        None,
+    ),
+    cs12(
+        TLS_ECDHE_RSA_WITH_RC4_128_SHA,
+        16,
+        20,
+        0,
+        ecdheRSAKA,
+        suiteECDHE,
+        Some(cipherRC4),
+        Some(macSHA1),
+        None,
+    ),
+    cs12(
+        TLS_ECDHE_ECDSA_WITH_RC4_128_SHA,
+        16,
+        20,
+        0,
+        ecdheECDSAKA,
+        suiteECDHE | suiteECSign,
+        Some(cipherRC4),
+        Some(macSHA1),
+        None,
+    ),
 ];
 
 // go: sdk 1.25.5 crypto/tls/cipher_suites.go:178-192 selectCipherSuite
@@ -1179,10 +1532,7 @@ pub(crate) const aesgcmCiphers: &[uint16] = &[
 // go: sdk 1.25.5 crypto/tls/cipher_suites.go:646-653 mutualCipherSuite
 /// Go: "mutualCipherSuite returns a cipherSuite given a list of
 /// supported ciphersuites and the id requested by the peer."
-pub(crate) fn mutualCipherSuite(
-    have: slice<uint16>,
-    want: uint16,
-) -> Option<&'static cipherSuite> {
+pub(crate) fn mutualCipherSuite(have: slice<uint16>, want: uint16) -> Option<&'static cipherSuite> {
     // Go: for _, id := range have { if id == want { return cipherSuiteByID(id) } }
     for (_, id) in crate::range!(have) {
         if *id == want {

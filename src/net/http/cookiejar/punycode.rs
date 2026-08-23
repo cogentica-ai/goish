@@ -50,9 +50,8 @@ const acePrefix: &str = "xn--";
 /// because len(s) in Go is in bytes, not runes."
 pub fn encode(prefix: &string, s: &string) -> (string, error) {
     let prefix_bytes = crate::gostring::__crate_as_bytes(prefix);
-    let mut output: Vec<byte> = Vec::with_capacity(
-        prefix_bytes.len() + 1 + 2 * crate::gostring::__crate_as_bytes(s).len(),
-    );
+    let mut output: Vec<byte> =
+        Vec::with_capacity(prefix_bytes.len() + 1 + 2 * crate::gostring::__crate_as_bytes(s).len());
     output.extend_from_slice(prefix_bytes);
 
     let mut delta: int32 = 0;
@@ -195,7 +194,10 @@ pub fn toASCII<S: Into<string>>(s: S) -> (string, error) {
         i += 1;
     }
     return (
-        strings::Join(crate::goslice::slice::__from_vec(out), string::from_static(".")),
+        strings::Join(
+            crate::goslice::slice::__from_vec(out),
+            string::from_static("."),
+        ),
         crate::errors::nil,
     );
 }

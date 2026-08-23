@@ -55,7 +55,10 @@ fn main() {
     let mut idx: usize = 0;
     for (i, r) in range!(s) {
         check(idx < 9, b"strings: range!(s) too many iters\n");
-        check(i == expected[idx].0, b"strings: range!(s) wrong byte offset\n");
+        check(
+            i == expected[idx].0,
+            b"strings: range!(s) wrong byte offset\n",
+        );
         check(r == expected[idx].1, b"strings: range!(s) wrong rune\n");
         idx += 1;
     }
@@ -74,7 +77,10 @@ fn main() {
     // (7) bytes(s) — copies into independent slice<byte>.
     let b: slice<byte> = bytes(s.clone());
     check(b.Len() == 14, b"strings: bytes(s).Len wrong\n");
-    check(b[0] == b'h' && b[8] == 0xE4, b"strings: bytes(s) content wrong\n");
+    check(
+        b[0] == b'h' && b[8] == 0xE4,
+        b"strings: bytes(s) content wrong\n",
+    );
 
     // (8) runes(s) — UTF-8 decode into slice<rune>.
     let rs: slice<rune> = runes(s.clone());
@@ -99,14 +105,26 @@ fn main() {
     // (12) utf8::EncodeRune writes 1..4 bytes back.
     let mut buf = [0u8; 4];
     let n = utf8::EncodeRune(&mut buf, 'A' as rune);
-    check(n == 1 && buf[0] == b'A', b"strings: EncodeRune ASCII wrong\n");
+    check(
+        n == 1 && buf[0] == b'A',
+        b"strings: EncodeRune ASCII wrong\n",
+    );
     let n = utf8::EncodeRune(&mut buf, '界' as rune);
-    check(n == 3 && buf[0] == 0xE7, b"strings: EncodeRune 3-byte wrong\n");
+    check(
+        n == 3 && buf[0] == 0xE7,
+        b"strings: EncodeRune 3-byte wrong\n",
+    );
 
     // (13) RuneLen / ValidRune.
     check(utf8::RuneLen('A' as rune) == 1, b"strings: RuneLen ASCII\n");
-    check(utf8::RuneLen('界' as rune) == 3, b"strings: RuneLen 3-byte\n");
-    check(utf8::RuneLen(0x110000) == -1, b"strings: RuneLen out-of-range\n");
+    check(
+        utf8::RuneLen('界' as rune) == 3,
+        b"strings: RuneLen 3-byte\n",
+    );
+    check(
+        utf8::RuneLen(0x110000) == -1,
+        b"strings: RuneLen out-of-range\n",
+    );
     check(utf8::ValidRune(0x4E16), b"strings: ValidRune valid\n");
     check(!utf8::ValidRune(0xD800), b"strings: ValidRune surrogate\n");
 

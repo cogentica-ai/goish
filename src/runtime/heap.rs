@@ -250,8 +250,7 @@ pub fn sys_bytes() -> usize {
 /// Relaxed ordering: these are statistics. A benchmark reading them
 /// across a park may miss a concurrent allocation from another M by a
 /// few counts, which is the same accuracy Go's own sampling gives.
-pub(crate) static MALLOCS: core::sync::atomic::AtomicU64 =
-    core::sync::atomic::AtomicU64::new(0);
+pub(crate) static MALLOCS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 pub(crate) static TOTAL_ALLOC: core::sync::atomic::AtomicU64 =
     core::sync::atomic::AtomicU64::new(0);
 

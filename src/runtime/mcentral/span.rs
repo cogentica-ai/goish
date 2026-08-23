@@ -160,7 +160,9 @@ impl Span {
         for w in &self.alloc_bits {
             w.store(0, Ordering::Relaxed);
         }
-        unsafe { *self.alloc_cache.get() = 0; }
+        unsafe {
+            *self.alloc_cache.get() = 0;
+        }
         self.next = NIL_SPAN;
         self.prev = NIL_SPAN;
         self.cached.store(false, Ordering::Relaxed);
@@ -240,8 +242,7 @@ impl Span {
             }
             let claimed = self.refill_alloc_cache((sfreeindex / 64) as usize);
             if claimed != 0 {
-                self.alloc_count
-                    .fetch_add(claimed as u16, Ordering::AcqRel);
+                self.alloc_count.fetch_add(claimed as u16, Ordering::AcqRel);
             }
             acache = *self.alloc_cache.get();
             bit_index = acache.trailing_zeros();
@@ -267,8 +268,7 @@ impl Span {
         if new_freeindex.is_multiple_of(64) && new_freeindex < nelems {
             let claimed = self.refill_alloc_cache((new_freeindex / 64) as usize);
             if claimed != 0 {
-                self.alloc_count
-                    .fetch_add(claimed as u16, Ordering::AcqRel);
+                self.alloc_count.fetch_add(claimed as u16, Ordering::AcqRel);
             }
         }
 
@@ -300,8 +300,7 @@ impl Span {
             if release_mask != 0 {
                 let cleared = release_mask.count_ones();
                 self.alloc_bits[wi].fetch_and(!release_mask, Ordering::Release);
-                self.alloc_count
-                    .fetch_sub(cleared as u16, Ordering::AcqRel);
+                self.alloc_count.fetch_sub(cleared as u16, Ordering::AcqRel);
             }
         }
         *self.alloc_cache.get() = 0;
@@ -354,7 +353,8 @@ impl Span {
             }
             self.alloc_bits[wi].fetch_or(1u64 << bit, Ordering::AcqRel);
             self.alloc_count.fetch_add(1, Ordering::AcqRel);
-            self.freeindex.store(slot.wrapping_add(1), Ordering::Relaxed);
+            self.freeindex
+                .store(slot.wrapping_add(1), Ordering::Relaxed);
             return Some(slot);
         }
         None

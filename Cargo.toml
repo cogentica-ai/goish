@@ -19,6 +19,12 @@ license = "MIT AND BSD-3-Clause"
 [lib]
 path = "src/lib.rs"
 
+[features]
+default = []
+# Keep the platform's FS-based TLS intact for dynamically loaded foreign
+# libraries and place Goish's per-M runtime slot in GS instead.
+ffi-system-tls = []
+
 [dependencies]
 goish-macros = { path = "goish-macros", version = "0.1" }
 libm = { version = "0.2", default-features = false }

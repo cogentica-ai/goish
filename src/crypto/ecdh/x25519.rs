@@ -26,13 +26,13 @@ use alloc::vec::Vec;
 use crate::crypto::internal::fips140::edwards25519::field;
 use crate::crypto::internal::fips140only;
 use crate::crypto::internal::randutil;
+use crate::error;
 use crate::errors;
 use crate::goslice::slice;
 use crate::io;
 use crate::string;
 use crate::types::byte;
 use crate::{int, uint32};
-use crate::error;
 
 use super::ecdh::{Curve, PrivateKey, PublicKey};
 
@@ -131,7 +131,10 @@ impl Curve for x25519Curve {
         }
         let raw: &[byte] = key;
         if raw.len() != x25519PublicKeySize {
-            return (zeroPublicKey(), errors::New("crypto/ecdh: invalid public key"));
+            return (
+                zeroPublicKey(),
+                errors::New("crypto/ecdh: invalid public key"),
+            );
         }
         return (
             PublicKey {

@@ -46,7 +46,10 @@ fn main() {
     if resp.StatusCode == 200 && body_eq(&body, b"from default mux\n") {
         fmt::Println!("[ 1] DefaultServeMux dispatch  PASS");
     } else {
-        fmt::Println!("[ 1] DefaultServeMux dispatch  FAIL status={}", resp.StatusCode);
+        fmt::Println!(
+            "[ 1] DefaultServeMux dispatch  FAIL status={}",
+            resp.StatusCode
+        );
         failed += 1;
     }
     let _ = srv_arc.Shutdown(time::Second);

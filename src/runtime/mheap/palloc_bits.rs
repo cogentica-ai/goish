@@ -199,7 +199,7 @@ impl PallocBits {
     /// Returns the leaf-level summary that the radix-tree update
     /// path will install at `summary[SUMMARY_LEVELS-1]`.
     pub fn summarize(&self) -> PallocSum {
-        let bits = &self.0.0;
+        let bits = &self.0 .0;
         let n_words = bits.len();
 
         let mut start: usize = NO_INDEX; // sentinel for "not set yet"
@@ -307,7 +307,7 @@ impl PallocBits {
     }
 
     fn find1(&self, search_idx: usize) -> usize {
-        let bits = &self.0.0;
+        let bits = &self.0 .0;
         let mut i = search_idx / 64;
         while i < bits.len() {
             let x = bits[i];
@@ -321,7 +321,7 @@ impl PallocBits {
     }
 
     fn find_small_n(&self, npages: usize, search_idx: usize) -> (usize, usize) {
-        let bits = &self.0.0;
+        let bits = &self.0 .0;
         let mut end: usize = 0;
         let mut new_search_idx: usize = NO_INDEX;
         let mut i = search_idx / 64;
@@ -352,7 +352,7 @@ impl PallocBits {
     }
 
     fn find_large_n(&self, npages: usize, search_idx: usize) -> (usize, usize) {
-        let bits = &self.0.0;
+        let bits = &self.0 .0;
         let mut start: usize = NO_INDEX;
         let mut size: usize = 0;
         let mut new_search_idx: usize = NO_INDEX;

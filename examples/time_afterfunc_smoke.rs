@@ -10,9 +10,9 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicI32, Ordering};
 use goish::fmt;
+use goish::syscall;
 use goish::time;
 use goish::types::int;
-use goish::{syscall};
 
 static FIRED: AtomicI32 = AtomicI32::new(0);
 static FIRED_NO_STOP: AtomicI32 = AtomicI32::new(0);
@@ -48,7 +48,12 @@ fn main() {
         if stopped && FIRED.load(Ordering::SeqCst) == 0 {
             fmt::Println!("[ 2] Stop cancels               PASS");
         } else {
-            fmt::Println!("[ 2] Stop cancels               FAIL stopped=", stopped, " fired=", FIRED.load(Ordering::SeqCst));
+            fmt::Println!(
+                "[ 2] Stop cancels               FAIL stopped=",
+                stopped,
+                " fired=",
+                FIRED.load(Ordering::SeqCst)
+            );
             failed += 1;
         }
     }

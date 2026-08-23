@@ -72,7 +72,10 @@ fn test_select_with_nil_recv_chooses_other() {
     }
     schedule();
 
-    check(GOT.load(Ordering::Relaxed) == 42, b"nil-recv: select didn't fire send case\n");
+    check(
+        GOT.load(Ordering::Relaxed) == 42,
+        b"nil-recv: select didn't fire send case\n",
+    );
 }
 
 // Nil send case must be skipped; the non-nil recv case fires.
@@ -97,7 +100,10 @@ fn test_select_with_nil_send_chooses_other() {
     }
     schedule();
 
-    check(GOT_V.load(Ordering::Relaxed) == 7, b"nil-send: didn't recv from real\n");
+    check(
+        GOT_V.load(Ordering::Relaxed) == 7,
+        b"nil-send: didn't recv from real\n",
+    );
 }
 
 // All cases nil, default present: default fires.
@@ -120,7 +126,10 @@ fn test_select_with_default_and_all_nil() {
     }
     schedule();
 
-    check(DEFAULT_FIRED.load(Ordering::Relaxed) == 1, b"all-nil-default: default didn't fire\n");
+    check(
+        DEFAULT_FIRED.load(Ordering::Relaxed) == 1,
+        b"all-nil-default: default didn't fire\n",
+    );
 }
 
 // Replace a chan with nil mid-loop to bound case counts. After the
@@ -165,6 +174,12 @@ fn test_select_progresses_after_replace() {
     }
     schedule();
 
-    check(A_COUNT.load(Ordering::Relaxed) == 8, b"replace: a count wrong\n");
-    check(B_COUNT.load(Ordering::Relaxed) == 16, b"replace: b count wrong\n");
+    check(
+        A_COUNT.load(Ordering::Relaxed) == 8,
+        b"replace: a count wrong\n",
+    );
+    check(
+        B_COUNT.load(Ordering::Relaxed) == 16,
+        b"replace: b count wrong\n",
+    );
 }

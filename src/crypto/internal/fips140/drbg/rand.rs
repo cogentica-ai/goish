@@ -82,8 +82,7 @@ pub fn Read(b: &mut slice<byte>) {
     while off < total {
         // Go: size := min(len(b), maxRequestSize)
         let size = core::cmp::min(total - off, maxRequestSize);
-        let reseedRequired =
-            drbg.Generate(&mut out[off..off + size], additionalInput.as_ref());
+        let reseedRequired = drbg.Generate(&mut out[off..off + size], additionalInput.as_ref());
         if reseedRequired {
             // See SP 800-90A Rev. 1, Section 9.3.1, Steps 6-8, as
             // explained in Section 9.3.2: if Generate reports a reseed is

@@ -37,7 +37,7 @@ use super::url::{parse_request_uri, URL};
 pub struct Request {
     pub Method: string,
     pub URL: URL,
-    pub Proto: string,    // "HTTP/1.1"
+    pub Proto: string, // "HTTP/1.1"
     pub ProtoMajor: int,
     pub ProtoMinor: int,
     pub Header: Header,
@@ -181,10 +181,7 @@ impl Request {
     // go: sdk 1.25.5 net/http/request.go:368-376 Request.WithContext
     /// `r.WithContext(ctx)` (request.go:368) — shallow copy of the
     /// request with its context replaced.
-    pub fn WithContext(
-        &self,
-        ctx: alloc::sync::Arc<dyn crate::context::Context>,
-    ) -> Request {
+    pub fn WithContext(&self, ctx: alloc::sync::Arc<dyn crate::context::Context>) -> Request {
         // Go: r2 := new(Request); *r2 = *r; r2.ctx = ctx
         let mut r2 = self.clone();
         r2.ctx = Some(ctx);
@@ -196,10 +193,7 @@ impl Request {
     /// replaced. Goish container types (string / slice / gomap) all
     /// deep-clone via #[derive(Clone)], so the explicit per-field
     /// clones in Go's source are unnecessary here.
-    pub fn Clone(
-        &self,
-        ctx: alloc::sync::Arc<dyn crate::context::Context>,
-    ) -> Request {
+    pub fn Clone(&self, ctx: alloc::sync::Arc<dyn crate::context::Context>) -> Request {
         // Go: cloneURL(r.URL); r.Header.Clone(); r.Trailer.Clone(); etc.
         let mut r2 = self.clone();
         r2.ctx = Some(ctx);
@@ -486,11 +480,7 @@ impl Request {
     pub fn FormFile<K: Into<string>>(
         &self,
         key: K,
-    ) -> (
-        bytes::Reader,
-        crate::mime::multipart::FileHeader,
-        error,
-    ) {
+    ) -> (bytes::Reader, crate::mime::multipart::FileHeader, error) {
         let key: string = key.into();
         if self.form_state.Lock().multipart_form.is_none() {
             let err = self.ParseMultipartForm(crate::int64(defaultMaxMemory));
@@ -533,10 +523,7 @@ impl Request {
     pub fn MultipartReader(&self) -> (super::super::super::mime::multipart::Reader, error) {
         let v = self.Header.Get(string("Content-Type"));
         if v.Len() == 0 {
-            return (
-                empty_multipart_reader(),
-                ErrNotMultipart.into(),
-            );
+            return (empty_multipart_reader(), ErrNotMultipart.into());
         }
         let (body_bytes, _) = self.Body.__materialize();
         if body_bytes.Len() == 0 {
@@ -634,7 +621,7 @@ impl Request {
     // go: sdk 1.25.5 net/http/request.go:1022-1024 Request.SetBasicAuth
     /// `r.SetBasicAuth(user, pass)` (request.go:1022) — set the
     /// `Authorization` header to "Basic " + base64(user:pass).
-    pub fn SetBasicAuth<U: Into<string>, P: Into<string>>(&mut self, username: U, password: P){
+    pub fn SetBasicAuth<U: Into<string>, P: Into<string>>(&mut self, username: U, password: P) {
         let username: string = username.into();
         let password: string = password.into();
         let mut creds = crate::strings::Builder::new();
@@ -947,13 +934,8 @@ pub fn textprotoReaderPool() -> &'static crate::sync::Pool<bufio::PoolBuf> {
 /// views straight off the bufio buffer (see `read_line_with`), so the
 /// server path never constructs a textproto::Reader at all. These
 /// exist for the callers that do (MIME/trailer parsing, user code).
-pub fn newTextprotoReader<R: io::Reader>(
-    br: bufio::Reader<R>,
-) -> crate::net::textproto::Reader<R> {
-    return crate::net::textproto::__new_reader_with_scratch(
-        br,
-        textprotoReaderPool().Get(),
-    );
+pub fn newTextprotoReader<R: io::Reader>(br: bufio::Reader<R>) -> crate::net::textproto::Reader<R> {
+    return crate::net::textproto::__new_reader_with_scratch(br, textprotoReaderPool().Get());
 }
 
 // go: sdk 1.25.5 net/http/request.go:1047-1050 putTextprotoReader
@@ -962,9 +944,7 @@ pub fn newTextprotoReader<R: io::Reader>(
 /// (request.go:1048); goish's ownership hands it back instead, so a
 /// caller chaining Go's put-both pattern can go on to
 /// `putBufioReader` with it.
-pub fn putTextprotoReader<R: io::Reader>(
-    r: crate::net::textproto::Reader<R>,
-) -> bufio::Reader<R> {
+pub fn putTextprotoReader<R: io::Reader>(r: crate::net::textproto::Reader<R>) -> bufio::Reader<R> {
     let (br, scratch) = r.__into_parts();
     textprotoReaderPool().Put(scratch);
     return br;
@@ -982,9 +962,7 @@ const MAX_BODY: usize = 16 * 1024 * 1024; // 16 MiB safety cap
 /// For server use with a configurable limit, prefer
 /// `ReadRequestWithLimit` (called by `http::Server` with
 /// `srv.MaxHeaderBytes`).
-pub fn ReadRequest<R: io::Reader>(
-    br: &mut bufio::Reader<R>,
-) -> (Request, error) {
+pub fn ReadRequest<R: io::Reader>(br: &mut bufio::Reader<R>) -> (Request, error) {
     ReadRequestWithLimit(br, DEFAULT_MAX_LINE as int)
 }
 
@@ -1171,9 +1149,12 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         let expect = req.Header.Get(string("Expect"));
         if !expect.as_bytes().is_empty() {
             if crate::strings::EqualFold(expect.clone(), string("100-continue")) {
-                let has_body = is_chunked(
-                    req.Header.Get(string("Transfer-Encoding")).as_bytes(),
-                ) || !req.Header.Get(string("Content-Length")).as_bytes().is_empty();
+                let has_body = is_chunked(req.Header.Get(string("Transfer-Encoding")).as_bytes())
+                    || !req
+                        .Header
+                        .Get(string("Content-Length"))
+                        .as_bytes()
+                        .is_empty();
                 if req.ProtoMajor > 1 || (req.ProtoMajor == 1 && req.ProtoMinor >= 1) {
                     if has_body {
                         write_interim_100(interim_fd);
@@ -1191,7 +1172,8 @@ pub(crate) fn __read_request_server<R: io::Reader>(
     // old hand-rolled check silently ignored it: a request-smuggling
     // surface), fixLength's multiple/invalid Content-Length
     // hardening, Close semantics, and the Trailer announcement.
-    let (kind, terr) = super::transfer::readTransfer(super::transfer::TransferMsgMut::Req(&mut req));
+    let (kind, terr) =
+        super::transfer::readTransfer(super::transfer::TransferMsgMut::Req(&mut req));
     if !terr.IsNil() {
         return (req, terr);
     }
@@ -1204,8 +1186,7 @@ pub(crate) fn __read_request_server<R: io::Reader>(
             let mut buf: Vec<u8> = Vec::new();
             // ChunkedReader wraps its own bufio::Reader; feed it a
             // thin `BufioPassthrough` that delegates to `br`.
-            let mut cr =
-                super::internal::chunked::NewChunkedReader(BufioPassthrough { inner: br });
+            let mut cr = super::internal::chunked::NewChunkedReader(BufioPassthrough { inner: br });
             loop {
                 let mut tmp = slice::<byte>::__from_vec(alloc::vec![0u8; 4096]);
                 let (n_read, err) = cr.Read(&mut tmp);
@@ -1356,10 +1337,7 @@ fn write_interim_100(fd: i32) {
 /// used only when the line doesn't fit the bufio buffer whole (rare:
 /// requires a header line > 4 KiB). The hot path is the zero-copy
 /// `__read_line_view` inside `read_line_with`.
-fn read_line_owned<R: io::Reader>(
-    br: &mut bufio::Reader<R>,
-    max: usize,
-) -> Result<Vec<u8>, error> {
+fn read_line_owned<R: io::Reader>(br: &mut bufio::Reader<R>, max: usize) -> Result<Vec<u8>, error> {
     let (line_bytes, err) = br.ReadBytes(b'\n');
     if !err.IsNil() {
         return Err(err);
@@ -1727,10 +1705,7 @@ crate::var! {
 /// Internal helper to construct a degenerate Reader for the
 /// MultipartReader error paths.
 fn empty_multipart_reader() -> crate::mime::multipart::Reader {
-    crate::mime::multipart::NewReader(
-        slice::<byte>::__from_vec(Vec::new()),
-        string::new(),
-    )
+    crate::mime::multipart::NewReader(slice::<byte>::__from_vec(Vec::new()), string::new())
 }
 
 /// `http.MaxBytesError` (request.go:1193) — typed error returned by
@@ -1899,4 +1874,3 @@ pub fn copyValues(
         dst.Set(k.clone(), merged);
     }
 }
-

@@ -17,8 +17,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::compress::flate;
+use goish::fmt;
 use goish::runtime::sched::schedule;
 use goish::{go, syscall};
 

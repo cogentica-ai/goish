@@ -95,7 +95,10 @@ fn main() {
         errors::Is(err.clone(), strconv::ErrRange),
         b"strconv: Atoi big-num Is(ErrRange) must hold\n",
     );
-    check(n == i64::MAX, b"strconv: Atoi big-num clamp must be i64::MAX\n");
+    check(
+        n == i64::MAX,
+        b"strconv: Atoi big-num clamp must be i64::MAX\n",
+    );
 
     // ─── ParseInt with explicit bases ─────────────────────────────────
 
@@ -103,36 +106,63 @@ fn main() {
     check(err == nil && n == 255, b"strconv: ParseInt(ff,16) wrong\n");
 
     let (n, err) = strconv::ParseInt("-ff", 16, 64);
-    check(err == nil && n == -255, b"strconv: ParseInt(-ff,16) wrong\n");
+    check(
+        err == nil && n == -255,
+        b"strconv: ParseInt(-ff,16) wrong\n",
+    );
 
     let (n, err) = strconv::ParseInt("0b1010", 0, 64);
-    check(err == nil && n == 10, b"strconv: ParseInt(0b1010,0) wrong\n");
+    check(
+        err == nil && n == 10,
+        b"strconv: ParseInt(0b1010,0) wrong\n",
+    );
 
     let (n, err) = strconv::ParseInt("0o17", 0, 64);
     check(err == nil && n == 15, b"strconv: ParseInt(0o17,0) wrong\n");
 
     let (n, err) = strconv::ParseInt("0xCAFE", 0, 64);
-    check(err == nil && n == 0xcafe, b"strconv: ParseInt(0xCAFE,0) wrong\n");
+    check(
+        err == nil && n == 0xcafe,
+        b"strconv: ParseInt(0xCAFE,0) wrong\n",
+    );
 
     // bit_size=8 clamp
     let (n, err) = strconv::ParseInt("200", 10, 8);
-    check(err != nil, b"strconv: ParseInt(200,10,8) err must be non-nil\n");
+    check(
+        err != nil,
+        b"strconv: ParseInt(200,10,8) err must be non-nil\n",
+    );
     check(n == 127, b"strconv: ParseInt(200,10,8) must clamp to 127\n");
 
     let (n, err) = strconv::ParseInt("-200", 10, 8);
-    check(err != nil, b"strconv: ParseInt(-200,10,8) err must be non-nil\n");
-    check(n == -128, b"strconv: ParseInt(-200,10,8) must clamp to -128\n");
+    check(
+        err != nil,
+        b"strconv: ParseInt(-200,10,8) err must be non-nil\n",
+    );
+    check(
+        n == -128,
+        b"strconv: ParseInt(-200,10,8) must clamp to -128\n",
+    );
 
     // ─── ParseUint ────────────────────────────────────────────────────
 
     let (u, err) = strconv::ParseUint("18446744073709551615", 10, 64);
     check(err == nil, b"strconv: ParseUint u64::MAX err must be nil\n");
-    check(u == u64::MAX as uint, b"strconv: ParseUint u64::MAX value wrong\n");
+    check(
+        u == u64::MAX as uint,
+        b"strconv: ParseUint u64::MAX value wrong\n",
+    );
 
     // Underscores: only when base==0.
     let (u, err) = strconv::ParseUint("1_000_000", 0, 64);
-    check(err == nil, b"strconv: ParseUint(1_000_000,0) err must be nil\n");
-    check(u == 1_000_000, b"strconv: ParseUint(1_000_000,0) value wrong\n");
+    check(
+        err == nil,
+        b"strconv: ParseUint(1_000_000,0) err must be nil\n",
+    );
+    check(
+        u == 1_000_000,
+        b"strconv: ParseUint(1_000_000,0) value wrong\n",
+    );
 
     let (_, err) = strconv::ParseUint("1_000", 10, 64);
     check(

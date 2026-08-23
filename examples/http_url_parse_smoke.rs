@@ -64,37 +64,70 @@ fn chkStr(raw: &'static str, want: &'static str, bad: &mut i32) {
 fn main() {
     let mut bad = 0i32;
 
-    chk("http://example.com/a/b?q=1#frag",
-        "Scheme=http Host=example.com Q=q=1 F=frag", &mut bad);
-    chk("http://example.com",
-        "Scheme=http Host=example.com Q= F=", &mut bad);
-    chk("http://example.com/",
-        "Scheme=http Host=example.com Q= F=", &mut bad);
-    chk("//example.com/x",
-        "Scheme= Host=example.com Q= F=", &mut bad);
-    chk("/just/a/path",
-        "Scheme= Host= Q= F=", &mut bad);
-    chk("http://[::1]:8080/p",
-        "Scheme=http Host=[::1]:8080 Q= F=", &mut bad);
+    chk(
+        "http://example.com/a/b?q=1#frag",
+        "Scheme=http Host=example.com Q=q=1 F=frag",
+        &mut bad,
+    );
+    chk(
+        "http://example.com",
+        "Scheme=http Host=example.com Q= F=",
+        &mut bad,
+    );
+    chk(
+        "http://example.com/",
+        "Scheme=http Host=example.com Q= F=",
+        &mut bad,
+    );
+    chk(
+        "//example.com/x",
+        "Scheme= Host=example.com Q= F=",
+        &mut bad,
+    );
+    chk("/just/a/path", "Scheme= Host= Q= F=", &mut bad);
+    chk(
+        "http://[::1]:8080/p",
+        "Scheme=http Host=[::1]:8080 Q= F=",
+        &mut bad,
+    );
     // Go lowercases the SCHEME but leaves the host case alone.
-    chk("HTTP://EXAMPLE.COM/P",
-        "Scheme=http Host=EXAMPLE.COM Q= F=", &mut bad);
+    chk(
+        "HTTP://EXAMPLE.COM/P",
+        "Scheme=http Host=EXAMPLE.COM Q= F=",
+        &mut bad,
+    );
     // Go does NOT clean dot segments during Parse.
-    chk("http://example.com/./a/../b",
-        "Scheme=http Host=example.com Q= F=", &mut bad);
-    chk("http://example.com//double//slash",
-        "Scheme=http Host=example.com Q= F=", &mut bad);
+    chk(
+        "http://example.com/./a/../b",
+        "Scheme=http Host=example.com Q= F=",
+        &mut bad,
+    );
+    chk(
+        "http://example.com//double//slash",
+        "Scheme=http Host=example.com Q= F=",
+        &mut bad,
+    );
 
     // %2F: Go DECODES Path and keeps the raw form in RawPath.
-    chk("http://example.com/a%2Fb",
-        "Scheme=http Host=example.com Q= F=", &mut bad);
+    chk(
+        "http://example.com/a%2Fb",
+        "Scheme=http Host=example.com Q= F=",
+        &mut bad,
+    );
 
     // Host must exclude userinfo (the bug this file was written for).
-    chk("https://user:pw@host:8443/p?x=1",
-        "Scheme=https Host=host:8443 Q=x=1 F=", &mut bad);
+    chk(
+        "https://user:pw@host:8443/p?x=1",
+        "Scheme=https Host=host:8443 Q=x=1 F=",
+        &mut bad,
+    );
 
     // String() round-trips.
-    chkStr("http://example.com/a/b?q=1#frag", "http://example.com/a/b?q=1#frag", &mut bad);
+    chkStr(
+        "http://example.com/a/b?q=1#frag",
+        "http://example.com/a/b?q=1#frag",
+        &mut bad,
+    );
     chkStr("http://example.com", "http://example.com", &mut bad);
     chkStr("http://example.com/", "http://example.com/", &mut bad);
     chkStr("/just/a/path", "/just/a/path", &mut bad);

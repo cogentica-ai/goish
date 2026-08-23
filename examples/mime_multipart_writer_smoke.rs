@@ -10,8 +10,8 @@ extern crate goish;
 
 use alloc::vec::Vec;
 
-use goish::fmt;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::mime::multipart;
 use goish::types::byte;
 use goish::{string, syscall};
@@ -22,8 +22,7 @@ fn main() {
 
     // 1. Boundary is non-empty + 60 chars (30 bytes hex-encoded).
     {
-        let mut buf =
-            goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
+        let mut buf = goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
         let w = multipart::NewWriter(&mut buf);
         let b = w.Boundary();
         if b.Len() == 60 {
@@ -36,8 +35,7 @@ fn main() {
 
     // 2. SetBoundary + FormDataContentType.
     {
-        let mut buf =
-            goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
+        let mut buf = goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
         let mut w = multipart::NewWriter(&mut buf);
         let err = w.SetBoundary(string("X-myBoundary-1"));
         let ct = w.FormDataContentType();
@@ -51,12 +49,10 @@ fn main() {
 
     // 3. Boundary too long → error.
     {
-        let mut buf =
-            goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
+        let mut buf = goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
         let mut w = multipart::NewWriter(&mut buf);
-        let too_long = string(
-            "12345678901234567890123456789012345678901234567890123456789012345678901",
-        );
+        let too_long =
+            string("12345678901234567890123456789012345678901234567890123456789012345678901");
         let err = w.SetBoundary(too_long);
         if !err.IsNil() {
             fmt::Println!("[ 3] boundary too long → err   PASS");
@@ -68,8 +64,7 @@ fn main() {
 
     // 4. WriteField round-trip.
     {
-        let mut buf =
-            goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
+        let mut buf = goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
         {
             let mut w = multipart::NewWriter(&mut buf);
             let _ = w.SetBoundary(string("BOUND"));
@@ -83,10 +78,8 @@ fn main() {
             v.push(on_wire[i]);
         }
         let s = goish::string::from_bytes(&v);
-        let want_head_a =
-            "--BOUND\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\nalice";
-        let want_head_b =
-            "\r\n--BOUND\r\nContent-Disposition: form-data; name=\"age\"\r\n\r\n30";
+        let want_head_a = "--BOUND\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\nalice";
+        let want_head_b = "\r\n--BOUND\r\nContent-Disposition: form-data; name=\"age\"\r\n\r\n30";
         let want_tail = "\r\n--BOUND--\r\n";
         let has_a = goish::strings::Contains(s.clone(), string(want_head_a));
         let has_b = goish::strings::Contains(s.clone(), string(want_head_b));
@@ -96,7 +89,9 @@ fn main() {
         } else {
             fmt::Println!(
                 "[ 4] WriteField wire           FAIL a={} b={} t={}",
-                has_a, has_b, has_t
+                has_a,
+                has_b,
+                has_t
             );
             failed += 1;
         }
@@ -104,8 +99,7 @@ fn main() {
 
     // 5. WriteFile produces Content-Type + filename.
     {
-        let mut buf =
-            goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
+        let mut buf = goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
         {
             let mut w = multipart::NewWriter(&mut buf);
             let _ = w.SetBoundary(string("X"));
@@ -122,17 +116,17 @@ fn main() {
             s.clone(),
             string("Content-Disposition: form-data; name=\"file\"; filename=\"hello.bin\""),
         );
-        let has_ct = goish::strings::Contains(
-            s.clone(),
-            string("Content-Type: application/octet-stream"),
-        );
+        let has_ct =
+            goish::strings::Contains(s.clone(), string("Content-Type: application/octet-stream"));
         let has_body = goish::strings::Contains(s.clone(), string("BINBYTES"));
         if has_disp && has_ct && has_body {
             fmt::Println!("[ 5] WriteFile wire            PASS");
         } else {
             fmt::Println!(
                 "[ 5] WriteFile wire            FAIL d={} c={} b={}",
-                has_disp, has_ct, has_body
+                has_disp,
+                has_ct,
+                has_body
             );
             failed += 1;
         }
@@ -140,8 +134,7 @@ fn main() {
 
     // 6. FileContentDisposition free fn.
     {
-        let s =
-            multipart::FileContentDisposition(string("up\\load"), string("foo\".bin"));
+        let s = multipart::FileContentDisposition(string("up\\load"), string("foo\".bin"));
         if s == "form-data; name=\"up\\\\load\"; filename=\"foo\\\".bin\"" {
             fmt::Println!("[ 6] FileContentDisposition    PASS");
         } else {
@@ -165,7 +158,11 @@ fn main() {
         if err.IsNil() && n == 8 && !all_zero {
             fmt::Println!("[ 7] crypto/rand.Read          PASS");
         } else {
-            fmt::Println!("[ 7] crypto/rand.Read          FAIL n={} zero={}", n, all_zero);
+            fmt::Println!(
+                "[ 7] crypto/rand.Read          FAIL n={} zero={}",
+                n,
+                all_zero
+            );
             failed += 1;
         }
     }

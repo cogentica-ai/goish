@@ -40,7 +40,7 @@ use alloc::sync::Arc;
 use goish::goslice::slice;
 use goish::io::fs::{self, FileMode};
 use goish::net::http;
-use goish::testing::fstest::{MapFile, MapFS};
+use goish::testing::fstest::{MapFS, MapFile};
 use goish::time;
 use goish::{errors, fmt, string, syscall};
 
@@ -161,7 +161,14 @@ fn main() {
             if serr == goish::nil && pos == 7 && got == "world." {
                 fmt::Println!("[6] ioFile.Seek reaches the file  PASS");
             } else {
-                fmt::Println!("[6] ioFile.Seek  FAIL pos=", pos, " got=", got, " err=", serr);
+                fmt::Println!(
+                    "[6] ioFile.Seek  FAIL pos=",
+                    pos,
+                    " got=",
+                    got,
+                    " err=",
+                    serr
+                );
                 failed += 1;
             }
         }

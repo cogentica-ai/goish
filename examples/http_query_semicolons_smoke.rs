@@ -11,8 +11,8 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use goish::fmt;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::io;
 use goish::net;
 use goish::net::http;
@@ -107,7 +107,10 @@ fn main() {
         if resp.StatusCode == 404 {
             fmt::Println!("[ 4] NewServeMux 404           PASS");
         } else {
-            fmt::Println!("[ 4] NewServeMux 404           FAIL status={}", resp.StatusCode);
+            fmt::Println!(
+                "[ 4] NewServeMux 404           FAIL status={}",
+                resp.StatusCode
+            );
             failed += 1;
         }
     }

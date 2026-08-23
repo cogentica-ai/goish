@@ -73,9 +73,7 @@ fn run_tests() {
     {
         let counter = alloc::sync::Arc::new(AtomicI64::new(0));
         let counter_clone = counter.clone();
-        let p: Pool<i64> = Pool::new(move || {
-            counter_clone.fetch_add(1, Ordering::Relaxed) + 100
-        });
+        let p: Pool<i64> = Pool::new(move || counter_clone.fetch_add(1, Ordering::Relaxed) + 100);
         let v1 = p.Get();
         let v2 = p.Get();
         let v3 = p.Get();
@@ -102,7 +100,10 @@ fn run_tests() {
         if counter.load(Ordering::Relaxed) == 0 {
             fmt::Println!("[ 5] New unused when stocked PASS");
         } else {
-            fmt::Println!("[ 5] New unused when stocked FAIL count={}", counter.load(Ordering::Relaxed));
+            fmt::Println!(
+                "[ 5] New unused when stocked FAIL count={}",
+                counter.load(Ordering::Relaxed)
+            );
             failed += 1;
         }
     }
@@ -165,7 +166,11 @@ fn run_tests() {
             if after_put == 3 && after_get == 2 {
                 fmt::Println!("[ 8] __len tracks items      PASS");
             } else {
-                fmt::Println!("[ 8] __len tracks items      FAIL put={} get={}", after_put as i64, after_get as i64);
+                fmt::Println!(
+                    "[ 8] __len tracks items      FAIL put={} get={}",
+                    after_put as i64,
+                    after_get as i64
+                );
                 failed += 1;
             }
         }

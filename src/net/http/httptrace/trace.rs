@@ -265,11 +265,10 @@ impl ClientTrace {
         match (self.ConnectDone.take(), old.ConnectDone.clone()) {
             (None, Some(o)) => self.ConnectDone = Some(o),
             (Some(t), Some(o)) => {
-                let composed: ConnectDoneHook =
-                    Arc::new(move |a: string, b: string, e: error| {
-                        t(a.clone(), b.clone(), e.clone());
-                        o(a, b, e);
-                    });
+                let composed: ConnectDoneHook = Arc::new(move |a: string, b: string, e: error| {
+                    t(a.clone(), b.clone(), e.clone());
+                    o(a, b, e);
+                });
                 self.ConnectDone = Some(composed);
             }
             (t, None) => self.ConnectDone = t,

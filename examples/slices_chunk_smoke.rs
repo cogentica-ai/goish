@@ -12,8 +12,8 @@ use alloc::vec;
 use goish::fmt;
 use goish::goslice::slice;
 use goish::slices;
+use goish::syscall;
 use goish::types::int;
-use goish::{syscall};
 
 fn make_int_slice(v: alloc::vec::Vec<int>) -> slice<int> {
     slice::<int>::__from_vec(v)

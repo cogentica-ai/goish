@@ -167,26 +167,41 @@ pub fn ParseCookie<L: Into<string>>(line: L) -> (slice<Cookie>, error) {
     let line: string = line.into();
     let semi_count = strings::Count(line.clone(), string(";")) as usize;
     if !cookieNumWithinMax(semi_count + 1) {
-        return (slice::<Cookie>::__from_vec(Vec::new()), errCookieNumLimitExceeded.into());
+        return (
+            slice::<Cookie>::__from_vec(Vec::new()),
+            errCookieNumLimitExceeded.into(),
+        );
     }
     let trimmed = strings::TrimSpace(line);
     let parts = strings::Split(trimmed.clone(), string(";"));
     if parts.Len() == 1 && parts[0].Len() == 0 {
-        return (slice::<Cookie>::__from_vec(Vec::new()), errBlankCookie.into());
+        return (
+            slice::<Cookie>::__from_vec(Vec::new()),
+            errBlankCookie.into(),
+        );
     }
     let mut out: Vec<Cookie> = Vec::with_capacity(parts.Len() as usize);
     for i in 0..parts.Len() {
         let s = strings::TrimSpace(parts[i].clone());
         let (name, value, found) = strings::Cut(s, string("="));
         if !found {
-            return (slice::<Cookie>::__from_vec(Vec::new()), errEqualNotFoundInCookie.into());
+            return (
+                slice::<Cookie>::__from_vec(Vec::new()),
+                errEqualNotFoundInCookie.into(),
+            );
         }
         if !super::http::isToken(&name) {
-            return (slice::<Cookie>::__from_vec(Vec::new()), errInvalidCookieName.into());
+            return (
+                slice::<Cookie>::__from_vec(Vec::new()),
+                errInvalidCookieName.into(),
+            );
         }
         let (val, quoted, ok) = parseCookieValue(&value, true);
         if !ok {
-            return (slice::<Cookie>::__from_vec(Vec::new()), errInvalidCookieValue.into());
+            return (
+                slice::<Cookie>::__from_vec(Vec::new()),
+                errInvalidCookieValue.into(),
+            );
         }
         let mut c = Cookie::default();
         c.Name = name;
@@ -625,10 +640,7 @@ fn parseCookieValue(raw: &string, allow_double_quote: bool) -> (string, bool, bo
     // Go: if allowDoubleQuote && len(raw) > 1 && raw[0] == '"' && raw[len(raw)-1] == '"' {
     //         raw = raw[1 : len(raw)-1]; quoted = true
     //     }
-    let raw = if allow_double_quote
-        && raw.Len() > 1
-        && raw[0] == b'"'
-        && raw[raw.Len() - 1] == b'"'
+    let raw = if allow_double_quote && raw.Len() > 1 && raw[0] == b'"' && raw[raw.Len() - 1] == b'"'
     {
         quoted = true;
         string::from_bytes(&raw.as_bytes()[1..(raw.Len() - 1) as usize])
@@ -657,9 +669,7 @@ fn validCookieDomain(v: &string) -> bool {
     if isCookieDomainName(v) {
         return true;
     }
-    if !crate::net::ParseIP(v.clone()).IsNil()
-        && !strings::Contains(v.clone(), string(":"))
-    {
+    if !crate::net::ParseIP(v.clone()).IsNil() && !strings::Contains(v.clone(), string(":")) {
         return true;
     }
     return false;
@@ -741,12 +751,9 @@ fn isCookieDomainName(s: &string) -> bool {
 // Removing it is its own change: it alters the accepted input set, and
 // the round-trip test is what would have to grow first.
 
-const DAY_NAMES: [&[byte; 3]; 7] = [
-    b"Sun", b"Mon", b"Tue", b"Wed", b"Thu", b"Fri", b"Sat",
-];
+const DAY_NAMES: [&[byte; 3]; 7] = [b"Sun", b"Mon", b"Tue", b"Wed", b"Thu", b"Fri", b"Sat"];
 const MONTH_NAMES: [&[byte; 3]; 12] = [
-    b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun",
-    b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
+    b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
 ];
 
 // go: none — goish-only: fills a fixed 29-byte buffer where Go calls

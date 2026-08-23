@@ -279,9 +279,8 @@ fn lookup_user_id(uid: string) -> (User, error) {
             errors::New(crate::Sprintf!("user: invalid userid {}", uid.clone())),
         );
     }
-    find_user_by(data, uid, 2i64, false).unwrap_or_else(|| {
-        (User::default(), UnknownUserIdError::new(i as int))
-    })
+    find_user_by(data, uid, 2i64, false)
+        .unwrap_or_else(|| (User::default(), UnknownUserIdError::new(i as int)))
 }
 
 // ─── /etc/passwd + /etc/group line scanner ───────────────────────────

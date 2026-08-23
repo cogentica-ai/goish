@@ -41,8 +41,8 @@ pub struct CipherSuiteTls13 {
 }
 
 // TLS 1.3 cipher suites.
-pub const TLS_AES_128_GCM_SHA256:      u16 = 0x1301;
-pub const TLS_AES_256_GCM_SHA384:      u16 = 0x1302;
+pub const TLS_AES_128_GCM_SHA256: u16 = 0x1301;
+pub const TLS_AES_256_GCM_SHA384: u16 = 0x1302;
 pub const TLS_CHACHA20_POLY1305_SHA256: u16 = 0x1303;
 
 /// Build the cipher suite descriptor for a given ID, or None if unsupported.
@@ -148,10 +148,7 @@ pub struct EarlySecret {
 impl EarlySecret {
     /// NewEarlySecret: extract(hash, psk_or_zeros, zeros_salt)
     /// RFC 8446 §7.1: When no PSK, IKM = zeros(hash_size), salt = zeros(hash_size)
-    pub fn new(
-        hash_fn: fn() -> Box<dyn HashTrait + Send + Sync>,
-        psk: Option<&[byte]>,
-    ) -> Self {
+    pub fn new(hash_fn: fn() -> Box<dyn HashTrait + Send + Sync>, psk: Option<&[byte]>) -> Self {
         let hash_size = hash_fn().Size() as usize;
         let zeros: Vec<byte> = alloc::vec![0u8; hash_size];
         // When psk is None, Go uses zeros of hash_size as the IKM
@@ -165,7 +162,8 @@ impl EarlySecret {
 
     /// ResumptionBinderKey: DeriveSecret(earlySecret, "res binder", H(""))
     /// RFC 8446 §4.2.11.2: used to compute the PSK binder in the ClientHello.
-    pub fn ResumptionBinderKey(&self) -> Vec<byte> { // goishlint:ignore GOISH008
+    pub fn ResumptionBinderKey(&self) -> Vec<byte> {
+        // goishlint:ignore GOISH008
         let hash_fn = self.hash_fn;
         // H("") = hash of empty string
         let empty_hash = {
@@ -263,7 +261,7 @@ pub fn traffic_keys(
     key_len: usize,
 ) -> TrafficKeys {
     let key = ExpandLabel(hash_fn, traffic_secret, "key", &[], key_len);
-    let iv  = ExpandLabel(hash_fn, traffic_secret, "iv",  &[], TLS13_IV_LENGTH);
+    let iv = ExpandLabel(hash_fn, traffic_secret, "iv", &[], TLS13_IV_LENGTH);
     TrafficKeys { key, iv }
 }
 
@@ -315,13 +313,14 @@ pub fn next_traffic_secret(
     ExpandLabel(hash_fn, traffic_secret, "traffic upd", &[], hash_size)
 }
 
-
 // ─── crypto/tls/key_schedule.go, ported verbatim ──────────────────────
 //
 // RFC 8446 §7. Everything above this divider is goish-only code that
 // predates the port and still drives the live TLS 1.3 handshake; it is
 // slated for eviction once the handshake moves onto these.
 
+use super::cipher_suites::{aeadNonceLength, cipherSuiteTLS13};
+use super::common::{CurveID, CurveP256, CurveP384, CurveP521, X25519};
 use crate::crypto::ecdh;
 use crate::crypto::internal::fips140::tls13;
 use crate::crypto::Hash as CryptoHash;
@@ -329,8 +328,6 @@ use crate::error;
 use crate::gostring::string;
 use crate::hash::HashFunc;
 use crate::io;
-use super::cipher_suites::{aeadNonceLength, cipherSuiteTLS13};
-use super::common::{CurveID, CurveP256, CurveP384, CurveP521, X25519};
 
 // go: none — goish-only: Go writes `c.hash.New` as a method value; goish
 // needs the closure named, because `crypto::Hash::New` is an inherent

@@ -78,7 +78,8 @@ fn main() {
         if class_for(1024, 8) == Some(32)      // 1024 bytes
             && class_for(1025, 8) == Some(33)  // first large-bucket size
             && class_for(1152, 8) == Some(33)  // exactly class 33
-            && class_for(1153, 8) == Some(34)  // first byte over class 33
+            && class_for(1153, 8) == Some(34)
+        // first byte over class 33
         {
             fmt::Println!("[ 2] class_for large bucket    PASS");
         } else {

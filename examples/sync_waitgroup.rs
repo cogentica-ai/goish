@@ -62,9 +62,15 @@ fn test_add_done_wait() {
     });
     schedule();
 
-    check(WAIT_DONE.load(Ordering::Acquire) == 1, b"add-done-wait: waiter didn't return\n");
+    check(
+        WAIT_DONE.load(Ordering::Acquire) == 1,
+        b"add-done-wait: waiter didn't return\n",
+    );
     let expected: i64 = (1..=N).sum();
-    check(SUM.load(Ordering::Relaxed) == expected, b"add-done-wait: sum wrong\n");
+    check(
+        SUM.load(Ordering::Relaxed) == expected,
+        b"add-done-wait: sum wrong\n",
+    );
 }
 
 // ── Test 2: many concurrent waiters all unblock at count→0 ────────
@@ -118,8 +124,14 @@ fn test_go_method() {
     });
     schedule();
 
-    check(W2.load(Ordering::Acquire) == 1, b"go-method: Wait didn't return\n");
-    check(GO_RAN.load(Ordering::Relaxed) == N, b"go-method: not all tasks ran\n");
+    check(
+        W2.load(Ordering::Acquire) == 1,
+        b"go-method: Wait didn't return\n",
+    );
+    check(
+        GO_RAN.load(Ordering::Relaxed) == N,
+        b"go-method: not all tasks ran\n",
+    );
 }
 
 // ── Test 4: reuse — second batch after first Wait() returned ──────
@@ -157,7 +169,16 @@ fn test_reuse() {
     });
     schedule();
 
-    check(W1.load(Ordering::Acquire) == 1, b"reuse: first Wait didn't return\n");
-    check(C1.load(Ordering::Relaxed) == 8, b"reuse: first batch count wrong\n");
-    check(C2.load(Ordering::Relaxed) == 5, b"reuse: second batch count wrong\n");
+    check(
+        W1.load(Ordering::Acquire) == 1,
+        b"reuse: first Wait didn't return\n",
+    );
+    check(
+        C1.load(Ordering::Relaxed) == 8,
+        b"reuse: first batch count wrong\n",
+    );
+    check(
+        C2.load(Ordering::Relaxed) == 5,
+        b"reuse: second batch count wrong\n",
+    );
 }

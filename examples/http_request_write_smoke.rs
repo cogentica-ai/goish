@@ -10,8 +10,8 @@ extern crate goish;
 
 use alloc::vec::Vec;
 
-use goish::fmt;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::net::http;
 use goish::{string, syscall};
 
@@ -28,8 +28,7 @@ fn main() {
         );
         req.Header.Set(string("Content-Type"), string("text/plain"));
 
-        let mut buf =
-            goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
+        let mut buf = goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
         let err = req.Write(&mut buf);
         if !err.IsNil() {
             fmt::Println!("[ 1] Write returned err        FAIL");
@@ -41,10 +40,7 @@ fn main() {
                 v.push(on_wire[i]);
             }
             let s = goish::string::from_bytes(&v);
-            let head_ok = goish::strings::HasPrefix(
-                s.clone(),
-                string("POST /api HTTP/1.1\r\n"),
-            );
+            let head_ok = goish::strings::HasPrefix(s.clone(), string("POST /api HTTP/1.1\r\n"));
             let host_ok = goish::strings::Contains(s.clone(), string("Host: example.com:8080\r\n"));
             let len_ok = goish::strings::Contains(s.clone(), string("Content-Length: 5\r\n"));
             let body_ok = goish::strings::HasSuffix(s.clone(), string("hello"));
@@ -53,7 +49,10 @@ fn main() {
             } else {
                 fmt::Println!(
                     "[ 1] Write wire format         FAIL head={} host={} len={} body={}",
-                    head_ok, host_ok, len_ok, body_ok
+                    head_ok,
+                    host_ok,
+                    len_ok,
+                    body_ok
                 );
                 failed += 1;
             }
@@ -92,10 +91,8 @@ fn main() {
 
     // 3. GET with no body — Content-Length omitted.
     {
-        let (req, _) =
-            http::NewRequest(string("GET"), string("http://x.example.com/p"), bytes(""));
-        let mut buf =
-            goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
+        let (req, _) = http::NewRequest(string("GET"), string("http://x.example.com/p"), bytes(""));
+        let mut buf = goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
         let _ = req.Write(&mut buf);
         let on_wire = buf.Bytes();
         let mut v: Vec<u8> = Vec::with_capacity(on_wire.Len() as usize);

@@ -70,7 +70,10 @@ fn main() {
     {
         let src = vals(&[("a", &["1", "2"])]);
         let mut dst = cloneURLValues(&src);
-        dst.Set(string("a"), slice::__from_vec(alloc::vec![string("mutated")]));
+        dst.Set(
+            string("a"),
+            slice::__from_vec(alloc::vec![string("mutated")]),
+        );
         let (orig, _) = src.Get(string("a"));
         let (copy, _) = dst.Get(string("a"));
         if orig.Len() == 2 && orig[0] == "1" && copy.Len() == 1 && copy[0] == "mutated" {
@@ -143,7 +146,10 @@ fn main() {
         let mut c = cloneMultipartForm(Some(&f)).unwrap();
         // Mutate the deepest thing in the copy.
         let (mut cf, _) = c.File.Get(string("upload"));
-        cf[0].Header.Set(string("X"), slice::__from_vec(alloc::vec![string("changed")]));
+        cf[0].Header.Set(
+            string("X"),
+            slice::__from_vec(alloc::vec![string("changed")]),
+        );
         c.File.Set(string("upload"), cf);
 
         let (of, _) = f.File.Get(string("upload"));

@@ -18,28 +18,28 @@ impl P384Element {
     ///
     /// If x == 0, Invert returns e = 0.
     pub fn Invert(&mut self, x: &P384Element) -> &mut Self {
-    // Inversion is implemented as exponentiation with exponent p − 2.
-    // The sequence of 15 multiplications and 383 squarings is derived from the
-    // following addition chain generated with github.com/mmcloughlin/addchain v0.4.0.
-    //
-    //	_10     = 2*1
-    //	_11     = 1 + _10
-    //	_110    = 2*_11
-    //	_111    = 1 + _110
-    //	_111000 = _111 << 3
-    //	_111111 = _111 + _111000
-    //	x12     = _111111 << 6 + _111111
-    //	x24     = x12 << 12 + x12
-    //	x30     = x24 << 6 + _111111
-    //	x31     = 2*x30 + 1
-    //	x32     = 2*x31 + 1
-    //	x63     = x32 << 31 + x31
-    //	x126    = x63 << 63 + x63
-    //	x252    = x126 << 126 + x126
-    //	x255    = x252 << 3 + _111
-    //	i397    = ((x255 << 33 + x32) << 94 + x30) << 2
-    //	return    1 + i397
-    //
+        // Inversion is implemented as exponentiation with exponent p − 2.
+        // The sequence of 15 multiplications and 383 squarings is derived from the
+        // following addition chain generated with github.com/mmcloughlin/addchain v0.4.0.
+        //
+        //	_10     = 2*1
+        //	_11     = 1 + _10
+        //	_110    = 2*_11
+        //	_111    = 1 + _110
+        //	_111000 = _111 << 3
+        //	_111111 = _111 + _111000
+        //	x12     = _111111 << 6 + _111111
+        //	x24     = x12 << 12 + x12
+        //	x30     = x24 << 6 + _111111
+        //	x31     = 2*x30 + 1
+        //	x32     = 2*x31 + 1
+        //	x63     = x32 << 31 + x31
+        //	x126    = x63 << 63 + x63
+        //	x252    = x126 << 126 + x126
+        //	x255    = x252 << 3 + _111
+        //	i397    = ((x255 << 33 + x32) << 94 + x30) << 2
+        //	return    1 + i397
+        //
         let mut z = P384Element::New();
         z.Set(*self);
         let mut t0 = P384Element::New();

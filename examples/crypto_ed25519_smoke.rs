@@ -23,11 +23,11 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::crypto;
 use goish::crypto::ed25519::{
     GenerateKey, NewKeyFromSeed, Options, Sign, Verify, VerifyWithOptions,
 };
+use goish::fmt;
 use goish::types::byte;
 use goish::{slice, syscall};
 

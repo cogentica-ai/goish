@@ -38,10 +38,10 @@ extern crate goish;
 
 use alloc::sync::Arc;
 
-use goish::fmt;
 use goish::bytes as gobytes;
 use goish::context;
 use goish::encoding::json;
+use goish::fmt;
 use goish::io;
 use goish::io::{Closer, Reader, Writer};
 use goish::mime::multipart;
@@ -198,7 +198,8 @@ fn write_json<T: goish::reflect::Reflect + ?Sized>(
         http::Error(w, err.Error(), http::StatusInternalServerError);
         return;
     }
-    w.Header().Set("Content-Type", "application/json; charset=utf-8");
+    w.Header()
+        .Set("Content-Type", "application/json; charset=utf-8");
     w.WriteHeader(code);
     w.Write(body);
 }
@@ -237,7 +238,11 @@ fn whoami(w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Requ
         }
     }
     if id.Len() == 0 {
-        http::Error(w, "no request id in context", http::StatusInternalServerError);
+        http::Error(
+            w,
+            "no request id in context",
+            http::StatusInternalServerError,
+        );
         return;
     }
     w.Header().Set("Content-Type", "text/plain");
@@ -295,7 +300,12 @@ fn uploadHandler(w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &htt
         http::Error(w, "missing file part", http::StatusBadRequest);
         return;
     }
-    w.Write(bytes(fmt::Sprintf!("file=%s size=%d meta=%s\n", fname, fsize, meta)));
+    w.Write(bytes(fmt::Sprintf!(
+        "file=%s size=%d meta=%s\n",
+        fname,
+        fsize,
+        meta
+    )));
 }
 
 // ─── main ────────────────────────────────────────────────────────────
@@ -594,7 +604,11 @@ fn main() {
         } else if resp.StatusCode != 201 {
             fail(fmt::Sprintf!("%s: status %d", name, resp.StatusCode));
         } else if resp.Header.Get("Location") != "/api/tasks/1" {
-            fail(fmt::Sprintf!("%s: Location %s", name, resp.Header.Get("Location")));
+            fail(fmt::Sprintf!(
+                "%s: Location %s",
+                name,
+                resp.Header.Get("Location")
+            ));
         } else if !gobytes::Contains(&body, bytes("\"id\":1")) {
             fail(fmt::Sprintf!("%s: bad body", name));
         } else {
@@ -638,7 +652,12 @@ fn main() {
             if uerr != nil {
                 fail(fmt::Sprintf!("%s: unmarshal: %s", name, uerr.Error()));
             } else if t.ID != 1 || t.Title != "write complex example" || t.Version != 1 {
-                fail(fmt::Sprintf!("%s: struct mismatch id=%d v=%d", name, t.ID, t.Version));
+                fail(fmt::Sprintf!(
+                    "%s: struct mismatch id=%d v=%d",
+                    name,
+                    t.ID,
+                    t.Version
+                ));
             } else if etag.Len() == 0 {
                 fail(fmt::Sprintf!("%s: no etag", name));
             } else {
@@ -691,7 +710,11 @@ fn main() {
                 if err2 != nil {
                     fail(fmt::Sprintf!("%s: refetch: %s", name, err2.Error()));
                 } else if resp2.StatusCode != 200 {
-                    fail(fmt::Sprintf!("%s: stale etag matched (%d)", name, resp2.StatusCode));
+                    fail(fmt::Sprintf!(
+                        "%s: stale etag matched (%d)",
+                        name,
+                        resp2.StatusCode
+                    ));
                 } else {
                     pass(name);
                 }
@@ -718,7 +741,11 @@ fn main() {
         } else if resp.StatusCode != 200 {
             fail(fmt::Sprintf!("%s: status %d", name, resp.StatusCode));
         } else if resp.Header.Get("X-Total-Count") != "7" {
-            fail(fmt::Sprintf!("%s: total %s", name, resp.Header.Get("X-Total-Count")));
+            fail(fmt::Sprintf!(
+                "%s: total %s",
+                name,
+                resp.Header.Get("X-Total-Count")
+            ));
         } else {
             let mut items = make!([]Task, 0);
             let uerr = json::Unmarshal(&body, &mut items);
@@ -747,7 +774,11 @@ fn main() {
                 if err2 != nil {
                     fail(fmt::Sprintf!("%s: refetch: %s", name, err2.Error()));
                 } else if resp2.StatusCode != 404 {
-                    fail(fmt::Sprintf!("%s: status %d after delete", name, resp2.StatusCode));
+                    fail(fmt::Sprintf!(
+                        "%s: status %d after delete",
+                        name,
+                        resp2.StatusCode
+                    ));
                 } else {
                     pass(name);
                 }
@@ -849,7 +880,11 @@ fn main() {
         let (req, e) =
             http::NewRequestWithContext(cctx, "GET", fmt::Sprintf!("%s/api/sleepy", base), nil);
         if e != nil {
-            fail(fmt::Sprintf!("%s: NewRequestWithContext: %s", name, e.Error()));
+            fail(fmt::Sprintf!(
+                "%s: NewRequestWithContext: %s",
+                name,
+                e.Error()
+            ));
         } else {
             go!(move || {
                 time::Sleep(time::Millisecond * 150);
@@ -895,7 +930,11 @@ fn main() {
                 nil,
             );
             if e != nil {
-                fail(fmt::Sprintf!("%s: NewRequestWithContext: %s", name, e.Error()));
+                fail(fmt::Sprintf!(
+                    "%s: NewRequestWithContext: %s",
+                    name,
+                    e.Error()
+                ));
             } else {
                 go!(move || {
                     time::Sleep(time::Millisecond * 150);
@@ -923,7 +962,11 @@ fn main() {
         let (req, e) =
             http::NewRequestWithContext(cctx, "GET", fmt::Sprintf!("%s/api/sleepy", base), nil);
         if e != nil {
-            fail(fmt::Sprintf!("%s: NewRequestWithContext: %s", name, e.Error()));
+            fail(fmt::Sprintf!(
+                "%s: NewRequestWithContext: %s",
+                name,
+                e.Error()
+            ));
         } else {
             let t0 = time::Now();
             let (_, err) = client.Do(&req);
@@ -949,7 +992,8 @@ fn main() {
             pass(name);
         }
         let name = "POST /api/import small -> 200";
-        let (mut resp, err) = client.Post(fmt::Sprintf!("%s/api/import", base), "text/plain", "tiny");
+        let (mut resp, err) =
+            client.Post(fmt::Sprintf!("%s/api/import", base), "text/plain", "tiny");
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = resp.Body.Close();
         if err != nil {
@@ -1001,7 +1045,8 @@ fn main() {
         // 14. SSE: raw client sees the first event while the handler is
         // still sleeping — proof of incremental flush, not buffer-then-dump.
         let name = "GET /api/stream streams incrementally";
-        let (mut conn, derr) = net::Dial("tcp", fmt::Sprintf!("127.0.0.1:%d", int(API_PORT.Load())));
+        let (mut conn, derr) =
+            net::Dial("tcp", fmt::Sprintf!("127.0.0.1:%d", int(API_PORT.Load())));
         if derr != nil {
             fail(fmt::Sprintf!("%s: dial: %s", name, derr.Error()));
         } else {
@@ -1062,7 +1107,10 @@ fn main() {
         } else if !gobytes::Contains(&body, bytes("\"id\":1")) {
             fail(fmt::Sprintf!("%s: bad body", name));
         } else if resp.Header.Get("X-Request-Id").Len() == 0 {
-            fail(fmt::Sprintf!("%s: middleware header lost in proxy hop", name));
+            fail(fmt::Sprintf!(
+                "%s: middleware header lost in proxy hop",
+                name
+            ));
         } else {
             pass(name);
         }
@@ -1108,7 +1156,11 @@ fn main() {
         } else if created != 192 {
             fail(fmt::Sprintf!("%s: created %d, want 192", name, created));
         } else if seq_delta < 384 {
-            fail(fmt::Sprintf!("%s: request-id sequence only advanced %d", name, seq_delta));
+            fail(fmt::Sprintf!(
+                "%s: request-id sequence only advanced %d",
+                name,
+                seq_delta
+            ));
         } else {
             pass(name);
         }
@@ -1119,7 +1171,11 @@ fn main() {
         if err != nil {
             fail(fmt::Sprintf!("%s: %s", name, err.Error()));
         } else if resp.Header.Get("X-Total-Count") != "198" {
-            fail(fmt::Sprintf!("%s: total %s", name, resp.Header.Get("X-Total-Count")));
+            fail(fmt::Sprintf!(
+                "%s: total %s",
+                name,
+                resp.Header.Get("X-Total-Count")
+            ));
         } else {
             pass(name);
         }
@@ -1129,13 +1185,12 @@ fn main() {
         // reading the response and expect the server's background
         // watcher to cancel the request context.
         let name = "client disconnect cancels request ctx";
-        let (mut conn, derr) = net::Dial("tcp", fmt::Sprintf!("127.0.0.1:%d", int(API_PORT.Load())));
+        let (mut conn, derr) =
+            net::Dial("tcp", fmt::Sprintf!("127.0.0.1:%d", int(API_PORT.Load())));
         if derr != nil {
             fail(fmt::Sprintf!("%s: dial: %s", name, derr.Error()));
         } else {
-            conn.Write(bytes(
-                "GET /api/watchdog HTTP/1.1\r\nHost: taskd\r\n\r\n",
-            ));
+            conn.Write(bytes("GET /api/watchdog HTTP/1.1\r\nHost: taskd\r\n\r\n"));
             // Give the handler time to reach its select before we
             // slam the connection shut.
             time::Sleep(time::Millisecond * 120);
@@ -1149,7 +1204,11 @@ fn main() {
             if got == 1 {
                 pass(name);
             } else {
-                fail(fmt::Sprintf!("%s: watchdog outcome %d, want 1", name, int(got)));
+                fail(fmt::Sprintf!(
+                    "%s: watchdog outcome %d, want 1",
+                    name,
+                    int(got)
+                ));
             }
         }
 

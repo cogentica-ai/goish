@@ -25,12 +25,12 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use crate::crypto::subtle;
+use crate::error;
 use crate::errors;
 use crate::goslice::slice;
 use crate::io;
 use crate::string;
 use crate::types::byte;
-use crate::error;
 
 // Go: ecdh.go:18-53
 //   type Curve interface { GenerateKey; NewPrivateKey; NewPublicKey; ecdh }

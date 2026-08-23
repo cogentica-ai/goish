@@ -12,8 +12,8 @@
 #![no_main]
 
 use core::sync::atomic::{AtomicU32, Ordering};
-use goish::syscall;
 use goish::runtime::pkginit::PkgInit;
+use goish::syscall;
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -21,7 +21,9 @@ fn die(msg: &[u8]) -> ! {
 }
 
 fn check(cond: bool, msg: &[u8]) {
-    if !cond { die(msg); }
+    if !cond {
+        die(msg);
+    }
 }
 
 // ── 1. run_once is idempotent ────────────────────────────────────────
@@ -69,16 +71,31 @@ fn main() {
     a_init();
     a_init();
     a_init();
-    check(A_RAN.load(Ordering::Relaxed) == 1, b"pkginit: A ran more than once\n");
+    check(
+        A_RAN.load(Ordering::Relaxed) == 1,
+        b"pkginit: A ran more than once\n",
+    );
     check(A_INIT.is_done(), b"pkginit: A state != DONE\n");
-    check(A_INIT.state() == PkgInit::DONE, b"pkginit: A state value wrong\n");
+    check(
+        A_INIT.state() == PkgInit::DONE,
+        b"pkginit: A state value wrong\n",
+    );
 
     // 2. Diamond — both B.init() and D.init() depend on C; C runs once.
     b_init();
     d_init();
-    check(B_RAN.load(Ordering::Relaxed) == 1, b"pkginit: B ran more than once\n");
-    check(D_RAN.load(Ordering::Relaxed) == 1, b"pkginit: D ran more than once\n");
-    check(C_RAN.load(Ordering::Relaxed) == 1, b"pkginit: C ran more than once (diamond bug)\n");
+    check(
+        B_RAN.load(Ordering::Relaxed) == 1,
+        b"pkginit: B ran more than once\n",
+    );
+    check(
+        D_RAN.load(Ordering::Relaxed) == 1,
+        b"pkginit: D ran more than once\n",
+    );
+    check(
+        C_RAN.load(Ordering::Relaxed) == 1,
+        b"pkginit: C ran more than once (diamond bug)\n",
+    );
 
     // 3. goish::init() — already invoked by #[goish::main] prelude.
     //    A direct call here must short-circuit.
@@ -92,14 +109,22 @@ fn main() {
 
     // 4. crypto registry was populated by goish::init() before main.
     //    crypto::SHA256.Available() should be true.
-    check(goish::crypto::SHA256.Available(),
-          b"pkginit: SHA256 not registered after goish::init\n");
-    check(goish::crypto::SHA512.Available(),
-          b"pkginit: SHA512 not registered after goish::init\n");
-    check(goish::crypto::SHA1.Available(),
-          b"pkginit: SHA1 not registered after goish::init\n");
-    check(goish::crypto::MD5.Available(),
-          b"pkginit: MD5 not registered after goish::init\n");
+    check(
+        goish::crypto::SHA256.Available(),
+        b"pkginit: SHA256 not registered after goish::init\n",
+    );
+    check(
+        goish::crypto::SHA512.Available(),
+        b"pkginit: SHA512 not registered after goish::init\n",
+    );
+    check(
+        goish::crypto::SHA1.Available(),
+        b"pkginit: SHA1 not registered after goish::init\n",
+    );
+    check(
+        goish::crypto::MD5.Available(),
+        b"pkginit: MD5 not registered after goish::init\n",
+    );
 
     const OK: &[u8] = b"pkginit: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

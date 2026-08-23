@@ -128,8 +128,7 @@ impl filterMatch {
                 }
                 // Go: "Verify filters before doing any processing."
                 for (i, s) in m.iter().enumerate() {
-                    let (_, err) =
-                        call_match(matchString, s, &string::from_static("non-empty"));
+                    let (_, err) = call_match(matchString, s, &string::from_static("non-empty"));
                     if err != crate::errors::nil {
                         // Go: fmt.Errorf("element %d of %s (%q): %s",
                         //         i, name, s, err)
@@ -267,8 +266,8 @@ impl matcher {
 
         // Go: "We check the full array of paths each time to allow for
         // the case that a pattern contains a '/'."
-        let elem: Vec<string> = crate::strings::Split(name.clone(), string::from_static("/"))
-            .to_vec();
+        let elem: Vec<string> =
+            crate::strings::Split(name.clone(), string::from_static("/")).to_vec();
 
         // Go: filter must match. Accept a partial match that may
         // produce a full match later.
@@ -301,11 +300,7 @@ impl matcher {
     /// subname by affixing it with one or more counts, if necessary."
     pub fn unique(&self, parent: &string, subname: &string) -> string {
         // Go: base := parent + "/" + subname
-        let base: string = crate::fmt::Sprintf!(
-            "%s/%s",
-            parent.clone(),
-            subname.clone()
-        );
+        let base: string = crate::fmt::Sprintf!("%s/%s", parent.clone(), subname.clone());
 
         return 'retry: loop {
             let mut sub = self.subNames.Lock();
@@ -490,7 +485,9 @@ pub fn rewrite(s: &string) -> string {
             }
         } else {
             let mut buf = [0u8; 4];
-            let enc = char::from_u32(uint32(r)).unwrap_or('\u{FFFD}').encode_utf8(&mut buf);
+            let enc = char::from_u32(uint32(r))
+                .unwrap_or('\u{FFFD}')
+                .encode_utf8(&mut buf);
             b.extend_from_slice(enc.as_bytes());
         }
     }

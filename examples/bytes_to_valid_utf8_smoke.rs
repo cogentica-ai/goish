@@ -8,9 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
 use goish::convert::bytes as as_bytes;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::types::byte;
 use goish::{string, syscall};

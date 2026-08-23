@@ -23,8 +23,8 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::crypto::internal::fips140::edwards25519::field::Element;
+use goish::fmt;
 use goish::types::byte;
 use goish::{slice, syscall};
 

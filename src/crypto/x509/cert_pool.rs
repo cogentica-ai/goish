@@ -43,8 +43,8 @@ use alloc::vec::Vec;
 use super::parser::ParseCertificate;
 use super::x509::Certificate;
 use crate::crypto::sha256;
-use crate::error;
 use crate::encoding::pem;
+use crate::error;
 use crate::gomap::map;
 use crate::goslice::slice;
 use crate::gostring::string;
@@ -188,20 +188,16 @@ impl CertPool {
             // and a `continue` for it; goish stores the parsed value, so
             // there is no error to skip on. See the banner.
             let candidate = self.cert(*c);
-            let kidMatch = crate::bytes::Equal(
-                candidate.SubjectKeyId.clone(),
-                cert.AuthorityKeyId.clone(),
-            );
+            let kidMatch =
+                crate::bytes::Equal(candidate.SubjectKeyId.clone(), cert.AuthorityKeyId.clone());
             if kidMatch {
-                matchingKeyID =
-                    crate::append!(matchingKeyID, potentialParent { cert: candidate });
+                matchingKeyID = crate::append!(matchingKeyID, potentialParent { cert: candidate });
             } else if (candidate.SubjectKeyId.Len() == 0 && cert.AuthorityKeyId.Len() > 0)
                 || (candidate.SubjectKeyId.Len() > 0 && cert.AuthorityKeyId.Len() == 0)
             {
                 oneKeyID = crate::append!(oneKeyID, potentialParent { cert: candidate });
             } else {
-                mismatchKeyID =
-                    crate::append!(mismatchKeyID, potentialParent { cert: candidate });
+                mismatchKeyID = crate::append!(mismatchKeyID, potentialParent { cert: candidate });
             }
         }
 

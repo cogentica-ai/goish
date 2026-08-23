@@ -71,10 +71,7 @@ fn test_local_runq_only() {
     }
 
     schedule();
-    check(
-        COUNT.load(Ordering::Relaxed) == N,
-        b"local: count != N\n",
-    );
+    check(COUNT.load(Ordering::Relaxed) == N, b"local: count != N\n");
 }
 
 // ─── Test 2: spawn many > LOCAL_RUNQ_SIZE, force runqputslow ─────────

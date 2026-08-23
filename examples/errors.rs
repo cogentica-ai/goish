@@ -73,7 +73,10 @@ fn main() {
     check(n == 0, b"errors: zero value on failure\n");
 
     // (3) err.Error() returns the message.
-    check(err.Error() == "empty input", b"errors: Error() text wrong\n");
+    check(
+        err.Error() == "empty input",
+        b"errors: Error() text wrong\n",
+    );
 
     // (4) errors::New returns distinct values for same text (Go semantic).
     let e1 = errors::New("same");
@@ -86,26 +89,44 @@ fn main() {
 
     // (6) Custom error type via Wrap.
     let pe = errors::Wrap(ParseErr { line: 7 });
-    check(pe.Error() == "parse error", b"errors: custom Error() wrong\n");
+    check(
+        pe.Error() == "parse error",
+        b"errors: custom Error() wrong\n",
+    );
     check(pe != nil, b"errors: custom != nil\n");
 
     // (7) errors::Is — sentinel match through clone.
     let sentinel = errors::New("sentinel");
     let same = sentinel.clone();
-    check(errors::Is(same, sentinel.clone()), b"errors: Is(clone, sentinel) failed\n");
+    check(
+        errors::Is(same, sentinel.clone()),
+        b"errors: Is(clone, sentinel) failed\n",
+    );
 
     // (8) errors::Is — different errors with same text are NOT equal.
     let other = errors::New("sentinel");
-    check(!errors::Is(other, sentinel.clone()), b"errors: Is must use ptr identity\n");
+    check(
+        !errors::Is(other, sentinel.clone()),
+        b"errors: Is must use ptr identity\n",
+    );
 
     // (9) errors::Is — nil cases.
     let nil_e1: error = nil.into();
     let nil_e2: error = nil.into();
     let nil_e3: error = nil.into();
     let nil_e4: error = nil.into();
-    check(errors::Is(nil_e1, nil_e2), b"errors: Is(nil, nil.into()) must be true\n");
-    check(!errors::Is(sentinel.clone(), nil_e3), b"errors: Is(non-nil, nil.into()) must be false\n");
-    check(!errors::Is(nil_e4, sentinel.clone()), b"errors: Is(nil, non-nil) must be false\n");
+    check(
+        errors::Is(nil_e1, nil_e2),
+        b"errors: Is(nil, nil.into()) must be true\n",
+    );
+    check(
+        !errors::Is(sentinel.clone(), nil_e3),
+        b"errors: Is(non-nil, nil.into()) must be false\n",
+    );
+    check(
+        !errors::Is(nil_e4, sentinel.clone()),
+        b"errors: Is(nil, non-nil) must be false\n",
+    );
 
     // (10) Wrapping chain — inner is reachable via Unwrap and Is.
     let inner = errors::New("inner cause");
@@ -113,11 +134,20 @@ fn main() {
         msg: string("wrapped"),
         inner: inner.clone(),
     });
-    check(errors::Is(wrapped.clone(), inner.clone()), b"errors: Is must walk Unwrap chain\n");
-    check(errors::Unwrap(wrapped.clone()) == inner, b"errors: Unwrap must return inner\n");
+    check(
+        errors::Is(wrapped.clone(), inner.clone()),
+        b"errors: Is must walk Unwrap chain\n",
+    );
+    check(
+        errors::Unwrap(wrapped.clone()) == inner,
+        b"errors: Unwrap must return inner\n",
+    );
 
     // (11) Unwrap of leaf returns nil.
-    check(errors::Unwrap(inner) == nil, b"errors: Unwrap of leaf must be nil\n");
+    check(
+        errors::Unwrap(inner) == nil,
+        b"errors: Unwrap of leaf must be nil\n",
+    );
 
     // (12) Two-level wrap: outer.Unwrap.Unwrap reaches the deepest.
     let leaf = errors::New("leaf");
@@ -129,7 +159,10 @@ fn main() {
         msg: string("outer"),
         inner: mid.clone(),
     });
-    check(errors::Is(outer.clone(), leaf.clone()), b"errors: Is must walk 2 levels\n");
+    check(
+        errors::Is(outer.clone(), leaf.clone()),
+        b"errors: Is must walk 2 levels\n",
+    );
     check(errors::Is(outer, mid), b"errors: Is must walk 1 level\n");
 
     const OK: &[u8] = b"errors: ok\n";

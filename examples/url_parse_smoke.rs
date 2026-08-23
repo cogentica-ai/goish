@@ -30,7 +30,10 @@ fn main() {
         } else {
             fmt::Println!(
                 "[ 1] absolute URL              FAIL scheme={} host={} path={} q={}",
-                u.Scheme, u.Host, u.Path, u.RawQuery
+                u.Scheme,
+                u.Host,
+                u.Path,
+                u.RawQuery
             );
             failed += 1;
         }
@@ -39,7 +42,12 @@ fn main() {
     // 2. Origin form: /path?query.
     {
         let (u, err) = url::Parse(string("/foo/bar?x=y"));
-        if err.IsNil() && u.Scheme == "" && u.Host == "" && u.Path == "/foo/bar" && u.RawQuery == "x=y" {
+        if err.IsNil()
+            && u.Scheme == ""
+            && u.Host == ""
+            && u.Path == "/foo/bar"
+            && u.RawQuery == "x=y"
+        {
             fmt::Println!("[ 2] origin form              PASS");
         } else {
             fmt::Println!("[ 2] origin form              FAIL");

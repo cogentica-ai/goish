@@ -210,7 +210,12 @@ fn main() {
         if !named_sub && named_parent {
             fmt::Println!("[ 6] parked tests are unlisted PASS");
         } else {
-            fmt::Println!("[ 6] parked tests are unlisted FAIL sub=", named_sub, " parent=", named_parent);
+            fmt::Println!(
+                "[ 6] parked tests are unlisted FAIL sub=",
+                named_sub,
+                " parent=",
+                named_parent
+            );
             failed += 1;
         }
     }

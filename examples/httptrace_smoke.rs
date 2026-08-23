@@ -11,14 +11,14 @@ extern crate goish;
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicI64, Ordering};
 
-use goish::fmt;
 use goish::context;
+use goish::crypto::tls;
 use goish::errors;
+use goish::fmt;
 use goish::net::http::httptrace::{
     self, ClientTrace, ContextClientTrace, DNSDoneInfo, DNSStartInfo, WithClientTrace,
     WroteRequestInfo,
 };
-use goish::crypto::tls;
 use goish::{string, syscall};
 
 #[goish::main]
@@ -88,7 +88,10 @@ fn main() {
         if CALLED.load(Ordering::SeqCst) == 10 {
             fmt::Println!("[ 4] compose adopt old         PASS");
         } else {
-            fmt::Println!("[ 4] compose adopt old         FAIL got {}", CALLED.load(Ordering::SeqCst));
+            fmt::Println!(
+                "[ 4] compose adopt old         FAIL got {}",
+                CALLED.load(Ordering::SeqCst)
+            );
             failed += 1;
         }
     }
@@ -116,7 +119,10 @@ fn main() {
         if SEQ.load(Ordering::SeqCst) == 12 {
             fmt::Println!("[ 5] compose new-then-old      PASS");
         } else {
-            fmt::Println!("[ 5] compose new-then-old      FAIL got {}", SEQ.load(Ordering::SeqCst));
+            fmt::Println!(
+                "[ 5] compose new-then-old      FAIL got {}",
+                SEQ.load(Ordering::SeqCst)
+            );
             failed += 1;
         }
     }
@@ -149,7 +155,10 @@ fn main() {
         if N.load(Ordering::SeqCst) == 3 {
             fmt::Println!("[ 6] compose ConnectStart      PASS");
         } else {
-            fmt::Println!("[ 6] compose ConnectStart      FAIL got {}", N.load(Ordering::SeqCst));
+            fmt::Println!(
+                "[ 6] compose ConnectStart      FAIL got {}",
+                N.load(Ordering::SeqCst)
+            );
             failed += 1;
         }
     }
@@ -167,7 +176,12 @@ fn main() {
         if !h0 && h1 && !h2 {
             fmt::Println!("[ 7] hasNetHooks               PASS");
         } else {
-            fmt::Println!("[ 7] hasNetHooks               FAIL h0={} h1={} h2={}", h0, h1, h2);
+            fmt::Println!(
+                "[ 7] hasNetHooks               FAIL h0={} h1={} h2={}",
+                h0,
+                h1,
+                h2
+            );
             failed += 1;
         }
     }
@@ -201,12 +215,12 @@ fn main() {
         }
         if let Some(h) = &t.DNSDone {
             h(DNSDoneInfo {
-                Addrs: goish::goslice::slice::<goish::net::LookupIPAddr>::__from_vec(
-                    alloc::vec![goish::net::LookupIPAddr {
+                Addrs: goish::goslice::slice::<goish::net::LookupIPAddr>::__from_vec(alloc::vec![
+                    goish::net::LookupIPAddr {
                         IP: goish::net::IPv4(127, 0, 0, 1),
                         Zone: string(""),
-                    }],
-                ),
+                    }
+                ]),
                 Err: errors::nil,
                 Coalesced: true,
             });

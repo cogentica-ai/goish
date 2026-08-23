@@ -29,8 +29,7 @@ fn main() {
 
     // 2. Type with single charset param.
     {
-        let (mt, params, err) =
-            mime::ParseMediaType(string("text/html; charset=utf-8"));
+        let (mt, params, err) = mime::ParseMediaType(string("text/html; charset=utf-8"));
         let (cs, _) = params.Get(string("charset"));
         if err.IsNil() && mt == "text/html" && cs == "utf-8" && params.Len() == 1 {
             fmt::Println!("[ 2] type + charset             PASS");
@@ -42,8 +41,7 @@ fn main() {
 
     // 3. Quoted parameter value.
     {
-        let (mt, params, err) =
-            mime::ParseMediaType(string("application/x; foo=\"bar baz\""));
+        let (mt, params, err) = mime::ParseMediaType(string("application/x; foo=\"bar baz\""));
         let (foo, _) = params.Get(string("foo"));
         if err.IsNil() && mt == "application/x" && foo == "bar baz" {
             fmt::Println!("[ 3] quoted value               PASS");
@@ -55,8 +53,7 @@ fn main() {
 
     // 4. Type is lowercased; param key lowercased; value preserved.
     {
-        let (mt, params, err) =
-            mime::ParseMediaType(string("Text/HTML; CharSet=UTF-8"));
+        let (mt, params, err) = mime::ParseMediaType(string("Text/HTML; CharSet=UTF-8"));
         let (cs, _) = params.Get(string("charset"));
         if err.IsNil() && mt == "text/html" && cs == "UTF-8" {
             fmt::Println!("[ 4] case folding              PASS");
@@ -104,8 +101,7 @@ fn main() {
 
     // 8. Backslash-escape inside quoted value.
     {
-        let (_mt, params, err) =
-            mime::ParseMediaType(string("text/x; q=\"a\\\"b\""));
+        let (_mt, params, err) = mime::ParseMediaType(string("text/x; q=\"a\\\"b\""));
         let (q, _) = params.Get(string("q"));
         if err.IsNil() && q == "a\"b" {
             fmt::Println!("[ 8] backslash-escape          PASS");

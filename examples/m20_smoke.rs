@@ -44,13 +44,19 @@ fn test_runtime() {
     // NumGoroutine: `main` itself runs on the main goroutine
     // (Go-faithful), so exactly 1 live before any go!(). Go's
     // runtime.NumGoroutine() likewise reports >= 1 inside main.
-    check(NumGoroutine() == 1, b"runtime: NumGoroutine != 1 at start\n");
+    check(
+        NumGoroutine() == 1,
+        b"runtime: NumGoroutine != 1 at start\n",
+    );
 
     // GOMAXPROCS(0) returns current; (>0) sets and returns previous.
     let prev = GOMAXPROCS(0);
     check(prev == n, b"runtime: GOMAXPROCS(0) != NumCPU\n");
     let prev2 = GOMAXPROCS(2);
-    check(prev2 == n, b"runtime: GOMAXPROCS(2) didn't return previous\n");
+    check(
+        prev2 == n,
+        b"runtime: GOMAXPROCS(2) didn't return previous\n",
+    );
     let now = GOMAXPROCS(0);
     check(now == 2, b"runtime: GOMAXPROCS didn't update cache\n");
     GOMAXPROCS(prev); // restore
@@ -76,7 +82,10 @@ fn test_binary() {
         buf[0] == 0xde && buf[1] == 0xad && buf[2] == 0xbe && buf[3] == 0xef,
         b"be: PutUint32\n",
     );
-    check(binary::BigEndian.Uint32(&buf) == 0xdeadbeef, b"be: Uint32\n");
+    check(
+        binary::BigEndian.Uint32(&buf) == 0xdeadbeef,
+        b"be: Uint32\n",
+    );
 
     // BigEndian uint64
     let mut buf8 = [0u8; 8];
@@ -103,12 +112,18 @@ fn test_binary() {
 fn test_hex() {
     // EncodeToString
     let s = hex::EncodeToString(b"hello");
-    check(s == string::from_static("68656c6c6f"), b"hex: EncodeToString\n");
+    check(
+        s == string::from_static("68656c6c6f"),
+        b"hex: EncodeToString\n",
+    );
 
     // Round-trip
     let (decoded, err) = hex::DecodeString("48656c6c6f20576f726c64"); // "Hello World"
     check(err.IsNil(), b"hex: DecodeString returned err\n");
-    check(&*decoded == b"Hello World".as_slice(), b"hex: round-trip wrong\n");
+    check(
+        &*decoded == b"Hello World".as_slice(),
+        b"hex: round-trip wrong\n",
+    );
 
     // Invalid byte detection
     let (_, err2) = hex::DecodeString("zz");

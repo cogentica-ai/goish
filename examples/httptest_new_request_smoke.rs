@@ -8,9 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::context;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::net::http::httptest;
 use goish::types::byte;

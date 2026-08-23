@@ -23,8 +23,7 @@ use goish::lazy::{Lazy, LazyMut};
 use goish::syscall;
 
 // Global decode-table-shaped LazyMut, the actual xid pattern.
-static DEC: Lazy<LazyMut<[u8; 256]>> =
-    Lazy::new(|| LazyMut::new([0u8; 256]));
+static DEC: Lazy<LazyMut<[u8; 256]>> = Lazy::new(|| LazyMut::new([0u8; 256]));
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
@@ -84,8 +83,11 @@ fn main() {
     });
 
     // 4. Read post-init: lookup table works.
-    if DEC[b'0' as usize] != 0 || DEC[b'9' as usize] != 9 || DEC[b'a' as usize] != 10
-        || DEC[b'v' as usize] != 31 || DEC[b'A' as usize] != 0xFF
+    if DEC[b'0' as usize] != 0
+        || DEC[b'9' as usize] != 9
+        || DEC[b'a' as usize] != 10
+        || DEC[b'v' as usize] != 31
+        || DEC[b'A' as usize] != 0xFF
     {
         fail(b"DEC lookup wrong after fill");
     } else {

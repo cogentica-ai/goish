@@ -59,7 +59,10 @@ fn main() {
         if resp.StatusCode == 200 && body.Len() > 0 {
             fmt::Println!("[ 1] FileServer 200            PASS body={}B", body.Len());
         } else {
-            fmt::Println!("[ 1] FileServer 200            FAIL status={}", resp.StatusCode);
+            fmt::Println!(
+                "[ 1] FileServer 200            FAIL status={}",
+                resp.StatusCode
+            );
             failed += 1;
         }
     }
@@ -71,7 +74,10 @@ fn main() {
         if resp.StatusCode == 404 {
             fmt::Println!("[ 2] missing → 404             PASS");
         } else {
-            fmt::Println!("[ 2] missing → 404             FAIL status={}", resp.StatusCode);
+            fmt::Println!(
+                "[ 2] missing → 404             FAIL status={}",
+                resp.StatusCode
+            );
             failed += 1;
         }
     }
@@ -96,7 +102,10 @@ fn main() {
         if resp.StatusCode == 200 && body.Len() > 0 {
             fmt::Println!("[ 4] ServeFile direct          PASS body={}B", body.Len());
         } else {
-            fmt::Println!("[ 4] ServeFile direct          FAIL status={}", resp.StatusCode);
+            fmt::Println!(
+                "[ 4] ServeFile direct          FAIL status={}",
+                resp.StatusCode
+            );
             failed += 1;
         }
     }

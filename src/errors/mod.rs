@@ -125,17 +125,23 @@ impl PartialEq for error {
 
 impl From<crate::nilval::Nil> for error {
     #[inline]
-    fn from(_: crate::nilval::Nil) -> Self { nil }
+    fn from(_: crate::nilval::Nil) -> Self {
+        nil
+    }
 }
 
 impl PartialEq<crate::nilval::Nil> for error {
     #[inline]
-    fn eq(&self, _: &crate::nilval::Nil) -> bool { self.IsNil() }
+    fn eq(&self, _: &crate::nilval::Nil) -> bool {
+        self.IsNil()
+    }
 }
 
 impl PartialEq<error> for crate::nilval::Nil {
     #[inline]
-    fn eq(&self, other: &error) -> bool { other.IsNil() }
+    fn eq(&self, other: &error) -> bool {
+        other.IsNil()
+    }
 }
 
 // Same comparison through a borrow — needed when the call site holds
@@ -143,22 +149,30 @@ impl PartialEq<error> for crate::nilval::Nil {
 // `for (_, err) in range!(errs)` which yields `&error`).
 impl PartialEq<crate::nilval::Nil> for &error {
     #[inline]
-    fn eq(&self, _: &crate::nilval::Nil) -> bool { (*self).IsNil() }
+    fn eq(&self, _: &crate::nilval::Nil) -> bool {
+        (*self).IsNil()
+    }
 }
 impl PartialEq<&error> for crate::nilval::Nil {
     #[inline]
-    fn eq(&self, other: &&error) -> bool { (*other).IsNil() }
+    fn eq(&self, other: &&error) -> bool {
+        (*other).IsNil()
+    }
 }
 // `&mut error` flavour — Goish lowers Go's `*error` write-through
 // parameters to `&mut error`, and those still need `if (*p == nil)`
 // guards to compile.
 impl PartialEq<crate::nilval::Nil> for &mut error {
     #[inline]
-    fn eq(&self, _: &crate::nilval::Nil) -> bool { (**self).IsNil() }
+    fn eq(&self, _: &crate::nilval::Nil) -> bool {
+        (**self).IsNil()
+    }
 }
 impl PartialEq<&mut error> for crate::nilval::Nil {
     #[inline]
-    fn eq(&self, other: &&mut error) -> bool { (**other).IsNil() }
+    fn eq(&self, other: &&mut error) -> bool {
+        (**other).IsNil()
+    }
 }
 impl Eq for error {}
 
@@ -276,7 +290,9 @@ pub fn Wrap<E: ErrorTrait>(e: E) -> error {
 // dedicated impls.
 impl<E: ErrorTrait> From<E> for error {
     #[inline]
-    fn from(e: E) -> Self { Wrap(e) }
+    fn from(e: E) -> Self {
+        Wrap(e)
+    }
 }
 
 // ─── Is / Unwrap ────────────────────────────────────────────────────────
@@ -297,7 +313,9 @@ pub trait IsTarget {
 
 impl IsTarget for error {
     #[inline]
-    fn __resolve(&self) -> error { self.clone() }
+    fn __resolve(&self) -> error {
+        self.clone()
+    }
 }
 
 /// `errors.Is(err, target)` — walks `err`'s `Unwrap()` chain looking for
@@ -422,8 +440,7 @@ pub fn Join(errs: crate::goslice::slice<error>) -> error {
             j += 1;
         }
     }
-    let mut filtered: alloc::vec::Vec<error> =
-        alloc::vec::Vec::with_capacity(n as usize);
+    let mut filtered: alloc::vec::Vec<error> = alloc::vec::Vec::with_capacity(n as usize);
     let mut k: crate::types::int = 0;
     while k < errs.Len() {
         if !errs[k].IsNil() {
@@ -466,4 +483,3 @@ impl ErrorTrait for JoinError {
         }
     }
 }
-

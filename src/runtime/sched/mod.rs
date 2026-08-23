@@ -55,29 +55,28 @@ mod scheduler;
 mod stack;
 pub mod stackpool;
 
-pub use g::{GStatus, SELECT_WAIT_MAX, G};
+pub use g::{GStatus, G, SELECT_WAIT_MAX};
 pub use gobuf::{gogo, make_context, make_context_gogo, swap_context, Gobuf};
 // `mcall_asm` is `pub(crate)`; expose it through the parent for the
 // SIGURG handler's PC-range filter (`is_in_mcall_asm`).
 pub(crate) use gobuf::mcall_asm;
+pub use grow::{
+    grow_bytes_live, grow_calls, grow_hits, grow_live, grow_peak_live, maybe_grow, maybe_grow_step,
+    DEFAULT_GROW_BARE_CAP, DEFAULT_GROW_RED_ZONE, GROW_TIER_2_SIZE, GROW_TIER_3_SIZE,
+};
 pub use m::{
     acquirem, current_g0_gobuf, current_m, current_m_locks, current_m_storage, is_tls_ready,
     pre_goish_fs_base, releasem, setup_main_g0, setup_main_tls, MStorage, ParkCommit, M, MAIN_M,
 };
 pub use p::{
-    acquirep, bootstrap_ps, current_p, for_each_p, num_ps, p_at, releasep, LOCAL_RUNQ_SIZE,
-    MAX_PS, P, P_DEAD, P_IDLE, P_RUNNING, P_SYSCALL, STEAL_HITS, STEAL_PASSES,
+    acquirep, bootstrap_ps, current_p, for_each_p, num_ps, p_at, releasep, LOCAL_RUNQ_SIZE, MAX_PS,
+    P, P_DEAD, P_IDLE, P_RUNNING, P_SYSCALL, STEAL_HITS, STEAL_PASSES,
 };
 pub use scheduler::{
     block_forever_commit, bootstrap_workers, chan_park_commit, current_g, for_each_m, gopark,
     goready, live_g_count, m_schedule_loop, newproc, newproc_at, newproc_with_stack,
     newproc_with_stack_at, num_cpus, panicking, register_m_storage, registered_m_count, runq_len,
-    schedule, selparkcommit, Gosched, DISPATCH_STAMP_COUNT, G_PANIC_COUNT,
-};
-pub use grow::{
-    grow_bytes_live, grow_calls, grow_hits, grow_live, grow_peak_live, maybe_grow,
-    maybe_grow_step, DEFAULT_GROW_BARE_CAP, DEFAULT_GROW_RED_ZONE, GROW_TIER_2_SIZE,
-    GROW_TIER_3_SIZE,
+    schedule, selparkcommit, startup_procs, Gosched, DISPATCH_STAMP_COUNT, G_PANIC_COUNT,
 };
 pub use stack::{
     bare_reserve, reserve_pool_len, set_bare_reserve, Stack, BARE_STACK_RESERVE,

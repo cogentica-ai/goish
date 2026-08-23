@@ -32,12 +32,12 @@ use alloc::vec::Vec;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use crate::error;
 use crate::goslice::slice;
 use crate::io;
 use crate::lazy::Lazy;
 use crate::math::big::Int;
 use crate::{byte, int};
-use crate::error;
 
 use super::nistec::{fillInto, initAllCurves, p224, p256, p384, p521};
 use super::params::CurveParams;

@@ -41,20 +41,20 @@ use alloc::vec::Vec;
 
 use crate::crypto::tls;
 use crate::errors::{self, error};
+use crate::go;
 use crate::goslice::slice;
+use crate::net;
 use crate::string;
 use crate::time;
-use crate::go;
-use crate::net;
 use crate::types::{byte, int};
 
-use super::responsewriter::{build_head, push_hex};
-use super::transfer::bodyAllowedForStatus;
-use super::responsewriter::{Flusher, HeaderHandle, ResponseWriter};
-use super::request::{ReadRequestWithLimit, Request};
-use super::server::request_keep_alive_pub;
 use super::header::Header;
+use super::request::{ReadRequestWithLimit, Request};
+use super::responsewriter::{build_head, push_hex};
+use super::responsewriter::{Flusher, HeaderHandle, ResponseWriter};
+use super::server::request_keep_alive_pub;
 use super::server::{Handler, Server};
+use super::transfer::bodyAllowedForStatus;
 
 // ─── tlsResponse — ResponseWriter over a tls::Conn ──────────────────
 
@@ -142,13 +142,8 @@ impl tlsResponse {
 
         let buf = {
             let mut h = self.header.Lock();
-            if bodyAllowedForStatus(g.status)
-                && h.Get(string("Content-Length")).Len() == 0
-            {
-                h.Set(
-                    string("Content-Length"),
-                    int_to_string(g.body.len() as i64),
-                );
+            if bodyAllowedForStatus(g.status) && h.Get(string("Content-Length")).Len() == 0 {
+                h.Set(string("Content-Length"), int_to_string(g.body.len() as i64));
             }
             if !g.keep_alive && h.Get(string("Connection")).Len() == 0 {
                 h.Set(string("Connection"), string("close"));
@@ -299,7 +294,11 @@ fn serve_tls_conn(
     // requests are still in flight and never kicks an idle HTTPS
     // keep-alive conn. Go gets this for free: plaintext and TLS conns
     // share `conn.serve` (server.go:2039).
-    let track = { let t = srv.newConn(pd_addr, raw_fd); srv.trackConn(&t, true); t };
+    let track = {
+        let t = srv.newConn(pd_addr, raw_fd);
+        srv.trackConn(&t, true);
+        t
+    };
     // Go reports StateNew as the conn is registered (server.go:1961);
     // the plaintext loop does the same.
     track.setState(super::server::CONN_STATE_NEW);
@@ -387,9 +386,7 @@ fn serve_tls_conn(
     let write_timeout_ns = srv.write_timeout_ns();
     let mut first_request = true;
     loop {
-        if srv
-            .__state_in_shutdown()
-        {
+        if srv.__state_in_shutdown() {
             let mut c = conn.Lock();
             let _ = c.Close();
             return;
@@ -403,7 +400,11 @@ fn serve_tls_conn(
         // requests (Go arms `idleTimeout()` while waiting for the next
         // first byte, server.go:2135). Cleared once the headers parse
         // so a handler's body read is not artificially capped.
-        let wait_ns = if first_request { read_header_ns } else { idle_ns };
+        let wait_ns = if first_request {
+            read_header_ns
+        } else {
+            idle_ns
+        };
         first_request = false;
 
         let (mut req, err): (Request, error) = {
@@ -444,8 +445,7 @@ fn serve_tls_conn(
             let _ = c.SetReadDeadline(time::Time::default());
             // Response phase: apply WriteTimeout if configured.
             if write_timeout_ns > 0 {
-                let _ =
-                    c.SetWriteDeadline(time::Now().Add(time::Duration(write_timeout_ns)));
+                let _ = c.SetWriteDeadline(time::Now().Add(time::Duration(write_timeout_ns)));
             }
         }
         // Request in flight — Go's `c.setState(StateActive)`
@@ -523,12 +523,7 @@ impl Server {
     /// accept loop on a pre-bound listener, wrapping each accepted
     /// connection in server-side TLS. The cert/key PEM pair is loaded
     /// into a `tls::Config` (or `Server.TLSConfig` is used if set).
-    pub fn ServeTLS<C, K>(
-        self: Arc<Self>,
-        ln: net::Listener,
-        certFile: C,
-        keyFile: K,
-    ) -> error
+    pub fn ServeTLS<C, K>(self: Arc<Self>, ln: net::Listener, certFile: C, keyFile: K) -> error
     where
         C: Into<string>,
         K: Into<string>,

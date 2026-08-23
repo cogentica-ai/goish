@@ -18,10 +18,9 @@ use crate::string;
 use crate::types::byte;
 
 use super::ed25519::{
-    bytes_slice, domPrefixPure, precomputePrivateKey, signWithDom, verifyWithDom,
-    bytes_equal, NewPublicKey, PrivateKey, PublicKey, Sign, Verify,
+    bytes_equal, bytes_slice, domPrefixPure, precomputePrivateKey, signWithDom, verifyWithDom,
+    NewPublicKey, PrivateKey, PublicKey, Sign, Verify,
 };
-
 
 // go: sdk 1.25.5 crypto/internal/fips140/ed25519/cast.go:15-19 fipsPCT
 pub(crate) fn fipsPCT(k: &PrivateKey) {

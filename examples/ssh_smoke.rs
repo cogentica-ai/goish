@@ -14,11 +14,11 @@
 
 extern crate alloc;
 
+use goish::crypto::ssh;
 use goish::fmt;
+use goish::int32;
 use goish::syscall;
 use goish::testing;
-use goish::crypto::ssh;
-use goish::int32;
 
 #[goish::main]
 fn main() {
@@ -42,7 +42,9 @@ fn test_kexinit_roundtrip(t: &mut testing::T) {
 
 fn test_dh_group14_small_exp(t: &mut testing::T) {
     if !ssh::test_dh_group14_small_exp() {
-        t.Fatal(fmt::Sprintf!("DH group14 small exp test failed: expected e=2 for x=1"));
+        t.Fatal(fmt::Sprintf!(
+            "DH group14 small exp test failed: expected e=2 for x=1"
+        ));
     }
 }
 
@@ -60,7 +62,9 @@ fn test_packet_framing(t: &mut testing::T) {
 
 fn test_hmac_sha256(t: &mut testing::T) {
     if !ssh::test_hmac_sha256() {
-        t.Fatal(fmt::Sprintf!("HMAC-SHA2-256 test failed: unexpected output length"));
+        t.Fatal(fmt::Sprintf!(
+            "HMAC-SHA2-256 test failed: unexpected output length"
+        ));
     }
 }
 

@@ -17,8 +17,8 @@ extern crate alloc;
 
 use crate::crypto::internal::fips140::sha256 as fips;
 use crate::goslice::slice;
-use crate::io;
 use crate::hash::Hash;
+use crate::io;
 use crate::types::{byte, int};
 use alloc::vec::Vec;
 
@@ -34,7 +34,6 @@ pub const Size224: int = 28;
 
 /// `sha256.BlockSize` — block size of SHA-256/SHA-224 (bytes).
 pub const BlockSize: int = 64;
-
 
 // go: sdk 1.25.5 crypto/sha256/sha256.go:34-43 New
 /// `sha256.New()` — a new SHA-256 hash.

@@ -107,10 +107,7 @@ pub fn inGroup(name: string, c: check) -> check {
         }
         return match v.As::<map<string, Any>>() {
             Some(g) => c(g),
-            None => crate::fmt::Sprintf!(
-                "value for group %q is not map[string]any",
-                name.clone()
-            ),
+            None => crate::fmt::Sprintf!("value for group %q is not map[string]any", name.clone()),
         };
     });
 }
@@ -138,7 +135,10 @@ impl wrapper {
         inner: Arc<dyn slog::Handler + Send + Sync>,
         md: Arc<dyn Fn(&mut slog::Record) + Send + Sync>,
     ) -> Self {
-        return wrapper { inner: inner, md: md };
+        return wrapper {
+            inner: inner,
+            md: md,
+        };
     }
 }
 
@@ -263,7 +263,9 @@ pub fn cases() -> alloc::vec::Vec<testCase> {
 
     out.push(testCase {
         name: sx("built-ins"),
-        explanation: withSource(sx("this test expects slog.TimeKey, slog.LevelKey and slog.MessageKey")),
+        explanation: withSource(sx(
+            "this test expects slog.TimeKey, slog.LevelKey and slog.MessageKey",
+        )),
         f: Box::new(|l| l.Info(sx("message"), args(alloc::vec![]))),
         md: None,
         checks: alloc::vec![
@@ -275,9 +277,14 @@ pub fn cases() -> alloc::vec::Vec<testCase> {
 
     out.push(testCase {
         name: sx("attrs"),
-        explanation: withSource(sx("a Handler should output attributes passed to the logging function")),
+        explanation: withSource(sx(
+            "a Handler should output attributes passed to the logging function",
+        )),
         f: Box::new(|l| {
-            l.Info(sx("message"), args(alloc::vec![Any::new(sx("k")), Any::new(sx("v"))]))
+            l.Info(
+                sx("message"),
+                args(alloc::vec![Any::new(sx("k")), Any::new(sx("v"))]),
+            )
         }),
         md: None,
         checks: alloc::vec![hasAttr(sx("k"), Any::new(sx("v")))],
@@ -311,7 +318,10 @@ pub fn cases() -> alloc::vec::Vec<testCase> {
         name: sx("zero-time"),
         explanation: withSource(sx("a Handler should ignore a zero Record.Time")),
         f: Box::new(|l| {
-            l.Info(sx("msg"), args(alloc::vec![Any::new(sx("k")), Any::new(sx("v"))]))
+            l.Info(
+                sx("msg"),
+                args(alloc::vec![Any::new(sx("k")), Any::new(sx("v"))]),
+            )
         }),
         md: Some(Arc::new(|r: &mut slog::Record| {
             r.Time = crate::time::Time::default();
@@ -321,10 +331,15 @@ pub fn cases() -> alloc::vec::Vec<testCase> {
 
     out.push(testCase {
         name: sx("WithAttrs"),
-        explanation: withSource(sx("a Handler should include the attributes from the WithAttrs method")),
+        explanation: withSource(sx(
+            "a Handler should include the attributes from the WithAttrs method",
+        )),
         f: Box::new(|l| {
             l.With(args(alloc::vec![Any::new(sx("a")), Any::new(sx("b"))]))
-                .Info(sx("msg"), args(alloc::vec![Any::new(sx("k")), Any::new(sx("v"))]))
+                .Info(
+                    sx("msg"),
+                    args(alloc::vec![Any::new(sx("k")), Any::new(sx("v"))]),
+                )
         }),
         md: None,
         checks: alloc::vec![
@@ -382,7 +397,7 @@ pub fn cases() -> alloc::vec::Vec<testCase> {
     out.push(testCase {
         name: sx("inline-group"),
         explanation: withSource(sx(
-            "a Handler should inline the Attrs of a group with an empty key"
+            "a Handler should inline the Attrs of a group with an empty key",
         )),
         f: Box::new(|l| {
             l.Info(
@@ -408,8 +423,10 @@ pub fn cases() -> alloc::vec::Vec<testCase> {
         name: sx("WithGroup"),
         explanation: withSource(sx("a Handler should handle the WithGroup method")),
         f: Box::new(|l| {
-            l.WithGroup(sx("G"))
-                .Info(sx("msg"), args(alloc::vec![Any::new(sx("a")), Any::new(sx("b"))]))
+            l.WithGroup(sx("G")).Info(
+                sx("msg"),
+                args(alloc::vec![Any::new(sx("a")), Any::new(sx("b"))]),
+            )
         }),
         md: None,
         checks: alloc::vec![
@@ -423,13 +440,18 @@ pub fn cases() -> alloc::vec::Vec<testCase> {
 
     out.push(testCase {
         name: sx("multi-With"),
-        explanation: withSource(sx("a Handler should handle multiple WithGroup and WithAttr calls")),
+        explanation: withSource(sx(
+            "a Handler should handle multiple WithGroup and WithAttr calls",
+        )),
         f: Box::new(|l| {
             l.With(args(alloc::vec![Any::new(sx("a")), Any::new(sx("b"))]))
                 .WithGroup(sx("G"))
                 .With(args(alloc::vec![Any::new(sx("c")), Any::new(sx("d"))]))
                 .WithGroup(sx("H"))
-                .Info(sx("msg"), args(alloc::vec![Any::new(sx("e")), Any::new(sx("f"))]))
+                .Info(
+                    sx("msg"),
+                    args(alloc::vec![Any::new(sx("e")), Any::new(sx("f"))]),
+                )
         }),
         md: None,
         checks: alloc::vec![
@@ -438,13 +460,18 @@ pub fn cases() -> alloc::vec::Vec<testCase> {
             hasAttr(sx(slog::MessageKey), Any::new(sx("msg"))),
             hasAttr(sx("a"), Any::new(sx("b"))),
             inGroup(sx("G"), hasAttr(sx("c"), Any::new(sx("d")))),
-            inGroup(sx("G"), inGroup(sx("H"), hasAttr(sx("e"), Any::new(sx("f"))))),
+            inGroup(
+                sx("G"),
+                inGroup(sx("H"), hasAttr(sx("e"), Any::new(sx("f"))))
+            ),
         ],
     });
 
     out.push(testCase {
         name: sx("empty-group-record"),
-        explanation: withSource(sx("a Handler should not output groups if there are no attributes")),
+        explanation: withSource(sx(
+            "a Handler should not output groups if there are no attributes",
+        )),
         f: Box::new(|l| {
             l.With(args(alloc::vec![Any::new(sx("a")), Any::new(sx("b"))]))
                 .WithGroup(sx("G"))
@@ -466,7 +493,7 @@ pub fn cases() -> alloc::vec::Vec<testCase> {
     out.push(testCase {
         name: sx("nested-empty-group-record"),
         explanation: withSource(sx(
-            "a Handler should not output nested groups if there are no attributes"
+            "a Handler should not output nested groups if there are no attributes",
         )),
         f: Box::new(|l| {
             l.With(args(alloc::vec![Any::new(sx("a")), Any::new(sx("b"))]))
@@ -511,7 +538,9 @@ pub fn cases() -> alloc::vec::Vec<testCase> {
 
     out.push(testCase {
         name: sx("resolve-groups"),
-        explanation: withSource(sx("a Handler should call Resolve on attribute values in groups")),
+        explanation: withSource(sx(
+            "a Handler should call Resolve on attribute values in groups",
+        )),
         f: Box::new(|l| {
             let r: Arc<dyn slog::LogValuer> = Arc::new(replace {
                 v: Any::new(sx("v2")),
@@ -524,7 +553,10 @@ pub fn cases() -> alloc::vec::Vec<testCase> {
                     "G",
                     alloc::vec![
                         slog::String(sx("a"), sx("v1")),
-                        slog::Attr { Key: sx("b"), Value: slog::LogValuerValue(r) },
+                        slog::Attr {
+                            Key: sx("b"),
+                            Value: slog::LogValuerValue(r)
+                        },
                     ]
                 )]),
             )
@@ -536,11 +568,10 @@ pub fn cases() -> alloc::vec::Vec<testCase> {
         ],
     });
 
-
     out.push(testCase {
         name: sx("resolve-WithAttrs"),
         explanation: withSource(sx(
-            "a Handler should call Resolve on attribute values from WithAttrs"
+            "a Handler should call Resolve on attribute values from WithAttrs",
         )),
         f: Box::new(|l| {
             let r: Arc<dyn slog::LogValuer> = Arc::new(replace {
@@ -563,7 +594,7 @@ pub fn cases() -> alloc::vec::Vec<testCase> {
     out.push(testCase {
         name: sx("resolve-WithAttrs-groups"),
         explanation: withSource(sx(
-            "a Handler should call Resolve on attribute values in groups from WithAttrs"
+            "a Handler should call Resolve on attribute values in groups from WithAttrs",
         )),
         f: Box::new(|l| {
             let r: Arc<dyn slog::LogValuer> = Arc::new(replace {
@@ -573,7 +604,10 @@ pub fn cases() -> alloc::vec::Vec<testCase> {
                 "G",
                 alloc::vec![
                     slog::String(sx("a"), sx("v1")),
-                    slog::Attr { Key: sx("b"), Value: slog::LogValuerValue(r) },
+                    slog::Attr {
+                        Key: sx("b"),
+                        Value: slog::LogValuerValue(r)
+                    },
                 ]
             ))]));
             l.Info(sx("msg"), args(alloc::vec![]))
@@ -588,7 +622,7 @@ pub fn cases() -> alloc::vec::Vec<testCase> {
     out.push(testCase {
         name: sx("empty-PC"),
         explanation: withSource(sx(
-            "a Handler should not output SourceKey if the PC is zero"
+            "a Handler should not output SourceKey if the PC is zero",
         )),
         f: Box::new(|l| l.Info(sx("message"), args(alloc::vec![]))),
         md: Some(Arc::new(|r: &mut slog::Record| {
@@ -684,10 +718,7 @@ where
 // test case fails, it calls t.Error."
 pub fn Run<NH, RES>(t: &mut crate::testing::T, newHandler: NH, result: RES)
 where
-    NH: Fn(&mut crate::testing::T) -> Arc<dyn slog::Handler + Send + Sync>
-        + Send
-        + Sync
-        + 'static,
+    NH: Fn(&mut crate::testing::T) -> Arc<dyn slog::Handler + Send + Sync> + Send + Sync + 'static,
     RES: Fn(&mut crate::testing::T) -> map<string, Any> + Send + Sync + 'static,
 {
     // Go passes the two funcs into each subtest closure directly. goish

@@ -23,8 +23,8 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::crypto::internal::fips140::edwards25519::{NewScalar, Scalar};
+use goish::fmt;
 use goish::types::byte;
 use goish::{slice, syscall};
 
@@ -185,10 +185,7 @@ fn test_2_setcanonical_reject() {
     let mut s4 = Scalar::new();
     let err_lm1 = s4.SetCanonicalBytes(from_bytes(&l_minus_one)); // canonical
 
-    let ok = !err31.IsNil()
-        && !err33.IsNil()
-        && !err_l.IsNil()
-        && err_lm1.IsNil();
+    let ok = !err31.IsNil() && !err33.IsNil() && !err_l.IsNil() && err_lm1.IsNil();
     write_result(2, b"SetCanonicalBytes rejects    ", ok);
     if !ok {
         fail();

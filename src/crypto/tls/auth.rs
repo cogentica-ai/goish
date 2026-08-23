@@ -26,9 +26,9 @@ use alloc::vec::Vec;
 
 use super::common::{
     directSigning, signatureECDSA, signatureEd25519, signaturePKCS1v15, signatureRSAPSS,
-    SignatureScheme, ECDSAWithP256AndSHA256, ECDSAWithP384AndSHA384, ECDSAWithP521AndSHA512,
-    ECDSAWithSHA1, Ed25519, PKCS1WithSHA1, PKCS1WithSHA256, PKCS1WithSHA384, PKCS1WithSHA512,
-    PSSWithSHA256, PSSWithSHA384, PSSWithSHA512,
+    ECDSAWithP256AndSHA256, ECDSAWithP384AndSHA384, ECDSAWithP521AndSHA512, ECDSAWithSHA1, Ed25519,
+    PKCS1WithSHA1, PKCS1WithSHA256, PKCS1WithSHA384, PKCS1WithSHA512, PSSWithSHA256, PSSWithSHA384,
+    PSSWithSHA512, SignatureScheme,
 };
 use crate::crypto;
 use crate::crypto::ecdsa;
@@ -163,7 +163,9 @@ pub(crate) fn typeAndHashFromSignatureScheme(
     let sigType: uint8 = match signatureAlgorithm {
         PKCS1WithSHA1 | PKCS1WithSHA256 | PKCS1WithSHA384 | PKCS1WithSHA512 => signaturePKCS1v15,
         PSSWithSHA256 | PSSWithSHA384 | PSSWithSHA512 => signatureRSAPSS,
-        ECDSAWithSHA1 | ECDSAWithP256AndSHA256 | ECDSAWithP384AndSHA384
+        ECDSAWithSHA1
+        | ECDSAWithP256AndSHA256
+        | ECDSAWithP384AndSHA384
         | ECDSAWithP521AndSHA512 => signatureECDSA,
         Ed25519 => signatureEd25519,
         // Go: default: return 0, 0, fmt.Errorf("unsupported signature algorithm: %v", …)
@@ -254,10 +256,7 @@ fn rsaSignatureSchemes() -> [(SignatureScheme, int); 7] {
 // go: sdk 1.25.5 crypto/tls/auth.go:166-202 signatureSchemesForPublicKey
 /// The signature schemes supported by a given public key, in Go's
 /// preference order. Each branch returns directly, as Go's does.
-pub(crate) fn signatureSchemesForPublicKey(
-    version: uint16,
-    pub_: &Any,
-) -> slice<SignatureScheme> {
+pub(crate) fn signatureSchemesForPublicKey(version: uint16, pub_: &Any) -> slice<SignatureScheme> {
     // Go: switch pub := pub.(type) { case *ecdsa.PublicKey: … }
     if let Some(p) = pub_.As::<ecdsa::PublicKey>() {
         // Go: if version < VersionTLS13 {
@@ -318,7 +317,6 @@ pub(crate) fn signatureSchemesForPublicKey(
 // Silence the unused-import warning for `Box` in builds where no arm
 // needs it; the signature of `sigHash.New()` returns one.
 const _: Option<Box<u8>> = None;
-
 
 // ─── Certificate-driven scheme selection ──────────────────────────────
 
@@ -431,7 +429,9 @@ pub(crate) fn selectSignatureScheme(
     //     certificate's signature algorithms")
     return (
         SignatureScheme(0),
-        crate::errors::New("tls: peer doesn't support any of the certificate's signature algorithms"),
+        crate::errors::New(
+            "tls: peer doesn't support any of the certificate's signature algorithms",
+        ),
     );
 }
 
@@ -481,8 +481,8 @@ pub(crate) fn unsupportedCertificateError(cert: &super::Certificate) -> error {
         );
     // Go: case ed25519.PublicKey:
     } else if pub_.downcast_ref::<ed25519::PublicKey>().is_some() {
-    // Go: default:
-    //         return fmt.Errorf("tls: unsupported certificate key (%T)", pub)
+        // Go: default:
+        //         return fmt.Errorf("tls: unsupported certificate key (%T)", pub)
     } else {
         return crate::errors::New("tls: unsupported certificate key");
     }

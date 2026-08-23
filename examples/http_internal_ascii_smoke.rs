@@ -11,7 +11,7 @@ extern crate goish;
 use goish::fmt;
 use goish::net::http::internal::ascii;
 use goish::string;
-use goish::{syscall};
+use goish::syscall;
 
 #[goish::main]
 fn main() {
@@ -84,7 +84,8 @@ fn main() {
         if !ascii::IsPrint(string("\u{0001}"))      // SOH
             && !ascii::IsPrint(string("\u{007F}"))   // DEL
             && !ascii::IsPrint(string("\u{0080}"))   // first non-ASCII byte
-            && !ascii::IsPrint(string("a\nb"))       // embedded newline
+            && !ascii::IsPrint(string("a\nb"))
+        // embedded newline
         {
             fmt::Println!("[ 6] IsPrint rejects ctrl      PASS");
         } else {
@@ -97,7 +98,8 @@ fn main() {
     {
         if ascii::Is(string("\u{0000}\u{0001}\u{007F}abc"))
             && !ascii::Is(string("\u{0080}"))
-            && !ascii::Is(string("héllo"))           // 'é' is >0x7F bytes
+            && !ascii::Is(string("héllo"))
+        // 'é' is >0x7F bytes
         {
             fmt::Println!("[ 7] Is ASCII boundary         PASS");
         } else {

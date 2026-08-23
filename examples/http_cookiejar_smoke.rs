@@ -140,12 +140,18 @@ fn main() {
         let (u, _) = ParseURL(string("http://example.com/"));
         let mut c1 = Cookie::new(string("k"), string("v"));
         c1.Path = string("/");
-        jar.SetCookies(&u, goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c1]));
+        jar.SetCookies(
+            &u,
+            goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c1]),
+        );
 
         let mut c2 = Cookie::new(string("k"), string("ignored"));
         c2.Path = string("/");
         c2.MaxAge = -1;
-        jar.SetCookies(&u, goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c2]));
+        jar.SetCookies(
+            &u,
+            goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c2]),
+        );
 
         let got = jar.Cookies(&u);
         if got.is_empty() {
@@ -163,7 +169,10 @@ fn main() {
         let mut c = Cookie::new(string("k"), string("v"));
         c.Path = string("/");
         c.Secure = true;
-        jar.SetCookies(&u_set, goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c]));
+        jar.SetCookies(
+            &u_set,
+            goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c]),
+        );
 
         let (u_http, _) = ParseURL(string("http://example.com/"));
         let http_got = jar.Cookies(&u_http);
@@ -193,10 +202,17 @@ fn main() {
         c2.Path = string("/a");
         let mut c3 = Cookie::new(string("longest"), string("3"));
         c3.Path = string("/a/b");
-        jar.SetCookies(&u, goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c1, c2, c3]));
+        jar.SetCookies(
+            &u,
+            goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![c1, c2, c3]),
+        );
 
         let got = jar.Cookies(&u);
-        if got.len() == 3 && got[0].Name == "longest" && got[1].Name == "long" && got[2].Name == "short" {
+        if got.len() == 3
+            && got[0].Name == "longest"
+            && got[1].Name == "long"
+            && got[2].Name == "short"
+        {
             fmt::Println!("[ 9] sort by path length       PASS");
         } else {
             fmt::Println!("[ 9] sort by path length       FAIL n={}", got.len());
@@ -208,7 +224,10 @@ fn main() {
     {
         let (jar, _) = New(None);
         let (u, _) = ParseURL(string("http://example.com/"));
-        jar.SetCookies(&u, goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![]));
+        jar.SetCookies(
+            &u,
+            goish::goslice::slice::<Cookie>::__from_vec(alloc::vec![]),
+        );
         let got = jar.Cookies(&u);
         if got.is_empty() {
             fmt::Println!("[10] empty Set noop            PASS");
@@ -330,11 +349,7 @@ fn main() {
         if after_bad == 0 && after_good == 1 {
             fmt::Println!("[16] trailing-dot domain bad   PASS");
         } else {
-            fmt::Println!(
-                "[16] trailing-dot domain bad   FAIL",
-                after_bad,
-                after_good
-            );
+            fmt::Println!("[16] trailing-dot domain bad   FAIL", after_bad, after_good);
             failed += 1;
         }
     }

@@ -26,8 +26,12 @@ struct Counter {
 }
 
 impl Counter {
-    fn Increment(&mut self) { self.value += 1; }
-    fn Get(&self) -> int { self.value }
+    fn Increment(&mut self) {
+        self.value += 1;
+    }
+    fn Get(&self) -> int {
+        self.value
+    }
 }
 
 #[goish::main]

@@ -65,7 +65,10 @@ fn main() {
         T1.store(burn(600), Ordering::Release);
     });
     schedule();
-    check(T1.load(Ordering::Acquire) == 601, b"t1: deep recursion result\n");
+    check(
+        T1.load(Ordering::Acquire) == 601,
+        b"t1: deep recursion result\n",
+    );
 
     // ─── Test 2: park on a chan from inside deep frames ────────────
     //
@@ -95,7 +98,10 @@ fn main() {
         T2.store(v, Ordering::Release);
     });
     schedule();
-    check(T2.load(Ordering::Acquire) == 42, b"t2: value through deep send\n");
+    check(
+        T2.load(Ordering::Acquire) == 42,
+        b"t2: value through deep send\n",
+    );
 
     // ─── Test 3: spawn churn recycles reservations ─────────────────
     //
@@ -110,7 +116,10 @@ fn main() {
     }
     schedule();
     check(RAN.load(Ordering::Relaxed) == 300, b"t3: churn count\n");
-    check(reserve_pool_len() > 0, b"t3: reserve pool empty after churn\n");
+    check(
+        reserve_pool_len() > 0,
+        b"t3: reserve pool empty after churn\n",
+    );
 
     // ─── Test 4: deep recursion on the main goroutine ──────────────
     //

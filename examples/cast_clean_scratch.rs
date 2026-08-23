@@ -24,9 +24,9 @@ use alloc::boxed::Box;
 use goish::cast;
 use goish::d; // shipped: `d!(Iface)` == `dyn Iface + Send + Sync`
 use goish::fmt;
+use goish::int;
 use goish::syscall;
 use goish::testing;
-use goish::int;
 
 // DECISION (shipped): `d!` lives in goish. NO `dcast!` — the inline reborrow
 // `cast!(&*value, Iface)` is the blessed spelling, so no wrapper is needed.
@@ -117,10 +117,22 @@ fn main() {
     __goish_register_Seek_impl::<HookedBuf>();
 
     let tests: &[(&str, testing::TestFn)] = &[
-        ("Q1_hooked_explicit_carrier_works", q1_hooked_explicit_carrier_works),
-        ("Q2_clean_impl_not_castable_today", q2_clean_impl_not_castable_today),
-        ("Q3_blanket_supertrait_recovers_clean_impl", q3_blanket_supertrait_recovers_clean_impl),
-        ("Q4_clean_spelling_no_carrier_local", q4_clean_spelling_no_carrier_local),
+        (
+            "Q1_hooked_explicit_carrier_works",
+            q1_hooked_explicit_carrier_works,
+        ),
+        (
+            "Q2_clean_impl_not_castable_today",
+            q2_clean_impl_not_castable_today,
+        ),
+        (
+            "Q3_blanket_supertrait_recovers_clean_impl",
+            q3_blanket_supertrait_recovers_clean_impl,
+        ),
+        (
+            "Q4_clean_spelling_no_carrier_local",
+            q4_clean_spelling_no_carrier_local,
+        ),
     ];
     let code = testing::Main(tests);
     syscall::Exit(goish::int32(code));
@@ -132,7 +144,9 @@ fn q1_hooked_explicit_carrier_works(t: &mut testing::T) {
     let r: &(dyn Read + Send + Sync) = &*b;
     let (s, ok) = cast!(r, Seek);
     if !ok {
-        t.Fatal(fmt::Sprintf!("Q1: explicit-carrier + hooked-impl cast! ok=false"));
+        t.Fatal(fmt::Sprintf!(
+            "Q1: explicit-carrier + hooked-impl cast! ok=false"
+        ));
     }
     if s.Seek() != 107 {
         t.Fatal(fmt::Sprintf!("Q1: Seek()=%d want 107", s.Seek()));

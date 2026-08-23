@@ -8,10 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::container::heap::{self, Interface};
+use goish::fmt;
+use goish::syscall;
 use goish::types::int;
-use goish::{syscall};
 
 // IntHeap: a min-heap of i64. Mirrors Go's example_test.go.
 struct IntHeap(alloc::vec::Vec<i64>);
@@ -146,9 +146,8 @@ fn main() {
     // 7. Stress: random ints in, sorted out.
     {
         let mut h = IntHeap(alloc::vec::Vec::new());
-        let inputs: alloc::vec::Vec<i64> = alloc::vec![
-            42, 7, 19, 3, 100, -5, 0, 88, 33, -42, 50, 21, 99, -1, 64,
-        ];
+        let inputs: alloc::vec::Vec<i64> =
+            alloc::vec![42, 7, 19, 3, 100, -5, 0, 88, 33, -42, 50, 21, 99, -1, 64,];
         for v in &inputs {
             heap::Push(&mut h, *v);
         }

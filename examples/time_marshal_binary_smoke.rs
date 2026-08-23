@@ -47,7 +47,11 @@ fn main() {
         if b[13] == 0xff && b[14] == 0xff {
             fmt::Println!("[ 3] offset bytes = -1          PASS");
         } else {
-            fmt::Println!("[ 3] offset bytes = -1          FAIL {:x} {:x}", b[13], b[14]);
+            fmt::Println!(
+                "[ 3] offset bytes = -1          FAIL {:x} {:x}",
+                b[13],
+                b[14]
+            );
             failed += 1;
         }
     }
@@ -58,7 +62,10 @@ fn main() {
         let (b, _) = t.MarshalBinary();
         let mut t2 = time::Unix(0, 0);
         let err = t2.UnmarshalBinary(b);
-        if err.IsNil() && t2.Unix() == 1_700_000_000 && t2.UnixNano() == 1_700_000_000 * 1_000_000_000 + 123_456_789 {
+        if err.IsNil()
+            && t2.Unix() == 1_700_000_000
+            && t2.UnixNano() == 1_700_000_000 * 1_000_000_000 + 123_456_789
+        {
             fmt::Println!("[ 4] round-trip preserves       PASS");
         } else {
             fmt::Println!("[ 4] round-trip preserves       FAIL");
@@ -114,7 +121,13 @@ fn main() {
         prefix[1] = 0xBB;
         prefix[2] = 0xCC;
         let (b, err) = t.AppendBinary(prefix);
-        if err.IsNil() && b.Len() == 3 + 15 && b[0] == 0xAA && b[1] == 0xBB && b[2] == 0xCC && b[3] == 1 {
+        if err.IsNil()
+            && b.Len() == 3 + 15
+            && b[0] == 0xAA
+            && b[1] == 0xBB
+            && b[2] == 0xCC
+            && b[3] == 1
+        {
             fmt::Println!("[ 8] AppendBinary preserves     PASS");
         } else {
             fmt::Println!("[ 8] AppendBinary preserves     FAIL len={}", b.Len());
@@ -159,7 +172,7 @@ fn main() {
     {
         let mut buf = make!([]goish::byte, 16);
         buf[0] = 2; // V2
-        // sec = 0x0000_0000_0000_002A = 42 (big-endian, bytes 1..8)
+                    // sec = 0x0000_0000_0000_002A = 42 (big-endian, bytes 1..8)
         buf[8] = 42;
         // nsec = 0; offset bytes = 0; offsetSec = 0.
         let mut t = time::Unix(0, 0);

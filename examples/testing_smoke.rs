@@ -8,9 +8,9 @@
 
 use goish::fmt;
 use goish::gostring::string;
+use goish::syscall;
 use goish::testing;
 use goish::types::int;
-use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -77,7 +77,9 @@ fn test_cleanup_order(t: &mut testing::T) {
     // validate via a sub-test that runs to completion and checks
     // the order in its own cleanups via a follow-up sub-test.
     // For v1, let's just verify they were registered (no panic).
-    t.Logf(string::from_static("registered 3 cleanups; LIFO order will be 3, 2, 1"));
+    t.Logf(string::from_static(
+        "registered 3 cleanups; LIFO order will be 3, 2, 1",
+    ));
 }
 
 // ── Skip ──────────────────────────────────────────────────────────
@@ -87,6 +89,8 @@ fn test_skips_are_fine(t: &mut testing::T) {
     // currently exits the process on Skip — see the impl note —
     // so we can't actually call it here without halting all
     // subsequent tests. Validate via a sub-test that won't run.
-    t.Logf(string::from_static("skip semantics tested in dedicated test infra"));
+    t.Logf(string::from_static(
+        "skip semantics tested in dedicated test infra",
+    ));
     let _ = t.Skipped(); // doesn't panic
 }

@@ -8,8 +8,8 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::boxed::Box;
-use goish::fmt;
 use goish::bytes;
+use goish::fmt;
 use goish::io::{self, ReaderAt};
 use goish::{byte, syscall};
 

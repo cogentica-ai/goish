@@ -67,21 +67,24 @@ fn run() -> ! {
     let short = time::NewTimer(time::Duration(50 * 1_000_000));
     let _ = short.C.Recv();
     check("unstopped timer still fires", true);
-    check(
-        "Stop after fire returns false",
-        !short.Stop(),
-    );
+    check("Stop after fire returns false", !short.Stop());
 
     // Give a mis-cancelled AfterFunc a moment to prove itself.
     time::Sleep(time::Duration(100 * 1_000_000));
-    check("stopped AfterFunc never ran", FUNC_RAN.load(Ordering::Relaxed) == 0);
+    check(
+        "stopped AfterFunc never ran",
+        FUNC_RAN.load(Ordering::Relaxed) == 0,
+    );
 
     // The point of the test: everything above plus process exit must
     // complete far below the 30 s the stopped timers asked for. The
     // in-process bound is 5 s; e2e's own 15 s timeout guards the
     // exit-drain tail after os::Exit is requested.
     let elapsed = time::Since(start);
-    check("wall time is seconds, not the timer's 30s", elapsed.0 < 5_000_000_000);
+    check(
+        "wall time is seconds, not the timer's 30s",
+        elapsed.0 < 5_000_000_000,
+    );
 
     let f = FAILED.load(Ordering::Relaxed);
     if f == 0 {

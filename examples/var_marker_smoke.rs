@@ -40,12 +40,18 @@ fn die(msg: &[u8]) -> ! {
 }
 
 fn check(cond: bool, msg: &[u8]) {
-    if !cond { die(msg); }
+    if !cond {
+        die(msg);
+    }
 }
 
-fn read_done() -> error { EOF.into() }
+fn read_done() -> error {
+    EOF.into()
+}
 
-fn handle<E: Into<error>>(e: E) -> error { e.into() }
+fn handle<E: Into<error>>(e: E) -> error {
+    e.into()
+}
 
 #[goish::main]
 fn main() {
@@ -59,7 +65,10 @@ fn main() {
 
     // ── (3) Different errors should NOT match the EOF sentinel ─────────
     let other = errors::New("not EOF");
-    check(!errors::Is(other.clone(), EOF), b"Is(other, EOF) false-positive\n");
+    check(
+        !errors::Is(other.clone(), EOF),
+        b"Is(other, EOF) false-positive\n",
+    );
     check(other != EOF, b"other != EOF wrong\n");
 
     // ── (4) From<Marker> for error — let / return / struct slot ────────
@@ -71,8 +80,14 @@ fn main() {
     let b: error = EOF.into();
     let c: error = read_done();
     let d: error = IsTarget::__resolve(&EOF);
-    check(a == EOF && b == EOF && c == EOF && d == EOF, b"identity wrong\n");
-    check(errors::Is(a.clone(), b.clone()), b"Is(a, b) cross-call wrong\n");
+    check(
+        a == EOF && b == EOF && c == EOF && d == EOF,
+        b"identity wrong\n",
+    );
+    check(
+        errors::Is(a.clone(), b.clone()),
+        b"Is(a, b) cross-call wrong\n",
+    );
     check(errors::Is(c, d), b"Is(c, d) wrong\n");
 
     // ── (6) impl Into<error> public API — bare marker passes ───────────
@@ -81,42 +96,76 @@ fn main() {
 
     // ── (7) errors::Is reflexive — error value still works ─────────────
     let runtime_err = errors::New("foo");
-    check(errors::Is(runtime_err.clone(), runtime_err.clone()), b"Is(err,err) wrong\n");
-    check(!errors::Is(runtime_err.clone(), EOF), b"Is(runtime, EOF) false-positive\n");
+    check(
+        errors::Is(runtime_err.clone(), runtime_err.clone()),
+        b"Is(err,err) wrong\n",
+    );
+    check(
+        !errors::Is(runtime_err.clone(), EOF),
+        b"Is(runtime, EOF) false-positive\n",
+    );
 
     // ── (8) Wrapped error — Is walks Unwrap chain ──────────────────────
-    struct Wrapper { inner: error }
+    struct Wrapper {
+        inner: error,
+    }
     impl errors::ErrorTrait for Wrapper {
         fn Error(&self) -> goish::string {
             goish::string::from_static("wrapped")
         }
-        fn Unwrap(&self) -> error { self.inner.clone() }
+        fn Unwrap(&self) -> error {
+            self.inner.clone()
+        }
     }
     let wrapped = errors::Wrap(Wrapper { inner: EOF.into() });
-    check(errors::Is(wrapped.clone(), EOF), b"Is(wrapped, EOF) chain walk wrong\n");
-    check(wrapped != EOF, b"wrapped == EOF wrong (top is wrapper, not EOF)\n");
+    check(
+        errors::Is(wrapped.clone(), EOF),
+        b"Is(wrapped, EOF) chain walk wrong\n",
+    );
+    check(
+        wrapped != EOF,
+        b"wrapped == EOF wrong (top is wrapper, not EOF)\n",
+    );
 
     // ── (9) Cross-sentinel discrimination ──────────────────────────────
     // Compare via converted error (cross-marker `EOF != ErrShortWrite`
     // doesn't compile — they're orthogonal types — so funnel through
     // `error` which has PartialEq<Marker> for every marker).
-    let eof_e: error      = EOF.into();
-    let short_e: error    = ErrShortWrite.into();
-    let unexp_e: error    = ErrUnexpectedEOF.into();
-    check(eof_e != ErrShortWrite, b"EOF Arc == ErrShortWrite Arc - collapsed\n");
-    check(eof_e != ErrUnexpectedEOF, b"EOF Arc == ErrUnexpectedEOF Arc - collapsed\n");
-    check(short_e != ErrUnexpectedEOF, b"ErrShortWrite Arc == ErrUnexpectedEOF Arc - collapsed\n");
+    let eof_e: error = EOF.into();
+    let short_e: error = ErrShortWrite.into();
+    let unexp_e: error = ErrUnexpectedEOF.into();
+    check(
+        eof_e != ErrShortWrite,
+        b"EOF Arc == ErrShortWrite Arc - collapsed\n",
+    );
+    check(
+        eof_e != ErrUnexpectedEOF,
+        b"EOF Arc == ErrUnexpectedEOF Arc - collapsed\n",
+    );
+    check(
+        short_e != ErrUnexpectedEOF,
+        b"ErrShortWrite Arc == ErrUnexpectedEOF Arc - collapsed\n",
+    );
     let _ = unexp_e;
 
     let s_err: error = ErrShortWrite.into();
     check(s_err == ErrShortWrite, b"ErrShortWrite identity wrong\n");
     check(s_err != EOF, b"ErrShortWrite == EOF wrong\n");
-    check(!errors::Is(s_err.clone(), EOF), b"Is(ErrShortWrite, EOF) false-positive\n");
-    check(errors::Is(s_err, ErrShortWrite), b"Is(ErrShortWrite, ErrShortWrite) wrong\n");
+    check(
+        !errors::Is(s_err.clone(), EOF),
+        b"Is(ErrShortWrite, EOF) false-positive\n",
+    );
+    check(
+        errors::Is(s_err, ErrShortWrite),
+        b"Is(ErrShortWrite, ErrShortWrite) wrong\n",
+    );
 
     // ── (10) Unexported sentinel works the same way ────────────────────
     let inv_err: error = errInvalidWrite.into();
-    check(inv_err == errInvalidWrite, b"errInvalidWrite identity wrong\n");
+    check(
+        inv_err == errInvalidWrite,
+        b"errInvalidWrite identity wrong\n",
+    );
 
     // ── (11) Plain-const fallback in the same macro ────────────────────
     check(MaxBufSize == 4096, b"MaxBufSize const wrong\n");

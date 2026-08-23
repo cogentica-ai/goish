@@ -81,7 +81,8 @@ fn main() {
     // 3. An explicit Content-Type wins, and WriteHeader's code sticks.
     {
         let rec = NewRecorder();
-        rec.Header().Set(string("Content-Type"), string("application/json"));
+        rec.Header()
+            .Set(string("Content-Type"), string("application/json"));
         rec.WriteHeader(201);
         let _ = rec.Write(goish::convert::bytes(string("{\"a\":1}")));
         let res = rec.Result();
@@ -143,8 +144,7 @@ fn main() {
         let first = rec.Result();
         rec.Header().Set(string("X-Late"), string("nope"));
         let second = rec.Result();
-        let ok = first.Status == second.Status
-            && second.Header.Get(string("X-Late")) == "";
+        let ok = first.Status == second.Status && second.Header.Get(string("X-Late")) == "";
         check("Result is cached", ok, second.Header.Get(string("X-Late")));
     }
 

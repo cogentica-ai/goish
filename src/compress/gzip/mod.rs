@@ -252,8 +252,7 @@ impl<R: io::Reader> Reader<R> {
             if self.buf[i] == 0 {
                 // Digest covers the NUL terminator.
                 let tab = crc32::IEEETable();
-                self.digest =
-                    crc32::Update(self.digest, &tab, from_bytes(&self.buf[..i + 1]));
+                self.digest = crc32::Update(self.digest, &tab, from_bytes(&self.buf[..i + 1]));
                 // Strings are ISO 8859-1, Latin-1 (RFC 1952, §2.3.1).
                 if needConv {
                     let mut s = crate::string::new();

@@ -42,10 +42,17 @@ fn main() {
     let mut bad = 0i32;
 
     {
-        let (r, _) = http::NewRequest(string("GET"), string("http://example.com/a?q=1"), goish::nil);
-        eq(wire(&r),
-           "GET /a?q=1 HTTP/1.1\r\nHost: example.com\r\nUser-Agent: Go-http-client/1.1\r\n\r\n",
-           "plain GET", &mut bad);
+        let (r, _) = http::NewRequest(
+            string("GET"),
+            string("http://example.com/a?q=1"),
+            goish::nil,
+        );
+        eq(
+            wire(&r),
+            "GET /a?q=1 HTTP/1.1\r\nHost: example.com\r\nUser-Agent: Go-http-client/1.1\r\n\r\n",
+            "plain GET",
+            &mut bad,
+        );
     }
     {
         let (mut r, _) = http::NewRequest(
@@ -70,16 +77,22 @@ fn main() {
     {
         let (mut r, _) = http::NewRequest(string("GET"), string("http://example.com/"), goish::nil);
         r.Header.Set(string("User-Agent"), string(""));
-        eq(wire(&r),
-           "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n",
-           "explicit empty UA omits the header", &mut bad);
+        eq(
+            wire(&r),
+            "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n",
+            "explicit empty UA omits the header",
+            &mut bad,
+        );
     }
     {
         let (mut r, _) = http::NewRequest(string("GET"), string("http://example.com/"), goish::nil);
         r.Host = string("other.example");
-        eq(wire(&r),
-           "GET / HTTP/1.1\r\nHost: other.example\r\nUser-Agent: Go-http-client/1.1\r\n\r\n",
-           "r.Host overrides URL host", &mut bad);
+        eq(
+            wire(&r),
+            "GET / HTTP/1.1\r\nHost: other.example\r\nUser-Agent: Go-http-client/1.1\r\n\r\n",
+            "r.Host overrides URL host",
+            &mut bad,
+        );
     }
     {
         let (mut r, _) = http::NewRequest(string("GET"), string("http://example.com/"), goish::nil);

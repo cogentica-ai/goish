@@ -9,8 +9,8 @@ extern crate goish;
 
 use goish::gomap::map;
 use goish::gostring::string;
-use goish::types::int;
 use goish::syscall;
+use goish::types::int;
 
 /// `alloc::format!` drags in fmt machinery that does not link in this
 /// no_std profile; build the keys by hand.
@@ -79,7 +79,10 @@ fn main() {
         check(ok && v == i * 2, b"clear: refilled lookup\n");
     }
     m.Clear();
-    check(m.Len() == 0 && m.Keys().len() == 0, b"clear: second clear\n");
+    check(
+        m.Len() == 0 && m.Keys().len() == 0,
+        b"clear: second clear\n",
+    );
 
     let msg = b"MAP_CLEAR_OK fill/clear/refill over 500 keys\n";
     syscall::Write(syscall::STDOUT, msg.as_ptr(), msg.len());

@@ -5,8 +5,8 @@
 #![no_std]
 #![no_main]
 
-use goish::fmt;
 use goish::encoding::json;
+use goish::fmt;
 use goish::{int, make, reflect, slice, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
@@ -44,12 +44,30 @@ pub struct User {
 #[goish::main]
 fn main() {
     // Build a User with a slice<Address> and map<string, Address>.
-    let addr_a = Address { Street: string("Main"), Zip: 1 };
-    let addr_b = Address { Street: string("Elm"),  Zip: 2 };
+    let addr_a = Address {
+        Street: string("Main"),
+        Zip: 1,
+    };
+    let addr_b = Address {
+        Street: string("Elm"),
+        Zip: 2,
+    };
 
     let mut by = make!(map[string]Address);
-    by.Set(string("home"), Address { Street: string("Oak"), Zip: 3 });
-    by.Set(string("work"), Address { Street: string("Ash"), Zip: 4 });
+    by.Set(
+        string("home"),
+        Address {
+            Street: string("Oak"),
+            Zip: 3,
+        },
+    );
+    by.Set(
+        string("work"),
+        Address {
+            Street: string("Ash"),
+            Zip: 4,
+        },
+    );
 
     let u = User {
         Name: string("alice"),
@@ -77,7 +95,10 @@ fn main() {
     let mut u2: User = Default::default();
     let err = json::Unmarshal(want.as_bytes(), &mut u2);
     check(err == goish::nil, b"collections: unmarshal err\n");
-    check(reflect::DeepEqual(&u, &u2), b"collections: DeepEqual round-trip\n");
+    check(
+        reflect::DeepEqual(&u, &u2),
+        b"collections: DeepEqual round-trip\n",
+    );
 
     // ─── SetField with a fresh slice<Address> ───────────────────────
     let mut u3 = u.clone();
@@ -87,15 +108,27 @@ fn main() {
     let err = reflect::SetFieldByName(&mut u3, "Addrs", reflect::ValueOf(&new_addrs));
     check(err == goish::nil, b"collections: SetField slice err\n");
     check(u3.Addrs.Len() == 1, b"collections: SetField slice len\n");
-    check(u3.Addrs[0].Street == "Pine", b"collections: SetField slice[0]\n");
+    check(
+        u3.Addrs[0].Street == "Pine",
+        b"collections: SetField slice[0]\n",
+    );
 
     // ─── SetField with a fresh map<string, Address> ─────────────────
     let mut new_by = make!(map[string]Address);
-    new_by.Set(string("only"), Address { Street: string("Birch"), Zip: 7 });
+    new_by.Set(
+        string("only"),
+        Address {
+            Street: string("Birch"),
+            Zip: 7,
+        },
+    );
     let err = reflect::SetFieldByName(&mut u3, "ByName", reflect::ValueOf(&new_by));
     check(err == goish::nil, b"collections: SetField map err\n");
     let (got, ok) = u3.ByName.Get(string("only"));
-    check(ok && got.Street == "Birch", b"collections: SetField map lookup\n");
+    check(
+        ok && got.Street == "Birch",
+        b"collections: SetField map lookup\n",
+    );
 
     const OK: &[u8] = b"reflect_collections: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

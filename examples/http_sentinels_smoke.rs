@@ -14,10 +14,10 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::errors;
+use goish::fmt;
 use goish::net::http;
-use goish::{syscall};
+use goish::syscall;
 
 #[goish::main]
 fn main() {
@@ -37,7 +37,8 @@ fn main() {
 
     // 2. ErrNoCookie message matches Go.
     {
-        let __e_for_s: goish::error = http::ErrNoCookie.into(); let s = __e_for_s.Error();
+        let __e_for_s: goish::error = http::ErrNoCookie.into();
+        let s = __e_for_s.Error();
         if s == "http: named cookie not present" {
             fmt::Println!("[ 2] ErrNoCookie message       PASS");
         } else {
@@ -48,7 +49,8 @@ fn main() {
 
     // 3. ErrMissingFile sentinel + message.
     {
-        let __e_for_s: goish::error = http::ErrMissingFile.into(); let s = __e_for_s.Error();
+        let __e_for_s: goish::error = http::ErrMissingFile.into();
+        let s = __e_for_s.Error();
         if s == "http: no such file" {
             fmt::Println!("[ 3] ErrMissingFile message    PASS");
         } else {
@@ -59,7 +61,8 @@ fn main() {
 
     // 4. ErrBodyNotAllowed sentinel.
     {
-        let __ev_s: goish::error = http::ErrBodyNotAllowed.into(); let s = __ev_s.Error();
+        let __ev_s: goish::error = http::ErrBodyNotAllowed.into();
+        let s = __ev_s.Error();
         if s == "http: request method or response status code does not allow body" {
             fmt::Println!("[ 4] ErrBodyNotAllowed message PASS");
         } else {
@@ -82,7 +85,8 @@ fn main() {
 
     // 6. ErrContentLength sentinel.
     {
-        let __ev_s: goish::error = http::ErrContentLength.into(); let s = __ev_s.Error();
+        let __ev_s: goish::error = http::ErrContentLength.into();
+        let s = __ev_s.Error();
         if s == "http: wrote more than the declared Content-Length" {
             fmt::Println!("[ 6] ErrContentLength message  PASS");
         } else {
@@ -105,7 +109,8 @@ fn main() {
 
     // 8. ErrHandlerTimeout sentinel.
     {
-        let __ev_s: goish::error = http::ErrHandlerTimeout.into(); let s = __ev_s.Error();
+        let __ev_s: goish::error = http::ErrHandlerTimeout.into();
+        let s = __ev_s.Error();
         if s == "http: Handler timeout" {
             fmt::Println!("[ 8] ErrHandlerTimeout message PASS");
         } else {
@@ -116,7 +121,8 @@ fn main() {
 
     // 9. ErrServerClosed (pre-existing) sentinel still works alongside.
     {
-        let __ev_s: goish::error = http::ErrServerClosed.into(); let s = __ev_s.Error();
+        let __ev_s: goish::error = http::ErrServerClosed.into();
+        let s = __ev_s.Error();
         if s == "http: Server closed" {
             fmt::Println!("[ 9] ErrServerClosed message   PASS");
         } else {

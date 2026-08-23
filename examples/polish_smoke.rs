@@ -52,7 +52,10 @@ fn main() {
     let (y, m, d) = t.Date();
     check(y == 1970 && m == 1 && d == 1, b"polish: epoch Date wrong\n");
     let (hh, mm, ss) = t.Clock();
-    check(hh == 0 && mm == 0 && ss == 0, b"polish: epoch Clock wrong\n");
+    check(
+        hh == 0 && mm == 0 && ss == 0,
+        b"polish: epoch Clock wrong\n",
+    );
     check(t.Weekday() == 4, b"polish: epoch Weekday wrong\n");
 
     // 2000-01-01 00:00:00 UTC = 946684800. Saturday.
@@ -64,9 +67,15 @@ fn main() {
     // 2024-02-29 12:34:56 UTC = 1709210096. (Leap year edge case.)
     let t = time::Unix(1_709_210_096, 0);
     let (y, m, d) = t.Date();
-    check(y == 2024 && m == 2 && d == 29, b"polish: leap-year Date wrong\n");
+    check(
+        y == 2024 && m == 2 && d == 29,
+        b"polish: leap-year Date wrong\n",
+    );
     let (hh, mm, ss) = t.Clock();
-    check(hh == 12 && mm == 34 && ss == 56, b"polish: leap-year Clock wrong\n");
+    check(
+        hh == 12 && mm == 34 && ss == 56,
+        b"polish: leap-year Clock wrong\n",
+    );
 
     check(t.Year() == 2024, b"polish: Year wrong\n");
     check(t.Month() == 2, b"polish: Month wrong\n");
@@ -95,9 +104,15 @@ fn main() {
     check(pi.Get() == 3.14159, b"polish: flag float wrong\n");
 
     let positional = fs.Args();
-    check(positional.Len() == 2, b"polish: flag positional count wrong\n");
+    check(
+        positional.Len() == 2,
+        b"polish: flag positional count wrong\n",
+    );
     let want: slice<string> = goish::slice!([]string{ "extra1", "extra2" });
-    check(slices::Equal(&positional, &want), b"polish: flag positional values wrong\n");
+    check(
+        slices::Equal(&positional, &want),
+        b"polish: flag positional values wrong\n",
+    );
 
     // ─── flag — `--` separator ──────────────────────────────────────
 

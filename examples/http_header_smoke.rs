@@ -8,8 +8,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes::NewBuffer;
+use goish::fmt;
 use goish::gomap::map;
 use goish::goslice::slice;
 use goish::net::http::Header;
@@ -30,7 +30,10 @@ fn main() {
         if h2.Values(string("X-Foo")).Len() == 2 && h2.Values(string("X-Foo"))[0] == "v1" {
             fmt::Println!("[ 1] Clone independence        PASS");
         } else {
-            fmt::Println!("[ 1] Clone independence        FAIL n={}", h2.Values(string("X-Foo")).Len());
+            fmt::Println!(
+                "[ 1] Clone independence        FAIL n={}",
+                h2.Values(string("X-Foo")).Len()
+            );
             failed += 1;
         }
     }

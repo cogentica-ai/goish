@@ -167,11 +167,10 @@ impl WaitGroup {
         F: FnOnce() + Send + 'a,
     {
         self.Add(1);
-        let body: alloc::boxed::Box<dyn FnOnce() + Send + 'a> =
-            alloc::boxed::Box::new(move || {
-                f();
-                self.Done();
-            });
+        let body: alloc::boxed::Box<dyn FnOnce() + Send + 'a> = alloc::boxed::Box::new(move || {
+            f();
+            self.Done();
+        });
 
         // SAFETY: `WaitGroup`'s `Drop` impl calls `Wait()`, which
         // blocks until the counter reaches zero — i.e., until every

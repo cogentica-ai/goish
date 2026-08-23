@@ -8,11 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::errors::{self, error, ErrorTrait};
+use goish::fmt;
 use goish::gostring::string;
+use goish::syscall;
 use goish::types::int;
-use goish::{syscall};
 
 // Custom typed error 1.
 struct ParseError {
@@ -60,7 +60,11 @@ fn main() {
                 if pe.line == 7 && pe.col == 12 {
                     fmt::Println!("[ 1] As head match           PASS");
                 } else {
-                    fmt::Println!("[ 1] As head match           FAIL line={} col={}", pe.line, pe.col);
+                    fmt::Println!(
+                        "[ 1] As head match           FAIL line={} col={}",
+                        pe.line,
+                        pe.col
+                    );
                     failed += 1;
                 }
             }
@@ -168,7 +172,10 @@ fn main() {
 
     // 9. Two ParseErrors with different fields — As returns the head one.
     {
-        let inner = errors::Wrap(ParseError { line: 100, col: 200 });
+        let inner = errors::Wrap(ParseError {
+            line: 100,
+            col: 200,
+        });
         let outer = errors::Wrap(WrappedError { inner });
         // Outer is WrappedError; As<ParseError> should walk to inner.
         match errors::As::<ParseError>(outer) {

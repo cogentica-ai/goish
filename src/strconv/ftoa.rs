@@ -306,14 +306,7 @@ fn fmt_E(
 }
 
 /// %f: -ddddddd.ddddd
-fn fmt_F(
-    mut dst: Vec<byte>,
-    neg: bool,
-    d: &[byte; 800],
-    nd: i32,
-    dp: i32,
-    prec: i32,
-) -> Vec<byte> {
+fn fmt_F(mut dst: Vec<byte>, neg: bool, d: &[byte; 800], nd: i32, dp: i32, prec: i32) -> Vec<byte> {
     if neg {
         dst.push(b'-');
     }

@@ -8,11 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::errors;
+use goish::fmt;
 use goish::os;
+use goish::syscall;
 use goish::types::int;
-use goish::{syscall};
 
 #[goish::main]
 fn main() {

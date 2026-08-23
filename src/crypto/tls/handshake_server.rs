@@ -142,7 +142,6 @@ pub(crate) fn negotiateALPN(
     );
 }
 
-
 // Go: handshake_server.go:24-40
 //   type serverHandshakeState struct { c *Conn; ctx context.Context
 //       clientHello *clientHelloMsg; hello *serverHelloMsg
@@ -327,9 +326,7 @@ impl serverHandshakeState {
         }
         if !foundCompression {
             self.c.sendAlert(super::alert::alertIllegalParameter);
-            return crate::errors::New(
-                "tls: client does not support uncompressed connections",
-            );
+            return crate::errors::New("tls: client does not support uncompressed connections");
         }
 
         // Go: hs.hello.random = make([]byte, 32)
@@ -347,18 +344,15 @@ impl serverHandshakeState {
         let mut randomLen = 32;
         if maxVers >= super::common::VersionTLS12 && self.c.vers < maxVers {
             if self.c.vers == super::common::VersionTLS12 {
-                self.hello.random[24..]
-                    .copy_from_slice(super::common::downgradeCanaryTLS12);
+                self.hello.random[24..].copy_from_slice(super::common::downgradeCanaryTLS12);
             } else {
-                self.hello.random[24..]
-                    .copy_from_slice(super::common::downgradeCanaryTLS11);
+                self.hello.random[24..].copy_from_slice(super::common::downgradeCanaryTLS11);
             }
             randomLen = 24;
         }
         let err = {
             let mut r = self.c.config.rand();
-            let mut buf =
-                slice::__from_vec(self.hello.random[..randomLen].to_vec());
+            let mut buf = slice::__from_vec(self.hello.random[..randomLen].to_vec());
             let (_, err) = crate::io::ReadFull(&mut *r, &mut buf);
             let raw: &[crate::types::byte] = &buf;
             self.hello.random[..randomLen].copy_from_slice(raw);
@@ -384,13 +378,11 @@ impl serverHandshakeState {
         //     hs.hello.compressionMethod = compressionNone
         //     if len(hs.clientHello.serverName) > 0 { c.serverName = hs.clientHello.serverName }
         self.hello.extendedMasterSecret = self.clientHello.extendedMasterSecret;
-        self.hello.secureRenegotiationSupported =
-            self.clientHello.secureRenegotiationSupported;
+        self.hello.secureRenegotiationSupported = self.clientHello.secureRenegotiationSupported;
         self.hello.compressionMethod = super::common::compressionNone;
         if self.clientHello.serverName.len() > 0 {
-            self.c.serverName = crate::gostring::string::from_bytes(
-                self.clientHello.serverName.as_bytes(),
-            );
+            self.c.serverName =
+                crate::gostring::string::from_bytes(self.clientHello.serverName.as_bytes());
         }
 
         // Go: selectedProto, err := negotiateALPN(c.config.NextProtos,
@@ -485,18 +477,22 @@ impl serverHandshakeState {
         //         case *rsa.PublicKey: hs.rsaSignOk = true
         //         default: c.sendAlert(alertInternalError)
         //             return fmt.Errorf("tls: unsupported signing key type (%T)", priv.Public()) } }
-        if let Some(priv_) =
-            super::auth::signerOf(&self.cert.as_ref().unwrap().PrivateKey)
-        {
+        if let Some(priv_) = super::auth::signerOf(&self.cert.as_ref().unwrap().PrivateKey) {
             let pub_ = priv_.Public();
-            if pub_.downcast_ref::<crate::crypto::ecdsa::PublicKey>().is_some() {
+            if pub_
+                .downcast_ref::<crate::crypto::ecdsa::PublicKey>()
+                .is_some()
+            {
                 self.ecSignOk = true;
             } else if pub_
                 .downcast_ref::<crate::crypto::ed25519::PublicKey>()
                 .is_some()
             {
                 self.ecSignOk = true;
-            } else if pub_.downcast_ref::<crate::crypto::rsa::PublicKey>().is_some() {
+            } else if pub_
+                .downcast_ref::<crate::crypto::rsa::PublicKey>()
+                .is_some()
+            {
                 self.rsaSignOk = true;
             } else {
                 self.c.sendAlert(super::alert::alertInternalError);
@@ -512,7 +508,10 @@ impl serverHandshakeState {
             super::key_agreement::decrypterOf(&self.cert.as_ref().unwrap().PrivateKey)
         {
             let pub_ = priv_.Public();
-            if pub_.downcast_ref::<crate::crypto::rsa::PublicKey>().is_some() {
+            if pub_
+                .downcast_ref::<crate::crypto::rsa::PublicKey>()
+                .is_some()
+            {
                 self.rsaDecryptOk = true;
             } else {
                 self.c.sendAlert(super::alert::alertInternalError);
@@ -543,10 +542,8 @@ impl serverHandshakeState {
         //     if _, err := hs.c.writeHandshakeRecord(hs.hello, &hs.finishedHash); err != nil { return err }
         self.finishedHash = super::prf::newFinishedHash(self.c.vers, self.suite.unwrap());
         self.finishedHash.discardHandshakeBuffer();
-        let err = super::handshake_messages::transcriptMsg(
-            &self.clientHello,
-            &mut self.finishedHash,
-        );
+        let err =
+            super::handshake_messages::transcriptMsg(&self.clientHello, &mut self.finishedHash);
         if err != crate::errors::nil {
             return err;
         }
@@ -587,9 +584,7 @@ impl serverHandshakeState {
     pub(crate) fn doFullHandshake(&mut self) -> crate::error {
         // Go: if hs.clientHello.ocspStapling && len(hs.cert.OCSPStaple) > 0 {
         //         hs.hello.ocspStapling = true }
-        if self.clientHello.ocspStapling
-            && self.cert.as_ref().unwrap().OCSPStaple.Len() > 0
-        {
+        if self.clientHello.ocspStapling && self.cert.as_ref().unwrap().OCSPStaple.Len() > 0 {
             self.hello.ocspStapling = true;
         }
 
@@ -612,10 +607,8 @@ impl serverHandshakeState {
         }
         // Go: if err := transcriptMsg(hs.clientHello, &hs.finishedHash); err != nil { return err }
         //     if _, err := hs.c.writeHandshakeRecord(hs.hello, &hs.finishedHash); err != nil { return err }
-        let err = super::handshake_messages::transcriptMsg(
-            &self.clientHello,
-            &mut self.finishedHash,
-        );
+        let err =
+            super::handshake_messages::transcriptMsg(&self.clientHello, &mut self.finishedHash);
         if err != crate::errors::nil {
             return err;
         }
@@ -796,9 +789,7 @@ impl serverHandshakeState {
             }
             msg = match nextMsg {
                 Some(m) => m,
-                None => {
-                    return crate::errors::New("tls: internal error: no handshake message")
-                }
+                None => return crate::errors::New("tls: internal error: no handshake message"),
             };
         }
         // Go: if c.config.VerifyConnection != nil {
@@ -908,9 +899,7 @@ impl serverHandshakeState {
             }
             let msg = match msg {
                 Some(m) => m,
-                None => {
-                    return crate::errors::New("tls: internal error: no handshake message")
-                }
+                None => return crate::errors::New("tls: internal error: no handshake message"),
             };
             let certVerify = match msg
                 .asAny()
@@ -945,7 +934,11 @@ impl serverHandshakeState {
             if self.c.vers >= super::common::VersionTLS12 {
                 if !super::common::isSupportedSignatureAlgorithm(
                     sigAlg,
-                    certReq.as_ref().unwrap().supportedSignatureAlgorithms.clone(),
+                    certReq
+                        .as_ref()
+                        .unwrap()
+                        .supportedSignatureAlgorithms
+                        .clone(),
                 ) {
                     self.c.sendAlert(super::alert::alertIllegalParameter);
                     return crate::errors::New(
@@ -959,9 +952,8 @@ impl serverHandshakeState {
                 sigType = st;
                 sigHash = sh;
             } else {
-                let (st, sh, err) = super::auth::legacyTypeAndHashFromPublicKey(
-                    pub_.as_ref().unwrap(),
-                );
+                let (st, sh, err) =
+                    super::auth::legacyTypeAndHashFromPublicKey(pub_.as_ref().unwrap());
                 if err != crate::errors::nil {
                     self.c.sendAlert(super::alert::alertIllegalParameter);
                     return err;
@@ -994,10 +986,7 @@ impl serverHandshakeState {
             self.c.peerSigAlg = sigAlg;
 
             // Go: if err := transcriptMsg(certVerify, &hs.finishedHash); err != nil { return err }
-            let err = super::handshake_messages::transcriptMsg(
-                &certVerify,
-                &mut self.finishedHash,
-            );
+            let err = super::handshake_messages::transcriptMsg(&certVerify, &mut self.finishedHash);
             if err != crate::errors::nil {
                 return err;
             }
@@ -1129,8 +1118,7 @@ pub(crate) fn clientHelloInfo(
     // Go: return &ClientHelloInfo{ CipherSuites: …, ServerName: …, … }
     let mut chi = super::common::ClientHelloInfo::default();
     chi.CipherSuites = slice::__from_vec(clientHello.cipherSuites.clone());
-    chi.ServerName =
-        crate::gostring::string::from_bytes(clientHello.serverName.as_bytes());
+    chi.ServerName = crate::gostring::string::from_bytes(clientHello.serverName.as_bytes());
     chi.SupportedCurves = slice::__from_vec(
         clientHello
             .supportedCurves
@@ -1159,7 +1147,6 @@ pub(crate) fn clientHelloInfo(
     return chi;
 }
 
-
 impl serverHandshakeState {
     // go: sdk 1.25.5 crypto/tls/handshake_server.go:396-430 serverHandshakeState.pickCipherSuite
     ///
@@ -1184,8 +1171,12 @@ impl serverHandshakeState {
         // Go passes the method value `hs.cipherSuiteOk`; Rust cannot
         // borrow `self` into a closure that `self` also calls, so the
         // four flags it reads are copied out first. Same predicate.
-        let (ecdheOk, ecSignOk, rsaDecryptOk, rsaSignOk) =
-            (self.ecdheOk, self.ecSignOk, self.rsaDecryptOk, self.rsaSignOk);
+        let (ecdheOk, ecSignOk, rsaDecryptOk, rsaSignOk) = (
+            self.ecdheOk,
+            self.ecSignOk,
+            self.rsaDecryptOk,
+            self.rsaSignOk,
+        );
         let vers = self.c.__vers();
         self.suite = super::cipher_suites::selectCipherSuite(
             preferenceList,
@@ -1277,7 +1268,6 @@ fn hexList(v: &slice<uint16>) -> crate::gostring::string {
     return crate::gostring::string::from_bytes(&out);
 }
 
-
 impl serverHandshakeState {
     // go: sdk 1.25.5 crypto/tls/handshake_server.go:808-831 serverHandshakeState.establishKeys
     /// Derive the six connection keys and stage them on both half
@@ -1332,11 +1322,11 @@ impl serverHandshakeState {
         //     c.out.prepareCipherSpec(c.vers, serverCipher, serverHash)
         //     return nil
         let vers = self.c.__vers();
-        self.c.__prepareCipherSpecs(vers, clientCipher, clientHash, serverCipher, serverHash);
+        self.c
+            .__prepareCipherSpecs(vers, clientCipher, clientHash, serverCipher, serverHash);
         return errors::nil;
     }
 }
-
 
 impl serverHandshakeState {
     // go: sdk 1.25.5 crypto/tls/handshake_server.go:454-555 serverHandshakeState.checkForResumption
@@ -1358,7 +1348,10 @@ impl serverHandshakeState {
         //     if err != nil { return nil }
         //     sessionState = ss
         let ticket = slice::__from_vec(self.clientHello.sessionTicket.clone());
-        let plaintext = self.c.__config().decryptTicket(ticket, self.c.__ticketKeys());
+        let plaintext = self
+            .c
+            .__config()
+            .decryptTicket(ticket, self.c.__ticketKeys());
         if plaintext.is_none() {
             return errors::nil;
         }
@@ -1402,8 +1395,12 @@ impl serverHandshakeState {
         // Go: suite := selectCipherSuite([]uint16{sessionState.cipherSuite},
         //         c.config.supportedCipherSuites(), hs.cipherSuiteOk)
         //     if suite == nil { return nil }
-        let (ecdheOk, ecSignOk, rsaDecryptOk, rsaSignOk) =
-            (self.ecdheOk, self.ecSignOk, self.rsaDecryptOk, self.rsaSignOk);
+        let (ecdheOk, ecSignOk, rsaDecryptOk, rsaSignOk) = (
+            self.ecdheOk,
+            self.ecSignOk,
+            self.rsaDecryptOk,
+            self.rsaSignOk,
+        );
         let vers = self.c.__vers();
         let suite = super::cipher_suites::selectCipherSuite(
             slice::__from_vec(alloc::vec![sessionState.__cipherSuite()]),
@@ -1482,9 +1479,7 @@ impl serverHandshakeState {
         // Go: if !sessionState.extMasterSecret && fips140tls.Required() {
         //         // FIPS 140-3 requires the use of Extended Master Secret.
         //         return nil }
-        if !sessionState.__extMasterSecret()
-            && super::internal::fips140tls::Required()
-        {
+        if !sessionState.__extMasterSecret() && super::internal::fips140tls::Required() {
             return errors::nil;
         }
 
@@ -1612,8 +1607,7 @@ impl Conn {
         // Go: certificates := certificate.Certificate
         //     certs := make([]*x509.Certificate, len(certificates))
         let certificates = certificate.Certificate.clone();
-        let mut certs: alloc::vec::Vec<crate::crypto::x509::Certificate> =
-            alloc::vec::Vec::new();
+        let mut certs: alloc::vec::Vec<crate::crypto::x509::Certificate> = alloc::vec::Vec::new();
         // Go: for i, asn1Data := range certificates {
         //         if certs[i], err = x509.ParseCertificate(asn1Data); err != nil {
         //             c.sendAlert(alertDecodeError)
@@ -1653,9 +1647,7 @@ impl Conn {
         //         if c.vers == VersionTLS13 { c.sendAlert(alertCertificateRequired) }
         //         else { c.sendAlert(alertHandshakeFailure) }
         //         return errors.New("tls: client didn't provide a certificate") }
-        if certs.is_empty()
-            && super::common::requiresClientCert(self.config.ClientAuth)
-        {
+        if certs.is_empty() && super::common::requiresClientCert(self.config.ClientAuth) {
             if self.vers == super::common::VersionTLS13 {
                 self.sendAlert(super::alert::alertCertificateRequired);
             } else {
@@ -1665,9 +1657,7 @@ impl Conn {
         }
 
         // Go: if c.config.ClientAuth >= VerifyClientCertIfGiven && len(certs) > 0 {
-        if self.config.ClientAuth >= super::common::VerifyClientCertIfGiven
-            && !certs.is_empty()
-        {
+        if self.config.ClientAuth >= super::common::VerifyClientCertIfGiven && !certs.is_empty() {
             // Go: opts := x509.VerifyOptions{ Roots: c.config.ClientCAs,
             //         CurrentTime: c.config.time(), Intermediates: x509.NewCertPool(),
             //         KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth} }
@@ -1692,9 +1682,8 @@ impl Conn {
                     .is_some()
                 {
                     self.sendAlert(super::alert::alertUnknownCA);
-                } else if let Some(ci) = crate::errors::As::<
-                    crate::crypto::x509::CertificateInvalidError,
-                >(err.clone())
+                } else if let Some(ci) =
+                    crate::errors::As::<crate::crypto::x509::CertificateInvalidError>(err.clone())
                 {
                     if ci.Reason == crate::crypto::x509::Expired {
                         self.sendAlert(super::alert::alertCertificateExpired);
@@ -1915,8 +1904,7 @@ impl super::conn::Conn {
                 }
                 echKeys = keys;
             }
-            let (newHello, newEch, err) =
-                self.processECHClientHello(&clientHello, echKeys);
+            let (newHello, newEch, err) = self.processECHClientHello(&clientHello, echKeys);
             if err != crate::errors::nil {
                 return (None, None, err);
             }
@@ -1937,11 +1925,8 @@ impl super::conn::Conn {
         //     } else if len(clientVersions) == 0 {
         //         clientVersions = supportedVersionsFromMax(clientHello.vers) }
         let mut clientVersions = slice::__from_vec(clientHello.supportedVersions.clone());
-        if clientHello.vers >= super::common::VersionTLS13
-            && clientVersions.len() == 0
-        {
-            clientVersions =
-                super::common::supportedVersionsFromMax(super::common::VersionTLS12);
+        if clientHello.vers >= super::common::VersionTLS13 && clientVersions.len() == 0 {
+            clientVersions = super::common::supportedVersionsFromMax(super::common::VersionTLS12);
         } else if clientVersions.len() == 0 {
             clientVersions = super::common::supportedVersionsFromMax(clientHello.vers);
         }
@@ -1987,9 +1972,7 @@ impl super::conn::Conn {
             return (
                 None,
                 None,
-                crate::errors::New(
-                    "tls: Encrypted Client Hello cannot be used pre-TLS 1.3",
-                ),
+                crate::errors::New("tls: Encrypted Client Hello cannot be used pre-TLS 1.3"),
             );
         }
 

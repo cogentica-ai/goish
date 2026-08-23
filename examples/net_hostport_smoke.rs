@@ -22,7 +22,11 @@ fn main() {
         if err.IsNil() && host == "example.com" && port == "8080" {
             fmt::Println!("[ 1] plain host:port           PASS");
         } else {
-            fmt::Println!("[ 1] plain host:port           FAIL host={} port={}", host, port);
+            fmt::Println!(
+                "[ 1] plain host:port           FAIL host={} port={}",
+                host,
+                port
+            );
             failed += 1;
         }
     }
@@ -44,7 +48,11 @@ fn main() {
         if err.IsNil() && host == "::1" && port == "80" {
             fmt::Println!("[ 3] IPv6 brackets             PASS");
         } else {
-            fmt::Println!("[ 3] IPv6 brackets             FAIL host={} port={}", host, port);
+            fmt::Println!(
+                "[ 3] IPv6 brackets             FAIL host={} port={}",
+                host,
+                port
+            );
             failed += 1;
         }
     }

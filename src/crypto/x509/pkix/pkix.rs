@@ -264,9 +264,9 @@ impl crate::reflect::Reflect for RelativeDistinguishedNameSET {
     fn __reflect_value(&self) -> crate::reflect::Value {
         return crate::reflect::Value::Named {
             ty: <Self as crate::reflect::Reflect>::__reflect_type(),
-            inner: alloc::boxed::Box::new(<slice<AttributeTypeAndValue> as crate::reflect::Reflect>::__reflect_value(
-                &self.0,
-            )),
+            inner: alloc::boxed::Box::new(
+                <slice<AttributeTypeAndValue> as crate::reflect::Reflect>::__reflect_value(&self.0),
+            ),
         };
     }
 }
@@ -429,7 +429,11 @@ impl Name {
         ret = self.appendRDNs(ret, self.StreetAddress.clone(), oidStreetAddress());
         ret = self.appendRDNs(ret, self.PostalCode.clone(), oidPostalCode());
         ret = self.appendRDNs(ret, self.Organization.clone(), oidOrganization());
-        ret = self.appendRDNs(ret, self.OrganizationalUnit.clone(), oidOrganizationalUnit());
+        ret = self.appendRDNs(
+            ret,
+            self.OrganizationalUnit.clone(),
+            oidOrganizationalUnit(),
+        );
         if self.CommonName.Len() > 0 {
             let one = slice::__from_vec(alloc::vec![self.CommonName.clone()]);
             ret = self.appendRDNs(ret, one, oidCommonName());
@@ -475,10 +479,7 @@ impl Name {
                 // the sequence so they will be at the end of the
                 // string. See Issue 39924.
                 let one = slice::__from_vec(alloc::vec![atv.clone()]);
-                rdns = RDNSequence(crate::append!(
-                    rdns.0,
-                    RelativeDistinguishedNameSET(one)
-                ));
+                rdns = RDNSequence(crate::append!(rdns.0, RelativeDistinguishedNameSET(one)));
             }
         }
         rdns = RDNSequence(crate::append!(rdns.0, self.ToRDNSequence().0...));

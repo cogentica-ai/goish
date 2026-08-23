@@ -24,9 +24,7 @@ extern crate goish;
 
 use goish::gostring::string;
 use goish::math::rand;
-use goish::testing::quick::{
-    randFloat64, randInt64, toString, CheckError, Config, SetupError,
-};
+use goish::testing::quick::{randFloat64, randInt64, toString, CheckError, Config, SetupError};
 use goish::{fmt, slice, syscall, Any};
 
 fn s(x: &str) -> string {
@@ -121,8 +119,12 @@ fn main() {
             fmt::Println!("[ 4] getMaxCount precedence    PASS");
         } else {
             fmt::Println!(
-                "[ 4] getMaxCount precedence    FAIL ", a.getMaxCount(),
-                " ", b.getMaxCount(), " ", c.getMaxCount()
+                "[ 4] getMaxCount precedence    FAIL ",
+                a.getMaxCount(),
+                " ",
+                b.getMaxCount(),
+                " ",
+                c.getMaxCount()
             );
             failed += 1;
         }

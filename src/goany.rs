@@ -300,11 +300,10 @@ impl Any {
     #[inline]
     #[track_caller]
     pub fn MustAsMut<T: 'static + Send + Sync + PartialEq>(&mut self) -> &mut T {
-        let inner: &mut dyn AnyVal = Arc::get_mut(&mut self.0)
-            .expect(
-                "interface conversion: Any is shared (refcount > 1) — \
+        let inner: &mut dyn AnyVal = Arc::get_mut(&mut self.0).expect(
+            "interface conversion: Any is shared (refcount > 1) — \
                  mutation through MustAsMut requires unique ownership",
-            );
+        );
         inner.__any_mut().downcast_mut::<T>().unwrap_or_else(|| {
             panic!(
                 "interface conversion: any is not {}",
@@ -757,9 +756,7 @@ pub trait NilDyn {
 /// [`NilDyn`], so a guarded `if ok { v.M() }` is safe and an
 /// unguarded call panics like Go's nil-interface-method call.
 #[inline]
-pub fn __cast_iface<'a, Target, Carrier>(
-    carrier: &'a Carrier,
-) -> (&'a Target, bool)
+pub fn __cast_iface<'a, Target, Carrier>(carrier: &'a Carrier) -> (&'a Target, bool)
 where
     Target: ?Sized + DowncastableFromAny + NilDyn,
     Carrier: ?Sized + HasDynAny,
@@ -779,9 +776,7 @@ where
 /// Trait`, owned `Box`, or `Any` with refcount 1) — Rust enforces the
 /// aliasing discipline Go leaves to the programmer.
 #[inline]
-pub fn __cast_iface_mut<'a, Target, Carrier>(
-    carrier: &'a mut Carrier,
-) -> Option<&'a mut Target>
+pub fn __cast_iface_mut<'a, Target, Carrier>(carrier: &'a mut Carrier) -> Option<&'a mut Target>
 where
     Target: ?Sized + DowncastableFromAnyMut,
     Carrier: ?Sized + HasDynAnyMut,
@@ -849,9 +844,9 @@ where
 // a Trait-specific vtable). A trait-agnostic registry storing
 // `*const ()` would lose the vtable on cast.
 
-use core::any::TypeId;
 use crate::runtime::spin::SpinLock;
 use alloc::vec::Vec;
+use core::any::TypeId;
 
 /// Per-concrete-impl probe entry within a single trait's registry.
 /// `cast` reads `&(dyn Any + Send + Sync)` and returns `&Trait`
@@ -899,10 +894,7 @@ impl<Trait: ?Sized + 'static> TraitRegistry<Trait> {
     /// Linear scan over registered probes. Returns the first match's
     /// `&Trait`. O(n) in the number of impls per trait — typically
     /// small (single-digit) per Goish program.
-    pub fn lookup<'a>(
-        &self,
-        any_ref: &'a (dyn CoreAny + Send + Sync),
-    ) -> Option<&'a Trait> {
+    pub fn lookup<'a>(&self, any_ref: &'a (dyn CoreAny + Send + Sync)) -> Option<&'a Trait> {
         let concrete = (*any_ref).type_id();
         for probe in &self.probes {
             if probe.concrete == concrete {
@@ -1012,7 +1004,9 @@ impl crate::reflect::FromReflectValue for Any {
                 (Any::new(b), crate::errors::nil)
             }
             // TagOID: a *named* slice, so it arrives wrapped.
-            V::Named { ref ty, .. } if ty.Name() == crate::gostring::string::from_static("ObjectIdentifier") => {
+            V::Named { ref ty, .. }
+                if ty.Name() == crate::gostring::string::from_static("ObjectIdentifier") =>
+            {
                 let (oid, err) =
                     <crate::encoding::asn1::ObjectIdentifier as crate::reflect::FromReflectValue>
                         ::from_reflect_value(v.clone());
@@ -1023,7 +1017,9 @@ impl crate::reflect::FromReflectValue for Any {
             }
             // TagBitString / TagUTCTime / TagGeneralizedTime are structs,
             // told apart by the descriptor name their `Reflect` carries.
-            V::Struct { ref ty, .. } if ty.Name() == crate::gostring::string::from_static("BitString") => {
+            V::Struct { ref ty, .. }
+                if ty.Name() == crate::gostring::string::from_static("BitString") =>
+            {
                 let (bs, err) =
                     <crate::encoding::asn1::BitString as crate::reflect::FromReflectValue>
                         ::from_reflect_value(v.clone());
@@ -1032,9 +1028,13 @@ impl crate::reflect::FromReflectValue for Any {
                 }
                 (Any::new(bs), crate::errors::nil)
             }
-            V::Struct { ref ty, .. } if ty.Name() == crate::gostring::string::from_static("Time") => {
-                let (t, err) = <crate::time::Time as crate::reflect::FromReflectValue>
-                    ::from_reflect_value(v.clone());
+            V::Struct { ref ty, .. }
+                if ty.Name() == crate::gostring::string::from_static("Time") =>
+            {
+                let (t, err) =
+                    <crate::time::Time as crate::reflect::FromReflectValue>::from_reflect_value(
+                        v.clone(),
+                    );
                 if err != crate::errors::nil {
                     return (Any::default(), err);
                 }

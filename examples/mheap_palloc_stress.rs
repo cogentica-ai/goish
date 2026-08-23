@@ -187,7 +187,10 @@ fn main() {
     // contiguous run. This proves the radix tree's bottom-up summary
     // restoration is symmetric with allocation.
     let whole = p.alloc(PALLOC_CHUNK_PAGES);
-    check(whole == arena_base, b"stress: post-drain whole-chunk failed\n");
+    check(
+        whole == arena_base,
+        b"stress: post-drain whole-chunk failed\n",
+    );
     p.free(whole, PALLOC_CHUNK_PAGES);
 
     const OK: &[u8] = b"mheap_palloc_stress: ok\n";

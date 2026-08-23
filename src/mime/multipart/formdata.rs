@@ -27,12 +27,18 @@ use crate::types::int64;
 // satisfy all four. The interface itself appears in user code mainly
 // as a stored field type — `pub Data: File` lowers to `Box<dyn File +
 // Send + Sync>` via the boxed-trait field convention.
-pub trait File: crate::io::Reader + crate::io::ReaderAt + crate::io::Seeker + crate::io::Closer {}
+pub trait File:
+    crate::io::Reader + crate::io::ReaderAt + crate::io::Seeker + crate::io::Closer
+{
+}
 
 // Blanket: any type that already implements all four io traits is a
 // `File`. Lets call sites store concrete readers without explicit
 // `impl File for MyT {}`.
-impl<T> File for T where T: crate::io::Reader + crate::io::ReaderAt + crate::io::Seeker + crate::io::Closer {}
+impl<T> File for T where
+    T: crate::io::Reader + crate::io::ReaderAt + crate::io::Seeker + crate::io::Closer
+{
+}
 
 /// `multipart.Form` (Go 1.25 src/mime/multipart/formdata.go:234) — the
 /// parsed multipart form: the plain values, and the file parts keyed by
@@ -44,7 +50,8 @@ impl<T> File for T where T: crate::io::Reader + crate::io::ReaderAt + crate::io:
 #[derive(Clone, Default)]
 pub struct Form {
     /// Go: "Value map[string][]string".
-    pub Value: crate::gomap::map<crate::gostring::string, crate::goslice::slice<crate::gostring::string>>,
+    pub Value:
+        crate::gomap::map<crate::gostring::string, crate::goslice::slice<crate::gostring::string>>,
     /// Go: "File map[string][]*FileHeader".
     pub File: crate::gomap::map<crate::gostring::string, crate::goslice::slice<FileHeader>>,
 }

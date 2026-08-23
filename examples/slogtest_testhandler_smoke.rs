@@ -209,7 +209,10 @@ impl slog::Handler for Recorder {
             root.set(&s(slog::TimeKey), Node::Leaf(Any::new(r.Time.Unix())));
         }
         root.set(&s(slog::LevelKey), Node::Leaf(Any::new(r.Level.0)));
-        root.set(&s(slog::MessageKey), Node::Leaf(Any::new(r.Message.clone())));
+        root.set(
+            &s(slog::MessageKey),
+            Node::Leaf(Any::new(r.Message.clone())),
+        );
 
         // Then the accumulated With attrs, each at the path it was
         // added under…
@@ -323,8 +326,18 @@ fn main() {
         if err == errors::nil && n == want {
             fmt::Println!("[ 1] conforming handler passes PASS");
         } else {
-            let msg = if err != errors::nil { err.Error() } else { s("") };
-            fmt::Println!("[ 1] conforming handler passes FAIL n=", n as i64, " [", msg, "]");
+            let msg = if err != errors::nil {
+                err.Error()
+            } else {
+                s("")
+            };
+            fmt::Println!(
+                "[ 1] conforming handler passes FAIL n=",
+                n as i64,
+                " [",
+                msg,
+                "]"
+            );
             failed += 1;
         }
     }
@@ -335,7 +348,11 @@ fn main() {
     {
         sinkClear();
         let err = TestHandler(newRecorder(), || slice::new());
-        let m = if err != errors::nil { err.Error() } else { s("") };
+        let m = if err != errors::nil {
+            err.Error()
+        } else {
+            s("")
+        };
         let ms: &str = m.as_ref();
         if err != errors::nil && ms.starts_with("got 0 results, want") {
             fmt::Println!("[ 2] empty results caught      PASS");
@@ -364,12 +381,22 @@ fn main() {
         sinkClear();
         let err = TestHandler(newFlattener(), sinkAll);
         let n = SINK.Lock().len();
-        let m = if err != errors::nil { err.Error() } else { s("") };
+        let m = if err != errors::nil {
+            err.Error()
+        } else {
+            s("")
+        };
         let ms: &str = m.as_ref();
         if err != errors::nil && n == want && !ms.starts_with("got 0 results") {
             fmt::Println!("[ 4] dropped groups caught     PASS");
         } else {
-            fmt::Println!("[ 4] dropped groups caught     FAIL n=", n as i64, " [", m, "]");
+            fmt::Println!(
+                "[ 4] dropped groups caught     FAIL n=",
+                n as i64,
+                " [",
+                m,
+                "]"
+            );
             failed += 1;
         }
     }

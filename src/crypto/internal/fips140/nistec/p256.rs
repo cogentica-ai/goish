@@ -787,7 +787,9 @@ impl p256AffineTable {
     /// n is 0, p is set to an undefined value.
     fn Select(&self, p: &mut p256AffinePoint, n: byte) {
         if n > 32 {
-            panic!("nistec: internal error: p256AffineTable.Select called with out-of-bounds value");
+            panic!(
+                "nistec: internal error: p256AffineTable.Select called with out-of-bounds value"
+            );
         }
         let mut i: byte = 1;
         while i <= 32 {

@@ -14,7 +14,7 @@ use alloc::sync::Arc;
 use goish::fmt;
 use goish::net::http::{Handler, NewServeMux, NotFoundHandler};
 use goish::string;
-use goish::{syscall};
+use goish::syscall;
 
 #[goish::main]
 fn main() {

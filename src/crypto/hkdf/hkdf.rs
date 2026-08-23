@@ -105,10 +105,7 @@ pub fn Key(
 /// `fips140only::Enabled` is a `const false` in goish, so this always
 /// returns nil today; it is ported in full because the guard is real Go
 /// code and a future FIPS 140-only mode would need it correct.
-fn checkFIPS140Only(
-    h: impl IntoHashFunc,
-    key: &slice<byte>,
-) -> error {
+fn checkFIPS140Only(h: impl IntoHashFunc, key: &slice<byte>) -> error {
     let h = h.into_hash_func();
     // Go: if !fips140only.Enabled { return nil }
     if !fips140only::Enabled {

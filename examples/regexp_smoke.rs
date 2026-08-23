@@ -68,7 +68,7 @@ fn main() {
     // the RE2-subset additions for the semver port.
     let (re4, err4) = regexp::Compile("a|b");
     check!("Compile alternation", err4 == nil);
-    check!("Match alt left",  re4.MatchString("a"));
+    check!("Match alt left", re4.MatchString("a"));
     check!("Match alt right", re4.MatchString("b"));
     check!("Reject alt no-match", !re4.MatchString("c"));
 
@@ -78,8 +78,10 @@ fn main() {
 
     let (re6, _) = regexp::Compile("[0-9]+");
     check!("Class+plus matches", re6.MatchString("hello 123 world"));
-    check!("Class+plus FindAllString",
-        re6.FindAllString("a 12 b 345 c", -1).Len() == 2);
+    check!(
+        "Class+plus FindAllString",
+        re6.FindAllString("a 12 b 345 c", -1).Len() == 2
+    );
 
     let (re7, _) = regexp::Compile("^v?(\\d+)\\.(\\d+)\\.(\\d+)$");
     check!("Compile semver-ish anchored", true);
@@ -88,8 +90,10 @@ fn main() {
     check!("Capture 1 == \"1\"", m[1] == string("1"));
     check!("Capture 2 == \"2\"", m[2] == string("2"));
     check!("Capture 3 == \"3\"", m[3] == string("3"));
-    check!("Reject unanchored extra",
-        re7.FindStringSubmatch("v1.2.3-beta").Len() == 0);
+    check!(
+        "Reject unanchored extra",
+        re7.FindStringSubmatch("v1.2.3-beta").Len() == 0
+    );
 
     // Non-capturing group.
     let (re8, _) = regexp::Compile("(?:ab)+");
@@ -127,9 +131,7 @@ fn main() {
 
     // Anchored version (mimicking semver constraint parsing where the
     // operator is followed by whitespace then a digit).
-    let (re_constr, _) = regexp::Compile(
-        "^(=|!=|>|>=|<|<=)\\s*(\\d+)$"
-    );
+    let (re_constr, _) = regexp::Compile("^(=|!=|>|>=|<|<=)\\s*(\\d+)$");
     let cm = re_constr.FindStringSubmatch(">=42");
     check!(
         "Semver-shape constraint matches `>=42`",
@@ -151,9 +153,7 @@ fn main() {
     // separates two A-flanked branches. With multi-length A and
     // separator alternation, snapshot-only Repeat would commit to
     // wrong branches and fail to validate well-formed inputs.
-    let (re_constr_list, _) = regexp::Compile(
-        "^(\\d+)((?:,|;)(\\d+))*$"
-    );
+    let (re_constr_list, _) = regexp::Compile("^(\\d+)((?:,|;)(\\d+))*$");
     check!(
         "Constraint-list anchored single",
         re_constr_list.MatchString("1")
@@ -176,9 +176,8 @@ fn main() {
     );
 
     // The actual semver pattern fragment used by Masterminds/semver.
-    let (sv, sv_err) = regexp::Compile(
-        "^v?(0|[1-9]\\d*)(?:\\.(0|[1-9]\\d*))?(?:\\.(0|[1-9]\\d*))?$"
-    );
+    let (sv, sv_err) =
+        regexp::Compile("^v?(0|[1-9]\\d*)(?:\\.(0|[1-9]\\d*))?(?:\\.(0|[1-9]\\d*))?$");
     check!("Semver-fragment compiles", sv_err == nil);
     let mm = sv.FindStringSubmatch("v1.2.3");
     check!("Semver match v1.2.3", mm.Len() == 4);

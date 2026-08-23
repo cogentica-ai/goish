@@ -69,7 +69,10 @@ fn main() {
         if resp.StatusCode == 200 && body_eq(&body, b"inner-status\n") {
             fmt::Println!("[ 1] StripPrefix routes        PASS");
         } else {
-            fmt::Println!("[ 1] StripPrefix routes        FAIL status={}", resp.StatusCode);
+            fmt::Println!(
+                "[ 1] StripPrefix routes        FAIL status={}",
+                resp.StatusCode
+            );
             failed += 1;
         }
     }
@@ -83,7 +86,10 @@ fn main() {
         if resp.StatusCode == 200 && body_eq(&body, b"welcome to /new\n") {
             fmt::Println!("[ 2] RedirectHandler 301→200   PASS");
         } else {
-            fmt::Println!("[ 2] RedirectHandler 301→200   FAIL status={}", resp.StatusCode);
+            fmt::Println!(
+                "[ 2] RedirectHandler 301→200   FAIL status={}",
+                resp.StatusCode
+            );
             failed += 1;
         }
     }
@@ -97,7 +103,10 @@ fn main() {
         if resp.StatusCode == 200 && body_eq(&body, b"welcome to /new\n") {
             fmt::Println!("[ 3] inline Redirect()         PASS");
         } else {
-            fmt::Println!("[ 3] inline Redirect()         FAIL status={}", resp.StatusCode);
+            fmt::Println!(
+                "[ 3] inline Redirect()         FAIL status={}",
+                resp.StatusCode
+            );
             failed += 1;
         }
     }

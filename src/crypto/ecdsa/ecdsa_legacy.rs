@@ -53,7 +53,11 @@ pub(super) fn generateLegacy(
     let (x, y) = c.ScalarBaseMult(&k.Bytes());
     return (
         PrivateKey {
-            PublicKey: PublicKey { Curve: c, X: x, Y: y },
+            PublicKey: PublicKey {
+                Curve: c,
+                X: x,
+                Y: y,
+            },
             D: k,
         },
         nil,

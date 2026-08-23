@@ -128,11 +128,9 @@ pub fn ErrInvalidMediaParameter() -> crate::error {
 ///   - param keys are lowercased; values keep case.
 ///   - Quoted values are unescaped (handles `\"` etc.).
 ///   - Duplicate parameter keys with conflicting values → error.
-pub fn ParseMediaType<V: Into<string>>(v: V) -> (
-    string,
-    crate::gomap::map<string, string>,
-    crate::error,
-) {
+pub fn ParseMediaType<V: Into<string>>(
+    v: V,
+) -> (string, crate::gomap::map<string, string>, crate::error) {
     let v: string = v.into();
     // Go: base, _, _ := strings.Cut(v, ";")
     let (base, _, _) = strings::Cut(v.clone(), string(";"));
@@ -141,11 +139,7 @@ pub fn ParseMediaType<V: Into<string>>(v: V) -> (
 
     // Go: err = checkMediaTypeDisposition(mediatype)
     if let Err(e) = check_media_type_disposition(mediatype.clone()) {
-        return (
-            string::new(),
-            crate::gomap::map::<string, string>::new(),
-            e,
-        );
+        return (string::new(), crate::gomap::map::<string, string>::new(), e);
     }
 
     let mut params: crate::gomap::map<string, string> = crate::gomap::map::new();
@@ -219,10 +213,7 @@ fn consume_token(v: string) -> (string, string) {
     let mut i: usize = 0;
     while i < bs.len() {
         if !is_token_char(bs[i]) {
-            return (
-                string::from_bytes(&bs[..i]),
-                string::from_bytes(&bs[i..]),
-            );
+            return (string::from_bytes(&bs[..i]), string::from_bytes(&bs[i..]));
         }
         i += 1;
     }
@@ -314,7 +305,20 @@ fn is_token_char(c: u8) -> bool {
 fn is_tspecial(c: u8) -> bool {
     matches!(
         c,
-        b'(' | b')' | b'<' | b'>' | b'@' | b',' | b';' | b':' | b'\\' | b'"' | b'/' | b'[' | b']' | b'?' | b'='
+        b'(' | b')'
+            | b'<'
+            | b'>'
+            | b'@'
+            | b','
+            | b';'
+            | b':'
+            | b'\\'
+            | b'"'
+            | b'/'
+            | b'['
+            | b']'
+            | b'?'
+            | b'='
     )
 }
 
@@ -408,10 +412,7 @@ pub fn ExtensionsByType<T: Into<string>>(typ: T) -> (crate::goslice::slice<strin
 
     // Go: slices.Sort(ret)
     out.sort();
-    (
-        crate::goslice::slice::__from_vec(out),
-        crate::errors::nil,
-    )
+    (crate::goslice::slice::__from_vec(out), crate::errors::nil)
 }
 
 /// `mime.AddExtensionType(ext, typ)` (type.go:160) — register the

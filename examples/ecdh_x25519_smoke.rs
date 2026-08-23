@@ -95,25 +95,45 @@ fn main() {
             ua.copy_from_slice(r);
         }
         let got = ecdh::x25519_scalarmult(&sa, &ua);
-        check("RFC 7748 §6.1 vector", hx(&slice::__from_vec(got.to_vec())), RFC7748);
+        check(
+            "RFC 7748 §6.1 vector",
+            hx(&slice::__from_vec(got.to_vec())),
+            RFC7748,
+        );
     }
 
     // The public Curve API.
     let a = keyOf(7, 3);
     let b = keyOf(11, 5);
     let (ka, err) = ecdh::X25519().NewPrivateKey(&a);
-    check("NewPrivateKey a err", fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        "NewPrivateKey a err",
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     let (kb, err) = ecdh::X25519().NewPrivateKey(&b);
-    check("NewPrivateKey b err", fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        "NewPrivateKey b err",
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
 
     check("public key A", hx(&ka.PublicKey().Bytes()), PUB_A);
     check("public key B", hx(&kb.PublicKey().Bytes()), PUB_B);
 
     let (ab, err) = ka.ECDH(&kb.PublicKey());
-    check("ECDH ab err", fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        "ECDH ab err",
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     check("shared secret ab", hx(&ab), SHARED);
     let (ba, err) = kb.ECDH(&ka.PublicKey());
-    check("ECDH ba err", fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        "ECDH ba err",
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     check("shared secret ba", hx(&ba), SHARED);
 
     check("curve name", ecdh::X25519().String(), "X25519");
@@ -122,7 +142,11 @@ fn main() {
 
     // A low-order point (all zeroes) must be rejected.
     let (lp, err) = ecdh::X25519().NewPublicKey(&slice::__from_vec(alloc::vec![0u8; 32]));
-    check("NewPublicKey(zero) err", fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        "NewPublicKey(zero) err",
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     let (_, err) = ka.ECDH(&lp);
     check(
         "low order point rejected",
@@ -151,7 +175,11 @@ fn main() {
     // The TLS shim must agree with the public API.
     let (sk, pk) = ecdh::x25519_generate();
     let (kg, err) = ecdh::X25519().NewPrivateKey(&slice::__from_vec(sk.0.to_vec()));
-    check("shim key parses", fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        "shim key parses",
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     check(
         "shim public key matches the Curve API",
         hx(&kg.PublicKey().Bytes()),
@@ -194,14 +222,30 @@ fn nist(name: &str, c: &'static (dyn ecdh::Curve + Send + Sync), n: usize, want:
     check(&(nm.clone() + "name"), c.String(), want[0]);
 
     let (ka, err) = c.NewPrivateKey(&nistKey(n, 0x00));
-    check(&(nm.clone() + "NewPrivateKey a err"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        &(nm.clone() + "NewPrivateKey a err"),
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     let (kb, err) = c.NewPrivateKey(&nistKey(n, 0x5a));
-    check(&(nm.clone() + "NewPrivateKey b err"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        &(nm.clone() + "NewPrivateKey b err"),
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
 
-    check(&(nm.clone() + "public key A"), hx(&ka.PublicKey().Bytes()), want[1]);
+    check(
+        &(nm.clone() + "public key A"),
+        hx(&ka.PublicKey().Bytes()),
+        want[1],
+    );
 
     let (ab, err) = ka.ECDH(&kb.PublicKey());
-    check(&(nm.clone() + "ECDH err"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        &(nm.clone() + "ECDH err"),
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     check(&(nm.clone() + "shared secret"), hx(&ab), want[2]);
     let (ba, _) = kb.ECDH(&ka.PublicKey());
     check(

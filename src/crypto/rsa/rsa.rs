@@ -65,13 +65,13 @@ use crate::crypto::internal::fips140::rsa;
 use crate::crypto::internal::fips140deps::godebug;
 use crate::crypto::internal::fips140only;
 use crate::crypto::subtle;
+use crate::error;
 use crate::errors;
 use crate::goslice::slice;
 use crate::io;
 use crate::math::big;
 use crate::nilval::nil;
 use crate::types::{byte, int};
-use crate::error;
 
 // go: none — Go's package-level `var bigOne = big.NewInt(1)`. A goish
 // `big::Int` is heap-backed and cannot be a `const`, so the one value is
@@ -317,8 +317,12 @@ impl PrivateKey {
                 if err != nil {
                     return (slice::default(), err);
                 }
-                let err =
-                    super::pkcs1v15::DecryptPKCS1v15SessionKey(rand, self, ciphertext, &mut plaintext);
+                let err = super::pkcs1v15::DecryptPKCS1v15SessionKey(
+                    rand,
+                    self,
+                    ciphertext,
+                    &mut plaintext,
+                );
                 if err != nil {
                     return (slice::default(), err);
                 }
@@ -453,16 +457,10 @@ impl PrivateKey {
         let one = bigOne();
         for (_, prime) in crate::range!(self.Primes) {
             if *prime == nil {
-                return (
-                    precomputed,
-                    errors::New("crypto/rsa: prime factor is nil"),
-                );
+                return (precomputed, errors::New("crypto/rsa: prime factor is nil"));
             }
             if prime.Cmp(&one) <= 0 {
-                return (
-                    precomputed,
-                    errors::New("crypto/rsa: prime factor is <= 1"),
-                );
+                return (precomputed, errors::New("crypto/rsa: prime factor is <= 1"));
             }
         }
 
@@ -477,7 +475,9 @@ impl PrivateKey {
         // Go's `ModInverse` returns nil when the inverse does not exist;
         // goish's leaves the receiver untouched, so a zero `Qinv` is the
         // same signal.
-        precomputed.Qinv.ModInverse(&self.Primes[1], &self.Primes[0]);
+        precomputed
+            .Qinv
+            .ModInverse(&self.Primes[1], &self.Primes[0]);
         if precomputed.Qinv.Sign() == 0 {
             return (
                 precomputed,
@@ -708,13 +708,7 @@ pub(super) fn fipsPublicKey(pub_: &PublicKey) -> (Option<rsa::PublicKey>, error)
     if err != nil {
         return (None, err);
     }
-    return (
-        Some(rsa::PublicKey {
-            N: N,
-            E: pub_.E,
-        }),
-        nil.into(),
-    );
+    return (Some(rsa::PublicKey { N: N, E: pub_.E }), nil.into());
 }
 
 // go: sdk 1.25.5 crypto/rsa/rsa.go:632-641 fipsPrivateKey

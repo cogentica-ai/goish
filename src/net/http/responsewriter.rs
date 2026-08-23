@@ -73,8 +73,8 @@ use crate::runtime::spin::SpinLock;
 use crate::string;
 use crate::types::{byte, int};
 
-use super::transfer::bodyAllowedForStatus;
 use super::header::Header;
+use super::transfer::bodyAllowedForStatus;
 
 // ─── The interfaces ─────────────────────────────────────────────────
 
@@ -131,9 +131,7 @@ impl<'a> crate::io::Writer for writerOf<'a> {
 //
 /// Borrow a [`ResponseWriter`] as an [`io::Writer`](crate::io::Writer).
 /// Go needs no equivalent — there the two interfaces already unify.
-pub fn AsWriter<'a>(
-    w: &'a (dyn ResponseWriter + Send + Sync + 'static),
-) -> writerOf<'a> {
+pub fn AsWriter<'a>(w: &'a (dyn ResponseWriter + Send + Sync + 'static)) -> writerOf<'a> {
     return writerOf(w);
 }
 
@@ -783,7 +781,9 @@ impl response {
         g.keep_alive = false;
         if !g.wrote_header {
             drop(g);
-            self.header.Lock().Set(string("Connection"), string("close"));
+            self.header
+                .Lock()
+                .Set(string("Connection"), string("close"));
         }
         return;
     }
@@ -941,9 +941,7 @@ impl response {
             // HEAD still advertises the GET-equivalent length; 1xx/
             // 204/304 must not carry an auto Content-Length at all
             // (Go omits it for bodyless statuses, server.go:1533).
-            if bodyAllowedForStatus(g.status)
-                && h.Get(string("Content-Length")).Len() == 0
-            {
+            if bodyAllowedForStatus(g.status) && h.Get(string("Content-Length")).Len() == 0 {
                 h.Set(string("Content-Length"), int_to_string(g.body.len() as i64));
             }
             if !g.keep_alive && h.Get(string("Connection")).Len() == 0 {
@@ -1127,9 +1125,7 @@ impl ResponseWriter for response {
     }
 
     // go: none — goish-only interface-registry hook emitted for cast! support.
-    fn __goish_as_dyn_any(
-        &self,
-    ) -> Option<&(dyn core::any::Any + Send + Sync)> {
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
         Some(self)
     }
 }
@@ -1168,9 +1164,7 @@ impl Flusher for response {
     }
 
     // go: none — goish-only interface-registry hook emitted for cast! support.
-    fn __goish_as_dyn_any(
-        &self,
-    ) -> Option<&(dyn core::any::Any + Send + Sync)> {
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
         Some(self)
     }
 }
@@ -1270,7 +1264,6 @@ pub(crate) fn push_hex(buf: &mut Vec<u8>, mut n: u64) {
 /// Reason phrase for a status code via the full IANA registry. Empty
 /// string falls back to "Status" so the wire stays well-formed.
 
-
 fn int_to_string(n: i64) -> string {
     let mut buf: Vec<u8> = Vec::with_capacity(20);
     if n < 0 {
@@ -1300,7 +1293,6 @@ fn push_dec_64(buf: &mut Vec<u8>, mut n: u64) {
         buf.push(tmp[i]);
     }
 }
-
 
 // go: none — goish-only bridge, and the reason it can exist where the
 // blanket impl above cannot: this is an impl on ONE concrete (if

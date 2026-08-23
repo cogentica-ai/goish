@@ -5,9 +5,9 @@
 
 extern crate alloc;
 
-use goish::{nil, string, syscall};
-use goish::os::exec;
 use goish::bytes;
+use goish::os::exec;
+use goish::{nil, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -15,15 +15,20 @@ fn die(msg: &[u8]) -> ! {
 }
 
 fn check(cond: bool, msg: &[u8]) {
-    if !cond { die(msg); }
+    if !cond {
+        die(msg);
+    }
 }
 
 #[goish::main]
 fn main() {
     // ── LookPath ─────────────────────────────────────────────────────
     let (echo_path, err) = exec::LookPath("echo");
-    check(err == nil,        b"exec: LookPath(echo) error\n");
-    check(echo_path.Len() > 0, b"exec: LookPath(echo) returned empty path\n");
+    check(err == nil, b"exec: LookPath(echo) error\n");
+    check(
+        echo_path.Len() > 0,
+        b"exec: LookPath(echo) returned empty path\n",
+    );
 
     // ── Command: echo hello world, capture stdout ─────────────────────
     let mut cmd = exec::Command("echo", goish::slice!([]string{ "hello", "world" }));
@@ -36,7 +41,10 @@ fn main() {
 
     // ── LookPath missing binary ───────────────────────────────────────
     let (_, err2) = exec::LookPath("__goish_no_such_binary_xyz__");
-    check(err2 != nil, b"exec: LookPath should fail for missing binary\n");
+    check(
+        err2 != nil,
+        b"exec: LookPath should fail for missing binary\n",
+    );
 
     // ── Command: true (exit 0) ────────────────────────────────────────
     let mut cmd2 = exec::Command("true", goish::make!([]string, 0));

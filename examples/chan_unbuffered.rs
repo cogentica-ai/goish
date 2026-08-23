@@ -174,8 +174,14 @@ fn test_close_drains_parked_recvs() {
     // and zero values.
     let flags = OK_FLAGS.load(Ordering::Relaxed);
     check(flags & 0b111 == 0b111, b"close: not all 3 saw ok=false\n");
-    check(flags & 0b1110000_0000_0000_0000 == 0, b"close: some saw ok=true\n");
-    check(ZEROS.load(Ordering::Relaxed) == 0, b"close: nonzero default\n");
+    check(
+        flags & 0b1110000_0000_0000_0000 == 0,
+        b"close: some saw ok=true\n",
+    );
+    check(
+        ZEROS.load(Ordering::Relaxed) == 0,
+        b"close: nonzero default\n",
+    );
 
     // A subsequent Recv on the closed channel should also return
     // (0, false) immediately, not block.

@@ -32,14 +32,20 @@ pub struct Profile {
 
 #[goish::main]
 fn main() {
-    let p = Profile { Name: string("alice"), Age: 30 };
+    let p = Profile {
+        Name: string("alice"),
+        Age: 30,
+    };
 
     // Coerce to the type-erased handle ports use for `interface{}`.
     let any_handle: Arc<dyn reflect::AnyReflect + Send + Sync> = Arc::new(p);
 
     // ─── Reflection round-trip ───────────────────────────────────────
     let val = any_handle.reflect_value();
-    check(val.Kind() == reflect::Kind::Struct, b"any: Kind != Struct\n");
+    check(
+        val.Kind() == reflect::Kind::Struct,
+        b"any: Kind != Struct\n",
+    );
     let ty = any_handle.reflect_type();
     check(ty.Name() == "Profile", b"any: Type.Name\n");
     check(ty.NumField() == 2, b"any: NumField\n");

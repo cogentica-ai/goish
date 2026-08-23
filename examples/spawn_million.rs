@@ -146,7 +146,7 @@ fn main() {
     static EXITED: AtomicI64 = AtomicI64::new(0);
     static WG: WaitGroup = WaitGroup::new();
 
-    let release: chan<()> = make!(chan ());
+    let release: chan<()> = make!(chan());
     WG.Add(N);
 
     print(b"spawning... ");

@@ -14,8 +14,8 @@ mod trace;
 
 pub use trace::{
     ClientTrace, ConnectDoneHook, ConnectStartHook, ContextClientTrace, DNSDoneHook, DNSDoneInfo,
-    DNSStartHook, DNSStartInfo, Got100ContinueHook, Got1xxResponseHook, GotConnHook, GotConnInfo,
-    GotFirstResponseByteHook, GetConnHook, PutIdleConnHook, TLSHandshakeDoneHook,
+    DNSStartHook, DNSStartInfo, GetConnHook, Got100ContinueHook, Got1xxResponseHook, GotConnHook,
+    GotConnInfo, GotFirstResponseByteHook, PutIdleConnHook, TLSHandshakeDoneHook,
     TLSHandshakeStartHook, Wait100ContinueHook, WithClientTrace, WroteHeaderFieldHook,
     WroteHeadersHook, WroteRequestHook, WroteRequestInfo,
 };

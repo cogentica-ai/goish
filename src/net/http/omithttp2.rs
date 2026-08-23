@@ -37,8 +37,8 @@ use crate::sync::Mutex;
 use crate::types::uint32;
 
 use super::client::Transport;
-use super::response::Response;
 use super::request::Request;
+use super::response::Response;
 
 // go: sdk 1.25.5 net/http/omithttp2.go:15-17 init
 /// Go: `func init() { omitBundledHTTP2 = true }`.

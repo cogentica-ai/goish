@@ -177,13 +177,18 @@ pub fn init(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // separate Punct tokens; `body` is the user's brace Group.
     use proc_macro::{Group, Punct, Spacing};
     let mut closure_inner: TokenStream = TokenStream::new();
-    closure_inner.extend(core::iter::once(TokenTree::Punct(Punct::new('|', Spacing::Joint))));
-    closure_inner.extend(core::iter::once(TokenTree::Punct(Punct::new('|', Spacing::Alone))));
+    closure_inner.extend(core::iter::once(TokenTree::Punct(Punct::new(
+        '|',
+        Spacing::Joint,
+    ))));
+    closure_inner.extend(core::iter::once(TokenTree::Punct(Punct::new(
+        '|',
+        Spacing::Alone,
+    ))));
     closure_inner.extend(core::iter::once(TokenTree::Group(body)));
 
     // Wrap closure in `( … )` for the run_once call argument.
-    let arg_paren: TokenTree =
-        TokenTree::Group(Group::new(Delimiter::Parenthesis, closure_inner));
+    let arg_paren: TokenTree = TokenTree::Group(Group::new(Delimiter::Parenthesis, closure_inner));
 
     // Inner fn body prelude. Balanced — declares the static, then
     // names the run_once method (we append the parenthesised arg
@@ -272,7 +277,10 @@ pub fn var_emit_error_marker(input: TokenStream) -> TokenStream {
                 iter.next();
                 break;
             }
-            other => panic!("var_emit_error_marker: expected vis or name, got {:?}", other),
+            other => panic!(
+                "var_emit_error_marker: expected vis or name, got {:?}",
+                other
+            ),
         }
     }
 
@@ -290,7 +298,10 @@ pub fn var_emit_error_marker(input: TokenStream) -> TokenStream {
             // Typed-payload — wrap with errors::Wrap
             format!("::goish::errors::Wrap({{ {} }})", g.stream())
         }
-        other => panic!("var_emit_error_marker: payload must be \"literal\" or {{ expr }}, got {:?}", other),
+        other => panic!(
+            "var_emit_error_marker: payload must be \"literal\" or {{ expr }}, got {:?}",
+            other
+        ),
     };
 
     let marker = format!("__{}Marker", name);
@@ -346,7 +357,8 @@ pub fn var_emit_error_marker(input: TokenStream) -> TokenStream {
         "#,
     );
 
-    src.parse().expect("var_emit_error_marker: emitted source failed to parse")
+    src.parse()
+        .expect("var_emit_error_marker: emitted source failed to parse")
 }
 
 // ─── #[goish::reflect] ───────────────────────────────────────────────
@@ -414,11 +426,13 @@ pub fn reflect(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // Build the static field array + impl Reflect.
     let mut impl_text = String::new();
-    let _ = write!(impl_text, "impl ::goish::reflect::Reflect for {} {{\n", parsed.name);
-    impl_text.push_str("    fn __reflect_type() -> ::goish::reflect::Type {\n");
-    impl_text.push_str(
-        "        static FIELDS: &[::goish::reflect::StructField] = &[\n",
+    let _ = write!(
+        impl_text,
+        "impl ::goish::reflect::Reflect for {} {{\n",
+        parsed.name
     );
+    impl_text.push_str("    fn __reflect_type() -> ::goish::reflect::Type {\n");
+    impl_text.push_str("        static FIELDS: &[::goish::reflect::StructField] = &[\n");
     for f in &parsed.fields {
         // `tag` is the verbatim literal text from the user's source —
         // already a `"..."` or `r#"..."#` string literal — or `""` if
@@ -447,9 +461,7 @@ pub fn reflect(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // __reflect_value: deep-clone each field into a Value, package as
     // Value::Struct.
-    impl_text.push_str(
-        "    fn __reflect_value(&self) -> ::goish::reflect::Value {\n",
-    );
+    impl_text.push_str("    fn __reflect_value(&self) -> ::goish::reflect::Value {\n");
     impl_text.push_str(
         "        let mut __fields: ::goish::__macro_alloc::Vec<::goish::reflect::Value> = ::goish::__macro_alloc::Vec::new();\n",
     );
@@ -528,7 +540,9 @@ pub fn reflect(attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_text.push_str("impl ::goish::encoding::json::FromValue for ");
     impl_text.push_str(&parsed.name);
     impl_text.push_str(" {\n");
-    impl_text.push_str("    fn from_value(__v: &::goish::encoding::json::Value) -> (Self, ::goish::error) {\n");
+    impl_text.push_str(
+        "    fn from_value(__v: &::goish::encoding::json::Value) -> (Self, ::goish::error) {\n",
+    );
     // Helper closure: build a fresh "zero" Self via per-field defaults.
     impl_text.push_str("        let __zero = || -> Self { Self {\n");
     for f in &parsed.fields {
@@ -545,7 +559,8 @@ pub fn reflect(attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_text.push_str("            _ => return (__zero(), ::goish::errors::New(\"json: cannot unmarshal into struct\")),\n");
     impl_text.push_str("        };\n");
     impl_text.push_str("        let mut __out = __zero();\n");
-    impl_text.push_str("        let __ty = <Self as ::goish::reflect::Reflect>::__reflect_type();\n");
+    impl_text
+        .push_str("        let __ty = <Self as ::goish::reflect::Reflect>::__reflect_type();\n");
     for (i, f) in parsed.fields.iter().enumerate() {
         impl_text.push_str("        {\n");
         let _ = write!(
@@ -556,7 +571,9 @@ pub fn reflect(attr: TokenStream, item: TokenStream) -> TokenStream {
         impl_text.push_str("            let __raw_tag = __field.Tag.Get(\"json\");\n");
         impl_text.push_str("            let (__key_seg, __skip) = ::goish::encoding::json::__parse_json_tag(&__raw_tag);\n");
         impl_text.push_str("            if !__skip {\n");
-        impl_text.push_str("                let __key_str: ::goish::string = if __key_seg.Len() == 0 {\n");
+        impl_text.push_str(
+            "                let __key_str: ::goish::string = if __key_seg.Len() == 0 {\n",
+        );
         impl_text.push_str("                    ::goish::string::from_static(__field.Name)\n");
         impl_text.push_str("                } else {\n");
         impl_text.push_str("                    __key_seg\n");
@@ -568,7 +585,9 @@ pub fn reflect(attr: TokenStream, item: TokenStream) -> TokenStream {
             "                    let (__val, __err) = <{} as ::goish::encoding::json::FromValue>::from_value(&__sub);\n",
             f.ty
         );
-        impl_text.push_str("                    if __err != ::goish::errors::nil { return (__out, __err); }\n");
+        impl_text.push_str(
+            "                    if __err != ::goish::errors::nil { return (__out, __err); }\n",
+        );
         let _ = write!(impl_text, "                    __out.{} = __val;\n", f.name);
         impl_text.push_str("                }\n");
         impl_text.push_str("            }\n");
@@ -585,9 +604,8 @@ pub fn reflect(attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_text.push_str("impl ::goish::fmt::Format for ");
     impl_text.push_str(&parsed.name);
     impl_text.push_str(" {\n");
-    impl_text.push_str(
-        "    fn fmt(&self, __verb: ::goish::byte, __f: &mut ::goish::fmt::FmtBuf) {\n",
-    );
+    impl_text
+        .push_str("    fn fmt(&self, __verb: ::goish::byte, __f: &mut ::goish::fmt::FmtBuf) {\n");
     impl_text.push_str("        ::goish::fmt::reflect_fmt_to(self, __verb, __f);\n");
     impl_text.push_str("    }\n");
     impl_text.push_str("}\n");
@@ -597,9 +615,8 @@ pub fn reflect(attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_text.push_str("impl ::goish::fmt::Format for &");
     impl_text.push_str(&parsed.name);
     impl_text.push_str(" {\n");
-    impl_text.push_str(
-        "    fn fmt(&self, __verb: ::goish::byte, __f: &mut ::goish::fmt::FmtBuf) {\n",
-    );
+    impl_text
+        .push_str("    fn fmt(&self, __verb: ::goish::byte, __f: &mut ::goish::fmt::FmtBuf) {\n");
     impl_text.push_str("        ::goish::fmt::reflect_fmt_to(*self, __verb, __f);\n");
     impl_text.push_str("    }\n");
     impl_text.push_str("}\n");
@@ -627,7 +644,9 @@ pub fn reflect(attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_text.push_str("        } };\n");
     impl_text.push_str("        let __fields = match __v {\n");
     impl_text.push_str("            ::goish::reflect::Value::Struct { fields, .. } => fields,\n");
-    impl_text.push_str("            _ => return (__zero(), ::goish::errors::New(\"reflect: expected struct\")),\n");
+    impl_text.push_str(
+        "            _ => return (__zero(), ::goish::errors::New(\"reflect: expected struct\")),\n",
+    );
     impl_text.push_str("        };\n");
     let _ = write!(
         impl_text,
@@ -669,7 +688,9 @@ pub fn reflect(attr: TokenStream, item: TokenStream) -> TokenStream {
         impl_text.push_str("                ::goish::errors::nil\n");
         impl_text.push_str("            }\n");
     }
-    impl_text.push_str("            _ => ::goish::errors::New(\"reflect.SetField: index out of range\"),\n");
+    impl_text.push_str(
+        "            _ => ::goish::errors::New(\"reflect.SetField: index out of range\"),\n",
+    );
     impl_text.push_str("        }\n");
     impl_text.push_str("    }\n");
     impl_text.push_str("}\n");
@@ -853,7 +874,11 @@ fn json_tag_parts(tag_lit: Option<&str>, field_name: &str) -> (String, bool, boo
             _ => {}
         }
     }
-    let key = if name.is_empty() { field_name.to_string() } else { name.to_string() };
+    let key = if name.is_empty() {
+        field_name.to_string()
+    } else {
+        name.to_string()
+    };
     (key, false, omitempty, omitzero)
 }
 
@@ -1173,7 +1198,8 @@ pub fn import(input: TokenStream) -> TokenStream {
         slot_name, fn_name
     );
 
-    out.parse().expect("goish::import: emitted source failed to parse")
+    out.parse()
+        .expect("goish::import: emitted source failed to parse")
 }
 
 // `(path, alias?)` — one entry per comma-separated item in the
@@ -1213,10 +1239,7 @@ fn parse_imports(input: TokenStream) -> Vec<ImportEntry> {
                             path.push_str("::");
                             after_segment = false;
                         }
-                        other => panic!(
-                            "goish::import: expected `::` after `:`, got {:?}",
-                            other
-                        ),
+                        other => panic!("goish::import: expected `::` after `:`, got {:?}", other),
                     }
                 }
                 _ => break,
@@ -1441,10 +1464,7 @@ pub fn interface(attr: TokenStream, item: TokenStream) -> TokenStream {
     // `cast!` macro reads this via `__HasNilSentinel` and produces a
     // clear compile error for composite-trait callers.
     let has_sentinel_val = if composite { "false" } else { "true" };
-    let _ = writeln!(
-        out,
-        "{vis} trait {name}{supertraits} {{"
-    );
+    let _ = writeln!(out, "{vis} trait {name}{supertraits} {{");
     for m in &parsed.methods {
         let _ = writeln!(out, "    {}", m.full_text);
     }
@@ -1532,7 +1552,8 @@ pub fn interface(attr: TokenStream, item: TokenStream) -> TokenStream {
             let _ = writeln!(
                 out,
                 "    {} {{ panic!(\"goish: method call on nil {} interface\") }}",
-                m.sig_only.trim(), name
+                m.sig_only.trim(),
+                name
             );
         }
         out.push_str("    fn __is_nil_iface(&self) -> bool { true }\n");
@@ -1760,11 +1781,13 @@ pub fn interface(attr: TokenStream, item: TokenStream) -> TokenStream {
     if inside_goish_runtime {
         // PartialEq<Nil> dispatches through __is_nil_iface() — safe for
         // both trivial and composite traits (no nil sentinel needed).
-        let _ = writeln!(out,
+        let _ = writeln!(
+            out,
             "impl ::core::cmp::PartialEq<::goish::Nil> \
              for ::alloc::sync::Arc<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
         );
-        let _ = writeln!(out,
+        let _ =
+            writeln!(out,
             "    #[inline] fn eq(&self, _: &::goish::Nil) -> bool {{ (**self).__is_nil_iface() }}"
         );
         out.push_str("}\n\n");
@@ -1795,7 +1818,8 @@ pub fn interface(attr: TokenStream, item: TokenStream) -> TokenStream {
     // construct `Box::new(__NilT)` — skip this section entirely for
     // composite. Trivial traits emit as before.
     if !composite {
-        let _ = writeln!(out,
+        let _ = writeln!(
+            out,
             "impl ::core::convert::From<::goish::Nil> \
              for ::alloc::boxed::Box<dyn {name} + ::core::marker::Send + ::core::marker::Sync> {{"
         );
@@ -1982,10 +2006,7 @@ pub fn interface(attr: TokenStream, item: TokenStream) -> TokenStream {
          -> ::core::option::Option<&mut (dyn ::core::any::Any + \
          ::core::marker::Send + ::core::marker::Sync)> {\n",
     );
-    let _ = writeln!(
-        out,
-        "{as_any_mut_body}"
-    );
+    let _ = writeln!(out, "{as_any_mut_body}");
     out.push_str("    }\n}\n\n");
 
     // ── (10) NilDyn for `dyn Trait + Send + Sync` — TRIVIAL only ───────
@@ -2115,16 +2136,21 @@ fn parse_iface(item: TokenStream) -> ParsedIface {
         match iter.next() {
             Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => break g,
             Some(tt) => supertrait_tokens.push(tt),
-            None => panic!(
-                "#[goish::interface]: expected trait body `{{ ... }}` after supertraits"
-            ),
+            None => {
+                panic!("#[goish::interface]: expected trait body `{{ ... }}` after supertraits")
+            }
         }
     };
     let supertraits: TokenStream = supertrait_tokens.into_iter().collect();
     let supertraits = supertraits.to_string();
 
     let methods = parse_iface_methods(body.stream());
-    ParsedIface { vis, name, supertraits, methods }
+    ParsedIface {
+        vis,
+        name,
+        supertraits,
+        methods,
+    }
 }
 
 fn parse_iface_methods(body: TokenStream) -> Vec<IfaceMethod> {
@@ -2133,8 +2159,7 @@ fn parse_iface_methods(body: TokenStream) -> Vec<IfaceMethod> {
 
     for tt in body {
         let is_terminator = matches!(&tt, TokenTree::Punct(p) if p.as_char() == ';');
-        let is_brace_body =
-            matches!(&tt, TokenTree::Group(g) if g.delimiter() == Delimiter::Brace);
+        let is_brace_body = matches!(&tt, TokenTree::Group(g) if g.delimiter() == Delimiter::Brace);
 
         if is_terminator {
             // Signature-only method: `fn name(...) -> ret;`
@@ -2391,13 +2416,18 @@ fn embed_walk(
         .collect();
     entries.sort_by_key(|e| e.file_name());
     for e in entries {
-        let name = e.file_name().into_string().map_err(|_| {
-            format!("goish::embed: non-UTF-8 file name under {}", dir.display())
-        })?;
+        let name = e
+            .file_name()
+            .into_string()
+            .map_err(|_| format!("goish::embed: non-UTF-8 file name under {}", dir.display()))?;
         if !all && (name.starts_with('.') || name.starts_with('_')) {
             continue;
         }
-        let sub_rel = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+        let sub_rel = if rel.is_empty() {
+            name.clone()
+        } else {
+            format!("{rel}/{name}")
+        };
         let path = e.path();
         if path.is_dir() {
             embed_walk(&path, &sub_rel, all, out)?;
@@ -2434,7 +2464,11 @@ fn embed_expand(base: &std::path::Path, pattern: &str) -> Result<Vec<String>, St
         let last = i == elements.len() - 1;
         let mut next: Vec<String> = Vec::new();
         for prefix in &cur {
-            let dir = if prefix.is_empty() { base.to_path_buf() } else { base.join(prefix) };
+            let dir = if prefix.is_empty() {
+                base.to_path_buf()
+            } else {
+                base.join(prefix)
+            };
             if el.contains('*') || el.contains('?') {
                 let mut entries: Vec<_> = std::fs::read_dir(&dir)
                     .map_err(|e| format!("goish::embed: reading {}: {}", dir.display(), e))?
@@ -2442,14 +2476,24 @@ fn embed_expand(base: &std::path::Path, pattern: &str) -> Result<Vec<String>, St
                     .collect();
                 entries.sort_by_key(|e| e.file_name());
                 for e in entries {
-                    let Ok(name) = e.file_name().into_string() else { continue };
+                    let Ok(name) = e.file_name().into_string() else {
+                        continue;
+                    };
                     if embed_glob_match(el, &name) {
-                        let sub = if prefix.is_empty() { name.clone() } else { format!("{prefix}/{name}") };
+                        let sub = if prefix.is_empty() {
+                            name.clone()
+                        } else {
+                            format!("{prefix}/{name}")
+                        };
                         next.push(sub);
                     }
                 }
             } else {
-                let sub = if prefix.is_empty() { (*el).to_string() } else { format!("{prefix}/{el}") };
+                let sub = if prefix.is_empty() {
+                    (*el).to_string()
+                } else {
+                    format!("{prefix}/{el}")
+                };
                 if dir.join(el).exists() {
                     next.push(sub);
                 }
@@ -2474,7 +2518,9 @@ fn embed_expand(base: &std::path::Path, pattern: &str) -> Result<Vec<String>, St
         }
     }
     if out.is_empty() {
-        return Err(format!("goish::embed: pattern {pattern:?}: no matching files found"));
+        return Err(format!(
+            "goish::embed: pattern {pattern:?}: no matching files found"
+        ));
     }
     Ok(out)
 }
@@ -2498,7 +2544,9 @@ fn embed_impl(input: TokenStream) -> Result<TokenStream, String> {
         // #[embed("pat", ...)]
         match toks.next() {
             Some(TT::Punct(p)) if p.as_char() == '#' => {}
-            Some(other) => return Err(format!("goish::embed: expected #[embed(...)], got {other}")),
+            Some(other) => {
+                return Err(format!("goish::embed: expected #[embed(...)], got {other}"))
+            }
             None => break,
         }
         let attr = match toks.next() {
@@ -2514,7 +2562,11 @@ fn embed_impl(input: TokenStream) -> Result<TokenStream, String> {
             }
             let args = match it.next() {
                 Some(TT::Group(g)) if g.delimiter() == proc_macro::Delimiter::Parenthesis => g,
-                _ => return Err("goish::embed: attribute must be #[embed(\"pattern\", ...)]".to_string()),
+                _ => {
+                    return Err(
+                        "goish::embed: attribute must be #[embed(\"pattern\", ...)]".to_string()
+                    )
+                }
             };
             for t in args.stream() {
                 match t {
@@ -2522,12 +2574,18 @@ fn embed_impl(input: TokenStream) -> Result<TokenStream, String> {
                         let s = l.to_string();
                         let Some(stripped) = s.strip_prefix('"').and_then(|s| s.strip_suffix('"'))
                         else {
-                            return Err("goish::embed: patterns must be plain string literals".to_string());
+                            return Err(
+                                "goish::embed: patterns must be plain string literals".to_string()
+                            );
                         };
                         patterns.push(stripped.to_string());
                     }
                     TT::Punct(p) if p.as_char() == ',' => {}
-                    other => return Err(format!("goish::embed: unexpected token {other} in pattern list")),
+                    other => {
+                        return Err(format!(
+                            "goish::embed: unexpected token {other} in pattern list"
+                        ))
+                    }
                 }
             }
         }

@@ -142,10 +142,10 @@ pub fn fatalln_impl(args: &[fmt::FmtArg]) -> ! {
 // rendering "???:0: " when either flag is set. Date/Time/Microseconds and
 // the prefix are fully faithful.
 
-use crate::gostring::string;
-use crate::goslice::slice;
-use crate::sync::Mutex;
 use crate::errors::error;
+use crate::goslice::slice;
+use crate::gostring::string;
+use crate::sync::Mutex;
 use alloc::boxed::Box;
 
 /// the date in the local time zone: 2009/01/23
@@ -279,8 +279,11 @@ impl Logger {
         let s = s.into();
         let now = time::Now();
         let mut g = self.inner.Lock();
-        let (file, line): (&str, int) =
-            if g.flag & (Lshortfile | Llongfile) != 0 { ("???", 0) } else { ("", 0) };
+        let (file, line): (&str, int) = if g.flag & (Lshortfile | Llongfile) != 0 {
+            ("???", 0)
+        } else {
+            ("", 0)
+        };
         let mut buf: Vec<byte> = Vec::new();
         g.format_header(&mut buf, now, file, line);
         let sb = s.as_bytes();

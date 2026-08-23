@@ -99,7 +99,10 @@ fn main() {
     check(req.URL.Path == "/api/echo", b"URL.Path != /api/echo\n");
     check(req.URL.RawQuery == "q=1", b"URL.RawQuery != q=1\n");
     check(req.Proto == "HTTP/1.1", b"Proto != HTTP/1.1\n");
-    check(req.ProtoMajor == 1 && req.ProtoMinor == 1, b"version != 1.1\n");
+    check(
+        req.ProtoMajor == 1 && req.ProtoMinor == 1,
+        b"version != 1.1\n",
+    );
     check(req.Host == "example.com", b"Host != example.com\n");
 
     let ua = req.Header.Get(string("User-Agent"));

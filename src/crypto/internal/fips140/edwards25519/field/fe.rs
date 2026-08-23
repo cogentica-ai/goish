@@ -28,8 +28,8 @@ use crate::crypto::subtle;
 use crate::error;
 use crate::errors;
 use crate::goslice::slice;
-use crate::math::bits;
 use crate::int64;
+use crate::math::bits;
 use crate::types::{byte, int};
 use alloc::vec::Vec;
 
@@ -44,8 +44,8 @@ use crate::crypto::internal::fips140::check as _check;
 // avoid pulling a heavy dep.
 
 // go: none — Go calls byteorder.LEUint64; goish's fips140deps
-    // shim is not reachable from this module, so the two-line helper is
-    // local.
+// shim is not reachable from this module, so the two-line helper is
+// local.
 
 // go: none — Go calls byteorder.LEUint64; the fips140deps shim is
 // not reachable from this module, so the two-line helper is local.
@@ -90,10 +90,22 @@ pub struct Element {
 pub(super) const maskLow51Bits: u64 = (1 << 51) - 1;
 
 /// `feZero` — the additive identity.
-const feZero: Element = Element { l0: 0, l1: 0, l2: 0, l3: 0, l4: 0 };
+const feZero: Element = Element {
+    l0: 0,
+    l1: 0,
+    l2: 0,
+    l3: 0,
+    l4: 0,
+};
 
 /// `feOne` — the multiplicative identity.
-const feOne: Element = Element { l0: 1, l1: 0, l2: 0, l3: 0, l4: 0 };
+const feOne: Element = Element {
+    l0: 1,
+    l1: 0,
+    l2: 0,
+    l3: 0,
+    l4: 0,
+};
 
 impl Default for Element {
     // go: none — Go gets the zero Element from `Element{}`; Rust needs
@@ -128,17 +140,13 @@ impl Element {
     // go: none — Go writes `v == u` on the struct directly, which Rust
     // cannot do for a type with a custom Equal; this is that comparison.
 
-// go: none — Go writes `v == u` on the struct directly, which Rust
-// cannot do for a type with a custom Equal; this is that comparison.
+    // go: none — Go writes `v == u` on the struct directly, which Rust
+    // cannot do for a type with a custom Equal; this is that comparison.
     /// `rawEqual` — bitwise (un-reduced) limb equality of v and u.
     /// Mirrors Go's `field.Element{}` struct comparison; used by
     /// edwards25519's `checkInitialized`, not a normalised field test.
-pub(crate) fn rawEqual(&self, u: &Element) -> bool {
-        self.l0 == u.l0
-            && self.l1 == u.l1
-            && self.l2 == u.l2
-            && self.l3 == u.l3
-            && self.l4 == u.l4
+    pub(crate) fn rawEqual(&self, u: &Element) -> bool {
+        self.l0 == u.l0 && self.l1 == u.l1 && self.l2 == u.l2 && self.l3 == u.l3 && self.l4 == u.l4
     }
 
     // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:55-85 Element.reduce
@@ -581,14 +589,13 @@ pub(crate) fn rawEqual(&self, u: &Element) -> bool {
 
         let mut rPrime = Element::new();
         rPrime.Multiply(&rr, &sqrtM1); // r_prime = SQRT_M1 * r
-        // r = CT_SELECT(r_prime IF flipped_sign_sqrt | flipped_sign_sqrt_i ELSE r)
+                                       // r = CT_SELECT(r_prime IF flipped_sign_sqrt | flipped_sign_sqrt_i ELSE r)
         let rrc = rr;
         rr.Select(&rPrime, &rrc, flippedSignSqrt | flippedSignSqrtI);
 
         self.Absolute(&rr); // Choose the nonnegative square root.
         correctSignSqrt | flippedSignSqrt
     }
-
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/edwards25519/field/fe.go:259-259 mask64Bits

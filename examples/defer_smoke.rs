@@ -34,8 +34,8 @@ fn trace_push(trace: &Cell<int>, tag: int) {
 
 // (1) Two defers, LIFO drop order.
 fn lifo_two(trace: &Cell<int>) {
-    defer!{ trace_push(trace, 1); }
-    defer!{ trace_push(trace, 2); }
+    defer! { trace_push(trace, 1); }
+    defer! { trace_push(trace, 2); }
     // end-of-fn: 2 drops first (newer binding), then 1.
     // trace ends up: 0 << 4 | 2  → 2; then 2 << 4 | 1 → 0x21
 }
@@ -43,14 +43,14 @@ fn lifo_two(trace: &Cell<int>) {
 // (2) Snapshot capture: body sees value at defer-time, not exit-time.
 fn snapshot(out: &Cell<int>) {
     let n: int = 7;
-    defer!{ out.set(n); }   // captures n=7 by move
-    // Even if we shadow n later, the closure already owns the original.
+    defer! { out.set(n); } // captures n=7 by move
+                           // Even if we shadow n later, the closure already owns the original.
     let _n: int = 99;
 }
 
 // (3) Defer fires on early return.
 fn early_return(trace: &Cell<int>, take_branch: bool) -> int {
-    defer!{ trace_push(trace, 9); }
+    defer! { trace_push(trace, 9); }
     if take_branch {
         return 1;
     }
@@ -59,9 +59,9 @@ fn early_return(trace: &Cell<int>, take_branch: bool) -> int {
 
 // (4) Three defers stacked.
 fn lifo_three(trace: &Cell<int>) {
-    defer!{ trace_push(trace, 1); }
-    defer!{ trace_push(trace, 2); }
-    defer!{ trace_push(trace, 3); }
+    defer! { trace_push(trace, 1); }
+    defer! { trace_push(trace, 2); }
+    defer! { trace_push(trace, 3); }
     // expected at exit: 3 first, then 2, then 1
     // trace: 0→3, →0x32, →0x321
 }

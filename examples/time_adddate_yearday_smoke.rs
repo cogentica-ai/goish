@@ -9,8 +9,8 @@ extern crate alloc;
 extern crate goish;
 
 use goish::fmt;
+use goish::syscall;
 use goish::time;
-use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -131,7 +131,7 @@ fn main() {
     // 10. AddDate negative deltas (subtract).
     {
         let t = time::Date(2024, 3, 1, 0, 0, 0, 0, goish::time::UTC);
-        let u = t.AddDate(-1, -2, -1);  // 2023 + (3-2)=Jan + (1-1)=0 → 2022-12-31
+        let u = t.AddDate(-1, -2, -1); // 2023 + (3-2)=Jan + (1-1)=0 → 2022-12-31
         let (y, m, d) = u.Date();
         if y == 2022 && m == 12 && d == 31 {
             fmt::Println!("[10] AddDate negative          PASS");

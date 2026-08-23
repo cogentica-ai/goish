@@ -8,10 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
 use goish::convert;
 use goish::errors;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::io::{self, Reader};
 use goish::testing::iotest::{
@@ -104,7 +104,8 @@ fn main() {
         let (n1, e1) = tor.Read(&mut b);
         let (n2, e2) = tor.Read(&mut b);
         // First call succeeds, second returns ErrTimeout (count == 2).
-        let __ev_timeout_msg: goish::error = ErrTimeout.into(); let timeout_msg = __ev_timeout_msg.Error();
+        let __ev_timeout_msg: goish::error = ErrTimeout.into();
+        let timeout_msg = __ev_timeout_msg.Error();
         if n1 > 0 && e1.IsNil() && n2 == 0 && !e2.IsNil() && e2.Error() == timeout_msg {
             fmt::Println!("[ 5] TimeoutReader 2nd call  PASS");
         } else {

@@ -92,19 +92,34 @@ fn main() {
     // (14) error formatting via %v / %s.
     let e = errors::New("file not found");
     let s = fmt::Sprintf!("got error: %v", e);
-    check(s == "got error: file not found", b"fmt: %v on error wrong\n");
+    check(
+        s == "got error: file not found",
+        b"fmt: %v on error wrong\n",
+    );
 
     // (15) Errorf with %w — wraps and is reachable via errors::Is/Unwrap.
     let inner = errors::New("disk full");
     let outer = fmt::Errorf!("write failed: %w", inner.clone());
-    check(outer.Error() == "write failed: disk full", b"fmt: %w text wrong\n");
-    check(errors::Is(outer.clone(), inner.clone()), b"fmt: Is must walk %w chain\n");
-    check(errors::Unwrap(outer) == inner, b"fmt: Unwrap on Errorf wrong\n");
+    check(
+        outer.Error() == "write failed: disk full",
+        b"fmt: %w text wrong\n",
+    );
+    check(
+        errors::Is(outer.clone(), inner.clone()),
+        b"fmt: Is must walk %w chain\n",
+    );
+    check(
+        errors::Unwrap(outer) == inner,
+        b"fmt: Unwrap on Errorf wrong\n",
+    );
 
     // (16) Errorf without %w — plain error.
     let e = fmt::Errorf!("bad: %s", string("input"));
     check(e.Error() == "bad: input", b"fmt: Errorf plain wrong\n");
-    check(errors::Unwrap(e) == nil, b"fmt: Errorf no-%w must Unwrap to nil\n");
+    check(
+        errors::Unwrap(e) == nil,
+        b"fmt: Errorf no-%w must Unwrap to nil\n",
+    );
 
     // (17) Println — to stdout, real I/O.
     fmt::Println!("fmt: stdout println", 42 as int, true);

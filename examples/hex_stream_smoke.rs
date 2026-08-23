@@ -8,9 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
 use goish::encoding::hex::{NewDecoder, NewEncoder};
+use goish::fmt;
 use goish::goslice::slice;
 use goish::io::{Reader, Writer};
 use goish::types::byte;

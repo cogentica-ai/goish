@@ -8,9 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bufio;
 use goish::bytes;
+use goish::fmt;
 use goish::net::textproto::{
     Add, CanonicalMIMEHeaderKey, Del, Error, Get, MIMEHeader, NewWriter, ProtocolError, Set,
     TrimBytes, TrimString, Values,
@@ -142,7 +142,9 @@ fn main() {
 
     // 10. Writer.PrintfLine writes with \r\n.
     {
-        let mut buf = bytes::NewBuffer(goish::goslice::slice::<goish::types::byte>::__from_vec(alloc::vec![]));
+        let mut buf = bytes::NewBuffer(goish::goslice::slice::<goish::types::byte>::__from_vec(
+            alloc::vec![],
+        ));
         let bw = bufio::NewWriter(&mut buf);
         let mut w = NewWriter(bw);
         let _ = w.PrintfLine(string("HELLO 1"));
@@ -157,7 +159,9 @@ fn main() {
 
     // 11. DotWriter emits dotcrnl after empty body.
     {
-        let mut buf = bytes::NewBuffer(goish::goslice::slice::<goish::types::byte>::__from_vec(alloc::vec![]));
+        let mut buf = bytes::NewBuffer(goish::goslice::slice::<goish::types::byte>::__from_vec(
+            alloc::vec![],
+        ));
         let bw = bufio::NewWriter(&mut buf);
         let mut w = NewWriter(bw);
         {
@@ -175,7 +179,9 @@ fn main() {
 
     // 12. DotWriter escapes leading dot + emits trailer.
     {
-        let mut buf = bytes::NewBuffer(goish::goslice::slice::<goish::types::byte>::__from_vec(alloc::vec![]));
+        let mut buf = bytes::NewBuffer(goish::goslice::slice::<goish::types::byte>::__from_vec(
+            alloc::vec![],
+        ));
         let bw = bufio::NewWriter(&mut buf);
         let mut w = NewWriter(bw);
         {

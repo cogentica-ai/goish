@@ -58,8 +58,8 @@
 
 extern crate alloc;
 
-use alloc::sync::Arc;
 use crate::runtime::lockfree_ring::LockFreeRing;
+use alloc::sync::Arc;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -86,13 +86,16 @@ use crate::syscall;
 /// doesn't carry a free wakeup slot on G (sudogs are stack-owned by
 /// the parking G, so the wakee identifies the winner by scanning
 /// its own sudogs' `success` bits — no `gp.param` needed).
-#[doc(hidden)] pub struct SelectCoord {
-    #[doc(hidden)] pub done: AtomicBool,
+#[doc(hidden)]
+pub struct SelectCoord {
+    #[doc(hidden)]
+    pub done: AtomicBool,
 }
 
 impl SelectCoord {
     #[allow(dead_code)] // wired up in M16f-α step 4 (select! macro)
-    #[doc(hidden)] pub fn new() -> Self {
+    #[doc(hidden)]
+    pub fn new() -> Self {
         SelectCoord {
             done: AtomicBool::new(false),
         }
@@ -109,32 +112,40 @@ impl SelectCoord {
 /// (select pass-3) all run in O(1) under the chan lock with zero
 /// allocator round-trips. Mirrors Go's `sudog.next` / `prev`
 /// (runtime/runtime2.go:335).
-#[doc(hidden)] pub struct Sudog<T> {
-    #[doc(hidden)] pub g: NonNull<G>,
+#[doc(hidden)]
+pub struct Sudog<T> {
+    #[doc(hidden)]
+    pub g: NonNull<G>,
     /// Send sudog: starts `Some(value)`, taken by a matching
     /// receiver. Recv sudog: starts `None`, filled by a matching
     /// sender.
-    #[doc(hidden)] pub value: Option<T>,
+    #[doc(hidden)]
+    pub value: Option<T>,
     /// True on a successful handoff; false on a close-induced
     /// wakeup.
-    #[doc(hidden)] pub success: bool,
+    #[doc(hidden)]
+    pub success: bool,
     /// `Some(coord)` if this sudog belongs to a `select!`; `None`
     /// for plain `Send`/`Recv`. Wakers consult `coord.done` via CAS
     /// before firing; on a stale sudog the CAS fails and the waker
     /// must skip this entry and try the next.
-    #[doc(hidden)] pub coord: Option<NonNull<SelectCoord>>,
+    #[doc(hidden)]
+    pub coord: Option<NonNull<SelectCoord>>,
     /// Intrusive queue link (sendq / recvq successor). Null when
     /// the sudog is at the tail or unqueued. Only mutated under the
     /// owning chan's `state` SpinLock.
-    #[doc(hidden)] pub next: *mut Sudog<T>,
+    #[doc(hidden)]
+    pub next: *mut Sudog<T>,
     /// Intrusive queue link (sendq / recvq predecessor). Null when
     /// at the head or unqueued. Same lock discipline as `next`.
-    #[doc(hidden)] pub prev: *mut Sudog<T>,
+    #[doc(hidden)]
+    pub prev: *mut Sudog<T>,
 }
 
 impl<T> Sudog<T> {
     /// Build a non-select send sudog carrying `v`.
-    #[doc(hidden)] pub fn new_send(g: NonNull<G>, v: T) -> Self {
+    #[doc(hidden)]
+    pub fn new_send(g: NonNull<G>, v: T) -> Self {
         Sudog {
             g,
             value: Some(v),
@@ -146,7 +157,8 @@ impl<T> Sudog<T> {
     }
 
     /// Build a non-select recv sudog (empty value slot).
-    #[doc(hidden)] pub fn new_recv(g: NonNull<G>) -> Self {
+    #[doc(hidden)]
+    pub fn new_recv(g: NonNull<G>) -> Self {
         Sudog {
             g,
             value: None,
@@ -160,11 +172,8 @@ impl<T> Sudog<T> {
     /// Build a select-bound send sudog carrying `v`. The waker that
     /// pops this sudog must succeed at `coord.done` CAS to fire it.
     #[allow(dead_code)] // wired up in M16f-α step 4 (select! macro)
-    #[doc(hidden)] pub fn new_send_select(
-        g: NonNull<G>,
-        v: T,
-        coord: NonNull<SelectCoord>,
-    ) -> Self {
+    #[doc(hidden)]
+    pub fn new_send_select(g: NonNull<G>, v: T, coord: NonNull<SelectCoord>) -> Self {
         Sudog {
             g,
             value: Some(v),
@@ -177,7 +186,8 @@ impl<T> Sudog<T> {
 
     /// Build a select-bound recv sudog. CAS-gated like its send peer.
     #[allow(dead_code)] // wired up in M16f-α step 4 (select! macro)
-    #[doc(hidden)] pub fn new_recv_select(g: NonNull<G>, coord: NonNull<SelectCoord>) -> Self {
+    #[doc(hidden)]
+    pub fn new_recv_select(g: NonNull<G>, coord: NonNull<SelectCoord>) -> Self {
         Sudog {
             g,
             value: None,
@@ -718,10 +728,7 @@ impl<T> chan<T> {
                     continue;
                 }
                 s.sendq.unlink(cur);
-                let sender_v = (*cur)
-                    .value
-                    .take()
-                    .expect("recv: sender sudog empty");
+                let sender_v = (*cur).value.take().expect("recv: sender sudog empty");
                 let v = if s.cap == 0 {
                     sender_v
                 } else {
@@ -755,7 +762,8 @@ impl<T> chan<T> {
     /// responsible for `gopark`-ing afterwards and inspecting
     /// `sg.success` on wake. Returns `false` if the chan is closed
     /// (caller should panic before parking).
-    #[doc(hidden)] pub fn __register_send(&self, sg: &mut Sudog<T>) -> bool {
+    #[doc(hidden)]
+    pub fn __register_send(&self, sg: &mut Sudog<T>) -> bool {
         let mut s = self.inner.state.lock();
         if s.closed {
             return false;
@@ -767,7 +775,8 @@ impl<T> chan<T> {
     /// Enqueue a recv-direction sudog on `recvq`. Returns `Err(())`
     /// if the chan is already closed-and-empty (caller should
     /// return `(zero, false)` and not park).
-    #[doc(hidden)] pub fn __register_recv(&self, sg: &mut Sudog<T>) -> Result<(), ()> {
+    #[doc(hidden)]
+    pub fn __register_recv(&self, sg: &mut Sudog<T>) -> Result<(), ()> {
         let mut s = self.inner.state.lock();
         if s.closed && s.buf.len() == 0 {
             return Err(());
@@ -833,13 +842,17 @@ impl<T> chan<T> {
         }
 
         let lock_atom = self.inner.state.lock_atom();
-        unsafe { raw_lock(lock_atom); }
+        unsafe {
+            raw_lock(lock_atom);
+        }
         let s = unsafe { self.inner.state.data_unchecked() };
 
         // Phase 1: try the non-blocking fast paths under held lock.
         let v = match Self::__try_send_locked(s, v) {
             Ok(()) => {
-                unsafe { raw_unlock(lock_atom); }
+                unsafe {
+                    raw_unlock(lock_atom);
+                }
                 return;
             }
             Err(v) => v,
@@ -847,14 +860,18 @@ impl<T> chan<T> {
 
         // Phase 2: register-and-park, lock still held.
         let g = current_g().unwrap_or_else(|| {
-            unsafe { raw_unlock(lock_atom); }
+            unsafe {
+                raw_unlock(lock_atom);
+            }
             fatal(b"goish: chan: Send outside of any goroutine\n")
         });
         let mut my_sudog = Sudog::new_send(g, v);
         match Self::__register_send_locked(s, &mut my_sudog) {
             RegisterStatus::Registered => {}
             RegisterStatus::Closed => {
-                unsafe { raw_unlock(lock_atom); }
+                unsafe {
+                    raw_unlock(lock_atom);
+                }
                 fatal(b"goish: chan: send on closed channel\n");
             }
             RegisterStatus::Skip => unsafe { core::hint::unreachable_unchecked() },
@@ -895,25 +912,33 @@ impl<T> chan<T> {
         }
 
         let lock_atom = self.inner.state.lock_atom();
-        unsafe { raw_lock(lock_atom); }
+        unsafe {
+            raw_lock(lock_atom);
+        }
         let s = unsafe { self.inner.state.data_unchecked() };
 
         // Phase 1: try the non-blocking fast paths under held lock.
         if let Some(result) = Self::__try_recv_locked(s) {
-            unsafe { raw_unlock(lock_atom); }
+            unsafe {
+                raw_unlock(lock_atom);
+            }
             return result;
         }
 
         // Phase 2: register-and-park.
         let g = current_g().unwrap_or_else(|| {
-            unsafe { raw_unlock(lock_atom); }
+            unsafe {
+                raw_unlock(lock_atom);
+            }
             fatal(b"goish: chan: Recv outside of any goroutine\n")
         });
         let mut my_sudog = Sudog::new_recv(g);
         match Self::__register_recv_locked(s, &mut my_sudog) {
             RegisterStatus::Registered => {}
             RegisterStatus::Closed => {
-                unsafe { raw_unlock(lock_atom); }
+                unsafe {
+                    raw_unlock(lock_atom);
+                }
                 return (T::default(), false);
             }
             RegisterStatus::Skip => unsafe { core::hint::unreachable_unchecked() },
@@ -924,10 +949,7 @@ impl<T> chan<T> {
         if !my_sudog.success {
             return (T::default(), false);
         }
-        let v = my_sudog
-            .value
-            .take()
-            .expect("recv: sudog empty after wake");
+        let v = my_sudog.value.take().expect("recv: sudog empty after wake");
         (v, true)
     }
 

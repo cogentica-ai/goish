@@ -109,7 +109,14 @@ fn main() {
     // 4. header.init — padding is `-len & 7`, not `len % 8`.
     {
         let cases: &[(i64, u8)] = &[
-            (0, 0), (1, 7), (7, 1), (8, 0), (9, 7), (15, 1), (16, 0), (65535, 1),
+            (0, 0),
+            (1, 7),
+            (7, 1),
+            (8, 0),
+            (9, 7),
+            (15, 1),
+            (16, 0),
+            (65535, 1),
         ];
         let mut bad = 0;
         for (cl, wantPad) in cases {
@@ -121,7 +128,12 @@ fn main() {
                 || h.ContentLength != (*cl as u16)
                 || h.PaddingLength != *wantPad
             {
-                fmt::Println!("     header.init(cl=", *cl, ") pad=", h.PaddingLength as i64);
+                fmt::Println!(
+                    "     header.init(cl=",
+                    *cl,
+                    ") pad=",
+                    h.PaddingLength as i64
+                );
                 bad += 1;
             }
         }

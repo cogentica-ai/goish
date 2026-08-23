@@ -12,14 +12,14 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
-use goish::fmt;
 use goish::convert::bytes as to_bytes;
 use goish::crypto::{hmac, md5, sha1, sha256};
+use goish::fmt;
 use goish::goslice::slice;
 use goish::hash::Hash;
 use goish::io::Writer as _;
+use goish::syscall;
 use goish::types::byte;
-use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -77,9 +77,7 @@ fn main() {
         let _ = h.Write(data);
         let mac = h.Sum(empty_buf());
         let raw: &[byte] = &mac;
-        let want = from_hex(
-            "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7",
-        );
+        let want = from_hex("b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7");
         if slice_eq(raw, &want) {
             fmt::Println!("[ 1] HMAC-SHA-256 RFC4231 #1   PASS");
         } else {
@@ -99,9 +97,7 @@ fn main() {
             h.Sum(empty_buf())
         };
         let raw: &[byte] = &mac;
-        let want = from_hex(
-            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843",
-        );
+        let want = from_hex("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
         if slice_eq(raw, &want) {
             fmt::Println!("[ 2] HMAC-SHA-256 RFC4231 #2   PASS");
         } else {
@@ -122,9 +118,7 @@ fn main() {
         ));
         let mac = h.Sum(empty_buf());
         let raw: &[byte] = &mac;
-        let want = from_hex(
-            "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54",
-        );
+        let want = from_hex("60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54");
         if slice_eq(raw, &want) {
             fmt::Println!("[ 3] HMAC-SHA-256 long key     PASS");
         } else {
@@ -283,10 +277,7 @@ fn main() {
         let _ = h2.Write(to_bytes("data"));
         let bare = h2.Sum(empty_buf());
         let bare_raw: &[byte] = &bare;
-        if raw.len() == 4 + 32
-            && &raw[0..4] == b"PRE:"
-            && slice_eq(&raw[4..], bare_raw)
-        {
+        if raw.len() == 4 + 32 && &raw[0..4] == b"PRE:" && slice_eq(&raw[4..], bare_raw) {
             fmt::Println!("[11] Sum prefix                PASS");
         } else {
             fmt::Println!("[11] Sum prefix                FAIL");
@@ -319,9 +310,7 @@ fn main() {
         let b = slice::<byte>::__from_vec(alloc::vec![1, 2, 3, 4]);
         let c = slice::<byte>::__from_vec(alloc::vec![1, 2, 3, 5]);
         let d = slice::<byte>::__from_vec(alloc::vec![1, 2, 3]);
-        let pass = hmac::Equal(a.clone(), b)
-            && !hmac::Equal(a.clone(), c)
-            && !hmac::Equal(a, d);
+        let pass = hmac::Equal(a.clone(), b) && !hmac::Equal(a.clone(), c) && !hmac::Equal(a, d);
         if pass {
             fmt::Println!("[13] Equal                     PASS");
         } else {

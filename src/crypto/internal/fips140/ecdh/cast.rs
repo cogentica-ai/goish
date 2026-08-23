@@ -13,10 +13,10 @@ extern crate alloc;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::crypto::internal::fips140;
+use crate::error;
 use crate::errors;
 use crate::goslice::slice;
 use crate::types::byte;
-use crate::error;
 
 use super::ecdh::{bytesEqual, ecdh, p256, PrivateKey, PublicKey, P256};
 

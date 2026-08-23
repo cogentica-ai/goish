@@ -54,7 +54,7 @@ fn main() {
 
     // ─── 2. first error wins ───────────────────────────────────────
     let g = errgroup::Group::new();
-    let gate: chan<()> = make!(chan ());
+    let gate: chan<()> = make!(chan());
     let gate2 = gate.clone();
     g.Go(move || {
         // Errors first, then releases the second task.
@@ -63,9 +63,9 @@ fn main() {
     });
     g.Go(move || {
         let _ = gate.Recv(); // strictly after the first task returned...
-        // (Send on an unbuffered chan completes at the rendezvous, so
-        // the first task's error records before or at this point;
-        // give the errOnce a beat to land regardless.)
+                             // (Send on an unbuffered chan completes at the rendezvous, so
+                             // the first task's error records before or at this point;
+                             // give the errOnce a beat to land regardless.)
         time::Sleep(time::Millisecond * 20);
         ErrSecond.into()
     });
@@ -84,7 +84,10 @@ fn main() {
     let err = g.Wait();
     check(err == ErrFirst, b"t3: Wait returns error\n");
     check(ctx.Err() != goish::nil, b"t3: ctx canceled after error\n");
-    check(context::Cause(&ctx) == ErrFirst, b"t3: Cause is the group error\n");
+    check(
+        context::Cause(&ctx) == ErrFirst,
+        b"t3: Cause is the group error\n",
+    );
 
     // Success path: Wait itself cancels the derived ctx.
     let (g, ctx) = errgroup::WithContext(context::Background());
@@ -110,12 +113,15 @@ fn main() {
     let err = g.Wait();
     check(err == goish::nil, b"t4: limited group Wait\n");
     let peak = PEAK.load(Ordering::Acquire);
-    check(peak >= 1 && peak <= 2, b"t4: concurrency bounded by limit\n");
+    check(
+        peak >= 1 && peak <= 2,
+        b"t4: concurrency bounded by limit\n",
+    );
 
     // ─── 5. TryGo at and below the limit ───────────────────────────
     let g = errgroup::Group::new();
     g.SetLimit(1);
-    let hold: chan<()> = make!(chan ());
+    let hold: chan<()> = make!(chan());
     let hold2 = hold.clone();
     let started = g.TryGo(move || {
         let _ = hold2.Recv();

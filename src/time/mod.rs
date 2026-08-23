@@ -201,8 +201,18 @@ impl PartialEq<Weekday> for int {
 // Long-name lookup tables used by Month::String / Weekday::String.
 // Mirrors Go's longMonthNames + longDayNames in time/format.go.
 const MONTH_LONG: [&str; 12] = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
 ];
 
 // fmt::Format impls — `%d`/`%b`/`%o`/`%x` print the underlying int;
@@ -458,7 +468,9 @@ impl Time {
             .wrapping_add((self.nsec as int) / 1_000)
     }
     pub fn UnixNano(self) -> int {
-        self.sec.wrapping_mul(1_000_000_000).wrapping_add(self.nsec as int)
+        self.sec
+            .wrapping_mul(1_000_000_000)
+            .wrapping_add(self.nsec as int)
     }
     pub fn After(self, u: Time) -> bool {
         self.sec > u.sec || (self.sec == u.sec && self.nsec > u.nsec)
@@ -690,10 +702,7 @@ impl Time {
     /// is ~1500 LOC).
     ///
     /// Pass the constant via `string(time::RFC3339)`.
-    pub fn Format<S: Into<crate::gostring::string>>(
-        self,
-        layout: S,
-    ) -> crate::gostring::string {
+    pub fn Format<S: Into<crate::gostring::string>>(self, layout: S) -> crate::gostring::string {
         let layout = layout.into();
         let (y, m, d, hh, mm, ss) = civil_from_unix(self.sec);
         let wd = self.Weekday().Int();
@@ -704,7 +713,11 @@ impl Time {
     /// `t.AppendFormat(b, layout)` (format.go:655) — append the formatted
     /// time to `b` and return the extended buffer. Slim port: delegates
     /// to `Format` then appends the byte representation.
-    pub fn AppendFormat<L: Into<crate::gostring::string>>(self, b: crate::goslice::slice<crate::types::byte>, layout: L) -> crate::goslice::slice<crate::types::byte> {
+    pub fn AppendFormat<L: Into<crate::gostring::string>>(
+        self,
+        b: crate::goslice::slice<crate::types::byte>,
+        layout: L,
+    ) -> crate::goslice::slice<crate::types::byte> {
         let layout: crate::gostring::string = layout.into();
         let s = self.Format(layout);
         let extra = crate::convert::bytes(s);
@@ -833,9 +846,7 @@ impl Time {
     /// `t.MarshalBinary()` (time.go:1513) — implements
     /// `encoding.BinaryMarshaler`. Wraps AppendBinary on a fresh
     /// 16-byte capacity buffer.
-    pub fn MarshalBinary(
-        self,
-    ) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
+    pub fn MarshalBinary(self) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
         // Go: b, err := t.AppendBinary(make([]byte, 0, 16))
         let buf: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(16);
         let (b, err) = self.AppendBinary(crate::goslice::slice::__from_vec(buf));
@@ -905,19 +916,14 @@ impl Time {
 
     /// `t.GobEncode()` (time.go:1574) — implements
     /// `encoding/gob.GobEncoder`. Delegates to MarshalBinary.
-    pub fn GobEncode(
-        self,
-    ) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
+    pub fn GobEncode(self) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
         // Go: return t.MarshalBinary()
         self.MarshalBinary()
     }
 
     /// `(*Time).GobDecode(data)` (time.go:1579) — implements
     /// `encoding/gob.GobDecoder`. Delegates to UnmarshalBinary.
-    pub fn GobDecode(
-        &mut self,
-        data: crate::goslice::slice<crate::types::byte>,
-    ) -> crate::error {
+    pub fn GobDecode(&mut self, data: crate::goslice::slice<crate::types::byte>) -> crate::error {
         // Go: return t.UnmarshalBinary(data)
         self.UnmarshalBinary(data)
     }
@@ -928,15 +934,18 @@ const MONTH_SHORT: [&str; 13] = [
 ];
 const DAY_SHORT: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAY_LONG: [&str; 7] = [
-    "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
 ];
 
 fn pad2(n: int) -> [u8; 2] {
     let n = n as i64;
-    [
-        b'0' + ((n / 10) % 10) as u8,
-        b'0' + (n % 10) as u8,
-    ]
+    [b'0' + ((n / 10) % 10) as u8, b'0' + (n % 10) as u8]
 }
 
 fn pad4(n: int) -> [u8; 4] {
@@ -1144,7 +1153,13 @@ fn format_layout(
     }
     // Kitchen: "3:04PM"
     if l == "3:04PM" {
-        let h12 = if hh == 0 { 12 } else if hh > 12 { hh - 12 } else { hh };
+        let h12 = if hh == 0 {
+            12
+        } else if hh > 12 {
+            hh - 12
+        } else {
+            hh
+        };
         let pm = hh >= 12;
         let mut out = alloc::vec::Vec::with_capacity(7);
         if h12 < 10 {
@@ -1705,7 +1720,11 @@ pub fn NewTicker(d: Duration) -> Ticker {
             tok.rearm();
         }
     });
-    Ticker { C: c, stopped, token }
+    Ticker {
+        C: c,
+        stopped,
+        token,
+    }
 }
 
 /// `time.Unix(sec, nsec)` — construct a Time from a Unix timestamp.
@@ -1958,10 +1977,12 @@ fn fmt_int(buf: &mut [u8], mut v: u64) -> usize {
 /// Recognized layouts: RFC3339, DateTime, DateOnly, TimeOnly,
 /// RFC1123 (assumes "GMT" or arbitrary 3-letter zone), ANSIC.
 /// Anything else returns an error.
-pub fn Parse<L: Into<crate::gostring::string>, V: Into<crate::gostring::string>>(layout: L, value: V) -> (Time, crate::error) {
+pub fn Parse<L: Into<crate::gostring::string>, V: Into<crate::gostring::string>>(
+    layout: L,
+    value: V,
+) -> (Time, crate::error) {
     let layout: crate::gostring::string = layout.into();
     let value: crate::gostring::string = value.into();
-    
 
     let l = layout.clone();
 
@@ -2044,13 +2065,31 @@ fn parse_asn1_utc(s: crate::gostring::string, seconds: bool) -> (Time, crate::er
             crate::errors::New("time: malformed ASN.1 UTCTime"),
         );
     }
-    let yy = match parse_int(&bs[0..2]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let m = match parse_int(&bs[2..4]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let d = match parse_int(&bs[4..6]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let hh = match parse_int(&bs[6..8]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let mm = match parse_int(&bs[8..10]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let yy = match parse_int(&bs[0..2]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let m = match parse_int(&bs[2..4]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let d = match parse_int(&bs[4..6]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let hh = match parse_int(&bs[6..8]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let mm = match parse_int(&bs[8..10]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
     let ss = if seconds {
-        match parse_int(&bs[10..12]) { Ok(v) => v, Err(e) => return (Time::default(), e) }
+        match parse_int(&bs[10..12]) {
+            Ok(v) => v,
+            Err(e) => return (Time::default(), e),
+        }
     } else {
         0
     };
@@ -2070,12 +2109,30 @@ fn parse_asn1_generalized(s: crate::gostring::string) -> (Time, crate::error) {
             crate::errors::New("time: malformed ASN.1 GeneralizedTime"),
         );
     }
-    let y = match parse_int(&bs[0..4]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let m = match parse_int(&bs[4..6]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let d = match parse_int(&bs[6..8]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let hh = match parse_int(&bs[8..10]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let mm = match parse_int(&bs[10..12]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let ss = match parse_int(&bs[12..14]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let y = match parse_int(&bs[0..4]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let m = match parse_int(&bs[4..6]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let d = match parse_int(&bs[6..8]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let hh = match parse_int(&bs[8..10]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let mm = match parse_int(&bs[10..12]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let ss = match parse_int(&bs[12..14]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
     return (Date(y, m, d, hh, mm, ss, 0, UTC), crate::errors::nil);
 }
 
@@ -2105,12 +2162,30 @@ fn parse_asn1_generalized_frac(s: crate::gostring::string) -> (Time, crate::erro
     if bs.len() < 15 || bs[bs.len() - 1] != b'Z' {
         return bad();
     }
-    let y = match parse_int(&bs[0..4]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let m = match parse_int(&bs[4..6]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let d = match parse_int(&bs[6..8]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let hh = match parse_int(&bs[8..10]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let mm = match parse_int(&bs[10..12]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let ss = match parse_int(&bs[12..14]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let y = match parse_int(&bs[0..4]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let m = match parse_int(&bs[4..6]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let d = match parse_int(&bs[6..8]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let hh = match parse_int(&bs[8..10]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let mm = match parse_int(&bs[10..12]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let ss = match parse_int(&bs[12..14]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
 
     // Everything between the seconds and the trailing 'Z' is the
     // optional ".fraction".
@@ -2141,7 +2216,6 @@ fn parse_asn1_generalized_frac(s: crate::gostring::string) -> (Time, crate::erro
 }
 
 fn parse_rfc3339(s: crate::gostring::string) -> (Time, crate::error) {
-    
     let bs = s.as_bytes();
     // "YYYY-MM-DDTHH:MM:SSZ" minimum. Z may be replaced by ±HH:MM, slim port treats only Z.
     if bs.len() < 20 {
@@ -2188,7 +2262,6 @@ fn parse_rfc3339(s: crate::gostring::string) -> (Time, crate::error) {
 }
 
 fn parse_datetime(s: crate::gostring::string, sep: u8) -> (Time, crate::error) {
-    
     let bs = s.as_bytes();
     if bs.len() != 19
         || bs[4] != b'-'
@@ -2202,17 +2275,34 @@ fn parse_datetime(s: crate::gostring::string, sep: u8) -> (Time, crate::error) {
             crate::errors::New("time: malformed DateTime"),
         );
     }
-    let y = match parse_int(&bs[0..4]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let m = match parse_int(&bs[5..7]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let d = match parse_int(&bs[8..10]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let hh = match parse_int(&bs[11..13]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let mm = match parse_int(&bs[14..16]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let ss = match parse_int(&bs[17..19]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let y = match parse_int(&bs[0..4]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let m = match parse_int(&bs[5..7]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let d = match parse_int(&bs[8..10]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let hh = match parse_int(&bs[11..13]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let mm = match parse_int(&bs[14..16]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let ss = match parse_int(&bs[17..19]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
     return (Date(y, m, d, hh, mm, ss, 0, UTC), crate::errors::nil);
 }
 
 fn parse_date_only(s: crate::gostring::string) -> (Time, crate::error) {
-    
     let bs = s.as_bytes();
     if bs.len() != 10 || bs[4] != b'-' || bs[7] != b'-' {
         return (
@@ -2220,14 +2310,22 @@ fn parse_date_only(s: crate::gostring::string) -> (Time, crate::error) {
             crate::errors::New("time: malformed DateOnly"),
         );
     }
-    let y = match parse_int(&bs[0..4]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let m = match parse_int(&bs[5..7]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let d = match parse_int(&bs[8..10]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let y = match parse_int(&bs[0..4]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let m = match parse_int(&bs[5..7]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let d = match parse_int(&bs[8..10]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
     (Date(y, m, d, 0, 0, 0, 0, UTC), crate::errors::nil)
 }
 
 fn parse_time_only(s: crate::gostring::string) -> (Time, crate::error) {
-    
     let bs = s.as_bytes();
     if bs.len() != 8 || bs[2] != b':' || bs[5] != b':' {
         return (
@@ -2235,25 +2333,43 @@ fn parse_time_only(s: crate::gostring::string) -> (Time, crate::error) {
             crate::errors::New("time: malformed TimeOnly"),
         );
     }
-    let hh = match parse_int(&bs[0..2]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let mm = match parse_int(&bs[3..5]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let ss = match parse_int(&bs[6..8]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let hh = match parse_int(&bs[0..2]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let mm = match parse_int(&bs[3..5]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let ss = match parse_int(&bs[6..8]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
     (Date(1970, 1, 1, hh, mm, ss, 0, UTC), crate::errors::nil)
 }
 
 fn parse_rfc1123(s: crate::gostring::string) -> (Time, crate::error) {
-    
     let bs = s.as_bytes();
     // "Day, DD Mon YYYY HH:MM:SS GMT" → 29 chars
-    if bs.len() != 29 || bs[3] != b',' || bs[4] != b' ' || bs[7] != b' ' || bs[11] != b' '
-        || bs[16] != b' ' || bs[19] != b':' || bs[22] != b':' || bs[25] != b' '
+    if bs.len() != 29
+        || bs[3] != b','
+        || bs[4] != b' '
+        || bs[7] != b' '
+        || bs[11] != b' '
+        || bs[16] != b' '
+        || bs[19] != b':'
+        || bs[22] != b':'
+        || bs[25] != b' '
     {
         return (
             Time::default(),
             crate::errors::New("time: malformed RFC1123"),
         );
     }
-    let d = match parse_int(&bs[5..7]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let d = match parse_int(&bs[5..7]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
     let mon = match month_short(&bs[8..11]) {
         Some(v) => v,
         None => {
@@ -2263,21 +2379,28 @@ fn parse_rfc1123(s: crate::gostring::string) -> (Time, crate::error) {
             );
         }
     };
-    let y = match parse_int(&bs[12..16]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let hh = match parse_int(&bs[17..19]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let mm = match parse_int(&bs[20..22]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let ss = match parse_int(&bs[23..25]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let y = match parse_int(&bs[12..16]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let hh = match parse_int(&bs[17..19]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let mm = match parse_int(&bs[20..22]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let ss = match parse_int(&bs[23..25]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
     (Date(y, mon, d, hh, mm, ss, 0, UTC), crate::errors::nil)
 }
 
 fn parse_ansic(s: crate::gostring::string) -> (Time, crate::error) {
     let bs = s.as_bytes();
-    let bad = || {
-        (
-            Time::default(),
-            crate::errors::New("time: malformed ANSIC"),
-        )
-    };
+    let bad = || (Time::default(), crate::errors::New("time: malformed ANSIC"));
     // "Mon Jan _2 15:04:05 2006". The `_2` day is space-padded, and Go
     // accepts all three renderings of it: " 6", "6" and "06". The
     // unpadded single digit makes the string 23 bytes instead of 24,
@@ -2298,19 +2421,37 @@ fn parse_ansic(s: crate::gostring::string) -> (Time, crate::error) {
     let day_end = if bs.len() == 24 { 10 } else { 9 };
     let day_bytes = &bs[8..day_end];
     let d = if day_bytes[0] == b' ' {
-        match parse_int(&day_bytes[1..]) { Ok(v) => v, Err(e) => return (Time::default(), e) }
+        match parse_int(&day_bytes[1..]) {
+            Ok(v) => v,
+            Err(e) => return (Time::default(), e),
+        }
     } else {
-        match parse_int(day_bytes) { Ok(v) => v, Err(e) => return (Time::default(), e) }
+        match parse_int(day_bytes) {
+            Ok(v) => v,
+            Err(e) => return (Time::default(), e),
+        }
     };
     // Everything after the day sits at a fixed offset from day_end.
     let t = day_end + 1;
     if bs[day_end] != b' ' || bs[t + 2] != b':' || bs[t + 5] != b':' || bs[t + 8] != b' ' {
         return bad();
     }
-    let hh = match parse_int(&bs[t..t + 2]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let mm = match parse_int(&bs[t + 3..t + 5]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let ss = match parse_int(&bs[t + 6..t + 8]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
-    let y = match parse_int(&bs[t + 9..t + 13]) { Ok(v) => v, Err(e) => return (Time::default(), e) };
+    let hh = match parse_int(&bs[t..t + 2]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let mm = match parse_int(&bs[t + 3..t + 5]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let ss = match parse_int(&bs[t + 6..t + 8]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
+    let y = match parse_int(&bs[t + 9..t + 13]) {
+        Ok(v) => v,
+        Err(e) => return (Time::default(), e),
+    };
     return (Date(y, mon, d, hh, mm, ss, 0, UTC), crate::errors::nil);
 }
 
@@ -2336,9 +2477,7 @@ fn parse_int(bs: &[u8]) -> Result<int, crate::error> {
 /// each with optional fraction and a unit suffix, such as "300ms",
 /// "-1.5h" or "2h45m". Valid time units are "ns", "us" (or "µs"),
 /// "ms", "s", "m", "h".
-pub fn ParseDuration<S: Into<crate::gostring::string>>(
-    s: S,
-) -> (Duration, crate::error) {
+pub fn ParseDuration<S: Into<crate::gostring::string>>(s: S) -> (Duration, crate::error) {
     use crate::gostring::string;
     use crate::strconv;
     let s: crate::gostring::string = s.into();
@@ -2432,8 +2571,7 @@ pub fn ParseDuration<S: Into<crate::gostring::string>>(
             return (
                 Duration(0),
                 crate::errors::New(
-                    string::from("time: missing unit in duration ")
-                        + strconv::Quote(orig.clone()),
+                    string::from("time: missing unit in duration ") + strconv::Quote(orig.clone()),
                 ),
             );
         }
@@ -2492,9 +2630,7 @@ pub fn ParseDuration<S: Into<crate::gostring::string>>(
     if d > (1u64 << 63) - 1 {
         return (
             Duration(0),
-            crate::errors::New(
-                string::from("time: invalid duration ") + strconv::Quote(orig),
-            ),
+            crate::errors::New(string::from("time: invalid duration ") + strconv::Quote(orig)),
         );
     }
     (Duration(d as int), crate::errors::nil)

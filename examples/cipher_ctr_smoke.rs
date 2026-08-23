@@ -20,9 +20,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::crypto::cipher;
 use goish::crypto::cipher::{Block, Stream};
+use goish::fmt;
 use goish::types::{byte, int};
 use goish::{slice, syscall};
 
@@ -57,8 +57,7 @@ fn main() {
     let mk_block = || ToyBlock {
         key: alloc::vec![0xa5, 0x5a, 0xc3, 0x3c, 0xf0, 0x0f, 0x96, 0x69],
     };
-    let iv: alloc::vec::Vec<byte> =
-        alloc::vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+    let iv: alloc::vec::Vec<byte> = alloc::vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
 
     // 1. Single 16-byte XORKeyStream produces non-trivial ciphertext.
     {
@@ -76,8 +75,7 @@ fn main() {
 
     // 2. Encrypt → decrypt round-trip recovers the plaintext.
     {
-        let plain: alloc::vec::Vec<byte> =
-            b"Goish CTR round-trip text.".to_vec();
+        let plain: alloc::vec::Vec<byte> = b"Goish CTR round-trip text.".to_vec();
         let n = plain.len();
 
         let mut enc = cipher::NewCTR(mk_block(), slice::__from_vec(iv.clone()));
@@ -195,14 +193,12 @@ fn main() {
         let iv_max: alloc::vec::Vec<byte> = alloc::vec![0xffu8; 8];
         let plain: alloc::vec::Vec<byte> = (0..32u8).collect();
 
-        let mut enc =
-            cipher::NewCTR(mk_block(), slice::__from_vec(iv_max.clone()));
+        let mut enc = cipher::NewCTR(mk_block(), slice::__from_vec(iv_max.clone()));
         let mut ct = slice::__from_vec(alloc::vec![0u8; 32]);
         enc.XORKeyStream(&mut ct, slice::__from_vec(plain.clone()));
         let ct_v = ct.__into_vec();
 
-        let mut dec =
-            cipher::NewCTR(mk_block(), slice::__from_vec(iv_max));
+        let mut dec = cipher::NewCTR(mk_block(), slice::__from_vec(iv_max));
         let mut pt2 = slice::__from_vec(alloc::vec![0u8; 32]);
         dec.XORKeyStream(&mut pt2, slice::__from_vec(ct_v));
         if pt2.__into_vec() == plain {

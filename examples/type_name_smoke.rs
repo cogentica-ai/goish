@@ -11,7 +11,7 @@ extern crate goish;
 use goish::fmt;
 use goish::goany::Any;
 use goish::gostring::string;
-use goish::{syscall};
+use goish::syscall;
 
 // `#[goish::reflect]` because `Any::new` requires `Reflect`: every value
 // that goes into goish's `interface{}` must be able to come back out as

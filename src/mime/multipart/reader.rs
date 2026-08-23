@@ -105,8 +105,7 @@ impl Reader {
         }
         let body_bytes = body_as_slice(&self.body);
         let dash_boundary_bytes: Vec<u8> = make_dash_boundary(&self.boundary);
-        let crlf_dash_boundary_bytes: Vec<u8> =
-            make_crlf_dash_boundary(&self.boundary);
+        let crlf_dash_boundary_bytes: Vec<u8> = make_crlf_dash_boundary(&self.boundary);
         let close_marker: &[u8] = b"--";
 
         let n = body_bytes.len();
@@ -135,9 +134,7 @@ impl Reader {
         }
 
         // 2. Check for closing marker `--`.
-        if p + close_marker.len() <= n
-            && &body_bytes[p..p + close_marker.len()] == close_marker
-        {
+        if p + close_marker.len() <= n && &body_bytes[p..p + close_marker.len()] == close_marker {
             self.finished = true;
             return (empty_part(), io::EOF.into());
         }
@@ -185,9 +182,7 @@ impl Reader {
             };
             let key = string::from_bytes(&line[..colon]);
             let mut v_start = colon + 1;
-            while v_start < line.len()
-                && (line[v_start] == b' ' || line[v_start] == b'\t')
-            {
+            while v_start < line.len() && (line[v_start] == b' ' || line[v_start] == b'\t') {
                 v_start += 1;
             }
             let value = string::from_bytes(&line[v_start..]);

@@ -27,7 +27,9 @@ fn main() {
         } else {
             fmt::Println!(
                 "[ 1] stat /etc/passwd          FAIL name={} size={} dir={}",
-                fi.Name(), fi.Size(), fi.IsDir()
+                fi.Name(),
+                fi.Size(),
+                fi.IsDir()
             );
             failed += 1;
         }

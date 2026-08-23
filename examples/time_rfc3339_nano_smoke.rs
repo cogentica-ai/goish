@@ -10,7 +10,7 @@ extern crate alloc;
 extern crate goish;
 
 use goish::fmt;
-use goish::time::{Date, RFC3339, RFC3339Nano};
+use goish::time::{Date, RFC3339Nano, RFC3339};
 use goish::{string, syscall};
 
 #[goish::main]

@@ -36,7 +36,10 @@ pub struct Bag {
 #[goish::main]
 fn main() {
     // ─── #2: %v / %+v on a reflect struct ────────────────────────────
-    let p = Person { Name: string("alice"), Age: 30 };
+    let p = Person {
+        Name: string("alice"),
+        Age: 30,
+    };
     let v = fmt::Sprintf!("%v", &p);
     check(v == "{alice 30}", b"reflect-v: %v body\n");
 
@@ -55,39 +58,36 @@ fn main() {
     check(sp == "{Items:[x y z] Count:3}", b"reflect-v: bag %+v\n");
 
     // ─── #1: SetField by index ───────────────────────────────────────
-    let mut p = Person { Name: string("orig"), Age: 0 };
+    let mut p = Person {
+        Name: string("orig"),
+        Age: 0,
+    };
     let err = reflect::SetField(&mut p, 1, reflect::Value::Int(99));
     check(err == goish::nil, b"reflect-set: SetField err\n");
     check(p.Age == 99, b"reflect-set: Age after SetField\n");
 
     // ─── SetFieldByName ──────────────────────────────────────────────
-    let err = reflect::SetFieldByName(
-        &mut p,
-        "Name",
-        reflect::Value::String(string("alice")),
-    );
+    let err = reflect::SetFieldByName(&mut p, "Name", reflect::Value::String(string("alice")));
     check(err == goish::nil, b"reflect-set: SetFieldByName err\n");
-    check(p.Name == "alice", b"reflect-set: Name after SetFieldByName\n");
+    check(
+        p.Name == "alice",
+        b"reflect-set: Name after SetFieldByName\n",
+    );
 
     // ─── Type mismatch returns error, leaves field intact ────────────
-    let err = reflect::SetFieldByName(
-        &mut p,
-        "Age",
-        reflect::Value::String(string("oops")),
-    );
+    let err = reflect::SetFieldByName(&mut p, "Age", reflect::Value::String(string("oops")));
     check(err != goish::nil, b"reflect-set: type mismatch must err\n");
     check(p.Age == 99, b"reflect-set: Age unchanged on err\n");
 
     // ─── Unknown name returns error ──────────────────────────────────
-    let err = reflect::SetFieldByName(
-        &mut p,
-        "Nonexistent",
-        reflect::Value::Int(0),
-    );
+    let err = reflect::SetFieldByName(&mut p, "Nonexistent", reflect::Value::Int(0));
     check(err != goish::nil, b"reflect-set: unknown field must err\n");
 
     // ─── SetField composite: slice<string> via Value::Slice ──────────
-    let mut bag = Bag { Items: goish::slice!([]string{}), Count: 0 };
+    let mut bag = Bag {
+        Items: goish::slice!([]string{}),
+        Count: 0,
+    };
     let new_items = reflect::ValueOf(&goish::slice!([]string{"a", "b"}));
     let err = reflect::SetFieldByName(&mut bag, "Items", new_items);
     check(err == goish::nil, b"reflect-set: slice err\n");

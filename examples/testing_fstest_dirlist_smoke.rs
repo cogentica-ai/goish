@@ -26,7 +26,7 @@ extern crate goish;
 use alloc::sync::Arc;
 use goish::gostring::string;
 use goish::io::fs::{self, DirEntry, FileInfo};
-use goish::testing::fstest::{fsTester, MapFile, MapFS};
+use goish::testing::fstest::{fsTester, MapFS, MapFile};
 use goish::types::int;
 use goish::{errors, fmt, slice, syscall};
 
@@ -54,10 +54,7 @@ impl DirEntry for LyingEntry {
     fn Info(&self) -> (Arc<dyn FileInfo + Send + Sync>, errors::error) {
         // checkDirList never calls Info(); this exists only to satisfy
         // the trait, and reports the error a real entry would.
-        return (
-            Arc::new(NoInfo {}),
-            errors::New(s("Info not available")),
-        );
+        return (Arc::new(NoInfo {}), errors::New(s("Info not available")));
     }
 }
 
@@ -112,7 +109,10 @@ fn main() {
         if t.Errors().Len() == 0 {
             fmt::Println!("[ 1] identical lists agree     PASS");
         } else {
-            fmt::Println!("[ 1] identical lists agree     FAIL ", t.Errors()[0].Error());
+            fmt::Println!(
+                "[ 1] identical lists agree     FAIL ",
+                t.Errors()[0].Error()
+            );
             failed += 1;
         }
     }

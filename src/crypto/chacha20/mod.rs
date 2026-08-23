@@ -50,10 +50,18 @@ pub struct Cipher {
 
 #[inline(always)]
 fn quarterRound(a: u32, b: u32, c: u32, d: u32) -> (u32, u32, u32, u32) {
-    let a = a.wrapping_add(b); let d = d ^ a; let d = d.rotate_left(16);
-    let c = c.wrapping_add(d); let b = b ^ c; let b = b.rotate_left(12);
-    let a = a.wrapping_add(b); let d = d ^ a; let d = d.rotate_left(8);
-    let c = c.wrapping_add(d); let b = b ^ c; let b = b.rotate_left(7);
+    let a = a.wrapping_add(b);
+    let d = d ^ a;
+    let d = d.rotate_left(16);
+    let c = c.wrapping_add(d);
+    let b = b ^ c;
+    let b = b.rotate_left(12);
+    let a = a.wrapping_add(b);
+    let d = d ^ a;
+    let d = d.rotate_left(8);
+    let c = c.wrapping_add(d);
+    let b = b ^ c;
+    let b = b.rotate_left(7);
     (a, b, c, d)
 }
 
@@ -79,15 +87,47 @@ impl Cipher {
 
         for _ in 0..10 {
             // Column rounds
-            let (a, b, c, d) = quarterRound(x0, x4, x8, x12);   x0=a; x4=b; x8=c; x12=d;
-            let (a, b, c, d) = quarterRound(x1, x5, x9, x13);   x1=a; x5=b; x9=c; x13=d;
-            let (a, b, c, d) = quarterRound(x2, x6, x10, x14);  x2=a; x6=b; x10=c; x14=d;
-            let (a, b, c, d) = quarterRound(x3, x7, x11, x15);  x3=a; x7=b; x11=c; x15=d;
+            let (a, b, c, d) = quarterRound(x0, x4, x8, x12);
+            x0 = a;
+            x4 = b;
+            x8 = c;
+            x12 = d;
+            let (a, b, c, d) = quarterRound(x1, x5, x9, x13);
+            x1 = a;
+            x5 = b;
+            x9 = c;
+            x13 = d;
+            let (a, b, c, d) = quarterRound(x2, x6, x10, x14);
+            x2 = a;
+            x6 = b;
+            x10 = c;
+            x14 = d;
+            let (a, b, c, d) = quarterRound(x3, x7, x11, x15);
+            x3 = a;
+            x7 = b;
+            x11 = c;
+            x15 = d;
             // Diagonal rounds
-            let (a, b, c, d) = quarterRound(x0, x5, x10, x15);  x0=a; x5=b; x10=c; x15=d;
-            let (a, b, c, d) = quarterRound(x1, x6, x11, x12);  x1=a; x6=b; x11=c; x12=d;
-            let (a, b, c, d) = quarterRound(x2, x7, x8, x13);   x2=a; x7=b; x8=c; x13=d;
-            let (a, b, c, d) = quarterRound(x3, x4, x9, x14);   x3=a; x4=b; x9=c; x14=d;
+            let (a, b, c, d) = quarterRound(x0, x5, x10, x15);
+            x0 = a;
+            x5 = b;
+            x10 = c;
+            x15 = d;
+            let (a, b, c, d) = quarterRound(x1, x6, x11, x12);
+            x1 = a;
+            x6 = b;
+            x11 = c;
+            x12 = d;
+            let (a, b, c, d) = quarterRound(x2, x7, x8, x13);
+            x2 = a;
+            x7 = b;
+            x8 = c;
+            x13 = d;
+            let (a, b, c, d) = quarterRound(x3, x4, x9, x14);
+            x3 = a;
+            x4 = b;
+            x9 = c;
+            x14 = d;
         }
 
         // Add initial state back
@@ -102,7 +142,7 @@ impl Cipher {
                     core::ptr::write(buf_ptr.add($offset * 4 + 2), v[2]);
                     core::ptr::write(buf_ptr.add($offset * 4 + 3), v[3]);
                 }
-            }
+            };
         }
         write_word!(0, x0, c0);
         write_word!(1, x1, c1);
@@ -124,7 +164,9 @@ impl Cipher {
 
     /// XOR key stream into dst/src.
     pub fn XORKeyStream(&mut self, dst: &mut [byte], src: &[byte]) {
-        if src.is_empty() { return; }
+        if src.is_empty() {
+            return;
+        }
         if dst.len() < src.len() {
             panic!("chacha20: output smaller than input");
         }
@@ -141,31 +183,41 @@ impl Cipher {
             }
             self.buf_len -= take;
             pos += take;
-            if pos >= src.len() { return; }
+            if pos >= src.len() {
+                return;
+            }
         }
 
         // Full blocks
         while pos + blockSize <= src.len() {
-            if self.overflow { panic!("chacha20: counter overflow"); }
+            if self.overflow {
+                panic!("chacha20: counter overflow");
+            }
             let mut block = [0u8; blockSize];
             self.generate_block(&mut block);
             for i in 0..blockSize {
                 dst[pos + i] = src[pos + i] ^ block[i];
             }
             self.counter = self.counter.wrapping_add(1);
-            if self.counter == 0 { self.overflow = true; }
+            if self.counter == 0 {
+                self.overflow = true;
+            }
             pos += blockSize;
         }
 
         // Partial block — fill buffer
         // Matches Go's layout: unused bytes live at buf[blockSize-buf_len..] (high indices).
         if pos < src.len() {
-            if self.overflow { panic!("chacha20: counter overflow"); }
+            if self.overflow {
+                panic!("chacha20: counter overflow");
+            }
             let mut block = [0u8; blockSize];
             self.generate_block(&mut block);
             self.buf = block;
             self.counter = self.counter.wrapping_add(1);
-            if self.counter == 0 { self.overflow = true; }
+            if self.counter == 0 {
+                self.overflow = true;
+            }
             let rem = src.len() - pos;
             for i in 0..rem {
                 dst[pos + i] = src[pos + i] ^ self.buf[i];
@@ -260,19 +312,25 @@ pub fn HChaCha20(key: slice<byte>, nonce: slice<byte>) -> (slice<byte>, error) {
 
 fn hchacha20(key: &[byte], nonce: &[byte]) -> (alloc::vec::Vec<byte>, error) {
     if key.len() != KeySize {
-        return (alloc::vec![], crate::errors::New("chacha20: wrong HChaCha20 key size"));
+        return (
+            alloc::vec![],
+            crate::errors::New("chacha20: wrong HChaCha20 key size"),
+        );
     }
     if nonce.len() != 16 {
-        return (alloc::vec![], crate::errors::New("chacha20: wrong HChaCha20 nonce size"));
+        return (
+            alloc::vec![],
+            crate::errors::New("chacha20: wrong HChaCha20 nonce size"),
+        );
     }
 
     let (mut x0, mut x1, mut x2, mut x3) = (j0, j1, j2, j3);
-    let mut x4  = read_u32_le(&key[0..4]);
-    let mut x5  = read_u32_le(&key[4..8]);
-    let mut x6  = read_u32_le(&key[8..12]);
-    let mut x7  = read_u32_le(&key[12..16]);
-    let mut x8  = read_u32_le(&key[16..20]);
-    let mut x9  = read_u32_le(&key[20..24]);
+    let mut x4 = read_u32_le(&key[0..4]);
+    let mut x5 = read_u32_le(&key[4..8]);
+    let mut x6 = read_u32_le(&key[8..12]);
+    let mut x7 = read_u32_le(&key[12..16]);
+    let mut x8 = read_u32_le(&key[16..20]);
+    let mut x9 = read_u32_le(&key[20..24]);
     let mut x10 = read_u32_le(&key[24..28]);
     let mut x11 = read_u32_le(&key[28..32]);
     let mut x12 = read_u32_le(&nonce[0..4]);
@@ -282,15 +340,47 @@ fn hchacha20(key: &[byte], nonce: &[byte]) -> (alloc::vec::Vec<byte>, error) {
 
     for _ in 0..10 {
         // Column rounds
-        let (a,b,c,d) = quarterRound(x0,x4,x8,x12);   x0=a;x4=b;x8=c;x12=d;
-        let (a,b,c,d) = quarterRound(x1,x5,x9,x13);   x1=a;x5=b;x9=c;x13=d;
-        let (a,b,c,d) = quarterRound(x2,x6,x10,x14);  x2=a;x6=b;x10=c;x14=d;
-        let (a,b,c,d) = quarterRound(x3,x7,x11,x15);  x3=a;x7=b;x11=c;x15=d;
+        let (a, b, c, d) = quarterRound(x0, x4, x8, x12);
+        x0 = a;
+        x4 = b;
+        x8 = c;
+        x12 = d;
+        let (a, b, c, d) = quarterRound(x1, x5, x9, x13);
+        x1 = a;
+        x5 = b;
+        x9 = c;
+        x13 = d;
+        let (a, b, c, d) = quarterRound(x2, x6, x10, x14);
+        x2 = a;
+        x6 = b;
+        x10 = c;
+        x14 = d;
+        let (a, b, c, d) = quarterRound(x3, x7, x11, x15);
+        x3 = a;
+        x7 = b;
+        x11 = c;
+        x15 = d;
         // Diagonal rounds
-        let (a,b,c,d) = quarterRound(x0,x5,x10,x15);  x0=a;x5=b;x10=c;x15=d;
-        let (a,b,c,d) = quarterRound(x1,x6,x11,x12);  x1=a;x6=b;x11=c;x12=d;
-        let (a,b,c,d) = quarterRound(x2,x7,x8,x13);   x2=a;x7=b;x8=c;x13=d;
-        let (a,b,c,d) = quarterRound(x3,x4,x9,x14);   x3=a;x4=b;x9=c;x14=d;
+        let (a, b, c, d) = quarterRound(x0, x5, x10, x15);
+        x0 = a;
+        x5 = b;
+        x10 = c;
+        x15 = d;
+        let (a, b, c, d) = quarterRound(x1, x6, x11, x12);
+        x1 = a;
+        x6 = b;
+        x11 = c;
+        x12 = d;
+        let (a, b, c, d) = quarterRound(x2, x7, x8, x13);
+        x2 = a;
+        x7 = b;
+        x8 = c;
+        x13 = d;
+        let (a, b, c, d) = quarterRound(x3, x4, x9, x14);
+        x3 = a;
+        x4 = b;
+        x9 = c;
+        x14 = d;
     }
 
     let mut out = alloc::vec![0u8; 32];

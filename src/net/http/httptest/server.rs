@@ -25,9 +25,9 @@
 
 #![allow(non_snake_case)]
 
-use crate::sync;
-use crate::string;
 use crate::net;
+use crate::string;
+use crate::sync;
 use alloc::sync::Arc;
 
 // goishlint:ignore GOISH019 Server — Go's httptest.Server exposes
@@ -329,7 +329,7 @@ impl Server {
         let nconn = {
             let conns = self.conns.Lock();
             let keys = conns.Keys();
-            let ch: crate::gochan::chan<()> = crate::make!(chan (), crate::int64(keys.len()));
+            let ch: crate::gochan::chan<()> = crate::make!(chan(), crate::int64(keys.len()));
             for i in 0..keys.len() {
                 let _ = self.closeConnChan(keys[i], Some(ch.clone()));
             }
@@ -405,8 +405,7 @@ impl Server {
                 for i in 0..keys.len() {
                     let fd = keys[i];
                     let (st, _) = conns.Get(fd);
-                    if st == super::super::server::StateIdle
-                        || st == super::super::server::StateNew
+                    if st == super::super::server::StateIdle || st == super::super::server::StateNew
                     {
                         self.closeConn(fd);
                     }
@@ -463,9 +462,9 @@ impl Server {
         // Go: only install the test cert when the caller supplied none.
         if cfg.Certificates.Len() == 0 {
             cfg.Certificates =
-                crate::goslice::slice::<crate::crypto::tls::Certificate>::__from_vec(
-                    alloc::vec![cert],
-                );
+                crate::goslice::slice::<crate::crypto::tls::Certificate>::__from_vec(alloc::vec![
+                    cert
+                ]);
         }
         // Go: `x509.ParseCertificate(s.TLS.Certificates[0].Certificate[0])`
         let leaf = cfg.Certificates[crate::int(0)].Certificate[crate::int(0)].clone();
@@ -498,10 +497,7 @@ impl Server {
         self.wg.Add(1);
         let me = self.clone();
         crate::go!(stack(1024 * 1024), move || {
-            let _ = me
-                .Config
-                .clone()
-                .__serve_tls_arc(me.Listener.clone(), cfg);
+            let _ = me.Config.clone().__serve_tls_arc(me.Listener.clone(), cfg);
             me.wg.Done();
         });
         return;

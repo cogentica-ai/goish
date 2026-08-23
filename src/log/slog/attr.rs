@@ -33,7 +33,6 @@ pub fn Group<S: Into<string>>(key: S, args: crate::goslice::slice<Attr>) -> Attr
     };
 }
 
-
 // go: sdk 1.25.5 log/slog/attr.go:93-95 Any
 /// Go: "Any returns an Attr for the supplied value."
 ///

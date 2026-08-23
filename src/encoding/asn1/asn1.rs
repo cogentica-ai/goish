@@ -249,9 +249,7 @@ pub fn parseSequenceOf(bytes: slice<byte>, sliceType: &Type, elemType: &Type) ->
         }
 
         if !matchAny
-            && (t.class != ClassUniversal
-                || t.isCompound != compoundType
-                || t.tag != expectedTag)
+            && (t.class != ClassUniversal || t.isCompound != compoundType || t.tag != expectedTag)
         {
             return (Value::Invalid, structural("sequence tag mismatch"));
         }
@@ -471,7 +469,10 @@ pub fn parseField(
     if !ok1 {
         return (
             offset,
-            fmt::Errorf!("asn1: structure error: unknown Go type: %v", fieldType.String()),
+            fmt::Errorf!(
+                "asn1: structure error: unknown Go type: %v",
+                fieldType.String()
+            ),
         );
     }
     let mut universalTag = universalTagIn;
@@ -761,10 +762,7 @@ pub fn parseField(
     let mut msg = crate::strings::Builder::new();
     let _ = msg.WriteString("unsupported: ");
     let _ = msg.WriteString(v.Type().String());
-    return (
-        offset,
-        super::StructuralError { Msg: msg.String() }.into(),
-    );
+    return (offset, super::StructuralError { Msg: msg.String() }.into());
 }
 
 // ─── setDefaultValue (asn1.go:1047) ───────────────────────────────────

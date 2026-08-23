@@ -25,9 +25,9 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::crypto::x509;
 use goish::encoding::asn1;
+use goish::fmt;
 use goish::gostring::string;
 use goish::math::big;
 use goish::types::byte;
@@ -120,10 +120,7 @@ fn test_1_parse_bool() {
     let (v1, e1) = asn1::ParseBool(from_bytes(&[0xff]));
     let (_, e2) = asn1::ParseBool(from_bytes(&[0x7f]));
     let (_, e3) = asn1::ParseBool(from_bytes(&[]));
-    let ok = !v0 && e0.IsNil()
-        && v1 && e1.IsNil()
-        && !e2.IsNil()
-        && !e3.IsNil();
+    let ok = !v0 && e0.IsNil() && v1 && e1.IsNil() && !e2.IsNil() && !e3.IsNil();
     write_result(1, b"ParseBool                    ", ok);
     if !ok {
         fail();
@@ -137,11 +134,7 @@ fn test_2_check_integer() {
     let e_nm2 = asn1::CheckInteger(from_bytes(&[0xff, 0xff]));
     let e_ok1 = asn1::CheckInteger(from_bytes(&[0x01]));
     let e_ok2 = asn1::CheckInteger(from_bytes(&[0x00, 0x80]));
-    let ok = !e_empty.IsNil()
-        && !e_nm1.IsNil()
-        && !e_nm2.IsNil()
-        && e_ok1.IsNil()
-        && e_ok2.IsNil();
+    let ok = !e_empty.IsNil() && !e_nm1.IsNil() && !e_nm2.IsNil() && e_ok1.IsNil() && e_ok2.IsNil();
     write_result(2, b"CheckInteger                 ", ok);
     if !ok {
         fail();
@@ -155,10 +148,14 @@ fn test_3_parse_int64() {
     let (v_pos, e_pos) = asn1::ParseInt64(from_bytes(&[0x7f]));
     let (v_128, e_128) = asn1::ParseInt64(from_bytes(&[0x00, 0x80]));
     let (v_n129, e_n129) = asn1::ParseInt64(from_bytes(&[0xff, 0x7f]));
-    let ok = e_neg.IsNil() && v_neg == -128
-        && e_pos.IsNil() && v_pos == 127
-        && e_128.IsNil() && v_128 == 128
-        && e_n129.IsNil() && v_n129 == -129;
+    let ok = e_neg.IsNil()
+        && v_neg == -128
+        && e_pos.IsNil()
+        && v_pos == 127
+        && e_128.IsNil()
+        && v_128 == 128
+        && e_n129.IsNil()
+        && v_n129 == -129;
     write_result(3, b"ParseInt64 sign-extension    ", ok);
     if !ok {
         fail();
@@ -210,7 +207,9 @@ fn test_6_parse_bitstring() {
     // Pick a valid case: paddingBits=0x06, byte=0x40 (only top 2 bits).
     // 0x40 & 0x3f = 0 → valid. BitLength = (2-1)*8 - 6 = 2.
     let (bs, err) = asn1::ParseBitString(from_bytes(&[0x06, 0x40]));
-    let ok_v = err.IsNil() && bs.BitLength == 2 && bs.Bytes.Len() == 1
+    let ok_v = err.IsNil()
+        && bs.BitLength == 2
+        && bs.Bytes.Len() == 1
         && bs.Bytes[0 as goish::int] == 0x40;
     // Invalid: paddingBits>7.
     let (_, err_p) = asn1::ParseBitString(from_bytes(&[0x09, 0xff]));
@@ -260,9 +259,10 @@ fn test_7_parse_object_identifier() {
         ok = false;
     }
     // Equal()
-    let oid2 = asn1::ParseObjectIdentifier(from_bytes(
-        &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x05],
-    )).0;
+    let oid2 = asn1::ParseObjectIdentifier(from_bytes(&[
+        0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x05,
+    ]))
+    .0;
     if !asn1::OIDEqual(&oid, &oid2) {
         ok = false;
     }
@@ -281,8 +281,12 @@ fn test_8_parse_base128_int() {
     let (_, _, e3) = asn1::ParseBase128Int(from_bytes(&[0x80, 0x01]), 0);
     // Truncated: continuation bit but no more bytes.
     let (_, _, e4) = asn1::ParseBase128Int(from_bytes(&[0x86]), 0);
-    let ok = e1.IsNil() && v1 == 5 && off1 == 1
-        && e2.IsNil() && v2 == 840 && off2 == 2
+    let ok = e1.IsNil()
+        && v1 == 5
+        && off1 == 1
+        && e2.IsNil()
+        && v2 == 840
+        && off2 == 2
         && !e3.IsNil()
         && !e4.IsNil();
     write_result(8, b"ParseBase128Int              ", ok);
@@ -300,14 +304,25 @@ fn test_9_parse_tag_and_length() {
     let (tl2, off2, e2) = asn1::ParseTagAndLength(from_bytes(&[0xa0, 0x00]), 0);
     // Long-form length: 0x04 0x82 0x01 0x00 → octet-string len 256.
     // 0x82 → bottom 7 bits=2 → next 2 bytes = 0x0100 = 256.
-    let (tl3, off3, e3) = asn1::ParseTagAndLength(
-        from_bytes(&[0x04, 0x82, 0x01, 0x00]), 0);
-    let ok = e1.IsNil() && tl1.class == 0 && tl1.tag == 16 && tl1.length == 5
-            && tl1.isCompound && off1 == 2
-        && e2.IsNil() && tl2.class == 2 && tl2.tag == 0 && tl2.length == 0
-            && tl2.isCompound && off2 == 2
-        && e3.IsNil() && tl3.class == 0 && tl3.tag == 4 && tl3.length == 256
-            && !tl3.isCompound && off3 == 4;
+    let (tl3, off3, e3) = asn1::ParseTagAndLength(from_bytes(&[0x04, 0x82, 0x01, 0x00]), 0);
+    let ok = e1.IsNil()
+        && tl1.class == 0
+        && tl1.tag == 16
+        && tl1.length == 5
+        && tl1.isCompound
+        && off1 == 2
+        && e2.IsNil()
+        && tl2.class == 2
+        && tl2.tag == 0
+        && tl2.length == 0
+        && tl2.isCompound
+        && off2 == 2
+        && e3.IsNil()
+        && tl3.class == 0
+        && tl3.tag == 4
+        && tl3.length == 256
+        && !tl3.isCompound
+        && off3 == 4;
     write_result(9, b"ParseTagAndLength            ", ok);
     if !ok {
         fail();
@@ -324,11 +339,14 @@ fn test_10_parse_strings() {
     // Printable: alphanumeric+space+colon OK; '@' rejected.
     let (s_pr, e_pr) = asn1::ParsePrintableString(from_bytes(b"foo bar"));
     let (_, e_pr_bad) = asn1::ParsePrintableString(from_bytes(b"foo@bar"));
-    let ok = e_ok.IsNil() && check_str(&s_ok, "hello")
+    let ok = e_ok.IsNil()
+        && check_str(&s_ok, "hello")
         && !e_bad.IsNil()
-        && e_ia5.IsNil() && check_str(&s_ia5, "abc123")
+        && e_ia5.IsNil()
+        && check_str(&s_ia5, "abc123")
         && !e_ia5_bad.IsNil()
-        && e_pr.IsNil() && check_str(&s_pr, "foo bar")
+        && e_pr.IsNil()
+        && check_str(&s_pr, "foo bar")
         && !e_pr_bad.IsNil();
     write_result(10, b"ParseUTF8/IA5/PrintableString", ok);
     if !ok {
@@ -347,7 +365,7 @@ fn test_11_parse_raw_sequence() {
         && rv.Tag == asn1::TagSequence
         && rv.IsCompound
         && rv.Bytes.Len() == 6   // body = the 6 bytes inside the SEQUENCE
-        && rest.Len() == 0;      // nothing left after parsing
+        && rest.Len() == 0; // nothing left after parsing
     write_result(11, b"ParseRaw SEQUENCE            ", ok);
     if !ok {
         fail();
@@ -416,22 +434,14 @@ fn test_13_parse_pkcs8_rsa_key() {
     // Build RSAPrivateKey body bytes:
     let rsa_body: &[u8] = &[
         // version = 0
-        0x02, 0x01, 0x00,
-        // n = 143 = 0x8f (needs leading 00 to be non-negative)
-        0x02, 0x02, 0x00, 0x8f,
-        // e = 7
-        0x02, 0x01, 0x07,
-        // d = 103 = 0x67
-        0x02, 0x01, 0x67,
-        // p = 11 = 0x0b
-        0x02, 0x01, 0x0b,
-        // q = 13 = 0x0d
-        0x02, 0x01, 0x0d,
-        // dp = 3
-        0x02, 0x01, 0x03,
-        // dq = 7
-        0x02, 0x01, 0x07,
-        // qinv = 6
+        0x02, 0x01, 0x00, // n = 143 = 0x8f (needs leading 00 to be non-negative)
+        0x02, 0x02, 0x00, 0x8f, // e = 7
+        0x02, 0x01, 0x07, // d = 103 = 0x67
+        0x02, 0x01, 0x67, // p = 11 = 0x0b
+        0x02, 0x01, 0x0b, // q = 13 = 0x0d
+        0x02, 0x01, 0x0d, // dp = 3
+        0x02, 0x01, 0x03, // dq = 7
+        0x02, 0x01, 0x07, // qinv = 6
         0x02, 0x01, 0x06,
     ];
     // rsa_body.len() = 3+4+3+3+3+3+3+3+3 = 28 = 0x1c
@@ -466,7 +476,7 @@ fn test_13_parse_pkcs8_rsa_key() {
     // OCTET STRING
     der_vec.push(0x04);
     der_vec.push(octet_content_len as u8); // goishlint:ignore GOISH005
-    // inner RSAPrivateKey SEQUENCE
+                                           // inner RSAPrivateKey SEQUENCE
     der_vec.push(0x30);
     der_vec.push(rsa_seq_len);
     der_vec.extend_from_slice(rsa_body);

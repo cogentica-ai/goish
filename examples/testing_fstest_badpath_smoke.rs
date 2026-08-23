@@ -25,7 +25,7 @@ extern crate goish;
 use alloc::sync::Arc;
 use goish::gostring::string;
 use goish::io::fs;
-use goish::testing::fstest::{fsTester, MapFile, MapFS};
+use goish::testing::fstest::{fsTester, MapFS, MapFile};
 use goish::{errors, fmt, slice, syscall};
 
 fn s(x: &str) -> string {
@@ -53,7 +53,10 @@ fn main() {
         if t.Errors().Len() == 0 {
             fmt::Println!("[ 1] conforming FS is silent   PASS");
         } else {
-            fmt::Println!("[ 1] conforming FS is silent   FAIL ", t.Errors()[0].Error());
+            fmt::Println!(
+                "[ 1] conforming FS is silent   FAIL ",
+                t.Errors()[0].Error()
+            );
             failed += 1;
         }
     }
@@ -74,7 +77,10 @@ fn main() {
         if t.Errors().Len() == 10 {
             fmt::Println!("[ 2] lenient FS is caught      PASS");
         } else {
-            fmt::Println!("[ 2] lenient FS is caught      FAIL got ", t.Errors().Len() as i64);
+            fmt::Println!(
+                "[ 2] lenient FS is caught      FAIL got ",
+                t.Errors().Len() as i64
+            );
             failed += 1;
         }
     }
@@ -89,7 +95,10 @@ fn main() {
         if t.Errors().Len() == 2 {
             fmt::Println!("[ 3] no-slash path: 2 forms    PASS");
         } else {
-            fmt::Println!("[ 3] no-slash path: 2 forms    FAIL got ", t.Errors().Len() as i64);
+            fmt::Println!(
+                "[ 3] no-slash path: 2 forms    FAIL got ",
+                t.Errors().Len() as i64
+            );
             failed += 1;
         }
     }
@@ -104,7 +113,10 @@ fn main() {
         if t.Errors().Len() == 3 {
             fmt::Println!("[ 4] root adds the / form      PASS");
         } else {
-            fmt::Println!("[ 4] root adds the / form      FAIL got ", t.Errors().Len() as i64);
+            fmt::Println!(
+                "[ 4] root adds the / form      FAIL got ",
+                t.Errors().Len() as i64
+            );
             failed += 1;
         }
     }

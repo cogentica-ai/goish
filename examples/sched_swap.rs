@@ -101,12 +101,18 @@ fn main() {
         swap_context(&mut main_buf, &a_buf);
     }
     check(COUNTER_A.load(Ordering::Relaxed) == 1, b"A first entry\n");
-    check(COUNTER_B.load(Ordering::Relaxed) == 0, b"B should not have run\n");
+    check(
+        COUNTER_B.load(Ordering::Relaxed) == 0,
+        b"B should not have run\n",
+    );
 
     unsafe {
         swap_context(&mut main_buf, &b_buf);
     }
-    check(COUNTER_A.load(Ordering::Relaxed) == 1, b"A should not advance\n");
+    check(
+        COUNTER_A.load(Ordering::Relaxed) == 1,
+        b"A should not advance\n",
+    );
     check(COUNTER_B.load(Ordering::Relaxed) == 1, b"B first entry\n");
 
     // ─── Many rounds of ping-pong ──────────────────────────────────

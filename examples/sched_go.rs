@@ -15,7 +15,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::go;
 use goish::runtime::sched::{schedule, Gosched};
-use goish::{syscall};
+use goish::syscall;
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -80,9 +80,7 @@ fn main() {
             // lines simultaneously; a plain load/store pair loses one
             // marker (lost update) and the count-==-9 check fails.
             let _ = INTERLEAVE_LOG
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
-                    Some((v << 2) | 1)
-                });
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some((v << 2) | 1));
             Gosched();
         }
     });
@@ -92,9 +90,7 @@ fn main() {
             // lines simultaneously; a plain load/store pair loses one
             // marker (lost update) and the count-==-9 check fails.
             let _ = INTERLEAVE_LOG
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
-                    Some((v << 2) | 2)
-                });
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some((v << 2) | 2));
             Gosched();
         }
     });
@@ -104,9 +100,7 @@ fn main() {
             // lines simultaneously; a plain load/store pair loses one
             // marker (lost update) and the count-==-9 check fails.
             let _ = INTERLEAVE_LOG
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
-                    Some((v << 2) | 3)
-                });
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some((v << 2) | 3));
             Gosched();
         }
     });

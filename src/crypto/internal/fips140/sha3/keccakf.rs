@@ -47,11 +47,7 @@ const RC: [u64; 24] = [
 
 // Lane rotation offsets (FIPS 202 §3.2.2 Table 2).
 const RHO: [int; 25] = [
-    0, 1, 62, 28, 27,
-    36, 44, 6, 55, 20,
-    3, 10, 43, 25, 39,
-    41, 45, 15, 21, 8,
-    18, 2, 61, 56, 14,
+    0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14,
 ];
 
 // go: none — goish idiom: the lane-level core Go expresses as an
@@ -86,8 +82,7 @@ fn keccakF1600Lanes(a: &mut [u64; 25]) {
         while x < 5 {
             let mut y: usize = 0;
             while y < 5 {
-                b[((2 * x + 3 * y) % 5) * 5 + y] =
-                    bits::RotateLeft64(a[5 * y + x], RHO[5 * y + x]);
+                b[((2 * x + 3 * y) % 5) * 5 + y] = bits::RotateLeft64(a[5 * y + x], RHO[5 * y + x]);
                 y += 1;
             }
             x += 1;
@@ -153,7 +148,6 @@ fn lanesToBytes(a: &[u64; 25], b: &mut [byte; STATE_BYTES]) {
         i += 1;
     }
 }
-
 
 // go: sdk 1.25.5 crypto/internal/fips140/sha3/keccakf.go:43-431 keccakF1600Generic
 /// Go: `func keccakF1600Generic(da *[200]byte)`

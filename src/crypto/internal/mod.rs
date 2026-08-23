@@ -7,13 +7,13 @@
 #![allow(non_snake_case)]
 
 pub mod entropy;
+pub mod fips140;
+pub mod fips140cache;
+pub mod fips140deps;
+pub mod fips140hash;
+pub mod fips140only;
 pub mod hpke;
 #[path = "impl/mod.rs"]
 pub mod r#impl;
-pub mod fips140;
-pub mod fips140deps;
-pub mod fips140cache;
-pub mod fips140hash;
-pub mod fips140only;
 pub mod randutil;
 pub mod sysrand;

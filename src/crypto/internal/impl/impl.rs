@@ -53,11 +53,7 @@ static allImplementations: SpinLock<Vec<implementation>> = SpinLock::new(Vec::ne
 /// an implicit base implementation that is selected when all alternatives
 /// are unavailable or disabled. pkg must be the package name, not path
 /// (e.g. "aes" not "crypto/aes").
-pub fn Register<P: Into<string>, N: Into<string>>(
-    pkg: P,
-    name: N,
-    available: &'static AtomicBool,
-) {
+pub fn Register<P: Into<string>, N: Into<string>>(pkg: P, name: N, available: &'static AtomicBool) {
     let pkg = pkg.into();
     if strings::Contains(&pkg, "/") {
         panic!("impl: package name must not contain slashes");

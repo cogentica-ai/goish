@@ -26,11 +26,7 @@ fn ascii_upper(s: string) -> string {
     let n = len(&bs);
     while i < n {
         let b = bs[i];
-        out[i] = if b >= b'a' && b <= b'z' {
-            b - 32
-        } else {
-            b
-        };
+        out[i] = if b >= b'a' && b <= b'z' { b - 32 } else { b };
         i += 1;
     }
     goish::string(out)

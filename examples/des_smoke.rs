@@ -26,9 +26,9 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::crypto::cipher::Block;
 use goish::crypto::des;
+use goish::fmt;
 use goish::types::byte;
 use goish::{slice, syscall};
 

@@ -42,7 +42,9 @@ fn main() {
     {
         let (base, _) = ParseURL(string("http://example.com/a/b/"));
         let (resolved, e) = base.Parse(string("https://other.test/x"));
-        if e.IsNil() && resolved.Scheme == "https" && resolved.Host == "other.test"
+        if e.IsNil()
+            && resolved.Scheme == "https"
+            && resolved.Host == "other.test"
             && resolved.Path == "/x"
         {
             fmt::Println!("[ 2] URL.Parse absolute        PASS");

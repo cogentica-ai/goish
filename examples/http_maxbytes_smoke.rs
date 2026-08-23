@@ -29,7 +29,9 @@ use goish::{errors, fmt, slice, string, syscall, types::int};
 
 /// Drive reads until an error, returning "n,n,...|err".
 fn drive(body: &'static str, limit: int, bufSize: int) -> string {
-    let mut r = http::MaxBytesReader(None, goish::bytes::NewReader(slice::<u8>::__from_vec(body.as_bytes().to_vec())),
+    let mut r = http::MaxBytesReader(
+        None,
+        goish::bytes::NewReader(slice::<u8>::__from_vec(body.as_bytes().to_vec())),
         limit,
     );
     let mut out = string::new();

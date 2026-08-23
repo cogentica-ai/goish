@@ -37,8 +37,8 @@ pub use attr::{argsToAttrSlice, Any, Group};
 pub use handler::{LevelKey, MessageKey, SourceKey, TimeKey};
 pub use record::{argsToAttr, badKey};
 pub use value::{
-    countEmptyGroups, isEmptyGroup, maxLogValues, AnyValue, GroupValue, LogValuer,
-    LogValuerBox, LogValuerValue, Resolve,
+    countEmptyGroups, isEmptyGroup, maxLogValues, AnyValue, GroupValue, LogValuer, LogValuerBox,
+    LogValuerValue, Resolve,
 };
 
 extern crate alloc;
@@ -171,7 +171,6 @@ pub fn Bool<S: Into<string>>(key: S, val: bool) -> Attr {
         },
     }
 }
-
 
 // ─── Record ─────────────────────────────────────────────────────────
 

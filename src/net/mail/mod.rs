@@ -21,8 +21,8 @@ use alloc::vec::Vec;
 
 use crate::bufio;
 use crate::errors::{self, error, nil};
-use crate::goslice::slice;
 use crate::gomap::map;
+use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
 use crate::net::textproto;
@@ -80,9 +80,7 @@ pub fn ReadMessage<R: io::Reader + 'static>(r: R) -> (Option<Message>, error) {
 // "Like textproto.ReadMIMEHeader but doesn't validate" — RFC 5322
 // permits non-ASCII bytes in header values (RFC 6532), and net/mail
 // does not enforce RFC 7230's restrictions.
-fn readHeader<R: io::Reader>(
-    r: &mut textproto::Reader<R>,
-) -> (map<string, slice<string>>, error) {
+fn readHeader<R: io::Reader>(r: &mut textproto::Reader<R>) -> (map<string, slice<string>>, error) {
     // Go: m := make(map[string][]string)
     let mut m: map<string, slice<string>> = map::new();
 

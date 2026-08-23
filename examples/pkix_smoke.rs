@@ -63,7 +63,12 @@ fn checkStr(got: goish::string, want: &'static str, label: &'static str) {
         fmt::Printf!("PASS: %s\n", string(label));
     } else {
         FAILED.fetch_add(1, Ordering::AcqRel);
-        fmt::Printf!("FAIL: %s\n  got  %q\n  want %q\n", string(label), got, string(want));
+        fmt::Printf!(
+            "FAIL: %s\n  got  %q\n  want %q\n",
+            string(label),
+            got,
+            string(want)
+        );
     }
 }
 
@@ -137,16 +142,28 @@ fn main() {
 
     // Order and grouping, straight from the Go reference.
     check(eq(at(&rdns, 0, 0), "2.5.4.6", "US"), "rdn[0][0] C=US");
-    check(eq(at(&rdns, 0, 1), "2.5.4.6", "GB"), "rdn[0][1] C=GB (one multi-entry RDN)");
+    check(
+        eq(at(&rdns, 0, 1), "2.5.4.6", "GB"),
+        "rdn[0][1] C=GB (one multi-entry RDN)",
+    );
     check(eq(at(&rdns, 1, 0), "2.5.4.8", "CA"), "rdn[1] ST=CA");
-    check(eq(at(&rdns, 2, 0), "2.5.4.7", "Springfield"), "rdn[2] L=Springfield");
+    check(
+        eq(at(&rdns, 2, 0), "2.5.4.7", "Springfield"),
+        "rdn[2] L=Springfield",
+    );
     check(eq(at(&rdns, 3, 0), "2.5.4.9", "1 Main St"), "rdn[3] STREET");
-    check(eq(at(&rdns, 4, 0), "2.5.4.17", "12345"), "rdn[4] POSTALCODE");
+    check(
+        eq(at(&rdns, 4, 0), "2.5.4.17", "12345"),
+        "rdn[4] POSTALCODE",
+    );
     check(eq(at(&rdns, 5, 0), "2.5.4.10", "Acme"), "rdn[5] O=Acme");
     check(eq(at(&rdns, 6, 0), "2.5.4.11", "Eng"), "rdn[6][0] OU=Eng");
     check(eq(at(&rdns, 6, 1), "2.5.4.11", "Ops"), "rdn[6][1] OU=Ops");
     check(eq(at(&rdns, 7, 0), "2.5.4.3", "example.com"), "rdn[7] CN");
-    check(eq(at(&rdns, 8, 0), "2.5.4.5", "SN-1"), "rdn[8] SERIALNUMBER");
+    check(
+        eq(at(&rdns, 8, 0), "2.5.4.5", "SN-1"),
+        "rdn[8] SERIALNUMBER",
+    );
 
     // Round-trip back into a Name.
     let mut back = Name::default();
@@ -162,14 +179,35 @@ fn main() {
         "FillFromRDNSequence OU=[Eng Ops]",
     );
     check(back.Organization.Len() == 1, "FillFromRDNSequence O=[Acme]");
-    check(back.Locality[0].as_bytes() == b"Springfield", "FillFromRDNSequence L");
-    check(back.Province[0].as_bytes() == b"CA", "FillFromRDNSequence ST");
-    check(back.StreetAddress[0].as_bytes() == b"1 Main St", "FillFromRDNSequence STREET");
-    check(back.PostalCode[0].as_bytes() == b"12345", "FillFromRDNSequence POSTALCODE");
-    check(back.CommonName.as_bytes() == b"example.com", "FillFromRDNSequence CN");
-    check(back.SerialNumber.as_bytes() == b"SN-1", "FillFromRDNSequence SERIALNUMBER");
+    check(
+        back.Locality[0].as_bytes() == b"Springfield",
+        "FillFromRDNSequence L",
+    );
+    check(
+        back.Province[0].as_bytes() == b"CA",
+        "FillFromRDNSequence ST",
+    );
+    check(
+        back.StreetAddress[0].as_bytes() == b"1 Main St",
+        "FillFromRDNSequence STREET",
+    );
+    check(
+        back.PostalCode[0].as_bytes() == b"12345",
+        "FillFromRDNSequence POSTALCODE",
+    );
+    check(
+        back.CommonName.as_bytes() == b"example.com",
+        "FillFromRDNSequence CN",
+    );
+    check(
+        back.SerialNumber.as_bytes() == b"SN-1",
+        "FillFromRDNSequence SERIALNUMBER",
+    );
     // Go: back.Names len=11 — every attribute, flattened, grouping lost.
-    check(back.Names.Len() == 11, "FillFromRDNSequence Names has all 11 flattened");
+    check(
+        back.Names.Len() == 11,
+        "FillFromRDNSequence Names has all 11 flattened",
+    );
 
     // An ExtraNames entry suppresses the standard field with the same OID.
     // Go emits ONE RDN here, not two.
@@ -183,7 +221,10 @@ fn main() {
         ..Default::default()
     };
     let r2 = n2.ToRDNSequence();
-    check(r2.0.Len() == 1, "ExtraNames suppresses the standard Country RDN");
+    check(
+        r2.0.Len() == 1,
+        "ExtraNames suppresses the standard Country RDN",
+    );
     check(eq(at(&r2, 0, 0), "2.5.4.6", "ZZ"), "ExtraNames value wins");
 
     // ── RDNSequence.String / Name.String ────────────────────────────
@@ -204,17 +245,41 @@ fn main() {
     );
 
     // The nine short names, one per attribute type.
-    checkStr(one(oid(&[2, 5, 4, 6]), Any::new(string("v"))).String(), "C=v", "shortname C");
-    checkStr(one(oid(&[2, 5, 4, 10]), Any::new(string("v"))).String(), "O=v", "shortname O");
-    checkStr(one(oid(&[2, 5, 4, 11]), Any::new(string("v"))).String(), "OU=v", "shortname OU");
-    checkStr(one(oid(&[2, 5, 4, 3]), Any::new(string("v"))).String(), "CN=v", "shortname CN");
+    checkStr(
+        one(oid(&[2, 5, 4, 6]), Any::new(string("v"))).String(),
+        "C=v",
+        "shortname C",
+    );
+    checkStr(
+        one(oid(&[2, 5, 4, 10]), Any::new(string("v"))).String(),
+        "O=v",
+        "shortname O",
+    );
+    checkStr(
+        one(oid(&[2, 5, 4, 11]), Any::new(string("v"))).String(),
+        "OU=v",
+        "shortname OU",
+    );
+    checkStr(
+        one(oid(&[2, 5, 4, 3]), Any::new(string("v"))).String(),
+        "CN=v",
+        "shortname CN",
+    );
     checkStr(
         one(oid(&[2, 5, 4, 5]), Any::new(string("v"))).String(),
         "SERIALNUMBER=v",
         "shortname SERIALNUMBER",
     );
-    checkStr(one(oid(&[2, 5, 4, 7]), Any::new(string("v"))).String(), "L=v", "shortname L");
-    checkStr(one(oid(&[2, 5, 4, 8]), Any::new(string("v"))).String(), "ST=v", "shortname ST");
+    checkStr(
+        one(oid(&[2, 5, 4, 7]), Any::new(string("v"))).String(),
+        "L=v",
+        "shortname L",
+    );
+    checkStr(
+        one(oid(&[2, 5, 4, 8]), Any::new(string("v"))).String(),
+        "ST=v",
+        "shortname ST",
+    );
     checkStr(
         one(oid(&[2, 5, 4, 9]), Any::new(string("v"))).String(),
         "STREET=v",
@@ -309,9 +374,15 @@ fn main() {
 
     // A reflectable Any round-trips through the bridge.
     let (sv, sok) = reflect::ValueOfAny(&Any::new(string("hi")));
-    check(sok && sv.String().as_bytes() == b"hi", "ValueOfAny(string) -> Value::String");
+    check(
+        sok && sv.String().as_bytes() == b"hi",
+        "ValueOfAny(string) -> Value::String",
+    );
     let (tv2, tok2) = reflect::TypeOfAny(&Any::new(42_i64));
-    check(tok2 && tv2.Kind() == reflect::Kind::Int, "TypeOfAny(int64) -> Kind::Int");
+    check(
+        tok2 && tv2.Kind() == reflect::Kind::Int,
+        "TypeOfAny(int64) -> Kind::Int",
+    );
 
     // ── RFC 2253 escaping, every rule ───────────────────────────────
     checkStr(cn("a,b"), "CN=a\\,b", "escape ,");
@@ -321,19 +392,35 @@ fn main() {
     checkStr(cn("a<b"), "CN=a\\<b", "escape <");
     checkStr(cn("a>b"), "CN=a\\>b", "escape >");
     checkStr(cn("a;b"), "CN=a\\;b", "escape ;");
-    checkStr(cn(",+\"\\<>;"), "CN=\\,\\+\\\"\\\\\\<\\>\\;", "escape all seven at once");
+    checkStr(
+        cn(",+\"\\<>;"),
+        "CN=\\,\\+\\\"\\\\\\<\\>\\;",
+        "escape all seven at once",
+    );
     checkStr(cn(" ab"), "CN=\\ ab", "escape leading space");
     checkStr(cn("ab "), "CN=ab\\ ", "escape trailing space");
     checkStr(cn(" ab "), "CN=\\ ab\\ ", "escape both spaces");
     checkStr(cn("a b"), "CN=a b", "inner space NOT escaped");
-    checkStr(cn(" "), "CN=\\ ", "a lone space is both leading and trailing");
+    checkStr(
+        cn(" "),
+        "CN=\\ ",
+        "a lone space is both leading and trailing",
+    );
     checkStr(cn(""), "CN=", "empty value");
     checkStr(cn("#ab"), "CN=\\#ab", "escape leading #");
     checkStr(cn("a#b"), "CN=a#b", "inner # NOT escaped");
     // k is a BYTE offset and Len() a BYTE length, exactly as in Go, so
     // the trailing-space test still fires after a two-byte rune.
-    checkStr(cn("é "), "CN=é\\ ", "trailing space after a multi-byte rune");
-    checkStr(cn(" é"), "CN=\\ é", "leading space before a multi-byte rune");
+    checkStr(
+        cn("é "),
+        "CN=é\\ ",
+        "trailing space after a multi-byte rune",
+    );
+    checkStr(
+        cn(" é"),
+        "CN=\\ é",
+        "leading space before a multi-byte rune",
+    );
     checkStr(cn("héllo"), "CN=héllo", "multi-byte runes pass through");
 
     // ── separators: RDNs REVERSED and joined by ',', entries within
@@ -366,8 +453,16 @@ fn main() {
         RelativeDistinguishedNameSET(slice::default()),
         RelativeDistinguishedNameSET(slice::__from_vec(alloc::vec![mk(&[2, 5, 4, 3], "cn")])),
     ]));
-    checkStr(withEmpty.String(), "CN=cn,,C=US", "an empty RDN still emits its separator");
-    checkStr(RDNSequence::default().String(), "", "the empty sequence is the empty string");
+    checkStr(
+        withEmpty.String(),
+        "CN=cn,,C=US",
+        "an empty RDN still emits its separator",
+    );
+    checkStr(
+        RDNSequence::default().String(),
+        "",
+        "the empty sequence is the empty string",
+    );
 
     // ── Name.String's Names branch (Go issue 39924) ─────────────────
     //
@@ -393,9 +488,17 @@ fn main() {
     // ExtraNames present suppresses the Names branch entirely.
     let mut n4 = n3.clone();
     n4.ExtraNames = slice::__from_vec(alloc::vec![mk(&[2, 5, 4, 6], "ZZ")]);
-    checkStr(n4.String(), "C=ZZ,CN=cn", "ExtraNames suppresses the Names branch");
+    checkStr(
+        n4.String(),
+        "C=ZZ,CN=cn",
+        "ExtraNames suppresses the Names branch",
+    );
 
-    checkStr(Name::default().String(), "", "the zero Name is the empty string");
+    checkStr(
+        Name::default().String(),
+        "",
+        "the zero Name is the empty string",
+    );
 
     let failed = FAILED.load(Ordering::Acquire);
     let ran = RAN.load(Ordering::Acquire);

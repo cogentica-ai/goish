@@ -8,8 +8,8 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::boxed::Box;
-use goish::fmt;
 use goish::bytes;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::io::{self, Reader, Writer};
 use goish::strings;
@@ -107,17 +107,24 @@ fn main() {
 
         let eof = io::EOF;
         // First two reads should yield 2 bytes each, third should be EOF.
-        if n1 == 2 && e1.IsNil()
-            && n2 == 2 && (e2.IsNil() || e2 == eof.clone())
-            && n3 == 0 && e3 == eof
-            && p1[0] == b'a' && p1[1] == b'b'
-            && p2[0] == b'c' && p2[1] == b'd'
+        if n1 == 2
+            && e1.IsNil()
+            && n2 == 2
+            && (e2.IsNil() || e2 == eof.clone())
+            && n3 == 0
+            && e3 == eof
+            && p1[0] == b'a'
+            && p1[1] == b'b'
+            && p2[0] == b'c'
+            && p2[1] == b'd'
         {
             fmt::Println!("[ 5] MultiReader boundaries    PASS");
         } else {
             fmt::Println!(
                 "[ 5] MultiReader boundaries    FAIL n1={} n2={} n3={}",
-                n1, n2, n3
+                n1,
+                n2,
+                n3
             );
             failed += 1;
         }

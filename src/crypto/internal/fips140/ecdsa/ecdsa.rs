@@ -37,18 +37,19 @@ use crate::crypto::internal::fips140;
 use crate::crypto::internal::fips140::bigmod::{Modulus, Nat};
 use crate::crypto::internal::fips140::drbg;
 use crate::crypto::internal::fips140::nistec;
+use crate::error;
 use crate::errors;
 use crate::goslice::slice;
 use crate::hash::IntoHashFunc;
 use crate::io;
 use crate::lazy::Lazy;
 use crate::types::{byte, int};
-use crate::error;
 
 use super::cast::{fipsPCT, fipsSelfTest, fipsSelfTestDeterministic};
 use super::ecdsa_noasm::{sign, verify};
-use super::hmacdrbg::{hmacDRBG, newDRBG, personalizationString,
-                      blockAlignedPersonalizationString};
+use super::hmacdrbg::{
+    blockAlignedPersonalizationString, hmacDRBG, newDRBG, personalizationString,
+};
 
 // PrivateKey and PublicKey are not generic to make it possible to use them
 // in other types without instantiating them with a specific point type.
@@ -487,9 +488,9 @@ pub fn Sign<P: Point>(
         h,
         &Z,
         &empty(),
-        personalizationString::blockAligned(blockAlignedPersonalizationString(
-            slice::__from_vec(alloc::vec![priv_.d.clone(), bits2octets(c, hash)]),
-        )),
+        personalizationString::blockAligned(blockAlignedPersonalizationString(slice::__from_vec(
+            alloc::vec![priv_.d.clone(), bits2octets(c, hash)],
+        ))),
     );
 
     return sign(c, priv_, &mut drbg, hash);
@@ -570,7 +571,10 @@ pub(super) fn signGeneric<P: Point>(
     // support is cryptographically negligible. If we hit it, something is
     // awfully wrong.
     if r.IsZero() == 1 {
-        return (zeroSignature(), errors::New("ecdsa: internal error: r is zero"));
+        return (
+            zeroSignature(),
+            errors::New("ecdsa: internal error: r is zero"),
+        );
     }
 
     let mut e = Nat::NewNat();
@@ -587,7 +591,10 @@ pub(super) fn signGeneric<P: Point>(
 
     // Again, the chance of this happening is cryptographically negligible.
     if s.IsZero() == 1 {
-        return (zeroSignature(), errors::New("ecdsa: internal error: s is zero"));
+        return (
+            zeroSignature(),
+            errors::New("ecdsa: internal error: s is zero"),
+        );
     }
 
     return (

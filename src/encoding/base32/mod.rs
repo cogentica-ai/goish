@@ -259,7 +259,9 @@ impl Encoding {
                         return (
                             n_total,
                             false,
-                            Wrap(CorruptInputError { offset: olen as int }),
+                            Wrap(CorruptInputError {
+                                offset: olen as int,
+                            }),
                         );
                     }
                     let mut k = 0;

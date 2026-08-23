@@ -26,10 +26,10 @@ extern crate goish;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::fmt;
+use goish::net::http::request::{newTextprotoReader, putTextprotoReader};
 use goish::net::http::server::{
     bufioWriterPool, newBufioReader, newBufioWriterSize, putBufioReader, putBufioWriter,
 };
-use goish::net::http::request::{newTextprotoReader, putTextprotoReader};
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
@@ -68,7 +68,10 @@ fn run() -> ! {
 
         let mut br2 = newBufioReader(goish::bytes::NewReader(goish::bytes("hello")));
         let p2 = br2.__buf_ptr();
-        check("putBufioReader → newBufioReader reuses the buffer", p1 == p2);
+        check(
+            "putBufioReader → newBufioReader reuses the buffer",
+            p1 == p2,
+        );
         let mut out = goish::make!([]goish::byte, 5);
         let (n, _) = goish::io::Reader::Read(&mut br2, &mut out);
         check(
@@ -82,7 +85,10 @@ fn run() -> ! {
     {
         let mut bw2k = newBufioWriterSize(SinkWriter, 2048);
         let bw4k = newBufioWriterSize(SinkWriter, 4096);
-        check("2k and 4k report their sizes", bw2k.Size() == 2048 && bw4k.Size() == 4096);
+        check(
+            "2k and 4k report their sizes",
+            bw2k.Size() == 2048 && bw4k.Size() == 4096,
+        );
         // Leave unflushed bytes in the 2k writer on purpose.
         let _ = bw2k.Write(goish::bytes("UNFLUSHED"));
         let p2k = bw2k.__buf_ptr();
@@ -103,7 +109,10 @@ fn run() -> ! {
 
         // Nonstandard size: no pool. Its buffer must NOT come back.
         let bw3k = newBufioWriterSize(SinkWriter, 3072);
-        check("bufioWriterPool(3072) is None", bufioWriterPool(3072).is_none());
+        check(
+            "bufioWriterPool(3072) is None",
+            bufioWriterPool(3072).is_none(),
+        );
         let p3k = bw3k.__buf_ptr();
         putBufioWriter(bw3k); // dropped, not pooled
         let bw2k_c = newBufioWriterSize(SinkWriter, 2048);

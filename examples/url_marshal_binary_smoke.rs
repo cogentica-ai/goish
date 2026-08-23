@@ -8,8 +8,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::convert;
+use goish::fmt;
 use goish::net::http::url;
 use goish::{make, string, syscall};
 

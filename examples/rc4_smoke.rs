@@ -12,10 +12,10 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::crypto::cipher::Stream;
 use goish::crypto::rc4;
 use goish::errors;
+use goish::fmt;
 use goish::{slice, syscall};
 
 #[goish::main]
@@ -26,9 +26,7 @@ fn main() {
     //    key      = 01 23 45 67 89 ab cd ef
     //    keystream = 74 94 c2 e7 10 4b 08 79 (XOR over 8 zero bytes)
     {
-        let key = slice::__from_vec(alloc::vec![
-            0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef
-        ]);
+        let key = slice::__from_vec(alloc::vec![0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef]);
         let want = alloc::vec![0x74, 0x94, 0xc2, 0xe7, 0x10, 0x4b, 0x08, 0x79];
         let (mut c, err) = rc4::NewCipher(key);
         if !err.IsNil() || c.is_none() {
@@ -77,9 +75,7 @@ fn main() {
     //    keystream = d6 a1 41 a7 ec 3c 38 df bd 61
     {
         let key = slice::__from_vec(alloc::vec![0xef, 0x01, 0x23, 0x45]);
-        let want = alloc::vec![
-            0xd6, 0xa1, 0x41, 0xa7, 0xec, 0x3c, 0x38, 0xdf, 0xbd, 0x61
-        ];
+        let want = alloc::vec![0xd6, 0xa1, 0x41, 0xa7, 0xec, 0x3c, 0x38, 0xdf, 0xbd, 0x61];
         let (mut c, err) = rc4::NewCipher(key);
         if !err.IsNil() || c.is_none() {
             fmt::Println!("[ 3] short key + 10-byte stream FAIL");
@@ -103,9 +99,7 @@ fn main() {
     //    keystream = eb 9f 77 81 b7 34 ca 72 a7 19
     {
         let key = slice::__from_vec(alloc::vec![0x4b, 0x65, 0x79]);
-        let want = alloc::vec![
-            0xeb, 0x9f, 0x77, 0x81, 0xb7, 0x34, 0xca, 0x72, 0xa7, 0x19
-        ];
+        let want = alloc::vec![0xeb, 0x9f, 0x77, 0x81, 0xb7, 0x34, 0xca, 0x72, 0xa7, 0x19];
         let (mut c, err) = rc4::NewCipher(key);
         if !err.IsNil() || c.is_none() {
             fmt::Println!("[ 4] Wikipedia 'Key' vector     FAIL");
@@ -152,9 +146,7 @@ fn main() {
     //    RC4 is symmetric: keystream is the same on both sides.
     {
         let key = slice::__from_vec(alloc::vec![b'k', b'e', b'y']);
-        let plain = alloc::vec![
-            b'h', b'e', b'l', b'l', b'o', b' ', b'w', b'o', b'r', b'l', b'd'
-        ];
+        let plain = alloc::vec![b'h', b'e', b'l', b'l', b'o', b' ', b'w', b'o', b'r', b'l', b'd'];
 
         let (mut c1, _) = rc4::NewCipher(key.clone());
         let mut enc = slice::__from_vec(alloc::vec![0u8; plain.len()]);
@@ -178,9 +170,7 @@ fn main() {
     //    must yield the same output as calling once for N.
     {
         let key = slice::__from_vec(alloc::vec![0x4b, 0x65, 0x79]);
-        let want_full = alloc::vec![
-            0xeb, 0x9f, 0x77, 0x81, 0xb7, 0x34, 0xca, 0x72, 0xa7, 0x19
-        ];
+        let want_full = alloc::vec![0xeb, 0x9f, 0x77, 0x81, 0xb7, 0x34, 0xca, 0x72, 0xa7, 0x19];
         let (mut c, _) = rc4::NewCipher(key);
         let cipher = c.as_mut().unwrap();
         let mut got: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(10);
@@ -281,9 +271,7 @@ fn main() {
     }
     {
         let key = slice::__from_vec(alloc::vec![0x4b, 0x65, 0x79]);
-        let want = alloc::vec![
-            0xeb, 0x9f, 0x77, 0x81, 0xb7, 0x34, 0xca, 0x72, 0xa7, 0x19
-        ];
+        let want = alloc::vec![0xeb, 0x9f, 0x77, 0x81, 0xb7, 0x34, 0xca, 0x72, 0xa7, 0x19];
         let (mut c, _) = rc4::NewCipher(key);
         let zeros = slice::__from_vec(alloc::vec![0u8; 10]);
         let out = xor_via_stream(c.as_mut().unwrap(), zeros);

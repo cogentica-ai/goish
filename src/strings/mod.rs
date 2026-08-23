@@ -46,10 +46,10 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use crate::error;
+use crate::errors::nil;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
-use crate::errors::nil;
 use crate::types::{byte, int, rune};
 use crate::unicode::utf8;
 
@@ -516,7 +516,11 @@ where
     // Compute final size: len(s) + n*(len(new) - len(old)).
     let delta = new_bytes.len() as int - old_bytes.len() as int;
     let cap_signed = s_bytes.len() as int + n * delta;
-    let cap_usize = if cap_signed > 0 { cap_signed as usize } else { 0 };
+    let cap_usize = if cap_signed > 0 {
+        cap_signed as usize
+    } else {
+        0
+    };
     let mut v: Vec<byte> = Vec::with_capacity(cap_usize);
 
     let mut start = 0usize;
@@ -608,7 +612,9 @@ pub fn EqualFold<S1: Into<string>, S2: Into<string>>(s: S1, t: S2) -> bool {
         let (sr, tr) = if tr < sr { (tr, sr) } else { (sr, tr) };
         if tr < 0x80 {
             // ASCII only: fold to lower and compare.
-            if (b'A' as rune..=b'Z' as rune).contains(&sr) && tr == sr + (b'a' as rune - b'A' as rune) {
+            if (b'A' as rune..=b'Z' as rune).contains(&sr)
+                && tr == sr + (b'a' as rune - b'A' as rune)
+            {
                 continue;
             }
             return false;
@@ -730,10 +736,7 @@ pub fn Cut<S1: Into<string>, S2: Into<string>>(s: S1, sep: S2) -> (string, strin
 
 /// `strings.CutPrefix(s, prefix)` — strip `prefix`, report whether it
 /// was present. Returns `(after, found)`.
-pub fn CutPrefix<S1: Into<string>, S2: Into<string>>(
-    s: S1,
-    prefix: S2,
-) -> (string, bool) {
+pub fn CutPrefix<S1: Into<string>, S2: Into<string>>(s: S1, prefix: S2) -> (string, bool) {
     let s = s.into();
     let prefix = prefix.into();
     if HasPrefix(s.clone(), prefix.clone()) {
@@ -743,10 +746,7 @@ pub fn CutPrefix<S1: Into<string>, S2: Into<string>>(
 }
 
 /// `strings.CutSuffix(s, suffix)` — strip `suffix`. Returns `(before, found)`.
-pub fn CutSuffix<S1: Into<string>, S2: Into<string>>(
-    s: S1,
-    suffix: S2,
-) -> (string, bool) {
+pub fn CutSuffix<S1: Into<string>, S2: Into<string>>(s: S1, suffix: S2) -> (string, bool) {
     let s = s.into();
     let suffix = suffix.into();
     if HasSuffix(s.clone(), suffix.clone()) {
@@ -1124,11 +1124,7 @@ pub fn SplitAfter<S1: Into<string>, S2: Into<string>>(s: S1, sep: S2) -> slice<s
 }
 
 /// `strings.SplitAfterN(s, sep, n)` — count-bounded `SplitAfter`.
-pub fn SplitAfterN<S1: Into<string>, S2: Into<string>>(
-    s: S1,
-    sep: S2,
-    n: int,
-) -> slice<string> {
+pub fn SplitAfterN<S1: Into<string>, S2: Into<string>>(s: S1, sep: S2, n: int) -> slice<string> {
     let s = s.into();
     let sep = sep.into();
     let mut out: alloc::vec::Vec<string> = alloc::vec::Vec::new();
@@ -1311,7 +1307,10 @@ impl Reader {
             return (0, crate::errors::New("strings.Reader.Seek: invalid whence"));
         };
         if abs < 0 {
-            return (0, crate::errors::New("strings.Reader.Seek: negative position"));
+            return (
+                0,
+                crate::errors::New("strings.Reader.Seek: negative position"),
+            );
         }
         self.i = abs as int;
         (abs, nil)
@@ -1320,7 +1319,10 @@ impl Reader {
     /// `(r *Reader).ReadAt(p, off)` (strings/reader.go:62) — slim port.
     pub fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
         if off < 0 {
-            return (0, crate::errors::New("strings.Reader.ReadAt: negative offset"));
+            return (
+                0,
+                crate::errors::New("strings.Reader.ReadAt: negative offset"),
+            );
         }
         if off >= self.s.Len() as i64 {
             return (0, io::EOF.into());
@@ -1437,8 +1439,7 @@ impl Replacer {
     pub fn Replace<S: Into<string>>(&self, s: S) -> string {
         let s = s.into();
         let bs = s.as_bytes();
-        let mut out: alloc::vec::Vec<u8> =
-            alloc::vec::Vec::with_capacity(bs.len());
+        let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(bs.len());
         let mut i: usize = 0;
         while i < bs.len() {
             let mut matched = false;
@@ -1562,9 +1563,8 @@ pub fn Lines<S: Into<string>>(s: S) -> impl crate::iter::Seq<string> {
 /// registries. Idempotent; called from `goish::init()`.
 pub fn register_strings_impls() {
     use crate::io::{
-        __goish_register_ReaderAt_impl, __goish_register_Reader_impl,
-        __goish_register_Seeker_impl, __goish_register_WriterTo_impl,
-        __goish_register_Writer_impl,
+        __goish_register_ReaderAt_impl, __goish_register_Reader_impl, __goish_register_Seeker_impl,
+        __goish_register_WriterTo_impl, __goish_register_Writer_impl,
     };
     __goish_register_Writer_impl::<Builder>();
     __goish_register_Reader_impl::<Reader>();

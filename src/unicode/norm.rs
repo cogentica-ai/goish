@@ -2,11 +2,8 @@
 // golang.org/x/text@v0.38.0 unicode/norm (the version typescript-go
 // pins). Goish stays dependency-free, so this is a port, not a wrap.
 //
-// Scope: **NFD only** (canonical decomposition + canonical ordering,
-// UAX #15). That is the only form typescript-go uses
-// (ls/lsutil/organizeimports.go removeDiacritics: `norm.NFD.String(s)`
-// then strip Mn). NFC/NFKC/NFKD need the composition/compatibility
-// tables and are not declared until something needs them.
+// Scope: NFD and NFC (canonical decomposition/ordering and canonical
+// composition, UAX #15). Compatibility normalization remains out of scope.
 //
 // Data: `norm_tables.rs` is generated from the real x/text v0.38.0 —
 // for every code point, its full recursive canonical decomposition
@@ -21,22 +18,26 @@
 // and the typescript-go loc corpora; byte-exact (see the
 // unicode_norm_smoke example for the embedded subset).
 
-use crate::gostring::string;
 use crate::goslice::slice;
+use crate::gostring::string;
 use crate::types::byte;
 
 use alloc::vec::Vec;
 
+#[path = "nfc_tables.rs"]
+mod nfc_tables;
 #[path = "norm_tables.rs"]
 mod tables;
 
 /// A Form denotes a canonical representation of Unicode code points.
-/// Mirrors x/text unicode/norm.Form. Only NFD is ported.
+/// Mirrors x/text unicode/norm.Form.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Form(u8);
 
 /// Canonical decomposition (UAX #15 Normalization Form D).
 pub const NFD: Form = Form(1);
+/// Canonical composition (UAX #15 Normalization Form C).
+pub const NFC: Form = Form(2);
 
 // Hangul decomposition constants (UAX #15 §3.12).
 const HANGUL_BASE: u32 = 0xAC00;
@@ -46,6 +47,8 @@ const JAMO_V_BASE: u32 = 0x1161;
 const JAMO_T_BASE: u32 = 0x11A7;
 const JAMO_V_COUNT: u32 = 21;
 const JAMO_T_COUNT: u32 = 28;
+const JAMO_L_COUNT: u32 = 19;
+const JAMO_N_COUNT: u32 = JAMO_V_COUNT * JAMO_T_COUNT;
 
 fn ccc(r: u32) -> u8 {
     match tables::CCC.binary_search_by_key(&r, |e| e.0) {
@@ -96,7 +99,7 @@ fn canonical_reorder(seq: &mut [(u32, u8)]) {
     }
 }
 
-fn nfd_bytes(src: &[u8]) -> Vec<u8> {
+fn nfd_sequence(src: &[u8]) -> Vec<(u32, u8)> {
     let mut seq: Vec<(u32, u8)> = Vec::with_capacity(src.len());
     // Decode UTF-8 the Go way: invalid bytes become U+FFFD.
     let mut i = 0;
@@ -106,24 +109,94 @@ fn nfd_bytes(src: &[u8]) -> Vec<u8> {
         i += size as usize;
     }
     canonical_reorder(&mut seq);
+    seq
+}
+
+fn sequence_bytes(seq: &[(u32, u8)]) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::with_capacity(seq.len() * 2);
     let mut buf = [0u8; 4];
-    for &(r, _) in &seq {
+    for &(r, _) in seq {
         let c = char::from_u32(r).unwrap_or('\u{FFFD}');
         out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
     }
     out
 }
 
+fn nfd_bytes(src: &[u8]) -> Vec<u8> {
+    sequence_bytes(&nfd_sequence(src))
+}
+
+fn compose_pair(first: u32, second: u32) -> Option<u32> {
+    if (JAMO_L_BASE..JAMO_L_BASE + JAMO_L_COUNT).contains(&first)
+        && (JAMO_V_BASE..JAMO_V_BASE + JAMO_V_COUNT).contains(&second)
+    {
+        return Some(
+            HANGUL_BASE
+                + (first - JAMO_L_BASE) * JAMO_N_COUNT
+                + (second - JAMO_V_BASE) * JAMO_T_COUNT,
+        );
+    }
+    if (HANGUL_BASE..HANGUL_END).contains(&first)
+        && (first - HANGUL_BASE).is_multiple_of(JAMO_T_COUNT)
+        && (JAMO_T_BASE + 1..JAMO_T_BASE + JAMO_T_COUNT).contains(&second)
+    {
+        return Some(first + second - JAMO_T_BASE);
+    }
+    nfc_tables::COMPOSE
+        .binary_search_by_key(&(first, second), |entry| entry.0)
+        .ok()
+        .map(|index| nfc_tables::COMPOSE[index].1)
+}
+
+fn nfc_bytes(src: &[u8]) -> Vec<u8> {
+    let decomposed = nfd_sequence(src);
+    let Some(&(first, _)) = decomposed.first() else {
+        return Vec::new();
+    };
+    let mut composed = Vec::with_capacity(decomposed.len());
+    composed.push((first, 0));
+    let mut starter_position = 0usize;
+    let mut starter = first;
+    let mut last_ccc = 0u8;
+    for &(character, class) in &decomposed[1..] {
+        let replacement = if last_ccc == 0 || last_ccc < class {
+            compose_pair(starter, character)
+        } else {
+            None
+        };
+        if let Some(replacement) = replacement {
+            composed[starter_position].0 = replacement;
+            starter = replacement;
+        } else {
+            if class == 0 {
+                starter_position = composed.len();
+                starter = character;
+            }
+            last_ccc = class;
+            composed.push((character, class));
+        }
+    }
+    sequence_bytes(&composed)
+}
+
 impl Form {
     /// String returns f(s) — the normalized form of s.
     pub fn String<S: Into<string>>(&self, s: S) -> string {
         let s = s.into();
-        string::from_bytes(&nfd_bytes(s.as_bytes()))
+        let normalized = if self.0 == NFC.0 {
+            nfc_bytes(s.as_bytes())
+        } else {
+            nfd_bytes(s.as_bytes())
+        };
+        string::from_bytes(&normalized)
     }
 
     /// Bytes returns f(b) — the normalized form of b.
     pub fn Bytes<B: AsRef<[byte]>>(&self, b: B) -> slice<byte> {
-        slice::__from_vec(nfd_bytes(b.as_ref()))
+        slice::__from_vec(if self.0 == NFC.0 {
+            nfc_bytes(b.as_ref())
+        } else {
+            nfd_bytes(b.as_ref())
+        })
     }
 }

@@ -118,8 +118,7 @@ fn main() {
     // 9. DecodeHeader: whitespace between two encoded-words is deleted.
     {
         let d = WordDecoder::new();
-        let (got, err) =
-            d.DecodeHeader(string("=?UTF-8?Q?Caf=C3=A9?= =?UTF-8?Q?_World?="));
+        let (got, err) = d.DecodeHeader(string("=?UTF-8?Q?Caf=C3=A9?= =?UTF-8?Q?_World?="));
         if err.IsNil() && got == string("Café World") {
             fmt::Println!("[ 9] DecodeHeader 2 words   PASS");
         } else {

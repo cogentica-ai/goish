@@ -24,8 +24,8 @@ extern crate goish;
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::errors::nil;
+use goish::fmt;
 use goish::gostring::string;
 use goish::runtime::sched::schedule;
 use goish::sync::singleflight::Group;
@@ -156,8 +156,7 @@ fn test_3_error_prop() {
 // 4. shared=false for lone call.
 fn test_4_shared_false_for_lone() {
     let g: Group<i64> = Group::new();
-    let (_v, _e, shared) =
-        g.Do(string::from_static("solo"), || (7i64, nil.clone()));
+    let (_v, _e, shared) = g.Do(string::from_static("solo"), || (7i64, nil.clone()));
     if !shared {
         ok(b"[ 4] shared=false for lone call  PASS\n");
     } else {

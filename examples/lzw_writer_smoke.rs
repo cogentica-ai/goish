@@ -27,11 +27,11 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
-use goish::error;
 use goish::bytes;
 use goish::compress::lzw::{self, LSB, MSB};
+use goish::error;
 use goish::errors;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::io;
 use goish::runtime::sched::schedule;

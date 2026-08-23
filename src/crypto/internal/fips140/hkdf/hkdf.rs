@@ -27,11 +27,7 @@ use crate::types::{byte, int};
 
 // go: sdk 1.25.5 crypto/internal/fips140/hkdf/hkdf.go:13-25 Extract
 /// `hkdf.Extract(h, secret, salt)` — the RFC 5869 extract step.
-pub fn Extract(
-    h: impl IntoHashFunc,
-    secret: slice<byte>,
-    salt: slice<byte>,
-) -> slice<byte> {
+pub fn Extract(h: impl IntoHashFunc, secret: slice<byte>, salt: slice<byte>) -> slice<byte> {
     let h = h.into_hash_func();
     // Go: if len(secret) < 112/8 { fips140.RecordNonApproved() } — no-op here.
     // Go: if salt == nil { salt = make([]byte, h().Size()) }

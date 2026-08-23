@@ -414,7 +414,10 @@ impl FromValue for string {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
             Value::String(s) => (s.clone(), nil),
-            _ => (string::new(), errors::New("json: cannot unmarshal into string")),
+            _ => (
+                string::new(),
+                errors::New("json: cannot unmarshal into string"),
+            ),
         }
     }
 }
@@ -596,7 +599,12 @@ pub fn Compact(dst: slice<byte>, src: slice<byte>) -> (slice<byte>, error) {
 /// Slim: parse to a `Value` then re-encode through the existing
 /// indent-aware encoder. Faithful for valid input; returns
 /// `(dst, ErrSyntax)` on parse error.
-pub fn Indent(dst: slice<byte>, src: slice<byte>, prefix: &str, indent: &str) -> (slice<byte>, error) {
+pub fn Indent(
+    dst: slice<byte>,
+    src: slice<byte>,
+    prefix: &str,
+    indent: &str,
+) -> (slice<byte>, error) {
     // Go: scan := newScanner(); ...
     //     b, err := appendIndent(b, src, prefix, indent)
     let bs: &[byte] = &src;
@@ -712,12 +720,7 @@ fn encode_reflect(out: &mut Vec<byte>, v: &reflect::Value) {
     }
 }
 
-fn encode_reflect_indent(
-    out: &mut Vec<byte>,
-    v: &reflect::Value,
-    cfg: &IndentCfg,
-    depth: usize,
-) {
+fn encode_reflect_indent(out: &mut Vec<byte>, v: &reflect::Value, cfg: &IndentCfg, depth: usize) {
     use reflect::Kind as K;
     match v.Kind() {
         K::Slice => {
@@ -751,8 +754,14 @@ fn encode_map(out: &mut Vec<byte>, v: &reflect::Value, cfg: Option<&IndentCfg>, 
     }
     // Go's encoding/json marshals map keys in sorted order.
     keys.sort_by(|a, b| {
-        let as_ = match a { reflect::Value::String(s) => s.as_bytes(), _ => b"" };
-        let bs = match b { reflect::Value::String(s) => s.as_bytes(), _ => b"" };
+        let as_ = match a {
+            reflect::Value::String(s) => s.as_bytes(),
+            _ => b"",
+        };
+        let bs = match b {
+            reflect::Value::String(s) => s.as_bytes(),
+            _ => b"",
+        };
         as_.cmp(bs)
     });
     out.push(b'{');
@@ -950,7 +959,12 @@ fn encode_array(out: &mut Vec<byte>, a: &slice<Value>, cfg: Option<&IndentCfg>, 
     out.push(b']');
 }
 
-fn encode_object(out: &mut Vec<byte>, o: &map<string, Value>, cfg: Option<&IndentCfg>, depth: usize) {
+fn encode_object(
+    out: &mut Vec<byte>,
+    o: &map<string, Value>,
+    cfg: Option<&IndentCfg>,
+    depth: usize,
+) {
     if o.Len() == 0 {
         out.extend_from_slice(b"{}");
         return;
@@ -1362,11 +1376,13 @@ impl<W: io::Writer> Encoder<W> {
         self.prefix.clear();
         // SAFETY: `string` carries valid UTF-8 by construction.
         unsafe {
-            self.prefix
-                .push_str(core::str::from_utf8_unchecked(crate::gostring::__crate_as_bytes(prefix)));
+            self.prefix.push_str(core::str::from_utf8_unchecked(
+                crate::gostring::__crate_as_bytes(prefix),
+            ));
             self.indent.clear();
-            self.indent
-                .push_str(core::str::from_utf8_unchecked(crate::gostring::__crate_as_bytes(indent)));
+            self.indent.push_str(core::str::from_utf8_unchecked(
+                crate::gostring::__crate_as_bytes(indent),
+            ));
         }
     }
 
@@ -1526,7 +1542,8 @@ impl Decoder {
                     return (Token::Delim(Delim(b'[')), nil);
                 }
                 b']' => {
-                    if self.token_state != TOKEN_ARRAY_START && self.token_state != TOKEN_ARRAY_COMMA
+                    if self.token_state != TOKEN_ARRAY_START
+                        && self.token_state != TOKEN_ARRAY_COMMA
                     {
                         return self.token_error(c);
                     }
@@ -1681,7 +1698,9 @@ impl Decoder {
                 "json: invalid character: looking for beginning of value"
             }
             TOKEN_ARRAY_COMMA => "json: invalid character: after array element",
-            TOKEN_OBJECT_KEY => "json: invalid character: looking for beginning of object key string",
+            TOKEN_OBJECT_KEY => {
+                "json: invalid character: looking for beginning of object key string"
+            }
             TOKEN_OBJECT_COLON => "json: invalid character: after object key",
             TOKEN_OBJECT_COMMA => "json: invalid character: after object key:value pair",
             _ => "json: invalid character",

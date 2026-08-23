@@ -28,10 +28,10 @@ use alloc::string::String as RustString;
 use alloc::sync::Arc;
 use goish::goslice::slice;
 use goish::io::fs::{self, FileMode, ModeDir, ModeSymlink};
-use goish::testing::fstest::{MapFile, MapFS};
+use goish::testing::fstest::{MapFS, MapFile};
 use goish::time;
 use goish::types::byte;
-use goish::{errors, syscall, string};
+use goish::{errors, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -60,21 +60,25 @@ fn main() {
     m.0.Set("a/b.txt", mf("", FileMode(0o666)));
     m.0.Set(".", mf("", FileMode(0o777 | ModeDir.0)));
     let buf = goish::runtime::spin::SpinLock::new(RustString::new());
-    let err = fs::WalkDir(&m, ".", |path: string, d: &(dyn fs::DirEntry + Send + Sync + 'static), err: goish::error| {
-        if err != errors::nil {
-            return err;
-        }
-        let (fi, err) = d.Info();
-        if err != errors::nil {
-            return err;
-        }
-        let mut g = buf.lock();
-        g.push_str(core::str::from_utf8(path.as_bytes()).unwrap());
-        g.push_str(": ");
-        g.push_str(core::str::from_utf8(fi.Mode().String().as_bytes()).unwrap());
-        g.push('\n');
-        errors::nil
-    });
+    let err = fs::WalkDir(
+        &m,
+        ".",
+        |path: string, d: &(dyn fs::DirEntry + Send + Sync + 'static), err: goish::error| {
+            if err != errors::nil {
+                return err;
+            }
+            let (fi, err) = d.Info();
+            if err != errors::nil {
+                return err;
+            }
+            let mut g = buf.lock();
+            g.push_str(core::str::from_utf8(path.as_bytes()).unwrap());
+            g.push_str(": ");
+            g.push_str(core::str::from_utf8(fi.Mode().String().as_bytes()).unwrap());
+            g.push('\n');
+            errors::nil
+        },
+    );
     check(err == errors::nil, b"chmoddot: walk error\n");
     // Go want: ".: drwxrwxrwx\na: dr-xr-xr-x\na/b.txt: -rw-rw-rw-\n"
     check(
@@ -87,7 +91,10 @@ fn main() {
     m.0.Set("path/to/b.txt", mf("", FileMode(0)));
     let (info, err) = m.Stat("path/to/b.txt");
     check(err == errors::nil, b"fileinfoname: stat error\n");
-    check(info.Name().as_bytes() == b"b.txt", b"fileinfoname: want b.txt\n");
+    check(
+        info.Name().as_bytes() == b"b.txt",
+        b"fileinfoname: want b.txt\n",
+    );
 
     // ─── TestMapFSSymlink (mapfs_test.go:61) ───────────────────────
     let file_content = "If a program is too slow, it must have a loop.\n";
@@ -99,10 +106,16 @@ fn main() {
     // Go: fs.ReadFile(m, "ken.txt") == fileContent (via two symlinks)
     let (got, err) = fs::ReadFile(&m, "ken.txt");
     check(err == errors::nil, b"symlink: readfile error\n");
-    check(got.as_ref() == file_content.as_bytes(), b"symlink: content mismatch\n");
+    check(
+        got.as_ref() == file_content.as_bytes(),
+        b"symlink: content mismatch\n",
+    );
     // Go: fs.ReadLink(m, "dirlink") == "fortune/k"
     let (target, err) = m.ReadLink("dirlink");
-    check(err == errors::nil && target.as_bytes() == b"fortune/k", b"symlink: readlink\n");
+    check(
+        err == errors::nil && target.as_bytes() == b"fortune/k",
+        b"symlink: readlink\n",
+    );
     // Go: fs.Lstat sees the symlink itself.
     let (li, err) = m.Lstat("linklink");
     check(
@@ -111,7 +124,10 @@ fn main() {
     );
     // Read through linklink (symlink -> symlink -> dir).
     let (got2, err) = fs::ReadFile(&m, "linklink/ken.txt");
-    check(err == errors::nil && got2.as_ref() == file_content.as_bytes(), b"symlink: linklink read\n");
+    check(
+        err == errors::nil && got2.as_ref() == file_content.as_bytes(),
+        b"symlink: linklink read\n",
+    );
 
     // ─── TestMapFS shape (mapfs_test.go:14) ────────────────────────
     let mut m = MapFS::new();
@@ -119,7 +135,10 @@ fn main() {
     m.0.Set("fortune/k/ken.txt", mf(file_content, FileMode(0)));
     // Root ReadDir: synthesized "fortune" dir + "hello" file, sorted.
     let (ents, err) = fs::ReadDir(&m, ".");
-    check(err == errors::nil && goish::len(&ents) == 2, b"mapfs: root readdir count\n");
+    check(
+        err == errors::nil && goish::len(&ents) == 2,
+        b"mapfs: root readdir count\n",
+    );
     check(
         ents[0].Name().as_bytes() == b"fortune" && ents[0].IsDir(),
         b"mapfs: fortune synthesized dir\n",
@@ -143,20 +162,32 @@ fn main() {
     let (rdf, ok) = goish::cast!(&*dirf, fs::ReadDirFile);
     check(ok, b"mapfs: dir is ReadDirFile\n");
     let (chunk, err) = rdf.ReadDir(1);
-    check(err == errors::nil && goish::len(&chunk) == 1 && chunk[0].Name().as_bytes() == b"k", b"mapfs: chunk 1\n");
+    check(
+        err == errors::nil && goish::len(&chunk) == 1 && chunk[0].Name().as_bytes() == b"k",
+        b"mapfs: chunk 1\n",
+    );
     let (_, err) = rdf.ReadDir(1);
     check(err == goish::io::EOF, b"mapfs: dir EOF\n");
     // Missing file: fs.ErrNotExist identity through PathError unwrap.
     let (_, err) = m.Open("nope");
-    check(err != errors::nil && errors::Is(err, fs::ErrNotExist), b"mapfs: ErrNotExist identity\n");
+    check(
+        err != errors::nil && errors::Is(err, fs::ErrNotExist),
+        b"mapfs: ErrNotExist identity\n",
+    );
     // Plain file read via Open.
     let (f, err) = m.Open("hello");
     check(err == errors::nil, b"mapfs: open hello\n");
     let mut rbuf: slice<byte> = slice::__from_vec(alloc::vec![0u8; 64]);
     let (n, err) = f.Read(&mut rbuf);
-    check(err == errors::nil && &rbuf.as_ref()[..n as usize] == b"hello, world\n", b"mapfs: read hello\n");
+    check(
+        err == errors::nil && &rbuf.as_ref()[..n as usize] == b"hello, world\n",
+        b"mapfs: read hello\n",
+    );
     let (info, err) = f.Stat();
-    check(err == errors::nil && info.Size() == 13 && !info.IsDir(), b"mapfs: stat hello\n");
+    check(
+        err == errors::nil && info.Size() == 13 && !info.IsDir(),
+        b"mapfs: stat hello\n",
+    );
 
     let msg = b"FSTEST_OK MapFS walk + symlinks + synth dirs vs Go semantics\n";
     syscall::Write(syscall::STDOUT, msg.as_ptr(), msg.len());

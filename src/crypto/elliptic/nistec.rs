@@ -22,13 +22,13 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use crate::crypto::internal::fips140::nistec;
+use crate::error;
 use crate::errors;
 use crate::goslice::slice;
 use crate::lazy::Lazy;
 use crate::math::big::Int;
 use crate::string;
 use crate::types::{byte, int};
-use crate::error;
 
 use super::elliptic::{unmarshaler, Curve};
 use super::params::CurveParams;
@@ -153,7 +153,8 @@ fn initP256() {
 }
 
 // Go: nistec.go:47-49 — `var p384 = &nistCurve[*nistec.P384Point]{…}`
-static _p384: Lazy<nistCurve<nistec::P384Point>> = Lazy::new(|| nistCurve {
+static _p384: Lazy<nistCurve<nistec::P384Point>> = Lazy::new(|| {
+    nistCurve {
     newPoint: nistec::NewP384Point,
     params: CurveParams {
         Name: string::from_static("P-384"),
@@ -177,6 +178,7 @@ static _p384: Lazy<nistCurve<nistec::P384Point>> = Lazy::new(|| nistCurve {
             "3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5f",
         ),
     },
+}
 });
 
 // go: none — see p224.
@@ -190,7 +192,8 @@ fn initP384() {
 }
 
 // Go: nistec.go:69-71 — `var p521 = &nistCurve[*nistec.P521Point]{…}`
-static _p521: Lazy<nistCurve<nistec::P521Point>> = Lazy::new(|| nistCurve {
+static _p521: Lazy<nistCurve<nistec::P521Point>> = Lazy::new(|| {
+    nistCurve {
     newPoint: nistec::NewP521Point,
     params: CurveParams {
         Name: string::from_static("P-521"),
@@ -217,6 +220,7 @@ bf97e7e31c2e5bd66",
 088be94769fd16650",
         ),
     },
+}
 });
 
 // go: none — see p224.

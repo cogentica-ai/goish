@@ -30,9 +30,9 @@
 extern crate alloc;
 
 use crate::error;
+use crate::errors::nil;
 use crate::goslice::slice;
 use crate::types::{byte, int};
-use crate::errors::nil;
 
 // ─── Reader / Writer / Closer traits ───────────────────────────────────
 
@@ -255,10 +255,7 @@ pub fn Copy(dst: &mut dyn Writer, src: &mut dyn Reader) -> (i64, error) {
 }
 
 /// `io.WriteString(w, s)` — convenience: write a string to a Writer.
-pub fn WriteString<S: Into<crate::gostring::string>>(
-    w: &mut dyn Writer,
-    s: S,
-) -> (int, error) {
+pub fn WriteString<S: Into<crate::gostring::string>>(w: &mut dyn Writer, s: S) -> (int, error) {
     let buf = crate::convert::bytes(s.into());
     w.Write(buf)
 }
@@ -274,11 +271,7 @@ pub fn WriteString<S: Into<crate::gostring::string>>(
 /// fast paths (goish doesn't yet have an io::WriterTo / io::ReaderFrom
 /// trait surface for runtime dispatch). Always stages through the
 /// buffer.
-pub fn CopyBuffer(
-    dst: &mut dyn Writer,
-    src: &mut dyn Reader,
-    buf: slice<byte>,
-) -> (i64, error) {
+pub fn CopyBuffer(dst: &mut dyn Writer, src: &mut dyn Reader, buf: slice<byte>) -> (i64, error) {
     // Go: if buf == nil { buf = make([]byte, size) } — goish: if the
     // caller passed an empty slice, allocate the default 32 KiB.
     let mut buf = if buf.Len() == 0 {
@@ -578,11 +571,7 @@ impl ReaderAt for SectionReader {
 
 /// `io.NewSectionReader(r, off, n)` (io.go:486) — read from `r`
 /// starting at offset `off`, capped at `n` bytes.
-pub fn NewSectionReader(
-    r: alloc::boxed::Box<dyn ReaderAt>,
-    off: i64,
-    n: i64,
-) -> SectionReader {
+pub fn NewSectionReader(r: alloc::boxed::Box<dyn ReaderAt>, off: i64, n: i64) -> SectionReader {
     // Go: const maxint64 = 1<<63 - 1
     //     if off <= maxint64 - n { remaining = n + off } else { remaining = maxint64 }
     let maxint64 = i64::MAX;
@@ -826,7 +815,9 @@ impl Reader for MultiReaderImpl {
 ///
 /// Pass readers as `slice<Box<dyn io::Reader>>` (the Go-variadic shape).
 pub fn MultiReader(readers: slice<alloc::boxed::Box<dyn Reader>>) -> MultiReaderImpl {
-    MultiReaderImpl { readers: readers.__into_vec() }
+    MultiReaderImpl {
+        readers: readers.__into_vec(),
+    }
 }
 
 // ─── MultiWriter ─────────────────────────────────────────────────────
@@ -867,7 +858,9 @@ impl Writer for MultiWriterImpl {
 /// `io.MultiWriter(writers...)` (multi.go:127) — slim port. Returns a
 /// Writer that duplicates each Write to all listed writers in order.
 pub fn MultiWriter(writers: slice<alloc::boxed::Box<dyn Writer>>) -> MultiWriterImpl {
-    MultiWriterImpl { writers: writers.__into_vec() }
+    MultiWriterImpl {
+        writers: writers.__into_vec(),
+    }
 }
 
 // ─── Pipe (line-by-line port of pipe.go) ─────────────────────────────
@@ -916,7 +909,11 @@ pub mod ioutil {
     ) -> (crate::string, error) {
         let dir: crate::string = dir.into();
         let pattern: crate::string = pattern.into();
-        let base = if dir.Len() == 0 { crate::os::TempDir() } else { dir };
+        let base = if dir.Len() == 0 {
+            crate::os::TempDir()
+        } else {
+            dir
+        };
 
         static NEXT: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
         let n = NEXT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
@@ -943,7 +940,11 @@ pub mod ioutil {
     ) -> (crate::gonilable::nilable<crate::os::File>, error) {
         let dir: crate::string = dir.into();
         let pattern: crate::string = pattern.into();
-        let base = if dir.Len() == 0 { crate::os::TempDir() } else { dir };
+        let base = if dir.Len() == 0 {
+            crate::os::TempDir()
+        } else {
+            dir
+        };
 
         static NEXT: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
         let n = NEXT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);

@@ -95,11 +95,7 @@ fn main() {
     {
         let url = build_url(&addr, "/p");
         let body = bytes("name=world");
-        let (resp, _) = http::Post(
-            url,
-            string("application/x-www-form-urlencoded"),
-            body,
-        );
+        let (resp, _) = http::Post(url, string("application/x-www-form-urlencoded"), body);
         let v = pf_name.Lock().clone();
         if resp.StatusCode == 200 && v == "world" {
             fmt::Println!("[ 2] PostFormValue             PASS");
@@ -114,11 +110,7 @@ fn main() {
     {
         let url = build_url(&addr, "/merge?key=query");
         let body = bytes("key=body");
-        let (resp, _) = http::Post(
-            url,
-            string("application/x-www-form-urlencoded"),
-            body,
-        );
+        let (resp, _) = http::Post(url, string("application/x-www-form-urlencoded"), body);
         let v = merged.Lock().clone();
         if resp.StatusCode == 200 && v == "body" {
             fmt::Println!("[ 3] body > query precedence   PASS");

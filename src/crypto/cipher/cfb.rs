@@ -84,8 +84,7 @@ impl<B: Block> Stream for CFB<B> {
             // Go: if x.outUsed == len(x.out) { x.b.Encrypt(x.out, x.next); x.outUsed = 0 }
             if self.out_used == self.out.len() {
                 let src_block: slice<byte> = slice::__from_vec(self.next.clone());
-                let mut dst_block: slice<byte> =
-                    slice::__from_vec(alloc::vec![0u8; bs]);
+                let mut dst_block: slice<byte> = slice::__from_vec(alloc::vec![0u8; bs]);
                 self.b.Encrypt(&mut dst_block, src_block);
                 self.out = dst_block.__into_vec();
                 self.out_used = 0;

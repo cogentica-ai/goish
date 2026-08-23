@@ -24,6 +24,5 @@
 mod quick;
 
 pub use quick::{
-    randFloat32, randFloat64, randInt64, toString, CheckEqualError, CheckError, Config,
-    SetupError,
+    randFloat32, randFloat64, randInt64, toString, CheckEqualError, CheckError, Config, SetupError,
 };

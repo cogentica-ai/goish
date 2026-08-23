@@ -284,11 +284,7 @@ pub fn NewPrivateKeyWithPrecomputation(
 /// `NewPrivateKeyWithoutCRT` creates a new RSA private key from the
 /// given parameters. Meant for deprecated multi-prime keys; NOT FIPS 140
 /// compliant.
-pub fn NewPrivateKeyWithoutCRT(
-    N: slice<byte>,
-    e: int,
-    d: slice<byte>,
-) -> (PrivateKey, error) {
+pub fn NewPrivateKeyWithoutCRT(N: slice<byte>, e: int, d: slice<byte>) -> (PrivateKey, error) {
     let (n, err) = Modulus::NewModulus(N);
     if !err.IsNil() {
         return (zero_private_key(), err);

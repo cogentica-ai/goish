@@ -39,6 +39,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use crate::crypto;
+use crate::crypto::cryptobyte::{self, asn1};
 use crate::crypto::ecdh;
 use crate::crypto::elliptic;
 use crate::crypto::internal::fips140::ecdsa as fipsec;
@@ -48,7 +49,6 @@ use crate::crypto::internal::fips140only;
 use crate::crypto::internal::randutil;
 use crate::crypto::sha512;
 use crate::crypto::subtle;
-use crate::crypto::cryptobyte::{self, asn1};
 use crate::errors::{self, error, nil};
 use crate::goslice::slice;
 use crate::gostring::string;
@@ -331,9 +331,7 @@ impl PrivateKey {
                 errors::New("ecdsa: invalid private key"),
             );
         }
-        return c
-            .unwrap()
-            .NewPrivateKey(&self.D.FillBytes(zeros(size)));
+        return c.unwrap().NewPrivateKey(&self.D.FillBytes(zeros(size)));
     }
 
     // go: sdk 1.25.5 crypto/ecdsa/ecdsa.go:214-216 PrivateKey.Public
@@ -519,9 +517,7 @@ fn generateFIPS<P: fipsec::Point>(
     if fips140only::Enabled && !fips140only::ApprovedRandomReader(rand) {
         return (
             zeroPrivateKey(),
-            errors::New(
-                "crypto/ecdsa: only crypto/rand.Reader is allowed in FIPS 140-only mode",
-            ),
+            errors::New("crypto/ecdsa: only crypto/rand.Reader is allowed in FIPS 140-only mode"),
         );
     }
     let (privateKey, err) = fipsec::GenerateKey(c, rand);
@@ -579,9 +575,7 @@ fn signFIPS<P: fipsec::Point>(
     if fips140only::Enabled && !fips140only::ApprovedRandomReader(rand) {
         return (
             empty(),
-            errors::New(
-                "crypto/ecdsa: only crypto/rand.Reader is allowed in FIPS 140-only mode",
-            ),
+            errors::New("crypto/ecdsa: only crypto/rand.Reader is allowed in FIPS 140-only mode"),
         );
     }
     let (k, err) = privateKeyToFIPS(c, priv_);
@@ -820,7 +814,11 @@ fn privateKeyToFIPS<P: fipsec::Point>(
     c: &fipsec::Curve<P>,
     priv_: &PrivateKey,
 ) -> (fipsec::PrivateKey, error) {
-    let (Q, err) = pointFromAffine(priv_.PublicKey.Curve, &priv_.PublicKey.X, &priv_.PublicKey.Y);
+    let (Q, err) = pointFromAffine(
+        priv_.PublicKey.Curve,
+        &priv_.PublicKey.X,
+        &priv_.PublicKey.Y,
+    );
     if err != nil {
         return (fipsec::PrivateKey::default(), err);
     }

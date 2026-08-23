@@ -110,8 +110,14 @@ fn test_timer_stop_prevents_fire() {
     });
     schedule();
 
-    check(STOP_OK.load(Ordering::Acquire) == 1, b"timer-stop: was_active wrong\n");
-    check(GOT.load(Ordering::Acquire) == 0, b"timer-stop: timer fired anyway\n");
+    check(
+        STOP_OK.load(Ordering::Acquire) == 1,
+        b"timer-stop: was_active wrong\n",
+    );
+    check(
+        GOT.load(Ordering::Acquire) == 0,
+        b"timer-stop: timer fired anyway\n",
+    );
 }
 
 // ── Test 4: Ticker fires periodically; Stop halts further ticks ──
@@ -137,5 +143,8 @@ fn test_ticker_periodic_then_stop() {
     });
     schedule();
 
-    check(TICKS.load(Ordering::Relaxed) == 3, b"ticker: didn't see 3 ticks\n");
+    check(
+        TICKS.load(Ordering::Relaxed) == 3,
+        b"ticker: didn't see 3 ticks\n",
+    );
 }

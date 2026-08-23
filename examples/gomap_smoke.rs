@@ -6,8 +6,8 @@
 #![no_std]
 #![no_main]
 
-use goish::{int, len, nil, string, syscall};
 use goish::maps;
+use goish::{int, len, nil, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -15,7 +15,9 @@ fn die(msg: &[u8]) -> ! {
 }
 
 fn check(cond: bool, msg: &[u8]) {
-    if !cond { die(msg); }
+    if !cond {
+        die(msg);
+    }
 }
 
 #[goish::main]
@@ -26,13 +28,13 @@ fn main() {
 
     m["hello"] = 1;
     m["world"] = 2;
-    m["foo"]   = 3;
+    m["foo"] = 3;
     check(len(&m) == 3, b"map: len after 3 inserts != 3\n");
 
     // ── bracket read ─────────────────────────────────────────────────
     check(m["hello"] == 1, b"map: m[hello] != 1\n");
     check(m["world"] == 2, b"map: m[world] != 2\n");
-    check(m["foo"]   == 3, b"map: m[foo] != 3\n");
+    check(m["foo"] == 3, b"map: m[foo] != 3\n");
     check(m["missing"] == 0, b"map: missing key must return zero\n");
 
     // ── Get (comma-ok) ───────────────────────────────────────────────
@@ -43,13 +45,16 @@ fn main() {
     check(!ok2, b"map: Get(missing) should return ok=false\n");
 
     // ── Has ──────────────────────────────────────────────────────────
-    check(m.Has(string::from_static("foo")),    b"map: Has(foo) wrong\n");
-    check(!m.Has(string::from_static("gone")),  b"map: Has(gone) wrong\n");
+    check(m.Has(string::from_static("foo")), b"map: Has(foo) wrong\n");
+    check(
+        !m.Has(string::from_static("gone")),
+        b"map: Has(gone) wrong\n",
+    );
 
     // ── update via index ─────────────────────────────────────────────
     m["hello"] = 42;
     check(m["hello"] == 42, b"map: update hello wrong\n");
-    check(len(&m) == 3,     b"map: len after update changed\n");
+    check(len(&m) == 3, b"map: len after update changed\n");
 
     // ── in-place increment ───────────────────────────────────────────
     m["foo"] += 10;
@@ -57,13 +62,19 @@ fn main() {
 
     // ── delete! ──────────────────────────────────────────────────────
     goish::delete!(m, string::from_static("world"));
-    check(len(&m) == 2,                          b"map: len after delete != 2\n");
-    check(!m.Has(string::from_static("world")),  b"map: world still in map after delete\n");
-    check(m["world"] == 0,                       b"map: deleted key must return zero\n");
+    check(len(&m) == 2, b"map: len after delete != 2\n");
+    check(
+        !m.Has(string::from_static("world")),
+        b"map: world still in map after delete\n",
+    );
+    check(m["world"] == 0, b"map: deleted key must return zero\n");
 
     // ── delete non-existent (no panic) ───────────────────────────────
     goish::delete!(m, string::from_static("neverwas"));
-    check(len(&m) == 2, b"map: len changed after delete of absent key\n");
+    check(
+        len(&m) == 2,
+        b"map: len changed after delete of absent key\n",
+    );
 
     // ── growth: insert enough keys to trigger rehash ──────────────────
     let mut big = goish::make!(map[int]int);
@@ -102,7 +113,10 @@ fn main() {
         goish::delete!(dm, i);
         i += 2;
     }
-    check(len(&dm) == fill / 2, b"map: len wrong after deleting odd keys\n");
+    check(
+        len(&dm) == fill / 2,
+        b"map: len wrong after deleting odd keys\n",
+    );
 
     // Re-set every even key to key*10. If the bug existed, len would grow
     // beyond fill/2 and some keys would appear twice in range! output.
@@ -111,7 +125,10 @@ fn main() {
         dm[i] = i * 10; // update existing even key
         i += 2;
     }
-    check(len(&dm) == fill / 2, b"map: len grew after updating even keys (duplicate bug)\n");
+    check(
+        len(&dm) == fill / 2,
+        b"map: len grew after updating even keys (duplicate bug)\n",
+    );
 
     i = 0;
     while i < fill {
@@ -124,7 +141,10 @@ fn main() {
     for (_, _) in goish::range!(dm) {
         count += 1;
     }
-    check(count == fill / 2, b"map: range count wrong (duplicate key?)\n");
+    check(
+        count == fill / 2,
+        b"map: range count wrong (duplicate key?)\n",
+    );
 
     // ── nil / Default handling ────────────────────────────────────────
     let nm: goish::map<string, int> = nil.into();
@@ -134,8 +154,14 @@ fn main() {
     let mut ints = goish::make!(map[int]string);
     ints[1] = string::from_static("one");
     ints[2] = string::from_static("two");
-    check(ints[1] == string::from_static("one"), b"map: int key 1 wrong\n");
-    check(ints[2] == string::from_static("two"), b"map: int key 2 wrong\n");
+    check(
+        ints[1] == string::from_static("one"),
+        b"map: int key 1 wrong\n",
+    );
+    check(
+        ints[2] == string::from_static("two"),
+        b"map: int key 2 wrong\n",
+    );
 
     // ── maps::Clone ───────────────────────────────────────────────────
     let cloned = maps::Clone(&m);

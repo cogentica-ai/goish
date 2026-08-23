@@ -37,7 +37,11 @@ pub struct State {
 /// `unix.IoctlGetTermios(fd, TCGETS)` — TCGETS into a fresh Termios.
 fn ioctl_get_termios(fd: i32) -> (syscall::Termios, isize) {
     let mut t = syscall::Termios::default();
-    let rc = syscall::Ioctl(fd, syscall::TCGETS, &mut t as *mut syscall::Termios as usize);
+    let rc = syscall::Ioctl(
+        fd,
+        syscall::TCGETS,
+        &mut t as *mut syscall::Termios as usize,
+    );
     (t, rc)
 }
 
@@ -88,11 +92,8 @@ pub fn MakeRaw(fd: int) -> (State, error) {
     // Go: termios.Oflag &^= OPOST
     termios.Oflag &= !syscall::OPOST;
     // Go: termios.Lflag &^= ECHO | ECHONL | ICANON | ISIG | IEXTEN
-    termios.Lflag &= !(syscall::ECHO
-        | syscall::ECHONL
-        | syscall::ICANON
-        | syscall::ISIG
-        | syscall::IEXTEN);
+    termios.Lflag &=
+        !(syscall::ECHO | syscall::ECHONL | syscall::ICANON | syscall::ISIG | syscall::IEXTEN);
     // Go: termios.Cflag &^= CSIZE | PARENB; termios.Cflag |= CS8
     termios.Cflag &= !(syscall::CSIZE | syscall::PARENB);
     termios.Cflag |= syscall::CS8;

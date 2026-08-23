@@ -121,7 +121,6 @@ struct MuxState {
     index: super::routing_index::routingIndex,
 }
 
-
 impl ServeMux {
     pub fn new() -> Self {
         ServeMux {
@@ -145,7 +144,6 @@ impl ServeMux {
         self.handle_arc(pattern.into(), handler);
         return;
     }
-
 
     /// `mux.Handle(pattern, h)` — register a Handler. Patterns that
     /// contain `{` are parsed as Go 1.22 wildcards; any parse error
@@ -341,10 +339,7 @@ impl ServeMux {
                 allow.push(m.clone());
             }
             allow.sort_by(|a, b| strings::Compare(a.clone(), b.clone()).cmp(&0));
-            let joined = strings::Join(
-                crate::goslice::slice::__from_vec(allow),
-                string(", "),
-            );
+            let joined = strings::Join(crate::goslice::slice::__from_vec(allow), string(", "));
             return (
                 Arc::new(methodNotAllowedHandler { allow: joined }) as Arc<dyn Handler>,
                 string::new(),
@@ -515,7 +510,11 @@ impl Handler for notFoundHandler {
 /// HTTP error response. Resets Content-Type to text/plain, sets
 /// X-Content-Type-Options: nosniff, deletes any prior Content-Length,
 /// then writes status + body + trailing newline.
-pub fn Error<S: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'static), error: S, code: int) {
+pub fn Error<S: Into<string>>(
+    w: &(dyn ResponseWriter + Send + Sync + 'static),
+    error: S,
+    code: int,
+) {
     // Go: h := w.Header(); h.Del("Content-Length")
     w.Header().Del(string("Content-Length"));
     // Go: h.Set("Content-Type", "text/plain; charset=utf-8")
@@ -534,7 +533,11 @@ pub fn Error<S: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'static), 
 // go: sdk 1.25.5 net/http/server.go:2358-2358 NotFound
 /// `http.NotFound(w, r)` (server.go:2358) — convenience wrapper.
 pub fn NotFound(w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request) {
-    Error(w, string("404 page not found"), super::status::StatusNotFound);
+    Error(
+        w,
+        string("404 page not found"),
+        super::status::StatusNotFound,
+    );
 }
 
 // go: sdk 1.25.5 net/http/server.go:4095-4101 MaxBytesHandler
@@ -671,10 +674,7 @@ where
 /// Generic over `H: Handler + 'static` — accepts bare structs,
 /// `Arc<dyn Handler>`, etc. without explicit `Arc::new` at the call
 /// site.
-pub fn StripPrefix<P: Into<string>, H: Handler + 'static>(
-    prefix: P,
-    h: H,
-) -> Arc<dyn Handler> {
+pub fn StripPrefix<P: Into<string>, H: Handler + 'static>(prefix: P, h: H) -> Arc<dyn Handler> {
     let prefix: string = prefix.into();
     let h: Arc<dyn Handler> = Arc::new(h);
     // Go: if prefix == "" { return h }
@@ -919,7 +919,12 @@ impl timeoutWriter {
 /// `http.Redirect(w, r, url, code)` (server.go:2403). Replies with a
 /// redirect to `url`. Slim port: relative paths are resolved against
 /// `r.URL.Path` via `path::Clean` + `path::Split`.
-pub fn Redirect<U: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request, url: U, code: int){
+pub fn Redirect<U: Into<string>>(
+    w: &(dyn ResponseWriter + Send + Sync + 'static),
+    r: &Request,
+    url: U,
+    code: int,
+) {
     let url: string = url.into();
     let mut url = url;
 
@@ -1043,8 +1048,7 @@ impl Handler for allowQuerySemicolonsHandler {
             // Go: r2.URL = new(url.URL); *r2.URL = *r.URL
             // Go: r2.URL.RawQuery = strings.ReplaceAll(r.URL.RawQuery, ";", "&")
             let mut r2 = r.clone();
-            r2.URL.RawQuery =
-                strings::ReplaceAll(r.URL.RawQuery.clone(), string(";"), string("&"));
+            r2.URL.RawQuery = strings::ReplaceAll(r.URL.RawQuery.clone(), string(";"), string("&"));
             // Go: h.ServeHTTP(w, r2)
             self.inner.ServeHTTP(w, &r2);
         } else {
@@ -1112,9 +1116,8 @@ pub fn htmlEscape(s: string) -> string {
 /// `Server.BaseContext`'s function shape (server.go:3081). Named
 /// alias so the `Arc<dyn Fn>` plumbing stays out of user-facing
 /// struct literals — same pattern as `client::ProxyResolver`.
-pub type BaseContextFn = Arc<
-    dyn Fn(&net::Listener) -> Arc<dyn crate::context::Context> + Send + Sync,
->;
+pub type BaseContextFn =
+    Arc<dyn Fn(&net::Listener) -> Arc<dyn crate::context::Context> + Send + Sync>;
 
 /// `Server.ConnContext`'s function shape (server.go:3087).
 pub type ConnContextFn = Arc<
@@ -1134,9 +1137,8 @@ pub type ConnStateHook = Arc<dyn Fn(int, ConnState) + Send + Sync>;
 // `func(*Server, *tls.Conn, Handler)`. Option because Go's func values
 // are nilable and goish's map zero value must be spellable (the same
 // shape Transport.__alt_proto uses for its RoundTripper map).
-pub type TLSNextProtoFn = Option<
-    Arc<dyn Fn(&Server, &mut crate::crypto::tls::Conn, Arc<dyn Handler>) + Send + Sync>,
->;
+pub type TLSNextProtoFn =
+    Option<Arc<dyn Fn(&Server, &mut crate::crypto::tls::Conn, Arc<dyn Handler>) + Send + Sync>>;
 
 pub struct Server {
     /// `host:port` to listen on. Empty = ":80".
@@ -1363,11 +1365,16 @@ impl extraHeader {
 /// interpolate into an href ATTRIBUTE, where a bare quote escapes it.
 pub fn htmlReplacer() -> crate::strings::Replacer {
     return crate::strings::NewReplacer(crate::goslice::slice::__from_vec(alloc::vec![
-        string("&"), string("&amp;"),
-        string("<"), string("&lt;"),
-        string(">"), string("&gt;"),
-        string("\""), string("&#34;"),
-        string("'"), string("&#39;"),
+        string("&"),
+        string("&amp;"),
+        string("<"),
+        string("&lt;"),
+        string(">"),
+        string("&gt;"),
+        string("\""),
+        string("&#34;"),
+        string("'"),
+        string("&#39;"),
     ]));
 }
 
@@ -1454,21 +1461,27 @@ pub fn putCopyBuf(b: crate::goslice::slice<crate::types::byte>) {
 // (whole var-group range, grouped-var convention)
 pub fn bufioReaderPool() -> &'static crate::sync::Pool<bufio::PoolBuf> {
     static POOL: crate::lazy::Lazy<crate::sync::Pool<bufio::PoolBuf>> =
-        crate::lazy::Lazy::new(|| crate::sync::Pool::new(|| bufio::PoolBuf(alloc::vec::Vec::new())));
+        crate::lazy::Lazy::new(|| {
+            crate::sync::Pool::new(|| bufio::PoolBuf(alloc::vec::Vec::new()))
+        });
     return POOL.get();
 }
 
 // go: sdk 1.25.5 net/http/server.go:826-830 bufioWriter2kPool
 pub fn bufioWriter2kPool() -> &'static crate::sync::Pool<bufio::PoolBuf> {
     static POOL: crate::lazy::Lazy<crate::sync::Pool<bufio::PoolBuf>> =
-        crate::lazy::Lazy::new(|| crate::sync::Pool::new(|| bufio::PoolBuf(alloc::vec::Vec::new())));
+        crate::lazy::Lazy::new(|| {
+            crate::sync::Pool::new(|| bufio::PoolBuf(alloc::vec::Vec::new()))
+        });
     return POOL.get();
 }
 
 // go: sdk 1.25.5 net/http/server.go:826-830 bufioWriter4kPool
 pub fn bufioWriter4kPool() -> &'static crate::sync::Pool<bufio::PoolBuf> {
     static POOL: crate::lazy::Lazy<crate::sync::Pool<bufio::PoolBuf>> =
-        crate::lazy::Lazy::new(|| crate::sync::Pool::new(|| bufio::PoolBuf(alloc::vec::Vec::new())));
+        crate::lazy::Lazy::new(|| {
+            crate::sync::Pool::new(|| bufio::PoolBuf(alloc::vec::Vec::new()))
+        });
     return POOL.get();
 }
 
@@ -1498,10 +1511,7 @@ pub fn putBufioReader<R: crate::io::Reader>(br: bufio::Reader<R>) {
 }
 
 // go: sdk 1.25.5 net/http/server.go:900-910 newBufioWriterSize
-pub fn newBufioWriterSize<W: crate::io::Writer>(
-    w: W,
-    size: crate::types::int,
-) -> bufio::Writer<W> {
+pub fn newBufioWriterSize<W: crate::io::Writer>(w: W, size: crate::types::int) -> bufio::Writer<W> {
     if let Some(pool) = bufioWriterPool(size) {
         return bufio::__new_writer_with_buf(w, pool.Get(), size);
     }
@@ -1537,9 +1547,7 @@ pub fn putBufioWriter<W: crate::io::Writer>(bw: bufio::Writer<W>) {
 ///    final return hands back — not the last frame seen. Mirrored
 ///    faithfully, quirk included.
 pub fn relevantCaller() -> crate::runtime::Frame {
-    let mut pc = crate::goslice::slice::<crate::types::uintptr>::__from_vec(
-        alloc::vec![0; 16],
-    );
+    let mut pc = crate::goslice::slice::<crate::types::uintptr>::__from_vec(alloc::vec![0; 16]);
     let n = crate::runtime::Callers(1, &mut pc);
     let mut frames = crate::runtime::CallersFrames(pc.slice(0, n));
     let frame = crate::runtime::Frame::default();
@@ -1684,7 +1692,11 @@ pub fn newLoggingConn(
 impl net::Conn for loggingConn {
     // go: sdk 1.25.5 net/http/server.go:4044-4049 loggingConn.Read
     fn Read(&mut self, p: &mut crate::goslice::slice<crate::types::byte>) -> (int, error) {
-        crate::log::Printf!("%s.Read(%d) = ....", self.name, crate::int64(crate::len(&*p)));
+        crate::log::Printf!(
+            "%s.Read(%d) = ....",
+            self.name,
+            crate::int64(crate::len(&*p))
+        );
         let (n, err) = self.conn.Read(p);
         crate::log::Printf!(
             "%s.Read(%d) = %d, %v",
@@ -1841,8 +1853,7 @@ pub(crate) fn http1ServerSupportsRequest(req: &Request) -> bool {
     }
     // Go: "Accept 'PRI * HTTP/2.0' upgrade requests, so Handlers can
     // wire up their own HTTP/2 upgrades."
-    if req.ProtoMajor == 2 && req.ProtoMinor == 0 && req.Method == "PRI" && req.RequestURI == "*"
-    {
+    if req.ProtoMajor == 2 && req.ProtoMinor == 0 && req.Method == "PRI" && req.RequestURI == "*" {
         return true;
     }
     // Go: "Reject HTTP/0.x, and all other HTTP/2+ requests (which
@@ -2052,7 +2063,7 @@ pub(crate) const CONN_STATE_NEW: u8 = 0; // StateNew
 pub(crate) const CONN_STATE_ACTIVE: u8 = 1; // StateActive
 pub(crate) const CONN_STATE_IDLE: u8 = 2; // StateIdle
 #[allow(dead_code)] // no Hijacker yet; the value is here so the five
-// states stay adjacent and a divergence from Go's numbering is visible.
+                    // states stay adjacent and a divergence from Go's numbering is visible.
 pub(crate) const CONN_STATE_HIJACKED: u8 = 3; // StateHijacked
 pub(crate) const CONN_STATE_CLOSED: u8 = 4; // StateClosed
 
@@ -2868,8 +2879,7 @@ impl Server {
         // Go: ctx := context.WithValue(baseCtx, ServerContextKey, s)
         // (server.go:3461). A handler reaches its Server through this,
         // and so does the package-level logf.
-        let base_ctx =
-            crate::context::WithValue(base_ctx, ServerContextKey, self.clone());
+        let base_ctx = crate::context::WithValue(base_ctx, ServerContextKey, self.clone());
 
         // Go's accept-failure backoff (server.go:3421-3446): on a
         // temporary error (EMFILE/ENFILE/resource exhaustion), sleep
@@ -2980,8 +2990,7 @@ impl Server {
         // Spawn RegisterOnShutdown callbacks, each on its own
         // goroutine (Go server.go:3184-3186).
         {
-            let hooks: Vec<Arc<dyn Fn() + Send + Sync>> =
-                self.__state.on_shutdown.Lock().clone();
+            let hooks: Vec<Arc<dyn Fn() + Send + Sync>> = self.__state.on_shutdown.Lock().clone();
             for f in hooks {
                 go!(move || f());
             }
@@ -3034,8 +3043,7 @@ impl Server {
         }
         let _ = self.closeListenersLocked();
         {
-            let hooks: Vec<Arc<dyn Fn() + Send + Sync>> =
-                self.__state.on_shutdown.Lock().clone();
+            let hooks: Vec<Arc<dyn Fn() + Send + Sync>> = self.__state.on_shutdown.Lock().clone();
             for f in hooks {
                 go!(move || f());
             }
@@ -3071,11 +3079,7 @@ impl Server {
     // result when two are equal.
     pub fn tlsHandshakeTimeout(&self) -> time::Duration {
         let mut ret = time::Duration(0);
-        for v in [
-            self.ReadHeaderTimeout,
-            self.ReadTimeout,
-            self.WriteTimeout,
-        ] {
+        for v in [self.ReadHeaderTimeout, self.ReadTimeout, self.WriteTimeout] {
             if v <= time::Duration(0) {
                 continue;
             }
@@ -3127,16 +3131,19 @@ impl Server {
     // need them gone should use `Shutdown`.
     pub fn SetKeepAlivesEnabled(&self, v: bool) {
         if v {
-            self.__state.disable_keep_alives.store(false, Ordering::Release);
+            self.__state
+                .disable_keep_alives
+                .store(false, Ordering::Release);
             return;
         }
-        self.__state.disable_keep_alives.store(true, Ordering::Release);
+        self.__state
+            .disable_keep_alives
+            .store(true, Ordering::Release);
     }
 
     // go: sdk 1.25.5 net/http/server.go:3650-3652 Server.doKeepAlives
     pub fn doKeepAlives(&self) -> bool {
-        return !self.__state.disable_keep_alives.load(Ordering::Acquire)
-            && !self.shuttingDown();
+        return !self.__state.disable_keep_alives.load(Ordering::Acquire) && !self.shuttingDown();
     }
 
     /// Kick tracked connections so their parked reads return — the
@@ -3157,8 +3164,7 @@ impl Server {
             let kick = all
                 || st == CONN_STATE_IDLE
                 || (st == CONN_STATE_NEW
-                    && now.wrapping_sub(t.since_ns.load(Ordering::Relaxed))
-                        > 5_000_000_000);
+                    && now.wrapping_sub(t.since_ns.load(Ordering::Relaxed)) > 5_000_000_000);
             if !kick {
                 continue;
             }
@@ -3227,8 +3233,7 @@ impl Server {
         // c.rwc.LocalAddr()) (server.go:1937) — stamped once per conn,
         // so a handler can tell WHICH listening address a request
         // arrived on when the server has several.
-        let conn_ctx =
-            crate::context::WithValue(conn_ctx, LocalAddrContextKey, conn.LocalAddr());
+        let conn_ctx = crate::context::WithValue(conn_ctx, LocalAddrContextKey, conn.LocalAddr());
         // Go: c.r = &connReader{conn: c} (newConn) — one per conn,
         // living across keep-alive requests.
         let cr = Arc::new(connReader::__new());
@@ -3244,7 +3249,11 @@ impl Server {
             // the next request's first byte (server.go:2135). Cleared
             // after the headers parse so handler body reads aren't
             // artificially capped (large uploads).
-            let wait_ns = if first_request { read_header_ns } else { idle_ns };
+            let wait_ns = if first_request {
+                read_header_ns
+            } else {
+                idle_ns
+            };
             first_request = false;
             let dl = time::Now().Add(time::Duration(wait_ns));
             let _ = conn.SetReadDeadline(dl);
@@ -3295,7 +3304,9 @@ impl Server {
                     let _ = crate::io::Writer::Write(
                         &mut conn,
                         crate::convert::bytes(
-                            string("HTTP/1.1 ") + string(public_err) + string(ERROR_HEADERS)
+                            string("HTTP/1.1 ")
+                                + string(public_err)
+                                + string(ERROR_HEADERS)
                                 + string(public_err),
                         ),
                     );
@@ -3410,8 +3421,8 @@ impl Server {
                 cr.startBackgroundRead(watch_pd);
             }
 
-            let keep_alive = request_keep_alive(&mut req)
-                && !self.__state.in_shutdown.load(Ordering::Acquire);
+            let keep_alive =
+                request_keep_alive(&mut req) && !self.__state.in_shutdown.load(Ordering::Acquire);
             let w = response::__new_with_cnc(conn, cnc);
             w.__set_keep_alive(keep_alive);
             // HEAD: handler writes are eaten by the response writer
@@ -3434,7 +3445,7 @@ impl Server {
             let panic_remote = req.RemoteAddr.clone();
             let panic_srv = self.clone();
             let panic_track = track.clone();
-            crate::defer!{
+            crate::defer! {
                 let pv = crate::recover!();
                 if pv != crate::nil {
                     // Go logs "http: panic serving %v: %v\n%s" with a
@@ -3802,14 +3813,8 @@ pub(crate) fn request_keep_alive_pub(req: &mut Request) -> bool {
 /// `removeCloseHeader` is false: the serve loop still needs to see the
 /// header, and Go passes false when reading a request too.
 fn request_keep_alive(req: &mut Request) -> bool {
-    return !super::transfer::shouldClose(
-        req.ProtoMajor,
-        req.ProtoMinor,
-        &mut req.Header,
-        false,
-    );
+    return !super::transfer::shouldClose(req.ProtoMajor, req.ProtoMinor, &mut req.Header, false);
 }
-
 
 // go: none — goish idiom: fill the `#[goish::interface]` downcast
 // registries for the types this package declares. See AGENTS.md §9b.

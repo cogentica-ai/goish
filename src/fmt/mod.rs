@@ -31,11 +31,11 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
+use crate::errors::nil;
 use crate::errors::{self, error, ErrorTrait};
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
-use crate::errors::nil;
 use crate::os;
 use crate::types::{byte, int, rune};
 use crate::unicode::utf8;
@@ -76,7 +76,11 @@ pub trait ScanState {
     fn ReadRune(&mut self) -> (crate::types::rune, crate::types::int, crate::error);
     fn UnreadRune(&mut self) -> crate::error;
     fn SkipSpace(&mut self);
-    fn Token(&mut self, skipSpace: bool, f: alloc::sync::Arc<dyn Fn(crate::types::rune) -> bool + Send + Sync>) -> (crate::slice<crate::types::byte>, crate::error);
+    fn Token(
+        &mut self,
+        skipSpace: bool,
+        f: alloc::sync::Arc<dyn Fn(crate::types::rune) -> bool + Send + Sync>,
+    ) -> (crate::slice<crate::types::byte>, crate::error);
     fn Width(&self) -> (crate::types::int, bool);
 }
 
@@ -879,11 +883,7 @@ fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Option<error> 
 /// Format a `reflect::Value` into `f` using `verb` (`'v'` or `'V'`).
 /// Public so `#[goish::reflect]`-generated `impl Format` bodies can
 /// call it directly without round-tripping through ValueOf.
-pub fn reflect_fmt_to<T: crate::reflect::Reflect + ?Sized>(
-    v: &T,
-    verb: byte,
-    f: &mut FmtBuf,
-) {
+pub fn reflect_fmt_to<T: crate::reflect::Reflect + ?Sized>(v: &T, verb: byte, f: &mut FmtBuf) {
     let rv = crate::reflect::ValueOf(v);
     write_reflect_value(&rv, verb == b'V', f);
 }
@@ -971,8 +971,15 @@ fn write_reflect_value(v: &crate::reflect::Value, plus: bool, f: &mut FmtBuf) {
             // dynamic type. Render Go's customary placeholder.
             f.extend(b"<interface>");
         }
-        K::Int64 | K::Uint64 | K::Uintptr | K::Func | K::Chan
-        | K::UnsafePointer | K::Array | K::Complex64 | K::Complex128 => {
+        K::Int64
+        | K::Uint64
+        | K::Uintptr
+        | K::Func
+        | K::Chan
+        | K::UnsafePointer
+        | K::Array
+        | K::Complex64
+        | K::Complex128 => {
             // Fallback rendering for variants whose `__reflect_value`
             // doesn't yet produce a typed Value (placeholder for parity
             // with Go's reflect.Kind universe).
@@ -1003,9 +1010,7 @@ pub fn sprintf_impl(format: &[byte], args: &[FmtArg]) -> string {
 /// returned `Vec<FmtArg>` is tied to `args` — callers must keep `args`
 /// alive across the call. The placeholder string has `'static`
 /// lifetime, which trivially outlives any caller's `'a`.
-fn __any_args_to_fmtargs<'a>(
-    args: &'a slice<crate::goany::Any>,
-) -> Vec<FmtArg<'a>> {
+fn __any_args_to_fmtargs<'a>(args: &'a slice<crate::goany::Any>) -> Vec<FmtArg<'a>> {
     static PLACEHOLDER: &str = "<unsupported %T>";
     let mut fa: Vec<FmtArg<'a>> = Vec::with_capacity(args.Len() as usize);
     for a in args.iter() {
@@ -1053,30 +1058,21 @@ fn __any_args_to_fmtargs<'a>(
 /// Supported concrete types: `string`, `&str`, `i64`/`i32`/`isize`,
 /// `u64`/`u32`/`usize`, `f64`/`f32`, `bool`, `byte` (u8), `char`, `error`.
 /// Unrecognised types render as `"<unsupported %T>"`.
-pub fn Sprintv<S: Into<string>>(
-    format: S,
-    args: slice<crate::goany::Any>,
-) -> string {
+pub fn Sprintv<S: Into<string>>(format: S, args: slice<crate::goany::Any>) -> string {
     let format = format.into();
     let fa = __any_args_to_fmtargs(&args);
     sprintf_impl(format.as_bytes(), &fa)
 }
 
 /// Runtime variadic-spread Errorf — `fmt.Errorf(format, args...)`.
-pub fn Errorv<S: Into<string>>(
-    format: S,
-    args: slice<crate::goany::Any>,
-) -> error {
+pub fn Errorv<S: Into<string>>(format: S, args: slice<crate::goany::Any>) -> error {
     let format = format.into();
     let fa = __any_args_to_fmtargs(&args);
     errorf_impl(format.as_bytes(), &fa)
 }
 
 /// Runtime variadic-spread Printf — `fmt.Printf(format, args...)`.
-pub fn Printv<S: Into<string>>(
-    format: S,
-    args: slice<crate::goany::Any>,
-) -> (int, error) {
+pub fn Printv<S: Into<string>>(format: S, args: slice<crate::goany::Any>) -> (int, error) {
     let format = format.into();
     let fa = __any_args_to_fmtargs(&args);
     printf_impl(format.as_bytes(), &fa)
@@ -1163,9 +1159,7 @@ pub trait ScanTarget {
 impl ScanTarget for crate::math::big::Rat {
     fn __scan_one(&mut self, input: &str, verb: u8) -> bool {
         match verb {
-            b'f' | b'g' | b'e' | b'v' => {
-                crate::math::big::parse_decimal_into_rat(input, self)
-            }
+            b'f' | b'g' | b'e' | b'v' => crate::math::big::parse_decimal_into_rat(input, self),
             _ => false,
         }
     }
@@ -1175,7 +1169,10 @@ impl ScanTarget for int {
     fn __scan_one(&mut self, input: &str, verb: u8) -> bool {
         match verb {
             b'd' | b'v' => match input.trim().parse::<int>() {
-                Ok(n) => { *self = n; true }
+                Ok(n) => {
+                    *self = n;
+                    true
+                }
                 Err(_) => false,
             },
             _ => false,
@@ -1187,7 +1184,10 @@ impl ScanTarget for f64 {
     fn __scan_one(&mut self, input: &str, verb: u8) -> bool {
         match verb {
             b'f' | b'g' | b'e' | b'v' => match input.trim().parse::<f64>() {
-                Ok(n) => { *self = n; true }
+                Ok(n) => {
+                    *self = n;
+                    true
+                }
                 Err(_) => false,
             },
             _ => false,
@@ -1232,9 +1232,10 @@ where
         i += 1;
     }
     if i + 1 >= fb.len() {
-        return (0, errors::New(string::from(
-            "fmt::Sscanf: format has no directive",
-        )));
+        return (
+            0,
+            errors::New(string::from("fmt::Sscanf: format has no directive")),
+        );
     }
     let verb = fb[i + 1];
     let s: &str = input.as_ref();

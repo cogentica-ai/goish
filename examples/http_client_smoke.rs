@@ -147,7 +147,8 @@ fn main() {
             } else {
                 fmt::Println!(
                     "[ 1] Get 200 OK               FAIL status={} body_ok={}",
-                    resp.StatusCode, body_ok
+                    resp.StatusCode,
+                    body_ok
                 );
                 failed += 1;
             }
@@ -163,7 +164,10 @@ fn main() {
         if resp.StatusCode == 404 && body_eq(&body, b"missing\n") {
             fmt::Println!("[ 2] Get 404                  PASS");
         } else {
-            fmt::Println!("[ 2] Get 404                  FAIL status={}", resp.StatusCode);
+            fmt::Println!(
+                "[ 2] Get 404                  FAIL status={}",
+                resp.StatusCode
+            );
             failed += 1;
         }
     }
@@ -189,7 +193,8 @@ fn main() {
         } else {
             fmt::Println!(
                 "[ 3] Post JSON                FAIL status={} seen_len={}",
-                resp.StatusCode, seen_len
+                resp.StatusCode,
+                seen_len
             );
             failed += 1;
         }
@@ -225,7 +230,10 @@ fn main() {
         if resp.StatusCode == 200 && body_eq(&body, b"hello, client\n") {
             fmt::Println!("[ 5] Redirect 302→200         PASS");
         } else {
-            fmt::Println!("[ 5] Redirect 302→200         FAIL status={}", resp.StatusCode);
+            fmt::Println!(
+                "[ 5] Redirect 302→200         FAIL status={}",
+                resp.StatusCode
+            );
             failed += 1;
         }
     }
@@ -236,15 +244,15 @@ fn main() {
         let (mut resp, _err) = http::Get(url);
         let (body, _) = io::ReadAll(&mut resp.Body);
         let _ = io::Closer::Close(&mut resp.Body);
-        if resp.StatusCode == 200
-            && body_eq(&body, b"alpha-beta-gamma")
-            && resp.ContentLength == -1
+        if resp.StatusCode == 200 && body_eq(&body, b"alpha-beta-gamma") && resp.ContentLength == -1
         {
             fmt::Println!("[ 6] Chunked response         PASS");
         } else {
             fmt::Println!(
                 "[ 6] Chunked response         FAIL status={} cl={} body_len={}",
-                resp.StatusCode, resp.ContentLength, body.Len()
+                resp.StatusCode,
+                resp.ContentLength,
+                body.Len()
             );
             failed += 1;
         }

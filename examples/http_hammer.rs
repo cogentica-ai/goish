@@ -22,8 +22,8 @@ extern crate goish;
 
 use alloc::sync::Arc;
 
-use goish::fmt;
 use goish::encoding::json;
+use goish::fmt;
 use goish::net;
 use goish::net::http;
 use goish::os;
@@ -120,7 +120,13 @@ fn url_at(path: &str) -> string {
 fn main() {
     let pid = syscall::Getpid();
     fmt::Println!("http_hammer PID:", int(pid));
-    fmt::Println!("target: N=", int(N), " concurrent clients @ ", int(CLIENT_STACK), " B stack each");
+    fmt::Println!(
+        "target: N=",
+        int(N),
+        " concurrent clients @ ",
+        int(CLIENT_STACK),
+        " B stack each"
+    );
 
     // Bind first, then report port.
     let (ln, err) = net::Listen("tcp", "127.0.0.1:0");
@@ -190,9 +196,25 @@ fn main() {
         let ok = OK_COUNT.Load();
         let fl = FAIL_COUNT.Load();
         let secs = elapsed.Seconds();
-        let rps = if secs > 0.0 { float64(ok) / secs } else { 0.0_f64 };
-        fmt::Println!("storm complete: ok=", int(ok), "/", int(N), "  fail=", int(fl));
-        fmt::Println!("elapsed:", fmt::Sprintf!("%.3f", secs), "s  rps:", fmt::Sprintf!("%.0f", rps));
+        let rps = if secs > 0.0 {
+            float64(ok) / secs
+        } else {
+            0.0_f64
+        };
+        fmt::Println!(
+            "storm complete: ok=",
+            int(ok),
+            "/",
+            int(N),
+            "  fail=",
+            int(fl)
+        );
+        fmt::Println!(
+            "elapsed:",
+            fmt::Sprintf!("%.3f", secs),
+            "s  rps:",
+            fmt::Sprintf!("%.0f", rps)
+        );
 
         // Graceful shutdown.
         let err = srv_for_shutdown.Shutdown(time::Second * 5);

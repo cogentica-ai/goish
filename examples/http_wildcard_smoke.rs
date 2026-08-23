@@ -84,7 +84,10 @@ fn main() {
         if resp.StatusCode == 200 && body_eq(&body, b"alive\n") {
             fmt::Println!("[ 1] literal route             PASS");
         } else {
-            fmt::Println!("[ 1] literal route             FAIL status={}", resp.StatusCode);
+            fmt::Println!(
+                "[ 1] literal route             FAIL status={}",
+                resp.StatusCode
+            );
             failed += 1;
         }
     }
@@ -126,7 +129,10 @@ fn main() {
         if resp.StatusCode == 200 && body_eq(&body, b"file-path=a/b/c.txt\n") {
             fmt::Println!("[ 4] {{path...}} bind          PASS");
         } else {
-            fmt::Println!("[ 4] {{path...}} bind          FAIL body_len={}", body.Len());
+            fmt::Println!(
+                "[ 4] {{path...}} bind          FAIL body_len={}",
+                body.Len()
+            );
             failed += 1;
         }
     }
@@ -153,7 +159,10 @@ fn main() {
         if resp.StatusCode == 404 {
             fmt::Println!("[ 6] /users/ → 404             PASS");
         } else {
-            fmt::Println!("[ 6] /users/ → 404             FAIL status={}", resp.StatusCode);
+            fmt::Println!(
+                "[ 6] /users/ → 404             FAIL status={}",
+                resp.StatusCode
+            );
             failed += 1;
         }
     }

@@ -12,8 +12,8 @@ use goish::fmt;
 use goish::gomap::map;
 use goish::maps;
 use goish::string;
+use goish::syscall;
 use goish::types::int;
-use goish::{syscall};
 
 fn make_str_int_map(pairs: &'static [(&'static str, int)]) -> map<string, int> {
     let mut m: map<string, int> = map::new();

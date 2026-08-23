@@ -25,7 +25,7 @@ extern crate goish;
 use alloc::sync::Arc;
 use goish::gostring::string;
 use goish::io::fs::{self, DirEntry};
-use goish::testing::fstest::{fsTester, MapFile, MapFS};
+use goish::testing::fstest::{fsTester, MapFS, MapFile};
 use goish::{errors, fmt, path, slice, syscall};
 
 fn s(x: &str) -> string {
@@ -64,7 +64,10 @@ fn main() {
             if t.Errors().Len() == 0 {
                 fmt::Println!("[ 1] conforming glob           PASS");
             } else {
-                fmt::Println!("[ 1] conforming glob           FAIL ", t.Errors()[0].Error());
+                fmt::Println!(
+                    "[ 1] conforming glob           FAIL ",
+                    t.Errors()[0].Error()
+                );
                 failed += 1;
             }
         }
@@ -108,7 +111,10 @@ fn main() {
         if t.Errors().Len() >= 2 {
             fmt::Println!("[ 3] broken glob caught        PASS");
         } else {
-            fmt::Println!("[ 3] broken glob caught        FAIL got ", t.Errors().Len() as i64);
+            fmt::Println!(
+                "[ 3] broken glob caught        FAIL got ",
+                t.Errors().Len() as i64
+            );
             failed += 1;
         }
     }

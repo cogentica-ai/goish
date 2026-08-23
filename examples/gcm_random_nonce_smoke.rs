@@ -37,8 +37,12 @@ fn check(ok: bool, what: &'static str) {
 }
 
 fn nib(c: u8) -> u8 {
-    if c >= b'0' && c <= b'9' { return c - b'0'; }
-    if c >= b'a' && c <= b'f' { return c - b'a' + 10; }
+    if c >= b'0' && c <= b'9' {
+        return c - b'0';
+    }
+    if c >= b'a' && c <= b'f' {
+        return c - b'a' + 10;
+    }
     return c - b'A' + 10;
 }
 
@@ -72,7 +76,10 @@ fn main() {
     let blk = blk.unwrap();
 
     let (a, err) = NewGCMWithRandomNonce(&blk);
-    check(err == goish::nil && a.is_some(), "NewGCMWithRandomNonce accepts an aes.Block");
+    check(
+        err == goish::nil && a.is_some(),
+        "NewGCMWithRandomNonce accepts an aes.Block",
+    );
     let a = a.unwrap();
 
     check(a.NonceSize() == 0, "NonceSize() == 0 (Go: 0)");
@@ -122,7 +129,11 @@ fn main() {
     if failed == 0 {
         fmt::Printf!("gcm_random_nonce_smoke OK %d/%d\n", ran as i64, ran as i64);
     } else {
-        fmt::Printf!("gcm_random_nonce_smoke FAILED %d of %d\n", failed as i64, ran as i64);
+        fmt::Printf!(
+            "gcm_random_nonce_smoke FAILED %d of %d\n",
+            failed as i64,
+            ran as i64
+        );
         goish::syscall::Exit(1);
     }
 }

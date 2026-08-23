@@ -28,7 +28,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use goish::fmt;
 use goish::gostring::string;
 use goish::html;
-use goish::{syscall};
+use goish::syscall;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 

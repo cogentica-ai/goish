@@ -80,9 +80,24 @@ fn main() {
     wantLen(&parse(&[]), 0, "empty count", &mut bad);
 
     // keepConn comes from the low bit of flags.
-    wantBool(fcgi::newRequest(1, 0).keepConn, false, "keepConn 0", &mut bad);
-    wantBool(fcgi::newRequest(1, 1).keepConn, true, "keepConn 1", &mut bad);
-    wantBool(fcgi::newRequest(1, 3).keepConn, true, "keepConn 3", &mut bad);
+    wantBool(
+        fcgi::newRequest(1, 0).keepConn,
+        false,
+        "keepConn 0",
+        &mut bad,
+    );
+    wantBool(
+        fcgi::newRequest(1, 1).keepConn,
+        true,
+        "keepConn 1",
+        &mut bad,
+    );
+    wantBool(
+        fcgi::newRequest(1, 3).keepConn,
+        true,
+        "keepConn 3",
+        &mut bad,
+    );
 
     // The env predicate: net/http-native names and HTTP_* are excluded.
     let envCases: [(&str, bool); 6] = [

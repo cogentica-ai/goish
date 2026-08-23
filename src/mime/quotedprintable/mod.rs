@@ -114,10 +114,10 @@ impl<R: io::Reader> io::Reader for Reader<R> {
                     slice::__from_vec(alloc::vec![b'\r', b'\n']),
                 );
                 let whole_line: Vec<byte> = self.line.clone();
-                let trimmed = bytes::TrimRightFunc(
-                    slice::__from_vec(self.line.clone()),
-                    |r: rune| is_qp_discard_whitespace(r),
-                );
+                let trimmed =
+                    bytes::TrimRightFunc(slice::__from_vec(self.line.clone()), |r: rune| {
+                        is_qp_discard_whitespace(r)
+                    });
                 let trimmed_raw: &[byte] = &trimmed;
                 self.line = trimmed_raw.to_vec();
                 let has_soft = bytes::HasSuffix(

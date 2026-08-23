@@ -174,8 +174,7 @@ fn steal_work() -> Option<NonNull<G>> {
     super::p::STEAL_PASSES.fetch_add(1, Ordering::Relaxed);
 
     const STEAL_TRIES: u32 = 4;
-    let allow_runnext_steal =
-        crate::runtime::flags::STEAL_RUNNEXT.load(Ordering::Relaxed);
+    let allow_runnext_steal = crate::runtime::flags::STEAL_RUNNEXT.load(Ordering::Relaxed);
     for i in 0..STEAL_TRIES {
         let steal_runnext_g = allow_runnext_steal && (i == STEAL_TRIES - 1);
         let mut e = super::p::STEAL_ORDER.start(crate::runtime::rand::cheaprand());
@@ -191,12 +190,9 @@ fn steal_work() -> Option<NonNull<G>> {
                     // idlepMask; `runqempty` is the right check at
                     // this layer.
                     let has_work = !p2.runqempty()
-                        || (steal_runnext_g
-                            && !p2.runnext.load(Ordering::Acquire).is_null());
+                        || (steal_runnext_g && !p2.runnext.load(Ordering::Acquire).is_null());
                     if has_work {
-                        if let Some(g) =
-                            unsafe { pp.runqsteal(p2, steal_runnext_g) }
-                        {
+                        if let Some(g) = unsafe { pp.runqsteal(p2, steal_runnext_g) } {
                             super::p::STEAL_HITS.fetch_add(1, Ordering::Relaxed);
                             return Some(g);
                         }
@@ -448,10 +444,7 @@ extern "C" fn g_entry() -> ! {
 
 #[inline(never)]
 unsafe fn g_entry_setup() -> alloc::boxed::Box<dyn FnOnce()> {
-    let g_ptr = current_m()
-        .lock()
-        .curg
-        .expect("g_entry: no current G");
+    let g_ptr = current_m().lock().curg.expect("g_entry: no current G");
     let g = unsafe { &mut *g_ptr.as_ptr() };
     crate::runtime::sched::make_context_gogo(
         &mut g.panic_recover,
@@ -511,7 +504,11 @@ extern "C" fn on_g_panic_aborted() -> ! {
     // this also defends against false positives if the flag were ever
     // observed post-recovery (e.g., a future feature that reuses Gs).
     if let Some(g_ptr) = current_m().lock().curg {
-        unsafe { (*g_ptr.as_ptr()).panicking.store(false, core::sync::atomic::Ordering::Release) };
+        unsafe {
+            (*g_ptr.as_ptr())
+                .panicking
+                .store(false, core::sync::atomic::Ordering::Release)
+        };
     }
 
     goexit();
@@ -531,7 +528,11 @@ extern "C" fn on_g_panic_aborted() -> ! {
 #[inline]
 pub fn panicking() -> bool {
     if let Some(g_ptr) = current_g() {
-        unsafe { (*g_ptr.as_ptr()).panicking.load(core::sync::atomic::Ordering::Acquire) }
+        unsafe {
+            (*g_ptr.as_ptr())
+                .panicking
+                .load(core::sync::atomic::Ordering::Acquire)
+        }
     } else {
         false
     }
@@ -539,8 +540,7 @@ pub fn panicking() -> bool {
 
 /// Total number of goroutines that have died by panic (vs normal
 /// return) since process start. Read by tests + diagnostic dumps.
-pub static G_PANIC_COUNT: core::sync::atomic::AtomicU64 =
-    core::sync::atomic::AtomicU64::new(0);
+pub static G_PANIC_COUNT: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
 /// Dispatch a single goroutine on the calling M, wait for it to
 /// yield or exit, then return. Internal helper shared by `schedule`
@@ -616,13 +616,15 @@ fn dispatch_g_trap_dump(label: &[u8], g_ptr: NonNull<G>) -> ! {
 
     // Status byte read raw to avoid GStatus enum UB on bad values.
     let status_raw = unsafe {
-        let p = (g_ptr.as_ptr() as *const u8)
-            .add(core::mem::offset_of!(G, status));
+        let p = (g_ptr.as_ptr() as *const u8).add(core::mem::offset_of!(G, status));
         p.read_volatile()
     };
     dump_hex(b"  status_raw   = ", status_raw as u64);
 
-    dump_hex(b"  LIVE_G_COUNT = ", LIVE_G_COUNT.load(Ordering::Relaxed) as u64);
+    dump_hex(
+        b"  LIVE_G_COUNT = ",
+        LIVE_G_COUNT.load(Ordering::Relaxed) as u64,
+    );
     dump_hex(
         b"  DISPATCH_CT  = ",
         DISPATCH_STAMP_COUNT.load(Ordering::Relaxed) as u64,
@@ -658,25 +660,47 @@ fn dispatch_g_trap_dump(label: &[u8], g_ptr: NonNull<G>) -> ! {
         let nib2 = ((off >> 8) & 0xf) as u8;
         let nib1 = ((off >> 4) & 0xf) as u8;
         let nib0 = (off & 0xf) as u8;
-        prefix[5] = if nib2 < 10 { b'0' + nib2 } else { b'a' + (nib2 - 10) };
-        prefix[6] = if nib1 < 10 { b'0' + nib1 } else { b'a' + (nib1 - 10) };
-        prefix[7] = if nib0 < 10 { b'0' + nib0 } else { b'a' + (nib0 - 10) };
+        prefix[5] = if nib2 < 10 {
+            b'0' + nib2
+        } else {
+            b'a' + (nib2 - 10)
+        };
+        prefix[6] = if nib1 < 10 {
+            b'0' + nib1
+        } else {
+            b'a' + (nib1 - 10)
+        };
+        prefix[7] = if nib0 < 10 {
+            b'0' + nib0
+        } else {
+            b'a' + (nib0 - 10)
+        };
         prefix[8] = b' ';
         prefix[9] = b'=';
         prefix[10] = b' ';
         syscall::Write(stderr, prefix.as_ptr(), 11);
         // dump lo and hi as two qwords.
         let mut buf = [0u8; 36];
-        buf[0] = b'0'; buf[1] = b'x';
+        buf[0] = b'0';
+        buf[1] = b'x';
         for i in 0..16 {
             let nib = ((lo >> ((15 - i) * 4)) & 0xf) as u8;
-            buf[2 + i] = if nib < 10 { b'0' + nib } else { b'a' + (nib - 10) };
+            buf[2 + i] = if nib < 10 {
+                b'0' + nib
+            } else {
+                b'a' + (nib - 10)
+            };
         }
         buf[18] = b' ';
-        buf[19] = b'0'; buf[20] = b'x';
+        buf[19] = b'0';
+        buf[20] = b'x';
         for i in 0..16 {
             let nib = ((hi >> ((15 - i) * 4)) & 0xf) as u8;
-            buf[21 + i] = if nib < 10 { b'0' + nib } else { b'a' + (nib - 10) };
+            buf[21 + i] = if nib < 10 {
+                b'0' + nib
+            } else {
+                b'a' + (nib - 10)
+            };
         }
         syscall::Write(stderr, buf.as_ptr(), 37);
         syscall::Write(stderr, b"\n".as_ptr(), 1);
@@ -773,8 +797,7 @@ unsafe fn mcall(fn_to_call: extern "C" fn(*mut G) -> !) {
     let g0_ptr = storage.g0.load(Ordering::Acquire);
     debug_assert!(!g0_ptr.is_null(), "mcall: g0 not initialized");
 
-    let curg = unsafe { current_m().data_unchecked().curg }
-        .expect("mcall: no current G");
+    let curg = unsafe { current_m().data_unchecked().curg }.expect("mcall: no current G");
 
     let from_buf = unsafe { &mut (*curg.as_ptr()).gobuf as *mut Gobuf };
     let to_buf = unsafe { &(*g0_ptr).gobuf as *const Gobuf };
@@ -1111,8 +1134,7 @@ pub(crate) fn schedule_loop() -> ! {
                     // every shard has a dedicated poller, the nginx
                     // per-worker-epoll configuration). Ms left over
                     // once all shards are claimed futex-park.
-                    let prefer =
-                        current_p().map(|p| p.id as usize).unwrap_or(0);
+                    let prefer = current_p().map(|p| p.id as usize).unwrap_or(0);
                     match crate::runtime::netpoll::try_claim_shard(prefer) {
                         Some(shard) => {
                             if let Some(g) = block_as_netpoller(shard) {
@@ -1438,6 +1460,43 @@ pub fn num_cpus() -> usize {
     }
 }
 
+/// Number of Ps and Ms to create during runtime bootstrap.
+///
+/// Go reads `GOMAXPROCS` before starting the scheduler. Goish previously
+/// exposed a `runtime.GOMAXPROCS` value but always created one M per CPU,
+/// which left programs that must keep foreign calls on the loader-created
+/// thread dependent on an external `taskset`. Honor a positive decimal
+/// `GOMAXPROCS` from the initial environment and clamp it to the scheduler's
+/// fixed P table. Invalid or missing values retain the affinity-derived CPU
+/// count.
+pub fn startup_procs() -> usize {
+    let fallback = num_cpus().min(super::p::MAX_PS).max(1);
+    let Some(value) = (unsafe { crate::runtime::args::envp_lookup(b"GOMAXPROCS") }) else {
+        return fallback;
+    };
+    if value.is_empty() {
+        return fallback;
+    }
+    let mut parsed = 0usize;
+    for &byte in value {
+        if !byte.is_ascii_digit() {
+            return fallback;
+        }
+        parsed = match parsed
+            .checked_mul(10)
+            .and_then(|current| current.checked_add((byte - b'0') as usize))
+        {
+            Some(next) => next,
+            None => return fallback,
+        };
+    }
+    if parsed == 0 {
+        fallback
+    } else {
+        parsed.min(super::p::MAX_PS)
+    }
+}
+
 /// Number of worker Ms that have completed `acquirep` and entered
 /// `m_schedule_loop`. `bootstrap_workers` waits on this so that, by
 /// the time the runtime hands control to user `main()`, every P has
@@ -1512,8 +1571,7 @@ const WORKER_M_STACK: usize = 64 * 1024;
 fn spawn_worker_m(id: u32) -> i64 {
     use crate::syscall;
 
-    let storage: &'static super::m::MStorage =
-        Box::leak(Box::new(super::m::MStorage::new(id)));
+    let storage: &'static super::m::MStorage = Box::leak(Box::new(super::m::MStorage::new(id)));
     storage.init_tls_self();
     // M17c: register so wake_idle_m can scan for parked workers.
     register_m_storage(storage);
@@ -1551,7 +1609,7 @@ fn spawn_worker_m(id: u32) -> i64 {
             syscall::CLONE_THREAD_FLAGS,
             stack_top,
             mstart,
-            storage.fs_base() as u64,
+            storage.tls_base() as u64,
         )
     }
 }
@@ -1564,8 +1622,8 @@ fn spawn_worker_m(id: u32) -> i64 {
 /// Mirrors Go's `runtime.schedinit` + `runtime.startTheWorld` for
 /// the GOMAXPROCS-sized M creation, minus the per-P machinery (M17b
 /// adds Ps; for now everything shares one global runq).
-pub fn bootstrap_workers() {
-    let n = num_cpus();
+pub fn bootstrap_workers(n: usize) {
+    let n = n.min(crate::runtime::sched::MAX_PS).max(1);
     // Pre-grow MIDLE / ALL_MS to capacity so subsequent push()es
     // never reallocate. MIDLE is hit on every M park; without this
     // the first park-cycle pushes trigger amortized Vec growth (an

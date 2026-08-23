@@ -25,9 +25,7 @@ extern crate alloc;
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use goish::runtime::sched::{
-    current_m, num_ps, schedule, MAX_PS, STEAL_HITS, STEAL_PASSES,
-};
+use goish::runtime::sched::{current_m, num_ps, schedule, MAX_PS, STEAL_HITS, STEAL_PASSES};
 use goish::{go, syscall};
 
 fn die(msg: &[u8]) -> ! {

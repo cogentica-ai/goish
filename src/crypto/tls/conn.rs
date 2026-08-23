@@ -25,7 +25,9 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use super::alert::{alert, alertBadRecordMAC, alertInternalError, alertRecordOverflow, alertUnexpectedMessage};
+use super::alert::{
+    alert, alertBadRecordMAC, alertInternalError, alertRecordOverflow, alertUnexpectedMessage,
+};
 use super::cipher_suites::{aead, cipherSuiteTLS13};
 use super::common::{recordHeaderLen, recordType, VersionTLS11, VersionTLS12, VersionTLS13};
 use super::quic::QUICEncryptionLevel;
@@ -539,8 +541,7 @@ impl halfConn {
 
                     // Go: plaintext, err = c.Open(payload[:0], nonce, payload, additionalData)
                     //     if err != nil { return nil, 0, alertBadRecordMAC }
-                    let (out, err) =
-                        c.Open(slice::new(), nonce, payload.clone(), additionalData);
+                    let (out, err) = c.Open(slice::new(), nonce, payload.clone(), additionalData);
                     if err != errors::nil {
                         return (slice::new(), recordType(0), Some(alertBadRecordMAC));
                     }
@@ -636,11 +637,7 @@ impl halfConn {
             //     n = subtle.ConstantTimeSelect(int(uint32(n)>>31), 0, n) // if n < 0 { n = 0 }
             //     record[3] = byte(n >> 8); record[4] = byte(n)
             let mut n = payload.Len() - macSize - paddingLen;
-            n = crate::crypto::subtle::ConstantTimeSelect(
-                crate::int(crate::uint32(n) >> 31),
-                0,
-                n,
-            );
+            n = crate::crypto::subtle::ConstantTimeSelect(crate::int(crate::uint32(n) >> 31), 0, n);
             record[3] = crate::byte(n >> 8);
             record[4] = crate::byte(n);
             // Go: remoteMAC := payload[n : n+macSize]
@@ -938,8 +935,9 @@ pub struct Conn {
     pub(crate) verifiedChains: slice<slice<crate::crypto::x509::Certificate>>,
     pub(crate) serverName: string,
     pub(crate) secureRenegotiation: bool,
-    pub(crate) ekm:
-        Option<alloc::sync::Arc<dyn Fn(string, slice<byte>, int) -> (slice<byte>, error) + Send + Sync>>,
+    pub(crate) ekm: Option<
+        alloc::sync::Arc<dyn Fn(string, slice<byte>, int) -> (slice<byte>, error) + Send + Sync>,
+    >,
     pub(crate) resumptionSecret: slice<byte>,
     pub(crate) echAccepted: bool,
     pub(crate) ticketKeys: slice<super::common::ticketKey>,
@@ -1020,22 +1018,29 @@ impl Default for Conn {
 }
 
 impl Conn {
-
     // go: none — goish-only: Conn's fields are unexported in Go, where
     // the tests are in-package. goish examples are external crates, so
     // the fields the reference tests set need named setters. Nothing in
     // the port uses them.
     #[doc(hidden)]
-    pub fn __setIsClient(&mut self, v: bool) { self.isClient = v; }
+    pub fn __setIsClient(&mut self, v: bool) {
+        self.isClient = v;
+    }
     // go: none — goish-only: see `__setIsClient`.
     #[doc(hidden)]
-    pub fn __setHandshakeComplete(&mut self, v: bool) { self.isHandshakeComplete = v; }
+    pub fn __setHandshakeComplete(&mut self, v: bool) {
+        self.isHandshakeComplete = v;
+    }
     // go: none — goish-only: see `__setIsClient`.
     #[doc(hidden)]
-    pub fn __setVers(&mut self, v: uint16) { self.vers = v; }
+    pub fn __setVers(&mut self, v: uint16) {
+        self.vers = v;
+    }
     // go: none — goish-only: see `__setIsClient`.
     #[doc(hidden)]
-    pub fn __setBytesSent(&mut self, v: crate::types::int64) { self.bytesSent = v; }
+    pub fn __setBytesSent(&mut self, v: crate::types::int64) {
+        self.bytesSent = v;
+    }
     // go: none — goish-only: see `__setIsClient`.
     #[doc(hidden)]
     pub fn __setDynamicRecordSizingDisabled(&mut self, v: bool) {
@@ -1079,27 +1084,28 @@ impl Conn {
         self.clientFinished = [1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     }
 
-
     // go: none — goish-only: an in-memory net::Conn so the reference
     // tests can see what the write path put on the wire. Go's tests are
     // in-package and build one inline.
     #[doc(hidden)]
-    pub fn __setMemConn(
-        &mut self,
-        sink: alloc::sync::Arc<crate::sync::Mutex<slice<byte>>>,
-    ) {
+    pub fn __setMemConn(&mut self, sink: alloc::sync::Arc<crate::sync::Mutex<slice<byte>>>) {
         self.conn = Some(alloc::boxed::Box::new(memConn { sink }));
     }
     // go: none — goish-only: see `__setMemConn`.
     #[doc(hidden)]
-    pub fn __echAccepted(&self) -> bool { return self.echAccepted; }
+    pub fn __echAccepted(&self) -> bool {
+        return self.echAccepted;
+    }
     // go: none — goish-only: see `__setMemConn`.
     #[doc(hidden)]
-    pub fn __setBuffering(&mut self, v: bool) { self.buffering = v; }
+    pub fn __setBuffering(&mut self, v: bool) {
+        self.buffering = v;
+    }
     // go: none — goish-only: see `__setMemConn`.
     #[doc(hidden)]
-    pub fn __buffering(&self) -> bool { return self.buffering; }
-
+    pub fn __buffering(&self) -> bool {
+        return self.buffering;
+    }
 
     // go: none — goish-only: an in-memory net::Conn that yields a fixed
     // byte string, so the reference tests can drive the read path. Go's
@@ -1133,20 +1139,26 @@ impl Conn {
     }
     // go: none — goish-only: see `__setFeedConn`.
     #[doc(hidden)]
-    pub fn __setHaveVers(&mut self, v: bool) { self.haveVers = v; }
+    pub fn __setHaveVers(&mut self, v: bool) {
+        self.haveVers = v;
+    }
     // go: none — goish-only: see `__setFeedConn`.
     #[doc(hidden)]
-    pub fn __hand(&self) -> slice<byte> { return slice::__from_vec(self.hand.clone()); }
+    pub fn __hand(&self) -> slice<byte> {
+        return slice::__from_vec(self.hand.clone());
+    }
     // go: none — goish-only: see `__setFeedConn`.
     #[doc(hidden)]
-    pub fn __retryCount(&self) -> int { return self.retryCount; }
-
+    pub fn __retryCount(&self) -> int {
+        return self.retryCount;
+    }
 
     // go: none — goish-only: `config` is unexported in Go, where the
     // tests and handshake_client.go are in the same package.
     #[doc(hidden)]
-    pub fn __configServerName(&self) -> string { return self.config.ServerName.clone(); }
-
+    pub fn __configServerName(&self) -> string {
+        return self.config.ServerName.clone();
+    }
 
     // go: none — goish-only: `config` is unexported in Go, where the
     // handshake state machines are in the same package.
@@ -1160,38 +1172,46 @@ impl Conn {
         return self.config.ClientAuth;
     }
 
-
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
     #[doc(hidden)]
-    pub fn __setConfig(&mut self, cfg: super::Config) { self.config = cfg; }
+    pub fn __setConfig(&mut self, cfg: super::Config) {
+        self.config = cfg;
+    }
     // go: none — goish-only: see `__setConfig`.
     #[doc(hidden)]
     pub fn __configClientSessionCache(
         &self,
-    ) -> Option<
-        alloc::sync::Arc<crate::sync::Mutex<Box<dyn super::common::ClientSessionCache>>>,
-    > {
+    ) -> Option<alloc::sync::Arc<crate::sync::Mutex<Box<dyn super::common::ClientSessionCache>>>>
+    {
         return self.config.ClientSessionCache.clone();
     }
     // go: none — goish-only: see `__setConfig`.
     #[doc(hidden)]
-    pub fn __peerCertificateCount(&self) -> int { return self.peerCertificates.Len(); }
+    pub fn __peerCertificateCount(&self) -> int {
+        return self.peerCertificates.Len();
+    }
     // go: none — goish-only: see `__setConfig`.
     #[doc(hidden)]
-    pub fn __verifiedChainCount(&self) -> int { return self.verifiedChains.Len(); }
-
-
-    // go: none — goish-only: see `__configSessionTicketsDisabled`.
-    #[doc(hidden)]
-    pub fn __config(&self) -> super::Config { return self.config.clone(); }
-    // go: none — goish-only: see `__configSessionTicketsDisabled`.
-    #[doc(hidden)]
-    pub fn __vers(&self) -> uint16 { return self.vers; }
-
+    pub fn __verifiedChainCount(&self) -> int {
+        return self.verifiedChains.Len();
+    }
 
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
     #[doc(hidden)]
-    pub fn __setCipherSuite(&mut self, id: uint16) { self.cipherSuite = id; }
+    pub fn __config(&self) -> super::Config {
+        return self.config.clone();
+    }
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __vers(&self) -> uint16 {
+        return self.vers;
+    }
+
+    // go: none — goish-only: see `__configSessionTicketsDisabled`.
+    #[doc(hidden)]
+    pub fn __setCipherSuite(&mut self, id: uint16) {
+        self.cipherSuite = id;
+    }
     // go: none — goish-only: `halfConn.trafficSecret` and the identity
     // fields a SessionState snapshot reads are unexported in Go, where
     // the tests are in-package.
@@ -1203,7 +1223,10 @@ impl Conn {
     // go: none — goish-only: see `__setTrafficSecrets`.
     #[doc(hidden)]
     pub fn __trafficSecrets(&self) -> (slice<byte>, slice<byte>) {
-        return (self.in_.trafficSecret.clone(), self.out.trafficSecret.clone());
+        return (
+            self.in_.trafficSecret.clone(),
+            self.out.trafficSecret.clone(),
+        );
     }
     // go: none — goish-only: see `__setTrafficSecrets`.
     #[doc(hidden)]
@@ -1232,14 +1255,16 @@ impl Conn {
         self.out.version = vers;
     }
 
-
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
     #[doc(hidden)]
-    pub fn __inVersion(&self) -> uint16 { return self.in_.version; }
+    pub fn __inVersion(&self) -> uint16 {
+        return self.in_.version;
+    }
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
     #[doc(hidden)]
-    pub fn __cipherSuite(&self) -> uint16 { return self.cipherSuite; }
-
+    pub fn __cipherSuite(&self) -> uint16 {
+        return self.cipherSuite;
+    }
 
     // go: none — goish-only: Go calls `c.in.prepareCipherSpec` and
     // `c.out.prepareCipherSpec` directly, because both halves are
@@ -1259,13 +1284,14 @@ impl Conn {
     }
     // go: none — goish-only: see `__prepareCipherSpecs`.
     #[doc(hidden)]
-    pub fn __inExplicitNonceLen(&self) -> int { return self.in_.explicitNonceLen(); }
+    pub fn __inExplicitNonceLen(&self) -> int {
+        return self.in_.explicitNonceLen();
+    }
     // go: none — goish-only: see `__prepareCipherSpecs`.
     #[doc(hidden)]
     pub fn __changeCipherSpecs(&mut self) -> bool {
         return self.in_.changeCipherSpec().is_none() && self.out.changeCipherSpec().is_none();
     }
-
 
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
     #[doc(hidden)]
@@ -1287,35 +1313,50 @@ impl Conn {
     }
     // go: none — goish-only: see `__adoptSession`.
     #[doc(hidden)]
-    pub fn __didResume(&self) -> bool { return self.didResume; }
+    pub fn __didResume(&self) -> bool {
+        return self.didResume;
+    }
     // go: none — goish-only: see `__didResume`.
     #[doc(hidden)]
-    pub fn __ocspResponseLen(&self) -> int { return self.ocspResponse.Len(); }
+    pub fn __ocspResponseLen(&self) -> int {
+        return self.ocspResponse.Len();
+    }
     // go: none — goish-only: see `__didResume`.
     #[doc(hidden)]
-    pub fn __inTrafficSecretOf(&self) -> slice<byte> { return self.in_.trafficSecret.clone(); }
+    pub fn __inTrafficSecretOf(&self) -> slice<byte> {
+        return self.in_.trafficSecret.clone();
+    }
     // go: none — goish-only: see `__didResume`.
     #[doc(hidden)]
-    pub fn __resumptionSecret(&self) -> slice<byte> { return self.resumptionSecret.clone(); }
+    pub fn __resumptionSecret(&self) -> slice<byte> {
+        return self.resumptionSecret.clone();
+    }
     // go: none — goish-only: see `__didResume`.
     #[doc(hidden)]
-    pub fn __hasEkm(&self) -> bool { return self.ekm.is_some(); }
+    pub fn __hasEkm(&self) -> bool {
+        return self.ekm.is_some();
+    }
     // go: none — goish-only: see `__adoptSession`.
     #[doc(hidden)]
     pub(crate) fn __setTicketKeys(&mut self, k: slice<super::common::ticketKey>) {
         self.ticketKeys = k;
     }
 
-
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
     #[doc(hidden)]
-    pub fn __handshakes(&self) -> int { return self.handshakes; }
+    pub fn __handshakes(&self) -> int {
+        return self.handshakes;
+    }
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
     #[doc(hidden)]
-    pub fn __secureRenegotiation(&self) -> bool { return self.secureRenegotiation; }
+    pub fn __secureRenegotiation(&self) -> bool {
+        return self.secureRenegotiation;
+    }
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
     #[doc(hidden)]
-    pub fn __setSecureRenegotiation(&mut self, v: bool) { self.secureRenegotiation = v; }
+    pub fn __setSecureRenegotiation(&mut self, v: bool) {
+        self.secureRenegotiation = v;
+    }
     // go: none — goish-only: Go builds the 24-byte expected value inline
     // from two unexported [12]byte fields; goish names the concatenation.
     #[doc(hidden)]
@@ -1327,23 +1368,34 @@ impl Conn {
     }
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
     #[doc(hidden)]
-    pub fn __setClientProtocol(&mut self, p: string) { self.clientProtocol = p; }
+    pub fn __setClientProtocol(&mut self, p: string) {
+        self.clientProtocol = p;
+    }
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
     #[doc(hidden)]
-    pub fn __setSCTs(&mut self, v: slice<slice<byte>>) { self.scts = v; }
+    pub fn __setSCTs(&mut self, v: slice<slice<byte>>) {
+        self.scts = v;
+    }
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
     #[doc(hidden)]
-    pub fn __scts(&self) -> slice<slice<byte>> { return self.scts.clone(); }
+    pub fn __scts(&self) -> slice<slice<byte>> {
+        return self.scts.clone();
+    }
     // go: none — goish-only: see `__configSessionTicketsDisabled`.
     #[doc(hidden)]
-    pub fn __clientProtocol(&self) -> string { return self.clientProtocol.clone(); }
+    pub fn __clientProtocol(&self) -> string {
+        return self.clientProtocol.clone();
+    }
     // go: none — goish-only: see `__setMemConn`.
     #[doc(hidden)]
-    pub fn __curveID(&self) -> super::common::CurveID { return self.curveID; }
+    pub fn __curveID(&self) -> super::common::CurveID {
+        return self.curveID;
+    }
     // go: none — goish-only: see `__setMemConn`.
     #[doc(hidden)]
-    pub fn __serverName(&self) -> string { return self.serverName.clone(); }
-
+    pub fn __serverName(&self) -> string {
+        return self.serverName.clone();
+    }
 
     // go: none — goish-only: `processServerHello` restores the same
     // fields as `checkForResumption` EXCEPT didResume, which the client
@@ -1651,11 +1703,7 @@ impl Conn {
     /// is the only reachable one. And `outBufPool` is a `sync.Pool`
     /// whose only purpose is to avoid an allocation per record; goish
     /// allocates, which is observably identical.
-    pub(crate) fn writeRecordLocked(
-        &mut self,
-        typ: recordType,
-        data: slice<byte>,
-    ) -> (int, error) {
+    pub(crate) fn writeRecordLocked(&mut self, typ: recordType, data: slice<byte>) -> (int, error) {
         // Go: var n int
         //     for len(data) > 0 { … }
         let mut n: int = 0;
@@ -1699,11 +1747,9 @@ impl Conn {
             // Go: outBuf, err = c.out.encrypt(outBuf, data[:m], c.config.rand())
             //     if err != nil { return n, err }
             let mut rand = self.config.rand();
-            let (sealed, err) = self.out.encrypt(
-                slice::__from_vec(outBuf),
-                data.slice(0, m),
-                &mut *rand,
-            );
+            let (sealed, err) =
+                self.out
+                    .encrypt(slice::__from_vec(outBuf), data.slice(0, m), &mut *rand);
             if err != errors::nil {
                 return (n, err);
             }
@@ -1785,7 +1831,6 @@ impl Conn {
     }
 }
 
-
 // go: none — goish-only: the in-memory net::Conn `__setMemConn`
 // installs. Go's tests build one inline; goish examples are external
 // crates, so it lives here.
@@ -1813,11 +1858,17 @@ impl crate::net::Conn for memConn {
     }
     // go: none — goish-only: see `memConn`.
     fn LocalAddr(&self) -> crate::net::TCPAddr {
-        return crate::net::TCPAddr { IP: [0, 0, 0, 0], Port: 0 };
+        return crate::net::TCPAddr {
+            IP: [0, 0, 0, 0],
+            Port: 0,
+        };
     }
     // go: none — goish-only: see `memConn`.
     fn RemoteAddr(&self) -> crate::net::TCPAddr {
-        return crate::net::TCPAddr { IP: [0, 0, 0, 0], Port: 0 };
+        return crate::net::TCPAddr {
+            IP: [0, 0, 0, 0],
+            Port: 0,
+        };
     }
     // go: none — goish-only: see `memConn`.
     fn SetDeadline(&self, _t: crate::time::Time) -> error {
@@ -1968,9 +2019,8 @@ impl Conn {
         // 0x80 strongly suggests an SSLv2 client.
         if !handshakeComplete && typ0 == recordType(0x80) {
             self.sendAlert(super::alert::alertProtocolVersion);
-            let e = self.newRecordHeaderError(string::from_static(
-                "unsupported SSLv2 handshake received",
-            ));
+            let e = self
+                .newRecordHeaderError(string::from_static("unsupported SSLv2 handshake received"));
             return self.in_.setErrorLocked(crate::errors::Wrap(e));
         }
 
@@ -2109,9 +2159,7 @@ impl Conn {
                     // record and retry.
                     return self.retryReadRecord(expectChangeCipherSpec);
                 }
-                return self
-                    .in_
-                    .setErrorLocked(crate::errors::Wrap(alert(data[1])));
+                return self.in_.setErrorLocked(crate::errors::Wrap(alert(data[1])));
             }
             // Go: switch data[0] {
             //     case alertLevelWarning: // Drop the record on the floor and retry.
@@ -2123,9 +2171,7 @@ impl Conn {
                 return self.retryReadRecord(expectChangeCipherSpec);
             }
             if crate::int(data[0]) == super::alert::alertLevelError {
-                return self
-                    .in_
-                    .setErrorLocked(crate::errors::Wrap(alert(data[1])));
+                return self.in_.setErrorLocked(crate::errors::Wrap(alert(data[1])));
             }
             let e = self.sendAlert(alertUnexpectedMessage);
             return self.in_.setErrorLocked(e);
@@ -2202,7 +2248,6 @@ impl Conn {
     }
 }
 
-
 // go: none — goish-only: Go's `readFromUntil` takes an `io.Reader` and
 // is handed `c.conn`, because `net.Conn` embeds `io.Reader`. goish's
 // `net::Conn` declares `Read` itself rather than inheriting it, so the
@@ -2218,7 +2263,6 @@ impl<'a> crate::io::Reader for connReader<'a> {
         return self.c.Read(p);
     }
 }
-
 
 // go: none — goish-only: the in-memory net::Conn `__setFeedConn`
 // installs. Returns EOF once drained, as a socket at end of stream does.
@@ -2258,21 +2302,35 @@ impl crate::net::Conn for feedConn {
         return (p.Len(), errors::nil);
     }
     // go: none — goish-only: see `feedConn`.
-    fn Close(&mut self) -> error { return errors::nil; }
+    fn Close(&mut self) -> error {
+        return errors::nil;
+    }
     // go: none — goish-only: see `feedConn`.
     fn LocalAddr(&self) -> crate::net::TCPAddr {
-        return crate::net::TCPAddr { IP: [0, 0, 0, 0], Port: 0 };
+        return crate::net::TCPAddr {
+            IP: [0, 0, 0, 0],
+            Port: 0,
+        };
     }
     // go: none — goish-only: see `feedConn`.
     fn RemoteAddr(&self) -> crate::net::TCPAddr {
-        return crate::net::TCPAddr { IP: [0, 0, 0, 0], Port: 0 };
+        return crate::net::TCPAddr {
+            IP: [0, 0, 0, 0],
+            Port: 0,
+        };
     }
     // go: none — goish-only: see `feedConn`.
-    fn SetDeadline(&self, _t: crate::time::Time) -> error { return errors::nil; }
+    fn SetDeadline(&self, _t: crate::time::Time) -> error {
+        return errors::nil;
+    }
     // go: none — goish-only: see `feedConn`.
-    fn SetReadDeadline(&self, _t: crate::time::Time) -> error { return errors::nil; }
+    fn SetReadDeadline(&self, _t: crate::time::Time) -> error {
+        return errors::nil;
+    }
     // go: none — goish-only: see `feedConn`.
-    fn SetWriteDeadline(&self, _t: crate::time::Time) -> error { return errors::nil; }
+    fn SetWriteDeadline(&self, _t: crate::time::Time) -> error {
+        return errors::nil;
+    }
 }
 
 crate::var! {
@@ -2383,8 +2441,11 @@ impl Conn {
         // Go: newSecret := cipherSuite.nextTrafficSecret(c.in.trafficSecret)
         //     c.in.setTrafficSecret(cipherSuite, QUICEncryptionLevelInitial, newSecret)
         let newSecret = cipherSuite.nextTrafficSecret(self.in_.trafficSecret.clone());
-        self.in_
-            .setTrafficSecret(cipherSuite, super::quic::QUICEncryptionLevelInitial, newSecret);
+        self.in_.setTrafficSecret(
+            cipherSuite,
+            super::quic::QUICEncryptionLevelInitial,
+            newSecret,
+        );
 
         // Go: if keyUpdate.updateRequested { … }
         if keyUpdate.updateRequested {
@@ -2470,7 +2531,10 @@ impl Conn {
             return (None, err);
         }
         // Go: data = c.hand.Next(4 + n)
-        let taken: Vec<byte> = self.hand.drain(..usize::try_from(4 + n).unwrap_or(0)).collect();
+        let taken: Vec<byte> = self
+            .hand
+            .drain(..usize::try_from(4 + n).unwrap_or(0))
+            .collect();
         // Go: return c.unmarshalHandshakeMessage(data, transcript)
         return self.unmarshalHandshakeMessage(slice::__from_vec(taken), transcript);
     }
@@ -2560,9 +2624,7 @@ impl Conn {
         // Go: return m, nil
         return (Some(m), errors::nil);
     }
-
 }
-
 
 // go: none — goish-only: Go's `cipherSuite.cipher` returns `any`, and
 // `halfConn.cipher` is the same `any` — the record layer asserts it back
@@ -2644,16 +2706,13 @@ impl Conn {
         // Go: if c.handshakeErr == nil && !c.isHandshakeComplete.Load() {
         //         c.handshakeErr = errors.New("tls: internal error: handshake should have had a result") }
         if self.handshakeErr == errors::nil && !self.isHandshakeComplete {
-            self.handshakeErr = errors::New(
-                "tls: internal error: handshake should have had a result",
-            );
+            self.handshakeErr =
+                errors::New("tls: internal error: handshake should have had a result");
         }
         // Go: if c.handshakeErr != nil && c.isHandshakeComplete.Load() {
         //         panic("tls: internal error: handshake returned an error but is marked successful") }
         if self.handshakeErr != errors::nil && self.isHandshakeComplete {
-            panic!(
-                "tls: internal error: handshake returned an error but is marked successful"
-            );
+            panic!("tls: internal error: handshake returned an error but is marked successful");
         }
 
         // Go: the `c.quic != nil` tail is absent — goish ships no QUIC

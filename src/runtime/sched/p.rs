@@ -195,7 +195,9 @@ impl P {
             let idx = cache[class];
             if idx != NIL_SPAN {
                 cache[class] = NIL_SPAN;
-                unsafe { mcentral::uncacheSpan(idx); }
+                unsafe {
+                    mcentral::uncacheSpan(idx);
+                }
             }
         }
     }
@@ -311,7 +313,10 @@ pub fn acquirep(p: &'static P) {
         prev
     );
     // 2) Backlink P → M.
-    p.m.store(storage as *const MStorage as *mut MStorage, Ordering::Release);
+    p.m.store(
+        storage as *const MStorage as *mut MStorage,
+        Ordering::Release,
+    );
     // 3) Forward link M → P.
     storage
         .current_p
@@ -330,7 +335,9 @@ pub fn releasep() -> Option<&'static P> {
         return None;
     }
     let storage = current_m_storage();
-    let p_ptr = storage.current_p.swap(core::ptr::null_mut(), Ordering::AcqRel);
+    let p_ptr = storage
+        .current_p
+        .swap(core::ptr::null_mut(), Ordering::AcqRel);
     if p_ptr.is_null() {
         return None;
     }
@@ -356,9 +363,7 @@ pub fn current_p() -> Option<&'static P> {
     if !is_tls_ready() {
         return None;
     }
-    let p_ptr = current_m_storage()
-        .current_p
-        .load(Ordering::Acquire);
+    let p_ptr = current_m_storage().current_p.load(Ordering::Acquire);
     if p_ptr.is_null() {
         None
     } else {
@@ -407,12 +412,7 @@ impl P {
                 let oldnext = self.runnext.load(Ordering::Relaxed);
                 if self
                     .runnext
-                    .compare_exchange_weak(
-                        oldnext,
-                        gp_ptr,
-                        Ordering::AcqRel,
-                        Ordering::Relaxed,
-                    )
+                    .compare_exchange_weak(oldnext, gp_ptr, Ordering::AcqRel, Ordering::Relaxed)
                     .is_ok()
                 {
                     if oldnext.is_null() {
@@ -432,8 +432,7 @@ impl P {
                 // Room in the ring.
                 let slot = (t as usize) % LOCAL_RUNQ_SIZE;
                 (*self.runq.get())[slot] = gp_ptr;
-                self.runqtail
-                    .store(t.wrapping_add(1), Ordering::Release);
+                self.runqtail.store(t.wrapping_add(1), Ordering::Release);
                 return;
             }
             // Full — try to overflow half + this G to global.
@@ -465,12 +464,7 @@ impl P {
         }
         if self
             .runqhead
-            .compare_exchange(
-                h,
-                h.wrapping_add(n),
-                Ordering::Release,
-                Ordering::Relaxed,
-            )
+            .compare_exchange(h, h.wrapping_add(n), Ordering::Release, Ordering::Relaxed)
             .is_err()
         {
             return false;
@@ -494,7 +488,12 @@ impl P {
             // attempt is sufficient.
             if self
                 .runnext
-                .compare_exchange(next, core::ptr::null_mut(), Ordering::AcqRel, Ordering::Relaxed)
+                .compare_exchange(
+                    next,
+                    core::ptr::null_mut(),
+                    Ordering::AcqRel,
+                    Ordering::Relaxed,
+                )
                 .is_ok()
             {
                 return Some(NonNull::new_unchecked(next));
@@ -510,12 +509,7 @@ impl P {
             let gp = (*self.runq.get())[slot];
             if self
                 .runqhead
-                .compare_exchange_weak(
-                    h,
-                    h.wrapping_add(1),
-                    Ordering::Release,
-                    Ordering::Relaxed,
-                )
+                .compare_exchange_weak(h, h.wrapping_add(1), Ordering::Release, Ordering::Relaxed)
                 .is_ok()
             {
                 if gp.is_null() {
@@ -665,12 +659,7 @@ impl P {
             }
             if self
                 .runqhead
-                .compare_exchange(
-                    h,
-                    h.wrapping_add(n),
-                    Ordering::Release,
-                    Ordering::Relaxed,
-                )
+                .compare_exchange(h, h.wrapping_add(n), Ordering::Release, Ordering::Relaxed)
                 .is_ok()
             {
                 return n;
@@ -694,11 +683,7 @@ impl P {
     /// `self.runqtail` is what makes the SPMC ring lock-free.
     #[inline(never)]
     #[link_section = "goish_rt_text"]
-    pub unsafe fn runqsteal(
-        &self,
-        target: &P,
-        steal_runnext_g: bool,
-    ) -> Option<NonNull<G>> {
+    pub unsafe fn runqsteal(&self, target: &P, steal_runnext_g: bool) -> Option<NonNull<G>> {
         // Single-writer read: only `self`'s owner M writes
         // `self.runqtail`, and that owner is the caller.
         let t = self.runqtail.load(Ordering::Relaxed);
@@ -722,8 +707,7 @@ impl P {
             "runqsteal: runq overflow"
         );
         // Publish the n remaining stolen Gs at indices [t, t+n).
-        self.runqtail
-            .store(t.wrapping_add(n), Ordering::Release);
+        self.runqtail.store(t.wrapping_add(n), Ordering::Release);
         NonNull::new(gp)
     }
 }

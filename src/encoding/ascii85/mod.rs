@@ -150,11 +150,7 @@ fn decode_into(dst: &mut [byte], src: &[byte], flush: bool) -> (int, int, error)
             v = v.wrapping_mul(85).wrapping_add((b - b'!') as u32);
             nb += 1;
         } else {
-            return (
-                0,
-                0,
-                Wrap(CorruptInputError { offset: i as int }),
-            );
+            return (0, 0, Wrap(CorruptInputError { offset: i as int }));
         }
         if nb == 5 {
             nsrc = i + 1;
@@ -177,7 +173,9 @@ fn decode_into(dst: &mut [byte], src: &[byte], flush: bool) -> (int, int, error)
                 return (
                     0,
                     0,
-                    Wrap(CorruptInputError { offset: src.len() as int }),
+                    Wrap(CorruptInputError {
+                        offset: src.len() as int,
+                    }),
                 );
             }
             // Go: pad with worst-case digit 84 to nudge top bits.

@@ -17,38 +17,55 @@ static PASSED: AtomicUsize = AtomicUsize::new(0);
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
 fn check(name: &'static str, ok: bool, detail: goish::string) {
-    if ok { PASSED.fetch_add(1, Ordering::Relaxed); fmt::Printf!("PASS: %s\n", name); }
-    else { FAILED.fetch_add(1, Ordering::Relaxed); fmt::Printf!("FAIL: %s — %s\n", name, detail); }
+    if ok {
+        PASSED.fetch_add(1, Ordering::Relaxed);
+        fmt::Printf!("PASS: %s\n", name);
+    } else {
+        FAILED.fetch_add(1, Ordering::Relaxed);
+        fmt::Printf!("FAIL: %s — %s\n", name, detail);
+    }
 }
 
 fn strs(v: &[&'static str]) -> slice<string> {
     let mut o: alloc::vec::Vec<string> = alloc::vec::Vec::new();
-    for s in v { o.push(string(*s)); }
+    for s in v {
+        o.push(string(*s));
+    }
     slice::<string>::__from_vec(o)
 }
 
 fn joined(v: &slice<string>) -> goish::string {
     let mut out = string("");
-    for i in 0..v.Len() { out = fmt::Sprintf!("%s%s,", out, v[i].clone()); }
+    for i in 0..v.Len() {
+        out = fmt::Sprintf!("%s%s,", out, v[i].clone());
+    }
     out
 }
 
 #[goish::main]
 fn main() {
-    goish::go!(stack(512 * 1024), move || { run(); });
-    loop { goish::runtime::sched::Gosched(); }
+    goish::go!(stack(512 * 1024), move || {
+        run();
+    });
+    loop {
+        goish::runtime::sched::Gosched();
+    }
 }
 
 fn run() {
     {
         let cases: &[(char, char)] = &[
-            ('a', 'A'), ('z', 'Z'), ('A', 'A'), ('Z', 'Z'),
+            ('a', 'A'),
+            ('z', 'Z'),
+            ('A', 'A'),
+            ('Z', 'Z'),
             ('-', '_'),
             // `=` maps to `_` too: a header named X=Y would otherwise
             // inject a second '=' into the key=value env entry.
             ('=', '_'),
-            ('_', '_'), ('0', '0'),
-            ('é', 'é'),   // non-ASCII passes through untouched
+            ('_', '_'),
+            ('0', '0'),
+            ('é', 'é'), // non-ASCII passes through untouched
         ];
         let mut bad = string("");
         for (r, want) in cases {
@@ -57,8 +74,11 @@ fn run() {
                 bad = fmt::Sprintf!("%s -> %d", string("case"), got as i64);
             }
         }
-        check("upperCaseAndUnderscore over 9 runes (incl. '=' and non-ASCII)",
-              bad.Len() == 0, bad);
+        check(
+            "upperCaseAndUnderscore over 9 runes (incl. '=' and non-ASCII)",
+            bad.Len() == 0,
+            bad,
+        );
     }
     {
         // LAST occurrence wins — an environment is applied last-wins,
@@ -81,14 +101,20 @@ fn run() {
                 bad = fmt::Sprintf!("got %s want %s", joined(&got), joined(&strs(want)));
             }
         }
-        check("removeLeadingDuplicates keeps the LAST of each key",
-              bad.Len() == 0, bad);
+        check(
+            "removeLeadingDuplicates keeps the LAST of each key",
+            bad.Len() == 0,
+            bad,
+        );
     }
 
     let p = PASSED.load(Ordering::Relaxed);
     let f = FAILED.load(Ordering::Relaxed);
     fmt::Printf!("\n%d passed, %d failed\n", p as i64, f as i64);
-    if f == 0 { fmt::Printf!("HTTP_CGI_HOST_SMOKE_OK\n"); goish::os::Exit(0); }
+    if f == 0 {
+        fmt::Printf!("HTTP_CGI_HOST_SMOKE_OK\n");
+        goish::os::Exit(0);
+    }
     fmt::Printf!("HTTP_CGI_HOST_SMOKE_FAIL\n");
     goish::os::Exit(1);
 }

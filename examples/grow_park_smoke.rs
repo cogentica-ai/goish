@@ -40,7 +40,9 @@ fn die(msg: &[u8]) -> ! {
 }
 
 fn check(cond: bool, msg: &[u8]) {
-    if !cond { die(msg); }
+    if !cond {
+        die(msg);
+    }
 }
 
 const NITER: i64 = 1_000;
@@ -72,7 +74,9 @@ fn main() {
                 let mut s: i64 = 0;
                 loop {
                     let (v, ok) = c.Recv();
-                    if !ok { break; }
+                    if !ok {
+                        break;
+                    }
                     n += 1;
                     s += v;
                 }

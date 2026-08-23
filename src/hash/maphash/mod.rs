@@ -79,10 +79,7 @@ fn r3(p: &[byte], k: u64) -> u64 {
 
 fn r4(p: &[byte]) -> u64 {
     // Go: uint64(LEUint32(p))
-    (p[0] as u64)
-        | ((p[1] as u64) << 8)
-        | ((p[2] as u64) << 16)
-        | ((p[3] as u64) << 24)
+    (p[0] as u64) | ((p[1] as u64) << 8) | ((p[2] as u64) << 16) | ((p[3] as u64) << 24)
 }
 
 fn r8(p: &[byte]) -> u64 {

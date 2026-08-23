@@ -24,13 +24,13 @@ use alloc::vec::Vec;
 use crate::bufio;
 use crate::bytes;
 use crate::errors::{self, error, nil};
-use crate::goslice::slice;
 use crate::gomap::map;
+use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
 use crate::types::{byte, int};
 
-use super::{ProtocolError, MIMEHeader};
+use super::{MIMEHeader, ProtocolError};
 
 // Go: reader.go:22
 //   var errMessageTooLarge = errors.New("message too large")
@@ -51,7 +51,10 @@ pub struct Reader<R: io::Reader> {
 // Go: reader.go:37-39
 //   func NewReader(r *bufio.Reader) *Reader { return &Reader{R: r} }
 pub fn NewReader<R: io::Reader>(r: bufio::Reader<R>) -> Reader<R> {
-    Reader { R: r, buf: Vec::new() }
+    Reader {
+        R: r,
+        buf: Vec::new(),
+    }
 }
 
 // go: none — goish-only: the get half of net/http's
@@ -198,8 +201,7 @@ impl<R: io::Reader> Reader<R> {
             let pb: &[byte] = peek.as_ref();
             // Go: len(peek) > 0 && (isASCIILetter(peek[0]) || peek[0] == '\n') ||
             //     len(peek) == 2 && peek[0] == '\r' && peek[1] == '\n'
-            let optimistic = (!pb.is_empty()
-                && (isASCIILetter(pb[0]) || pb[0] == b'\n'))
+            let optimistic = (!pb.is_empty() && (isASCIILetter(pb[0]) || pb[0] == b'\n'))
                 || (pb.len() == 2 && pb[0] == b'\r' && pb[1] == b'\n');
             if optimistic {
                 return (trim_slice(&line), nil);
@@ -446,8 +448,7 @@ fn readMIMEHeader<R: io::Reader>(
     //          if len(kv) == 0 { return m, err }
     //          ... }
     loop {
-        let (kv, err) =
-            r.readContinuedLineSlice(max_memory, ValidatorKind::MustHaveFieldNameColon);
+        let (kv, err) = r.readContinuedLineSlice(max_memory, ValidatorKind::MustHaveFieldNameColon);
         if kv.Len() == 0 {
             return (m, err);
         }

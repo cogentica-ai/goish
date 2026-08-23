@@ -44,8 +44,10 @@ fn postReq(target: &'static str, body: &'static str) -> http::Request {
         string(target),
         goish::slice::<u8>::__from_vec(body.as_bytes().to_vec()),
     );
-    r.Header
-        .Set(string("Content-Type"), string("application/x-www-form-urlencoded"));
+    r.Header.Set(
+        string("Content-Type"),
+        string("application/x-www-form-urlencoded"),
+    );
     return r;
 }
 
@@ -57,9 +59,27 @@ fn main() {
     {
         let (r, _) = http::NewRequest(string("GET"), string("http://x/?a=1&b=2&a=3"), goish::nil);
         let _ = r.ParseForm();
-        eq(joined(&{ let (v, _) = r.Form().Get(string("a")); v }), "1|3", "query Form[a]", &mut bad);
-        eq(r.FormValue(string("a")), "1", "query FormValue(a)", &mut bad);
-        eq(r.PostFormValue(string("a")), "", "query PostFormValue(a)", &mut bad);
+        eq(
+            joined(&{
+                let (v, _) = r.Form().Get(string("a"));
+                v
+            }),
+            "1|3",
+            "query Form[a]",
+            &mut bad,
+        );
+        eq(
+            r.FormValue(string("a")),
+            "1",
+            "query FormValue(a)",
+            &mut bad,
+        );
+        eq(
+            r.PostFormValue(string("a")),
+            "",
+            "query PostFormValue(a)",
+            &mut bad,
+        );
     }
 
     // POST body only.
@@ -67,7 +87,12 @@ fn main() {
         let r = postReq("http://x/", "a=9&c=7");
         let _ = r.ParseForm();
         eq(r.FormValue(string("a")), "9", "post FormValue(a)", &mut bad);
-        eq(r.PostFormValue(string("a")), "9", "post PostFormValue(a)", &mut bad);
+        eq(
+            r.PostFormValue(string("a")),
+            "9",
+            "post PostFormValue(a)",
+            &mut bad,
+        );
         eq(r.FormValue(string("c")), "7", "post FormValue(c)", &mut bad);
     }
 
@@ -75,9 +100,22 @@ fn main() {
     {
         let r = postReq("http://x/?a=1&b=2", "a=9&c=7");
         let _ = r.ParseForm();
-        eq(joined(&{ let (v, _) = r.Form().Get(string("a")); v }), "9|1", "both Form[a] order", &mut bad);
+        eq(
+            joined(&{
+                let (v, _) = r.Form().Get(string("a"));
+                v
+            }),
+            "9|1",
+            "both Form[a] order",
+            &mut bad,
+        );
         eq(r.FormValue(string("a")), "9", "both FormValue(a)", &mut bad);
-        eq(r.PostFormValue(string("a")), "9", "both PostFormValue(a)", &mut bad);
+        eq(
+            r.PostFormValue(string("a")),
+            "9",
+            "both PostFormValue(a)",
+            &mut bad,
+        );
         eq(r.FormValue(string("b")), "2", "both FormValue(b)", &mut bad);
     }
 
@@ -88,11 +126,23 @@ fn main() {
             string("http://x/?a=1"),
             goish::slice::<u8>::__from_vec(b"a=9".to_vec()),
         );
-        r.Header
-            .Set(string("Content-Type"), string("application/x-www-form-urlencoded"));
+        r.Header.Set(
+            string("Content-Type"),
+            string("application/x-www-form-urlencoded"),
+        );
         let _ = r.ParseForm();
-        eq(r.FormValue(string("a")), "1", "get+body FormValue(a)", &mut bad);
-        eq(r.PostFormValue(string("a")), "", "get+body PostFormValue(a)", &mut bad);
+        eq(
+            r.FormValue(string("a")),
+            "1",
+            "get+body FormValue(a)",
+            &mut bad,
+        );
+        eq(
+            r.PostFormValue(string("a")),
+            "",
+            "get+body PostFormValue(a)",
+            &mut bad,
+        );
     }
 
     // Bad escape: error reported, parseable values still present.
@@ -103,7 +153,12 @@ fn main() {
             fmt::Println!("FAIL bad escape: expected an error");
             bad += 1;
         }
-        eq(r.FormValue(string("b")), "2", "bad escape keeps b", &mut bad);
+        eq(
+            r.FormValue(string("b")),
+            "2",
+            "bad escape keeps b",
+            &mut bad,
+        );
         eq(r.FormValue(string("a")), "", "bad escape drops a", &mut bad);
     }
 

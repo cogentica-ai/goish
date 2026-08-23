@@ -36,9 +36,18 @@ fn main() {
     for line in REF.lines() {
         n += 1;
         let mut it = line.split(' ');
-        let b: i64 = it.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| die(b"bad ref\n"));
-        let e: i64 = it.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| die(b"bad ref\n"));
-        let m: i64 = it.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| die(b"bad ref\n"));
+        let b: i64 = it
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| die(b"bad ref\n"));
+        let e: i64 = it
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| die(b"bad ref\n"));
+        let m: i64 = it
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| die(b"bad ref\n"));
 
         let mut bi = big::Int::new();
         bi.SetInt64(b);

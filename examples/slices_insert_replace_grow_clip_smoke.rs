@@ -12,8 +12,8 @@ extern crate goish;
 use goish::fmt;
 use goish::goslice::slice;
 use goish::slices;
+use goish::syscall;
 use goish::types::int;
-use goish::{syscall};
 
 fn make_int_slice(xs: &[int]) -> slice<int> {
     let mut v: alloc::vec::Vec<int> = alloc::vec::Vec::with_capacity(xs.len());

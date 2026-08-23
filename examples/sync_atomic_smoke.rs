@@ -16,7 +16,7 @@ extern crate goish;
 
 use goish::fmt;
 use goish::sync::atomic;
-use goish::{syscall};
+use goish::syscall;
 
 #[goish::main]
 fn main() {

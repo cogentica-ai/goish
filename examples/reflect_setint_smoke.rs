@@ -77,7 +77,6 @@ fn main() {
     let other = Value::Int(8);
     check(def != other, "makeField shape: default != field");
 
-
     // ─── typed re-extraction, the makeBody prerequisite ───────────────
     //
     // makeBody does value.Interface().(T) for five types. goish's
@@ -107,25 +106,36 @@ fn main() {
         _ => check(false, "ObjectIdentifier reflect value round-trips"),
     }
 
-    let bs = BitString { Bytes: slice::__from_vec(alloc::vec![0xf0u8]), BitLength: 4 };
+    let bs = BitString {
+        Bytes: slice::__from_vec(alloc::vec![0xf0u8]),
+        BitLength: 4,
+    };
     match bs.__reflect_value() {
         Value::Struct { fields, .. } => {
-            check(fields.len() == 2 && fields[1] == Value::Int(4),
-                  "BitString reflect value round-trips");
+            check(
+                fields.len() == 2 && fields[1] == Value::Int(4),
+                "BitString reflect value round-trips",
+            );
         }
         _ => check(false, "BitString reflect value round-trips"),
     }
 
     let rv = RawValue {
-        Class: 2, Tag: 7, IsCompound: true,
+        Class: 2,
+        Tag: 7,
+        IsCompound: true,
         Bytes: slice::__from_vec(alloc::vec![1u8, 2]),
         FullBytes: slice::__from_vec(alloc::vec![0xa7u8, 2, 1, 2]),
     };
     match rv.__reflect_value() {
         Value::Struct { fields, .. } => {
-            check(fields.len() == 5 && fields[0] == Value::Int(2)
-                      && fields[1] == Value::Int(7) && fields[2] == Value::Bool(true),
-                  "RawValue reflect value round-trips");
+            check(
+                fields.len() == 5
+                    && fields[0] == Value::Int(2)
+                    && fields[1] == Value::Int(7)
+                    && fields[2] == Value::Bool(true),
+                "RawValue reflect value round-trips",
+            );
         }
         _ => check(false, "RawValue reflect value round-trips"),
     }
@@ -133,8 +143,10 @@ fn main() {
     let t = goish::time::Date(2024, 3, 7, 9, 5, 1, 0, goish::time::UTC);
     match t.__reflect_value() {
         Value::Struct { fields, .. } => {
-            check(fields.len() == 2 && fields[0] == Value::Int(t.Unix()),
-                  "time::Time reflect value carries its instant");
+            check(
+                fields.len() == 2 && fields[0] == Value::Int(t.Unix()),
+                "time::Time reflect value carries its instant",
+            );
         }
         _ => check(false, "time::Time reflect value carries its instant"),
     }
@@ -148,7 +160,10 @@ fn main() {
                 Value::Slice { items, .. } => items.len() == n.Bytes().Len() as usize,
                 _ => false,
             };
-            check(signOK && magOK, "big::Int reflect value carries sign and magnitude");
+            check(
+                signOK && magOK,
+                "big::Int reflect value carries sign and magnitude",
+            );
         }
         _ => check(false, "big::Int reflect value carries sign and magnitude"),
     }
@@ -158,7 +173,11 @@ fn main() {
     if failed == 0 {
         fmt::Printf!("reflect_setint_smoke OK %d/%d\n", ran as i64, ran as i64);
     } else {
-        fmt::Printf!("reflect_setint_smoke FAILED %d of %d\n", failed as i64, ran as i64);
+        fmt::Printf!(
+            "reflect_setint_smoke FAILED %d of %d\n",
+            failed as i64,
+            ran as i64
+        );
         goish::syscall::Exit(1);
     }
 }

@@ -69,12 +69,15 @@ fn count_fds() -> usize {
         // Walk linux_dirent64 entries: u64 d_ino, i64 d_off, u16 d_reclen, u8 d_type, char d_name[].
         let mut off = 0usize;
         while off < n as usize {
-            let d_reclen =
-                u16::from_le_bytes([buf[off + 16], buf[off + 17]]) as usize;
+            let d_reclen = u16::from_le_bytes([buf[off + 16], buf[off + 17]]) as usize;
             // Filter "." and ".." which getdents always returns.
             let name_start = off + 19;
             let name0 = buf[name_start];
-            let name1 = if d_reclen > 20 { buf[name_start + 1] } else { 0 };
+            let name1 = if d_reclen > 20 {
+                buf[name_start + 1]
+            } else {
+                0
+            };
             if !(name0 == b'.' && (name1 == 0 || name1 == b'.')) {
                 total += 1;
             }

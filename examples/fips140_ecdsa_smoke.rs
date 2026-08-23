@@ -88,29 +88,55 @@ fn msg(n: usize) -> slice<byte> {
     return slice::__from_vec(h);
 }
 
-fn run<P: ecdsa::Point>(name: &str, c: &ecdsa::Curve<P>, n: usize, Q: &slice<byte>, want: &[&str; 8]) {
+fn run<P: ecdsa::Point>(
+    name: &str,
+    c: &ecdsa::Curve<P>,
+    n: usize,
+    Q: &slice<byte>,
+    want: &[&str; 8],
+) {
     check(&nm(name, "generator multiple Q"), hx(Q), want[0]);
 
     let d = scalar(n, 0x00);
     let (k, err) = ecdsa::NewPrivateKey(c, &d, Q);
-    check(&nm(name, "NewPrivateKey err"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        &nm(name, "NewPrivateKey err"),
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     check(&nm(name, "private scalar"), hx(&k.Bytes()), want[1]);
 
     let hash = msg(64);
     let (sig, err) = ecdsa::SignDeterministic(c, sha512::NewHash, &k, &hash);
-    check(&nm(name, "SignDeterministic sha512 err"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        &nm(name, "SignDeterministic sha512 err"),
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     check(&nm(name, "r (sha512)"), hx(&sig.R), want[2]);
     check(&nm(name, "s (sha512)"), hx(&sig.S), want[3]);
     let err = ecdsa::Verify(c, &k.PublicKey(), &hash, &sig);
-    check(&nm(name, "Verify (sha512)"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        &nm(name, "Verify (sha512)"),
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
 
     let h256 = msg(32);
     let (sig2, err) = ecdsa::SignDeterministic(c, sha256::NewHash, &k, &h256);
-    check(&nm(name, "SignDeterministic sha256 err"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        &nm(name, "SignDeterministic sha256 err"),
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
     check(&nm(name, "r (sha256)"), hx(&sig2.R), want[4]);
     check(&nm(name, "s (sha256)"), hx(&sig2.S), want[5]);
     let err = ecdsa::Verify(c, &k.PublicKey(), &h256, &sig2);
-    check(&nm(name, "Verify (sha256)"), fmt::Sprintf!("%v", err != goish::nil), "false");
+    check(
+        &nm(name, "Verify (sha256)"),
+        fmt::Sprintf!("%v", err != goish::nil),
+        "false",
+    );
 
     // A tampered r must not verify.
     let mut rb: Vec<byte> = {
@@ -124,7 +150,11 @@ fn run<P: ecdsa::Point>(name: &str, c: &ecdsa::Curve<P>, n: usize, Q: &slice<byt
         S: sig.S.clone(),
     };
     let err = ecdsa::Verify(c, &k.PublicKey(), &hash, &bad);
-    check(&nm(name, "tampered signature rejected"), fmt::Sprintf!("%v", err.Error()), want[6]);
+    check(
+        &nm(name, "tampered signature rejected"),
+        fmt::Sprintf!("%v", err.Error()),
+        want[6],
+    );
 
     // r = 0 is rejected before any point arithmetic.
     let zero = ecdsa::Signature {
@@ -132,7 +162,11 @@ fn run<P: ecdsa::Point>(name: &str, c: &ecdsa::Curve<P>, n: usize, Q: &slice<byt
         S: sig.S.clone(),
     };
     let err = ecdsa::Verify(c, &k.PublicKey(), &hash, &zero);
-    check(&nm(name, "zero r rejected"), fmt::Sprintf!("%v", err.Error()), want[7]);
+    check(
+        &nm(name, "zero r rejected"),
+        fmt::Sprintf!("%v", err.Error()),
+        want[7],
+    );
 }
 
 #[goish::main]
@@ -140,25 +174,57 @@ fn main() {
     {
         let mut q = nistec::NewP224Point();
         let _ = q.ScalarBaseMult(&scalar(28, 0x00));
-        run("p224", ecdsa::P224(), 28, &q.Bytes(), &[P224_Q, P224_D, P224_R512, P224_S512, P224_R256, P224_S256, P224_BAD, P224_ZERO]);
+        run(
+            "p224",
+            ecdsa::P224(),
+            28,
+            &q.Bytes(),
+            &[
+                P224_Q, P224_D, P224_R512, P224_S512, P224_R256, P224_S256, P224_BAD, P224_ZERO,
+            ],
+        );
     }
 
     {
         let mut q = nistec::NewP256Point();
         let _ = q.ScalarBaseMult(&scalar(32, 0x00));
-        run("p256", ecdsa::P256(), 32, &q.Bytes(), &[P256_Q, P256_D, P256_R512, P256_S512, P256_R256, P256_S256, P256_BAD, P256_ZERO]);
+        run(
+            "p256",
+            ecdsa::P256(),
+            32,
+            &q.Bytes(),
+            &[
+                P256_Q, P256_D, P256_R512, P256_S512, P256_R256, P256_S256, P256_BAD, P256_ZERO,
+            ],
+        );
     }
 
     {
         let mut q = nistec::NewP384Point();
         let _ = q.ScalarBaseMult(&scalar(48, 0x00));
-        run("p384", ecdsa::P384(), 48, &q.Bytes(), &[P384_Q, P384_D, P384_R512, P384_S512, P384_R256, P384_S256, P384_BAD, P384_ZERO]);
+        run(
+            "p384",
+            ecdsa::P384(),
+            48,
+            &q.Bytes(),
+            &[
+                P384_Q, P384_D, P384_R512, P384_S512, P384_R256, P384_S256, P384_BAD, P384_ZERO,
+            ],
+        );
     }
 
     {
         let mut q = nistec::NewP521Point();
         let _ = q.ScalarBaseMult(&scalar(66, 0x00));
-        run("p521", ecdsa::P521(), 66, &q.Bytes(), &[P521_Q, P521_D, P521_R512, P521_S512, P521_R256, P521_S256, P521_BAD, P521_ZERO]);
+        run(
+            "p521",
+            ecdsa::P521(),
+            66,
+            &q.Bytes(),
+            &[
+                P521_Q, P521_D, P521_R512, P521_S512, P521_R256, P521_S256, P521_BAD, P521_ZERO,
+            ],
+        );
     }
 
     // The hash-factory gap: before hash::HashFunc, every goish signature
@@ -171,8 +237,7 @@ fn main() {
     // captures an inner constructor and is handed to SignDeterministic.
     // It must produce the identical signature to the plain function.
     {
-        let inner: fn() -> alloc::boxed::Box<dyn goish::hash::Hash + Send + Sync> =
-            sha512::NewHash;
+        let inner: fn() -> alloc::boxed::Box<dyn goish::hash::Hash + Send + Sync> = sha512::NewHash;
         let wrapped = goish::hash::HashFunc::New(move || inner());
 
         let d = scalar(32, 0x00);
@@ -181,8 +246,7 @@ fn main() {
         let (k, _) = ecdsa::NewPrivateKey(ecdsa::P256(), &d, &q.Bytes());
 
         let hash = msg(64);
-        let (viaClosure, err) =
-            ecdsa::SignDeterministic(ecdsa::P256(), wrapped, &k, &hash);
+        let (viaClosure, err) = ecdsa::SignDeterministic(ecdsa::P256(), wrapped, &k, &hash);
         check(
             "closure factory: SignDeterministic err",
             fmt::Sprintf!("%v", err != goish::nil),

@@ -26,7 +26,7 @@ extern crate alloc;
 use goish::encoding::json::jsontext;
 use goish::encoding::json::v2 as json;
 use goish::gomap::map;
-use goish::{int, slice, strings, string, syscall};
+use goish::{int, slice, string, strings, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -164,15 +164,21 @@ fn main() {
     // ─── 1. Struct marshal: tags, omission, nesting ────────────────
     let item = Item {
         Label: "goish".into(),
-        Detail: string::new(),          // omitempty → dropped
-        Score: 0,                       // omitzero → dropped
+        Detail: string::new(), // omitempty → dropped
+        Score: 0,              // omitzero → dropped
         Tags: slice::__from_vec(alloc::vec!["a".into(), "b".into()]),
         Span: Range {
-            Start: Position { Line: 1, Character: 2 },
-            End: Position { Line: 3, Character: 4 },
+            Start: Position {
+                Line: 1,
+                Character: 2,
+            },
+            End: Position {
+                Line: 3,
+                Character: 4,
+            },
         },
-        Internal: 99,                   // `-` → never emitted
-        Extra: None,                    // omitempty → dropped
+        Internal: 99, // `-` → never emitted
+        Extra: None,  // omitempty → dropped
     };
     let (out, err) = json::Marshal(&item, []);
     check(err == goish::nil, b"t1: Marshal err\n");
@@ -189,8 +195,14 @@ fn main() {
         Score: 7,
         Tags: slice::__from_vec(alloc::vec::Vec::new()),
         Span: Range {
-            Start: Position { Line: 0, Character: 0 },
-            End: Position { Line: 0, Character: 0 },
+            Start: Position {
+                Line: 0,
+                Character: 0,
+            },
+            End: Position {
+                Line: 0,
+                Character: 0,
+            },
         },
         Internal: 0,
         Extra: Some(5),
@@ -209,7 +221,10 @@ fn main() {
     check(err == goish::nil, b"t2: Unmarshal err\n");
     check(back.Label.as_bytes() == b"goish", b"t2: Label\n");
     check(back.Tags.as_ref().len() == 2, b"t2: Tags len\n");
-    check(back.Span.End.Line == 3 && back.Span.End.Character == 4, b"t2: nested\n");
+    check(
+        back.Span.End.Line == 3 && back.Span.End.Character == 4,
+        b"t2: nested\n",
+    );
     check(back.Internal == 0, b"t2: skipped field stays zero\n");
     check(back.Extra.is_none(), b"t2: absent Option stays None\n");
 
@@ -220,7 +235,10 @@ fn main() {
         [],
     );
     check(err == goish::nil, b"t2b: unknown-field skip err\n");
-    check(lenient.Label.as_bytes() == b"ok", b"t2b: Label after skip\n");
+    check(
+        lenient.Label.as_bytes() == b"ok",
+        b"t2b: Label after skip\n",
+    );
     check(lenient.Extra == Some(42), b"t2b: Option present\n");
 
     let mut zeroed = lenient;
@@ -240,25 +258,40 @@ fn main() {
     check(err == goish::nil && t.Kind() == '{', b"t3: begin object\n");
     let (name, err) = dec.ReadToken();
     check(err == goish::nil && name.Kind() == '"', b"t3: name token\n");
-    check(name.String().as_bytes() == "a\u{e9}".as_bytes(), b"t3: \\u escape decoded\n");
+    check(
+        name.String().as_bytes() == "a\u{e9}".as_bytes(),
+        b"t3: \\u escape decoded\n",
+    );
     check(dec.PeekKind() == '[', b"t3: peek array\n");
     let (t, err) = dec.ReadToken();
     check(err == goish::nil && t.Kind() == '[', b"t3: begin array\n");
     let (n1, err) = dec.ReadToken();
     check(err == goish::nil && n1.Int() == 1, b"t3: int token\n");
     let (n2, err) = dec.ReadToken();
-    check(err == goish::nil && n2.Float() == -250.0, b"t3: float token\n");
+    check(
+        err == goish::nil && n2.Float() == -250.0,
+        b"t3: float token\n",
+    );
     let (s, err) = dec.ReadToken();
-    check(err == goish::nil && s.String().as_bytes() == b"s\n", b"t3: string escape\n");
+    check(
+        err == goish::nil && s.String().as_bytes() == b"s\n",
+        b"t3: string escape\n",
+    );
     let (t, err) = dec.ReadToken();
     check(err == goish::nil && t.Kind() == ']', b"t3: end array\n");
     let (name, err) = dec.ReadToken();
-    check(err == goish::nil && name.String().as_bytes() == b"b", b"t3: second name\n");
+    check(
+        err == goish::nil && name.String().as_bytes() == b"b",
+        b"t3: second name\n",
+    );
     let (raw, err) = dec.ReadValue();
     check(err == goish::nil, b"t3: ReadValue err\n");
     check(raw.0.as_ref() == br#"{"c": null}"#, b"t3: raw value text\n");
     let (name, err) = dec.ReadToken();
-    check(err == goish::nil && name.String().as_bytes() == b"d", b"t3: third name\n");
+    check(
+        err == goish::nil && name.String().as_bytes() == b"d",
+        b"t3: third name\n",
+    );
     let err = dec.SkipValue();
     check(err == goish::nil, b"t3: SkipValue\n");
     let (t, err) = dec.ReadToken();
@@ -280,7 +313,11 @@ fn main() {
     );
     let (out, err) = json::Marshal(&pairs, []);
     check(err == goish::nil, b"t4: custom marshal err\n");
-    check_bytes(&out, r#"{"z":26,"a":1,"m":13}"#, b"t4: custom marshal order\n");
+    check_bytes(
+        &out,
+        r#"{"z":26,"a":1,"m":13}"#,
+        b"t4: custom marshal order\n",
+    );
 
     // map<string, V> marshals sorted (deterministic).
     let mut m: map<string, int> = map::new();
@@ -292,17 +329,29 @@ fn main() {
 
     // ─── 5. Streaming + entry-point variants ───────────────────────
     // Two top-level values through one decoder (LSP read loop shape).
-    let mut stream =
-        jsontext::NewDecoder(strings::NewReader("{\"line\":7,\"character\":8}\n{\"line\":9,\"character\":10}"), []);
+    let mut stream = jsontext::NewDecoder(
+        strings::NewReader("{\"line\":7,\"character\":8}\n{\"line\":9,\"character\":10}"),
+        [],
+    );
     let mut p1 = Position::default();
     let err = json::UnmarshalDecode(&mut stream, &mut p1);
-    check(err == goish::nil && p1.Line == 7, b"t5: first streamed value\n");
+    check(
+        err == goish::nil && p1.Line == 7,
+        b"t5: first streamed value\n",
+    );
     let mut p2 = Position::default();
     let err = json::UnmarshalDecode(&mut stream, &mut p2);
-    check(err == goish::nil && p2.Line == 9 && p2.Character == 10, b"t5: second streamed value\n");
+    check(
+        err == goish::nil && p2.Line == 9 && p2.Character == 10,
+        b"t5: second streamed value\n",
+    );
 
     let mut p3 = Position::default();
-    let err = json::UnmarshalRead(strings::NewReader(r#"{"line":1,"character":1}"#), &mut p3, []);
+    let err = json::UnmarshalRead(
+        strings::NewReader(r#"{"line":1,"character":1}"#),
+        &mut p3,
+        [],
+    );
     check(err == goish::nil && p3.Line == 1, b"t5b: UnmarshalRead\n");
 
     let (pretty, err) = json::MarshalIndent(&p1, "", "  ");
@@ -323,13 +372,23 @@ fn main() {
     check_bytes(&out, r#"{"anything":["goes",1]}"#, b"t6: raw passthrough\n");
 
     // ─── 7. nilable<T> fields (Go *T) ──────────────────────────────
-    let n = Node { Pos: goish::nilable::default(), Depth: goish::nilable::default() };
+    let n = Node {
+        Pos: goish::nilable::default(),
+        Depth: goish::nilable::default(),
+    };
     let (out, err) = json::Marshal(&n, []);
     check(err == goish::nil, b"t7: nil marshal err\n");
-    check_bytes(&out, r#"{"pos":null}"#, b"t7: nil pos null, nil depth omitted\n");
+    check_bytes(
+        &out,
+        r#"{"pos":null}"#,
+        b"t7: nil pos null, nil depth omitted\n",
+    );
 
     let n = Node {
-        Pos: goish::nilable::new(Position { Line: 4, Character: 2 }),
+        Pos: goish::nilable::new(Position {
+            Line: 4,
+            Character: 2,
+        }),
         Depth: goish::nilable::new(9),
     };
     let (out, err) = json::Marshal(&n, []);
@@ -343,13 +402,22 @@ fn main() {
     let mut back = Node::default();
     let err = json::Unmarshal(out.as_ref(), &mut back, []);
     check(err == goish::nil, b"t7c: unmarshal err\n");
-    check(!back.Pos.IsNil() && back.Pos.Must().Line == 4, b"t7c: pos decoded\n");
-    check(!back.Depth.IsNil() && *back.Depth.Must() == 9, b"t7c: depth decoded\n");
+    check(
+        !back.Pos.IsNil() && back.Pos.Must().Line == 4,
+        b"t7c: pos decoded\n",
+    );
+    check(
+        !back.Depth.IsNil() && *back.Depth.Must() == 9,
+        b"t7c: depth decoded\n",
+    );
 
     let mut back = Node::default();
     let err = json::Unmarshal(br#"{"pos":null}"#.as_ref(), &mut back, []);
     check(err == goish::nil, b"t7d: null unmarshal err\n");
-    check(back.Pos.IsNil() && back.Depth.IsNil(), b"t7d: null/absent stay nil\n");
+    check(
+        back.Pos.IsNil() && back.Depth.IsNil(),
+        b"t7d: null/absent stay nil\n",
+    );
 
     // jsontext.Value.IsValid (lsp/jsonrpc usage shape).
     let good: jsontext::Value = r#"{"a":[1,2]}"#.into();

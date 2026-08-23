@@ -17,7 +17,11 @@ fn main() {
     let mut failed = 0;
 
     // Helper: parse base+ref, resolve, compare to want.
-    let check = |label: &'static str, base: &'static str, reference: &'static str, want: &'static str, fail: &mut i32| {
+    let check = |label: &'static str,
+                 base: &'static str,
+                 reference: &'static str,
+                 want: &'static str,
+                 fail: &mut i32| {
         let (b, _) = http::ParseURL(string(base));
         let (r, _) = http::ParseURL(string(reference));
         let merged = b.ResolveReference(&r);
@@ -25,7 +29,17 @@ fn main() {
         if got == want {
             fmt::Println!(label, "PASS");
         } else {
-            fmt::Println!(label, "FAIL base=", base, "ref=", reference, "got=", got, "want=", want);
+            fmt::Println!(
+                label,
+                "FAIL base=",
+                base,
+                "ref=",
+                reference,
+                "got=",
+                got,
+                "want=",
+                want
+            );
             *fail += 1;
         }
     };
@@ -51,7 +65,10 @@ fn main() {
         if u.EscapedPath() == "*" {
             fmt::Println!("[ 2] EscapedPath star            PASS");
         } else {
-            fmt::Println!("[ 2] EscapedPath star            FAIL got={}", u.EscapedPath());
+            fmt::Println!(
+                "[ 2] EscapedPath star            FAIL got={}",
+                u.EscapedPath()
+            );
             failed += 1;
         }
     }
@@ -62,7 +79,10 @@ fn main() {
         if u.EscapedPath() == "" {
             fmt::Println!("[ 3] EscapedPath empty           PASS");
         } else {
-            fmt::Println!("[ 3] EscapedPath empty           FAIL got={}", u.EscapedPath());
+            fmt::Println!(
+                "[ 3] EscapedPath empty           FAIL got={}",
+                u.EscapedPath()
+            );
             failed += 1;
         }
     }
@@ -71,30 +91,96 @@ fn main() {
     // Base: http://a/b/c/d;p?q
 
     //  4. "g"        -> "http://a/b/c/g"
-    check("[ 4] resolve g                ", "http://a/b/c/d;p?q", "g", "http://a/b/c/g", &mut failed);
+    check(
+        "[ 4] resolve g                ",
+        "http://a/b/c/d;p?q",
+        "g",
+        "http://a/b/c/g",
+        &mut failed,
+    );
     //  5. "./g"      -> "http://a/b/c/g"
-    check("[ 5] resolve ./g              ", "http://a/b/c/d;p?q", "./g", "http://a/b/c/g", &mut failed);
+    check(
+        "[ 5] resolve ./g              ",
+        "http://a/b/c/d;p?q",
+        "./g",
+        "http://a/b/c/g",
+        &mut failed,
+    );
     //  6. "g/"       -> "http://a/b/c/g/"
-    check("[ 6] resolve g/               ", "http://a/b/c/d;p?q", "g/", "http://a/b/c/g/", &mut failed);
+    check(
+        "[ 6] resolve g/               ",
+        "http://a/b/c/d;p?q",
+        "g/",
+        "http://a/b/c/g/",
+        &mut failed,
+    );
     //  7. "/g"       -> "http://a/g"
-    check("[ 7] resolve /g               ", "http://a/b/c/d;p?q", "/g", "http://a/g", &mut failed);
+    check(
+        "[ 7] resolve /g               ",
+        "http://a/b/c/d;p?q",
+        "/g",
+        "http://a/g",
+        &mut failed,
+    );
     //  8. "//g"      -> skipped (slim: no Host parse from //g).
     //  9. "?y"       -> "http://a/b/c/d;p?y"
-    check("[ 9] resolve ?y               ", "http://a/b/c/d;p?q", "?y", "http://a/b/c/d;p?y", &mut failed);
+    check(
+        "[ 9] resolve ?y               ",
+        "http://a/b/c/d;p?q",
+        "?y",
+        "http://a/b/c/d;p?y",
+        &mut failed,
+    );
     // 10. "g?y"      -> "http://a/b/c/g?y"
-    check("[10] resolve g?y              ", "http://a/b/c/d;p?q", "g?y", "http://a/b/c/g?y", &mut failed);
+    check(
+        "[10] resolve g?y              ",
+        "http://a/b/c/d;p?q",
+        "g?y",
+        "http://a/b/c/g?y",
+        &mut failed,
+    );
     // 11. ""         -> "http://a/b/c/d;p?q"  (identity; query+frag inherited)
-    check("[11] resolve \"\" identity       ", "http://a/b/c/d;p?q", "", "http://a/b/c/d;p?q", &mut failed);
+    check(
+        "[11] resolve \"\" identity       ",
+        "http://a/b/c/d;p?q",
+        "",
+        "http://a/b/c/d;p?q",
+        &mut failed,
+    );
 
     // ---- §5.4.2 abnormal examples ----
     // 12. "../g"     -> "http://a/b/g"
-    check("[12] resolve ../g             ", "http://a/b/c/d;p?q", "../g", "http://a/b/g", &mut failed);
+    check(
+        "[12] resolve ../g             ",
+        "http://a/b/c/d;p?q",
+        "../g",
+        "http://a/b/g",
+        &mut failed,
+    );
     // 13. "../.."    -> "http://a/"
-    check("[13] resolve ../..            ", "http://a/b/c/d;p?q", "../..", "http://a/", &mut failed);
+    check(
+        "[13] resolve ../..            ",
+        "http://a/b/c/d;p?q",
+        "../..",
+        "http://a/",
+        &mut failed,
+    );
     // 14. "../../g"  -> "http://a/g"
-    check("[14] resolve ../../g          ", "http://a/b/c/d;p?q", "../../g", "http://a/g", &mut failed);
+    check(
+        "[14] resolve ../../g          ",
+        "http://a/b/c/d;p?q",
+        "../../g",
+        "http://a/g",
+        &mut failed,
+    );
     // 15. Absolute ref replaces base entirely.
-    check("[15] resolve absolute replace ", "http://a/b/c/d;p?q", "http://other/x", "http://other/x", &mut failed);
+    check(
+        "[15] resolve absolute replace ",
+        "http://a/b/c/d;p?q",
+        "http://other/x",
+        "http://other/x",
+        &mut failed,
+    );
 
     if failed == 0 {
         fmt::Println!("ok 15/15");

@@ -8,9 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::error;
 use goish::errors;
+use goish::fmt;
 use goish::io::fs;
 use goish::{string, syscall};
 

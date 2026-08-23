@@ -84,7 +84,10 @@ fn test_self_select(chan_cap: i64) {
 
     schedule();
 
-    check(GS_DONE.load(Ordering::Relaxed) == 2, b"self_select: not all Gs done\n");
+    check(
+        GS_DONE.load(Ordering::Relaxed) == 2,
+        b"self_select: not all Gs done\n",
+    );
     if chan_cap == 0 {
         check(
             SELF_RECV_VIOLATIONS.load(Ordering::Relaxed) == 0,

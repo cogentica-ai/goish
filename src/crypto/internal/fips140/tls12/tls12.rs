@@ -58,12 +58,7 @@ pub fn PRF(
 
 // go: sdk 1.25.5 crypto/internal/fips140/tls12/tls12.go:27-45 pHash
 /// The P_hash function, as defined in RFC 5246 §5.
-fn pHash(
-    hash: impl IntoHashFunc,
-    result: &mut [byte],
-    secret: slice<byte>,
-    seed: &[byte],
-) {
+fn pHash(hash: impl IntoHashFunc, result: &mut [byte], secret: slice<byte>, seed: &[byte]) {
     let hash = hash.into_hash_func();
     // Go: h := hmac.New(hash, secret); h.Write(seed); a := h.Sum(nil)
     let mut h = hmac::New(hash, secret);

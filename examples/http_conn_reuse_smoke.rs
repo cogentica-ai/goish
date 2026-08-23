@@ -270,7 +270,11 @@ fn run() -> ! {
         // reproduce deterministically.
         let mut buf = goish::make!([]goish::byte, 16);
         let (n, _) = c.Read(&mut buf);
-        check("conn EOFs after the 413", n == 0, fmt::Sprintf!("n=%d", n as i64));
+        check(
+            "conn EOFs after the 413",
+            n == 0,
+            fmt::Sprintf!("n=%d", n as i64),
+        );
         let (_, we1) = c.Write(goish::bytes("straggler"));
         check(
             "write during the RST-avoidance window still succeeds",

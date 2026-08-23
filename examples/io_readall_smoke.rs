@@ -7,8 +7,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
+use goish::fmt;
 use goish::io;
 use goish::strings;
 use goish::{byte, string, syscall};
@@ -103,7 +103,11 @@ fn main() {
         if err.IsNil() && n == 4 && buf.String() == "0123" {
             fmt::Println!("[ 7] CopyN exact               PASS");
         } else {
-            fmt::Println!("[ 7] CopyN exact               FAIL n={} got={}", n, buf.String());
+            fmt::Println!(
+                "[ 7] CopyN exact               FAIL n={} got={}",
+                n,
+                buf.String()
+            );
             failed += 1;
         }
     }

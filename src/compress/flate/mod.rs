@@ -32,13 +32,13 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::bufio;
+use crate::errors::nil;
 use crate::errors::{self, error, ErrorTrait};
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
 use crate::math::bits;
 use crate::types::{byte, int, uint};
-use crate::errors::nil;
 
 // ─── constants (inflate.go:18) ─────────────────────────────────────────
 
@@ -1297,51 +1297,31 @@ const matchType: u32 = 1 << 30;
 // The length code for length X (MIN_MATCH_LENGTH <= X <= MAX_MATCH_LENGTH)
 // is lengthCodes[length - MIN_MATCH_LENGTH].
 static lengthCodes: [u32; 256] = [
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 8,
-    9, 9, 10, 10, 11, 11, 12, 12, 12, 12,
-    13, 13, 13, 13, 14, 14, 14, 14, 15, 15,
-    15, 15, 16, 16, 16, 16, 16, 16, 16, 16,
-    17, 17, 17, 17, 17, 17, 17, 17, 18, 18,
-    18, 18, 18, 18, 18, 18, 19, 19, 19, 19,
-    19, 19, 19, 19, 20, 20, 20, 20, 20, 20,
-    20, 20, 20, 20, 20, 20, 20, 20, 20, 20,
-    21, 21, 21, 21, 21, 21, 21, 21, 21, 21,
-    21, 21, 21, 21, 21, 21, 22, 22, 22, 22,
-    22, 22, 22, 22, 22, 22, 22, 22, 22, 22,
-    22, 22, 23, 23, 23, 23, 23, 23, 23, 23,
-    23, 23, 23, 23, 23, 23, 23, 23, 24, 24,
-    24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-    24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-    24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-    25, 25, 25, 25, 25, 25, 25, 25, 25, 25,
-    25, 25, 25, 25, 25, 25, 25, 25, 25, 25,
-    25, 25, 25, 25, 25, 25, 25, 25, 25, 25,
-    25, 25, 26, 26, 26, 26, 26, 26, 26, 26,
-    26, 26, 26, 26, 26, 26, 26, 26, 26, 26,
-    26, 26, 26, 26, 26, 26, 26, 26, 26, 26,
-    26, 26, 26, 26, 27, 27, 27, 27, 27, 27,
-    27, 27, 27, 27, 27, 27, 27, 27, 27, 27,
-    27, 27, 27, 27, 27, 27, 27, 27, 27, 27,
-    27, 27, 27, 27, 27, 28,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 12, 12, 13, 13, 13, 13, 14, 14, 14,
+    14, 15, 15, 15, 15, 16, 16, 16, 16, 16, 16, 16, 16, 17, 17, 17, 17, 17, 17, 17, 17, 18, 18, 18,
+    18, 18, 18, 18, 18, 19, 19, 19, 19, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20,
+    20, 20, 20, 20, 20, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 22, 22, 22,
+    22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23,
+    23, 23, 23, 23, 23, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
+    24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25,
+    25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 26, 26, 26,
+    26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26,
+    26, 26, 26, 26, 26, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27,
+    27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 28,
 ];
 
 static offsetCodes: [u32; 256] = [
-    0, 1, 2, 3, 4, 4, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7,
-    8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9,
-    10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
-    11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11,
-    12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
-    12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
-    13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
-    13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
-    14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
-    14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
-    14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
-    14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
-    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
-    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
-    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
-    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+    0, 1, 2, 3, 4, 4, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9,
+    10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 11, 11,
+    11, 11, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+    12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13,
+    13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+    14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
+    14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
+    14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,
 ];
 
 /// `flate.token` — a packed `uint32` encoding a literal or a
@@ -1677,8 +1657,13 @@ impl huffmanEncoder {
         if self.freqcache.is_empty() {
             // Reusable buffer with the longest possible frequency table.
             self.freqcache = Vec::with_capacity((maxNumLit + 1) as usize);
-            self.freqcache
-                .resize((maxNumLit + 1) as usize, literalNode { literal: 0, freq: 0 });
+            self.freqcache.resize(
+                (maxNumLit + 1) as usize,
+                literalNode {
+                    literal: 0,
+                    freq: 0,
+                },
+            );
         }
         // list = h.freqcache[:len(freq)+1]
         let mut count: usize = 0;
@@ -1821,33 +1806,27 @@ const maxStoreBlockSize: int = 65535;
 
 // The number of extra bits needed by length code X - LENGTH_CODES_START.
 static lengthExtraBits: [i8; 29] = [
-    /* 257 */ 0, 0, 0,
-    /* 260 */ 0, 0, 0, 0, 0, 1, 1, 1, 1, 2,
-    /* 270 */ 2, 2, 2, 3, 3, 3, 3, 4, 4, 4,
-    /* 280 */ 4, 5, 5, 5, 5, 0,
+    /* 257 */ 0, 0, 0, /* 260 */ 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, /* 270 */ 2, 2, 2, 3,
+    3, 3, 3, 4, 4, 4, /* 280 */ 4, 5, 5, 5, 5, 0,
 ];
 
 // The length indicated by length code X - LENGTH_CODES_START.
 static lengthBase: [u32; 29] = [
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 10,
-    12, 14, 16, 20, 24, 28, 32, 40, 48, 56,
-    64, 80, 96, 112, 128, 160, 192, 224, 255,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48, 56, 64, 80, 96, 112, 128,
+    160, 192, 224, 255,
 ];
 
 // Offset code word extra bits.
 static offsetExtraBits: [i8; 30] = [
-    0, 0, 0, 0, 1, 1, 2, 2, 3, 3,
-    4, 4, 5, 5, 6, 6, 7, 7, 8, 8,
-    9, 9, 10, 10, 11, 11, 12, 12, 13, 13,
+    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13,
+    13,
 ];
 
 static offsetBase: [u32; 30] = [
-    0x000000, 0x000001, 0x000002, 0x000003, 0x000004,
-    0x000006, 0x000008, 0x00000c, 0x000010, 0x000018,
-    0x000020, 0x000030, 0x000040, 0x000060, 0x000080,
-    0x0000c0, 0x000100, 0x000180, 0x000200, 0x000300,
-    0x000400, 0x000600, 0x000800, 0x000c00, 0x001000,
-    0x001800, 0x002000, 0x003000, 0x004000, 0x006000,
+    0x000000, 0x000001, 0x000002, 0x000003, 0x000004, 0x000006, 0x000008, 0x00000c, 0x000010,
+    0x000018, 0x000020, 0x000030, 0x000040, 0x000060, 0x000080, 0x0000c0, 0x000100, 0x000180,
+    0x000200, 0x000300, 0x000400, 0x000600, 0x000800, 0x000c00, 0x001000, 0x001800, 0x002000,
+    0x003000, 0x004000, 0x006000,
 ];
 
 // The odd order in which the codegen code sizes are written.
@@ -2273,7 +2252,7 @@ impl<W: io::Writer> huffmanBitWriter<W> {
         self.flush();
         self.writeBits(length as i32, 16);
         // int32(^uint16(length)) — ones-complement of the low 16 bits.
-        self.writeBits((!((length as u16))) as i32, 16);
+        self.writeBits((!(length as u16)) as i32, 16);
     }
 
     /// `(w *huffmanBitWriter).writeFixedHeader(isEof)`
@@ -2763,7 +2742,7 @@ const baseMatchLength: int = 3; // smallest match length per the RFC
 const minMatchLength: int = 4; // smallest match length the compressor emits
 const maxMatchLength: int = 258; // largest match length
 const baseMatchOffset: int = 1; // smallest match offset
-// maxMatchOffset is shared with the decompressor (defined above as 1<<15).
+                                // maxMatchOffset is shared with the decompressor (defined above as 1<<15).
 
 const maxFlateBlockTokens: int = 1 << 14;
 const hashBits: int = 17; // after 17, performance degrades
@@ -2786,7 +2765,14 @@ struct compressionLevel {
 }
 
 const fn cl(level: int, good: int, lazy: int, nice: int, chain: int, fsh: int) -> compressionLevel {
-    compressionLevel { level, good, lazy, nice, chain, fastSkipHashing: fsh }
+    compressionLevel {
+        level,
+        good,
+        lazy,
+        nice,
+        chain,
+        fastSkipHashing: fsh,
+    }
 }
 
 // Go's package-level `var levels []compressionLevel`. Renamed to
@@ -2818,10 +2804,10 @@ enum Fill {
 /// Models Go's `compressor.step func(*compressor)`.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CStep {
-    Store,    // store
+    Store,     // store
     StoreHuff, // storeHuff
-    EncSpeed, // encSpeed
-    Deflate,  // deflate
+    EncSpeed,  // encSpeed
+    Deflate,   // deflate
 }
 
 // ─── deflateFast constants (deflatefast.go:12) ─────────────────────────
@@ -2839,10 +2825,7 @@ const minNonLiteralBlockSize: int = 1 + 1 + inputMargin;
 
 fn load32(b: &[byte], i: i32) -> u32 {
     let i = i as usize;
-    (b[i] as u32)
-        | ((b[i + 1] as u32) << 8)
-        | ((b[i + 2] as u32) << 16)
-        | ((b[i + 3] as u32) << 24)
+    (b[i] as u32) | ((b[i + 1] as u32) << 8) | ((b[i + 2] as u32) << 16) | ((b[i + 3] as u32) << 24)
 }
 
 fn load64(b: &[byte], i: i32) -> u64 {
@@ -2930,8 +2913,10 @@ impl deflateFast {
                 }
                 candidate = self.table[(nextHash & tableMask) as usize];
                 let now = load32(src, nextS);
-                self.table[(nextHash & tableMask) as usize] =
-                    tableEntry { offset: s + self.cur, val: cv };
+                self.table[(nextHash & tableMask) as usize] = tableEntry {
+                    offset: s + self.cur,
+                    val: cv,
+                };
                 nextHash = hash(now);
 
                 let offset = s - (candidate.offset - self.cur);
@@ -2971,13 +2956,17 @@ impl deflateFast {
 
                 let x = load64(src, s - 1);
                 let prevHash = hash(x as u32);
-                self.table[(prevHash & tableMask) as usize] =
-                    tableEntry { offset: self.cur + s - 1, val: x as u32 };
+                self.table[(prevHash & tableMask) as usize] = tableEntry {
+                    offset: self.cur + s - 1,
+                    val: x as u32,
+                };
                 let x = x >> 8;
                 let currHash = hash(x as u32);
                 candidate = self.table[(currHash & tableMask) as usize];
-                self.table[(currHash & tableMask) as usize] =
-                    tableEntry { offset: self.cur + s, val: x as u32 };
+                self.table[(currHash & tableMask) as usize] = tableEntry {
+                    offset: self.cur + s,
+                    val: x as u32,
+                };
 
                 let offset = s - (candidate.offset - self.cur);
                 if (offset as int) > maxMatchOffset || (x as u32) != candidate.val {
@@ -3195,10 +3184,8 @@ impl<W: io::Writer> compressor<W> {
     fn fillDeflate(&mut self, b: &[byte]) -> int {
         if self.index >= 2 * windowSize - (minMatchLength + maxMatchLength) {
             // Shift the window by windowSize.
-            self.window.copy_within(
-                windowSize as usize..2 * windowSize as usize,
-                0,
-            );
+            self.window
+                .copy_within(windowSize as usize..2 * windowSize as usize, 0);
             self.index -= windowSize;
             self.windowEnd -= windowSize;
             if self.blockStart >= windowSize {
@@ -3240,8 +3227,7 @@ impl<W: io::Writer> compressor<W> {
         if index > 0 {
             let mut window: Option<Vec<byte>> = None;
             if self.blockStart <= index {
-                window =
-                    Some(self.window[self.blockStart as usize..index as usize].to_vec());
+                window = Some(self.window[self.blockStart as usize..index as usize].to_vec());
             }
             self.blockStart = index;
             match &window {
@@ -3469,8 +3455,7 @@ impl<W: io::Writer> compressor<W> {
             if self.index < self.maxInsertIndex {
                 // Update the hash.
                 let hash = hash4(
-                    &self.window
-                        [self.index as usize..(self.index + minMatchLength) as usize],
+                    &self.window[self.index as usize..(self.index + minMatchLength) as usize],
                 );
                 let hh = (hash & hashMask) as usize;
                 self.chainHead = self.hashHead[hh] as int;
@@ -3492,9 +3477,7 @@ impl<W: io::Writer> compressor<W> {
 
             if self.chainHead - self.hashOffset >= minIndex
                 && (fastSkipHashing != skipNever && lookahead > minMatchLength - 1
-                    || fastSkipHashing == skipNever
-                        && lookahead > prevLength
-                        && prevLength < lazy)
+                    || fastSkipHashing == skipNever && lookahead > prevLength && prevLength < lazy)
             {
                 let (newLength, newOffset, ok) = self.findMatch(
                     self.index,
@@ -3538,8 +3521,7 @@ impl<W: io::Writer> compressor<W> {
                     while index < newIndex {
                         if index < self.maxInsertIndex {
                             let hash = hash4(
-                                &self.window
-                                    [index as usize..(index + minMatchLength) as usize],
+                                &self.window[index as usize..(index + minMatchLength) as usize],
                             );
                             let hh = (hash & hashMask) as usize;
                             self.hashPrev[(index & windowMask) as usize] = self.hashHead[hh];
@@ -3878,7 +3860,10 @@ impl<W: io::Writer> io::Closer for Writer<W> {
 ///
 /// If `level` is in `[-2, 9]` the error is `nil`; otherwise it is non-nil.
 pub fn NewWriter<W: io::Writer>(w: W, level: int) -> (Writer<W>, error) {
-    let mut dw = Writer { d: new_compressor(w), dict: Vec::new() };
+    let mut dw = Writer {
+        d: new_compressor(w),
+        dict: Vec::new(),
+    };
     let err = dw.d.init(level);
     if !err.IsNil() {
         return (dw, err);

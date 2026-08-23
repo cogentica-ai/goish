@@ -21,11 +21,7 @@ fn main() {
     {
         let (exts, err) = mime::ExtensionsByType(string("image/jpeg"));
         let n = exts.Len() as int;
-        if err.IsNil()
-            && n == 2
-            && exts[0i64] == string(".jpeg")
-            && exts[1i64] == string(".jpg")
-        {
+        if err.IsNil() && n == 2 && exts[0i64] == string(".jpeg") && exts[1i64] == string(".jpg") {
             fmt::Println!("[ 1] ExtByType image/jpeg    PASS");
         } else {
             fmt::Println!("[ 1] ExtByType image/jpeg    FAIL n={}", n);
@@ -37,11 +33,7 @@ fn main() {
     {
         let (exts, err) = mime::ExtensionsByType(string("text/html"));
         let n = exts.Len() as int;
-        if err.IsNil()
-            && n == 2
-            && exts[0i64] == string(".htm")
-            && exts[1i64] == string(".html")
-        {
+        if err.IsNil() && n == 2 && exts[0i64] == string(".htm") && exts[1i64] == string(".html") {
             fmt::Println!("[ 2] ExtByType text/html     PASS");
         } else {
             fmt::Println!("[ 2] ExtByType text/html     FAIL n={}", n);

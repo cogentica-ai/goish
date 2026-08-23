@@ -70,9 +70,7 @@ pub fn removeLeadingDuplicates(env: slice<string>) -> slice<string> {
             // Go: `keq := e[:eq+1]` — the key INCLUDING its '=', so
             // "PATH=" cannot match "PATH_EXTRA=".
             let eb = e.as_bytes();
-            let keq = string::from_bytes(
-                &eb[..crate::builtin::__make_size(eq) + 1],
-            );
+            let keq = string::from_bytes(&eb[..crate::builtin::__make_size(eq) + 1]);
             for j in (i + 1)..env.Len() {
                 if crate::strings::HasPrefix(env[j].clone(), keq.clone()) {
                     found = true;
@@ -197,11 +195,7 @@ impl Handler {
         if !err.IsNil() {
             rw.WriteHeader(super::super::status::StatusInternalServerError);
             self.printf(
-                crate::fmt::Sprintf!(
-                    "cgi: error resolving local URI path %q: %v",
-                    path,
-                    err
-                ),
+                crate::fmt::Sprintf!("cgi: error resolving local URI path %q: %v", path, err),
                 slice::new(),
             );
             return;
@@ -422,7 +416,10 @@ impl HTTPHandler for Handler {
             let (line, isPrefix, lerr) = linebody.ReadLine();
             if isPrefix {
                 rw.WriteHeader(super::super::status::StatusInternalServerError);
-                self.printf(string("cgi: long header line from subprocess."), slice::new());
+                self.printf(
+                    string("cgi: long header line from subprocess."),
+                    slice::new(),
+                );
                 let _ = cmd.Kill();
                 let _ = cmd.Wait();
                 return;
@@ -480,10 +477,7 @@ impl HTTPHandler for Handler {
                         crate::fmt::Sprintf!("cgi: bogus status: %q", val),
                         slice::new(),
                     );
-                    self.printf(
-                        crate::fmt::Sprintf!("cgi: line was %q", text),
-                        slice::new(),
-                    );
+                    self.printf(crate::fmt::Sprintf!("cgi: line was %q", text), slice::new());
                     let _ = cmd.Kill();
                     let _ = cmd.Wait();
                     return;
@@ -503,8 +497,7 @@ impl HTTPHandler for Handler {
 
         let loc = headers.Get(string("Location"));
         if loc.Len() != 0 {
-            if strings::HasPrefix(loc.clone(), string("/")) && self.PathLocationHandler.is_some()
-            {
+            if strings::HasPrefix(loc.clone(), string("/")) && self.PathLocationHandler.is_some() {
                 self.handleInternalRedirect(rw, req, loc);
                 let _ = cmd.Wait();
                 return;
@@ -560,16 +553,9 @@ impl Handler {
     // go: none — goish-only: Go declares `internalError` as a closure
     // inside ServeHTTP; a closure capturing `rw` and `self` cannot be
     // spelled there without fighting the borrow checker for nothing.
-    fn __internalError(
-        &self,
-        rw: &(dyn ResponseWriter + Send + Sync + 'static),
-        err: error,
-    ) {
+    fn __internalError(&self, rw: &(dyn ResponseWriter + Send + Sync + 'static), err: error) {
         rw.WriteHeader(super::super::status::StatusInternalServerError);
-        self.printf(
-            crate::fmt::Sprintf!("CGI error: %v", err),
-            slice::new(),
-        );
+        self.printf(crate::fmt::Sprintf!("CGI error: %v", err), slice::new());
         return;
     }
 }

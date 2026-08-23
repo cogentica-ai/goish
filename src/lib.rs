@@ -41,8 +41,8 @@ extern crate self as goish;
 #[doc(hidden)]
 pub mod __macro_alloc {
     pub use alloc::boxed::Box;
-    pub use alloc::vec::Vec;
     pub use alloc::vec;
+    pub use alloc::vec::Vec;
 }
 
 // ─── byte-size unit constants ───────────────────────────────────────
@@ -81,29 +81,28 @@ pub mod errors;
 pub mod expvar;
 pub mod flag;
 pub mod fmt;
+pub mod r#go;
 pub mod goany;
 pub mod goarray;
 pub mod gochan;
 pub mod gomap;
-pub mod goslice;
-pub mod gostring;
-pub mod r#go;
-pub mod hook;
-pub mod lazy;
 pub mod gonilable;
 pub mod gonilable_ref;
-pub mod nilval;
+pub mod goslice;
+pub mod gostring;
 pub mod hash;
+pub mod hook;
 pub mod html;
 pub mod internal;
-pub mod maps;
 pub mod io;
 pub mod iter;
-pub mod xxh3;
+pub mod lazy;
 pub mod log;
+pub mod maps;
 pub mod math;
 pub mod mime;
 pub mod net;
+pub mod nilval;
 pub mod os;
 pub mod path;
 pub mod range;
@@ -123,6 +122,7 @@ pub mod text;
 pub mod time;
 pub mod types;
 pub mod unicode;
+pub mod xxh3;
 
 // Top-level `fs` is Go's `io/fs` (Go 1.16+). Re-export rather than
 // declare a second copy so paths `goish::fs::FileMode` and
@@ -143,8 +143,8 @@ pub use convert::{
     uint16, uint32, uint64, uint8, NumCast,
 };
 pub use errors::error;
-pub use goany::Any;
 pub use goany::try_consume_box;
+pub use goany::Any;
 pub use gonilable::nilable;
 pub use gonilable_ref::{nilable_ref, nilable_refmut};
 
@@ -207,9 +207,9 @@ macro_rules! nilable {
 /// runtime, all reachable impls have registered.
 pub mod any {
     pub use crate::goany::{
-        register_with, lookup_with, lookup_with_mut, AsExt, AsExtMut,
-        DowncastableFromAny, DowncastableFromAnyMut, HasDynAny, HasDynAnyMut,
-        NilDyn, TraitProbe, TraitRegistry, __HasNilSentinel,
+        __HasNilSentinel, lookup_with, lookup_with_mut, register_with, AsExt, AsExtMut,
+        DowncastableFromAny, DowncastableFromAnyMut, HasDynAny, HasDynAnyMut, NilDyn, TraitProbe,
+        TraitRegistry,
     };
 }
 
@@ -220,13 +220,16 @@ pub mod any {
 // Trait + Send + Sync`) — keeping it at root simplifies the macro's
 // generated path.
 pub use goany::{AsExt, AsExtMut, HasDynAny, HasDynAnyMut};
-pub use nilval::{nil, Nil};
 pub use goarray::array;
 pub use gochan::chan;
 pub use gomap::map;
 pub use goslice::slice;
 pub use gostring::string;
-pub use types::{byte, complex64, complex128, float32, float64, int, int8, int16, int32, int64, rune, uint, uint8, uint16, uint32, uint64, uintptr};
+pub use nilval::{nil, Nil};
+pub use types::{
+    byte, complex128, complex64, float32, float64, int, int16, int32, int64, int8, rune, uint,
+    uint16, uint32, uint64, uint8, uintptr,
+};
 
 // Re-export the entry-point attribute so users write `#[goish::main]`.
 pub use goish_macros::main;

@@ -125,7 +125,10 @@ fn run() -> ! {
     // above and this 400 come from the same run. Before the mux gained
     // the asterisk branch goish answered `301 -> /*` here.
     {
-        let raw = send(port, b"PRI * HTTP/2.0\r\nHost: x\r\nConnection: close\r\n\r\n");
+        let raw = send(
+            port,
+            b"PRI * HTTP/2.0\r\nHost: x\r\nConnection: close\r\n\r\n",
+        );
         let w: &str = raw.as_ref();
         check(
             "PRI * HTTP/2.0 passes the version gate (Go's upgrade hook)",
@@ -143,7 +146,10 @@ fn run() -> ! {
 
     // ── OPTIONS * is the other asterisk case, and it is a 200 ──
     {
-        let raw = send(port, b"OPTIONS * HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+        let raw = send(
+            port,
+            b"OPTIONS * HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+        );
         let w: &str = raw.as_ref();
         check(
             "OPTIONS * is answered 200 by the global options handler",
@@ -178,7 +184,10 @@ fn run() -> ! {
 
     // ── the ordinary case is untouched ──
     {
-        let raw = send(port, b"GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+        let raw = send(
+            port,
+            b"GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+        );
         let w: &str = raw.as_ref();
         check(
             "an HTTP/1.1 request is still served",

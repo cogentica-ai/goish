@@ -42,7 +42,7 @@ fn main() {
     const N: u32 = 8;
     const TRIALS: u32 = 80_000;
     const MEAN: u32 = TRIALS / N; // 10_000
-    const TOL: u32 = MEAN / 20;   // ±5% = 500
+    const TOL: u32 = MEAN / 20; // ±5% = 500
 
     let mut buckets: [u32; N as usize] = [0; N as usize];
     for _ in 0..TRIALS {

@@ -145,7 +145,11 @@ fn main() {
         if is_here(get("in_helper")) {
             fmt::Println!("[ 3] helper attributes to file PASS");
         } else {
-            fmt::Println!("[ 3] helper attributes to file FAIL [", get("in_helper"), "]");
+            fmt::Println!(
+                "[ 3] helper attributes to file FAIL [",
+                get("in_helper"),
+                "]"
+            );
             failed += 1;
         }
     }
@@ -187,7 +191,12 @@ fn main() {
         }
     }
 
-    fmt::Println!("    sites: direct=", get("direct"), " helper=", get("in_helper"));
+    fmt::Println!(
+        "    sites: direct=",
+        get("direct"),
+        " helper=",
+        get("in_helper")
+    );
     fmt::Println!("           subtest=", get("subtest"));
 
     if failed == 0 {

@@ -27,7 +27,12 @@ fn main() {
         if y == 2024 && m == 1 && d == 2 {
             fmt::Println!("[ 0] Date round-trip           PASS");
         } else {
-            fmt::Println!("[ 0] Date round-trip           FAIL y={} m={} d={}", y, m, d);
+            fmt::Println!(
+                "[ 0] Date round-trip           FAIL y={} m={} d={}",
+                y,
+                m,
+                d
+            );
             failed += 1;
         }
     }

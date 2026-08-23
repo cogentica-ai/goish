@@ -18,27 +18,27 @@ impl P521Element {
     ///
     /// If x == 0, Invert returns e = 0.
     pub fn Invert(&mut self, x: &P521Element) -> &mut Self {
-    // Inversion is implemented as exponentiation with exponent p − 2.
-    // The sequence of 13 multiplications and 520 squarings is derived from the
-    // following addition chain generated with github.com/mmcloughlin/addchain v0.4.0.
-    //
-    //	_10       = 2*1
-    //	_11       = 1 + _10
-    //	_1100     = _11 << 2
-    //	_1111     = _11 + _1100
-    //	_11110000 = _1111 << 4
-    //	_11111111 = _1111 + _11110000
-    //	x16       = _11111111 << 8 + _11111111
-    //	x32       = x16 << 16 + x16
-    //	x64       = x32 << 32 + x32
-    //	x65       = 2*x64 + 1
-    //	x129      = x65 << 64 + x64
-    //	x130      = 2*x129 + 1
-    //	x259      = x130 << 129 + x129
-    //	x260      = 2*x259 + 1
-    //	x519      = x260 << 259 + x259
-    //	return      x519 << 2 + 1
-    //
+        // Inversion is implemented as exponentiation with exponent p − 2.
+        // The sequence of 13 multiplications and 520 squarings is derived from the
+        // following addition chain generated with github.com/mmcloughlin/addchain v0.4.0.
+        //
+        //	_10       = 2*1
+        //	_11       = 1 + _10
+        //	_1100     = _11 << 2
+        //	_1111     = _11 + _1100
+        //	_11110000 = _1111 << 4
+        //	_11111111 = _1111 + _11110000
+        //	x16       = _11111111 << 8 + _11111111
+        //	x32       = x16 << 16 + x16
+        //	x64       = x32 << 32 + x32
+        //	x65       = 2*x64 + 1
+        //	x129      = x65 << 64 + x64
+        //	x130      = 2*x129 + 1
+        //	x259      = x130 << 129 + x129
+        //	x260      = 2*x259 + 1
+        //	x519      = x260 << 259 + x259
+        //	return      x519 << 2 + 1
+        //
         let mut z = P521Element::New();
         z.Set(*self);
         let mut t0 = P521Element::New();

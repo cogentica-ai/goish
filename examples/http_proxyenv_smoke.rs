@@ -78,33 +78,126 @@ fn main() {
 }
 
 fn run() -> ! {
-    resolve("plain", "http://proxy.example:3128", "", "", "http://target.com/x",
-            "http://proxy.example:3128");
-    resolve("bare-host-proxy", "proxy.example:3128", "", "", "http://target.com/x",
-            "http://proxy.example:3128");
-    resolve("https-req-uses-https-proxy", "http://hp:1", "http://sp:2", "",
-            "https://target.com/x", "http://sp:2");
-    resolve("https-req-no-https-proxy", "http://hp:1", "", "", "https://target.com/x",
-            "<nil>");
-    resolve("noproxy-exact", "http://p:1", "", "target.com", "http://target.com/x",
-            "<nil>");
-    resolve("noproxy-subdomain", "http://p:1", "", "target.com",
-            "http://sub.target.com/x", "<nil>");
-    resolve("noproxy-dot-no-parent", "http://p:1", "", ".target.com",
-            "http://target.com/x", "http://p:1");
-    resolve("noproxy-dot-subdomain", "http://p:1", "", ".target.com",
-            "http://sub.target.com/x", "<nil>");
-    resolve("noproxy-star", "http://p:1", "", "*", "http://target.com/x", "<nil>");
-    resolve("noproxy-cidr", "http://p:1", "", "10.0.0.0/8", "http://10.1.2.3/x",
-            "<nil>");
-    resolve("noproxy-ip-other", "http://p:1", "", "10.0.0.0/8", "http://11.1.2.3/x",
-            "http://p:1");
-    resolve("localhost", "http://p:1", "", "", "http://localhost:8080/x", "<nil>");
-    resolve("loopback", "http://p:1", "", "", "http://127.0.0.1:9/x", "<nil>");
-    resolve("noproxy-port-match", "http://p:1", "", "target.com:80",
-            "http://target.com/x", "<nil>");
-    resolve("noproxy-port-miss", "http://p:1", "", "target.com:81",
-            "http://target.com/x", "http://p:1");
+    resolve(
+        "plain",
+        "http://proxy.example:3128",
+        "",
+        "",
+        "http://target.com/x",
+        "http://proxy.example:3128",
+    );
+    resolve(
+        "bare-host-proxy",
+        "proxy.example:3128",
+        "",
+        "",
+        "http://target.com/x",
+        "http://proxy.example:3128",
+    );
+    resolve(
+        "https-req-uses-https-proxy",
+        "http://hp:1",
+        "http://sp:2",
+        "",
+        "https://target.com/x",
+        "http://sp:2",
+    );
+    resolve(
+        "https-req-no-https-proxy",
+        "http://hp:1",
+        "",
+        "",
+        "https://target.com/x",
+        "<nil>",
+    );
+    resolve(
+        "noproxy-exact",
+        "http://p:1",
+        "",
+        "target.com",
+        "http://target.com/x",
+        "<nil>",
+    );
+    resolve(
+        "noproxy-subdomain",
+        "http://p:1",
+        "",
+        "target.com",
+        "http://sub.target.com/x",
+        "<nil>",
+    );
+    resolve(
+        "noproxy-dot-no-parent",
+        "http://p:1",
+        "",
+        ".target.com",
+        "http://target.com/x",
+        "http://p:1",
+    );
+    resolve(
+        "noproxy-dot-subdomain",
+        "http://p:1",
+        "",
+        ".target.com",
+        "http://sub.target.com/x",
+        "<nil>",
+    );
+    resolve(
+        "noproxy-star",
+        "http://p:1",
+        "",
+        "*",
+        "http://target.com/x",
+        "<nil>",
+    );
+    resolve(
+        "noproxy-cidr",
+        "http://p:1",
+        "",
+        "10.0.0.0/8",
+        "http://10.1.2.3/x",
+        "<nil>",
+    );
+    resolve(
+        "noproxy-ip-other",
+        "http://p:1",
+        "",
+        "10.0.0.0/8",
+        "http://11.1.2.3/x",
+        "http://p:1",
+    );
+    resolve(
+        "localhost",
+        "http://p:1",
+        "",
+        "",
+        "http://localhost:8080/x",
+        "<nil>",
+    );
+    resolve(
+        "loopback",
+        "http://p:1",
+        "",
+        "",
+        "http://127.0.0.1:9/x",
+        "<nil>",
+    );
+    resolve(
+        "noproxy-port-match",
+        "http://p:1",
+        "",
+        "target.com:80",
+        "http://target.com/x",
+        "<nil>",
+    );
+    resolve(
+        "noproxy-port-miss",
+        "http://p:1",
+        "",
+        "target.com:81",
+        "http://target.com/x",
+        "http://p:1",
+    );
 
     // The cache is real: WITHOUT reset, a changed environment must
     // NOT be observed (this is what envProxyOnce means).

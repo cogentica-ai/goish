@@ -9,8 +9,8 @@ extern crate alloc;
 extern crate goish;
 
 use goish::fmt;
+use goish::syscall;
 use goish::time;
-use goish::{syscall};
 
 #[goish::main]
 fn main() {

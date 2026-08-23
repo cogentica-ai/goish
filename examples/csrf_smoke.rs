@@ -27,7 +27,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use goish::fmt;
 use goish::gostring::string;
 use goish::net::http;
-use goish::{syscall};
+use goish::syscall;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
@@ -135,7 +135,10 @@ fn test_3_sec_fetch_site_safe() {
     let mut ok = true;
     for v in ["same-origin", "none"] {
         let mut r = make_request("POST", "example.com");
-        r.Header.Set(string::from_static("Sec-Fetch-Site"), string::from_static(v));
+        r.Header.Set(
+            string::from_static("Sec-Fetch-Site"),
+            string::from_static(v),
+        );
         if !c.Check(&r).IsNil() {
             ok = false;
             break;
@@ -201,9 +204,9 @@ fn test_7_add_trusted_origin() {
 fn test_8_invalid_origins() {
     let c = http::NewCrossOriginProtection();
     let bad: [&str; 3] = [
-        "no-scheme.com",                 // missing scheme
-        "https://with.path/page",        // path not allowed
-        "https://with.query?x=1",        // query not allowed
+        "no-scheme.com",          // missing scheme
+        "https://with.path/page", // path not allowed
+        "https://with.query?x=1", // query not allowed
     ];
     let mut ok = true;
     for o in bad.iter() {

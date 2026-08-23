@@ -13,11 +13,11 @@
 extern crate alloc;
 extern crate goish;
 
+use alloc::vec::Vec;
 use goish::fmt;
+use goish::gostring::string;
 use goish::os;
 use goish::{nil, syscall};
-use alloc::vec::Vec;
-use goish::gostring::string;
 
 #[goish::main]
 fn main() {
@@ -63,12 +63,18 @@ fn main() {
     // 3. Leave them behind, request one more — must succeed without retry storm.
     let (f_nilable, err) = os::CreateTemp("/tmp", "goish-uniq-*.dat");
     if err != nil {
-        fmt::Println!(fmt::Sprintf!("[FAIL] 6th CreateTemp (with leftovers): %v", err));
+        fmt::Println!(fmt::Sprintf!(
+            "[FAIL] 6th CreateTemp (with leftovers): %v",
+            err
+        ));
         syscall::Exit(1);
     }
     let sixth_name = f_nilable.Must().Name();
     let sn_str: &str = sixth_name.as_ref();
-    fmt::Println!(fmt::Sprintf!("[OK] 6th CreateTemp (with leftovers) → %s", sn_str));
+    fmt::Println!(fmt::Sprintf!(
+        "[OK] 6th CreateTemp (with leftovers) → %s",
+        sn_str
+    ));
     names.push(sixth_name);
 
     // 4. MkdirTemp once.

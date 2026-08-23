@@ -21,14 +21,13 @@ use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::encoding::asn1::{
-    BitString, TagAndLength, __appendBase128Int, __appendLength, __appendTagAndLength,
-    __base128IntLength, __bitStringEncoder, __byteEncoder, __bytesEncoder, __encoder,
-    __int64Encoder, __lengthLength, __makeIA5String, __makeNumericString,
-    __makeObjectIdentifier, __makePrintableString, __makeUTF8String, __multiEncoder,
-    __makeBigInt, __makeGeneralizedTime, __makeUTCTime, __outsideUTCRange, __setEncoder,
-    __stringEncoder, __stripTagAndLength, __taggedEncoder,
-    getUniversalType, parseFieldParameters,
-    Enumerated, Marshal, MarshalWithParams, ObjectIdentifier, RawValue,
+    __appendBase128Int, __appendLength, __appendTagAndLength, __base128IntLength,
+    __bitStringEncoder, __byteEncoder, __bytesEncoder, __encoder, __int64Encoder, __lengthLength,
+    __makeBigInt, __makeGeneralizedTime, __makeIA5String, __makeNumericString,
+    __makeObjectIdentifier, __makePrintableString, __makeUTCTime, __makeUTF8String, __multiEncoder,
+    __outsideUTCRange, __setEncoder, __stringEncoder, __stripTagAndLength, __taggedEncoder,
+    getUniversalType, parseFieldParameters, BitString, Enumerated, Marshal, MarshalWithParams,
+    ObjectIdentifier, RawValue, TagAndLength,
 };
 use goish::fmt;
 use goish::goslice::slice;
@@ -42,7 +41,9 @@ static FAILED: AtomicUsize = AtomicUsize::new(0);
 static RAN: AtomicUsize = AtomicUsize::new(0);
 
 fn nib(c: u8) -> u8 {
-    if c >= b'0' && c <= b'9' { return c - b'0'; }
+    if c >= b'0' && c <= b'9' {
+        return c - b'0';
+    }
     return c - b'a' + 10;
 }
 
@@ -56,7 +57,6 @@ fn unhex(s: &str) -> Vec<byte> {
     }
     return out;
 }
-
 
 // Go-shape fixtures for the Marshal cases; the `asn1:"…"` tags are what
 // makeField reads back out of the reflect descriptor.
@@ -118,25 +118,47 @@ fn check(ok: bool, label: &'static str, n: i64) {
 fn main() {
     // base128IntLength / appendBase128Int
     let b128: [(i64, i64, &str); 10] = [
-        (0, 1, "00"), (1, 1, "01"), (127, 1, "7f"), (128, 2, "8100"),
-        (255, 2, "817f"), (256, 2, "8200"), (16383, 2, "ff7f"),
-        (16384, 3, "818000"), (1048576, 3, "c08000"), (2147483647, 5, "87ffffff7f"),
+        (0, 1, "00"),
+        (1, 1, "01"),
+        (127, 1, "7f"),
+        (128, 2, "8100"),
+        (255, 2, "817f"),
+        (256, 2, "8200"),
+        (16383, 2, "ff7f"),
+        (16384, 3, "818000"),
+        (1048576, 3, "c08000"),
+        (2147483647, 5, "87ffffff7f"),
     ];
     for &(n, wantLen, wantHex) in b128.iter() {
         let gotLen = __base128IntLength(n);
         let dst = __appendBase128Int(empty(), n);
-        check(gotLen == wantLen && dst.__into_vec() == unhex(wantHex), "base128", n);
+        check(
+            gotLen == wantLen && dst.__into_vec() == unhex(wantHex),
+            "base128",
+            n,
+        );
     }
 
     // lengthLength / appendLength
     let lens: [(i64, i64, &str); 9] = [
-        (0, 1, "00"), (1, 1, "01"), (127, 1, "7f"), (128, 1, "80"), (255, 1, "ff"),
-        (256, 2, "0100"), (65535, 2, "ffff"), (65536, 3, "010000"), (16777216, 4, "01000000"),
+        (0, 1, "00"),
+        (1, 1, "01"),
+        (127, 1, "7f"),
+        (128, 1, "80"),
+        (255, 1, "ff"),
+        (256, 2, "0100"),
+        (65535, 2, "ffff"),
+        (65536, 3, "010000"),
+        (16777216, 4, "01000000"),
     ];
     for &(i, wantLL, wantHex) in lens.iter() {
         let gotLL = __lengthLength(i);
         let dst = __appendLength(empty(), i);
-        check(gotLL == wantLL && dst.__into_vec() == unhex(wantHex), "length", i);
+        check(
+            gotLL == wantLL && dst.__into_vec() == unhex(wantHex),
+            "length",
+            i,
+        );
     }
 
     // appendTagAndLength
@@ -152,11 +174,15 @@ fn main() {
         (0, 3, 65536, false, "0383010000"),
     ];
     for &(class, tag, length, isCompound, wantHex) in tls.iter() {
-        let t = TagAndLength { class, tag, length, isCompound };
+        let t = TagAndLength {
+            class,
+            tag,
+            length,
+            isCompound,
+        };
         let dst = __appendTagAndLength(empty(), &t);
         check(dst.__into_vec() == unhex(wantHex), "tagAndLength tag=", tag);
     }
-
 
     // ─── encoder layer ────────────────────────────────────────────────
     //
@@ -168,33 +194,64 @@ fn main() {
         return dst.__into_vec();
     }
 
-    check(encOf(&__byteEncoder(0x2a)) == unhex("2a"), "byteEncoder", 0x2a);
+    check(
+        encOf(&__byteEncoder(0x2a)) == unhex("2a"),
+        "byteEncoder",
+        0x2a,
+    );
     let be = __bytesEncoder(slice::__from_vec(alloc::vec![1u8, 2, 3]));
-    check(be.Len() == 3 && encOf(&be) == unhex("010203"), "bytesEncoder", 3);
+    check(
+        be.Len() == 3 && encOf(&be) == unhex("010203"),
+        "bytesEncoder",
+        3,
+    );
     let se = __stringEncoder(goish::string("hi!"));
-    check(se.Len() == 3 && encOf(&se) == unhex("686921"), "stringEncoder", 3);
+    check(
+        se.Len() == 3 && encOf(&se) == unhex("686921"),
+        "stringEncoder",
+        3,
+    );
 
     let ints: [(i64, i64, &str); 12] = [
-        (0, 1, "00"), (1, 1, "01"), (127, 1, "7f"), (128, 2, "0080"),
-        (-1, 1, "ff"), (-128, 1, "80"), (-129, 2, "ff7f"), (255, 2, "00ff"),
-        (256, 2, "0100"), (-32768, 2, "8000"), (2147483647, 4, "7fffffff"),
+        (0, 1, "00"),
+        (1, 1, "01"),
+        (127, 1, "7f"),
+        (128, 2, "0080"),
+        (-1, 1, "ff"),
+        (-128, 1, "80"),
+        (-129, 2, "ff7f"),
+        (255, 2, "00ff"),
+        (256, 2, "0100"),
+        (-32768, 2, "8000"),
+        (2147483647, 4, "7fffffff"),
         (-2147483648, 4, "80000000"),
     ];
     for &(n, wantLen, wantHex) in ints.iter() {
         let e = __int64Encoder(n);
-        check(e.Len() == wantLen && encOf(&e) == unhex(wantHex), "int64Encoder", n);
+        check(
+            e.Len() == wantLen && encOf(&e) == unhex(wantHex),
+            "int64Encoder",
+            n,
+        );
     }
 
     let bits: [(&[u8], i64, i64, &str); 5] = [
-        (&[0x80], 1, 2, "0780"), (&[0xf0], 4, 2, "04f0"), (&[0xff], 8, 2, "00ff"),
-        (&[0xff, 0xc0], 10, 3, "06ffc0"), (&[], 0, 1, "00"),
+        (&[0x80], 1, 2, "0780"),
+        (&[0xf0], 4, 2, "04f0"),
+        (&[0xff], 8, 2, "00ff"),
+        (&[0xff, 0xc0], 10, 3, "06ffc0"),
+        (&[], 0, 1, "00"),
     ];
     for &(by, bl, wantLen, wantHex) in bits.iter() {
         let e = __bitStringEncoder(BitString {
             Bytes: slice::__from_vec(by.to_vec()),
             BitLength: bl,
         });
-        check(e.Len() == wantLen && encOf(&e) == unhex(wantHex), "bitStringEncoder bits=", bl);
+        check(
+            e.Len() == wantLen && encOf(&e) == unhex(wantHex),
+            "bitStringEncoder bits=",
+            bl,
+        );
     }
 
     let oids: [(&[i64], i64, &str); 5] = [
@@ -214,10 +271,21 @@ fn main() {
     }
     for bad in [&[1i64][..], &[3, 1][..], &[1, 40][..], &[][..]].iter() {
         let (_, err) = __makeObjectIdentifier(slice::__from_vec(bad.to_vec()));
-        check(err != goish::nil, "makeObjectIdentifier rejects", bad.len() as i64);
+        check(
+            err != goish::nil,
+            "makeObjectIdentifier rejects",
+            bad.len() as i64,
+        );
     }
 
-    for &(s, ok) in [("hello", true), ("a*b", true), ("a&b", false), ("caf\u{e9}", false)].iter() {
+    for &(s, ok) in [
+        ("hello", true),
+        ("a*b", true),
+        ("a&b", false),
+        ("caf\u{e9}", false),
+    ]
+    .iter()
+    {
         let (_, err) = __makePrintableString(s);
         check((err == goish::nil) == ok, "makePrintableString", ok as i64);
     }
@@ -230,8 +298,11 @@ fn main() {
         check((err == goish::nil) == ok, "makeNumericString", ok as i64);
     }
     let u = __makeUTF8String("caf\u{e9}");
-    check(u.Len() == 5 && encOf(&u) == unhex("636166c3a9"), "makeUTF8String", 5);
-
+    check(
+        u.Len() == 5 && encOf(&u) == unhex("636166c3a9"),
+        "makeUTF8String",
+        5,
+    );
 
     // ─── composite encoders ───────────────────────────────────────────
     fn bx(v: &[u8]) -> alloc::boxed::Box<dyn __encoder> {
@@ -244,7 +315,11 @@ fn main() {
         bx(&[0x03]),
         alloc::boxed::Box::new(__byteEncoder(0xff)),
     ]));
-    check(m.Len() == 4 && encOf(&m) == unhex("010203ff"), "multiEncoder", 4);
+    check(
+        m.Len() == 4 && encOf(&m) == unhex("010203ff"),
+        "multiEncoder",
+        4,
+    );
 
     // setEncoder sorts the encoded elements as octet strings (X690 11.6).
     let s1 = __setEncoder::New(slice::__from_vec(alloc::vec![
@@ -252,7 +327,11 @@ fn main() {
         bx(&[0x02, 0x01, 0x05]),
         bx(&[0x0c, 0x01, 0x41]),
     ]));
-    check(s1.Len() == 8 && encOf(&s1) == unhex("0201050c01413002"), "setEncoder sorts", 8);
+    check(
+        s1.Len() == 8 && encOf(&s1) == unhex("0201050c01413002"),
+        "setEncoder sorts",
+        8,
+    );
 
     // Same first octet, differing lengths — the length octet decides.
     let s2 = __setEncoder::New(slice::__from_vec(alloc::vec![
@@ -269,63 +348,396 @@ fn main() {
     // taggedEncoder: tag octets then body.
     let tagBuf = __appendTagAndLength(
         empty(),
-        &TagAndLength { class: 0, tag: 2, length: 1, isCompound: false },
+        &TagAndLength {
+            class: 0,
+            tag: 2,
+            length: 1,
+            isCompound: false,
+        },
     );
     let te = __taggedEncoder::New(
         alloc::boxed::Box::new(__bytesEncoder(tagBuf)),
         alloc::boxed::Box::new(__int64Encoder(5)),
     );
-    check(te.Len() == 3 && encOf(&te) == unhex("020105"), "taggedEncoder", 3);
+    check(
+        te.Len() == 3 && encOf(&te) == unhex("020105"),
+        "taggedEncoder",
+        3,
+    );
 
     let tagBuf2 = __appendTagAndLength(
         empty(),
-        &TagAndLength { class: 0, tag: 4, length: 3, isCompound: false },
+        &TagAndLength {
+            class: 0,
+            tag: 4,
+            length: 3,
+            isCompound: false,
+        },
     );
     let te2 = __taggedEncoder::New(
         alloc::boxed::Box::new(__bytesEncoder(tagBuf2)),
         bx(&[0xde, 0xad, 0xbe]),
     );
-    check(te2.Len() == 5 && encOf(&te2) == unhex("0403deadbe"), "taggedEncoder octets", 5);
-
+    check(
+        te2.Len() == 5 && encOf(&te2) == unhex("0403deadbe"),
+        "taggedEncoder octets",
+        5,
+    );
 
     // ─── parseFieldParameters (common.go) ─────────────────────────────
     //
     // Columns: optional, explicit, application, private, defaultValue,
     // tag, stringType, timeType, set, omitEmpty — as the Go reference
     // printed them.
-    let fp: [(&str, bool, bool, bool, bool, Option<i64>, Option<i64>, i64, i64, bool, bool); 32] = [
-        ("", false, false, false, false, None, None, 0, 0, false, false),
-        ("optional", true, false, false, false, None, None, 0, 0, false, false),
-        ("explicit", false, true, false, false, None, Some(0), 0, 0, false, false),
-        ("generalized", false, false, false, false, None, None, 0, 24, false, false),
-        ("utc", false, false, false, false, None, None, 0, 23, false, false),
-        ("ia5", false, false, false, false, None, None, 22, 0, false, false),
-        ("printable", false, false, false, false, None, None, 19, 0, false, false),
-        ("numeric", false, false, false, false, None, None, 18, 0, false, false),
-        ("utf8", false, false, false, false, None, None, 12, 0, false, false),
-        ("set", false, false, false, false, None, None, 0, 0, true, false),
-        ("application", false, false, true, false, None, Some(0), 0, 0, false, false),
-        ("private", false, false, false, true, None, Some(0), 0, 0, false, false),
-        ("omitempty", false, false, false, false, None, None, 0, 0, false, true),
-        ("tag:5", false, false, false, false, None, Some(5), 0, 0, false, false),
-        ("tag:0", false, false, false, false, None, Some(0), 0, 0, false, false),
-        ("tag:-3", false, false, false, false, None, Some(-3), 0, 0, false, false),
-        ("tag:notanumber", false, false, false, false, None, None, 0, 0, false, false),
-        ("tag:", false, false, false, false, None, None, 0, 0, false, false),
-        ("default:42", false, false, false, false, Some(42), None, 0, 0, false, false),
-        ("default:-7", false, false, false, false, Some(-7), None, 0, 0, false, false),
-        ("default:9223372036854775807", false, false, false, false, Some(9223372036854775807), None, 0, 0, false, false),
-        ("default:bad", false, false, false, false, None, None, 0, 0, false, false),
-        ("optional,explicit,tag:2", true, true, false, false, None, Some(2), 0, 0, false, false),
-        ("explicit,tag:7", false, true, false, false, None, Some(7), 0, 0, false, false),
-        ("tag:7,explicit", false, true, false, false, None, Some(7), 0, 0, false, false),
-        ("application,tag:3", false, false, true, false, None, Some(3), 0, 0, false, false),
-        ("private,tag:4", false, false, false, true, None, Some(4), 0, 0, false, false),
-        ("optional,omitempty,set,utf8", true, false, false, false, None, None, 12, 0, true, true),
-        ("unknown,optional", true, false, false, false, None, None, 0, 0, false, false),
-        ("ia5,printable", false, false, false, false, None, None, 19, 0, false, false),
-        ("utc,generalized", false, false, false, false, None, None, 0, 24, false, false),
-        (",,optional,,", true, false, false, false, None, None, 0, 0, false, false),
+    let fp: [(
+        &str,
+        bool,
+        bool,
+        bool,
+        bool,
+        Option<i64>,
+        Option<i64>,
+        i64,
+        i64,
+        bool,
+        bool,
+    ); 32] = [
+        (
+            "", false, false, false, false, None, None, 0, 0, false, false,
+        ),
+        (
+            "optional", true, false, false, false, None, None, 0, 0, false, false,
+        ),
+        (
+            "explicit",
+            false,
+            true,
+            false,
+            false,
+            None,
+            Some(0),
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "generalized",
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
+            0,
+            24,
+            false,
+            false,
+        ),
+        (
+            "utc", false, false, false, false, None, None, 0, 23, false, false,
+        ),
+        (
+            "ia5", false, false, false, false, None, None, 22, 0, false, false,
+        ),
+        (
+            "printable",
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
+            19,
+            0,
+            false,
+            false,
+        ),
+        (
+            "numeric", false, false, false, false, None, None, 18, 0, false, false,
+        ),
+        (
+            "utf8", false, false, false, false, None, None, 12, 0, false, false,
+        ),
+        (
+            "set", false, false, false, false, None, None, 0, 0, true, false,
+        ),
+        (
+            "application",
+            false,
+            false,
+            true,
+            false,
+            None,
+            Some(0),
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "private",
+            false,
+            false,
+            false,
+            true,
+            None,
+            Some(0),
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "omitempty",
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
+            0,
+            0,
+            false,
+            true,
+        ),
+        (
+            "tag:5",
+            false,
+            false,
+            false,
+            false,
+            None,
+            Some(5),
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "tag:0",
+            false,
+            false,
+            false,
+            false,
+            None,
+            Some(0),
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "tag:-3",
+            false,
+            false,
+            false,
+            false,
+            None,
+            Some(-3),
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "tag:notanumber",
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "tag:", false, false, false, false, None, None, 0, 0, false, false,
+        ),
+        (
+            "default:42",
+            false,
+            false,
+            false,
+            false,
+            Some(42),
+            None,
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "default:-7",
+            false,
+            false,
+            false,
+            false,
+            Some(-7),
+            None,
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "default:9223372036854775807",
+            false,
+            false,
+            false,
+            false,
+            Some(9223372036854775807),
+            None,
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "default:bad",
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "optional,explicit,tag:2",
+            true,
+            true,
+            false,
+            false,
+            None,
+            Some(2),
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "explicit,tag:7",
+            false,
+            true,
+            false,
+            false,
+            None,
+            Some(7),
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "tag:7,explicit",
+            false,
+            true,
+            false,
+            false,
+            None,
+            Some(7),
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "application,tag:3",
+            false,
+            false,
+            true,
+            false,
+            None,
+            Some(3),
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "private,tag:4",
+            false,
+            false,
+            false,
+            true,
+            None,
+            Some(4),
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "optional,omitempty,set,utf8",
+            true,
+            false,
+            false,
+            false,
+            None,
+            None,
+            12,
+            0,
+            true,
+            true,
+        ),
+        (
+            "unknown,optional",
+            true,
+            false,
+            false,
+            false,
+            None,
+            None,
+            0,
+            0,
+            false,
+            false,
+        ),
+        (
+            "ia5,printable",
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
+            19,
+            0,
+            false,
+            false,
+        ),
+        (
+            "utc,generalized",
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
+            0,
+            24,
+            false,
+            false,
+        ),
+        (
+            ",,optional,,",
+            true,
+            false,
+            false,
+            false,
+            None,
+            None,
+            0,
+            0,
+            false,
+            false,
+        ),
     ];
     let mut idx: i64 = 0;
     for &(tagstr, opt, exp, app, priv_, dv, tg, st, tt, set, omit) in fp.iter() {
@@ -343,7 +755,6 @@ fn main() {
         check(ok, "parseFieldParameters #", idx);
         idx += 1;
     }
-
 
     // ─── type identity for getUniversalType ───────────────────────────
     //
@@ -394,9 +805,17 @@ fn main() {
 
     // The values round-trip through reflect too.
     let oid = ObjectIdentifier::New(slice::__from_vec(alloc::vec![1i64, 2, 840]));
-    check(oid.Len() == 3 && oid.String().as_bytes() == b"1.2.840", "OID String", 3);
+    check(
+        oid.Len() == 3 && oid.String().as_bytes() == b"1.2.840",
+        "OID String",
+        3,
+    );
     let oid2 = ObjectIdentifier::New(slice::__from_vec(alloc::vec![1i64, 2, 840]));
-    check(oid.Equal(&oid2), "ObjectIdentifier.Equal is a method now", 0);
+    check(
+        oid.Equal(&oid2),
+        "ObjectIdentifier.Equal is a method now",
+        0,
+    );
     // An ObjectIdentifier reflects as a *named* slice: Kind stays Slice
     // and the elements are still reachable, but Type().Name() survives —
     // without which makeBody cannot tell an OID from any other []int and
@@ -412,7 +831,6 @@ fn main() {
         0,
     );
 
-
     // ─── getUniversalType (common.go) ─────────────────────────────────
     //
     // Columns are the Go reference's (matchAny, tagNumber, isCompound, ok).
@@ -425,11 +843,39 @@ fn main() {
 
     let ident: [(&'static str, goish::reflect::Type, bool, i64, bool, bool); 6] = [
         ("RawValue", TypeOfDyn::<RawValue>(), true, -1, false, true),
-        ("ObjectIdentifier", TypeOfDyn::<ObjectIdentifier>(), false, 6, false, true),
+        (
+            "ObjectIdentifier",
+            TypeOfDyn::<ObjectIdentifier>(),
+            false,
+            6,
+            false,
+            true,
+        ),
         ("BitString", TypeOfDyn::<BitString>(), false, 3, false, true),
-        ("time.Time", TypeOfDyn::<goish::time::Time>(), false, 23, false, true),
-        ("Enumerated", TypeOfDyn::<Enumerated>(), false, 10, false, true),
-        ("big.Int", TypeOfDyn::<goish::math::big::Int>(), false, 2, false, true),
+        (
+            "time.Time",
+            TypeOfDyn::<goish::time::Time>(),
+            false,
+            23,
+            false,
+            true,
+        ),
+        (
+            "Enumerated",
+            TypeOfDyn::<Enumerated>(),
+            false,
+            10,
+            false,
+            true,
+        ),
+        (
+            "big.Int",
+            TypeOfDyn::<goish::math::big::Int>(),
+            false,
+            2,
+            false,
+            true,
+        ),
     ];
     let mut k: i64 = 0;
     for (_, t, ma, tn, ic, ok) in ident.iter() {
@@ -439,33 +885,93 @@ fn main() {
     }
 
     // Kind-driven rows.
-    check(gut(&TypeOfDyn::<bool>()) == (false, 1, false, true), "gut bool", 1);
-    check(gut(&TypeOfDyn::<i64>()) == (false, 2, false, true), "gut int", 2);
-    check(gut(&TypeOfDyn::<i8>()) == (false, 2, false, true), "gut int8", 2);
-    check(gut(&TypeOfDyn::<i16>()) == (false, 2, false, true), "gut int16", 2);
-    check(gut(&TypeOfDyn::<i32>()) == (false, 2, false, true), "gut int32", 2);
-    check(gut(&TypeOfDyn::<slice<byte>>()) == (false, 4, false, true), "gut []byte", 4);
-    check(gut(&TypeOfDyn::<slice<i64>>()) == (false, 16, true, true), "gut []int", 16);
-    check(gut(&TypeOfDyn::<goish::string>()) == (false, 19, false, true), "gut string", 19);
-    check(gut(&TypeOfDyn::<u64>()) == (false, 0, false, false), "gut uint rejected", 0);
-    check(gut(&TypeOfDyn::<f64>()) == (false, 0, false, false), "gut float64 rejected", 0);
-
+    check(
+        gut(&TypeOfDyn::<bool>()) == (false, 1, false, true),
+        "gut bool",
+        1,
+    );
+    check(
+        gut(&TypeOfDyn::<i64>()) == (false, 2, false, true),
+        "gut int",
+        2,
+    );
+    check(
+        gut(&TypeOfDyn::<i8>()) == (false, 2, false, true),
+        "gut int8",
+        2,
+    );
+    check(
+        gut(&TypeOfDyn::<i16>()) == (false, 2, false, true),
+        "gut int16",
+        2,
+    );
+    check(
+        gut(&TypeOfDyn::<i32>()) == (false, 2, false, true),
+        "gut int32",
+        2,
+    );
+    check(
+        gut(&TypeOfDyn::<slice<byte>>()) == (false, 4, false, true),
+        "gut []byte",
+        4,
+    );
+    check(
+        gut(&TypeOfDyn::<slice<i64>>()) == (false, 16, true, true),
+        "gut []int",
+        16,
+    );
+    check(
+        gut(&TypeOfDyn::<goish::string>()) == (false, 19, false, true),
+        "gut string",
+        19,
+    );
+    check(
+        gut(&TypeOfDyn::<u64>()) == (false, 0, false, false),
+        "gut uint rejected",
+        0,
+    );
+    check(
+        gut(&TypeOfDyn::<f64>()) == (false, 0, false, false),
+        "gut float64 rejected",
+        0,
+    );
 
     // ─── makeBigInt / stripTagAndLength ───────────────────────────────
     let bi: [(&str, i64, &str); 16] = [
-        ("0", 1, "00"), ("1", 1, "01"), ("127", 1, "7f"), ("128", 2, "0080"),
-        ("255", 2, "00ff"), ("256", 2, "0100"), ("32767", 2, "7fff"), ("32768", 3, "008000"),
-        ("-1", 1, "ff"), ("-128", 1, "80"), ("-129", 2, "ff7f"), ("-255", 2, "ff01"),
-        ("-256", 2, "ff00"), ("-32768", 2, "8000"),
-        ("123456789012345678901234567890", 13, "018ee90ff6c373e0ee4e3f0ad2"),
-        ("-123456789012345678901234567890", 13, "fe7116f0093c8c1f11b1c0f52e"),
+        ("0", 1, "00"),
+        ("1", 1, "01"),
+        ("127", 1, "7f"),
+        ("128", 2, "0080"),
+        ("255", 2, "00ff"),
+        ("256", 2, "0100"),
+        ("32767", 2, "7fff"),
+        ("32768", 3, "008000"),
+        ("-1", 1, "ff"),
+        ("-128", 1, "80"),
+        ("-129", 2, "ff7f"),
+        ("-255", 2, "ff01"),
+        ("-256", 2, "ff00"),
+        ("-32768", 2, "8000"),
+        (
+            "123456789012345678901234567890",
+            13,
+            "018ee90ff6c373e0ee4e3f0ad2",
+        ),
+        (
+            "-123456789012345678901234567890",
+            13,
+            "fe7116f0093c8c1f11b1c0f52e",
+        ),
     ];
     let mut bidx: i64 = 0;
     for &(dec, wantLen, wantHex) in bi.iter() {
         bidx += 1;
         let mut n = goish::math::big::Int::default();
         let ok = n.SetString(dec, 10);
-        if !ok.1 { check(false, "big::Int::SetString", 0); continue; }
+        if !ok.1 {
+            check(false, "big::Int::SetString", 0);
+            continue;
+        }
         let (e, err) = __makeBigInt(&n);
         check(
             err == goish::nil && e.Len() == wantLen && encOf(&*e) == unhex(wantHex),
@@ -475,14 +981,16 @@ fn main() {
     }
 
     let strips: [(&str, &str); 5] = [
-        ("020105", "05"), ("0403deadbe", "deadbe"), ("30050203010203", "0203010203"),
-        ("02", "02"), ("0481c8", ""),
+        ("020105", "05"),
+        ("0403deadbe", "deadbe"),
+        ("30050203010203", "0203010203"),
+        ("02", "02"),
+        ("0481c8", ""),
     ];
     for &(inHex, wantHex) in strips.iter() {
         let got = __stripTagAndLength(slice::__from_vec(unhex(inHex)));
         check(got.__into_vec() == unhex(wantHex), "stripTagAndLength", 0);
     }
-
 
     // ─── UTCTime / GeneralizedTime ────────────────────────────────────
     //
@@ -493,11 +1001,61 @@ fn main() {
     // encodes them.
     let times: [(i64, i64, i64, i64, i64, i64, bool, &str, &str); 7] = [
         (1949, 12, 31, 23, 59, 59, true, "", "19491231235959Z"),
-        (1950, 1, 1, 0, 0, 0, false, "500101000000Z", "19500101000000Z"),
-        (1999, 12, 31, 23, 59, 59, false, "991231235959Z", "19991231235959Z"),
-        (2000, 1, 1, 0, 0, 0, false, "000101000000Z", "20000101000000Z"),
-        (2024, 3, 7, 9, 5, 1, false, "240307090501Z", "20240307090501Z"),
-        (2049, 12, 31, 23, 59, 59, false, "491231235959Z", "20491231235959Z"),
+        (
+            1950,
+            1,
+            1,
+            0,
+            0,
+            0,
+            false,
+            "500101000000Z",
+            "19500101000000Z",
+        ),
+        (
+            1999,
+            12,
+            31,
+            23,
+            59,
+            59,
+            false,
+            "991231235959Z",
+            "19991231235959Z",
+        ),
+        (
+            2000,
+            1,
+            1,
+            0,
+            0,
+            0,
+            false,
+            "000101000000Z",
+            "20000101000000Z",
+        ),
+        (
+            2024,
+            3,
+            7,
+            9,
+            5,
+            1,
+            false,
+            "240307090501Z",
+            "20240307090501Z",
+        ),
+        (
+            2049,
+            12,
+            31,
+            23,
+            59,
+            59,
+            false,
+            "491231235959Z",
+            "20491231235959Z",
+        ),
         (2050, 1, 1, 0, 0, 0, true, "", "20500101000000Z"),
     ];
     for &(y, mo, d, h, mi, sec, outside, wantUTC, wantGen) in times.iter() {
@@ -528,7 +1086,11 @@ fn main() {
 
     fn mh<T: goish::reflect::Reflect>(v: &T, want: &str, n: i64) {
         let (b, err) = Marshal(v);
-        check(err == goish::nil && b.__into_vec() == unhex(want), "Marshal", n);
+        check(
+            err == goish::nil && b.__into_vec() == unhex(want),
+            "Marshal",
+            n,
+        );
     }
     fn mp<T: goish::reflect::Reflect>(v: &T, params: &'static str, want: &str, n: i64) {
         let (b, err) = MarshalWithParams(v, params);
@@ -552,11 +1114,7 @@ fn main() {
         "0c1075736572406578616d706c652e636f6d",
         9,
     );
-    mh(
-        &slice::__from_vec(alloc::vec![1u8, 2, 3]),
-        "0403010203",
-        10,
-    );
+    mh(&slice::__from_vec(alloc::vec![1u8, 2, 3]), "0403010203", 10);
     mh(
         &ObjectIdentifier::New(slice::__from_vec(alloc::vec![1_i64, 2, 840, 113549])),
         "06062a864886f70d",
@@ -576,28 +1134,10 @@ fn main() {
 
     // time.Date(2026, 8, 11, 12, 0, 0, 0, UTC) and a post-2050 value that
     // forces GeneralizedTime.
-    let tm = goish::time::Date(
-        2026,
-        goish::time::August,
-        11,
-        12,
-        0,
-        0,
-        0,
-        goish::time::UTC,
-    );
+    let tm = goish::time::Date(2026, goish::time::August, 11, 12, 0, 0, 0, goish::time::UTC);
     mh(&tm, "170d3236303831313132303030305a", 16);
     mp(&tm, "generalized", "180f32303236303831313132303030305a", 17);
-    let tm2 = goish::time::Date(
-        2051,
-        goish::time::January,
-        2,
-        3,
-        4,
-        5,
-        0,
-        goish::time::UTC,
-    );
+    let tm2 = goish::time::Date(2051, goish::time::January, 2, 3, 4, 5, 0, goish::time::UTC);
     mh(&tm2, "180f32303531303130323033303430355a", 18);
 
     mh(&simple { A: 5, B: true }, "30060201050101ff", 19);
@@ -642,7 +1182,11 @@ fn main() {
         "3009020101020102020103",
         27,
     );
-    mh(&slice::__from_vec(alloc::vec![] as alloc::vec::Vec<i64>), "3000", 28);
+    mh(
+        &slice::__from_vec(alloc::vec![] as alloc::vec::Vec<i64>),
+        "3000",
+        28,
+    );
     mh(
         &slice::__from_vec(alloc::vec![goish::string("a"), goish::string("b")]),
         "3006130161130162",
@@ -684,7 +1228,11 @@ fn main() {
     if failed == 0 {
         fmt::Printf!("asn1_marshal_smoke OK %d/%d\n", ran as i64, ran as i64);
     } else {
-        fmt::Printf!("asn1_marshal_smoke FAILED %d of %d\n", failed as i64, ran as i64);
+        fmt::Printf!(
+            "asn1_marshal_smoke FAILED %d of %d\n",
+            failed as i64,
+            ran as i64
+        );
         goish::syscall::Exit(1);
     }
 }

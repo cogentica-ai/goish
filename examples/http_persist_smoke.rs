@@ -24,24 +24,38 @@ static PASSED: AtomicUsize = AtomicUsize::new(0);
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
 fn check(name: &'static str, ok: bool, detail: goish::string) {
-    if ok { PASSED.fetch_add(1, Ordering::Relaxed); fmt::Printf!("PASS: %s\n", name); }
-    else { FAILED.fetch_add(1, Ordering::Relaxed); fmt::Printf!("FAIL: %s — %s\n", name, detail); }
+    if ok {
+        PASSED.fetch_add(1, Ordering::Relaxed);
+        fmt::Printf!("PASS: %s\n", name);
+    } else {
+        FAILED.fetch_add(1, Ordering::Relaxed);
+        fmt::Printf!("FAIL: %s — %s\n", name, detail);
+    }
 }
 
 #[goish::main]
 fn main() {
-    goish::go!(stack(512 * 1024), move || { run(); });
-    loop { goish::runtime::sched::Gosched(); }
+    goish::go!(stack(512 * 1024), move || {
+        run();
+    });
+    loop {
+        goish::runtime::sched::Gosched();
+    }
 }
 
 fn run() {
     let (ln, e) = net::Listen(string("tcp"), string("127.0.0.1:0"));
-    if !e.IsNil() { check("listen", false, fmt::Sprintf!("%v", e)); finish(); }
+    if !e.IsNil() {
+        check("listen", false, fmt::Sprintf!("%v", e));
+        finish();
+    }
     let port = ln.Addr().Port;
     go!(stack(256 * 1024), move || {
         loop {
             let (c, e) = ln.Accept();
-            if !e.IsNil() { return; }
+            if !e.IsNil() {
+                return;
+            }
             let _ = c;
             time::Sleep(time::Duration(50 * 1_000_000));
         }
@@ -54,19 +68,33 @@ fn run() {
         let (c, _) = net::Dial(string("tcp"), addr.clone());
         let sc = NewServerConn(c, None);
         let taken = sc.Hijack();
-        check("ServerConn.Hijack yields the connection", taken.is_some(), string(""));
-        check("and a second Hijack yields nothing — it was detached, not cloned",
-              sc.Hijack().is_none(), string(""));
+        check(
+            "ServerConn.Hijack yields the connection",
+            taken.is_some(),
+            string(""),
+        );
+        check(
+            "and a second Hijack yields nothing — it was detached, not cloned",
+            sc.Hijack().is_none(),
+            string(""),
+        );
         // Close after Hijack must be a no-op, not a double close.
-        check("Close after Hijack is a no-op", sc.Close().IsNil(), string(""));
+        check(
+            "Close after Hijack is a no-op",
+            sc.Close().IsNil(),
+            string(""),
+        );
     }
     // Close without Hijack closes the conn.
     {
         let (c, _) = net::Dial(string("tcp"), addr.clone());
         let sc = NewServerConn(c, None);
         let err = sc.Close();
-        check("Close without Hijack closes the connection",
-              err.IsNil() && sc.Hijack().is_none(), fmt::Sprintf!("%v", err));
+        check(
+            "Close without Hijack closes the connection",
+            err.IsNil() && sc.Hijack().is_none(),
+            fmt::Sprintf!("%v", err),
+        );
     }
     // ClientConn mirrors it, and the proxy form differs only in flag.
     {
@@ -74,11 +102,21 @@ fn run() {
         let cc = NewClientConn(c1, None);
         let (c2, _) = net::Dial(string("tcp"), addr.clone());
         let pc = NewProxyClientConn(c2, None);
-        check("NewProxyClientConn differs from NewClientConn only in request form",
-              !cc.proxy && pc.proxy, string(""));
-        check("ClientConn.Pending starts at 0", cc.Pending() == 0, string(""));
-        check("ClientConn.Hijack detaches the same way",
-              cc.Hijack().is_some() && cc.Hijack().is_none(), string(""));
+        check(
+            "NewProxyClientConn differs from NewClientConn only in request form",
+            !cc.proxy && pc.proxy,
+            string(""),
+        );
+        check(
+            "ClientConn.Pending starts at 0",
+            cc.Pending() == 0,
+            string(""),
+        );
+        check(
+            "ClientConn.Hijack detaches the same way",
+            cc.Hijack().is_some() && cc.Hijack().is_none(),
+            string(""),
+        );
         let _ = pc.Close();
     }
 
@@ -105,7 +143,9 @@ fn run() {
         let sport = sln.Addr().Port;
         {
             let s2 = srv.clone();
-            go!(stack(1024 * 1024), move || { let _ = s2.Serve(sln); });
+            go!(stack(1024 * 1024), move || {
+                let _ = s2.Serve(sln);
+            });
         }
         time::Sleep(time::Duration(150 * 1_000_000));
 
@@ -118,10 +158,14 @@ fn run() {
             goish::goslice::slice::new(),
         );
         let (resp, derr) = cc2.Do(&req);
-        let body = goish::string::from_bytes(&{ let (b, _) = goish::io::ReadAll(&mut resp.Body.clone()); b });
+        let body = goish::string::from_bytes(&{
+            let (b, _) = goish::io::ReadAll(&mut resp.Body.clone());
+            b
+        });
         check(
             "ClientConn.Do writes the request and reads its response",
-            derr.IsNil() && resp.StatusCode == 200
+            derr.IsNil()
+                && resp.StatusCode == 200
                 && resp.Header.Get(string("X-Echo")) == "/hi"
                 && body == "persist-ok",
             fmt::Sprintf!("err=%v code=%d body=%q", derr, resp.StatusCode, body),
@@ -156,7 +200,10 @@ fn finish() -> ! {
     let p = PASSED.load(Ordering::Relaxed);
     let f = FAILED.load(Ordering::Relaxed);
     fmt::Printf!("\n%d passed, %d failed\n", p as i64, f as i64);
-    if f == 0 { fmt::Printf!("HTTP_PERSIST_SMOKE_OK\n"); goish::os::Exit(0); }
+    if f == 0 {
+        fmt::Printf!("HTTP_PERSIST_SMOKE_OK\n");
+        goish::os::Exit(0);
+    }
     fmt::Printf!("HTTP_PERSIST_SMOKE_FAIL\n");
     goish::os::Exit(1);
 }

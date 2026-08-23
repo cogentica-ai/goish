@@ -59,12 +59,16 @@ pub(super) type p521NonMontgomeryDomainFieldElement = [u64; 9];
 /// algorithm, so this returns it instead.
 pub(super) fn p521CmovznzU64(arg1: u64, arg2: u64, arg3: u64) -> u64 {
     let x1 = ((uint64(arg1)).wrapping_mul(0xffffffffffffffff));
-    let x2 = ((((x1 & arg3)) | ((((!x1)) & arg2))));
+    let x2 = ((x1 & arg3) | ((!x1) & arg2));
     return x2;
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p521_fiat64.go:88-1599 p521Mul
-pub(super) fn p521Mul(out1: &mut p521MontgomeryDomainFieldElement, arg1: &p521MontgomeryDomainFieldElement, arg2: &p521MontgomeryDomainFieldElement) {
+pub(super) fn p521Mul(
+    out1: &mut p521MontgomeryDomainFieldElement,
+    arg1: &p521MontgomeryDomainFieldElement,
+    arg2: &p521MontgomeryDomainFieldElement,
+) {
     let x1 = arg1[1];
     let x2 = arg1[2];
     let x3 = arg1[3];
@@ -607,7 +611,10 @@ pub(super) fn p521Mul(out1: &mut p521MontgomeryDomainFieldElement, arg1: &p521Mo
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p521_fiat64.go:1611-3122 p521Square
-pub(super) fn p521Square(out1: &mut p521MontgomeryDomainFieldElement, arg1: &p521MontgomeryDomainFieldElement) {
+pub(super) fn p521Square(
+    out1: &mut p521MontgomeryDomainFieldElement,
+    arg1: &p521MontgomeryDomainFieldElement,
+) {
     let x1 = arg1[1];
     let x2 = arg1[2];
     let x3 = arg1[3];
@@ -1150,7 +1157,11 @@ pub(super) fn p521Square(out1: &mut p521MontgomeryDomainFieldElement, arg1: &p52
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p521_fiat64.go:3135-3219 p521Add
-pub(super) fn p521Add(out1: &mut p521MontgomeryDomainFieldElement, arg1: &p521MontgomeryDomainFieldElement, arg2: &p521MontgomeryDomainFieldElement) {
+pub(super) fn p521Add(
+    out1: &mut p521MontgomeryDomainFieldElement,
+    arg1: &p521MontgomeryDomainFieldElement,
+    arg2: &p521MontgomeryDomainFieldElement,
+) {
     let (x1, x2) = bits::Add64(arg1[0], arg2[0], uint64(0x0));
     let (x3, x4) = bits::Add64(arg1[1], arg2[1], uint64(uint64(x2)));
     let (x5, x6) = bits::Add64(arg1[2], arg2[2], uint64(uint64(x4)));
@@ -1191,7 +1202,11 @@ pub(super) fn p521Add(out1: &mut p521MontgomeryDomainFieldElement, arg1: &p521Mo
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p521_fiat64.go:3232-3297 p521Sub
-pub(super) fn p521Sub(out1: &mut p521MontgomeryDomainFieldElement, arg1: &p521MontgomeryDomainFieldElement, arg2: &p521MontgomeryDomainFieldElement) {
+pub(super) fn p521Sub(
+    out1: &mut p521MontgomeryDomainFieldElement,
+    arg1: &p521MontgomeryDomainFieldElement,
+    arg2: &p521MontgomeryDomainFieldElement,
+) {
     let (x1, x2) = bits::Sub64(arg1[0], arg2[0], uint64(0x0));
     let (x3, x4) = bits::Sub64(arg1[1], arg2[1], uint64(uint64(x2)));
     let (x5, x6) = bits::Sub64(arg1[2], arg2[2], uint64(uint64(x4)));
@@ -1210,7 +1225,7 @@ pub(super) fn p521Sub(out1: &mut p521MontgomeryDomainFieldElement, arg1: &p521Mo
     let (x30, x31) = bits::Add64(x11, x19, uint64(uint64(x29)));
     let (x32, x33) = bits::Add64(x13, x19, uint64(uint64(x31)));
     let (x34, x35) = bits::Add64(x15, x19, uint64(uint64(x33)));
-    let (x36, _) = bits::Add64(x17, ((x19 & 0x1ff)), uint64(uint64(x35)));
+    let (x36, _) = bits::Add64(x17, (x19 & 0x1ff), uint64(uint64(x35)));
     out1[0] = x20;
     out1[1] = x22;
     out1[2] = x24;
@@ -1236,7 +1251,10 @@ pub(super) fn p521SetOne(out1: &mut p521MontgomeryDomainFieldElement) {
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p521_fiat64.go:3327-4271 p521FromMontgomery
-pub(super) fn p521FromMontgomery(out1: &mut p521NonMontgomeryDomainFieldElement, arg1: &p521MontgomeryDomainFieldElement) {
+pub(super) fn p521FromMontgomery(
+    out1: &mut p521NonMontgomeryDomainFieldElement,
+    arg1: &p521MontgomeryDomainFieldElement,
+) {
     let x1 = arg1[0];
     let (x3, x2) = bits::Mul64(x1, 0x1ff);
     let (x5, x4) = bits::Mul64(x1, 0xffffffffffffffff);
@@ -1297,7 +1315,13 @@ pub(super) fn p521FromMontgomery(out1: &mut p521NonMontgomeryDomainFieldElement,
     let (x114, x115) = bits::Add64(x64, x96, uint64(uint64(x113)));
     let (x116, x117) = bits::Add64(x66, x98, uint64(uint64(x115)));
     let (x118, x119) = bits::Add64(x68, x100, uint64(uint64(x117)));
-    let (x120, x121) = bits::Add64(((uint64(uint64(x69))).wrapping_add(((uint64(uint64(x53))).wrapping_add(((uint64(uint64(x35))).wrapping_add(x3)))))), x102, uint64(uint64(x119)));
+    let (x120, x121) = bits::Add64(
+        ((uint64(uint64(x69))).wrapping_add(
+            ((uint64(uint64(x53))).wrapping_add(((uint64(uint64(x35))).wrapping_add(x3)))),
+        )),
+        x102,
+        uint64(uint64(x119)),
+    );
     let (x122, x123) = bits::Add64(x106, arg1[2], uint64(0x0));
     let (x124, x125) = bits::Add64(x108, uint64(0x0), uint64(uint64(x123)));
     let (x126, x127) = bits::Add64(x110, uint64(0x0), uint64(uint64(x125)));
@@ -1331,7 +1355,13 @@ pub(super) fn p521FromMontgomery(out1: &mut p521NonMontgomeryDomainFieldElement,
     let (x182, x183) = bits::Add64(x132, x164, uint64(uint64(x181)));
     let (x184, x185) = bits::Add64(x134, x166, uint64(uint64(x183)));
     let (x186, x187) = bits::Add64(x136, x168, uint64(uint64(x185)));
-    let (x188, x189) = bits::Add64(((uint64(uint64(x137))).wrapping_add(((uint64(uint64(x121))).wrapping_add(((uint64(uint64(x103))).wrapping_add(x71)))))), x170, uint64(uint64(x187)));
+    let (x188, x189) = bits::Add64(
+        ((uint64(uint64(x137))).wrapping_add(
+            ((uint64(uint64(x121))).wrapping_add(((uint64(uint64(x103))).wrapping_add(x71)))),
+        )),
+        x170,
+        uint64(uint64(x187)),
+    );
     let (x190, x191) = bits::Add64(x174, arg1[3], uint64(0x0));
     let (x192, x193) = bits::Add64(x176, uint64(0x0), uint64(uint64(x191)));
     let (x194, x195) = bits::Add64(x178, uint64(0x0), uint64(uint64(x193)));
@@ -1365,7 +1395,13 @@ pub(super) fn p521FromMontgomery(out1: &mut p521NonMontgomeryDomainFieldElement,
     let (x250, x251) = bits::Add64(x200, x232, uint64(uint64(x249)));
     let (x252, x253) = bits::Add64(x202, x234, uint64(uint64(x251)));
     let (x254, x255) = bits::Add64(x204, x236, uint64(uint64(x253)));
-    let (x256, x257) = bits::Add64(((uint64(uint64(x205))).wrapping_add(((uint64(uint64(x189))).wrapping_add(((uint64(uint64(x171))).wrapping_add(x139)))))), x238, uint64(uint64(x255)));
+    let (x256, x257) = bits::Add64(
+        ((uint64(uint64(x205))).wrapping_add(
+            ((uint64(uint64(x189))).wrapping_add(((uint64(uint64(x171))).wrapping_add(x139)))),
+        )),
+        x238,
+        uint64(uint64(x255)),
+    );
     let (x258, x259) = bits::Add64(x242, arg1[4], uint64(0x0));
     let (x260, x261) = bits::Add64(x244, uint64(0x0), uint64(uint64(x259)));
     let (x262, x263) = bits::Add64(x246, uint64(0x0), uint64(uint64(x261)));
@@ -1399,7 +1435,13 @@ pub(super) fn p521FromMontgomery(out1: &mut p521NonMontgomeryDomainFieldElement,
     let (x318, x319) = bits::Add64(x268, x300, uint64(uint64(x317)));
     let (x320, x321) = bits::Add64(x270, x302, uint64(uint64(x319)));
     let (x322, x323) = bits::Add64(x272, x304, uint64(uint64(x321)));
-    let (x324, x325) = bits::Add64(((uint64(uint64(x273))).wrapping_add(((uint64(uint64(x257))).wrapping_add(((uint64(uint64(x239))).wrapping_add(x207)))))), x306, uint64(uint64(x323)));
+    let (x324, x325) = bits::Add64(
+        ((uint64(uint64(x273))).wrapping_add(
+            ((uint64(uint64(x257))).wrapping_add(((uint64(uint64(x239))).wrapping_add(x207)))),
+        )),
+        x306,
+        uint64(uint64(x323)),
+    );
     let (x326, x327) = bits::Add64(x310, arg1[5], uint64(0x0));
     let (x328, x329) = bits::Add64(x312, uint64(0x0), uint64(uint64(x327)));
     let (x330, x331) = bits::Add64(x314, uint64(0x0), uint64(uint64(x329)));
@@ -1433,7 +1475,13 @@ pub(super) fn p521FromMontgomery(out1: &mut p521NonMontgomeryDomainFieldElement,
     let (x386, x387) = bits::Add64(x336, x368, uint64(uint64(x385)));
     let (x388, x389) = bits::Add64(x338, x370, uint64(uint64(x387)));
     let (x390, x391) = bits::Add64(x340, x372, uint64(uint64(x389)));
-    let (x392, x393) = bits::Add64(((uint64(uint64(x341))).wrapping_add(((uint64(uint64(x325))).wrapping_add(((uint64(uint64(x307))).wrapping_add(x275)))))), x374, uint64(uint64(x391)));
+    let (x392, x393) = bits::Add64(
+        ((uint64(uint64(x341))).wrapping_add(
+            ((uint64(uint64(x325))).wrapping_add(((uint64(uint64(x307))).wrapping_add(x275)))),
+        )),
+        x374,
+        uint64(uint64(x391)),
+    );
     let (x394, x395) = bits::Add64(x378, arg1[6], uint64(0x0));
     let (x396, x397) = bits::Add64(x380, uint64(0x0), uint64(uint64(x395)));
     let (x398, x399) = bits::Add64(x382, uint64(0x0), uint64(uint64(x397)));
@@ -1467,7 +1515,13 @@ pub(super) fn p521FromMontgomery(out1: &mut p521NonMontgomeryDomainFieldElement,
     let (x454, x455) = bits::Add64(x404, x436, uint64(uint64(x453)));
     let (x456, x457) = bits::Add64(x406, x438, uint64(uint64(x455)));
     let (x458, x459) = bits::Add64(x408, x440, uint64(uint64(x457)));
-    let (x460, x461) = bits::Add64(((uint64(uint64(x409))).wrapping_add(((uint64(uint64(x393))).wrapping_add(((uint64(uint64(x375))).wrapping_add(x343)))))), x442, uint64(uint64(x459)));
+    let (x460, x461) = bits::Add64(
+        ((uint64(uint64(x409))).wrapping_add(
+            ((uint64(uint64(x393))).wrapping_add(((uint64(uint64(x375))).wrapping_add(x343)))),
+        )),
+        x442,
+        uint64(uint64(x459)),
+    );
     let (x462, x463) = bits::Add64(x446, arg1[7], uint64(0x0));
     let (x464, x465) = bits::Add64(x448, uint64(0x0), uint64(uint64(x463)));
     let (x466, x467) = bits::Add64(x450, uint64(0x0), uint64(uint64(x465)));
@@ -1501,7 +1555,13 @@ pub(super) fn p521FromMontgomery(out1: &mut p521NonMontgomeryDomainFieldElement,
     let (x522, x523) = bits::Add64(x472, x504, uint64(uint64(x521)));
     let (x524, x525) = bits::Add64(x474, x506, uint64(uint64(x523)));
     let (x526, x527) = bits::Add64(x476, x508, uint64(uint64(x525)));
-    let (x528, x529) = bits::Add64(((uint64(uint64(x477))).wrapping_add(((uint64(uint64(x461))).wrapping_add(((uint64(uint64(x443))).wrapping_add(x411)))))), x510, uint64(uint64(x527)));
+    let (x528, x529) = bits::Add64(
+        ((uint64(uint64(x477))).wrapping_add(
+            ((uint64(uint64(x461))).wrapping_add(((uint64(uint64(x443))).wrapping_add(x411)))),
+        )),
+        x510,
+        uint64(uint64(x527)),
+    );
     let (x530, x531) = bits::Add64(x514, arg1[8], uint64(0x0));
     let (x532, x533) = bits::Add64(x516, uint64(0x0), uint64(uint64(x531)));
     let (x534, x535) = bits::Add64(x518, uint64(0x0), uint64(uint64(x533)));
@@ -1535,7 +1595,13 @@ pub(super) fn p521FromMontgomery(out1: &mut p521NonMontgomeryDomainFieldElement,
     let (x590, x591) = bits::Add64(x540, x572, uint64(uint64(x589)));
     let (x592, x593) = bits::Add64(x542, x574, uint64(uint64(x591)));
     let (x594, x595) = bits::Add64(x544, x576, uint64(uint64(x593)));
-    let (x596, x597) = bits::Add64(((uint64(uint64(x545))).wrapping_add(((uint64(uint64(x529))).wrapping_add(((uint64(uint64(x511))).wrapping_add(x479)))))), x578, uint64(uint64(x595)));
+    let (x596, x597) = bits::Add64(
+        ((uint64(uint64(x545))).wrapping_add(
+            ((uint64(uint64(x529))).wrapping_add(((uint64(uint64(x511))).wrapping_add(x479)))),
+        )),
+        x578,
+        uint64(uint64(x595)),
+    );
     let x598 = ((uint64(uint64(x597))).wrapping_add(((uint64(uint64(x579))).wrapping_add(x547))));
     let (x599, x600) = bits::Sub64(x582, 0xffffffffffffffff, uint64(0x0));
     let (x601, x602) = bits::Sub64(x584, 0xffffffffffffffff, uint64(uint64(x600)));
@@ -1568,7 +1634,10 @@ pub(super) fn p521FromMontgomery(out1: &mut p521NonMontgomeryDomainFieldElement,
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p521_fiat64.go:4283-5134 p521ToMontgomery
-pub(super) fn p521ToMontgomery(out1: &mut p521MontgomeryDomainFieldElement, arg1: &p521NonMontgomeryDomainFieldElement) {
+pub(super) fn p521ToMontgomery(
+    out1: &mut p521MontgomeryDomainFieldElement,
+    arg1: &p521NonMontgomeryDomainFieldElement,
+) {
     let (x2, x1) = bits::Mul64(arg1[0], 0x400000000000);
     let (x4, x3) = bits::Mul64(arg1[1], 0x400000000000);
     let (x5, x6) = bits::Add64(x2, x3, uint64(0x0));
@@ -1591,7 +1660,11 @@ pub(super) fn p521ToMontgomery(out1: &mut p521MontgomeryDomainFieldElement, arg1
     let (x39, x40) = bits::Add64(x10, x7, uint64(uint64(x38)));
     let (_, x42) = bits::Add64(x1, x23, uint64(0x0));
     let (x43, x44) = bits::Add64(x5, x25, uint64(uint64(x42)));
-    let (x45, x46) = bits::Add64(((uint64(uint64(x6))).wrapping_add(x4)), x27, uint64(uint64(x44)));
+    let (x45, x46) = bits::Add64(
+        ((uint64(uint64(x6))).wrapping_add(x4)),
+        x27,
+        uint64(uint64(x44)),
+    );
     let (x47, x48) = bits::Add64(uint64(0x0), x29, uint64(uint64(x46)));
     let (x49, x50) = bits::Add64(uint64(0x0), x31, uint64(uint64(x48)));
     let (x51, x52) = bits::Add64(uint64(0x0), x33, uint64(uint64(x50)));
@@ -1631,7 +1704,13 @@ pub(super) fn p521ToMontgomery(out1: &mut p521MontgomeryDomainFieldElement, arg1
     let (x119, x120) = bits::Add64(x69, x101, uint64(uint64(x118)));
     let (x121, x122) = bits::Add64(x71, x103, uint64(uint64(x120)));
     let (x123, x124) = bits::Add64(x73, x105, uint64(uint64(x122)));
-    let (x125, x126) = bits::Add64(((uint64(uint64(x74))).wrapping_add(((uint64(uint64(x58))).wrapping_add(((uint64(uint64(x40))).wrapping_add(x8)))))), x107, uint64(uint64(x124)));
+    let (x125, x126) = bits::Add64(
+        ((uint64(uint64(x74))).wrapping_add(
+            ((uint64(uint64(x58))).wrapping_add(((uint64(uint64(x40))).wrapping_add(x8)))),
+        )),
+        x107,
+        uint64(uint64(x124)),
+    );
     let (x128, x127) = bits::Mul64(arg1[3], 0x400000000000);
     let (x129, x130) = bits::Add64(x113, x127, uint64(0x0));
     let (x131, x132) = bits::Add64(x115, x128, uint64(uint64(x130)));
@@ -1665,7 +1744,13 @@ pub(super) fn p521ToMontgomery(out1: &mut p521MontgomeryDomainFieldElement, arg1
     let (x187, x188) = bits::Add64(x137, x169, uint64(uint64(x186)));
     let (x189, x190) = bits::Add64(x139, x171, uint64(uint64(x188)));
     let (x191, x192) = bits::Add64(x141, x173, uint64(uint64(x190)));
-    let (x193, x194) = bits::Add64(((uint64(uint64(x142))).wrapping_add(((uint64(uint64(x126))).wrapping_add(((uint64(uint64(x108))).wrapping_add(x76)))))), x175, uint64(uint64(x192)));
+    let (x193, x194) = bits::Add64(
+        ((uint64(uint64(x142))).wrapping_add(
+            ((uint64(uint64(x126))).wrapping_add(((uint64(uint64(x108))).wrapping_add(x76)))),
+        )),
+        x175,
+        uint64(uint64(x192)),
+    );
     let (x196, x195) = bits::Mul64(arg1[4], 0x400000000000);
     let (x197, x198) = bits::Add64(x181, x195, uint64(0x0));
     let (x199, x200) = bits::Add64(x183, x196, uint64(uint64(x198)));
@@ -1699,7 +1784,13 @@ pub(super) fn p521ToMontgomery(out1: &mut p521MontgomeryDomainFieldElement, arg1
     let (x255, x256) = bits::Add64(x205, x237, uint64(uint64(x254)));
     let (x257, x258) = bits::Add64(x207, x239, uint64(uint64(x256)));
     let (x259, x260) = bits::Add64(x209, x241, uint64(uint64(x258)));
-    let (x261, x262) = bits::Add64(((uint64(uint64(x210))).wrapping_add(((uint64(uint64(x194))).wrapping_add(((uint64(uint64(x176))).wrapping_add(x144)))))), x243, uint64(uint64(x260)));
+    let (x261, x262) = bits::Add64(
+        ((uint64(uint64(x210))).wrapping_add(
+            ((uint64(uint64(x194))).wrapping_add(((uint64(uint64(x176))).wrapping_add(x144)))),
+        )),
+        x243,
+        uint64(uint64(x260)),
+    );
     let (x264, x263) = bits::Mul64(arg1[5], 0x400000000000);
     let (x265, x266) = bits::Add64(x249, x263, uint64(0x0));
     let (x267, x268) = bits::Add64(x251, x264, uint64(uint64(x266)));
@@ -1733,7 +1824,13 @@ pub(super) fn p521ToMontgomery(out1: &mut p521MontgomeryDomainFieldElement, arg1
     let (x323, x324) = bits::Add64(x273, x305, uint64(uint64(x322)));
     let (x325, x326) = bits::Add64(x275, x307, uint64(uint64(x324)));
     let (x327, x328) = bits::Add64(x277, x309, uint64(uint64(x326)));
-    let (x329, x330) = bits::Add64(((uint64(uint64(x278))).wrapping_add(((uint64(uint64(x262))).wrapping_add(((uint64(uint64(x244))).wrapping_add(x212)))))), x311, uint64(uint64(x328)));
+    let (x329, x330) = bits::Add64(
+        ((uint64(uint64(x278))).wrapping_add(
+            ((uint64(uint64(x262))).wrapping_add(((uint64(uint64(x244))).wrapping_add(x212)))),
+        )),
+        x311,
+        uint64(uint64(x328)),
+    );
     let (x332, x331) = bits::Mul64(arg1[6], 0x400000000000);
     let (x333, x334) = bits::Add64(x317, x331, uint64(0x0));
     let (x335, x336) = bits::Add64(x319, x332, uint64(uint64(x334)));
@@ -1767,7 +1864,13 @@ pub(super) fn p521ToMontgomery(out1: &mut p521MontgomeryDomainFieldElement, arg1
     let (x391, x392) = bits::Add64(x341, x373, uint64(uint64(x390)));
     let (x393, x394) = bits::Add64(x343, x375, uint64(uint64(x392)));
     let (x395, x396) = bits::Add64(x345, x377, uint64(uint64(x394)));
-    let (x397, x398) = bits::Add64(((uint64(uint64(x346))).wrapping_add(((uint64(uint64(x330))).wrapping_add(((uint64(uint64(x312))).wrapping_add(x280)))))), x379, uint64(uint64(x396)));
+    let (x397, x398) = bits::Add64(
+        ((uint64(uint64(x346))).wrapping_add(
+            ((uint64(uint64(x330))).wrapping_add(((uint64(uint64(x312))).wrapping_add(x280)))),
+        )),
+        x379,
+        uint64(uint64(x396)),
+    );
     let (x400, x399) = bits::Mul64(arg1[7], 0x400000000000);
     let (x401, x402) = bits::Add64(x385, x399, uint64(0x0));
     let (x403, x404) = bits::Add64(x387, x400, uint64(uint64(x402)));
@@ -1801,7 +1904,13 @@ pub(super) fn p521ToMontgomery(out1: &mut p521MontgomeryDomainFieldElement, arg1
     let (x459, x460) = bits::Add64(x409, x441, uint64(uint64(x458)));
     let (x461, x462) = bits::Add64(x411, x443, uint64(uint64(x460)));
     let (x463, x464) = bits::Add64(x413, x445, uint64(uint64(x462)));
-    let (x465, x466) = bits::Add64(((uint64(uint64(x414))).wrapping_add(((uint64(uint64(x398))).wrapping_add(((uint64(uint64(x380))).wrapping_add(x348)))))), x447, uint64(uint64(x464)));
+    let (x465, x466) = bits::Add64(
+        ((uint64(uint64(x414))).wrapping_add(
+            ((uint64(uint64(x398))).wrapping_add(((uint64(uint64(x380))).wrapping_add(x348)))),
+        )),
+        x447,
+        uint64(uint64(x464)),
+    );
     let (x468, x467) = bits::Mul64(arg1[8], 0x400000000000);
     let (x469, x470) = bits::Add64(x453, x467, uint64(0x0));
     let (x471, x472) = bits::Add64(x455, x468, uint64(uint64(x470)));
@@ -1835,7 +1944,13 @@ pub(super) fn p521ToMontgomery(out1: &mut p521MontgomeryDomainFieldElement, arg1
     let (x527, x528) = bits::Add64(x477, x509, uint64(uint64(x526)));
     let (x529, x530) = bits::Add64(x479, x511, uint64(uint64(x528)));
     let (x531, x532) = bits::Add64(x481, x513, uint64(uint64(x530)));
-    let (x533, x534) = bits::Add64(((uint64(uint64(x482))).wrapping_add(((uint64(uint64(x466))).wrapping_add(((uint64(uint64(x448))).wrapping_add(x416)))))), x515, uint64(uint64(x532)));
+    let (x533, x534) = bits::Add64(
+        ((uint64(uint64(x482))).wrapping_add(
+            ((uint64(uint64(x466))).wrapping_add(((uint64(uint64(x448))).wrapping_add(x416)))),
+        )),
+        x515,
+        uint64(uint64(x532)),
+    );
     let x535 = ((uint64(uint64(x534))).wrapping_add(((uint64(uint64(x516))).wrapping_add(x484))));
     let (x536, x537) = bits::Sub64(x519, 0xffffffffffffffff, uint64(0x0));
     let (x538, x539) = bits::Sub64(x521, 0xffffffffffffffff, uint64(uint64(x537)));
@@ -1868,7 +1983,12 @@ pub(super) fn p521ToMontgomery(out1: &mut p521MontgomeryDomainFieldElement, arg1
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p521_fiat64.go:5151-5179 p521Selectznz
-pub(super) fn p521Selectznz(out1: &mut [u64; 9], arg1: p521Uint1, arg2: &[u64; 9], arg3: &[u64; 9]) {
+pub(super) fn p521Selectznz(
+    out1: &mut [u64; 9],
+    arg1: p521Uint1,
+    arg2: &[u64; 9],
+    arg3: &[u64; 9],
+) {
     let x1 = p521CmovznzU64(arg1, arg2[0], arg3[0]);
     let x2 = p521CmovznzU64(arg1, arg2[1], arg3[1]);
     let x3 = p521CmovznzU64(arg1, arg2[2], arg3[2]);
@@ -1900,120 +2020,120 @@ pub(super) fn p521ToBytes(out1: &mut [u8; 66], arg1: &[u64; 9]) {
     let x7 = arg1[2];
     let x8 = arg1[1];
     let x9 = arg1[0];
-    let x10 = ((uint8(x9) & 0xff));
-    let x11 = ((x9 >> 8));
-    let x12 = ((uint8(x11) & 0xff));
-    let x13 = ((x11 >> 8));
-    let x14 = ((uint8(x13) & 0xff));
-    let x15 = ((x13 >> 8));
-    let x16 = ((uint8(x15) & 0xff));
-    let x17 = ((x15 >> 8));
-    let x18 = ((uint8(x17) & 0xff));
-    let x19 = ((x17 >> 8));
-    let x20 = ((uint8(x19) & 0xff));
-    let x21 = ((x19 >> 8));
-    let x22 = ((uint8(x21) & 0xff));
-    let x23 = uint8(((x21 >> 8)));
-    let x24 = ((uint8(x8) & 0xff));
-    let x25 = ((x8 >> 8));
-    let x26 = ((uint8(x25) & 0xff));
-    let x27 = ((x25 >> 8));
-    let x28 = ((uint8(x27) & 0xff));
-    let x29 = ((x27 >> 8));
-    let x30 = ((uint8(x29) & 0xff));
-    let x31 = ((x29 >> 8));
-    let x32 = ((uint8(x31) & 0xff));
-    let x33 = ((x31 >> 8));
-    let x34 = ((uint8(x33) & 0xff));
-    let x35 = ((x33 >> 8));
-    let x36 = ((uint8(x35) & 0xff));
-    let x37 = uint8(((x35 >> 8)));
-    let x38 = ((uint8(x7) & 0xff));
-    let x39 = ((x7 >> 8));
-    let x40 = ((uint8(x39) & 0xff));
-    let x41 = ((x39 >> 8));
-    let x42 = ((uint8(x41) & 0xff));
-    let x43 = ((x41 >> 8));
-    let x44 = ((uint8(x43) & 0xff));
-    let x45 = ((x43 >> 8));
-    let x46 = ((uint8(x45) & 0xff));
-    let x47 = ((x45 >> 8));
-    let x48 = ((uint8(x47) & 0xff));
-    let x49 = ((x47 >> 8));
-    let x50 = ((uint8(x49) & 0xff));
-    let x51 = uint8(((x49 >> 8)));
-    let x52 = ((uint8(x6) & 0xff));
-    let x53 = ((x6 >> 8));
-    let x54 = ((uint8(x53) & 0xff));
-    let x55 = ((x53 >> 8));
-    let x56 = ((uint8(x55) & 0xff));
-    let x57 = ((x55 >> 8));
-    let x58 = ((uint8(x57) & 0xff));
-    let x59 = ((x57 >> 8));
-    let x60 = ((uint8(x59) & 0xff));
-    let x61 = ((x59 >> 8));
-    let x62 = ((uint8(x61) & 0xff));
-    let x63 = ((x61 >> 8));
-    let x64 = ((uint8(x63) & 0xff));
-    let x65 = uint8(((x63 >> 8)));
-    let x66 = ((uint8(x5) & 0xff));
-    let x67 = ((x5 >> 8));
-    let x68 = ((uint8(x67) & 0xff));
-    let x69 = ((x67 >> 8));
-    let x70 = ((uint8(x69) & 0xff));
-    let x71 = ((x69 >> 8));
-    let x72 = ((uint8(x71) & 0xff));
-    let x73 = ((x71 >> 8));
-    let x74 = ((uint8(x73) & 0xff));
-    let x75 = ((x73 >> 8));
-    let x76 = ((uint8(x75) & 0xff));
-    let x77 = ((x75 >> 8));
-    let x78 = ((uint8(x77) & 0xff));
-    let x79 = uint8(((x77 >> 8)));
-    let x80 = ((uint8(x4) & 0xff));
-    let x81 = ((x4 >> 8));
-    let x82 = ((uint8(x81) & 0xff));
-    let x83 = ((x81 >> 8));
-    let x84 = ((uint8(x83) & 0xff));
-    let x85 = ((x83 >> 8));
-    let x86 = ((uint8(x85) & 0xff));
-    let x87 = ((x85 >> 8));
-    let x88 = ((uint8(x87) & 0xff));
-    let x89 = ((x87 >> 8));
-    let x90 = ((uint8(x89) & 0xff));
-    let x91 = ((x89 >> 8));
-    let x92 = ((uint8(x91) & 0xff));
-    let x93 = uint8(((x91 >> 8)));
-    let x94 = ((uint8(x3) & 0xff));
-    let x95 = ((x3 >> 8));
-    let x96 = ((uint8(x95) & 0xff));
-    let x97 = ((x95 >> 8));
-    let x98 = ((uint8(x97) & 0xff));
-    let x99 = ((x97 >> 8));
-    let x100 = ((uint8(x99) & 0xff));
-    let x101 = ((x99 >> 8));
-    let x102 = ((uint8(x101) & 0xff));
-    let x103 = ((x101 >> 8));
-    let x104 = ((uint8(x103) & 0xff));
-    let x105 = ((x103 >> 8));
-    let x106 = ((uint8(x105) & 0xff));
-    let x107 = uint8(((x105 >> 8)));
-    let x108 = ((uint8(x2) & 0xff));
-    let x109 = ((x2 >> 8));
-    let x110 = ((uint8(x109) & 0xff));
-    let x111 = ((x109 >> 8));
-    let x112 = ((uint8(x111) & 0xff));
-    let x113 = ((x111 >> 8));
-    let x114 = ((uint8(x113) & 0xff));
-    let x115 = ((x113 >> 8));
-    let x116 = ((uint8(x115) & 0xff));
-    let x117 = ((x115 >> 8));
-    let x118 = ((uint8(x117) & 0xff));
-    let x119 = ((x117 >> 8));
-    let x120 = ((uint8(x119) & 0xff));
-    let x121 = uint8(((x119 >> 8)));
-    let x122 = ((uint8(x1) & 0xff));
-    let x123 = uint64(((x1 >> 8)));
+    let x10 = (uint8(x9) & 0xff);
+    let x11 = (x9 >> 8);
+    let x12 = (uint8(x11) & 0xff);
+    let x13 = (x11 >> 8);
+    let x14 = (uint8(x13) & 0xff);
+    let x15 = (x13 >> 8);
+    let x16 = (uint8(x15) & 0xff);
+    let x17 = (x15 >> 8);
+    let x18 = (uint8(x17) & 0xff);
+    let x19 = (x17 >> 8);
+    let x20 = (uint8(x19) & 0xff);
+    let x21 = (x19 >> 8);
+    let x22 = (uint8(x21) & 0xff);
+    let x23 = uint8((x21 >> 8));
+    let x24 = (uint8(x8) & 0xff);
+    let x25 = (x8 >> 8);
+    let x26 = (uint8(x25) & 0xff);
+    let x27 = (x25 >> 8);
+    let x28 = (uint8(x27) & 0xff);
+    let x29 = (x27 >> 8);
+    let x30 = (uint8(x29) & 0xff);
+    let x31 = (x29 >> 8);
+    let x32 = (uint8(x31) & 0xff);
+    let x33 = (x31 >> 8);
+    let x34 = (uint8(x33) & 0xff);
+    let x35 = (x33 >> 8);
+    let x36 = (uint8(x35) & 0xff);
+    let x37 = uint8((x35 >> 8));
+    let x38 = (uint8(x7) & 0xff);
+    let x39 = (x7 >> 8);
+    let x40 = (uint8(x39) & 0xff);
+    let x41 = (x39 >> 8);
+    let x42 = (uint8(x41) & 0xff);
+    let x43 = (x41 >> 8);
+    let x44 = (uint8(x43) & 0xff);
+    let x45 = (x43 >> 8);
+    let x46 = (uint8(x45) & 0xff);
+    let x47 = (x45 >> 8);
+    let x48 = (uint8(x47) & 0xff);
+    let x49 = (x47 >> 8);
+    let x50 = (uint8(x49) & 0xff);
+    let x51 = uint8((x49 >> 8));
+    let x52 = (uint8(x6) & 0xff);
+    let x53 = (x6 >> 8);
+    let x54 = (uint8(x53) & 0xff);
+    let x55 = (x53 >> 8);
+    let x56 = (uint8(x55) & 0xff);
+    let x57 = (x55 >> 8);
+    let x58 = (uint8(x57) & 0xff);
+    let x59 = (x57 >> 8);
+    let x60 = (uint8(x59) & 0xff);
+    let x61 = (x59 >> 8);
+    let x62 = (uint8(x61) & 0xff);
+    let x63 = (x61 >> 8);
+    let x64 = (uint8(x63) & 0xff);
+    let x65 = uint8((x63 >> 8));
+    let x66 = (uint8(x5) & 0xff);
+    let x67 = (x5 >> 8);
+    let x68 = (uint8(x67) & 0xff);
+    let x69 = (x67 >> 8);
+    let x70 = (uint8(x69) & 0xff);
+    let x71 = (x69 >> 8);
+    let x72 = (uint8(x71) & 0xff);
+    let x73 = (x71 >> 8);
+    let x74 = (uint8(x73) & 0xff);
+    let x75 = (x73 >> 8);
+    let x76 = (uint8(x75) & 0xff);
+    let x77 = (x75 >> 8);
+    let x78 = (uint8(x77) & 0xff);
+    let x79 = uint8((x77 >> 8));
+    let x80 = (uint8(x4) & 0xff);
+    let x81 = (x4 >> 8);
+    let x82 = (uint8(x81) & 0xff);
+    let x83 = (x81 >> 8);
+    let x84 = (uint8(x83) & 0xff);
+    let x85 = (x83 >> 8);
+    let x86 = (uint8(x85) & 0xff);
+    let x87 = (x85 >> 8);
+    let x88 = (uint8(x87) & 0xff);
+    let x89 = (x87 >> 8);
+    let x90 = (uint8(x89) & 0xff);
+    let x91 = (x89 >> 8);
+    let x92 = (uint8(x91) & 0xff);
+    let x93 = uint8((x91 >> 8));
+    let x94 = (uint8(x3) & 0xff);
+    let x95 = (x3 >> 8);
+    let x96 = (uint8(x95) & 0xff);
+    let x97 = (x95 >> 8);
+    let x98 = (uint8(x97) & 0xff);
+    let x99 = (x97 >> 8);
+    let x100 = (uint8(x99) & 0xff);
+    let x101 = (x99 >> 8);
+    let x102 = (uint8(x101) & 0xff);
+    let x103 = (x101 >> 8);
+    let x104 = (uint8(x103) & 0xff);
+    let x105 = (x103 >> 8);
+    let x106 = (uint8(x105) & 0xff);
+    let x107 = uint8((x105 >> 8));
+    let x108 = (uint8(x2) & 0xff);
+    let x109 = (x2 >> 8);
+    let x110 = (uint8(x109) & 0xff);
+    let x111 = (x109 >> 8);
+    let x112 = (uint8(x111) & 0xff);
+    let x113 = (x111 >> 8);
+    let x114 = (uint8(x113) & 0xff);
+    let x115 = (x113 >> 8);
+    let x116 = (uint8(x115) & 0xff);
+    let x117 = (x115 >> 8);
+    let x118 = (uint8(x117) & 0xff);
+    let x119 = (x117 >> 8);
+    let x120 = (uint8(x119) & 0xff);
+    let x121 = uint8((x119 >> 8));
+    let x122 = (uint8(x1) & 0xff);
+    let x123 = uint64((x1 >> 8));
     out1[0] = x10;
     out1[1] = x12;
     out1[2] = x14;
@@ -2084,71 +2204,71 @@ pub(super) fn p521ToBytes(out1: &mut [u8; 66], arg1: &[u64; 9]) {
 
 // go: sdk 1.25.5 crypto/internal/fips140/nistec/fiat/p521_fiat64.go:5408-5541 p521FromBytes
 pub(super) fn p521FromBytes(out1: &mut [u64; 9], arg1: &[u8; 66]) {
-    let x1 = ((uint64(uint64(arg1[65])) << 8));
+    let x1 = (uint64(uint64(arg1[65])) << 8);
     let x2 = arg1[64];
-    let x3 = ((uint64(arg1[63]) << 56));
-    let x4 = ((uint64(arg1[62]) << 48));
-    let x5 = ((uint64(arg1[61]) << 40));
-    let x6 = ((uint64(arg1[60]) << 32));
-    let x7 = ((uint64(arg1[59]) << 24));
-    let x8 = ((uint64(arg1[58]) << 16));
-    let x9 = ((uint64(arg1[57]) << 8));
+    let x3 = (uint64(arg1[63]) << 56);
+    let x4 = (uint64(arg1[62]) << 48);
+    let x5 = (uint64(arg1[61]) << 40);
+    let x6 = (uint64(arg1[60]) << 32);
+    let x7 = (uint64(arg1[59]) << 24);
+    let x8 = (uint64(arg1[58]) << 16);
+    let x9 = (uint64(arg1[57]) << 8);
     let x10 = arg1[56];
-    let x11 = ((uint64(arg1[55]) << 56));
-    let x12 = ((uint64(arg1[54]) << 48));
-    let x13 = ((uint64(arg1[53]) << 40));
-    let x14 = ((uint64(arg1[52]) << 32));
-    let x15 = ((uint64(arg1[51]) << 24));
-    let x16 = ((uint64(arg1[50]) << 16));
-    let x17 = ((uint64(arg1[49]) << 8));
+    let x11 = (uint64(arg1[55]) << 56);
+    let x12 = (uint64(arg1[54]) << 48);
+    let x13 = (uint64(arg1[53]) << 40);
+    let x14 = (uint64(arg1[52]) << 32);
+    let x15 = (uint64(arg1[51]) << 24);
+    let x16 = (uint64(arg1[50]) << 16);
+    let x17 = (uint64(arg1[49]) << 8);
     let x18 = arg1[48];
-    let x19 = ((uint64(arg1[47]) << 56));
-    let x20 = ((uint64(arg1[46]) << 48));
-    let x21 = ((uint64(arg1[45]) << 40));
-    let x22 = ((uint64(arg1[44]) << 32));
-    let x23 = ((uint64(arg1[43]) << 24));
-    let x24 = ((uint64(arg1[42]) << 16));
-    let x25 = ((uint64(arg1[41]) << 8));
+    let x19 = (uint64(arg1[47]) << 56);
+    let x20 = (uint64(arg1[46]) << 48);
+    let x21 = (uint64(arg1[45]) << 40);
+    let x22 = (uint64(arg1[44]) << 32);
+    let x23 = (uint64(arg1[43]) << 24);
+    let x24 = (uint64(arg1[42]) << 16);
+    let x25 = (uint64(arg1[41]) << 8);
     let x26 = arg1[40];
-    let x27 = ((uint64(arg1[39]) << 56));
-    let x28 = ((uint64(arg1[38]) << 48));
-    let x29 = ((uint64(arg1[37]) << 40));
-    let x30 = ((uint64(arg1[36]) << 32));
-    let x31 = ((uint64(arg1[35]) << 24));
-    let x32 = ((uint64(arg1[34]) << 16));
-    let x33 = ((uint64(arg1[33]) << 8));
+    let x27 = (uint64(arg1[39]) << 56);
+    let x28 = (uint64(arg1[38]) << 48);
+    let x29 = (uint64(arg1[37]) << 40);
+    let x30 = (uint64(arg1[36]) << 32);
+    let x31 = (uint64(arg1[35]) << 24);
+    let x32 = (uint64(arg1[34]) << 16);
+    let x33 = (uint64(arg1[33]) << 8);
     let x34 = arg1[32];
-    let x35 = ((uint64(arg1[31]) << 56));
-    let x36 = ((uint64(arg1[30]) << 48));
-    let x37 = ((uint64(arg1[29]) << 40));
-    let x38 = ((uint64(arg1[28]) << 32));
-    let x39 = ((uint64(arg1[27]) << 24));
-    let x40 = ((uint64(arg1[26]) << 16));
-    let x41 = ((uint64(arg1[25]) << 8));
+    let x35 = (uint64(arg1[31]) << 56);
+    let x36 = (uint64(arg1[30]) << 48);
+    let x37 = (uint64(arg1[29]) << 40);
+    let x38 = (uint64(arg1[28]) << 32);
+    let x39 = (uint64(arg1[27]) << 24);
+    let x40 = (uint64(arg1[26]) << 16);
+    let x41 = (uint64(arg1[25]) << 8);
     let x42 = arg1[24];
-    let x43 = ((uint64(arg1[23]) << 56));
-    let x44 = ((uint64(arg1[22]) << 48));
-    let x45 = ((uint64(arg1[21]) << 40));
-    let x46 = ((uint64(arg1[20]) << 32));
-    let x47 = ((uint64(arg1[19]) << 24));
-    let x48 = ((uint64(arg1[18]) << 16));
-    let x49 = ((uint64(arg1[17]) << 8));
+    let x43 = (uint64(arg1[23]) << 56);
+    let x44 = (uint64(arg1[22]) << 48);
+    let x45 = (uint64(arg1[21]) << 40);
+    let x46 = (uint64(arg1[20]) << 32);
+    let x47 = (uint64(arg1[19]) << 24);
+    let x48 = (uint64(arg1[18]) << 16);
+    let x49 = (uint64(arg1[17]) << 8);
     let x50 = arg1[16];
-    let x51 = ((uint64(arg1[15]) << 56));
-    let x52 = ((uint64(arg1[14]) << 48));
-    let x53 = ((uint64(arg1[13]) << 40));
-    let x54 = ((uint64(arg1[12]) << 32));
-    let x55 = ((uint64(arg1[11]) << 24));
-    let x56 = ((uint64(arg1[10]) << 16));
-    let x57 = ((uint64(arg1[9]) << 8));
+    let x51 = (uint64(arg1[15]) << 56);
+    let x52 = (uint64(arg1[14]) << 48);
+    let x53 = (uint64(arg1[13]) << 40);
+    let x54 = (uint64(arg1[12]) << 32);
+    let x55 = (uint64(arg1[11]) << 24);
+    let x56 = (uint64(arg1[10]) << 16);
+    let x57 = (uint64(arg1[9]) << 8);
     let x58 = arg1[8];
-    let x59 = ((uint64(arg1[7]) << 56));
-    let x60 = ((uint64(arg1[6]) << 48));
-    let x61 = ((uint64(arg1[5]) << 40));
-    let x62 = ((uint64(arg1[4]) << 32));
-    let x63 = ((uint64(arg1[3]) << 24));
-    let x64 = ((uint64(arg1[2]) << 16));
-    let x65 = ((uint64(arg1[1]) << 8));
+    let x59 = (uint64(arg1[7]) << 56);
+    let x60 = (uint64(arg1[6]) << 48);
+    let x61 = (uint64(arg1[5]) << 40);
+    let x62 = (uint64(arg1[4]) << 32);
+    let x63 = (uint64(arg1[3]) << 24);
+    let x64 = (uint64(arg1[2]) << 16);
+    let x65 = (uint64(arg1[1]) << 8);
     let x66 = arg1[0];
     let x67 = ((x65).wrapping_add(uint64(x66)));
     let x68 = ((x64).wrapping_add(x67));
@@ -2217,4 +2337,3 @@ pub(super) fn p521FromBytes(out1: &mut [u64; 9], arg1: &[u8; 66]) {
     out1[7] = x122;
     out1[8] = x123;
 }
-

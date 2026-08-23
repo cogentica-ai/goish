@@ -174,28 +174,48 @@ pub struct Token {
 }
 
 /// `jsontext.Null` (token.go:95).
-pub const Null: Token = Token { repr: Repr::Raw("null") };
+pub const Null: Token = Token {
+    repr: Repr::Raw("null"),
+};
 /// `jsontext.False` (token.go:96).
-pub const False: Token = Token { repr: Repr::Raw("false") };
+pub const False: Token = Token {
+    repr: Repr::Raw("false"),
+};
 /// `jsontext.True` (token.go:97).
-pub const True: Token = Token { repr: Repr::Raw("true") };
+pub const True: Token = Token {
+    repr: Repr::Raw("true"),
+};
 /// `jsontext.BeginObject` (token.go:99).
-pub const BeginObject: Token = Token { repr: Repr::Raw("{") };
+pub const BeginObject: Token = Token {
+    repr: Repr::Raw("{"),
+};
 /// `jsontext.EndObject` (token.go:100).
-pub const EndObject: Token = Token { repr: Repr::Raw("}") };
+pub const EndObject: Token = Token {
+    repr: Repr::Raw("}"),
+};
 /// `jsontext.BeginArray` (token.go:101).
-pub const BeginArray: Token = Token { repr: Repr::Raw("[") };
+pub const BeginArray: Token = Token {
+    repr: Repr::Raw("["),
+};
 /// `jsontext.EndArray` (token.go:102).
-pub const EndArray: Token = Token { repr: Repr::Raw("]") };
+pub const EndArray: Token = Token {
+    repr: Repr::Raw("]"),
+};
 
 /// `jsontext.Bool(b)` (token.go:117).
 pub fn Bool(b: bool) -> Token {
-    if b { True } else { False }
+    if b {
+        True
+    } else {
+        False
+    }
 }
 
 /// `jsontext.String(s)` (token.go:127).
 pub fn String<S: Into<string>>(s: S) -> Token {
-    Token { repr: Repr::Str(s.into()) }
+    Token {
+        repr: Repr::Str(s.into()),
+    }
 }
 
 /// `jsontext.Float(f)` (token.go:175). The textual form comes from
@@ -203,7 +223,9 @@ pub fn String<S: Into<string>>(s: S) -> Token {
 /// numbers use the ES6 conversion (token.go:312 formats num tokens
 /// through `jsonwire.AppendFloat`).
 pub fn Float(n: float64) -> Token {
-    Token { repr: Repr::Num(AppendFloatString(n, 64)) }
+    Token {
+        repr: Repr::Num(AppendFloatString(n, 64)),
+    }
 }
 
 /// `jsontext.AppendFloat(dst, src, bits)` (value.go:32) ->
@@ -219,17 +241,17 @@ pub fn Float(n: float64) -> Token {
 ///
 /// For 32-bit floating-point numbers, the output is a 32-bit equivalent
 /// of the algorithm.
-pub fn AppendFloat(
-    dst: &mut alloc::vec::Vec<crate::types::byte>,
-    src: float64,
-    bits: int,
-) {
+pub fn AppendFloat(dst: &mut alloc::vec::Vec<crate::types::byte>, src: float64, bits: int) {
     dst.extend_from_slice(AppendFloatString(src, bits).as_bytes());
 }
 
 /// The formatting core shared by [`Float`] and [`AppendFloat`].
 fn AppendFloatString(src: float64, bits: int) -> string {
-    let src = if bits == 32 { src as crate::types::float32 as float64 } else { src };
+    let src = if bits == 32 {
+        src as crate::types::float32 as float64
+    } else {
+        src
+    };
 
     let abs = crate::math::Abs(src);
     let mut fmt = b'f';
@@ -258,12 +280,16 @@ fn AppendFloatString(src: float64, bits: int) -> string {
 
 /// `jsontext.Int(i)` (token.go:152).
 pub fn Int(n: int) -> Token {
-    Token { repr: Repr::Num(crate::strconv::FormatInt(n, 10)) }
+    Token {
+        repr: Repr::Num(crate::strconv::FormatInt(n, 10)),
+    }
 }
 
 /// `jsontext.Uint(u)` (token.go:160).
 pub fn Uint(n: uint) -> Token {
-    Token { repr: Repr::Num(crate::strconv::FormatUint(n, 10)) }
+    Token {
+        repr: Repr::Num(crate::strconv::FormatUint(n, 10)),
+    }
 }
 
 impl Token {
@@ -282,7 +308,10 @@ impl Token {
         match &self.repr {
             Repr::Raw("true") => true,
             Repr::Raw("false") => false,
-            _ => panic!("invalid jsontext.Token.Bool call on {:?}", self.Kind().String()),
+            _ => panic!(
+                "invalid jsontext.Token.Bool call on {:?}",
+                self.Kind().String()
+            ),
         }
     }
 
@@ -357,7 +386,11 @@ pub struct Value(pub slice<byte>);
 
 impl core::fmt::Debug for Value {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "jsontext.Value({:?})", core::str::from_utf8(self.0.as_ref()).unwrap_or("<invalid utf8>"))
+        write!(
+            f,
+            "jsontext.Value({:?})",
+            core::str::from_utf8(self.0.as_ref()).unwrap_or("<invalid utf8>")
+        )
     }
 }
 
@@ -479,22 +512,34 @@ impl Options {
 
 /// `jsontext.AllowDuplicateNames(v)` (options.go:54).
 pub fn AllowDuplicateNames(v: bool) -> Options {
-    Options { allow_duplicate_names: Some(v), ..Options::default() }
+    Options {
+        allow_duplicate_names: Some(v),
+        ..Options::default()
+    }
 }
 
 /// `jsontext.AllowInvalidUTF8(v)` (options.go:68).
 pub fn AllowInvalidUTF8(v: bool) -> Options {
-    Options { allow_invalid_utf8: Some(v), ..Options::default() }
+    Options {
+        allow_invalid_utf8: Some(v),
+        ..Options::default()
+    }
 }
 
 /// `jsontext.WithIndent(indent)` (options.go:232).
 pub fn WithIndent<S: Into<string>>(indent: S) -> Options {
-    Options { indent: Some(indent.into()), ..Options::default() }
+    Options {
+        indent: Some(indent.into()),
+        ..Options::default()
+    }
 }
 
 /// `jsontext.WithIndentPrefix(prefix)` (options.go:265).
 pub fn WithIndentPrefix<S: Into<string>>(prefix: S) -> Options {
-    Options { indent_prefix: Some(prefix.into()), ..Options::default() }
+    Options {
+        indent_prefix: Some(prefix.into()),
+        ..Options::default()
+    }
 }
 
 // ─── shared syntax helpers ───────────────────────────────────────────
@@ -738,7 +783,11 @@ impl Encoder {
         // Trim surrounding whitespace so separators stay tight.
         let raw = v.0.as_ref();
         let start = raw.iter().position(|&b| !is_ws(b)).unwrap_or(0);
-        let end = raw.iter().rposition(|&b| !is_ws(b)).map(|i| i + 1).unwrap_or(raw.len());
+        let end = raw
+            .iter()
+            .rposition(|&b| !is_ws(b))
+            .map(|i| i + 1)
+            .unwrap_or(raw.len());
         self.buf.extend_from_slice(&raw[start..end]);
         // A whole value occupies exactly one slot at this level.
         self.bump_count();
@@ -887,9 +936,7 @@ impl Decoder {
                             self.pos += 1;
                             self.skip_ws();
                         }
-                        Some(_) => {
-                            return errors::New("jsontext: missing ':' after object name")
-                        }
+                        Some(_) => return errors::New("jsontext: missing ':' after object name"),
                         None => return crate::io::ErrUnexpectedEOF.into(),
                     }
                 } else if count > 0 {
@@ -900,11 +947,7 @@ impl Decoder {
                             self.skip_ws();
                         }
                         Some(b'}') => {}
-                        Some(_) => {
-                            return errors::New(
-                                "jsontext: missing ',' after object value",
-                            )
-                        }
+                        Some(_) => return errors::New("jsontext: missing ',' after object value"),
                         None => return crate::io::ErrUnexpectedEOF.into(),
                     }
                 }
@@ -918,11 +961,7 @@ impl Decoder {
                             self.skip_ws();
                         }
                         Some(b']') => {}
-                        Some(_) => {
-                            return errors::New(
-                                "jsontext: missing ',' after array element",
-                            )
-                        }
+                        Some(_) => return errors::New("jsontext: missing ',' after array element"),
                         None => return crate::io::ErrUnexpectedEOF.into(),
                     }
                 }
@@ -1043,8 +1082,11 @@ impl Decoder {
                 self.counts.push(0);
                 // One namespace per frame, kept in lockstep with
                 // `stack` so the pop below cannot get out of step.
-                self.names
-                    .push(if k.0 == b'{' { Some(BTreeSet::new()) } else { None });
+                self.names.push(if k.0 == b'{' {
+                    Some(BTreeSet::new())
+                } else {
+                    None
+                });
                 self.cur_name.push(None);
             }
             b'}' | b']' => {
@@ -1085,7 +1127,9 @@ impl Decoder {
     /// `Decoder.ReadToken()` (decode.go:461). At the top level with
     /// only whitespace left, returns `io::EOF` (Go does the same).
     pub fn ReadToken(&mut self) -> (Token, error) {
-        let invalid = Token { repr: Repr::Raw("null") };
+        let invalid = Token {
+            repr: Repr::Raw("null"),
+        };
         let err = self.prepare_next();
         if err != nil {
             return (invalid, err);
@@ -1107,9 +1151,7 @@ impl Decoder {
                 (if b == b'{' { BeginObject } else { BeginArray }, nil)
             }
             b'}' | b']' => {
-                if self.stack.last().copied()
-                    != Some(if b == b'}' { b'{' } else { b'[' })
-                {
+                if self.stack.last().copied() != Some(if b == b'}' { b'{' } else { b'[' }) {
                     return (invalid, errors::New("jsontext: mismatched end token"));
                 }
                 if b == b'}' && *self.counts.last().unwrap() % 2 == 1 {
@@ -1159,11 +1201,19 @@ impl Decoder {
             b'-' | b'0'..=b'9' => match self.scan_number() {
                 Ok(raw) => {
                     self.after_token(Kind(b'0'));
-                    (Token { repr: Repr::Num(raw) }, nil)
+                    (
+                        Token {
+                            repr: Repr::Num(raw),
+                        },
+                        nil,
+                    )
                 }
                 Err(e) => (invalid, e),
             },
-            _ => (invalid, errors::New("jsontext: invalid character at start of value")),
+            _ => (
+                invalid,
+                errors::New("jsontext: invalid character at start of value"),
+            ),
         }
     }
 
@@ -1200,15 +1250,11 @@ impl Decoder {
                             let hi = self.read_hex4()?;
                             let cp = if (0xD800..0xDC00).contains(&hi) {
                                 // Surrogate pair: expect \uDC00-\uDFFF.
-                                if self.peek_at(0) == Some(b'\\')
-                                    && self.peek_at(1) == Some(b'u')
-                                {
+                                if self.peek_at(0) == Some(b'\\') && self.peek_at(1) == Some(b'u') {
                                     self.pos += 2;
                                     let lo = self.read_hex4()?;
                                     if (0xDC00..0xE000).contains(&lo) {
-                                        0x10000
-                                            + ((hi - 0xD800) << 10)
-                                            + (lo - 0xDC00)
+                                        0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00)
                                     } else {
                                         0xFFFD
                                     }
@@ -1223,9 +1269,7 @@ impl Decoder {
                             push_utf8(&mut out, cp);
                         }
                         _ => {
-                            return Err(errors::New(
-                                "jsontext: invalid escape sequence in string",
-                            ))
+                            return Err(errors::New("jsontext: invalid escape sequence in string"))
                         }
                     }
                 }

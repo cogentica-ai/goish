@@ -27,10 +27,7 @@ fn main() {
 
     // 1. Append two segments to an absolute URL.
     {
-        let (out, err) = url::JoinPath(
-            string("http://example.com/api"),
-            vec_of(&["users", "42"]),
-        );
+        let (out, err) = url::JoinPath(string("http://example.com/api"), vec_of(&["users", "42"]));
         if err.IsNil() && out == "http://example.com/api/users/42" {
             fmt::Println!("[ 1] absolute base + 2 elems   PASS");
         } else {
@@ -41,10 +38,7 @@ fn main() {
 
     // 2. Trailing slash preserved when last elem ends with /.
     {
-        let (out, err) = url::JoinPath(
-            string("http://example.com/api/"),
-            vec_of(&["users/"]),
-        );
+        let (out, err) = url::JoinPath(string("http://example.com/api/"), vec_of(&["users/"]));
         if err.IsNil() && out == "http://example.com/api/users/" {
             fmt::Println!("[ 2] trailing slash preserved  PASS");
         } else {
@@ -55,10 +49,7 @@ fn main() {
 
     // 3. ../ collapsed by path.Join.
     {
-        let (out, err) = url::JoinPath(
-            string("http://example.com/a/b/c"),
-            vec_of(&["..", "d"]),
-        );
+        let (out, err) = url::JoinPath(string("http://example.com/a/b/c"), vec_of(&["..", "d"]));
         if err.IsNil() && out == "http://example.com/a/b/d" {
             fmt::Println!("[ 3] dot-dot collapsed         PASS");
         } else {
@@ -88,7 +79,8 @@ fn main() {
             } else {
                 fmt::Println!(
                     "[ 5] URL.JoinPath method       FAIL path={} q={}",
-                    joined.Path, joined.RawQuery
+                    joined.Path,
+                    joined.RawQuery
                 );
                 failed += 1;
             }

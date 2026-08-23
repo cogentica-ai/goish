@@ -62,12 +62,12 @@ fn main() {
         ("Sunday, 06-Nov-94 08:49:37 UTC", REF),
         ("Sunday, 06-Nov-94 08:49:37 EST", REF), // any 3-letter zone is UTC
         ("Sunday, 06-Nov-94 08:49:37 XYZ", REF),
-        ("Sun, 06-Nov-94 08:49:37 GMT", 0),      // abbreviation not allowed
-        ("Xyzzy, 06-Nov-94 08:49:37 GMT", 0),    // bogus full weekday
+        ("Sun, 06-Nov-94 08:49:37 GMT", 0), // abbreviation not allowed
+        ("Xyzzy, 06-Nov-94 08:49:37 GMT", 0), // bogus full weekday
         ("Sunday, 06-Nov-1994 08:49:37 GMT", 0), // 4-digit year rejected
-        ("Sunday, 06-Nov-94 08:49:37 gmt", 0),   // zone case-sensitive
-        ("Sunday, 06-Nov-94 08:49:37 UT", 0),    // 2-letter zone
-        ("Sunday, 06-Nov-94 08:49:37", 0),       // zone required
+        ("Sunday, 06-Nov-94 08:49:37 gmt", 0), // zone case-sensitive
+        ("Sunday, 06-Nov-94 08:49:37 UT", 0), // 2-letter zone
+        ("Sunday, 06-Nov-94 08:49:37", 0),  // zone required
         // The form goish used to accept and Go never did.
         ("Mon, 02-Jan-2006 15:04:05 MST", 0),
         // ── ANSI C asctime ─────────────────────────────────────────
@@ -105,10 +105,10 @@ fn main() {
     // 2. RFC 850's two-digit year pivots at 69.
     {
         let years: &[(&str, i64)] = &[
-            ("Tuesday, 01-Jan-69 00:00:00 GMT", -31536000),  // 1969
+            ("Tuesday, 01-Jan-69 00:00:00 GMT", -31536000), // 1969
             ("Wednesday, 01-Jan-68 00:00:00 GMT", 3092601600), // 2068
-            ("Thursday, 01-Jan-00 00:00:00 GMT", 946684800),  // 2000
-            ("Friday, 31-Dec-99 23:59:59 GMT", 946684799),    // 1999
+            ("Thursday, 01-Jan-00 00:00:00 GMT", 946684800), // 2000
+            ("Friday, 31-Dec-99 23:59:59 GMT", 946684799),  // 1999
         ];
         let mut yb = 0;
         for (input, want) in years {

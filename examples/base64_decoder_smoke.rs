@@ -11,10 +11,10 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
 use goish::convert;
 use goish::encoding::base64;
+use goish::fmt;
 use goish::io;
 use goish::types::byte;
 use goish::{slice, syscall};
@@ -25,9 +25,7 @@ fn main() {
 
     // 1. NewDecoder — single Read covers full input.
     {
-        let src = bytes::NewReader(slice::__from_vec(
-            b"SGVsbG8sIFdvcmxkIQ==".to_vec(),
-        ));
+        let src = bytes::NewReader(slice::__from_vec(b"SGVsbG8sIFdvcmxkIQ==".to_vec()));
         let mut dec = base64::NewDecoder(base64::StdEncoding, src);
         let mut out = goish::make!([]byte, 64);
         let (n, _err) = dec.Read(&mut out);
@@ -46,9 +44,7 @@ fn main() {
 
     // 2. NewDecoder via io::ReadAll — drains until EOF.
     {
-        let src = bytes::NewReader(slice::__from_vec(
-            b"SGVsbG8sIFdvcmxkIQ==".to_vec(),
-        ));
+        let src = bytes::NewReader(slice::__from_vec(b"SGVsbG8sIFdvcmxkIQ==".to_vec()));
         let mut dec = base64::NewDecoder(base64::StdEncoding, src);
         let (got, err) = io::ReadAll(&mut dec);
         let want_str: goish::string = "Hello, World!".into();
@@ -65,9 +61,7 @@ fn main() {
 
     // 3. NewDecoder — small destination buffer (forces outbuf staging).
     {
-        let src = bytes::NewReader(slice::__from_vec(
-            b"SGVsbG8sIFdvcmxkIQ==".to_vec(),
-        ));
+        let src = bytes::NewReader(slice::__from_vec(b"SGVsbG8sIFdvcmxkIQ==".to_vec()));
         let mut dec = base64::NewDecoder(base64::StdEncoding, src);
         // Read into a 1-byte buffer repeatedly; collect all output.
         let mut collected: alloc::vec::Vec<byte> = alloc::vec::Vec::new();
@@ -111,9 +105,7 @@ fn main() {
 
     // 5. NewDecoder — newline tolerance ('\n' between blocks).
     {
-        let src = bytes::NewReader(slice::__from_vec(
-            b"SGVsbG8s\nIFdvcmxk\nIQ==".to_vec(),
-        ));
+        let src = bytes::NewReader(slice::__from_vec(b"SGVsbG8s\nIFdvcmxk\nIQ==".to_vec()));
         let mut dec = base64::NewDecoder(base64::StdEncoding, src);
         let (got, err) = io::ReadAll(&mut dec);
         let want: goish::string = "Hello, World!".into();
@@ -130,9 +122,7 @@ fn main() {
 
     // 6. NewDecoder — \r\n tolerance (CRLF, stripped).
     {
-        let src = bytes::NewReader(slice::__from_vec(
-            b"SGVsbG8s\r\nIFdvcmxk\r\nIQ==".to_vec(),
-        ));
+        let src = bytes::NewReader(slice::__from_vec(b"SGVsbG8s\r\nIFdvcmxk\r\nIQ==".to_vec()));
         let mut dec = base64::NewDecoder(base64::StdEncoding, src);
         let (got, err) = io::ReadAll(&mut dec);
         let want: goish::string = "Hello, World!".into();
@@ -211,8 +201,7 @@ fn main() {
         let mut buf = bytes::Buffer::new();
         {
             let mut e = base64::NewEncoder(base64::StdEncoding, &mut buf);
-            let payload: slice<byte> =
-                slice::__from_vec(original.to_vec());
+            let payload: slice<byte> = slice::__from_vec(original.to_vec());
             let _ = e.Write(payload);
             let _ = e.Close();
         }

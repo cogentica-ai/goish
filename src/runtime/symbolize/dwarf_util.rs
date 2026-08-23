@@ -30,12 +30,7 @@ pub fn read_u32(buf: &[u8], off: &mut usize) -> Option<u32> {
     if *off + 4 > buf.len() {
         return None;
     }
-    let v = u32::from_le_bytes([
-        buf[*off],
-        buf[*off + 1],
-        buf[*off + 2],
-        buf[*off + 3],
-    ]);
+    let v = u32::from_le_bytes([buf[*off], buf[*off + 1], buf[*off + 2], buf[*off + 3]]);
     *off += 4;
     Some(v)
 }

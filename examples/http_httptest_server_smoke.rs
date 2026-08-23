@@ -76,9 +76,7 @@ fn main() {
             mux2.HandleFunc("/tls", |w, _r| {
                 let _ = w.Write(goish::bytes("secure"));
             });
-            let ts2 = goish::net::http::httptest::NewTLSServer(
-                alloc::sync::Arc::new(mux2),
-            );
+            let ts2 = goish::net::http::httptest::NewTLSServer(alloc::sync::Arc::new(mux2));
             goish::time::Sleep(goish::time::Duration(200 * 1_000_000));
             let u = ts2.URL();
             let us: &str = u.as_ref();
@@ -92,9 +90,7 @@ fn main() {
                 ServerName: goish::string("localhost"),
                 ..Default::default()
             };
-            let addr = goish::string::from_bytes(
-                us.trim_start_matches("https://").as_bytes(),
-            );
+            let addr = goish::string::from_bytes(us.trim_start_matches("https://").as_bytes());
             let (mut c, e) = goish::crypto::tls::Dial(goish::string("tcp"), addr, &cfg);
             let mut got = goish::string("");
             if e.IsNil() {

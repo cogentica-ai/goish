@@ -215,7 +215,10 @@ impl Digest {
         out.extend_from_slice(&self.x[..self.nx]);
         out.resize(out.len() + (CHUNK - self.nx), 0);
         // Go: b = byteorder.BEAppendUint64(b, d.len); return b, nil
-        return (byteorder::BEAppendUint64(slice::__from_vec(out), self.len), nil);
+        return (
+            byteorder::BEAppendUint64(slice::__from_vec(out), self.len),
+            nil,
+        );
     }
 
     // go: sdk 1.25.5 crypto/internal/fips140/sha512/sha512.go:164-192 Digest.UnmarshalBinary
@@ -283,7 +286,10 @@ impl Digest {
 /// and the borrow avoids a re-wrap per field.
 fn consumeUint64(b: &[byte]) -> (&[byte], uint64) {
     // Go: return b[8:], byteorder.BEUint64(b)
-    return (&b[8..], byteorder::BEUint64(slice::__from_vec(b[..8].to_vec())));
+    return (
+        &b[8..],
+        byteorder::BEUint64(slice::__from_vec(b[..8].to_vec())),
+    );
 }
 
 // ─── Hash trait impls for Digest ──────────────────────────────────────

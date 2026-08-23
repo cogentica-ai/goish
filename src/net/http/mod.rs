@@ -14,49 +14,48 @@
 
 #![allow(non_snake_case)]
 
-
+pub mod cgi;
 pub mod client;
 pub mod clone;
 pub mod cookie;
 pub mod cookiejar;
 pub mod csrf;
-pub mod cgi;
 pub mod fcgi;
 pub mod filetransport;
 pub mod fs;
 pub mod header;
 pub mod http;
+pub(crate) mod httpproxy;
 pub mod httptest;
-pub mod pprof;
 pub mod httptrace;
 pub mod httputil;
 pub mod internal;
 pub mod jar;
 pub mod mapping;
 pub mod method;
-pub(crate) mod httpproxy;
 pub(crate) mod omithttp2;
 pub mod pattern;
+pub mod pprof;
 pub mod request;
+pub mod response;
+pub mod responsecontroller;
 pub mod responsewriter;
 pub mod routing_index;
 pub mod routing_tree;
-pub mod response;
-pub mod responsecontroller;
 pub mod servemux121;
 pub mod server;
 pub mod server_tls;
-pub mod transport_default_other;
 pub mod sniff;
 pub mod socks_bundle;
 pub mod status;
 pub mod transfer;
 pub mod transport;
+pub mod transport_default_other;
 pub mod url;
 
 pub use client::{
-    Client, DialContextFn, Get, Head, NewRequest, NewRequestWithContext, Post, PostForm,
-    Body, ErrUseLastResponse, ProxyFromEnvironment, ProxyResolver, RoundTripper, Transport,
+    Body, Client, DialContextFn, ErrUseLastResponse, Get, Head, NewRequest, NewRequestWithContext,
+    Post, PostForm, ProxyFromEnvironment, ProxyResolver, RoundTripper, Transport,
 };
 pub use cookie::{
     Cookie, ParseCookie, ParseSetCookie, SameSite, SameSiteDefaultMode, SameSiteLaxMode,
@@ -67,55 +66,54 @@ pub use csrf::{
     NewCrossOriginProtection,
 };
 pub use fs::{
-    Dir, File, FileServer, FileServerFS, FileSystem, NewDir, ServeContent, ServeFile,
-    ServeFileFS, FS,
+    Dir, File, FileServer, FileServerFS, FileSystem, NewDir, ServeContent, ServeFile, ServeFileFS,
+    FS,
 };
 pub use header::{CanonicalHeaderKey, Header, ParseTime, TimeFormat};
+pub use http::{HTTP2Config, NoBody, Protocols, PushOptions, Pusher};
+pub use httputil::NewSingleHostReverseProxy;
 pub use jar::CookieJar;
 pub use method::{
     MethodConnect, MethodDelete, MethodGet, MethodHead, MethodOptions, MethodPatch, MethodPost,
     MethodPut, MethodTrace,
 };
-pub use http::{HTTP2Config, NoBody, Protocols, PushOptions, Pusher};
 pub use request::{
     ErrHeaderTooLong, ErrMaxBytes, ErrMissingBoundary, ErrMissingContentLength, ErrMissingFile,
     ErrNoCookie, ErrNotMultipart, ErrNotSupported, ErrShortBody, ErrUnexpectedTrailer,
-    MaxBytesError, MaxBytesReader, NewMaxBytesError, ParseHTTPVersion,
-    ProtocolError, ReadRequest, Request,
+    MaxBytesError, MaxBytesReader, NewMaxBytesError, ParseHTTPVersion, ProtocolError, ReadRequest,
+    Request,
 };
-pub use responsecontroller::{NewResponseController, ResponseController};
 pub use response::{ErrNoLocation, ReadResponse, Response};
-pub use responsewriter::{CloseNotifier, AsWriter,
-    Flusher, HeaderHandle, Hijacker, ResponseWriter,
+pub use responsecontroller::{NewResponseController, ResponseController};
+pub use responsewriter::{
+    AsWriter, CloseNotifier, Flusher, HeaderHandle, Hijacker, ResponseWriter,
 };
-pub use httputil::NewSingleHostReverseProxy;
 pub use server::{
     handler, AllowQuerySemicolons, DefaultServeMux, ErrAbortHandler, ErrBodyNotAllowed,
     ErrContentLength, ErrHandlerTimeout, ErrHijacked, ErrServerClosed, Error, Handle, HandleFunc,
-    Handler, HandlerFunc, ListenAndServe, MaxBytesHandler, NewServeMux, NotFound, NotFoundHandler, Redirect,
-    RedirectHandler, Serve, ServeMux, Server, StripPrefix, TimeoutHandler,
+    Handler, HandlerFunc, ListenAndServe, MaxBytesHandler, NewServeMux, NotFound, NotFoundHandler,
+    Redirect, RedirectHandler, Serve, ServeMux, Server, StripPrefix, TimeoutHandler,
 };
 pub use server_tls::ListenAndServeTLS;
 pub use sniff::DetectContentType;
 pub use status::{
-    StatusAccepted, StatusBadGateway, StatusBadRequest, StatusConflict, StatusContinue,
-    StatusCreated, StatusEarlyHints, StatusExpectationFailed, StatusFailedDependency,
-    StatusForbidden, StatusFound, StatusGatewayTimeout, StatusGone,
+    StatusAccepted, StatusAlreadyReported, StatusBadGateway, StatusBadRequest, StatusConflict,
+    StatusContinue, StatusCreated, StatusEarlyHints, StatusExpectationFailed,
+    StatusFailedDependency, StatusForbidden, StatusFound, StatusGatewayTimeout, StatusGone,
     StatusHTTPVersionNotSupported, StatusIMUsed, StatusInsufficientStorage,
     StatusInternalServerError, StatusLengthRequired, StatusLocked, StatusLoopDetected,
-    StatusMethodNotAllowed, StatusMisdirectedRequest, StatusMovedPermanently,
-    StatusMultiStatus, StatusMultipleChoices, StatusNetworkAuthenticationRequired,
-    StatusNoContent, StatusNonAuthoritativeInfo, StatusNotAcceptable, StatusNotExtended,
-    StatusNotFound, StatusNotImplemented, StatusNotModified, StatusOK, StatusPartialContent,
-    StatusPaymentRequired, StatusPermanentRedirect, StatusPreconditionFailed,
-    StatusPreconditionRequired, StatusProcessing, StatusProxyAuthRequired,
-    StatusRequestEntityTooLarge, StatusRequestHeaderFieldsTooLarge, StatusRequestTimeout,
-    StatusRequestURITooLong, StatusRequestedRangeNotSatisfiable, StatusResetContent,
-    StatusSeeOther, StatusServiceUnavailable, StatusSwitchingProtocols, StatusTeapot,
-    StatusTemporaryRedirect, StatusText, StatusTooEarly, StatusTooManyRequests,
-    StatusUnauthorized, StatusUnavailableForLegalReasons, StatusUnprocessableEntity,
-    StatusUnsupportedMediaType, StatusUpgradeRequired, StatusUseProxy,
-    StatusVariantAlsoNegotiates, StatusAlreadyReported,
+    StatusMethodNotAllowed, StatusMisdirectedRequest, StatusMovedPermanently, StatusMultiStatus,
+    StatusMultipleChoices, StatusNetworkAuthenticationRequired, StatusNoContent,
+    StatusNonAuthoritativeInfo, StatusNotAcceptable, StatusNotExtended, StatusNotFound,
+    StatusNotImplemented, StatusNotModified, StatusOK, StatusPartialContent, StatusPaymentRequired,
+    StatusPermanentRedirect, StatusPreconditionFailed, StatusPreconditionRequired,
+    StatusProcessing, StatusProxyAuthRequired, StatusRequestEntityTooLarge,
+    StatusRequestHeaderFieldsTooLarge, StatusRequestTimeout, StatusRequestURITooLong,
+    StatusRequestedRangeNotSatisfiable, StatusResetContent, StatusSeeOther,
+    StatusServiceUnavailable, StatusSwitchingProtocols, StatusTeapot, StatusTemporaryRedirect,
+    StatusText, StatusTooEarly, StatusTooManyRequests, StatusUnauthorized,
+    StatusUnavailableForLegalReasons, StatusUnprocessableEntity, StatusUnsupportedMediaType,
+    StatusUpgradeRequired, StatusUseProxy, StatusVariantAlsoNegotiates,
 };
 pub use url::{
     JoinPath as JoinURLPath, Parse as ParseURL, ParseRequestURI, PathEscape, PathUnescape,

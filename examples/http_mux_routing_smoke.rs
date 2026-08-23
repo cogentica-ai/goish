@@ -34,7 +34,13 @@ fn main() {
         let mut bad = 0i32;
         let mux = http::ServeMux::new();
         for p in [
-            "/", "/a/", "/a/b", "/p/{x}", "/p/{x}/c", "POST /m", "/exact",
+            "/",
+            "/a/",
+            "/a/b",
+            "/p/{x}",
+            "/p/{x}/c",
+            "POST /m",
+            "/exact",
             "/tree/{rest...}",
         ]
         .iter()
@@ -80,7 +86,16 @@ fn main() {
             mux.ServeHTTP(&rec, &req);
             let res = rec.Result();
             if res.StatusCode != *code {
-                fmt::Println!("FAIL ", *method, " ", *path, ": code ", res.StatusCode, " want ", *code);
+                fmt::Println!(
+                    "FAIL ",
+                    *method,
+                    " ",
+                    *path,
+                    ": code ",
+                    res.StatusCode,
+                    " want ",
+                    *code
+                );
                 bad += 1;
             }
             eq(res.Header.Get(string("X-Pat")), pat, *path, &mut bad);

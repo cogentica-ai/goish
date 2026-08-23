@@ -21,11 +21,11 @@
 
 pub mod atomic;
 mod cond;
+pub mod errgroup;
 mod mutex;
 mod once;
 mod oncefunc;
 mod pool;
-pub mod errgroup;
 mod rwmutex;
 mod sema;
 pub mod singleflight;

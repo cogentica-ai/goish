@@ -285,7 +285,10 @@ pub fn DecryptPEMBlock(b: &pem::Block, password: slice<byte>) -> (slice<byte>, e
     // mean a bad password.
     let dlen = data.Len();
     if dlen == 0 || dlen % ciph.blockSize != 0 {
-        return (slice::default(), crate::errors::New("x509: invalid padding"));
+        return (
+            slice::default(),
+            crate::errors::New("x509: invalid padding"),
+        );
     }
     let last = crate::int(data[dlen - 1]);
     if dlen < last {

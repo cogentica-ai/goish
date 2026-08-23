@@ -81,7 +81,13 @@ fn main() {
             prettyPrint(&mut buf, *x, &s("ns/op"));
             let got = buf.String();
             if got != s(want) {
-                fmt::Println!("    prettyPrint mismatch got [", got, "] want [", *want, "]");
+                fmt::Println!(
+                    "    prettyPrint mismatch got [",
+                    got,
+                    "] want [",
+                    *want,
+                    "]"
+                );
                 ok = false;
             }
         }
@@ -125,7 +131,11 @@ fn main() {
         if r.MemString() == s("      80 B/op\t       2 allocs/op") {
             fmt::Println!("[ 4] BenchmarkResult.MemString PASS");
         } else {
-            fmt::Println!("[ 4] BenchmarkResult.MemString FAIL got [", r.MemString(), "]");
+            fmt::Println!(
+                "[ 4] BenchmarkResult.MemString FAIL got [",
+                r.MemString(),
+                "]"
+            );
             failed += 1;
         }
     }

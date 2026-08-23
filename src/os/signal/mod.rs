@@ -67,10 +67,7 @@ pub fn Stop(c: &chan<i32>) {
 pub fn NotifyContext(
     parent: Arc<dyn crate::context::Context>,
     sigs: &[i32],
-) -> (
-    Arc<dyn crate::context::Context>,
-    crate::context::CancelFunc,
-) {
+) -> (Arc<dyn crate::context::Context>, crate::context::CancelFunc) {
     let (ctx, cancel) = crate::context::WithCancel(parent);
     let cancel = Arc::new(cancel);
     let ch = chan::<i32>::new_buffered(1);

@@ -20,8 +20,8 @@ extern crate alloc;
 
 use super::cast::fipsSelfTest;
 use super::rsa::{
-    checkPublicKey, decrypt, encrypt, nil_bytes,
-    withCheck, ErrMessageTooLong, ErrVerification, PrivateKey, PublicKey,
+    checkPublicKey, decrypt, encrypt, nil_bytes, withCheck, ErrMessageTooLong, ErrVerification,
+    PrivateKey, PublicKey,
 };
 use crate::bytes;
 use crate::crypto::internal::fips140;
@@ -126,11 +126,7 @@ fn hashPrefixes(hash: HashId) -> Option<&'static [byte]> {
 /// `hash` identifies the hash function used to produce `hashed`; pass
 /// `crypto.Hash(0)` (Go's empty hash name) to indicate that the message
 /// is signed directly.
-pub fn SignPKCS1v15(
-    priv_: &PrivateKey,
-    hash: HashId,
-    hashed: slice<byte>,
-) -> (slice<byte>, error) {
+pub fn SignPKCS1v15(priv_: &PrivateKey, hash: HashId, hashed: slice<byte>) -> (slice<byte>, error) {
     fipsSelfTest();
     fips140::RecordApproved();
     checkApprovedHashName(hash);

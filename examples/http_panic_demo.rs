@@ -68,21 +68,33 @@ fn print_dec(mut n: u64) {
 /// Read /proc/self/status and parse VmRSS in KB.
 fn vmrss_kb() -> u64 {
     let fd = syscall::Open(b"/proc/self/status\0".as_ptr(), 0, 0);
-    if fd < 0 { return 0; }
+    if fd < 0 {
+        return 0;
+    }
     let mut buf = [0u8; 2048];
     let mut total = 0usize;
     loop {
-        let n = syscall::Read(fd, unsafe { buf.as_mut_ptr().add(total) }, buf.len() - total);
-        if n <= 0 { break; }
+        let n = syscall::Read(
+            fd,
+            unsafe { buf.as_mut_ptr().add(total) },
+            buf.len() - total,
+        );
+        if n <= 0 {
+            break;
+        }
         total += n as usize;
-        if total >= buf.len() { break; }
+        if total >= buf.len() {
+            break;
+        }
     }
     syscall::Close(fd);
     let s = &buf[..total];
     let key = b"VmRSS:";
     if let Some(pos) = (0..s.len()).find(|&i| s[i..].starts_with(key)) {
         let mut p = pos + key.len();
-        while p < s.len() && (s[p] == b' ' || s[p] == b'\t') { p += 1; }
+        while p < s.len() && (s[p] == b' ' || s[p] == b'\t') {
+            p += 1;
+        }
         let mut v = 0u64;
         while p < s.len() && s[p].is_ascii_digit() {
             v = v * 10 + (s[p] - b'0') as u64;
@@ -130,9 +142,7 @@ fn http_request(addr: &goish::gostring::string, path: &[u8]) -> bool {
     if n_r <= 0 {
         return false;
     }
-    let bytes_read = unsafe {
-        core::slice::from_raw_parts(resp_slice.as_ptr(), n_r as usize)
-    };
+    let bytes_read = unsafe { core::slice::from_raw_parts(resp_slice.as_ptr(), n_r as usize) };
     bytes_read.starts_with(b"HTTP/1.1 2")
 }
 
@@ -161,7 +171,7 @@ fn run_demo() {
         // The panicking handler. defer! before the panic should still
         // fire via cleanup registry → DEFER_RAN_ON_PANIC increments.
         mux.HandleFunc(string("/panic"), |_w, _r| {
-            defer!{ DEFER_RAN_ON_PANIC.fetch_add(1, Ordering::Relaxed); }
+            defer! { DEFER_RAN_ON_PANIC.fetch_add(1, Ordering::Relaxed); }
             REQ_PANIC_HANDLED.fetch_add(1, Ordering::Relaxed);
             panic!("intentional panic from /panic route");
         });
@@ -193,8 +203,15 @@ fn run_demo() {
     let mut p = port as u32;
     let mut tmp = [0u8; 8];
     let mut ti = tmp.len();
-    if p == 0 { ti -= 1; tmp[ti] = b'0'; }
-    while p > 0 { ti -= 1; tmp[ti] = b'0' + (p % 10) as u8; p /= 10; }
+    if p == 0 {
+        ti -= 1;
+        tmp[ti] = b'0';
+    }
+    while p > 0 {
+        ti -= 1;
+        tmp[ti] = b'0' + (p % 10) as u8;
+        p /= 10;
+    }
     let pn = tmp.len() - ti;
     addr_buf[alen..alen + pn].copy_from_slice(&tmp[ti..]);
     alen += pn;
@@ -253,14 +270,26 @@ fn run_demo() {
     let defer_ran = DEFER_RAN_ON_PANIC.load(Ordering::Relaxed);
 
     print(b"\n=== report ===\n");
-    print(b"drivers OK    : "); print_dec(drive_panic); print(b" panic + ");
-    print_dec(drive_healthz); print(b" healthz\n");
-    print(b"server OK     : "); print_dec(server_panics); print(b" panic-handled + ");
-    print_dec(server_healthz); print(b" healthz-served\n");
-    print(b"G_PANIC_COUNT : "); print_dec(g_panic_count); print(b"\n");
-    print(b"DEFER_RAN_ON_PANIC: "); print_dec(defer_ran); print(b"\n");
-    print(b"final alive   : "); print(if final_alive { b"yes\n" } else { b"NO\n" });
-    print(b"VmRSS after   : "); print_dec(rss_after);
+    print(b"drivers OK    : ");
+    print_dec(drive_panic);
+    print(b" panic + ");
+    print_dec(drive_healthz);
+    print(b" healthz\n");
+    print(b"server OK     : ");
+    print_dec(server_panics);
+    print(b" panic-handled + ");
+    print_dec(server_healthz);
+    print(b" healthz-served\n");
+    print(b"G_PANIC_COUNT : ");
+    print_dec(g_panic_count);
+    print(b"\n");
+    print(b"DEFER_RAN_ON_PANIC: ");
+    print_dec(defer_ran);
+    print(b"\n");
+    print(b"final alive   : ");
+    print(if final_alive { b"yes\n" } else { b"NO\n" });
+    print(b"VmRSS after   : ");
+    print_dec(rss_after);
     print(b" KB (delta from before: ");
     print_dec(rss_after.saturating_sub(rss_before));
     print(b" KB)\n");

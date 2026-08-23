@@ -19,8 +19,8 @@
 
 use crate::errors::ErrorTrait;
 use crate::gostring::string;
-use crate::strconv;
 use crate::int;
+use crate::strconv;
 use crate::types::uint8;
 
 // Go: alert.go:19

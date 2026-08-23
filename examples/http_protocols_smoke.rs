@@ -12,8 +12,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::errors;
+use goish::fmt;
 use goish::io;
 use goish::net::http;
 use goish::{make, string, syscall};
@@ -144,7 +144,12 @@ fn main() {
         if n == 0 && err.IsNil() && buf.Len() == 0 {
             fmt::Println!("[10] NoBody.WriteTo=(0,nil)    PASS");
         } else {
-            fmt::Println!("[10] NoBody.WriteTo=(0,nil)    FAIL n=", n, " buflen=", buf.Len());
+            fmt::Println!(
+                "[10] NoBody.WriteTo=(0,nil)    FAIL n=",
+                n,
+                " buflen=",
+                buf.Len()
+            );
             failed += 1;
         }
     }

@@ -8,9 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
 use goish::convert;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::io::{self, Closer, Reader, Writer};
 use goish::mime::quotedprintable::{NewReader, NewWriter};

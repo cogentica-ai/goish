@@ -8,11 +8,11 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::crypto::subtle::{
     ConstantTimeByteEq, ConstantTimeCompare, ConstantTimeCopy, ConstantTimeEq,
     ConstantTimeLessOrEq, ConstantTimeSelect, XORBytes,
 };
+use goish::fmt;
 // Go keeps ConstantTimeLessOrEqBytes in the FIPS module only; crypto/subtle
 // does not re-export it (crypto/internal/fips140/subtle/constant_time.go:34).
 use goish::crypto::internal::fips140::subtle::ConstantTimeLessOrEqBytes;
@@ -36,7 +36,12 @@ fn main() {
         if r1 == 1 && r2 == 0 && r3 == 0 {
             fmt::Println!("[ 1] Compare                   PASS");
         } else {
-            fmt::Println!("[ 1] Compare                   FAIL r1={} r2={} r3={}", r1, r2, r3);
+            fmt::Println!(
+                "[ 1] Compare                   FAIL r1={} r2={} r3={}",
+                r1,
+                r2,
+                r3
+            );
             failed += 1;
         }
     }
@@ -87,10 +92,10 @@ fn main() {
 
     // 5. ConstantTimeLessOrEq.
     {
-        let r1 = ConstantTimeLessOrEq(5, 10);  // 1
+        let r1 = ConstantTimeLessOrEq(5, 10); // 1
         let r2 = ConstantTimeLessOrEq(10, 10); // 1
         let r3 = ConstantTimeLessOrEq(11, 10); // 0
-        let r4 = ConstantTimeLessOrEq(0, 0);   // 1
+        let r4 = ConstantTimeLessOrEq(0, 0); // 1
         if r1 == 1 && r2 == 1 && r3 == 0 && r4 == 1 {
             fmt::Println!("[ 5] LessOrEq                  PASS");
         } else {
@@ -170,7 +175,13 @@ fn main() {
         if r1 == 1 && r2 == 1 && r3 == 0 && r4 == 0 {
             fmt::Println!("[ 9] LessOrEqBytes short       PASS");
         } else {
-            fmt::Println!("[ 9] LessOrEqBytes short       FAIL r={},{},{},{}", r1, r2, r3, r4);
+            fmt::Println!(
+                "[ 9] LessOrEqBytes short       FAIL r={},{},{},{}",
+                r1,
+                r2,
+                r3,
+                r4
+            );
             failed += 1;
         }
     }

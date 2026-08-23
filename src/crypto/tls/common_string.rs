@@ -29,11 +29,11 @@
 #![allow(non_snake_case)]
 
 use super::common::{
-    ClientAuthType, CurveID, SignatureScheme, CurveP256, CurveP384, CurveP521, ECDSAWithP256AndSHA256,
+    ClientAuthType, CurveID, CurveP256, CurveP384, CurveP521, ECDSAWithP256AndSHA256,
     ECDSAWithP384AndSHA384, ECDSAWithP521AndSHA512, ECDSAWithSHA1, Ed25519, NoClientCert,
     PKCS1WithSHA1, PKCS1WithSHA256, PKCS1WithSHA384, PKCS1WithSHA512, PSSWithSHA256, PSSWithSHA384,
-    PSSWithSHA512, RequireAndVerifyClientCert, RequireAnyClientCert, RequestClientCert,
-    VerifyClientCertIfGiven, X25519, X25519MLKEM768,
+    PSSWithSHA512, RequestClientCert, RequireAndVerifyClientCert, RequireAnyClientCert,
+    SignatureScheme, VerifyClientCertIfGiven, X25519, X25519MLKEM768,
 };
 use crate::gostring::string;
 use crate::strconv;

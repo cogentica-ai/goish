@@ -18,16 +18,13 @@ fn main() {
     // 1. Parse splits off #fragment.
     {
         let (u, err) = url::Parse(string("https://example.com/path?q=1#section-2"));
-        if err.IsNil()
-            && u.Fragment == "section-2"
-            && u.Path == "/path"
-            && u.RawQuery == "q=1"
-        {
+        if err.IsNil() && u.Fragment == "section-2" && u.Path == "/path" && u.RawQuery == "q=1" {
             fmt::Println!("[ 1] Parse fragment           PASS");
         } else {
             fmt::Println!(
                 "[ 1] Parse fragment           FAIL frag={} path={}",
-                u.Fragment, u.Path
+                u.Fragment,
+                u.Path
             );
             failed += 1;
         }

@@ -121,10 +121,7 @@ impl String {
             Some(v) => v,
         };
         let v: &[byte] = &v;
-        *out = uint32(v[0]) << 24
-            | uint32(v[1]) << 16
-            | uint32(v[2]) << 8
-            | uint32(v[3]);
+        *out = uint32(v[0]) << 24 | uint32(v[1]) << 16 | uint32(v[2]) << 8 | uint32(v[3]);
         return true;
     }
 

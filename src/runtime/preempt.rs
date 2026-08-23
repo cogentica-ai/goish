@@ -45,9 +45,7 @@
 use core::arch::naked_asm;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use crate::runtime::sched::{
-    current_g, current_m, current_m_locks, Gosched, GStatus,
-};
+use crate::runtime::sched::{current_g, current_m, current_m_locks, GStatus, Gosched};
 use crate::syscall;
 
 // ─── ucontext_t layout (Linux x86_64) ──────────────────────────────
@@ -540,11 +538,7 @@ pub unsafe extern "C" fn goish_async_preempt() {
 //   - heap allocation
 //   - any `gopark` / `swap_context` (handler is *not* the trampoline)
 
-extern "C" fn goish_preempt_sigtramp(
-    _sig: i32,
-    _info: *const u8,
-    ctx: *mut UcontextT,
-) {
+extern "C" fn goish_preempt_sigtramp(_sig: i32, _info: *const u8, ctx: *mut UcontextT) {
     PREEMPT_INVOCATIONS.fetch_add(1, Ordering::Relaxed);
 
     // 1. m.locks == 0
@@ -559,11 +553,7 @@ extern "C" fn goish_preempt_sigtramp(
     // mcall_asm} range. All of these are runtime asm windows where
     // m.locks == 0 but injection would corrupt scheduler state by
     // hijacking a half-switched RSP.
-    if is_in_trampoline(pc)
-        || is_in_swap_context(pc)
-        || is_in_gogo(pc)
-        || is_in_mcall_asm(pc)
-    {
+    if is_in_trampoline(pc) || is_in_swap_context(pc) || is_in_gogo(pc) || is_in_mcall_asm(pc) {
         SKIP_TRAMPOLINE.fetch_add(1, Ordering::Relaxed);
         return;
     }
@@ -577,8 +567,7 @@ extern "C" fn goish_preempt_sigtramp(
     // wakeups (hang). The cooperative path catches these Gs at the
     // next `raw_unlock` safe point — no forward-progress loss.
     if crate::runtime::rt_section::is_in_runtime(pc) {
-        crate::runtime::rt_section::SKIP_RUNTIME_PC
-            .fetch_add(1, Ordering::Relaxed);
+        crate::runtime::rt_section::SKIP_RUNTIME_PC.fetch_add(1, Ordering::Relaxed);
         return;
     }
 

@@ -119,7 +119,10 @@ fn run_tests(arena_base: usize) {
     p.free(a1, 1);
     p.free(a2, 1);
     p.free(r8, 8);
-    check(p.allocated_pages() == 0, b"after triple-free: nonzero alloc\n");
+    check(
+        p.allocated_pages() == 0,
+        b"after triple-free: nonzero alloc\n",
+    );
 
     let mut addrs = [0usize; 64];
     for i in 0..64 {
@@ -137,10 +140,16 @@ fn run_tests(arena_base: usize) {
     // The full chunk should now be available as one contiguous run.
     let whole = p.alloc(PALLOC_CHUNK_PAGES);
     check(whole == arena_base, b"alloc(whole chunk) wrong addr\n");
-    check(p.allocated_pages() == PALLOC_CHUNK_PAGES, b"whole chunk: wrong total\n");
+    check(
+        p.allocated_pages() == PALLOC_CHUNK_PAGES,
+        b"whole chunk: wrong total\n",
+    );
 
     // ─── Exhaustion ─────────────────────────────────────────────────
-    check(p.alloc(1) == ALLOC_FAILED, b"exhausted heap returned non-failure\n");
+    check(
+        p.alloc(1) == ALLOC_FAILED,
+        b"exhausted heap returned non-failure\n",
+    );
 
     // Free the whole chunk; allocator should be empty again.
     p.free(whole, PALLOC_CHUNK_PAGES);

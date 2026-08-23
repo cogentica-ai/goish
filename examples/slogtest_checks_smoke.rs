@@ -97,10 +97,7 @@ fn main() {
     //    into a real group.
     {
         let inner = m(&[("a", Any::new(s("1")))]);
-        let rec = m(&[
-            ("g", Any::new(inner)),
-            ("flat", Any::new(s("not a map"))),
-        ]);
+        let rec = m(&[("g", Any::new(inner)), ("flat", Any::new(s("not a map")))]);
 
         let descends = inGroup(s("g"), hasKey(s("a")))(&rec).Len() == 0;
         let absent = inGroup(s("nope"), hasKey(s("a")))(&rec);
@@ -112,7 +109,13 @@ fn main() {
         {
             fmt::Println!("[ 5] inGroup distinguishes     PASS");
         } else {
-            fmt::Println!("[ 5] inGroup distinguishes     FAIL [", absent, "] [", notmap, "]");
+            fmt::Println!(
+                "[ 5] inGroup distinguishes     FAIL [",
+                absent,
+                "] [",
+                notmap,
+                "]"
+            );
             failed += 1;
         }
     }

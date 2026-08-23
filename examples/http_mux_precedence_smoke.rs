@@ -132,8 +132,18 @@ fn main() {
         );
         let cases: &[(&str, i64, &str, &str)] = &[
             ("/dir/", 200, "", "dir"),
-            ("/dir", 301, "/dir/", "<a href=\"/dir/\">Moved Permanently</a>.\n\n"),
-            ("/dir?q=1", 301, "/dir/?q=1", "<a href=\"/dir/?q=1\">Moved Permanently</a>.\n\n"),
+            (
+                "/dir",
+                301,
+                "/dir/",
+                "<a href=\"/dir/\">Moved Permanently</a>.\n\n",
+            ),
+            (
+                "/dir?q=1",
+                301,
+                "/dir/?q=1",
+                "<a href=\"/dir/?q=1\">Moved Permanently</a>.\n\n",
+            ),
             ("/file", 200, "", "file"),
             ("/file/", 404, "", "404 page not found\n"),
             ("/nope", 404, "", "404 page not found\n"),
@@ -153,7 +163,16 @@ fn main() {
             let body = string::from_bytes(&rec.Body());
             let loc = rec.Header().Get(string("Location"));
             if rec.Code() != *wantCode || loc != *wantLoc || body != *wantBody {
-                fmt::Println!("     ", *path, " code=", rec.Code(), " loc=", loc, " body=", body);
+                fmt::Println!(
+                    "     ",
+                    *path,
+                    " code=",
+                    rec.Code(),
+                    " loc=",
+                    loc,
+                    " body=",
+                    body
+                );
                 bad += 1;
             }
         }

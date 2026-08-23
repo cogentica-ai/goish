@@ -33,7 +33,7 @@ extern crate goish;
 use alloc::sync::Arc;
 use goish::gostring::string;
 use goish::io::fs;
-use goish::testing::fstest::{MapFile, MapFS, __shim_map_file_info_string};
+use goish::testing::fstest::{__shim_map_file_info_string, MapFS, MapFile};
 use goish::{errors, fmt, slice, syscall};
 
 fn s(x: &str) -> string {
@@ -116,7 +116,13 @@ fn main() {
             if got_file == s("- hello.go") && got_dir == s("d subdir/") {
                 fmt::Println!("[ 3] FormatDirEntry strips 9   PASS");
             } else {
-                fmt::Println!("[ 3] FormatDirEntry            FAIL [", got_file, "] [", got_dir, "]");
+                fmt::Println!(
+                    "[ 3] FormatDirEntry            FAIL [",
+                    got_file,
+                    "] [",
+                    got_dir,
+                    "]"
+                );
                 failed += 1;
             }
         }

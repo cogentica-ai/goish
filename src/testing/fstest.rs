@@ -33,9 +33,7 @@ use crate::errors::{self, error};
 use crate::gomap::map;
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::io::fs::{
-    self, DirEntry, File, FileInfo, FileMode, ModeDir, ModeSymlink, ReadDirFile,
-};
+use crate::io::fs::{self, DirEntry, File, FileInfo, FileMode, ModeDir, ModeSymlink, ReadDirFile};
 use crate::path;
 use crate::strings;
 use crate::time;
@@ -74,15 +72,16 @@ impl MapFS {
 
     fn get(&self, name: &string) -> Option<Arc<MapFile>> {
         let (v, ok) = self.0.GetRef(name.clone());
-        if ok { v.cloned() } else { None }
+        if ok {
+            v.cloned()
+        } else {
+            None
+        }
     }
 
     // Go: mapfs.go:48 — func (fsys MapFS) Open(name string) (fs.File, error)
     /// Open opens the named file after following any symbolic links.
-    pub fn Open<S: Into<string>>(
-        &self,
-        name: S,
-    ) -> (Arc<dyn File + Send + Sync>, error) {
+    pub fn Open<S: Into<string>>(&self, name: S) -> (Arc<dyn File + Send + Sync>, error) {
         register_fstest_impls();
         let name: string = name.into();
         // Go: if !fs.ValidPath(name) { return nil, &fs.PathError{...ErrNotExist} }
@@ -103,7 +102,10 @@ impl MapFS {
                 return (
                     Arc::new(openMapFile {
                         path: name.clone(),
-                        info: mapFileInfo { name: path::Base(name), f: f.clone() },
+                        info: mapFileInfo {
+                            name: path::Base(name),
+                            f: f.clone(),
+                        },
                         offset: AtomicI64::new(0),
                     }),
                     errors::nil,
@@ -119,13 +121,13 @@ impl MapFS {
                 let i = strings::Index(fname.clone(), "/");
                 if i < 0 {
                     if fname.as_bytes() != b"." {
-                        list.push(mapFileInfo { name: fname.clone(), f: f.clone() });
+                        list.push(mapFileInfo {
+                            name: fname.clone(),
+                            f: f.clone(),
+                        });
                     }
                 } else {
-                    need.Set(
-                        string::from_bytes(&fname.as_bytes()[..i as usize]),
-                        true,
-                    );
+                    need.Set(string::from_bytes(&fname.as_bytes()[..i as usize]), true);
                 }
             }
         } else {
@@ -157,7 +159,10 @@ impl MapFS {
         }
         // Go: for name := range need { list = append(list, {name, &MapFile{Mode: ModeDir|0555}}) }
         for n in need.Keys().as_ref() {
-            list.push(mapFileInfo { name: n.clone(), f: synth_dir() });
+            list.push(mapFileInfo {
+                name: n.clone(),
+                f: synth_dir(),
+            });
         }
         // Go: slices.SortFunc(list, ... strings.Compare(a.name, b.name))
         list.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
@@ -169,13 +174,20 @@ impl MapFS {
             string::from_static(".")
         } else {
             let nb = name.as_bytes();
-            let i = nb.iter().rposition(|&c| c == b'/').map(|i| i as i64).unwrap_or(-1);
+            let i = nb
+                .iter()
+                .rposition(|&c| c == b'/')
+                .map(|i| i as i64)
+                .unwrap_or(-1);
             string::from_bytes(&nb[(i + 1) as usize..])
         };
         (
             Arc::new(mapDir {
                 path: name,
-                info: mapFileInfo { name: elem, f: file },
+                info: mapFileInfo {
+                    name: elem,
+                    f: file,
+                },
                 entry: list,
                 offset: AtomicUsize::new(0),
             }),
@@ -193,9 +205,10 @@ impl MapFS {
                 if path::IsAbs(target.clone()) {
                     return (string::new(), false);
                 }
-                return self.resolveSymlinks(path::Join(slice::__from_vec(
-                    alloc::vec![path::Dir(name), target],
-                )));
+                return self.resolveSymlinks(path::Join(slice::__from_vec(alloc::vec![
+                    path::Dir(name),
+                    target
+                ])));
             }
         }
 
@@ -222,14 +235,10 @@ impl MapFS {
                     if path::IsAbs(target.clone()) {
                         return (string::new(), false);
                     }
-                    let joined = path::Join(slice::__from_vec(alloc::vec![
-                        path::Dir(dir),
-                        target,
-                    ]));
+                    let joined =
+                        path::Join(slice::__from_vec(alloc::vec![path::Dir(dir), target,]));
                     let mut rejoined = joined.to_string();
-                    rejoined.push_str(
-                        core::str::from_utf8(&name.as_bytes()[i..]).unwrap_or(""),
-                    );
+                    rejoined.push_str(core::str::from_utf8(&name.as_bytes()[i..]).unwrap_or(""));
                     return self.resolveSymlinks(string::from(rejoined.as_str()));
                 }
             }
@@ -259,10 +268,7 @@ impl MapFS {
     // Go: mapfs.go:171 — func (fsys MapFS) Lstat(name string) (fs.FileInfo, error)
     /// Lstat returns a FileInfo describing the named file without
     /// following symbolic links.
-    pub fn Lstat<S: Into<string>>(
-        &self,
-        name: S,
-    ) -> (Arc<dyn FileInfo + Send + Sync>, error) {
+    pub fn Lstat<S: Into<string>>(&self, name: S) -> (Arc<dyn FileInfo + Send + Sync>, error) {
         register_fstest_impls();
         let name: string = name.into();
         let (info, err) = self.lstat(&name);
@@ -282,22 +288,39 @@ impl MapFS {
             return (None, fs::ErrNotExist.clone().into());
         }
         let elem = path::Base(name.clone());
-        let real_name =
-            path::Join(slice::__from_vec(alloc::vec![real_dir, elem.clone()]));
+        let real_name = path::Join(slice::__from_vec(alloc::vec![real_dir, elem.clone()]));
 
         if let Some(file) = self.get(&real_name) {
-            return (Some(mapFileInfo { name: elem, f: file }), errors::nil);
+            return (
+                Some(mapFileInfo {
+                    name: elem,
+                    f: file,
+                }),
+                errors::nil,
+            );
         }
 
         if real_name.as_bytes() == b"." {
-            return (Some(mapFileInfo { name: elem, f: synth_dir() }), errors::nil);
+            return (
+                Some(mapFileInfo {
+                    name: elem,
+                    f: synth_dir(),
+                }),
+                errors::nil,
+            );
         }
         // Go: Maybe a directory.
         let mut prefix = real_name.to_string();
         prefix.push('/');
         for (fname, _) in self.0.__iter() {
             if fname.as_bytes().starts_with(prefix.as_bytes()) {
-                return (Some(mapFileInfo { name: elem, f: synth_dir() }), errors::nil);
+                return (
+                    Some(mapFileInfo {
+                        name: elem,
+                        f: synth_dir(),
+                    }),
+                    errors::nil,
+                );
             }
         }
         (None, fs::ErrNotExist.clone().into())
@@ -311,10 +334,7 @@ impl MapFS {
     }
 
     // Go: mapfs.go:222 — func (fsys MapFS) Stat(name string) (fs.FileInfo, error)
-    pub fn Stat<S: Into<string>>(
-        &self,
-        name: S,
-    ) -> (Arc<dyn FileInfo + Send + Sync>, error) {
+    pub fn Stat<S: Into<string>>(&self, name: S) -> (Arc<dyn FileInfo + Send + Sync>, error) {
         fs::Stat(self, name)
     }
 
@@ -463,7 +483,10 @@ impl File for openMapFile {
             return (0, crate::io::EOF.into());
         }
         if offset < 0 {
-            return (0, path_err("read", &self.path, fs::ErrInvalid.clone().into()));
+            return (
+                0,
+                path_err("read", &self.path, fs::ErrInvalid.clone().into()),
+            );
         }
         // Go: n := copy(b, f.f.Data[f.offset:])
         let src = &data[offset as usize..];
@@ -604,7 +627,10 @@ impl File for mapDir {
     }
     // Go: func (d *mapDir) Read(b []byte) (int, error) — always ErrInvalid
     fn Read(&self, _b: &mut slice<byte>) -> (int, error) {
-        (0, path_err("read", &self.path, fs::ErrInvalid.clone().into()))
+        (
+            0,
+            path_err("read", &self.path, fs::ErrInvalid.clone().into()),
+        )
     }
     fn Close(&self) -> error {
         errors::nil
@@ -843,7 +869,9 @@ pub fn formatInfo(info: &dyn FileInfo) -> string {
         // goish's time does not provide. RFC3339Nano is the closest
         // stable rendering and is what matters here: the string is only
         // ever compared against another produced the same way.
-        info.ModTime().Format(crate::gostring::string::from_static(crate::time::RFC3339Nano))
+        info.ModTime().Format(crate::gostring::string::from_static(
+            crate::time::RFC3339Nano
+        ))
     );
 }
 
@@ -1068,10 +1096,7 @@ impl fsTester {
             "%s: diff %s:\n\t%s",
             dir.clone(),
             s_of(desc),
-            crate::strings::Join(
-                slice::__from_vec(diffs),
-                string::from_static("\n\t")
-            )
+            crate::strings::Join(slice::__from_vec(diffs), string::from_static("\n\t"))
         ));
     }
 }
@@ -1106,13 +1131,21 @@ impl fsTester {
     ) {
         let (file, err) = fs::FS::Open(fsys, path.clone());
         if err != errors::nil {
-            self.errorf(crate::fmt::Sprintf!("%s: Open: %v", path.clone(), err.Error()));
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: Open: %v",
+                path.clone(),
+                err.Error()
+            ));
             return;
         }
         let (info, serr) = file.Stat();
         file.Close();
         if serr != errors::nil {
-            self.errorf(crate::fmt::Sprintf!("%s: Stat: %v", path.clone(), serr.Error()));
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: Stat: %v",
+                path.clone(),
+                serr.Error()
+            ));
             return;
         }
 
@@ -1351,10 +1384,7 @@ impl fsTester {
                 "%s: Glob(%q): unsorted output:\n%s",
                 dir.clone(),
                 glob.clone(),
-                crate::strings::Join(
-                    slice::__from_vec(got.clone()),
-                    string::from_static("\n")
-                )
+                crate::strings::Join(slice::__from_vec(got.clone()), string::from_static("\n"))
             ));
             got.sort_by(|x, y| {
                 let (a, b): (&str, &str) = (x.as_ref(), y.as_ref());
@@ -1412,7 +1442,11 @@ impl fsTester {
     ) -> (slice<Arc<dyn DirEntry + Send + Sync>>, bool) {
         let (f, err) = fs::FS::Open(fsys, dir.clone());
         if err != errors::nil {
-            self.errorf(crate::fmt::Sprintf!("%s: Open: %v", dir.clone(), err.Error()));
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: Open: %v",
+                dir.clone(),
+                err.Error()
+            ));
             return (slice::new(), false);
         }
         // Go: d, ok := f.(fs.ReadDirFile); if !ok { f.Close(); errorf }
@@ -1471,17 +1505,17 @@ impl fsTester {
     /// ReadSeeker/ReaderAt downcasts). The aliasing check that block
     /// would have performed is done here against `fs::ReadFile`
     /// instead, so the property is still covered.
-    pub fn checkFile(
-        &mut self,
-        fsys: &(dyn fs::FS + Send + Sync + 'static),
-        file: string,
-    ) {
+    pub fn checkFile(&mut self, fsys: &(dyn fs::FS + Send + Sync + 'static), file: string) {
         self.__push_file(file.clone());
 
         // Go: read the entire file through Open.
         let (f, err) = fs::FS::Open(fsys, file.clone());
         if err != errors::nil {
-            self.errorf(crate::fmt::Sprintf!("%s: Open: %v", file.clone(), err.Error()));
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: Open: %v",
+                file.clone(),
+                err.Error()
+            ));
             return;
         }
         let (data, rerr) = read_all_file(f.as_ref());
@@ -1496,7 +1530,11 @@ impl fsTester {
         }
         let cerr = f.Close();
         if cerr != errors::nil {
-            self.errorf(crate::fmt::Sprintf!("%s: Close: %v", file.clone(), cerr.Error()));
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: Close: %v",
+                file.clone(),
+                cerr.Error()
+            ));
         }
         // Go: "Check that closing twice doesn't crash. The return value
         // doesn't matter."
@@ -1512,7 +1550,12 @@ impl fsTester {
             ));
             return;
         }
-        self.checkFileRead(file.clone(), "ReadAll vs fs.ReadFile", data.clone(), data2.clone());
+        self.checkFileRead(
+            file.clone(),
+            "ReadAll vs fs.ReadFile",
+            data.clone(),
+            data2.clone(),
+        );
 
         // Go performs this aliasing check inside the ReadFileFS block:
         // "Modify the data and check it again. Modifying the returned
@@ -1631,18 +1674,18 @@ impl fsTester {
     /// both sort checks are kept. Symlink children are recorded without
     /// being followed, exactly as Go does, "to avoid potentially
     /// unbounded recursion".
-    pub fn checkDir(
-        &mut self,
-        fsys: &(dyn fs::FS + Send + Sync + 'static),
-        dir: string,
-    ) {
+    pub fn checkDir(&mut self, fsys: &(dyn fs::FS + Send + Sync + 'static), dir: string) {
         self.__push_dir(dir.clone());
 
         let (dh, oerr) = open_dir_handle(fsys, dir.clone());
         let d = match dh {
             Some(d) => d,
             None => {
-                self.errorf(crate::fmt::Sprintf!("%s: Open: %v", dir.clone(), oerr.Error()));
+                self.errorf(crate::fmt::Sprintf!(
+                    "%s: Open: %v",
+                    dir.clone(),
+                    oerr.Error()
+                ));
                 return;
             }
         };
@@ -1746,7 +1789,11 @@ impl fsTester {
 
         let cerr = d.Close();
         if cerr != errors::nil {
-            self.errorf(crate::fmt::Sprintf!("%s: Close: %v", dir.clone(), cerr.Error()));
+            self.errorf(crate::fmt::Sprintf!(
+                "%s: Close: %v",
+                dir.clone(),
+                cerr.Error()
+            ));
         }
         // Go: "Check that closing twice doesn't crash."
         d.Close();
@@ -1882,10 +1929,7 @@ impl fsTester {
 /// Go's 15-entry truncation of the "expected empty" list is kept, as is
 /// `errors.Join` — so the returned error unwraps to the individual
 /// failures rather than flattening to a single string.
-pub fn testFS(
-    fsys: &(dyn fs::FS + Send + Sync + 'static),
-    expected: &slice<string>,
-) -> error {
+pub fn testFS(fsys: &(dyn fs::FS + Send + Sync + 'static), expected: &slice<string>) -> error {
     let mut t = fsTester::default();
     t.checkDir(fsys, string::from_static("."));
     t.checkOpen(fsys, string::from_static("."));
@@ -1954,10 +1998,7 @@ pub fn testFS(
 /// again against the subtree — so a `SubFS` that rewrites paths
 /// incorrectly is caught. Go stops after one such subtest ("one
 /// sub-test is enough") and so does this.
-pub fn TestFS(
-    fsys: Arc<dyn fs::FS + Send + Sync>,
-    expected: &slice<string>,
-) -> error {
+pub fn TestFS(fsys: Arc<dyn fs::FS + Send + Sync>, expected: &slice<string>) -> error {
     let err = testFS(fsys.as_ref(), expected);
     if err != errors::nil {
         return err;

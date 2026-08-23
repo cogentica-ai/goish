@@ -33,7 +33,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use goish::gostring::string;
 use goish::io::fs;
-use goish::testing::fstest::{MapFile, MapFS};
+use goish::testing::fstest::{MapFS, MapFile};
 use goish::{errors, fmt, slice, syscall};
 
 fn s(x: &str) -> string {
@@ -126,10 +126,7 @@ fn main() {
     // 3. A malformed pattern IS an error, and it is path.ErrBadPattern.
     {
         let (m, err) = fs::Glob(&fsys, s("["));
-        if m.Len() == 0
-            && err != errors::nil
-            && err.Error() == s("syntax error in pattern")
-        {
+        if m.Len() == 0 && err != errors::nil && err.Error() == s("syntax error in pattern") {
             fmt::Println!("[ 3] bad pattern errors        PASS");
         } else {
             fmt::Println!("[ 3] bad pattern errors        FAIL");
@@ -156,8 +153,7 @@ fn main() {
     {
         let (via_method, e1) = fsys.Glob(s("*.txt"));
         let (via_free, e2) = fs::Glob(&fsys, s("*.txt"));
-        if e1 == errors::nil && e2 == errors::nil && joined(&via_method) == joined(&via_free)
-        {
+        if e1 == errors::nil && e2 == errors::nil && joined(&via_method) == joined(&via_free) {
             fmt::Println!("[ 5] MapFS.Glob delegates      PASS");
         } else {
             fmt::Println!("[ 5] MapFS.Glob delegates      FAIL");

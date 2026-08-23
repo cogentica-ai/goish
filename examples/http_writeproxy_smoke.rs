@@ -7,10 +7,10 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
 use goish::context;
 use goish::convert;
+use goish::fmt;
 use goish::net::http;
 use goish::strings;
 use goish::{byte, string, syscall};

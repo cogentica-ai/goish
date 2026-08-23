@@ -95,7 +95,11 @@ pub fn ParsePKCS8PrivateKey(der: slice<byte>) -> (Any, error) {
         return (Any::default(), err);
     }
 
-    if privKey.Algo.Algorithm.Equal(&super::x509::oidPublicKeyRSA()) {
+    if privKey
+        .Algo
+        .Algorithm
+        .Equal(&super::x509::oidPublicKeyRSA())
+    {
         let (key, err) = super::pkcs1::ParsePKCS1PrivateKey(privKey.PrivateKey.clone());
         if err != errors::nil {
             return (
@@ -109,14 +113,17 @@ pub fn ParsePKCS8PrivateKey(der: slice<byte>) -> (Any, error) {
         return (Any::new_fn(key), errors::nil);
     }
 
-    if privKey.Algo.Algorithm.Equal(&super::x509::oidPublicKeyECDSA()) {
+    if privKey
+        .Algo
+        .Algorithm
+        .Equal(&super::x509::oidPublicKeyECDSA())
+    {
         let bytes = privKey.Algo.Parameters.FullBytes.clone();
         let mut oid = asn1::ObjectIdentifier::default();
         let (_, e) = asn1::Unmarshal(bytes, &mut oid);
         // Go: `namedCurveOID = nil` when the inner Unmarshal fails.
         let namedCurveOID = if e == errors::nil { Some(&oid) } else { None };
-        let (key, err) =
-            super::sec1::parseECPrivateKey(namedCurveOID, privKey.PrivateKey.clone());
+        let (key, err) = super::sec1::parseECPrivateKey(namedCurveOID, privKey.PrivateKey.clone());
         if err != errors::nil {
             return (
                 Any::default(),
@@ -129,7 +136,11 @@ pub fn ParsePKCS8PrivateKey(der: slice<byte>) -> (Any, error) {
         return (Any::new_fn(key), errors::nil);
     }
 
-    if privKey.Algo.Algorithm.Equal(&super::x509::oidPublicKeyEd25519()) {
+    if privKey
+        .Algo
+        .Algorithm
+        .Equal(&super::x509::oidPublicKeyEd25519())
+    {
         if privKey.Algo.Parameters.FullBytes.Len() != 0 {
             return (
                 Any::default(),
@@ -155,7 +166,11 @@ pub fn ParsePKCS8PrivateKey(der: slice<byte>) -> (Any, error) {
         return (Any::new_fn(key), errors::nil);
     }
 
-    if privKey.Algo.Algorithm.Equal(&super::x509::oidPublicKeyX25519()) {
+    if privKey
+        .Algo
+        .Algorithm
+        .Equal(&super::x509::oidPublicKeyX25519())
+    {
         if privKey.Algo.Parameters.FullBytes.Len() != 0 {
             return (
                 Any::default(),

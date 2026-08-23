@@ -17,8 +17,8 @@ extern crate goish;
 
 use goish::fmt;
 use goish::strings;
+use goish::syscall;
 use goish::unicode;
-use goish::{syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -62,7 +62,11 @@ fn main() {
         ("Go", "GO", true),
         ("\u{130}stanbul", "istanbul", false),
         ("\u{132}SSELMEER", "\u{133}sselmeer", true),
-        ("\u{3a3}\u{38a}\u{3a3}\u{3a5}\u{3a6}\u{39f}\u{3a3}", "\u{3c3}\u{3af}\u{3c3}\u{3c5}\u{3c6}\u{3bf}\u{3c2}", true),
+        (
+            "\u{3a3}\u{38a}\u{3a3}\u{3a5}\u{3a6}\u{39f}\u{3a3}",
+            "\u{3c3}\u{3af}\u{3c3}\u{3c5}\u{3c6}\u{3bf}\u{3c2}",
+            true,
+        ),
         ("kelvin \u{212a}", "KELVIN k", true),
         ("\u{1c5}ungla", "\u{1c6}UNGLA", true),
         ("stra\u{df}e", "STRASSE", false),
@@ -88,8 +92,14 @@ fn main() {
         b"t3: ToLower mixed\n",
     );
     // ASCII fast paths still exact.
-    check(strings::ToUpper("hello Web").as_bytes() == b"HELLO WEB", b"t3: ascii upper\n");
-    check(strings::ToLower("Hello WEB").as_bytes() == b"hello web", b"t3: ascii lower\n");
+    check(
+        strings::ToUpper("hello Web").as_bytes() == b"HELLO WEB",
+        b"t3: ascii upper\n",
+    );
+    check(
+        strings::ToLower("Hello WEB").as_bytes() == b"hello web",
+        b"t3: ascii lower\n",
+    );
 
     let msg = b"UNICODE_CASE_OK sweep hash + fold vectors vs real Go\n";
     syscall::Write(syscall::STDOUT, msg.as_ptr(), msg.len());

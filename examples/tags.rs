@@ -49,7 +49,10 @@ fn check(cond: bool, msg: &[u8]) {
 fn main() {
     // (1) The headline normalize example.
     let got = normalize(string("Hello,  WORLD , #goish, , Rust"));
-    check(got == "hello, world, goish, rust", b"strings: normalize wrong\n");
+    check(
+        got == "hello, world, goish, rust",
+        b"strings: normalize wrong\n",
+    );
     fmt::Println!(got);
 
     // (2) Spot-checks for each public function used in the design table.
@@ -69,7 +72,10 @@ fn main() {
         strings::HasSuffix(string("greetings"), "ings"),
         b"strings: HasSuffix wrong\n",
     );
-    check(strings::Index(string("abcdef"), "cd") == 2, b"strings: Index wrong\n");
+    check(
+        strings::Index(string("abcdef"), "cd") == 2,
+        b"strings: Index wrong\n",
+    );
     check(
         strings::IndexByte(string("hello"), b'l') == 2,
         b"strings: IndexByte wrong\n",
@@ -78,7 +84,10 @@ fn main() {
         strings::LastIndex(string("ababab"), "ab") == 4,
         b"strings: LastIndex wrong\n",
     );
-    check(strings::Count(string("cheese"), "e") == 3, b"strings: Count wrong\n");
+    check(
+        strings::Count(string("cheese"), "e") == 3,
+        b"strings: Count wrong\n",
+    );
 
     // Trim family.
     check(
@@ -140,7 +149,10 @@ fn main() {
 
     // Join.
     let parts = strings::Split(string("a,b,c"), ",");
-    check(strings::Join(parts, "-") == "a-b-c", b"strings: Join wrong\n");
+    check(
+        strings::Join(parts, "-") == "a-b-c",
+        b"strings: Join wrong\n",
+    );
 
     const OK: &[u8] = b"strings: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

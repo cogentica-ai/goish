@@ -73,12 +73,18 @@ fn main() {
         DONE.store(1, Ordering::Release);
     });
     goish::runtime::sched::schedule();
-    check(DONE.load(Ordering::Acquire) == 1, b"preempt_sysmon: WG.Wait didn't return\n");
+    check(
+        DONE.load(Ordering::Acquire) == 1,
+        b"preempt_sysmon: WG.Wait didn't return\n",
+    );
 
     let expected: u64 = (0..ITERS).fold(0u64, |a, k| a.wrapping_add(k));
     for i in 0..N_SPINNERS {
         let got = SPINNER_RESULTS[i].load(Ordering::Acquire);
-        check(got == expected, b"preempt_sysmon: spinner result wrong (register corruption)\n");
+        check(
+            got == expected,
+            b"preempt_sysmon: spinner result wrong (register corruption)\n",
+        );
     }
 
     let inv = preempt::invocations();
@@ -103,7 +109,10 @@ fn main() {
     print_diag(b" skip_sp_range=", sp);
     syscall::Write(syscall::STDOUT, b"\n".as_ptr(), 1);
 
-    check(inv > 0, b"preempt_sysmon: handler never fired (sysmon scan failed)\n");
+    check(
+        inv > 0,
+        b"preempt_sysmon: handler never fired (sysmon scan failed)\n",
+    );
     check(
         inj > 0,
         b"preempt_sysmon: handler never injected (no async preempt observed)\n",

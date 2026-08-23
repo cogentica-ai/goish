@@ -57,12 +57,12 @@ use goish::crypto::x509::{
 };
 use goish::encoding::asn1;
 use goish::encoding::hex;
+use goish::fmt::Stringer;
 use goish::goany::Any;
 use goish::goslice::slice;
 use goish::math::big;
 use goish::time;
 use goish::types::byte;
-use goish::fmt::Stringer;
 use goish::{bytes, fmt, int, string};
 
 static RAN: AtomicUsize = AtomicUsize::new(0);
@@ -84,7 +84,12 @@ fn checkHex(got: string, want: &'static str, label: &'static str) {
         fmt::Printf!("PASS: %s\n", string(label));
     } else {
         FAILED.fetch_add(1, Ordering::AcqRel);
-        fmt::Printf!("FAIL: %s\n  got  %s\n  want %s\n", string(label), got, string(want));
+        fmt::Printf!(
+            "FAIL: %s\n  got  %s\n  want %s\n",
+            string(label),
+            got,
+            string(want)
+        );
     }
 }
 
@@ -117,12 +122,16 @@ pub const RSA_QINV: &str = "3695694221643378904847426960563219200599745419166114
 pub const EC_SEC1: &str = "30770201010420940ba408fd695f8b5de889aafd0366e6e6db701532b4d33efaeb71bc613da10ea00a06082a8648ce3d030107a144034200046283d58def679dec57d86bdbeb36cd0ce655228f7f54ce3a25acb54df9199c25f7f52ec591c6d81c8e233eab2ddec5f4740962018c9800294ae0b3b9574c201a";
 pub const EC_PKCS8: &str = "308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b0201010420940ba408fd695f8b5de889aafd0366e6e6db701532b4d33efaeb71bc613da10ea144034200046283d58def679dec57d86bdbeb36cd0ce655228f7f54ce3a25acb54df9199c25f7f52ec591c6d81c8e233eab2ddec5f4740962018c9800294ae0b3b9574c201a";
 pub const EC_PKIX_PUB: &str = "3059301306072a8648ce3d020106082a8648ce3d030107034200046283d58def679dec57d86bdbeb36cd0ce655228f7f54ce3a25acb54df9199c25f7f52ec591c6d81c8e233eab2ddec5f4740962018c9800294ae0b3b9574c201a";
-pub const EC_D: &str = "66962869036803792517252271411794185920904369633174339968503819875414808830222";
-pub const EC_X: &str = "44559590025182684090047224048952823820761123113194172351827877841355163671589";
-pub const EC_Y: &str = "112154473937731029928959042955816822867270053756587384329823820875103166275610";
+pub const EC_D: &str =
+    "66962869036803792517252271411794185920904369633174339968503819875414808830222";
+pub const EC_X: &str =
+    "44559590025182684090047224048952823820761123113194172351827877841355163671589";
+pub const EC_Y: &str =
+    "112154473937731029928959042955816822867270053756587384329823820875103166275610";
 pub const ED_PKCS8: &str = "302e020100300506032b65700422042065f45a6006942ec426a1667d42e02fbce8ed73436dd444cac275f58b50982aa1";
 pub const ED_SEED: &str = "65f45a6006942ec426a1667d42e02fbce8ed73436dd444cac275f58b50982aa1";
-pub const ED_PKIX_PUB: &str = "302a300506032b657003210044864760e04b5f4a5ae44b1d5c0663f1376891efd5e725c2e7181f2372eb513e";
+pub const ED_PKIX_PUB: &str =
+    "302a300506032b657003210044864760e04b5f4a5ae44b1d5c0663f1376891efd5e725c2e7181f2372eb513e";
 pub const BIGINT_DER: &str = "020d018ee90ff6c373e0ee4e3f0ad2";
 pub const BIGINT_BACK: &str = "123456789012345678901234567890";
 pub const BIGINT_REST: int = 2;
@@ -157,7 +166,10 @@ fn testPKCS1Private() {
     check(key.Primes[1i64].String() == RSA_Q, "pkcs1 priv: Q");
     check(key.Precomputed.Dp.String() == RSA_DP, "pkcs1 priv: Dp");
     check(key.Precomputed.Dq.String() == RSA_DQ, "pkcs1 priv: Dq");
-    check(key.Precomputed.Qinv.String() == RSA_QINV, "pkcs1 priv: Qinv");
+    check(
+        key.Precomputed.Qinv.String() == RSA_QINV,
+        "pkcs1 priv: Qinv",
+    );
 
     // Round trip: re-marshal must be byte-identical to Go's own output.
     let mut k2 = key.clone();
@@ -236,7 +248,10 @@ fn testPKCS8Ed25519() {
         Some(k) => {
             check(tohex(&k.Seed()) == ED_SEED, "pkcs8 Ed25519: seed");
             let (out, err) = MarshalPKCS8PrivateKey(&Any::new_fn(k.clone()));
-            check(err == goish::nil, "MarshalPKCS8PrivateKey(Ed25519): no error");
+            check(
+                err == goish::nil,
+                "MarshalPKCS8PrivateKey(Ed25519): no error",
+            );
             checkHex(
                 tohex(&out),
                 ED_PKCS8,
@@ -312,7 +327,10 @@ fn testUnmarshalBareBigInt() {
     let (rest, err) = asn1::Unmarshal(slice::__from_vec(withTrailer), &mut n);
     check(err == goish::nil, "Unmarshal(big::Int): no error");
     check(n.String() == BIGINT_BACK, "Unmarshal(big::Int): value");
-    check(rest.Len() == BIGINT_REST, "Unmarshal(big::Int): rest length");
+    check(
+        rest.Len() == BIGINT_REST,
+        "Unmarshal(big::Int): rest length",
+    );
 }
 
 // The OPTIONAL-omission invariant `asn1::makeField` runs — `v ==
@@ -340,7 +358,11 @@ fn testOptionalZeroOmission() {
 
     let (b, err) = asn1::MarshalWithParams(&time::Unix(TIME_SET_UNIX, 0).UTC(), "optional");
     check(err == goish::nil, "optional set time::Time: no error");
-    checkHex(tohex(&b), TIME_SET_DER, "optional set time::Time is emitted");
+    checkHex(
+        tohex(&b),
+        TIME_SET_DER,
+        "optional set time::Time is emitted",
+    );
 
     // KNOWN DIVERGENCE, recorded rather than hidden: Go's `*big.Int` is a
     // pointer, so it distinguishes a nil one (omitted) from a present
@@ -383,7 +405,10 @@ fn testTimeParsers() {
 
     let (t, err) = asn1::ParseUTCTime(bytes("9105062345Z"));
     check(err == goish::nil, "parseUTCTime: short form no error");
-    check(t.UTC().Unix() == UTC_9105062345Z, "parseUTCTime: short form");
+    check(
+        t.UTC().Unix() == UTC_9105062345Z,
+        "parseUTCTime: short form",
+    );
 
     let (t, err) = asn1::ParseUTCTime(bytes("500506234540Z"));
     check(err == goish::nil, "parseUTCTime: 2050 rollback no error");

@@ -68,7 +68,6 @@ fn main() {
     let mut failed = 0;
     let mut n = 1;
 
-
     let base = errors::New(string("connection refused"));
 
     // 1-4. OpError's four shapes. Source present -> "->"; Source absent
@@ -81,11 +80,14 @@ fn main() {
             Addr: Some(addr(93, 184, 216, 34, 80)),
             Err: base.clone(),
         };
-        if !eq(n, 
+        if !eq(
+            n,
             "OpError src->addr",
             goish::errors::ErrorTrait::Error(&e),
             "dial tcp 10.0.0.1:1234->93.184.216.34:80: connection refused",
-        ) { failed += 1; }
+        ) {
+            failed += 1;
+        }
         n += 1;
     }
     {
@@ -96,11 +98,14 @@ fn main() {
             Addr: Some(addr(93, 184, 216, 34, 80)),
             Err: base.clone(),
         };
-        if !eq(n, 
+        if !eq(
+            n,
             "OpError addr only",
             goish::errors::ErrorTrait::Error(&e),
             "dial tcp 93.184.216.34:80: connection refused",
-        ) { failed += 1; }
+        ) {
+            failed += 1;
+        }
         n += 1;
     }
     {
@@ -111,11 +116,14 @@ fn main() {
             Addr: None,
             Err: base.clone(),
         };
-        if !eq(n, 
+        if !eq(
+            n,
             "OpError net only",
             goish::errors::ErrorTrait::Error(&e),
             "listen tcp: connection refused",
-        ) { failed += 1; }
+        ) {
+            failed += 1;
+        }
         n += 1;
     }
     {
@@ -126,11 +134,14 @@ fn main() {
             Addr: None,
             Err: base.clone(),
         };
-        if !eq(n, 
+        if !eq(
+            n,
             "OpError op only",
             goish::errors::ErrorTrait::Error(&e),
             "read: connection refused",
-        ) { failed += 1; }
+        ) {
+            failed += 1;
+        }
         n += 1;
     }
 
@@ -162,11 +173,14 @@ fn main() {
             Type: string("IP address"),
             Text: string("1.2.3"),
         };
-        if !eq(n, 
+        if !eq(
+            n,
             "ParseError",
             goish::errors::ErrorTrait::Error(&e),
             "invalid IP address: 1.2.3",
-        ) { failed += 1; }
+        ) {
+            failed += 1;
+        }
         n += 1;
     }
     {
@@ -174,11 +188,14 @@ fn main() {
             Err: string("missing port in address"),
             Addr: string("example.com"),
         };
-        if !eq(n, 
+        if !eq(
+            n,
             "AddrError with addr",
             goish::errors::ErrorTrait::Error(&e),
             "address example.com: missing port in address",
-        ) { failed += 1; }
+        ) {
+            failed += 1;
+        }
         n += 1;
     }
     {
@@ -187,25 +204,38 @@ fn main() {
             Err: string("bare"),
             Addr: string(""),
         };
-        if !eq(n, "AddrError bare", goish::errors::ErrorTrait::Error(&e), "bare") { failed += 1; }
+        if !eq(
+            n,
+            "AddrError bare",
+            goish::errors::ErrorTrait::Error(&e),
+            "bare",
+        ) {
+            failed += 1;
+        }
         n += 1;
     }
     {
         let e = UnknownNetworkError(string("sctp"));
-        if !eq(n, 
+        if !eq(
+            n,
             "UnknownNetworkError",
             goish::errors::ErrorTrait::Error(&e),
             "unknown network sctp",
-        ) { failed += 1; }
+        ) {
+            failed += 1;
+        }
         n += 1;
     }
     {
         let e = InvalidAddrError(string("bad addr"));
-        if !eq(n, 
+        if !eq(
+            n,
             "InvalidAddrError",
             goish::errors::ErrorTrait::Error(&e),
             "bad addr",
-        ) { failed += 1; }
+        ) {
+            failed += 1;
+        }
         n += 1;
     }
 
@@ -216,22 +246,28 @@ fn main() {
         e.Name = string("nope.example");
         e.Server = string("8.8.8.8:53");
         e.IsNotFound = true;
-        if !eq(n, 
+        if !eq(
+            n,
             "DNSError with server",
             goish::errors::ErrorTrait::Error(&e),
             "lookup nope.example on 8.8.8.8:53: no such host",
-        ) { failed += 1; }
+        ) {
+            failed += 1;
+        }
         n += 1;
     }
     {
         let mut e = DNSError::default();
         e.Err = string("timeout");
         e.Name = string("slow.example");
-        if !eq(n, 
+        if !eq(
+            n,
             "DNSError no server",
             goish::errors::ErrorTrait::Error(&e),
             "lookup slow.example: timeout",
-        ) { failed += 1; }
+        ) {
+            failed += 1;
+        }
         n += 1;
     }
 

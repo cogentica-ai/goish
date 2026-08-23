@@ -8,8 +8,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
+use goish::fmt;
 use goish::io;
 use goish::{make, string, syscall};
 
@@ -35,7 +35,11 @@ fn main() {
         if err.IsNil() && n == 11 && buf.String() == "hello world" {
             fmt::Println!("[ 2] ReadFrom drains source    PASS");
         } else {
-            fmt::Println!("[ 2] ReadFrom drains source    FAIL n={} body={}", n, buf.String());
+            fmt::Println!(
+                "[ 2] ReadFrom drains source    FAIL n={} body={}",
+                n,
+                buf.String()
+            );
             failed += 1;
         }
     }

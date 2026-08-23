@@ -18,25 +18,25 @@ impl P256Element {
     ///
     /// If x == 0, Invert returns e = 0.
     pub fn Invert(&mut self, x: &P256Element) -> &mut Self {
-    // Inversion is implemented as exponentiation with exponent p − 2.
-    // The sequence of 12 multiplications and 255 squarings is derived from the
-    // following addition chain generated with github.com/mmcloughlin/addchain v0.4.0.
-    //
-    //	_10     = 2*1
-    //	_11     = 1 + _10
-    //	_110    = 2*_11
-    //	_111    = 1 + _110
-    //	_111000 = _111 << 3
-    //	_111111 = _111 + _111000
-    //	x12     = _111111 << 6 + _111111
-    //	x15     = x12 << 3 + _111
-    //	x16     = 2*x15 + 1
-    //	x32     = x16 << 16 + x16
-    //	i53     = x32 << 15
-    //	x47     = x15 + i53
-    //	i263    = ((i53 << 17 + 1) << 143 + x47) << 47
-    //	return    (x47 + i263) << 2 + 1
-    //
+        // Inversion is implemented as exponentiation with exponent p − 2.
+        // The sequence of 12 multiplications and 255 squarings is derived from the
+        // following addition chain generated with github.com/mmcloughlin/addchain v0.4.0.
+        //
+        //	_10     = 2*1
+        //	_11     = 1 + _10
+        //	_110    = 2*_11
+        //	_111    = 1 + _110
+        //	_111000 = _111 << 3
+        //	_111111 = _111 + _111000
+        //	x12     = _111111 << 6 + _111111
+        //	x15     = x12 << 3 + _111
+        //	x16     = 2*x15 + 1
+        //	x32     = x16 << 16 + x16
+        //	i53     = x32 << 15
+        //	x47     = x15 + i53
+        //	i263    = ((i53 << 17 + 1) << 143 + x47) << 47
+        //	return    (x47 + i263) << 2 + 1
+        //
         let mut z = P256Element::New();
         z.Set(*self);
         let mut t0 = P256Element::New();

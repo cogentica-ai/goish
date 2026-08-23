@@ -74,12 +74,10 @@ pub unsafe fn register(g: &super::g::G, node: *mut Cleanup) {
     let mut head = g.cleanups.load(Ordering::Acquire);
     loop {
         unsafe { (*node).next = head };
-        match g.cleanups.compare_exchange_weak(
-            head,
-            node,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
+        match g
+            .cleanups
+            .compare_exchange_weak(head, node, Ordering::AcqRel, Ordering::Acquire)
+        {
             Ok(_) => return,
             Err(observed) => head = observed,
         }
@@ -100,12 +98,9 @@ pub unsafe fn unregister(g: &super::g::G, node: *mut Cleanup) {
         let next = unsafe { (*node).next };
         // Single-threaded mutation; relaxed swap is fine but use AcqRel
         // for memory model clarity.
-        let _ = g.cleanups.compare_exchange(
-            node,
-            next,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        );
+        let _ = g
+            .cleanups
+            .compare_exchange(node, next, Ordering::AcqRel, Ordering::Acquire);
         return;
     }
     // Walk the list looking for `node`'s predecessor.

@@ -157,7 +157,12 @@ fn main() {
         r.to_vec()
     };
     tampered[0] ^= 0x01;
-    let (_, err) = g.Open(empty(), nonce.clone(), slice::__from_vec(tampered), unhex(AAD));
+    let (_, err) = g.Open(
+        empty(),
+        nonce.clone(),
+        slice::__from_vec(tampered),
+        unhex(AAD),
+    );
     check(
         "tampered ciphertext errors",
         fmt::Sprintf!("%v", err != goish::nil),
@@ -225,11 +230,7 @@ fn main() {
     let hr: &[byte] = &one;
     hkey.copy_from_slice(hr);
     let gh = gcm::GHASH(&hkey, &[unhex("00000000000000000000000000000000")]);
-    check(
-        "GHASH one zero block",
-        fmt::Sprintf!("%d", gh.Len()),
-        "16",
-    );
+    check("GHASH one zero block", fmt::Sprintf!("%d", gh.Len()), "16");
 
     // ── CMAC (NIST SP 800-38B) ────────────────────────────────────────
     //

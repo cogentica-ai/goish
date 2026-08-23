@@ -91,7 +91,6 @@ rTXGcd5XGWoS0+AF8t1cUw==
 -----END PRIVATE KEY-----
 ";
 
-
 // ─── harness ────────────────────────────────────────────────────────
 
 static PASSED: AtomicUsize = AtomicUsize::new(0);
@@ -496,9 +495,7 @@ fn run() {
                 go!(stack(1024 * 1024), move || {
                     let _ = srv2.Shutdown(time::Duration(10 * 1_000_000_000));
                 });
-                let _ = c.SetReadDeadline(
-                    time::Now().Add(time::Duration(10 * 1_000_000_000)),
-                );
+                let _ = c.SetReadDeadline(time::Now().Add(time::Duration(10 * 1_000_000_000)));
                 let start = time::Now();
                 let mut b2 = goish::make!([]goish::byte, 64);
                 let (n2, re2) = c.Read(&mut b2);
@@ -506,10 +503,7 @@ fn run() {
                 // Bound well under the 3s idle read deadline: only the
                 // Shutdown KICK can close it this fast. Letting the
                 // idle timeout do it would take ~3s and fail here.
-                if n2 == 0
-                    && !re2.IsNil()
-                    && elapsed < time::Duration(1_500 * 1_000_000)
-                {
+                if n2 == 0 && !re2.IsNil() && elapsed < time::Duration(1_500 * 1_000_000) {
                     pass("Shutdown kicks an idle HTTPS keep-alive conn");
                 } else {
                     fail(fmt::Sprintf!(

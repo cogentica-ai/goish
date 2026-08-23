@@ -11,13 +11,13 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
-use goish::fmt;
 use goish::convert::bytes as to_bytes;
 use goish::crypto::sha1;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::hash::Hash;
+use goish::syscall;
 use goish::types::byte;
-use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -132,10 +132,7 @@ fn main() {
         let dst = to_bytes("PRE:");
         let out = h.Sum(dst);
         let raw: &[byte] = &out;
-        if raw.len() == 4 + 20
-            && &raw[0..4] == b"PRE:"
-            && array20_eq(&SHA1_ABC, &raw[4..])
-        {
+        if raw.len() == 4 + 20 && &raw[0..4] == b"PRE:" && array20_eq(&SHA1_ABC, &raw[4..]) {
             fmt::Println!("[ 6] Sum prefix                PASS");
         } else {
             fmt::Println!("[ 6] Sum prefix                FAIL");

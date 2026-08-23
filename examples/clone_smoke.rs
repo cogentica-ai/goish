@@ -78,7 +78,8 @@ fn main() {
     // Clone needs the stack TOP. Stack grows downward.
     let stack_top = unsafe { stack.add(STACK_SIZE) };
 
-    let child_tid = unsafe { syscall::Clone(syscall::CLONE_THREAD_FLAGS, stack_top, child_entry, 0) };
+    let child_tid =
+        unsafe { syscall::Clone(syscall::CLONE_THREAD_FLAGS, stack_top, child_entry, 0) };
     check(child_tid > 0, b"clone returned non-positive tid\n");
     check(child_tid as i32 != parent_tid, b"child tid == parent tid\n");
 

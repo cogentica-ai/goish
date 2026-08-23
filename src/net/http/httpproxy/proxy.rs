@@ -214,7 +214,8 @@ impl config {
             // Go: IPv4/CIDR, IPv6/CIDR
             let (_, pnet, cerr) = crate::net::ParseCIDR(p.clone());
             if cerr.IsNil() {
-                self.ipMatchers.push(MatcherKind::Cidr(cidrMatch { cidr: pnet }));
+                self.ipMatchers
+                    .push(MatcherKind::Cidr(cidrMatch { cidr: pnet }));
                 continue;
             }
             // Go: IPv4:port, [IPv6]:port

@@ -23,12 +23,19 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::net::http;
 use goish::net::http::header::{hasToken, isTokenBoundary, Header};
 use goish::net::http::request::{valueOrDefault, Request};
-use goish::net::http;
 use goish::{fmt, string, syscall};
 
-fn req(method: &'static str, proto: &'static str, maj: i64, min: i64, path: &'static str, hdrs: &[(&'static str, &'static str)]) -> Request {
+fn req(
+    method: &'static str,
+    proto: &'static str,
+    maj: i64,
+    min: i64,
+    path: &'static str,
+    hdrs: &[(&'static str, &'static str)],
+) -> Request {
     let mut h = Header::new();
     let mut i = 0;
     while i < hdrs.len() {
@@ -127,7 +134,12 @@ fn main() {
         if a.isH2Upgrade() && !b.isH2Upgrade() && !c.isH2Upgrade() {
             fmt::Println!("[4] isH2Upgrade  PASS");
         } else {
-            fmt::Println!("[4] isH2Upgrade  FAIL ", a.isH2Upgrade(), b.isH2Upgrade(), c.isH2Upgrade());
+            fmt::Println!(
+                "[4] isH2Upgrade  FAIL ",
+                a.isH2Upgrade(),
+                b.isH2Upgrade(),
+                c.isH2Upgrade()
+            );
             failed += 1;
         }
     }
@@ -147,8 +159,22 @@ fn main() {
 
     // 6. wantsHttp10KeepAlive — only for HTTP/1.0 exactly.
     {
-        let a = req("GET", "HTTP/1.0", 1, 0, "/", &[("Connection", "keep-alive")]);
-        let b = req("GET", "HTTP/1.1", 1, 1, "/", &[("Connection", "keep-alive")]);
+        let a = req(
+            "GET",
+            "HTTP/1.0",
+            1,
+            0,
+            "/",
+            &[("Connection", "keep-alive")],
+        );
+        let b = req(
+            "GET",
+            "HTTP/1.1",
+            1,
+            1,
+            "/",
+            &[("Connection", "keep-alive")],
+        );
         let c = req("GET", "HTTP/1.0", 1, 0, "/", &[]);
         if a.wantsHttp10KeepAlive() && !b.wantsHttp10KeepAlive() && !c.wantsHttp10KeepAlive() {
             fmt::Println!("[6] wantsHttp10KeepAlive  PASS");
@@ -160,8 +186,22 @@ fn main() {
 
     // 7. requiresHTTP1 — Connection: Upgrade AND Upgrade: websocket.
     {
-        let a = req("GET", "HTTP/1.1", 1, 1, "/", &[("Connection", "Upgrade"), ("Upgrade", "websocket")]);
-        let b = req("GET", "HTTP/1.1", 1, 1, "/", &[("Connection", "Upgrade"), ("Upgrade", "h2c")]);
+        let a = req(
+            "GET",
+            "HTTP/1.1",
+            1,
+            1,
+            "/",
+            &[("Connection", "Upgrade"), ("Upgrade", "websocket")],
+        );
+        let b = req(
+            "GET",
+            "HTTP/1.1",
+            1,
+            1,
+            "/",
+            &[("Connection", "Upgrade"), ("Upgrade", "h2c")],
+        );
         let c = req("GET", "HTTP/1.1", 1, 1, "/", &[("Upgrade", "websocket")]);
         if a.requiresHTTP1() && !b.requiresHTTP1() && !c.requiresHTTP1() {
             fmt::Println!("[7] requiresHTTP1  PASS");
@@ -194,7 +234,13 @@ fn main() {
                 r.Header.Set(string("Connection"), string(*conn));
             }
             if r.wantsClose() != *want {
-                fmt::Println!("     wantsClose(Close=", *close, " Connection=", *conn, ") wrong");
+                fmt::Println!(
+                    "     wantsClose(Close=",
+                    *close,
+                    " Connection=",
+                    *conn,
+                    ") wrong"
+                );
                 bad += 1;
             }
         }

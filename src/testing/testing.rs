@@ -293,11 +293,7 @@ impl T {
     // nothing: the body has not run, `sub` is still empty, and a
     // parallel subtest created later parks on a barrier nobody closes.
     fn finish_before_goexit(&self) {
-        if self
-            .state
-            .reported
-            .swap(true, Ordering::AcqRel)
-        {
+        if self.state.reported.swap(true, Ordering::AcqRel) {
             return;
         }
         let state = &self.state;
@@ -812,8 +808,16 @@ pub fn Init() {
         // its functionality is provided by test writers themselves."
         short: crate::flag::Bool("test.short", false, "run smaller test suite to save time"),
         chatty: crate::flag::Bool("test.v", false, "verbose: print additional output"),
-        run: crate::flag::String("test.run", "", "run only tests and examples matching `regexp`"),
-        skip: crate::flag::String("test.skip", "", "do not list or run tests matching `regexp`"),
+        run: crate::flag::String(
+            "test.run",
+            "",
+            "run only tests and examples matching `regexp`",
+        ),
+        skip: crate::flag::String(
+            "test.skip",
+            "",
+            "do not list or run tests matching `regexp`",
+        ),
         count: crate::flag::Uint("test.count", 1, "run tests and benchmarks `n` times"),
         timeout: crate::flag::Duration(
             "test.timeout",
@@ -825,7 +829,11 @@ pub fn Init() {
             crate::runtime::NumCPU(),
             "run at most `n` tests in parallel",
         ),
-        fullPath: crate::flag::Bool("test.fullpath", false, "show full file names in error messages"),
+        fullPath: crate::flag::Bool(
+            "test.fullpath",
+            false,
+            "show full file names in error messages",
+        ),
         failFast: crate::flag::Bool(
             "test.failfast",
             false,
@@ -1152,7 +1160,10 @@ pub fn parseCpuList(cpuListStr: string) -> (crate::goslice::slice<int>, crate::e
     if cpuList.len() == 0 {
         cpuList.push(crate::runtime::GOMAXPROCS(-1));
     }
-    return (crate::goslice::slice::__from_vec(cpuList), crate::errors::nil);
+    return (
+        crate::goslice::slice::__from_vec(cpuList),
+        crate::errors::nil,
+    );
 }
 
 // ─── chattyPrinter ───────────────────────────────────────────────────
@@ -1224,11 +1235,7 @@ impl chattyPrinter {
         if last.Len() == 0 {
             *last = testName;
         } else if *last != testName {
-            let hdr = crate::fmt::Sprintf!(
-                "%s=== NAME  %s\n",
-                self.prefix(),
-                testName.clone()
-            );
+            let hdr = crate::fmt::Sprintf!("%s=== NAME  %s\n", self.prefix(), testName.clone());
             self.w.Lock().extend_from_slice(hdr.as_bytes());
             *last = testName;
         }
@@ -1254,8 +1261,7 @@ impl chattyPrinter {
 /// `pcToName` could only ever have returned "", which would have made
 /// every `Helper`/`Cleanup` attribution silently blank.
 pub fn callerName(skip: int) -> string {
-    let mut pc: crate::goslice::slice<crate::types::uintptr> =
-        crate::make!([]uintptr, 1);
+    let mut pc: crate::goslice::slice<crate::types::uintptr> = crate::make!([]uintptr, 1);
     // Go: skip + runtime.Callers + callerName
     let n = crate::runtime::Callers(skip + 2, &mut pc);
     if n == 0 {
@@ -1334,7 +1340,10 @@ pub(crate) trait testDeps {
         &self,
         dir: string,
         types: crate::goslice::slice<crate::reflect::Type>,
-    ) -> (crate::goslice::slice<crate::testing::fuzz::corpusEntry>, crate::errors::error);
+    ) -> (
+        crate::goslice::slice<crate::testing::fuzz::corpusEntry>,
+        crate::errors::error,
+    );
     fn CheckCorpus(
         &self,
         vals: crate::goslice::slice<crate::goany::Any>,
@@ -1362,9 +1371,7 @@ pub(crate) type SnapCovFunc = alloc::boxed::Box<dyn Fn() -> crate::types::float6
 /// block off a bare function type.
 #[allow(non_camel_case_types)]
 pub(crate) struct matchStringOnly {
-    f: alloc::boxed::Box<
-        dyn Fn(string, string) -> (bool, crate::errors::error) + Send + Sync,
-    >,
+    f: alloc::boxed::Box<dyn Fn(string, string) -> (bool, crate::errors::error) + Send + Sync>,
 }
 
 #[allow(dead_code)]
@@ -1451,7 +1458,10 @@ impl testDeps for matchStringOnly {
         &self,
         dir: string,
         types: crate::goslice::slice<crate::reflect::Type>,
-    ) -> (crate::goslice::slice<crate::testing::fuzz::corpusEntry>, crate::errors::error) {
+    ) -> (
+        crate::goslice::slice<crate::testing::fuzz::corpusEntry>,
+        crate::errors::error,
+    ) {
         return (crate::goslice::slice::new(), errMain.into());
     }
 
@@ -1543,10 +1553,7 @@ where
             string::from_static(""),
         ),
         runFuzzWorker: d.RunFuzzWorker(&mut |_e| crate::errors::nil),
-        checkCorpus: d.CheckCorpus(
-            crate::goslice::slice::new(),
-            crate::goslice::slice::new(),
-        ),
+        checkCorpus: d.CheckCorpus(crate::goslice::slice::new(), crate::goslice::slice::new()),
         readCorpusLen: corpus.Len(),
         readCorpusErr,
         coverMode,
@@ -1597,8 +1604,11 @@ impl T {
     /// verbatim means the call has to resolve.
     pub(crate) fn checkFuzzFn(&self, name: string) {
         if self.state.inFuzzFn.load(Ordering::Acquire) {
-            panic!("testing: f.{} was called inside the fuzz target, use t.{} instead",
-                   name.as_ref() as &str, name.as_ref() as &str);
+            panic!(
+                "testing: f.{} was called inside the fuzz target, use t.{} instead",
+                name.as_ref() as &str,
+                name.as_ref() as &str
+            );
         }
     }
 
@@ -1640,12 +1650,7 @@ impl T {
         // variadic. Same text either way.
         chatty.Updatef(
             self.name.clone(),
-            crate::fmt::Sprintf!(
-                "=== ATTR  %s %v %v\n",
-                self.name.clone(),
-                key,
-                value
-            ),
+            crate::fmt::Sprintf!("=== ATTR  %s %v %v\n", self.name.clone(), key, value),
         );
     }
 }
@@ -1690,10 +1695,7 @@ impl TState {
 // exposes the parent-walk it performs so a test can drive it.
 #[doc(hidden)]
 pub fn __shim_destination(t: &T) -> Option<string> {
-    return t
-        .state
-        .destination()
-        .map(|d| return d.name.Lock().clone());
+    return t.state.destination().map(|d| return d.name.Lock().clone());
 }
 
 // go: none — goish-only: lets a test observe `ran` and `done`, which
@@ -1843,11 +1845,8 @@ impl outputWriter {
             None => return,
         };
         if !c.done.load(Ordering::Acquire) && c.chatty.Lock().is_some() {
-            let line = crate::fmt::Sprintf!(
-                "%s%s",
-                string::from_bytes(indent),
-                string::from_bytes(b)
-            );
+            let line =
+                crate::fmt::Sprintf!("%s%s", string::from_bytes(indent), string::from_bytes(b));
             if c.bench.load(Ordering::Acquire) {
                 // Go: "Benchmarks don't print === CONT, so we should
                 // skip the test printer and just print straight to
@@ -2052,10 +2051,7 @@ impl TState {
             Some(c) => c.prefix(),
             None => string::from_static(""),
         };
-        let msg = crate::fmt::Sprintv(
-            crate::fmt::Sprintf!("%s%s", prefix, format),
-            args,
-        );
+        let msg = crate::fmt::Sprintv(crate::fmt::Sprintf!("%s%s", prefix, format), args);
 
         let w = p.w.Lock().clone();
         match w {
@@ -2068,11 +2064,7 @@ impl TState {
             None => {
                 // The root: Go's driver holds an os.Stdout here.
                 let bytes = msg.clone().__as_bytes_internal().to_vec();
-                crate::syscall::Write(
-                    crate::syscall::STDOUT,
-                    bytes.as_ptr(),
-                    bytes.len(),
-                );
+                crate::syscall::Write(crate::syscall::STDOUT, bytes.as_ptr(), bytes.len());
             }
         }
     }
@@ -2566,9 +2558,9 @@ impl T {
                     drop(st);
                     self.Fatalf(
                         "TempDir: %v",
-                        crate::goslice::slice::__from_vec(alloc::vec![
-                            crate::goany::Any::new(err.Error())
-                        ]),
+                        crate::goslice::slice::__from_vec(alloc::vec![crate::goany::Any::new(
+                            err.Error()
+                        )]),
                     );
                 }
             }
@@ -2623,10 +2615,8 @@ impl T {
                         let e = removeAll(toRemove);
                         if e != crate::errors::nil {
                             // Go: c.Errorf("TempDir RemoveAll cleanup: %v", err)
-                            let msg = crate::fmt::Sprintf!(
-                                "TempDir RemoveAll cleanup: %v",
-                                e.Error()
-                            );
+                            let msg =
+                                crate::fmt::Sprintf!("TempDir RemoveAll cleanup: %v", e.Error());
                             let bytes = msg.clone().__as_bytes_internal().to_vec();
                             crate::syscall::Write(
                                 crate::syscall::STDOUT,
@@ -2647,9 +2637,9 @@ impl T {
                 drop(st);
                 self.Fatalf(
                     "TempDir: %v",
-                    crate::goslice::slice::__from_vec(alloc::vec![
-                        crate::goany::Any::new(e.Error())
-                    ]),
+                    crate::goslice::slice::__from_vec(alloc::vec![crate::goany::Any::new(
+                        e.Error()
+                    )]),
                 );
             }
         }
@@ -2660,9 +2650,7 @@ impl T {
         if err != crate::errors::nil {
             self.Fatalf(
                 "TempDir: %v",
-                crate::goslice::slice::__from_vec(alloc::vec![
-                    crate::goany::Any::new(err.Error())
-                ]),
+                crate::goslice::slice::__from_vec(alloc::vec![crate::goany::Any::new(err.Error())]),
             );
         }
         return dir;
@@ -2674,8 +2662,7 @@ impl T {
 // go: sdk 1.25.5 testing/testing.go:520 numFailed
 /// Go: "number of test failures". Incremented by tRunner for every
 /// top-level test that fails, and read only by shouldFailFast.
-pub(crate) static numFailed: core::sync::atomic::AtomicU32 =
-    core::sync::atomic::AtomicU32::new(0);
+pub(crate) static numFailed: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 // go: sdk 1.25.5 testing/testing.go:2723-2725 shouldFailFast
 /// Go: "shouldFailFast reports whether the test binary should stop
@@ -2792,9 +2779,8 @@ impl TState {
 /// barrier is not reported as running. Without that, a timeout panic
 /// would name every parallel test in the tree rather than the ones
 /// actually stuck.
-pub(crate) static running: crate::sync::Mutex<
-    Option<crate::map<string, crate::time::Time>>,
-> = crate::sync::Mutex::new(None);
+pub(crate) static running: crate::sync::Mutex<Option<crate::map<string, crate::time::Time>>> =
+    crate::sync::Mutex::new(None);
 
 // go: none — goish idiom: Go's `running` is a sync.Map, usable
 // zero-valued. goish's map needs constructing, so the two accessors
@@ -2867,10 +2853,7 @@ pub struct InternalTest {
 /// deduplication and parallel gating to top-level tests for free,
 /// rather than needing a second implementation beside T.Run.
 #[allow(non_snake_case)]
-pub fn runTests(
-    tests: &[InternalTest],
-    deadline: crate::time::Time,
-) -> (bool, bool) {
+pub fn runTests(tests: &[InternalTest], deadline: crate::time::Time) -> (bool, bool) {
     let mut ran = false;
     let mut ok = true;
 
@@ -2977,12 +2960,7 @@ pub fn toOutputDir(path: string) -> string {
     if crate::os::IsPathSeparator(path.as_bytes()[0]) {
         return path;
     }
-    return crate::fmt::Sprintf!(
-        "%s%c%s",
-        dir,
-        '/' as crate::types::rune,
-        path
-    );
+    return crate::fmt::Sprintf!("%s%c%s", dir, '/' as crate::types::rune, path);
 }
 
 // go: sdk 1.25.5 testing/testing.go:2403-2429 listTests

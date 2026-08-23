@@ -20,7 +20,7 @@ extern crate alloc;
 extern crate goish;
 
 use goish::gostring::string;
-use goish::runtime::{CallersFrames, Callers, FuncForPC};
+use goish::runtime::{Callers, CallersFrames, FuncForPC};
 use goish::types::{int, uintptr};
 use goish::{fmt, make, slice, syscall};
 
@@ -98,7 +98,14 @@ fn main() {
         } else {
             fmt::Println!(
                 "[ 2] frames named, in order    FAIL (",
-                i3, ",", i2, ",", i1, " of ", seen.len() as i64, ")"
+                i3,
+                ",",
+                i2,
+                ",",
+                i1,
+                " of ",
+                seen.len() as i64,
+                ")"
             );
             for nm in seen.iter().take(6) {
                 fmt::Println!("      ", nm.clone());

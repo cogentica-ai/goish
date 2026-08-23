@@ -9,10 +9,10 @@ mod gcm_nonces;
 mod ghash;
 
 pub use cmac::{NewCMAC, CMAC};
-pub use ctrkdf::{NewCounterKDF, CounterKDF};
+pub use ctrkdf::{CounterKDF, NewCounterKDF};
 pub use gcm::{New, GCM};
 pub use gcm_nonces::{
-    NewGCMForSSH, NewGCMForTLS12, NewGCMForTLS13, NewGCMWithCounterNonce, SealWithRandomNonce,
-    GCMForSSH, GCMForTLS12, GCMForTLS13, GCMWithCounterNonce,
+    GCMForSSH, GCMForTLS12, GCMForTLS13, GCMWithCounterNonce, NewGCMForSSH, NewGCMForTLS12,
+    NewGCMForTLS13, NewGCMWithCounterNonce, SealWithRandomNonce,
 };
 pub use ghash::GHASH;

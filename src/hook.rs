@@ -83,11 +83,7 @@ impl<T: ?Sized + Send + Sync + 'static> Hook<T> {
     /// `tracer.M(args)` directly without a `.call(...).unwrap()`
     /// closure dance. The panic message mirrors Go's nil-method-
     /// dispatch runtime error so debugging signal stays Go-shaped.
-    pub fn call_or_panic<R>(
-        &self,
-        nil_msg: &'static str,
-        f: impl FnOnce(&T) -> R,
-    ) -> R {
+    pub fn call_or_panic<R>(&self, nil_msg: &'static str, f: impl FnOnce(&T) -> R) -> R {
         let g = self.inner.lock();
         match g.as_ref() {
             ::core::option::Option::Some(t) => f(&**t),

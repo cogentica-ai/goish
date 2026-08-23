@@ -82,7 +82,11 @@ fn run() -> ! {
         // A second Hijack must fail rather than hand out the fd twice.
         let (_, err2) = cn.Hijack();
         SECOND_HIJACK.store(
-            if errors::Is(err2, http::ErrHijacked) { 1 } else { 0 },
+            if errors::Is(err2, http::ErrHijacked) {
+                1
+            } else {
+                0
+            },
             Ordering::Relaxed,
         );
 

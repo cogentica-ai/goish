@@ -9,11 +9,11 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
-use goish::fmt;
 use goish::encoding::binary;
+use goish::fmt;
 use goish::goslice::slice;
+use goish::syscall;
 use goish::types::{byte, int, uint};
-use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -134,12 +134,7 @@ fn main() {
     // 9. BigEndian.AppendUint32.
     {
         let buf = binary::BigEndian.AppendUint32(empty_buf(), 0xDEADBEEF);
-        if buf.Len() == 4
-            && buf[0] == 0xDE
-            && buf[1] == 0xAD
-            && buf[2] == 0xBE
-            && buf[3] == 0xEF
-        {
+        if buf.Len() == 4 && buf[0] == 0xDE && buf[1] == 0xAD && buf[2] == 0xBE && buf[3] == 0xEF {
             fmt::Println!("[ 9] BE.AppendUint32           PASS");
         } else {
             fmt::Println!("[ 9] BE.AppendUint32           FAIL");
@@ -150,10 +145,7 @@ fn main() {
     // 10. BigEndian.AppendUint64.
     {
         let buf = binary::BigEndian.AppendUint64(empty_buf(), 0x0102030405060708);
-        if buf.Len() == 8
-            && buf[0] == 0x01
-            && buf[7] == 0x08
-        {
+        if buf.Len() == 8 && buf[0] == 0x01 && buf[7] == 0x08 {
             fmt::Println!("[10] BE.AppendUint64           PASS");
         } else {
             fmt::Println!("[10] BE.AppendUint64           FAIL");
@@ -164,12 +156,7 @@ fn main() {
     // 11. LittleEndian.AppendUint32 (byte-order flip).
     {
         let buf = binary::LittleEndian.AppendUint32(empty_buf(), 0xDEADBEEF);
-        if buf.Len() == 4
-            && buf[0] == 0xEF
-            && buf[1] == 0xBE
-            && buf[2] == 0xAD
-            && buf[3] == 0xDE
-        {
+        if buf.Len() == 4 && buf[0] == 0xEF && buf[1] == 0xBE && buf[2] == 0xAD && buf[3] == 0xDE {
             fmt::Println!("[11] LE.AppendUint32           PASS");
         } else {
             fmt::Println!("[11] LE.AppendUint32           FAIL");
@@ -181,12 +168,7 @@ fn main() {
     {
         let prefix: alloc::vec::Vec<byte> = alloc::vec![0xAA, 0xBB];
         let buf = binary::BigEndian.AppendUint16(slice::__from_vec(prefix), 0x1234);
-        if buf.Len() == 4
-            && buf[0] == 0xAA
-            && buf[1] == 0xBB
-            && buf[2] == 0x12
-            && buf[3] == 0x34
-        {
+        if buf.Len() == 4 && buf[0] == 0xAA && buf[1] == 0xBB && buf[2] == 0x12 && buf[3] == 0x34 {
             fmt::Println!("[12] AppendUint16 prefix       PASS");
         } else {
             fmt::Println!("[12] AppendUint16 prefix       FAIL");

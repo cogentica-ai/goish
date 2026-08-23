@@ -14,16 +14,16 @@
 #![allow(unused_mut)]
 
 extern crate alloc;
-use alloc::sync::Arc;
 use alloc::string::String;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use crate::context;
 use crate::errors::{self, error};
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::types::{byte, uint16};
-use crate::context;
 use crate::nilable;
+use crate::types::{byte, uint16};
 
 use super::dnsclient;
 use super::dnsmessage as dns;
@@ -33,17 +33,17 @@ use super::dnsmessage as dns;
 /// `net.IPAddr` — an IP address with optional zone.
 #[derive(Clone, Default)]
 pub struct IPAddr {
-    pub IP:   super::IP,
+    pub IP: super::IP,
     pub Zone: string,
 }
 
 /// `net.SRV` — a single DNS SRV record.
 #[derive(Clone, Default, Debug)]
 pub struct SRV {
-    pub Target:   string,
-    pub Port:     uint16,
+    pub Target: string,
+    pub Port: uint16,
     pub Priority: uint16,
-    pub Weight:   uint16,
+    pub Weight: uint16,
 }
 
 /// `net.MX` — a single DNS MX record.
@@ -66,7 +66,7 @@ pub struct NS {
 /// all lookups delegate directly to the dnsclient functions.
 #[derive(Clone, Default)]
 pub struct Resolver {
-    pub PreferGo:     bool,
+    pub PreferGo: bool,
     pub StrictErrors: bool,
 }
 
@@ -88,10 +88,14 @@ fn raw_to_ip(raw: &[u8]) -> super::IP {
 
 /// Check that a string is a valid domain name (mirrors Go's `isDomainName`).
 fn is_domain_name(s: &str) -> bool {
-    if s == "." { return true; }
+    if s == "." {
+        return true;
+    }
     let l = s.len();
     let sb = s.as_bytes();
-    if l == 0 || l > 254 || (l == 254 && sb[l - 1] != b'.') { return false; }
+    if l == 0 || l > 254 || (l == 254 && sb[l - 1] != b'.') {
+        return false;
+    }
     let mut last = b'.';
     let mut non_numeric = false;
     let mut part_len = 0usize;
@@ -102,22 +106,32 @@ fn is_domain_name(s: &str) -> bool {
                 non_numeric = true;
                 part_len += 1;
             }
-            b'0'..=b'9' => { part_len += 1; }
+            b'0'..=b'9' => {
+                part_len += 1;
+            }
             b'-' => {
-                if last == b'.' { return false; }
+                if last == b'.' {
+                    return false;
+                }
                 part_len += 1;
                 non_numeric = true;
             }
             b'.' => {
-                if last == b'.' || last == b'-' { return false; }
-                if part_len > 63 || part_len == 0 { return false; }
+                if last == b'.' || last == b'-' {
+                    return false;
+                }
+                if part_len > 63 || part_len == 0 {
+                    return false;
+                }
                 part_len = 0;
             }
             _ => return false,
         }
         last = c;
     }
-    if last == b'-' || part_len > 63 { return false; }
+    if last == b'-' || part_len > 63 {
+        return false;
+    }
     non_numeric
 }
 
@@ -133,8 +147,7 @@ fn new_dns_error<M: Into<string>>(msg: M, name: &str) -> error {
     errors::New(b.String())
 }
 
-const ERR_MALFORMED_DNS: &str =
-    "DNS response contained records which contain invalid names";
+const ERR_MALFORMED_DNS: &str = "DNS response contained records which contain invalid names";
 
 // ─── Resolver methods ────────────────────────────────────────────────────────
 
@@ -193,10 +206,7 @@ impl Resolver {
             "ip" | "ip4" | "ip6" => {}
             _ => {
                 let net_err = (string::from_static("unknown network ")) + (network);
-                return (
-                    slice::<super::IP>::new(),
-                    errors::New(net_err),
-                );
+                return (slice::<super::IP>::new(), errors::New(net_err));
             }
         }
         let host = host.into();
@@ -233,18 +243,29 @@ impl Resolver {
         // Walk answers for CNAME record
         loop {
             let (hdr, e2) = p.AnswerHeader();
-            if e2 == dns::ErrSectionDone { break; }
+            if e2 == dns::ErrSectionDone {
+                break;
+            }
             if e2 != errors::nil {
-                return (string::from_static(""), errors::New(string::from_static("cannot unmarshal DNS message")));
+                return (
+                    string::from_static(""),
+                    errors::New(string::from_static("cannot unmarshal DNS message")),
+                );
             }
             if hdr.Type == dns::TypeCNAME {
                 let (r, e3) = p.CNAMEResource();
                 if e3 != errors::nil {
-                    return (string::from_static(""), errors::New(string::from_static("cannot unmarshal DNS message")));
+                    return (
+                        string::from_static(""),
+                        errors::New(string::from_static("cannot unmarshal DNS message")),
+                    );
                 }
                 let cname = r.CNAME.String();
                 if !is_domain_name(cname.as_ref()) {
-                    return (string::from_static(""), errors::New(string::from_bytes(h.as_bytes())));
+                    return (
+                        string::from_static(""),
+                        errors::New(string::from_bytes(h.as_bytes())),
+                    );
                 }
                 return (cname, errors::nil);
             }
@@ -253,7 +274,9 @@ impl Resolver {
         // No CNAME record — return host itself with trailing dot
         let mut cname_str = String::with_capacity(h.len() + 1);
         cname_str.push_str(h);
-        if !h.ends_with('.') { cname_str.push('.'); }
+        if !h.ends_with('.') {
+            cname_str.push('.');
+        }
         let cname = string::from_bytes(cname_str.as_bytes());
         if !is_domain_name(cname.as_ref()) {
             return (string::from_static(""), new_dns_error("invalid CNAME", h));
@@ -284,14 +307,20 @@ impl Resolver {
         let mut names: Vec<String> = Vec::new();
         loop {
             let (hdr, e2) = p.AnswerHeader();
-            if e2 == dns::ErrSectionDone { break; }
-            if e2 != errors::nil { break; }
+            if e2 == dns::ErrSectionDone {
+                break;
+            }
+            if e2 != errors::nil {
+                break;
+            }
             if hdr.Type != dns::TypePTR {
                 let _ = p.SkipAnswer();
                 continue;
             }
             let (r, e3) = p.PTRResource();
-            if e3 != errors::nil { break; }
+            if e3 != errors::nil {
+                break;
+            }
             let name_str = {
                 let s = r.PTR.String();
                 let mut ns = String::with_capacity(s.Len() as usize);
@@ -325,19 +354,29 @@ impl Resolver {
         let mut out = slice::<string>::new();
         loop {
             let (hdr, e2) = p.AnswerHeader();
-            if e2 == dns::ErrSectionDone { break; }
-            if e2 != errors::nil { break; }
+            if e2 == dns::ErrSectionDone {
+                break;
+            }
+            if e2 != errors::nil {
+                break;
+            }
             if hdr.Type != dns::TypeTXT {
                 let _ = p.SkipAnswer();
                 continue;
             }
             let (txt, e3) = p.TXTResource();
-            if e3 != errors::nil { break; }
+            if e3 != errors::nil {
+                break;
+            }
             // Concatenate all strings in the TXT record
             let mut total = 0usize;
-            for s in &txt.TXT { total += s.len(); }
+            for s in &txt.TXT {
+                total += s.len();
+            }
             let mut joined = String::with_capacity(total);
-            for s in &txt.TXT { joined.push_str(s); }
+            for s in &txt.TXT {
+                joined.push_str(s);
+            }
             out = crate::append!(out, string::from_bytes(joined.as_bytes()));
         }
         (out, errors::nil)
@@ -359,14 +398,20 @@ impl Resolver {
         let mut nss: Vec<NS> = Vec::new();
         loop {
             let (hdr, e2) = p.AnswerHeader();
-            if e2 == dns::ErrSectionDone { break; }
-            if e2 != errors::nil { break; }
+            if e2 == dns::ErrSectionDone {
+                break;
+            }
+            if e2 != errors::nil {
+                break;
+            }
             if hdr.Type != dns::TypeNS {
                 let _ = p.SkipAnswer();
                 continue;
             }
             let (r, e3) = p.NSResource();
-            if e3 != errors::nil { break; }
+            if e3 != errors::nil {
+                break;
+            }
             let host = r.NS.String();
             if is_domain_name(host.as_ref()) {
                 nss.push(NS { Host: host });
@@ -395,19 +440,28 @@ impl Resolver {
         let mut mxs: Vec<MX> = Vec::new();
         loop {
             let (hdr, e2) = p.AnswerHeader();
-            if e2 == dns::ErrSectionDone { break; }
-            if e2 != errors::nil { break; }
+            if e2 == dns::ErrSectionDone {
+                break;
+            }
+            if e2 != errors::nil {
+                break;
+            }
             if hdr.Type != dns::TypeMX {
                 let _ = p.SkipAnswer();
                 continue;
             }
             let (r, e3) = p.MXResource();
-            if e3 != errors::nil { break; }
+            if e3 != errors::nil {
+                break;
+            }
             let host = r.MX.String();
             let pref = r.Pref;
             let host_str: &str = host.as_ref();
             if is_domain_name(host_str) {
-                mxs.push(MX { Host: host, Pref: pref });
+                mxs.push(MX {
+                    Host: host,
+                    Pref: pref,
+                });
             }
         }
         // Sort by preference (ascending)
@@ -440,7 +494,8 @@ impl Resolver {
             s
         } else {
             // "_service._proto.name"
-            let mut s = String::with_capacity(1 + svc_ref.len() + 2 + proto_ref.len() + 1 + name_ref.len());
+            let mut s =
+                String::with_capacity(1 + svc_ref.len() + 2 + proto_ref.len() + 1 + name_ref.len());
             s.push('_');
             s.push_str(svc_ref);
             s.push_str("._");
@@ -461,10 +516,15 @@ impl Resolver {
 
         loop {
             let (hdr, e2) = p.AnswerHeader();
-            if e2 == dns::ErrSectionDone { break; }
+            if e2 == dns::ErrSectionDone {
+                break;
+            }
             if e2 != errors::nil {
-                return (string::from_static(""), slice::<nilable<SRV>>::new(),
-                    errors::New(string::from_static("cannot unmarshal DNS message")));
+                return (
+                    string::from_static(""),
+                    slice::<nilable<SRV>>::new(),
+                    errors::New(string::from_static("cannot unmarshal DNS message")),
+                );
             }
             if hdr.Type != dns::TypeSRV {
                 let _ = p.SkipAnswer();
@@ -475,24 +535,25 @@ impl Resolver {
             }
             let (r, e3) = p.SRVResource();
             if e3 != errors::nil {
-                return (string::from_static(""), slice::<nilable<SRV>>::new(),
-                    errors::New(string::from_static("cannot unmarshal DNS message")));
+                return (
+                    string::from_static(""),
+                    slice::<nilable<SRV>>::new(),
+                    errors::New(string::from_static("cannot unmarshal DNS message")),
+                );
             }
             let tgt = r.Target.String();
             if is_domain_name(tgt.as_ref()) {
                 srvs.push(SRV {
-                    Target:   tgt,
-                    Port:     r.Port,
+                    Target: tgt,
+                    Port: r.Port,
                     Priority: r.Priority,
-                    Weight:   r.Weight,
+                    Weight: r.Weight,
                 });
             }
         }
 
         // Sort by priority then randomise by weight (simplified: sort by priority only)
-        srvs.sort_by(|a, b| {
-            a.Priority.cmp(&b.Priority).then(b.Weight.cmp(&a.Weight))
-        });
+        srvs.sort_by(|a, b| a.Priority.cmp(&b.Priority).then(b.Weight.cmp(&a.Weight)));
 
         let cname_str = if cname_name.Length > 0 {
             cname_name.String()
@@ -531,21 +592,29 @@ impl Resolver {
         let ip_lit = super::ParseIP(host.clone());
         if !ip_lit.IsNil() {
             let mut r = slice::<IPAddr>::new();
-            r = crate::append!(r, IPAddr { IP: ip_lit, Zone: string::from_static("") });
+            r = crate::append!(
+                r,
+                IPAddr {
+                    IP: ip_lit,
+                    Zone: string::from_static("")
+                }
+            );
             return (r, errors::nil);
         }
         let cfg = dnsclient::get_system_dns_config();
-        let (raw_addrs, _cname, e) =
-            dnsclient::go_lookup_ip_cname_order(&cfg, network, h);
+        let (raw_addrs, _cname, e) = dnsclient::go_lookup_ip_cname_order(&cfg, network, h);
         if e != errors::nil {
             return (slice::<IPAddr>::new(), e);
         }
         let mut out = slice::<IPAddr>::new();
         for a in &raw_addrs {
-            out = crate::append!(out, IPAddr {
-                IP:   raw_to_ip(&a.ip),
-                Zone: string::from_static(""),
-            });
+            out = crate::append!(
+                out,
+                IPAddr {
+                    IP: raw_to_ip(&a.ip),
+                    Zone: string::from_static(""),
+                }
+            );
         }
         (out, errors::nil)
     }
@@ -588,7 +657,10 @@ fn build_arpa_name(addr: &str) -> Option<String> {
 
 // ─── Package-level convenience functions ────────────────────────────────────
 
-static DEFAULT_RESOLVER: Resolver = Resolver { PreferGo: false, StrictErrors: false };
+static DEFAULT_RESOLVER: Resolver = Resolver {
+    PreferGo: false,
+    StrictErrors: false,
+};
 
 /// `net.LookupHost` — resolves host to a list of address strings.
 pub fn LookupHost<S: Into<string>>(host: S) -> (slice<string>, error) {
@@ -626,8 +698,7 @@ pub fn LookupIP<S: Into<string>>(host: S) -> (slice<super::IP>, error) {
         return (slice::<super::IP>::new(), new_dns_error("no such host", h));
     }
     let cfg = dnsclient::get_system_dns_config();
-    let (raw_addrs, _cname, e) =
-        dnsclient::go_lookup_ip_cname_order(&cfg, "ip", h);
+    let (raw_addrs, _cname, e) = dnsclient::go_lookup_ip_cname_order(&cfg, "ip", h);
     if e != errors::nil {
         return (slice::<super::IP>::new(), e);
     }
@@ -649,14 +720,22 @@ pub fn LookupCNAME<S: Into<string>>(host: S) -> (string, error) {
     }
     loop {
         let (hdr, e2) = p.AnswerHeader();
-        if e2 == dns::ErrSectionDone { break; }
+        if e2 == dns::ErrSectionDone {
+            break;
+        }
         if e2 != errors::nil {
-            return (string::from_static(""), errors::New(string::from_static("cannot unmarshal DNS message")));
+            return (
+                string::from_static(""),
+                errors::New(string::from_static("cannot unmarshal DNS message")),
+            );
         }
         if hdr.Type == dns::TypeCNAME {
             let (r, e3) = p.CNAMEResource();
             if e3 != errors::nil {
-                return (string::from_static(""), errors::New(string::from_static("cannot unmarshal DNS message")));
+                return (
+                    string::from_static(""),
+                    errors::New(string::from_static("cannot unmarshal DNS message")),
+                );
             }
             return (r.CNAME.String(), errors::nil);
         }
@@ -665,7 +744,9 @@ pub fn LookupCNAME<S: Into<string>>(host: S) -> (string, error) {
     // Return host + trailing dot
     let mut cname_str = String::with_capacity(h.len() + 1);
     cname_str.push_str(h);
-    if !h.ends_with('.') { cname_str.push('.'); }
+    if !h.ends_with('.') {
+        cname_str.push('.');
+    }
     (string::from_bytes(cname_str.as_bytes()), errors::nil)
 }
 

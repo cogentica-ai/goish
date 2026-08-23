@@ -263,8 +263,14 @@ static sniffSignatures: &[&dyn sniffSig] = &[
         skipWS: true,
         ct: "text/xml; charset=utf-8",
     },
-    &exactSig { sig: b"%PDF-", ct: "application/pdf" },
-    &exactSig { sig: b"%!PS-Adobe-", ct: "application/postscript" },
+    &exactSig {
+        sig: b"%PDF-",
+        ct: "application/pdf",
+    },
+    &exactSig {
+        sig: b"%!PS-Adobe-",
+        ct: "application/postscript",
+    },
     // UTF BOMs.
     &maskedSig {
         mask: b"\xFF\xFF\x00\x00",
@@ -290,19 +296,40 @@ static sniffSignatures: &[&dyn sniffSig] = &[
     // "image/vnd.microsoft.icon" ... but that has since been replaced
     // with "image/x-icon" in Section 6.2 of
     // https://mimesniff.spec.whatwg.org/#matching-an-image-type-pattern"
-    &exactSig { sig: b"\x00\x00\x01\x00", ct: "image/x-icon" },
-    &exactSig { sig: b"\x00\x00\x02\x00", ct: "image/x-icon" },
-    &exactSig { sig: b"BM", ct: "image/bmp" },
-    &exactSig { sig: b"GIF87a", ct: "image/gif" },
-    &exactSig { sig: b"GIF89a", ct: "image/gif" },
+    &exactSig {
+        sig: b"\x00\x00\x01\x00",
+        ct: "image/x-icon",
+    },
+    &exactSig {
+        sig: b"\x00\x00\x02\x00",
+        ct: "image/x-icon",
+    },
+    &exactSig {
+        sig: b"BM",
+        ct: "image/bmp",
+    },
+    &exactSig {
+        sig: b"GIF87a",
+        ct: "image/gif",
+    },
+    &exactSig {
+        sig: b"GIF89a",
+        ct: "image/gif",
+    },
     &maskedSig {
         mask: b"\xFF\xFF\xFF\xFF\x00\x00\x00\x00\xFF\xFF\xFF\xFF\xFF\xFF",
         pat: b"RIFF\x00\x00\x00\x00WEBPVP",
         skipWS: false,
         ct: "image/webp",
     },
-    &exactSig { sig: b"\x89PNG\x0D\x0A\x1A\x0A", ct: "image/png" },
-    &exactSig { sig: b"\xFF\xD8\xFF", ct: "image/jpeg" },
+    &exactSig {
+        sig: b"\x89PNG\x0D\x0A\x1A\x0A",
+        ct: "image/png",
+    },
+    &exactSig {
+        sig: b"\xFF\xD8\xFF",
+        ct: "image/jpeg",
+    },
     // Audio and Video types.
     //
     // Go: "Enforce the pattern match ordering as prescribed in
@@ -313,7 +340,12 @@ static sniffSignatures: &[&dyn sniffSig] = &[
         skipWS: false,
         ct: "audio/aiff",
     },
-    &maskedSig { mask: b"\xFF\xFF\xFF", pat: b"ID3", skipWS: false, ct: "audio/mpeg" },
+    &maskedSig {
+        mask: b"\xFF\xFF\xFF",
+        pat: b"ID3",
+        skipWS: false,
+        ct: "audio/mpeg",
+    },
     &maskedSig {
         mask: b"\xFF\xFF\xFF\xFF\xFF",
         pat: b"OggS\x00",
@@ -341,7 +373,10 @@ static sniffSignatures: &[&dyn sniffSig] = &[
     // 6.2.0.2. video/mp4
     &mp4Sig,
     // 6.2.0.3. video/webm
-    &exactSig { sig: b"\x1A\x45\xDF\xA3", ct: "video/webm" },
+    &exactSig {
+        sig: b"\x1A\x45\xDF\xA3",
+        ct: "video/webm",
+    },
     // Font types.
     &maskedSig {
         pat: eotPat,
@@ -349,21 +384,51 @@ static sniffSignatures: &[&dyn sniffSig] = &[
         skipWS: false,
         ct: "application/vnd.ms-fontobject",
     },
-    &exactSig { sig: b"\x00\x01\x00\x00", ct: "font/ttf" },
-    &exactSig { sig: b"OTTO", ct: "font/otf" },
-    &exactSig { sig: b"ttcf", ct: "font/collection" },
-    &exactSig { sig: b"wOFF", ct: "font/woff" },
-    &exactSig { sig: b"wOF2", ct: "font/woff2" },
+    &exactSig {
+        sig: b"\x00\x01\x00\x00",
+        ct: "font/ttf",
+    },
+    &exactSig {
+        sig: b"OTTO",
+        ct: "font/otf",
+    },
+    &exactSig {
+        sig: b"ttcf",
+        ct: "font/collection",
+    },
+    &exactSig {
+        sig: b"wOFF",
+        ct: "font/woff",
+    },
+    &exactSig {
+        sig: b"wOF2",
+        ct: "font/woff2",
+    },
     // Archive types.
-    &exactSig { sig: b"\x1F\x8B\x08", ct: "application/x-gzip" },
-    &exactSig { sig: b"PK\x03\x04", ct: "application/zip" },
+    &exactSig {
+        sig: b"\x1F\x8B\x08",
+        ct: "application/x-gzip",
+    },
+    &exactSig {
+        sig: b"PK\x03\x04",
+        ct: "application/zip",
+    },
     // Go: "RAR's signatures are incorrectly defined by the MIME spec as
     // per https://github.com/whatwg/mimesniff/issues/63. However, RAR
     // Labs correctly defines it at
     // https://www.rarlab.com/technote.htm#rarsign, so we use the
     // definition from RAR Labs."
-    &exactSig { sig: b"Rar!\x1A\x07\x00", ct: "application/x-rar-compressed" }, // RAR v1.5-v4.0
-    &exactSig { sig: b"Rar!\x1A\x07\x01\x00", ct: "application/x-rar-compressed" }, // RAR v5+
-    &exactSig { sig: b"\x00\x61\x73\x6D", ct: "application/wasm" },
+    &exactSig {
+        sig: b"Rar!\x1A\x07\x00",
+        ct: "application/x-rar-compressed",
+    }, // RAR v1.5-v4.0
+    &exactSig {
+        sig: b"Rar!\x1A\x07\x01\x00",
+        ct: "application/x-rar-compressed",
+    }, // RAR v5+
+    &exactSig {
+        sig: b"\x00\x61\x73\x6D",
+        ct: "application/wasm",
+    },
     &textSig, // should be last
 ];

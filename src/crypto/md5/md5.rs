@@ -125,7 +125,10 @@ impl Digest {
         out.extend_from_slice(&self.x[..self.nx]);
         out.resize(out.len() + (CHUNK - self.nx), 0);
         // Go: b = byteorder.BEAppendUint64(b, d.len); return b, nil
-        return (byteorder::BEAppendUint64(slice::__from_vec(out), self.len), nil);
+        return (
+            byteorder::BEAppendUint64(slice::__from_vec(out), self.len),
+            nil,
+        );
     }
 
     // go: sdk 1.25.5 crypto/md5/md5.go:81-97 digest.UnmarshalBinary
@@ -189,7 +192,10 @@ impl Digest {
 /// than wrapping, as an unexported cursor helper.
 fn consumeUint64(b: &[byte]) -> (&[byte], uint64) {
     // Go: return b[8:], byteorder.BEUint64(b[0:8])
-    return (&b[8..], byteorder::BEUint64(slice::__from_vec(b[..8].to_vec())));
+    return (
+        &b[8..],
+        byteorder::BEUint64(slice::__from_vec(b[..8].to_vec())),
+    );
 }
 
 // go: sdk 1.25.5 crypto/md5/md5.go:103-105 consumeUint32
@@ -197,7 +203,10 @@ fn consumeUint64(b: &[byte]) -> (&[byte], uint64) {
 /// [`consumeUint64`].
 fn consumeUint32(b: &[byte]) -> (&[byte], uint32) {
     // Go: return b[4:], byteorder.BEUint32(b[0:4])
-    return (&b[4..], byteorder::BEUint32(slice::__from_vec(b[..4].to_vec())));
+    return (
+        &b[4..],
+        byteorder::BEUint32(slice::__from_vec(b[..4].to_vec())),
+    );
 }
 
 // ─── Hash trait impls for Digest ──────────────────────────────────────

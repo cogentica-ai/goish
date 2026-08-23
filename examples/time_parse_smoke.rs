@@ -80,10 +80,7 @@ fn main() {
 
     // 5. ANSIC.
     {
-        let (got, err) = time::Parse(
-            string(time::ANSIC),
-            string("Mon Jul  4 12:00:00 2024"),
-        );
+        let (got, err) = time::Parse(string(time::ANSIC), string("Mon Jul  4 12:00:00 2024"));
         if err.IsNil() && got.Year() == 2024 && got.Month() == 7 && got.Day() == 4 {
             fmt::Println!("[ 5] ANSIC                     PASS");
         } else {

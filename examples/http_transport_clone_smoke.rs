@@ -23,8 +23,13 @@ static PASSED: AtomicUsize = AtomicUsize::new(0);
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
 fn check(name: &'static str, ok: bool, detail: goish::string) {
-    if ok { PASSED.fetch_add(1, Ordering::Relaxed); fmt::Printf!("PASS: %s\n", name); }
-    else { FAILED.fetch_add(1, Ordering::Relaxed); fmt::Printf!("FAIL: %s — %s\n", name, detail); }
+    if ok {
+        PASSED.fetch_add(1, Ordering::Relaxed);
+        fmt::Printf!("PASS: %s\n", name);
+    } else {
+        FAILED.fetch_add(1, Ordering::Relaxed);
+        fmt::Printf!("FAIL: %s — %s\n", name, detail);
+    }
 }
 
 fn conn(host: &'static str) -> Arc<persistConn> {
@@ -40,8 +45,12 @@ fn conn(host: &'static str) -> Arc<persistConn> {
 
 #[goish::main]
 fn main() {
-    goish::go!(stack(512 * 1024), move || { run(); });
-    loop { goish::runtime::sched::Gosched(); }
+    goish::go!(stack(512 * 1024), move || {
+        run();
+    });
+    loop {
+        goish::runtime::sched::Gosched();
+    }
 }
 
 fn run() {
@@ -54,11 +63,15 @@ fn run() {
         t.MaxResponseHeaderBytes = 4096;
         t.IdleConnTimeout = time::Duration(5 * 1_000_000_000);
         let c = t.Clone();
-        check("scalar fields are copied",
-              c.MaxIdleConns == 7 && c.MaxIdleConnsPerHost == 3
-                  && c.DisableKeepAlives && c.MaxResponseHeaderBytes == 4096
-                  && c.IdleConnTimeout == time::Duration(5 * 1_000_000_000),
-              string(""));
+        check(
+            "scalar fields are copied",
+            c.MaxIdleConns == 7
+                && c.MaxIdleConnsPerHost == 3
+                && c.DisableKeepAlives
+                && c.MaxResponseHeaderBytes == 4096
+                && c.IdleConnTimeout == time::Duration(5 * 1_000_000_000),
+            string(""),
+        );
     }
 
     // The idle pool is NOT shared.
@@ -71,8 +84,11 @@ fn run() {
         let e2 = c.tryPutIdleConn(&conn("a.com"));
         // If the pool were shared, the original's entry would count
         // toward the per-host cap of 2 and e2 would be refused.
-        check("the clone gets a FRESH idle pool",
-              e1.IsNil() && e2.IsNil(), fmt::Sprintf!("%v / %v", e1, e2));
+        check(
+            "the clone gets a FRESH idle pool",
+            e1.IsNil() && e2.IsNil(),
+            fmt::Sprintf!("%v / %v", e1, e2),
+        );
     }
 
     // Closing idle conns on the clone must not disturb the original.
@@ -82,8 +98,11 @@ fn run() {
         let _ = t.tryPutIdleConn(&pc);
         let c = t.Clone();
         c.CloseIdleConnections();
-        check("CloseIdleConnections on the clone leaves the original's conn alone",
-              !pc.isBroken(), string(""));
+        check(
+            "CloseIdleConnections on the clone leaves the original's conn alone",
+            !pc.isBroken(),
+            string(""),
+        );
     }
 
     // The registered-protocol map is copied, not shared.
@@ -93,25 +112,32 @@ fn run() {
             as Arc<dyn goish::net::http::fs::FileSystem + Send + Sync>;
         t.RegisterProtocol(string("file"), NewFileTransport(dir.clone()));
         let c = t.Clone();
-        let (req, _) = goish::net::http::NewRequest(
-            string("GET"), string("file:///x"), goish::slice::new());
-        check("registered protocols carry across to the clone",
-              c.alternateRoundTripper(&req).is_some(), string(""));
+        let (req, _) =
+            goish::net::http::NewRequest(string("GET"), string("file:///x"), goish::slice::new());
+        check(
+            "registered protocols carry across to the clone",
+            c.alternateRoundTripper(&req).is_some(),
+            string(""),
+        );
         // And registering on the clone must not reach the original —
         // if the map were shared this would panic on double-register.
         c.RegisterProtocol(string("ftp"), NewFileTransport(dir));
-        let (req2, _) = goish::net::http::NewRequest(
-            string("GET"), string("ftp://h/x"), goish::slice::new());
-        check("but the clone's own registrations do not reach the original",
-              c.alternateRoundTripper(&req2).is_some()
-                  && t.alternateRoundTripper(&req2).is_none(),
-              string(""));
+        let (req2, _) =
+            goish::net::http::NewRequest(string("GET"), string("ftp://h/x"), goish::slice::new());
+        check(
+            "but the clone's own registrations do not reach the original",
+            c.alternateRoundTripper(&req2).is_some() && t.alternateRoundTripper(&req2).is_none(),
+            string(""),
+        );
     }
 
     let p = PASSED.load(Ordering::Relaxed);
     let f = FAILED.load(Ordering::Relaxed);
     fmt::Printf!("\n%d passed, %d failed\n", p as i64, f as i64);
-    if f == 0 { fmt::Printf!("HTTP_TRANSPORT_CLONE_SMOKE_OK\n"); goish::os::Exit(0); }
+    if f == 0 {
+        fmt::Printf!("HTTP_TRANSPORT_CLONE_SMOKE_OK\n");
+        goish::os::Exit(0);
+    }
     fmt::Printf!("HTTP_TRANSPORT_CLONE_SMOKE_FAIL\n");
     goish::os::Exit(1);
 }

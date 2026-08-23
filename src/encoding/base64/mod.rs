@@ -8,7 +8,7 @@
 //   base64::URLEncoding.EncodeToString(&src)        // "-_=" alphabet
 //   base64::RawStdEncoding.EncodeToString(&src)     // no '=' padding
 //   base64::RawURLEncoding.EncodeToString(&src)     // no '=' padding
-//   base64::StdEncoding.DecodeString(&s) -> (slice<byte>, error)
+//   base64::StdEncoding.DecodeString(s)  -> (slice<byte>, error)
 //   base64::StdEncoding.Encode(&mut dst, src)       // in-place encode
 //   base64::StdEncoding.AppendEncode(dst, src)      // appends → slice<byte>
 //   base64::StdEncoding.Decode(&mut dst, src)       // in-place decode
@@ -162,7 +162,8 @@ impl Encoding {
     /// Decode `s` (a base64 string) into bytes. Returns
     /// `(slice<byte>, error)` — Go's `[]byte` shape. Mirrors
     /// `Encoding.DecodeString` (base64.go).
-    pub fn DecodeString(&self, s: &str) -> (slice<byte>, error) {
+    pub fn DecodeString<S: Into<string>>(&self, s: S) -> (slice<byte>, error) {
+        let s = s.into();
         let src = s.as_bytes();
         // Estimate; trim once we know exact length.
         let max_len = self.DecodedLen(src.len() as int) as usize + 3;

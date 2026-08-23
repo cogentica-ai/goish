@@ -76,7 +76,7 @@ fn main() {
     {
         let n = sort::Search(10, |i| i >= 7);
         let m = sort::Search(10, |_| false); // never true → returns n
-        let z = sort::Search(0, |_| true);   // empty → returns 0
+        let z = sort::Search(0, |_| true); // empty → returns 0
         if n == 7 && m == 10 && z == 0 {
             fmt::Println!("[ 4] Search basic             PASS");
         } else {
@@ -97,19 +97,34 @@ fn main() {
             // For target=4 in a sorted ascending array, that means we want
             // cmp(i) = sign(4 - a[i])  (positive when a[i] < 4, zero when equal,
             // negative when a[i] > 4) — which is the natural encoding.
-            if 4 > v { 1 } else if 4 == v { 0 } else { -1 }
+            if 4 > v {
+                1
+            } else if 4 == v {
+                0
+            } else {
+                -1
+            }
         });
         // Should find the first 4 (index 2).
         let (j, no) = sort::Find(a.len() as int, |i| {
             let v = a[i as usize];
-            if 6 > v { 1 } else if 6 == v { 0 } else { -1 }
+            if 6 > v {
+                1
+            } else if 6 == v {
+                0
+            } else {
+                -1
+            }
         });
         if i == 2 && ok && j == 5 && !no {
             fmt::Println!("[ 5] Find 3-way cmp           PASS");
         } else {
             fmt::Println!(
                 "[ 5] Find 3-way cmp           FAIL i={} ok={} j={} no={}",
-                i, ok as int, j, no as int
+                i,
+                ok as int,
+                j,
+                no as int
             );
             failed += 1;
         }
@@ -118,16 +133,19 @@ fn main() {
     // 6. sort::SearchInts — binary search in a sorted []int.
     {
         let a: goish::slice<int> = slice!([]int{1, 3, 5, 7, 9, 11});
-        let i3 = sort::SearchInts(&a, 3);   // present at 1
-        let i4 = sort::SearchInts(&a, 4);   // would insert at 2
+        let i3 = sort::SearchInts(&a, 3); // present at 1
+        let i4 = sort::SearchInts(&a, 4); // would insert at 2
         let i12 = sort::SearchInts(&a, 12); // beyond end → 6
-        let i0 = sort::SearchInts(&a, 0);   // before start → 0
+        let i0 = sort::SearchInts(&a, 0); // before start → 0
         if i3 == 1 && i4 == 2 && i12 == 6 && i0 == 0 {
             fmt::Println!("[ 6] SearchInts               PASS");
         } else {
             fmt::Println!(
                 "[ 6] SearchInts               FAIL {} {} {} {}",
-                i3, i4, i12, i0
+                i3,
+                i4,
+                i12,
+                i0
             );
             failed += 1;
         }
@@ -195,7 +213,8 @@ fn main() {
         sort::Float64s!(xs);
         let raw: &[float64] = &xs;
         // After sort: NaN first, then 1.0, 2.0, 3.0.
-        let ok = raw.len() == 4 && raw[0].is_nan() && raw[1] == 1.0 && raw[2] == 2.0 && raw[3] == 3.0;
+        let ok =
+            raw.len() == 4 && raw[0].is_nan() && raw[1] == 1.0 && raw[2] == 2.0 && raw[3] == 3.0;
         if ok {
             fmt::Println!("[10] Float64s! NaN first      PASS");
         } else {
@@ -233,4 +252,3 @@ fn main() {
         syscall::Exit(1);
     }
 }
-

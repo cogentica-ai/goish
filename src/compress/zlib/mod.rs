@@ -216,10 +216,7 @@ fn readHeader<R: io::Reader>(r: &mut R, dict: &slice<byte>) -> (bool, error) {
     let h = ((scratch[0] as u16) << 8) | (scratch[1] as u16);
     // CM must be deflate, CINFO must not exceed the max window, and the
     // 16-bit header must be a multiple of 31 (FCHECK).
-    if (scratch[0] & 0x0f != zlibDeflate)
-        || (scratch[0] >> 4 > zlibMaxWindow)
-        || (h % 31 != 0)
-    {
+    if (scratch[0] & 0x0f != zlibDeflate) || (scratch[0] >> 4 > zlibMaxWindow) || (h % 31 != 0) {
         return (false, ErrHeader.into());
     }
     let haveDict = scratch[1] & 0x20 != 0;

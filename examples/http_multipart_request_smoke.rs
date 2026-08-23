@@ -11,9 +11,9 @@ extern crate goish;
 
 use alloc::vec::Vec;
 
-use goish::fmt;
 use goish::convert::bytes;
 use goish::errors;
+use goish::fmt;
 use goish::io;
 use goish::mime::multipart;
 use goish::net::http;
@@ -27,8 +27,7 @@ fn main() {
     // 1. Construct a multipart body and hand it to a Request via the
     //    Body field; MultipartReader should parse out the parts.
     {
-        let mut buf =
-            goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
+        let mut buf = goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
         let ct;
         {
             let mut w = multipart::NewWriter(&mut buf);
@@ -46,8 +45,7 @@ fn main() {
         let body = goish::goslice::slice::<u8>::__from_vec(body_v);
 
         // Build a Request manually with the assembled body.
-        let (mut req, _) =
-            http::NewRequest(string("POST"), string("http://x/upload"), bytes(""));
+        let (mut req, _) = http::NewRequest(string("POST"), string("http://x/upload"), bytes(""));
         req.Header.Set(string("Content-Type"), ct);
         req.Body = http::Body::from_bytes(body);
 
@@ -78,8 +76,7 @@ fn main() {
 
     // 2. Non-multipart Content-Type → ErrNotMultipart.
     {
-        let (mut req, _) =
-            http::NewRequest(string("POST"), string("http://x/u"), bytes("hello"));
+        let (mut req, _) = http::NewRequest(string("POST"), string("http://x/u"), bytes("hello"));
         req.Header.Set(string("Content-Type"), string("text/plain"));
         let (_mr, err) = req.MultipartReader();
         if errors::Is(err, http::ErrNotMultipart) {
@@ -92,8 +89,7 @@ fn main() {
 
     // 3. multipart/form-data without boundary → ErrMissingBoundary.
     {
-        let (mut req, _) =
-            http::NewRequest(string("POST"), string("http://x/u"), bytes("body"));
+        let (mut req, _) = http::NewRequest(string("POST"), string("http://x/u"), bytes("body"));
         req.Header
             .Set(string("Content-Type"), string("multipart/form-data"));
         let (_mr, err) = req.MultipartReader();

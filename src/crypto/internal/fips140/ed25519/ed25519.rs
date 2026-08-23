@@ -10,10 +10,10 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-use crate::crypto::internal::fips140;
 use super::cast::{fipsPCT, fipsSelfTest};
-use crate::crypto::internal::fips140::edwards25519::{NewScalar, Scalar};
+use crate::crypto::internal::fips140;
 use crate::crypto::internal::fips140::edwards25519::Point;
+use crate::crypto::internal::fips140::edwards25519::{NewScalar, Scalar};
 use crate::crypto::sha512;
 use crate::errors::{self, error};
 use crate::goslice::slice;
@@ -21,7 +21,6 @@ use crate::io;
 use crate::strconv;
 use crate::string;
 use crate::types::{byte, int};
-
 
 const seedSize: usize = 32;
 const publicKeySize: usize = 32;
@@ -286,11 +285,7 @@ pub fn SignPH(
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:186-196 signPH
-fn signPH(
-    priv_: &PrivateKey,
-    message: slice<byte>,
-    context: slice<byte>,
-) -> (slice<byte>, error) {
+fn signPH(priv_: &PrivateKey, message: slice<byte>, context: slice<byte>) -> (slice<byte>, error) {
     fipsSelfTest();
     fips140::RecordApproved();
     let l = message.Len();
@@ -306,7 +301,12 @@ fn signPH(
         return (empty_slice(), errors::New(msg));
     }
     (
-        signWithDom(priv_, message, domPrefixPh, slice_as_bytes(&context).as_slice()),
+        signWithDom(
+            priv_,
+            message,
+            domPrefixPh,
+            slice_as_bytes(&context).as_slice(),
+        ),
         errors::nil,
     )
 }
@@ -323,11 +323,7 @@ pub fn SignCtx(
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:205-214 signCtx
-fn signCtx(
-    priv_: &PrivateKey,
-    message: slice<byte>,
-    context: slice<byte>,
-) -> (slice<byte>, error) {
+fn signCtx(priv_: &PrivateKey, message: slice<byte>, context: slice<byte>) -> (slice<byte>, error) {
     fipsSelfTest();
     // FIPS 186-5 specifies Ed25519 and Ed25519ph, but not Ed25519ctx.
     fips140::RecordNonApproved();
@@ -338,7 +334,12 @@ fn signCtx(
         return (empty_slice(), errors::New(msg));
     }
     (
-        signWithDom(priv_, message, domPrefixCtx, slice_as_bytes(&context).as_slice()),
+        signWithDom(
+            priv_,
+            message,
+            domPrefixCtx,
+            slice_as_bytes(&context).as_slice(),
+        ),
         errors::nil,
     )
 }
@@ -446,7 +447,13 @@ pub fn VerifyPH(
         msg = msg + strconv::Itoa(lc);
         return errors::New(msg);
     }
-    verifyWithDom(pub_, message, sig, domPrefixPh, slice_as_bytes(&context).as_slice())
+    verifyWithDom(
+        pub_,
+        message,
+        sig,
+        domPrefixPh,
+        slice_as_bytes(&context).as_slice(),
+    )
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:280-288 VerifyCtx
@@ -467,7 +474,13 @@ pub fn VerifyCtx(
         msg = msg + strconv::Itoa(lc);
         return errors::New(msg);
     }
-    verifyWithDom(pub_, message, sig, domPrefixCtx, slice_as_bytes(&context).as_slice())
+    verifyWithDom(
+        pub_,
+        message,
+        sig,
+        domPrefixCtx,
+        slice_as_bytes(&context).as_slice(),
+    )
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/ed25519/ed25519.go:290-328 verifyWithDom
@@ -523,7 +536,6 @@ pub(crate) fn verifyWithDom(
     }
     errors::nil
 }
-
 
 // go: none — goish idiom (local helper / no Go counterpart)
 // Empty `slice<byte>` for the `nil` return slot of failing Sign* fns.
@@ -582,7 +594,6 @@ pub(crate) fn bytes_equal(a: &slice<byte>, b: &slice<byte>) -> bool {
 pub(crate) fn write_bytes(h: &mut sha512::Digest, b: &[u8]) {
     let _ = io::Writer::Write(h, slice::__from_vec(b.to_vec()));
 }
-
 
 // ─── small helpers ────────────────────────────────────────────────────
 

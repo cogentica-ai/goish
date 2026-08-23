@@ -62,9 +62,7 @@ fn spawn_backend() -> goish::int {
                 loop {
                     // Read one request head.
                     let mut head: Vec<u8> = Vec::new();
-                    let _ = c.SetReadDeadline(
-                        time::Now().Add(time::Duration(10_000_000_000)),
-                    );
+                    let _ = c.SetReadDeadline(time::Now().Add(time::Duration(10_000_000_000)));
                     loop {
                         let mut b = goish::make!([]goish::byte, 512);
                         let (n, re) = c.Read(&mut b);
@@ -72,8 +70,7 @@ fn spawn_backend() -> goish::int {
                             head.push(b[i]);
                         }
                         let s = goish::string::from_bytes(&head);
-                        if (s.as_ref() as &str).contains("\r\n\r\n") || !re.IsNil() || n == 0
-                        {
+                        if (s.as_ref() as &str).contains("\r\n\r\n") || !re.IsNil() || n == 0 {
                             break;
                         }
                     }
@@ -155,13 +152,21 @@ fn run() -> ! {
                 r
             });
             if !err.IsNil() {
-                check("sequential GET succeeds", false, fmt::Sprintf!("i=%d %v", i as i64, err));
+                check(
+                    "sequential GET succeeds",
+                    false,
+                    fmt::Sprintf!("i=%d %v", i as i64, err),
+                );
                 break;
             }
             let (body, _) = goish::io::ReadAll(&mut resp.Body);
             let _ = resp.Body.Close();
             if body.Len() != 22 {
-                check("body intact", false, fmt::Sprintf!("len=%d", body.Len() as i64));
+                check(
+                    "body intact",
+                    false,
+                    fmt::Sprintf!("len=%d", body.Len() as i64),
+                );
             }
         }
         check(
@@ -175,7 +180,11 @@ fn run() -> ! {
             let (r, _) = http::NewRequest(string("GET"), url.clone(), goish::nil);
             r
         });
-        check("request before early close", err.IsNil(), fmt::Sprintf!("%v", err));
+        check(
+            "request before early close",
+            err.IsNil(),
+            fmt::Sprintf!("%v", err),
+        );
         // Close WITHOUT reading: 22 unread bytes on the wire.
         let _ = resp.Body.Close();
         let before = ACCEPTS.load(Ordering::SeqCst);
@@ -197,8 +206,11 @@ fn run() -> ! {
                 ),
             );
         } else {
-            check("after an early close the next request dials FRESH and reads clean",
-                  false, fmt::Sprintf!("%v", err));
+            check(
+                "after an early close the next request dials FRESH and reads clean",
+                false,
+                fmt::Sprintf!("%v", err),
+            );
         }
 
         // ── 3. server closes the idle conn: retry is transparent ──
@@ -259,8 +271,7 @@ fn run() -> ! {
         time::Sleep(time::Duration(100 * 1_000_000));
         // GET so shouldRetryRequest's isReplayable arm passes; the
         // body still exercises the rewind (GetBody replay).
-        let (req, _) =
-            http::NewRequest(string("GET"), url.clone(), bytes("replay-me-exactly"));
+        let (req, _) = http::NewRequest(string("GET"), url.clone(), bytes("replay-me-exactly"));
         let (mut resp, err) = client.Do(&req);
         if err.IsNil() {
             let (body, _) = goish::io::ReadAll(&mut resp.Body);
@@ -331,7 +342,11 @@ fn run() -> ! {
                 r
             });
             if !err.IsNil() {
-                check("HTTPS GET succeeds", false, fmt::Sprintf!("i=%d %v", i as i64, err));
+                check(
+                    "HTTPS GET succeeds",
+                    false,
+                    fmt::Sprintf!("i=%d %v", i as i64, err),
+                );
                 ok = false;
                 break;
             }

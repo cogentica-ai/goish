@@ -6,10 +6,10 @@
 
 extern crate alloc;
 
-use goish::{int, slice, string, syscall};
+use goish::fmt::Stringer;
 use goish::math::big;
 use goish::math::rand;
-use goish::fmt::Stringer;
+use goish::{int, slice, string, syscall};
 
 static mut PASS: i32 = 0;
 static mut TOTAL: i32 = 0;
@@ -51,7 +51,11 @@ fn write_i32(mut n: i32) {
         return;
     }
     let neg = n < 0;
-    let mut un: u32 = if neg { (n as i64).unsigned_abs() as u32 } else { n as u32 };
+    let mut un: u32 = if neg {
+        (n as i64).unsigned_abs() as u32
+    } else {
+        n as u32
+    };
     let _ = &mut n;
     while un > 0 {
         i -= 1;
@@ -234,21 +238,21 @@ impl goish::fmt::ScanState for ScanCursor {
 fn main() {
     // ── Sign ───────────────────────────────────────────────────────
     let zero = big::NewInt(0);
-    let pos  = big::NewInt(42);
-    let neg  = big::NewInt(-7);
-    check(zero.Sign() == 0,  b"sign zero");
-    check(pos.Sign()  == 1,  b"sign pos");
-    check(neg.Sign()  == -1, b"sign neg");
+    let pos = big::NewInt(42);
+    let neg = big::NewInt(-7);
+    check(zero.Sign() == 0, b"sign zero");
+    check(pos.Sign() == 1, b"sign pos");
+    check(neg.Sign() == -1, b"sign neg");
 
     // ── Int64 round-trip ───────────────────────────────────────────
     check(pos.Int64() == 42, b"int64 pos");
     check(neg.Int64() == -7, b"int64 neg");
 
     // ── Cmp ────────────────────────────────────────────────────────
-    check(pos.Cmp(&zero) == 1,  b"cmp pos zero");
+    check(pos.Cmp(&zero) == 1, b"cmp pos zero");
     check(zero.Cmp(&pos) == -1, b"cmp zero pos");
-    check(pos.Cmp(&pos)  == 0,  b"cmp pos pos");
-    check(neg.Cmp(&pos)  == -1, b"cmp neg pos");
+    check(pos.Cmp(&pos) == 0, b"cmp pos pos");
+    check(neg.Cmp(&pos) == -1, b"cmp neg pos");
 
     // ── Mod (small) ────────────────────────────────────────────────
     let mut z = big::Int::new();
@@ -280,21 +284,29 @@ fn main() {
     let mut prod = big::Int::new();
     prod.Mul(&p, &q);
     check(
-        dec_eq(&prod, b"10000000000000000000000000000000000000000000000000000000"),
+        dec_eq(
+            &prod,
+            b"10000000000000000000000000000000000000000000000000000000",
+        ),
         b"mul 10^30 * 10^25 == 10^55",
     );
 
     // Signed: (-10^30) * (10^25) is negative; * itself again positive.
     let mut neg_prod = big::Int::new();
-    neg_prod.Mul(&big::NewInt(-1), &p);          // -10^30
+    neg_prod.Mul(&big::NewInt(-1), &p); // -10^30
     let mut signed = big::Int::new();
-    signed.Mul(&neg_prod, &q);                   // -10^55
+    signed.Mul(&neg_prod, &q); // -10^55
     check(signed.Sign() == -1, b"mul signed negative");
     let mut back = big::Int::new();
-    back.Mul(&neg_prod, &neg_prod);              // (+) 10^60
-    check(back.Sign() == 1 && dec_eq(&back,
-        b"1000000000000000000000000000000000000000000000000000000000000"),
-        b"mul neg*neg == 10^60");
+    back.Mul(&neg_prod, &neg_prod); // (+) 10^60
+    check(
+        back.Sign() == 1
+            && dec_eq(
+                &back,
+                b"1000000000000000000000000000000000000000000000000000000000000",
+            ),
+        b"mul neg*neg == 10^60",
+    );
 
     // Mul where neither operand fits in u64, irregular digits.
     // x = 123456789012345678901234567890
@@ -313,7 +325,10 @@ fn main() {
         x = v;
     }
     // x is now 123456789012345678901234567890
-    check(dec_eq(&x, b"123456789012345678901234567890"), b"mul build x");
+    check(
+        dec_eq(&x, b"123456789012345678901234567890"),
+        b"mul build x",
+    );
     let mut y = big::Int::new();
     y.Mul(&pow10(10), &big::NewInt(9876543210i64));
     {
@@ -333,9 +348,9 @@ fn main() {
     // ── Multi-precision Div / DivMod: large / large divisor ────────
     // dividend = 10^55 + 7, divisor = 10^25 + 3.
     let mut dividend = big::Int::new();
-    dividend.Add(&prod, &big::NewInt(7));        // 10^55 + 7
+    dividend.Add(&prod, &big::NewInt(7)); // 10^55 + 7
     let mut divisor = big::Int::new();
-    divisor.Add(&q, &big::NewInt(3));            // 10^25 + 3
+    divisor.Add(&q, &big::NewInt(3)); // 10^25 + 3
     let mut quo = big::Int::new();
     let mut rem = big::Int::new();
     quo.DivMod(&dividend, &divisor, &mut rem);
@@ -363,14 +378,19 @@ fn main() {
     let mut nchk2 = big::Int::new();
     nchk2.Add(&nchk, &nrem);
     check(nchk2.Cmp(&neg_dividend) == 0, b"divmod neg identity");
-    check(nrem.Sign() >= 0 && nrem.Cmp(&divisor) == -1, b"divmod neg 0<=r<d");
+    check(
+        nrem.Sign() >= 0 && nrem.Cmp(&divisor) == -1,
+        b"divmod neg 0<=r<d",
+    );
 
     // Exact division: (10^55) / (10^25) == 10^30, remainder 0.
     let mut exq = big::Int::new();
     let mut exr = big::Int::new();
     exq.DivMod(&prod, &q, &mut exr);
-    check(dec_eq(&exq, b"1000000000000000000000000000000") && exr.Sign() == 0,
-        b"div exact 10^55/10^25");
+    check(
+        dec_eq(&exq, b"1000000000000000000000000000000") && exr.Sign() == 0,
+        b"div exact 10^55/10^25",
+    );
 
     // ── Multi-precision Exp: operands & modulus larger than u32 ────
     // Base, exponent, modulus all a few hundred bits.
@@ -384,10 +404,15 @@ fn main() {
     let mut eres = big::Int::new();
     eres.Exp(&ebase, &eexp, &emod);
     // Result must be reduced: 0 <= eres < emod, and non-trivial.
-    check(eres.Sign() >= 0 && eres.Cmp(&emod) == -1, b"exp big in range");
+    check(
+        eres.Sign() >= 0 && eres.Cmp(&emod) == -1,
+        b"exp big in range",
+    );
     // Exact value cross-checked against Python's pow(base, exp, mod).
-    check(dec_eq(&eres, b"73926293254195207749682038714681681753283032610409"),
-        b"exp big exact value");
+    check(
+        dec_eq(&eres, b"73926293254195207749682038714681681753283032610409"),
+        b"exp big exact value",
+    );
 
     // Cross-check exp via the definition for a small exponent but
     // multi-precision base & modulus: base^3 mod m == ((base*base mod m)*base) mod m.
@@ -425,11 +450,11 @@ fn main() {
     check(s.Int64() == 7, b"sub 10-3");
     s.Sub(&big::NewInt(3), &big::NewInt(10));
     check(s.Int64() == -7, b"sub 3-10");
-    s.Sub(&big::NewInt(-5), &big::NewInt(8));      // -5 - 8 = -13
+    s.Sub(&big::NewInt(-5), &big::NewInt(8)); // -5 - 8 = -13
     check(s.Int64() == -13, b"sub -5-8");
-    s.Sub(&big::NewInt(-5), &big::NewInt(-8));     // -5 - (-8) = 3
+    s.Sub(&big::NewInt(-5), &big::NewInt(-8)); // -5 - (-8) = 3
     check(s.Int64() == 3, b"sub -5-(-8)");
-    s.Sub(&big::NewInt(7), &big::NewInt(7));       // 7 - 7 = 0
+    s.Sub(&big::NewInt(7), &big::NewInt(7)); // 7 - 7 = 0
     check(s.Int64() == 0 && s.Sign() == 0, b"sub 7-7 zero");
     // Multi-precision: (10^55 + 7) - 10^55 == 7.
     let mut bigsub = big::Int::new();
@@ -446,8 +471,8 @@ fn main() {
     check(ng.Sign() == 0, b"neg 0 stays non-neg");
 
     // ── BitLen / TrailingZeroBits ──────────────────────────────────
-    check(big::NewInt(0).BitLen() == 0,  b"bitlen 0");
-    check(big::NewInt(1).BitLen() == 1,  b"bitlen 1");
+    check(big::NewInt(0).BitLen() == 0, b"bitlen 0");
+    check(big::NewInt(1).BitLen() == 1, b"bitlen 1");
     check(big::NewInt(255).BitLen() == 8, b"bitlen 255");
     check(big::NewInt(256).BitLen() == 9, b"bitlen 256");
     // 2^40 has bit length 41.
@@ -459,7 +484,7 @@ fn main() {
     check(pow2(40).TrailingZeroBits() == 40, b"tzb 2^40");
 
     // ── Bit ────────────────────────────────────────────────────────
-    let bx = big::NewInt(0b1010);                  // = 10
+    let bx = big::NewInt(0b1010); // = 10
     check(bx.Bit(0) == 0, b"bit 10[0]");
     check(bx.Bit(1) == 1, b"bit 10[1]");
     check(bx.Bit(2) == 0, b"bit 10[2]");
@@ -467,18 +492,24 @@ fn main() {
     check(bx.Bit(99) == 0, b"bit 10[99] above range");
     // Negative: -1 is all-ones in two's complement -> every bit is 1.
     let bneg = big::NewInt(-1);
-    check(bneg.Bit(0) == 1 && bneg.Bit(5) == 1 && bneg.Bit(70) == 1, b"bit -1 all ones");
+    check(
+        bneg.Bit(0) == 1 && bneg.Bit(5) == 1 && bneg.Bit(70) == 1,
+        b"bit -1 all ones",
+    );
     // -2 == ...11111110 -> bit0=0, bit1..=1.
     let bneg2 = big::NewInt(-2);
-    check(bneg2.Bit(0) == 0 && bneg2.Bit(1) == 1 && bneg2.Bit(8) == 1, b"bit -2");
+    check(
+        bneg2.Bit(0) == 0 && bneg2.Bit(1) == 1 && bneg2.Bit(8) == 1,
+        b"bit -2",
+    );
 
     // ── SetBit ─────────────────────────────────────────────────────
     let mut sb = big::Int::new();
-    sb.SetBit(&big::NewInt(0), 4, 1);              // 0 | (1<<4) = 16
+    sb.SetBit(&big::NewInt(0), 4, 1); // 0 | (1<<4) = 16
     check(sb.Int64() == 16, b"setbit 0 bit4=1");
-    sb.SetBit(&big::NewInt(0b1111), 1, 0);         // 15 &^ (1<<1) = 13
+    sb.SetBit(&big::NewInt(0b1111), 1, 0); // 15 &^ (1<<1) = 13
     check(sb.Int64() == 13, b"setbit 15 bit1=0");
-    sb.SetBit(&big::NewInt(5), 1, 1);              // 5 | 2 = 7
+    sb.SetBit(&big::NewInt(5), 1, 1); // 5 | 2 = 7
     check(sb.Int64() == 7, b"setbit 5 bit1=1");
     // Negative: -1 with bit0 cleared == -2 (two's complement).
     sb.SetBit(&big::NewInt(-1), 0, 0);
@@ -489,15 +520,15 @@ fn main() {
     let mut bw = big::Int::new();
     bw.And(&big::NewInt(12), &big::NewInt(10));
     check(bw.Int64() == 8, b"and 12&10");
-    bw.Or(&big::NewInt(12), &big::NewInt(10));     // = 14
+    bw.Or(&big::NewInt(12), &big::NewInt(10)); // = 14
     check(bw.Int64() == 14, b"or 12|10");
-    bw.Xor(&big::NewInt(12), &big::NewInt(10));    // = 6
+    bw.Xor(&big::NewInt(12), &big::NewInt(10)); // = 6
     check(bw.Int64() == 6, b"xor 12^10");
     bw.AndNot(&big::NewInt(12), &big::NewInt(10)); // 12 &^ 10 = 4
     check(bw.Int64() == 4, b"andnot 12&^10");
-    bw.Not(&big::NewInt(0));                       // ^0 = -1
+    bw.Not(&big::NewInt(0)); // ^0 = -1
     check(bw.Int64() == -1, b"not 0 == -1");
-    bw.Not(&big::NewInt(5));                       // ^5 = -6
+    bw.Not(&big::NewInt(5)); // ^5 = -6
     check(bw.Int64() == -6, b"not 5 == -6");
 
     // ── Bitwise on negative operands (two's complement) ────────────
@@ -541,15 +572,15 @@ fn main() {
 
     // ── Lsh / Rsh ──────────────────────────────────────────────────
     let mut sh = big::Int::new();
-    sh.Lsh(&big::NewInt(1), 10);                   // 1 << 10 = 1024
+    sh.Lsh(&big::NewInt(1), 10); // 1 << 10 = 1024
     check(sh.Int64() == 1024, b"lsh 1<<10");
-    sh.Lsh(&big::NewInt(3), 40);                   // 3 << 40
+    sh.Lsh(&big::NewInt(3), 40); // 3 << 40
     check(dec_eq(&sh, b"3298534883328"), b"lsh 3<<40");
-    sh.Lsh(&big::NewInt(-1), 4);                   // -1 << 4 = -16
+    sh.Lsh(&big::NewInt(-1), 4); // -1 << 4 = -16
     check(sh.Int64() == -16, b"lsh -1<<4 == -16");
-    sh.Rsh(&big::NewInt(1024), 10);                // 1024 >> 10 = 1
+    sh.Rsh(&big::NewInt(1024), 10); // 1024 >> 10 = 1
     check(sh.Int64() == 1, b"rsh 1024>>10");
-    sh.Rsh(&big::NewInt(255), 4);                  // 255 >> 4 = 15
+    sh.Rsh(&big::NewInt(255), 4); // 255 >> 4 = 15
     check(sh.Int64() == 15, b"rsh 255>>4");
     // Negative arithmetic shift: -8 >> 1 == -4 ; -5 >> 1 == -3.
     sh.Rsh(&big::NewInt(-8), 1);
@@ -573,13 +604,22 @@ fn main() {
         let (_, ok) = t.SetString(string::from_bytes(big_dec), 10);
         check(ok && dec_eq(&t, big_dec), b"setstring base10 large");
         // Text(10) must agree with String().
-        check(t.Text(10).as_bytes() == t.String().as_bytes(), b"text10 == string");
+        check(
+            t.Text(10).as_bytes() == t.String().as_bytes(),
+            b"text10 == string",
+        );
         // Round-trip through bases 2, 8, 10, 16.
         check(t.Text(2).as_bytes()
             == b"1100011101110100100001111111101101100001101110011111000001110111001001110001111110000101011010010",
             b"text base2 large");
-        check(t.Text(8).as_bytes() == b"143564417755415637016711617605322", b"text base8 large");
-        check(t.Text(16).as_bytes() == b"18ee90ff6c373e0ee4e3f0ad2", b"text base16 large");
+        check(
+            t.Text(8).as_bytes() == b"143564417755415637016711617605322",
+            b"text base8 large",
+        );
+        check(
+            t.Text(16).as_bytes() == b"18ee90ff6c373e0ee4e3f0ad2",
+            b"text base16 large",
+        );
         // Re-parse each representation and confirm equality.
         for &(repr, base) in &[
             (b"1100011101110100100001111111101101100001101110011111000001110111001001110001111110000101011010010" as &[u8], 2i64),
@@ -599,11 +639,16 @@ fn main() {
         let (_, ok) = t.SetString(string::from_bytes(neg_dec), 10);
         check(ok && t.Sign() == -1, b"setstring negative parsed");
         check(t.Text(10).as_bytes() == neg_dec, b"text negative base10");
-        check(t.Text(16).as_bytes() == b"-2e7074d9c994179b09b1bc62f21c70cb1",
-            b"text negative base16");
+        check(
+            t.Text(16).as_bytes() == b"-2e7074d9c994179b09b1bc62f21c70cb1",
+            b"text negative base16",
+        );
         // Round-trip via base 16.
         let mut u = big::Int::new();
-        u.SetString(string::from_bytes(b"-2e7074d9c994179b09b1bc62f21c70cb1"), 16);
+        u.SetString(
+            string::from_bytes(b"-2e7074d9c994179b09b1bc62f21c70cb1"),
+            16,
+        );
         check(u.Cmp(&t) == 0, b"setstring negative base16 roundtrip");
         // Round-trip via base 2.
         let bin = t.Text(2);
@@ -616,8 +661,14 @@ fn main() {
     {
         let mut t = big::Int::new();
         t.SetString(string::from_bytes(big_dec), 10);
-        check(t.Text(36).as_bytes() == b"byw97um9s91dlz68tsi", b"text base36");
-        check(t.Text(62).as_bytes() == b"2AyLS9BKAMjjsWHR0", b"text base62");
+        check(
+            t.Text(36).as_bytes() == b"byw97um9s91dlz68tsi",
+            b"text base36",
+        );
+        check(
+            t.Text(62).as_bytes() == b"2AyLS9BKAMjjsWHR0",
+            b"text base62",
+        );
         let mut u = big::Int::new();
         u.SetString(string::from_bytes(b"2AyLS9BKAMjjsWHR0"), 62);
         check(u.Cmp(&t) == 0, b"setstring base62 roundtrip");
@@ -655,7 +706,10 @@ fn main() {
         // Underscore separators (base 0 only).
         let mut us = big::Int::new();
         let (_, ok) = us.SetString(string::from_bytes(b"0x_de_ad_be_ef"), 0);
-        check(ok && us.Int64() == 0xdeadbeef, b"setstring base0 underscores");
+        check(
+            ok && us.Int64() == 0xdeadbeef,
+            b"setstring base0 underscores",
+        );
     }
 
     // ── SetString parse failures return false ──────────────────────
@@ -723,7 +777,10 @@ fn main() {
         check(nb.len() == 13, b"bytes of negative drops sign");
         let mut back = big::Int::new();
         back.SetBytes(nb);
-        check(back.Cmp(&t) == 0 && back.Sign() == 1, b"setbytes magnitude only");
+        check(
+            back.Cmp(&t) == 0 && back.Sign() == 1,
+            b"setbytes magnitude only",
+        );
 
         // Zero round-trips to an empty slice.
         let z0 = big::NewInt(0);
@@ -739,9 +796,13 @@ fn main() {
         check(sb.Int64() == 0x010203, b"setbytes 010203");
         // And its Bytes() comes back identical.
         let rt = sb.Bytes();
-        check(rt.len() == 3 && rt[int::from(0)] == 1
-            && rt[int::from(1)] == 2 && rt[int::from(2)] == 3,
-            b"bytes 010203 roundtrip");
+        check(
+            rt.len() == 3
+                && rt[int::from(0)] == 1
+                && rt[int::from(1)] == 2
+                && rt[int::from(2)] == 3,
+            b"bytes 010203 roundtrip",
+        );
 
         // Leading zero bytes in the input are ignored.
         let mut lz = big::Int::new();
@@ -811,8 +872,10 @@ fn main() {
             recon.Add(&yq, &mr);
             let mut absr = big::Int::new();
             absr.Abs(&mr);
-            check(recon.Cmp(&dividend) == 0 && absr.Cmp(&divisor) == -1,
-                b"quo multi-limb identity");
+            check(
+                recon.Cmp(&dividend) == 0 && absr.Cmp(&divisor) == -1,
+                b"quo multi-limb identity",
+            );
         }
 
         // Multi-limb QuoRem with a negative dividend: -(10^55+7) / (10^25+3).
@@ -826,7 +889,10 @@ fn main() {
             yq.Mul(&divisor, &nmq);
             let mut recon = big::Int::new();
             recon.Add(&yq, &nmr);
-            check(recon.Cmp(&neg_dividend) == 0, b"quorem multi-limb neg identity");
+            check(
+                recon.Cmp(&neg_dividend) == 0,
+                b"quorem multi-limb neg identity",
+            );
             // Truncated quotient must equal -(positive quotient).
             let mut negq = big::Int::new();
             negq.Neg(&mq);
@@ -839,8 +905,10 @@ fn main() {
         let mut xeq = big::Int::new();
         let mut xer = big::Int::new();
         xeq.QuoRem(&prod, &q, &mut xer);
-        check(dec_eq(&xeq, b"1000000000000000000000000000000")
-            && xer.Sign() == 0, b"quorem exact 10^55/10^25");
+        check(
+            dec_eq(&xeq, b"1000000000000000000000000000000") && xer.Sign() == 0,
+            b"quorem exact 10^55/10^25",
+        );
     }
 
     // ── GCD ────────────────────────────────────────────────────────
@@ -872,8 +940,10 @@ fn main() {
         let p30 = pow10(30);
         let p25 = pow10(25);
         g.GCD(goish::nil, goish::nil, &p30, &p25);
-        check(g.Cmp(&p25) == 0 && dec_eq(&g, b"10000000000000000000000000"),
-            b"gcd 10^30,10^25 == 10^25");
+        check(
+            g.Cmp(&p25) == 0 && dec_eq(&g, b"10000000000000000000000000"),
+            b"gcd 10^30,10^25 == 10^25",
+        );
 
         // Multi-limb coprime: (10^25 + 1) and (10^25 + 3) — both odd,
         // differ by 2, so gcd is 1.
@@ -965,7 +1035,10 @@ fn main() {
             r.Mod(&prod, &n);
             check(r.Int64() == 1, b"modinverse multi-limb mod");
             // Result is normalised into [0, n).
-            check(z.Sign() >= 0 && z.Cmp(&n) == -1, b"modinverse result in range");
+            check(
+                z.Sign() >= 0 && z.Cmp(&n) == -1,
+                b"modinverse result in range",
+            );
         }
 
         // Non-coprime: gcd(6,9)==3 != 1 — no inverse. self stays unchanged.
@@ -1046,7 +1119,7 @@ fn main() {
         // Multi-limb perfect square: sqrt of (10^20)^2 == 10^20.
         let p20 = pow10(20);
         let mut sqr = big::Int::new();
-        sqr.Mul(&p20, &p20);                    // 10^40
+        sqr.Mul(&p20, &p20); // 10^40
         let mut root = big::Int::new();
         root.Sqrt(&sqr);
         check(root.Cmp(&p20) == 0, b"sqrt (10^20)^2 == 10^20");
@@ -1054,12 +1127,15 @@ fn main() {
         // Multi-limb non-perfect square: sqrt(10^40 - 1) == 10^20 - 1.
         let mut one = big::NewInt(1);
         let mut sqr_m1 = big::Int::new();
-        sqr_m1.Sub(&sqr, &big::NewInt(1));      // 10^40 - 1
+        sqr_m1.Sub(&sqr, &big::NewInt(1)); // 10^40 - 1
         let mut root2 = big::Int::new();
         root2.Sqrt(&sqr_m1);
         let mut p20_m1 = big::Int::new();
-        p20_m1.Sub(&p20, &big::NewInt(1));      // 10^20 - 1
-        check(root2.Cmp(&p20_m1) == 0, b"sqrt (10^40 - 1) floor == 10^20 - 1");
+        p20_m1.Sub(&p20, &big::NewInt(1)); // 10^20 - 1
+        check(
+            root2.Cmp(&p20_m1) == 0,
+            b"sqrt (10^40 - 1) floor == 10^20 - 1",
+        );
         // Verify the floor property: root² <= x < (root+1)².
         {
             let mut rr = big::Int::new();
@@ -1068,8 +1144,10 @@ fn main() {
             rp1.Add(&root2, &one);
             let mut rp1sq = big::Int::new();
             rp1sq.Mul(&rp1, &rp1);
-            check(rr.Cmp(&sqr_m1) <= 0 && sqr_m1.Cmp(&rp1sq) == -1,
-                b"sqrt multi-limb floor property");
+            check(
+                rr.Cmp(&sqr_m1) <= 0 && sqr_m1.Cmp(&rp1sq) == -1,
+                b"sqrt multi-limb floor property",
+            );
         }
         let _ = &mut one;
     }
@@ -1077,23 +1155,26 @@ fn main() {
     // ── ProbablyPrime ──────────────────────────────────────────────
     {
         // Known small primes.
-        check(big::NewInt(2).ProbablyPrime(0),  b"prime 2");
-        check(big::NewInt(3).ProbablyPrime(0),  b"prime 3");
+        check(big::NewInt(2).ProbablyPrime(0), b"prime 2");
+        check(big::NewInt(3).ProbablyPrime(0), b"prime 3");
         check(big::NewInt(97).ProbablyPrime(0), b"prime 97");
         check(big::NewInt(7919).ProbablyPrime(0), b"prime 7919");
         // 2^31 - 1 == 2147483647 is a Mersenne prime.
         check(big::NewInt(2147483647).ProbablyPrime(0), b"prime 2^31-1");
 
         // Known composites.
-        check(!big::NewInt(1).ProbablyPrime(0),   b"composite 1");
-        check(!big::NewInt(0).ProbablyPrime(0),   b"composite 0");
-        check(!big::NewInt(4).ProbablyPrime(0),   b"composite 4");
+        check(!big::NewInt(1).ProbablyPrime(0), b"composite 1");
+        check(!big::NewInt(0).ProbablyPrime(0), b"composite 0");
+        check(!big::NewInt(4).ProbablyPrime(0), b"composite 4");
         check(!big::NewInt(100).ProbablyPrime(0), b"composite 100");
         check(!big::NewInt(7917).ProbablyPrime(0), b"composite 7917");
         // 561 is the smallest Carmichael number — fools the Fermat test.
-        check(!big::NewInt(561).ProbablyPrime(0), b"composite 561 carmichael");
+        check(
+            !big::NewInt(561).ProbablyPrime(0),
+            b"composite 561 carmichael",
+        );
         // Negative receiver is never prime.
-        check(!big::NewInt(-7).ProbablyPrime(0),  b"composite negative");
+        check(!big::NewInt(-7).ProbablyPrime(0), b"composite negative");
 
         // Multi-limb prime: 10^20 + 39 is prime (cross-checked).
         let mut bigprime = big::Int::new();
@@ -1106,7 +1187,7 @@ fn main() {
         // a product of two equal large primes.
         {
             let mut f = big::Int::new();
-            f.Add(&pow10(10), &big::NewInt(19));   // 10^10 + 19, prime
+            f.Add(&pow10(10), &big::NewInt(19)); // 10^10 + 19, prime
             let mut comp = big::Int::new();
             comp.Mul(&f, &f);
             check(!comp.ProbablyPrime(0), b"composite multi-limb prime^2");
@@ -1146,7 +1227,7 @@ fn main() {
             let mut all_ok = true;
             for a in 1i64..23 {
                 let mut xv = big::Int::new();
-                xv.Mod(&big::NewInt(a * a), &p);   // quadratic residue
+                xv.Mod(&big::NewInt(a * a), &p); // quadratic residue
                 let mut zr = big::Int::new();
                 zr.ModSqrt(&xv, &p);
                 let mut zrsq = big::Int::new();
@@ -1352,46 +1433,71 @@ fn main() {
     {
         // Exact small values.
         let (f, acc) = big::NewInt(0).Float64();
-        check(f == 0.0 && acc == big::Accuracy::Exact, b"float64 zero exact");
+        check(
+            f == 0.0 && acc == big::Accuracy::Exact,
+            b"float64 zero exact",
+        );
         let (f, acc) = big::NewInt(42).Float64();
-        check(f == 42.0 && acc == big::Accuracy::Exact, b"float64 42 exact");
+        check(
+            f == 42.0 && acc == big::Accuracy::Exact,
+            b"float64 42 exact",
+        );
         let (f, acc) = big::NewInt(-7).Float64();
-        check(f == -7.0 && acc == big::Accuracy::Exact, b"float64 -7 exact");
+        check(
+            f == -7.0 && acc == big::Accuracy::Exact,
+            b"float64 -7 exact",
+        );
         // 2^53 is exactly representable.
         let (f, acc) = pow2(53).Float64();
-        check(f == 9007199254740992.0 && acc == big::Accuracy::Exact,
-              b"float64 2^53 exact");
+        check(
+            f == 9007199254740992.0 && acc == big::Accuracy::Exact,
+            b"float64 2^53 exact",
+        );
         // 2^60 has only one significant bit → exact despite > 53 bits.
         let (f, acc) = pow2(60).Float64();
-        check(f == 1152921504606846976.0 && acc == big::Accuracy::Exact,
-              b"float64 2^60 exact");
+        check(
+            f == 1152921504606846976.0 && acc == big::Accuracy::Exact,
+            b"float64 2^60 exact",
+        );
         // 2^54 + 1 cannot be represented exactly: 54 significant bits.
         // It rounds down to 2^54 (even mantissa) → Below.
         let mut inexact = pow2(54);
         inexact.Add(&inexact.clone(), &big::NewInt(1));
         let (f, acc) = inexact.Float64();
-        check(f == 18014398509481984.0 && acc == big::Accuracy::Below,
-              b"float64 2^54+1 below");
+        check(
+            f == 18014398509481984.0 && acc == big::Accuracy::Below,
+            b"float64 2^54+1 below",
+        );
         // 2^54 + 3 rounds up to 2^54 + 4 → Above.
         let mut up = pow2(54);
         up.Add(&up.clone(), &big::NewInt(3));
         let (f, acc) = up.Float64();
-        check(f == 18014398509481988.0 && acc == big::Accuracy::Above,
-              b"float64 2^54+3 above");
+        check(
+            f == 18014398509481988.0 && acc == big::Accuracy::Above,
+            b"float64 2^54+3 above",
+        );
         // Negative inexact flips Below<->Above: -(2^54+1) → Above.
         let mut negin = pow2(54);
         negin.Add(&negin.clone(), &big::NewInt(1));
         negin.Neg(&negin.clone());
         let (f, acc) = negin.Float64();
-        check(f == -18014398509481984.0 && acc == big::Accuracy::Above,
-              b"float64 -(2^54+1) above");
+        check(
+            f == -18014398509481984.0 && acc == big::Accuracy::Above,
+            b"float64 -(2^54+1) above",
+        );
         // Accuracy::String() values.
-        check(big::Accuracy::Below.String().as_bytes() == b"Below",
-              b"accuracy string below");
-        check(big::Accuracy::Exact.String().as_bytes() == b"Exact",
-              b"accuracy string exact");
-        check(big::Accuracy::Above.String().as_bytes() == b"Above",
-              b"accuracy string above");
+        check(
+            big::Accuracy::Below.String().as_bytes() == b"Below",
+            b"accuracy string below",
+        );
+        check(
+            big::Accuracy::Exact.String().as_bytes() == b"Exact",
+            b"accuracy string exact",
+        );
+        check(
+            big::Accuracy::Above.String().as_bytes() == b"Above",
+            b"accuracy string above",
+        );
     }
 
     // ── FillBytes ──────────────────────────────────────────────────
@@ -1424,8 +1530,10 @@ fn main() {
         // Exact-fit buffer: 0xABCD into 2 bytes.
         let eb: slice<goish::byte> = slice::__from_vec(alloc::vec![0u8; 2]);
         let eout = big::NewInt(0xABCD).FillBytes(eb);
-        check(eout[0usize] == 0xAB && eout[1usize] == 0xCD,
-              b"fillbytes exact fit");
+        check(
+            eout[0usize] == 0xAB && eout[1usize] == 0xCD,
+            b"fillbytes exact fit",
+        );
     }
 
     // ── Bits / SetBits round-trip ──────────────────────────────────
@@ -1458,10 +1566,12 @@ fn main() {
         check(zbits.len() == 0, b"bits zero is empty");
         // Word value that exercises both u32 halves.
         let mut wmix = big::Int::new();
-        let mixed: slice<big::Word> =
-            slice::__from_vec(alloc::vec![0xDEAD_BEEF_CAFE_F00Du64]);
+        let mixed: slice<big::Word> = slice::__from_vec(alloc::vec![0xDEAD_BEEF_CAFE_F00Du64]);
         wmix.SetBits(mixed);
-        check(wmix.Uint64() == 0xDEAD_BEEF_CAFE_F00D, b"setbits both halves");
+        check(
+            wmix.Uint64() == 0xDEAD_BEEF_CAFE_F00D,
+            b"setbits both halves",
+        );
         let wb = wmix.Bits();
         check(wb[0usize] == 0xDEAD_BEEF_CAFE_F00D, b"bits both halves");
     }
@@ -1472,9 +1582,12 @@ fn main() {
         let big_pos = pow10(40); // 10^40
         let mut big_neg = big::Int::new();
         big_neg.Neg(&big_pos);
-        let cases: [&big::Int; 4] =
-            [&big::NewInt(0), &big::NewInt(123456789), &big::NewInt(-987654321),
-             &big_pos];
+        let cases: [&big::Int; 4] = [
+            &big::NewInt(0),
+            &big::NewInt(123456789),
+            &big::NewInt(-987654321),
+            &big_pos,
+        ];
         let names: [&[u8]; 4] = [b"zero", b"pos", b"neg", b"multi-limb"];
         for k in 0usize..4 {
             let (txt, err) = cases[k].MarshalText();
@@ -1499,15 +1612,16 @@ fn main() {
         check(baderr != goish::nil, b"unmarshaltext invalid -> error");
         let empty: slice<goish::byte> = slice::__from_vec(alloc::vec![]);
         let mut ee = big::Int::new();
-        check(ee.UnmarshalText(empty) != goish::nil,
-              b"unmarshaltext empty -> error");
+        check(
+            ee.UnmarshalText(empty) != goish::nil,
+            b"unmarshaltext empty -> error",
+        );
     }
 
     // ── MarshalJSON / UnmarshalJSON round-trip + null ──────────────
     {
         let big_pos = pow10(35);
-        let cases: [&big::Int; 3] =
-            [&big::NewInt(0), &big::NewInt(-7777), &big_pos];
+        let cases: [&big::Int; 3] = [&big::NewInt(0), &big::NewInt(-7777), &big_pos];
         let names: [&[u8]; 3] = [b"json zero", b"json neg", b"json multi-limb"];
         for k in 0usize..3 {
             let (j, err) = cases[k].MarshalJSON();
@@ -1532,11 +1646,18 @@ fn main() {
     {
         let mut big_neg = big::Int::new();
         big_neg.Neg(&pow10(50));
-        let cases: [&big::Int; 4] =
-            [&big::NewInt(0), &big::NewInt(424242), &big::NewInt(-1),
-             &big_neg];
-        let names: [&[u8]; 4] =
-            [b"gob zero", b"gob pos", b"gob neg small", b"gob neg multi-limb"];
+        let cases: [&big::Int; 4] = [
+            &big::NewInt(0),
+            &big::NewInt(424242),
+            &big::NewInt(-1),
+            &big_neg,
+        ];
+        let names: [&[u8]; 4] = [
+            b"gob zero",
+            b"gob pos",
+            b"gob neg small",
+            b"gob neg multi-limb",
+        ];
         for k in 0usize..4 {
             let (enc, eerr) = cases[k].GobEncode();
             check(eerr == goish::nil, b"gobencode nil error");
@@ -1560,11 +1681,12 @@ fn main() {
         check(zerr == goish::nil, b"gobdecode empty nil error");
         check(zr.Sign() == 0, b"gobdecode empty resets to zero");
         // Version-mismatch buffer -> non-nil error.
-        let badver: slice<goish::byte> =
-            slice::__from_vec(alloc::vec![0xFFu8, 0x01u8]);
+        let badver: slice<goish::byte> = slice::__from_vec(alloc::vec![0xFFu8, 0x01u8]);
         let mut bv = big::Int::new();
-        check(bv.GobDecode(badver) != goish::nil,
-              b"gobdecode bad version -> error");
+        check(
+            bv.GobDecode(badver) != goish::nil,
+            b"gobdecode bad version -> error",
+        );
         // Sign-bit check: encoding of a negative value has bit 0 set.
         let (nenc, _) = big::NewInt(-5).GobEncode();
         check(nenc[0usize] & 1 == 1, b"gobencode negative sign bit");
@@ -1614,7 +1736,10 @@ fn main() {
         // norm reduction: 2/4 -> 1/2.
         let red = big::NewRat(2, 4);
         check(red.Num().Cmp(&big::NewInt(1)) == 0, b"rat 2/4 reduces num");
-        check(red.Denom().Cmp(&big::NewInt(2)) == 0, b"rat 2/4 reduces den");
+        check(
+            red.Denom().Cmp(&big::NewInt(2)) == 0,
+            b"rat 2/4 reduces den",
+        );
 
         // norm reduction: 6/8 -> 3/4.
         let mut sf = big::Rat::new();
@@ -1658,9 +1783,18 @@ fn main() {
         check(ivn.Denom().Cmp(&big::NewInt(2)) == 0, b"rat inv neg den 2");
 
         // Cmp: 1/3 < 1/2 < 2/3, with equality.
-        check(big::NewRat(1, 3).Cmp(&big::NewRat(1, 2)) == -1, b"rat cmp lt");
-        check(big::NewRat(1, 2).Cmp(&big::NewRat(2, 4)) == 0, b"rat cmp eq");
-        check(big::NewRat(2, 3).Cmp(&big::NewRat(1, 2)) == 1, b"rat cmp gt");
+        check(
+            big::NewRat(1, 3).Cmp(&big::NewRat(1, 2)) == -1,
+            b"rat cmp lt",
+        );
+        check(
+            big::NewRat(1, 2).Cmp(&big::NewRat(2, 4)) == 0,
+            b"rat cmp eq",
+        );
+        check(
+            big::NewRat(2, 3).Cmp(&big::NewRat(1, 2)) == 1,
+            b"rat cmp gt",
+        );
 
         // Sign.
         check(big::NewRat(-1, 4).Sign() == -1, b"rat sign neg");
@@ -1682,8 +1816,14 @@ fn main() {
         check(su.IsInt(), b"rat setuint64 is int");
         let mut s64 = big::Rat::new();
         s64.SetFrac64(10, -4);
-        check(s64.Num().Cmp(&big::NewInt(-5)) == 0, b"rat setfrac64 num -5");
-        check(s64.Denom().Cmp(&big::NewInt(2)) == 0, b"rat setfrac64 den 2");
+        check(
+            s64.Num().Cmp(&big::NewInt(-5)) == 0,
+            b"rat setfrac64 num -5",
+        );
+        check(
+            s64.Denom().Cmp(&big::NewInt(2)) == 0,
+            b"rat setfrac64 den 2",
+        );
 
         // Aliasing: r.Add(r, r) == 2*r.
         let mut al = big::NewRat(1, 4);
@@ -1695,12 +1835,24 @@ fn main() {
 
     // ── Rat I/O: String / RatString / FloatString ─────────────────
     {
-        check(big::NewRat(1, 2).String().as_bytes() == b"1/2", b"rat string 1/2");
+        check(
+            big::NewRat(1, 2).String().as_bytes() == b"1/2",
+            b"rat string 1/2",
+        );
         // 4/2 reduces to 2/1 — String always shows the "a/b" form.
-        check(big::NewRat(4, 2).String().as_bytes() == b"2/1", b"rat string 4/2");
+        check(
+            big::NewRat(4, 2).String().as_bytes() == b"2/1",
+            b"rat string 4/2",
+        );
         // RatString drops the denominator when it is 1.
-        check(big::NewRat(1, 2).RatString().as_bytes() == b"1/2", b"rat ratstring 1/2");
-        check(big::NewRat(4, 2).RatString().as_bytes() == b"2", b"rat ratstring 4/2");
+        check(
+            big::NewRat(1, 2).RatString().as_bytes() == b"1/2",
+            b"rat ratstring 1/2",
+        );
+        check(
+            big::NewRat(4, 2).RatString().as_bytes() == b"2",
+            b"rat ratstring 4/2",
+        );
 
         // FloatString: prec digits after the point, rounded.
         check(
@@ -1727,8 +1879,14 @@ fn main() {
         let mut r = big::Rat::new();
         let (_, ok) = r.SetString("22/7");
         check(ok, b"rat setstring 22/7 ok");
-        check(r.Num().Cmp(&big::NewInt(22)) == 0, b"rat setstring 22/7 num");
-        check(r.Denom().Cmp(&big::NewInt(7)) == 0, b"rat setstring 22/7 den");
+        check(
+            r.Num().Cmp(&big::NewInt(22)) == 0,
+            b"rat setstring 22/7 num",
+        );
+        check(
+            r.Denom().Cmp(&big::NewInt(7)) == 0,
+            b"rat setstring 22/7 den",
+        );
 
         let mut ri = big::Rat::new();
         let (_, ok) = ri.SetString("5");
@@ -1740,14 +1898,23 @@ fn main() {
         let (_, ok) = rf.SetString("1.5");
         check(ok, b"rat setstring 1.5 ok");
         check(rf.Num().Cmp(&big::NewInt(3)) == 0, b"rat setstring 1.5 num");
-        check(rf.Denom().Cmp(&big::NewInt(2)) == 0, b"rat setstring 1.5 den");
+        check(
+            rf.Denom().Cmp(&big::NewInt(2)) == 0,
+            b"rat setstring 1.5 den",
+        );
 
         let mut re = big::Rat::new();
         let (_, ok) = re.SetString("-0.25e1");
         check(ok, b"rat setstring -0.25e1 ok");
         // -0.25e1 == -2.5 == -5/2.
-        check(re.Num().Cmp(&big::NewInt(-5)) == 0, b"rat setstring -0.25e1 num");
-        check(re.Denom().Cmp(&big::NewInt(2)) == 0, b"rat setstring -0.25e1 den");
+        check(
+            re.Num().Cmp(&big::NewInt(-5)) == 0,
+            b"rat setstring -0.25e1 num",
+        );
+        check(
+            re.Denom().Cmp(&big::NewInt(2)) == 0,
+            b"rat setstring -0.25e1 den",
+        );
 
         let mut rbad = big::Rat::new();
         let (_, ok) = rbad.SetString("not-a-rat");
@@ -1759,12 +1926,18 @@ fn main() {
         let (f, exact) = big::NewRat(1, 2).Float64();
         check(f == 0.5 && exact, b"rat float64 1/2 exact");
         let (f3, exact3) = big::NewRat(1, 3).Float64();
-        check(f3 > 0.333 && f3 < 0.334 && !exact3, b"rat float64 1/3 inexact");
+        check(
+            f3 > 0.333 && f3 < 0.334 && !exact3,
+            b"rat float64 1/3 inexact",
+        );
 
         let (g, gexact) = big::NewRat(1, 2).Float32();
         check(g == 0.5f32 && gexact, b"rat float32 1/2 exact");
         let (g3, g3exact) = big::NewRat(1, 3).Float32();
-        check(g3 > 0.333f32 && g3 < 0.334f32 && !g3exact, b"rat float32 1/3 inexact");
+        check(
+            g3 > 0.333f32 && g3 < 0.334f32 && !g3exact,
+            b"rat float32 1/3 inexact",
+        );
 
         // Negative sign is carried onto the float.
         let (nf, _) = big::NewRat(-1, 2).Float64();
@@ -1789,14 +1962,23 @@ fn main() {
         let mut rh = big::Rat::new();
         let (_, ok) = rh.SetFloat64(0.5);
         check(ok, b"rat setfloat64 0.5 ok");
-        check(rh.Num().Cmp(&big::NewInt(1)) == 0, b"rat setfloat64 0.5 num");
-        check(rh.Denom().Cmp(&big::NewInt(2)) == 0, b"rat setfloat64 0.5 den");
+        check(
+            rh.Num().Cmp(&big::NewInt(1)) == 0,
+            b"rat setfloat64 0.5 num",
+        );
+        check(
+            rh.Denom().Cmp(&big::NewInt(2)) == 0,
+            b"rat setfloat64 0.5 den",
+        );
 
         // An integer-valued float -> a/1.
         let mut r3 = big::Rat::new();
         let (_, ok) = r3.SetFloat64(3.0);
         check(ok, b"rat setfloat64 3.0 ok");
-        check(r3.IsInt() && r3.Num().Cmp(&big::NewInt(3)) == 0, b"rat setfloat64 3.0 int");
+        check(
+            r3.IsInt() && r3.Num().Cmp(&big::NewInt(3)) == 0,
+            b"rat setfloat64 3.0 int",
+        );
     }
 
     // ── Rat MarshalText / UnmarshalText round-trip ─────────────────
@@ -1832,7 +2014,10 @@ fn main() {
         let eb: slice<goish::byte> = slice::__from_vec(alloc::vec![]);
         let zerr = zr.GobDecode(eb);
         check(zerr == goish::nil, b"rat gobdecode empty no err");
-        check(zr.Sign() == 0 && zr.Denom().Cmp(&big::NewInt(1)) == 0, b"rat gobdecode empty resets");
+        check(
+            zr.Sign() == 0 && zr.Denom().Cmp(&big::NewInt(1)) == 0,
+            b"rat gobdecode empty resets",
+        );
     }
 
     // ── Float core: type, RoundingMode, setters, predicates ────────
@@ -1843,8 +2028,14 @@ fn main() {
         check(!pf.Signbit(), b"float newfloat signbit");
         check(!pf.IsInf(), b"float newfloat not inf");
         check(pf.Prec() == 53, b"float newfloat prec 53");
-        check(pf.Mode() == big::RoundingMode::ToNearestEven, b"float newfloat mode");
-        check(pf.Acc() == big::Accuracy::Exact, b"float newfloat acc exact");
+        check(
+            pf.Mode() == big::RoundingMode::ToNearestEven,
+            b"float newfloat mode",
+        );
+        check(
+            pf.Acc() == big::Accuracy::Exact,
+            b"float newfloat acc exact",
+        );
         check(pf.IsInt() == false, b"float 3.5 not int");
 
         let nf = big::NewFloat(-2.0);
@@ -1860,7 +2051,10 @@ fn main() {
         // Zero value default.
         let dv = big::Float::default();
         check(dv.Sign() == 0 && dv.Prec() == 0, b"float default zero");
-        check(dv.Mode() == big::RoundingMode::ToNearestEven, b"float default mode");
+        check(
+            dv.Mode() == big::RoundingMode::ToNearestEven,
+            b"float default mode",
+        );
     }
 
     // ── Float: SetInt64 / SetUint64 / SetInt ───────────────────────
@@ -1943,10 +2137,16 @@ fn main() {
         let exp = x.MantExp(&mut mant);
         check(exp == 4, b"float mantexp exponent");
         // mant ∈ [0.5, 1): 0.5 <= mant < 1.0  ⇔  MantExp(mant) == 0.
-        check(mant.MantExp(goish::nil) == 0, b"float mantexp mant normalized");
+        check(
+            mant.MantExp(goish::nil) == 0,
+            b"float mantexp mant normalized",
+        );
         let half = big::NewFloat(0.5);
         let one = big::NewFloat(1.0);
-        check(mant.Cmp(&half) >= 0 && mant.Cmp(&one) < 0, b"float mantexp mant in [0.5,1)");
+        check(
+            mant.Cmp(&half) >= 0 && mant.Cmp(&one) < 0,
+            b"float mantexp mant in [0.5,1)",
+        );
 
         // SetMantExp reconstructs x from (mant, exp).
         let mut rebuilt = big::Float::new();
@@ -1977,7 +2177,10 @@ fn main() {
         narrowed.Copy(&wide);
         narrowed.SetPrec(4);
         check(narrowed.Prec() == 4, b"float setprec 4");
-        check(narrowed.Acc() != big::Accuracy::Exact, b"float setprec inexact acc");
+        check(
+            narrowed.Acc() != big::Accuracy::Exact,
+            b"float setprec inexact acc",
+        );
         check(narrowed.Cmp(&wide) != 0, b"float setprec changed value");
         check(narrowed.MinPrec() <= 4, b"float setprec minprec fits");
 
@@ -1985,14 +2188,20 @@ fn main() {
         let mut keep = big::Float::new();
         keep.Copy(&wide);
         keep.SetPrec(16);
-        check(keep.Acc() == big::Accuracy::Exact, b"float setprec wide exact");
+        check(
+            keep.Acc() == big::Accuracy::Exact,
+            b"float setprec wide exact",
+        );
         check(keep.Cmp(&wide) == 0, b"float setprec wide unchanged");
 
         // SetPrec(0) collapses a finite value to ±0.
         let mut collapsed = big::Float::new();
         collapsed.Copy(&wide);
         collapsed.SetPrec(0);
-        check(collapsed.Sign() == 0 && collapsed.Prec() == 0, b"float setprec 0 = zero");
+        check(
+            collapsed.Sign() == 0 && collapsed.Prec() == 0,
+            b"float setprec 0 = zero",
+        );
     }
 
     // ── Float: arithmetic (Add/Sub/Mul/Quo/Neg/Abs/Sqrt) ──────────
@@ -2006,7 +2215,10 @@ fn main() {
         // Add mixed sign: 2.0 + (-0.5) == 1.5
         let mut s2 = big::Float::new();
         s2.Add(&big::NewFloat(2.0), &big::NewFloat(-0.5));
-        check(s2.Cmp(&big::NewFloat(1.5)) == 0, b"float add 2.0+(-0.5)=1.5");
+        check(
+            s2.Cmp(&big::NewFloat(1.5)) == 0,
+            b"float add 2.0+(-0.5)=1.5",
+        );
 
         // Sub: 1.0 - 0.25 == 0.75
         let mut d = big::Float::new();
@@ -2016,7 +2228,10 @@ fn main() {
         // Sub crossing zero: 0.25 - 1.0 == -0.75
         let mut d2 = big::Float::new();
         d2.Sub(&big::NewFloat(0.25), &big::NewFloat(1.0));
-        check(d2.Cmp(&big::NewFloat(-0.75)) == 0, b"float sub 0.25-1.0=-0.75");
+        check(
+            d2.Cmp(&big::NewFloat(-0.75)) == 0,
+            b"float sub 0.25-1.0=-0.75",
+        );
 
         // Sub to exact zero.
         let mut dz = big::Float::new();
@@ -2031,7 +2246,10 @@ fn main() {
         // Mul sign: (-2.0) * 3.0 == -6.0
         let mut m2 = big::Float::new();
         m2.Mul(&big::NewFloat(-2.0), &big::NewFloat(3.0));
-        check(m2.Cmp(&big::NewFloat(-6.0)) == 0, b"float mul (-2.0)*3.0=-6.0");
+        check(
+            m2.Cmp(&big::NewFloat(-6.0)) == 0,
+            b"float mul (-2.0)*3.0=-6.0",
+        );
 
         // Quo: 7.0 / 2.0 == 3.5
         let mut q = big::Float::new();
@@ -2041,7 +2259,10 @@ fn main() {
         // Quo sign: (-9.0) / 3.0 == -3.0
         let mut q2 = big::Float::new();
         q2.Quo(&big::NewFloat(-9.0), &big::NewFloat(3.0));
-        check(q2.Cmp(&big::NewFloat(-3.0)) == 0, b"float quo (-9.0)/3.0=-3.0");
+        check(
+            q2.Cmp(&big::NewFloat(-3.0)) == 0,
+            b"float quo (-9.0)/3.0=-3.0",
+        );
 
         // Neg / Abs.
         let mut n = big::Float::new();
@@ -2074,14 +2295,20 @@ fn main() {
         // root2 close to 1.4142135... — bracket it.
         let lo = big::NewFloat(1.41421356);
         let hi = big::NewFloat(1.41421357);
-        check(root2.Cmp(&lo) > 0 && root2.Cmp(&hi) < 0, b"float sqrt 2 in range");
+        check(
+            root2.Cmp(&lo) > 0 && root2.Cmp(&hi) < 0,
+            b"float sqrt 2 in range",
+        );
         let mut sq = big::Float::new();
         sq.SetPrec(64);
         sq.Mul(&root2, &root2);
         // sq ≈ 2.0; within a couple ulps.
         let two_lo = big::NewFloat(1.9999999);
         let two_hi = big::NewFloat(2.0000001);
-        check(sq.Cmp(&two_lo) > 0 && sq.Cmp(&two_hi) < 0, b"float sqrt 2 squared ~= 2");
+        check(
+            sq.Cmp(&two_lo) > 0 && sq.Cmp(&two_hi) < 0,
+            b"float sqrt 2 squared ~= 2",
+        );
 
         // Sqrt special cases.
         let mut rzero = big::Float::new();
@@ -2132,32 +2359,47 @@ fn main() {
         // Inf - finite == Inf
         let mut subinf = big::Float::new();
         subinf.Sub(&ninf, &big::NewFloat(100.0));
-        check(subinf.IsInf() && subinf.Signbit(), b"float sub -Inf-100=-Inf");
+        check(
+            subinf.IsInf() && subinf.Signbit(),
+            b"float sub -Inf-100=-Inf",
+        );
 
         // ── rounding: low-precision result reports Below/Above ─────
         // 1/3 is not representable; a 4-bit result must round inexact.
         let mut third = big::Float::new();
         third.SetPrec(4);
         third.Quo(&big::NewFloat(1.0), &big::NewFloat(3.0));
-        check(third.Acc() != big::Accuracy::Exact, b"float quo 1/3 inexact acc");
+        check(
+            third.Acc() != big::Accuracy::Exact,
+            b"float quo 1/3 inexact acc",
+        );
         // ToZero rounds the magnitude down => result Below the exact 1/3.
         let mut third_dn = big::Float::new();
         third_dn.SetPrec(4);
         third_dn.SetMode(big::RoundingMode::ToZero);
         third_dn.Quo(&big::NewFloat(1.0), &big::NewFloat(3.0));
-        check(third_dn.Acc() == big::Accuracy::Below, b"float quo 1/3 ToZero=Below");
+        check(
+            third_dn.Acc() == big::Accuracy::Below,
+            b"float quo 1/3 ToZero=Below",
+        );
         // AwayFromZero rounds the magnitude up => result Above.
         let mut third_up = big::Float::new();
         third_up.SetPrec(4);
         third_up.SetMode(big::RoundingMode::AwayFromZero);
         third_up.Quo(&big::NewFloat(1.0), &big::NewFloat(3.0));
-        check(third_up.Acc() == big::Accuracy::Above, b"float quo 1/3 AwayFromZero=Above");
+        check(
+            third_up.Acc() == big::Accuracy::Above,
+            b"float quo 1/3 AwayFromZero=Above",
+        );
 
         // ── aliasing: receiver also an operand ─────────────────────
         let mut alias_add = big::NewFloat(2.5);
         let alias_add_snap = alias_add.clone();
         alias_add.Add(&alias_add_snap, &alias_add_snap);
-        check(alias_add.Cmp(&big::NewFloat(5.0)) == 0, b"float add aliased z=z+z");
+        check(
+            alias_add.Cmp(&big::NewFloat(5.0)) == 0,
+            b"float add aliased z=z+z",
+        );
 
         // True self-alias: z.Add(z, z) — exercises the snapshot path.
         let mut z_aa = big::NewFloat(3.0);
@@ -2168,7 +2410,10 @@ fn main() {
         let mut alias_mul = big::NewFloat(3.0);
         let alias_mul_snap = alias_mul.clone();
         alias_mul.Mul(&alias_mul_snap, &alias_mul_snap);
-        check(alias_mul.Cmp(&big::NewFloat(9.0)) == 0, b"float mul aliased z=z*z");
+        check(
+            alias_mul.Cmp(&big::NewFloat(9.0)) == 0,
+            b"float mul aliased z=z*z",
+        );
 
         // Aliased Sub down to zero.
         let mut alias_sub = big::NewFloat(4.0);
@@ -2194,7 +2439,10 @@ fn main() {
             f.SetFloat64(v);
             let (got, acc) = f.Float64();
             check(got == v, b"float Float64 round-trip");
-            check(acc == big::Accuracy::Exact, b"float Float64 round-trip Exact");
+            check(
+                acc == big::Accuracy::Exact,
+                b"float Float64 round-trip Exact",
+            );
         }
 
         // Float32 round-trip for an exactly representable value.
@@ -2202,7 +2450,10 @@ fn main() {
         f32rt.SetFloat64(-2.25);
         let (g32, a32) = f32rt.Float32();
         check(g32 == -2.25f32, b"float Float32 round-trip");
-        check(a32 == big::Accuracy::Exact, b"float Float32 round-trip Exact");
+        check(
+            a32 == big::Accuracy::Exact,
+            b"float Float32 round-trip Exact",
+        );
 
         // A value needing more precision than 53 bits rounds inexactly.
         // 1/3 at high precision → nearest f64 is rounded.
@@ -2223,68 +2474,107 @@ fn main() {
         bits30.SetPrec(30);
         bits30.Quo(&big::NewFloat(1.0), &big::NewFloat(3.0));
         let (_, a30_64) = bits30.Float64();
-        check(a30_64 == big::Accuracy::Exact, b"float Float64 30-bit Exact");
+        check(
+            a30_64 == big::Accuracy::Exact,
+            b"float Float64 30-bit Exact",
+        );
         let (_, a30_32) = bits30.Float32();
-        check(a30_32 != big::Accuracy::Exact, b"float Float32 30-bit inexact");
+        check(
+            a30_32 != big::Accuracy::Exact,
+            b"float Float32 30-bit inexact",
+        );
 
         // ── numeric conversions: Int64 / Uint64 ────────────────────
         let mut three = big::Float::new();
         three.SetFloat64(3.0);
         let (i3, ai3) = three.Int64();
-        check(i3 == 3 && ai3 == big::Accuracy::Exact, b"float Int64 3.0=3 Exact");
+        check(
+            i3 == 3 && ai3 == big::Accuracy::Exact,
+            b"float Int64 3.0=3 Exact",
+        );
         let (u3, au3) = three.Uint64();
-        check(u3 == 3 && au3 == big::Accuracy::Exact, b"float Uint64 3.0=3 Exact");
+        check(
+            u3 == 3 && au3 == big::Accuracy::Exact,
+            b"float Uint64 3.0=3 Exact",
+        );
 
         let mut frac = big::Float::new();
         frac.SetFloat64(3.9);
         let (i39, ai39) = frac.Int64();
-        check(i39 == 3 && ai39 == big::Accuracy::Below, b"float Int64 3.9=3 Below");
+        check(
+            i39 == 3 && ai39 == big::Accuracy::Below,
+            b"float Int64 3.9=3 Below",
+        );
         // Go quirk: Uint64's exactness check is MinPrec()<=64, so a
         // 53-bit 3.9 truncates to 3 yet reports Exact (matches Go).
         let (u39, au39) = frac.Uint64();
-        check(u39 == 3 && au39 == big::Accuracy::Exact, b"float Uint64 3.9=3 (Go quirk)");
+        check(
+            u39 == 3 && au39 == big::Accuracy::Exact,
+            b"float Uint64 3.9=3 (Go quirk)",
+        );
 
         // Negative truncation: -3.9 → -3, Above (truncation toward zero).
         let mut nfrac = big::Float::new();
         nfrac.SetFloat64(-3.9);
         let (in39, ain39) = nfrac.Int64();
-        check(in39 == -3 && ain39 == big::Accuracy::Above, b"float Int64 -3.9=-3 Above");
+        check(
+            in39 == -3 && ain39 == big::Accuracy::Above,
+            b"float Int64 -3.9=-3 Above",
+        );
         // Uint64 of a negative value saturates to (0, Above).
         let (un, aun) = nfrac.Uint64();
-        check(un == 0 && aun == big::Accuracy::Above, b"float Uint64 neg=0 Above");
+        check(
+            un == 0 && aun == big::Accuracy::Above,
+            b"float Uint64 neg=0 Above",
+        );
 
         // Out-of-range saturation: 2^100 → MaxInt64/MaxUint64, Below.
         let mut huge = big::Float::new();
         huge.SetInt(&pow2(100));
         let (ihuge, aihuge) = huge.Int64();
-        check(ihuge == i64::MAX && aihuge == big::Accuracy::Below,
-            b"float Int64 2^100=MaxInt64 Below");
+        check(
+            ihuge == i64::MAX && aihuge == big::Accuracy::Below,
+            b"float Int64 2^100=MaxInt64 Below",
+        );
         let (uhuge, auhuge) = huge.Uint64();
-        check(uhuge == u64::MAX && auhuge == big::Accuracy::Below,
-            b"float Uint64 2^100=MaxUint64 Below");
+        check(
+            uhuge == u64::MAX && auhuge == big::Accuracy::Below,
+            b"float Uint64 2^100=MaxUint64 Below",
+        );
 
         // ── numeric conversions: Int ───────────────────────────────
         let mut seven_half = big::Float::new();
         seven_half.SetFloat64(7.5);
         let (iz, aiz) = seven_half.Int(big::Int::new());
-        check(iz.Int64() == 7 && aiz == big::Accuracy::Below, b"float Int 7.5=7 Below");
+        check(
+            iz.Int64() == 7 && aiz == big::Accuracy::Below,
+            b"float Int 7.5=7 Below",
+        );
         // Exact integer: Int of 12.0 → 12 Exact.
         let mut twelve = big::Float::new();
         twelve.SetFloat64(12.0);
         let (iz12, aiz12) = twelve.Int(goish::nil);
-        check(iz12.Int64() == 12 && aiz12 == big::Accuracy::Exact, b"float Int 12.0=12 Exact");
+        check(
+            iz12.Int64() == 12 && aiz12 == big::Accuracy::Exact,
+            b"float Int 12.0=12 Exact",
+        );
 
         // ── numeric conversions: Rat ───────────────────────────────
         let mut half = big::Float::new();
         half.SetFloat64(0.5);
         let (rz, arz) = half.Rat(big::Rat::new());
-        check(rz.Num().Int64() == 1 && rz.Denom().Int64() == 2
-            && arz == big::Accuracy::Exact, b"float Rat 0.5=1/2 Exact");
+        check(
+            rz.Num().Int64() == 1 && rz.Denom().Int64() == 2 && arz == big::Accuracy::Exact,
+            b"float Rat 0.5=1/2 Exact",
+        );
         // Rat of 3.0 → 3/1.
         let mut rthree = big::Float::new();
         rthree.SetFloat64(3.0);
         let (rz3, _) = rthree.Rat(goish::nil);
-        check(rz3.Num().Int64() == 3 && rz3.Denom().Int64() == 1, b"float Rat 3.0=3/1");
+        check(
+            rz3.Num().Int64() == 3 && rz3.Denom().Int64() == 1,
+            b"float Rat 3.0=3/1",
+        );
 
         // ── numeric conversions: SetRat ────────────────────────────
         // SetRat of 1/4 → exact, Float64()==0.25.
@@ -2300,7 +2590,10 @@ fn main() {
         let mut sr3 = big::Float::new();
         sr3.SetPrec(8);
         sr3.SetRat(&third_rat);
-        check(sr3.Acc() != big::Accuracy::Exact, b"float SetRat 1/3 inexact");
+        check(
+            sr3.Acc() != big::Accuracy::Exact,
+            b"float SetRat 1/3 inexact",
+        );
         // SetRat of an integer Rat → exact integer Float.
         let mut int_rat = big::Rat::new();
         int_rat.SetFrac(&big::NewInt(10), &big::NewInt(2));
@@ -2317,7 +2610,10 @@ fn main() {
         check(three.Text(b'g', 10).as_bytes() == b"3", b"float Text g 3.0");
 
         let half = big::NewFloat(0.5);
-        check(half.String().as_bytes() == b"0.5", b"float String 0.5=\"0.5\"");
+        check(
+            half.String().as_bytes() == b"0.5",
+            b"float String 0.5=\"0.5\"",
+        );
 
         let mneg = big::NewFloat(-2.25);
         check(mneg.String().as_bytes() == b"-2.25", b"float String -2.25");
@@ -2336,28 +2632,52 @@ fn main() {
         let mut third = big::Float::new();
         third.SetPrec(64);
         third.Quo(&big::NewFloat(1.0), &big::NewFloat(3.0));
-        check(third.Text(b'f', 2).as_bytes() == b"0.33", b"float Text f2 1/3=\"0.33\"");
+        check(
+            third.Text(b'f', 2).as_bytes() == b"0.33",
+            b"float Text f2 1/3=\"0.33\"",
+        );
 
         // Text('f', 4) of -2.25.
-        check(mneg.Text(b'f', 4).as_bytes() == b"-2.2500", b"float Text f4 -2.25");
+        check(
+            mneg.Text(b'f', 4).as_bytes() == b"-2.2500",
+            b"float Text f4 -2.25",
+        );
 
         // Text('e', ...) — scientific notation.
         let mut big100 = big::Float::new();
         big100.SetFloat64(125.0);
-        check(big100.Text(b'e', 2).as_bytes() == b"1.25e+02", b"float Text e2 125");
-        check(big100.Text(b'E', 2).as_bytes() == b"1.25E+02", b"float Text E2 125");
+        check(
+            big100.Text(b'e', 2).as_bytes() == b"1.25e+02",
+            b"float Text e2 125",
+        );
+        check(
+            big100.Text(b'E', 2).as_bytes() == b"1.25E+02",
+            b"float Text E2 125",
+        );
 
         // Text('g') for a large number switches to exponent form.
         let mut million = big::Float::new();
         million.SetFloat64(1.0e7);
-        check(million.Text(b'g', -1).as_bytes() == b"1e+07", b"float Text g 1e7");
+        check(
+            million.Text(b'g', -1).as_bytes() == b"1e+07",
+            b"float Text g 1e7",
+        );
 
         // 'b' / 'p' / 'x' binary/hex forms — at least non-empty & sane.
         let two = big::NewFloat(2.0);
-        check(two.Text(b'x', -1).as_bytes() == b"0x1p+01", b"float Text x 2.0");
+        check(
+            two.Text(b'x', -1).as_bytes() == b"0x1p+01",
+            b"float Text x 2.0",
+        );
         let onex = big::NewFloat(1.0);
-        check(onex.Text(b'p', -1).as_bytes().len() > 0, b"float Text p 1.0 non-empty");
-        check(onex.Text(b'b', -1).as_bytes().len() > 0, b"float Text b 1.0 non-empty");
+        check(
+            onex.Text(b'p', -1).as_bytes().len() > 0,
+            b"float Text p 1.0 non-empty",
+        );
+        check(
+            onex.Text(b'b', -1).as_bytes().len() > 0,
+            b"float Text b 1.0 non-empty",
+        );
 
         // Append onto an existing buffer.
         let pre: slice<goish::byte> = slice::__from_vec(b"=".to_vec());
@@ -2371,7 +2691,10 @@ fn main() {
             let mut y = big::Float::new();
             y.SetPrec(53);
             let (_, _, err) = y.Parse(txt.clone(), 10);
-            check(err == goish::nil && y.Cmp(&x) == 0, b"float Parse(Text(x))==x");
+            check(
+                err == goish::nil && y.Cmp(&x) == 0,
+                b"float Parse(Text(x))==x",
+            );
         }
 
         // High-precision round-trip.
@@ -2382,28 +2705,36 @@ fn main() {
         let mut hp2 = big::Float::new();
         hp2.SetPrec(200);
         let (_, _, hperr) = hp2.Parse(hptxt, 10);
-        check(hperr == goish::nil && hp2.Cmp(&hp) == 0,
-            b"float Parse(Text) hi-prec round-trip");
+        check(
+            hperr == goish::nil && hp2.Cmp(&hp) == 0,
+            b"float Parse(Text) hi-prec round-trip",
+        );
 
         // SetString then Float64() ≈ 3.14159.
         let mut pi = big::Float::new();
         pi.SetPrec(64);
         let (_, ok) = pi.SetString("3.14159");
         let (piv, _) = pi.Float64();
-        check(ok && piv > 3.14158 && piv < 3.14160, b"float SetString 3.14159");
+        check(
+            ok && piv > 3.14158 && piv < 3.14160,
+            b"float SetString 3.14159",
+        );
 
         // ParseFloat with explicit precision/mode.
-        let (pf, pfb, pferr) =
-            big::ParseFloat("2.5", 10, 64, big::RoundingMode::ToNearestEven);
-        check(pferr == goish::nil && pfb == 10
-            && pf.Cmp(&big::NewFloat(2.5)) == 0, b"float ParseFloat 2.5");
+        let (pf, pfb, pferr) = big::ParseFloat("2.5", 10, 64, big::RoundingMode::ToNearestEven);
+        check(
+            pferr == goish::nil && pfb == 10 && pf.Cmp(&big::NewFloat(2.5)) == 0,
+            b"float ParseFloat 2.5",
+        );
 
         // Base-0 hex-float literal.
         let mut hf = big::Float::new();
         hf.SetPrec(64);
         let (_, hfb, hferr) = hf.Parse("0x1.8p1", 0);
-        check(hferr == goish::nil && hfb == 16
-            && hf.Cmp(&big::NewFloat(3.0)) == 0, b"float Parse 0x1.8p1=3");
+        check(
+            hferr == goish::nil && hfb == 16 && hf.Cmp(&big::NewFloat(3.0)) == 0,
+            b"float Parse 0x1.8p1=3",
+        );
 
         // Invalid parse → non-nil error / ok==false.
         let mut bad = big::Float::new();
@@ -2420,8 +2751,10 @@ fn main() {
             let mut y = big::Float::new();
             y.SetPrec(53);
             let uerr = y.UnmarshalText(txt);
-            check(merr == goish::nil && uerr == goish::nil && y.Cmp(&x) == 0,
-                b"float MarshalText/UnmarshalText round-trip");
+            check(
+                merr == goish::nil && uerr == goish::nil && y.Cmp(&x) == 0,
+                b"float MarshalText/UnmarshalText round-trip",
+            );
         }
 
         // GobEncode → GobDecode round-trip (incl. negative, zero, Inf).
@@ -2432,23 +2765,29 @@ fn main() {
             let (gb, gerr) = neg_g.GobEncode();
             let mut gd = big::Float::new();
             let derr = gd.GobDecode(gb);
-            check(gerr == goish::nil && derr == goish::nil
-                && gd.Cmp(&neg_g) == 0, b"float Gob round-trip negative");
+            check(
+                gerr == goish::nil && derr == goish::nil && gd.Cmp(&neg_g) == 0,
+                b"float Gob round-trip negative",
+            );
 
             let zero_g = big::NewFloat(0.0);
             let (zgb, _) = zero_g.GobEncode();
             let mut zgd = big::Float::new();
             let zderr = zgd.GobDecode(zgb);
-            check(zderr == goish::nil && zgd.Cmp(&zero_g) == 0,
-                b"float Gob round-trip zero");
+            check(
+                zderr == goish::nil && zgd.Cmp(&zero_g) == 0,
+                b"float Gob round-trip zero",
+            );
 
             let mut inf_g = big::Float::new();
             inf_g.SetInf(true);
             let (igb, _) = inf_g.GobEncode();
             let mut igd = big::Float::new();
             let iderr = igd.GobDecode(igb);
-            check(iderr == goish::nil && igd.IsInf()
-                && igd.Signbit(), b"float Gob round-trip -Inf");
+            check(
+                iderr == goish::nil && igd.IsInf() && igd.Signbit(),
+                b"float Gob round-trip -Inf",
+            );
 
             // Hi-precision Gob round-trip.
             let mut hpg = big::Float::new();
@@ -2457,8 +2796,10 @@ fn main() {
             let (hgb, _) = hpg.GobEncode();
             let mut hgd = big::Float::new();
             let hderr = hgd.GobDecode(hgb);
-            check(hderr == goish::nil && hgd.Cmp(&hpg) == 0,
-                b"float Gob round-trip hi-prec");
+            check(
+                hderr == goish::nil && hgd.Cmp(&hpg) == 0,
+                b"float Gob round-trip hi-prec",
+            );
         }
 
         // ── Cross-check vs real Go 1.25 (*big.Float).GobEncode ─────────
@@ -2473,9 +2814,12 @@ fn main() {
                 f.SetFloat64(1.5);
                 f.GobEncode()
             };
-            check(&*e1 == &[0x01u8, 0x0a, 0, 0, 0, 0x50, 0, 0, 0, 0x01,
-                0xc0, 0, 0, 0, 0, 0, 0, 0][..],
-                b"float Gob bytes == Go (p80 1.5)");
+            check(
+                &*e1 == &[
+                    0x01u8, 0x0a, 0, 0, 0, 0x50, 0, 0, 0, 0x01, 0xc0, 0, 0, 0, 0, 0, 0, 0,
+                ][..],
+                b"float Gob bytes == Go (p80 1.5)",
+            );
 
             let (e2, _) = {
                 let mut f = big::Float::new();
@@ -2483,9 +2827,12 @@ fn main() {
                 f.SetFloat64(-3.25);
                 f.GobEncode()
             };
-            check(&*e2 == &[0x01u8, 0x0b, 0, 0, 0, 0x64, 0, 0, 0, 0x02,
-                0xd0, 0, 0, 0, 0, 0, 0, 0][..],
-                b"float Gob bytes == Go (p100 -3.25)");
+            check(
+                &*e2 == &[
+                    0x01u8, 0x0b, 0, 0, 0, 0x64, 0, 0, 0, 0x02, 0xd0, 0, 0, 0, 0, 0, 0, 0,
+                ][..],
+                b"float Gob bytes == Go (p100 -3.25)",
+            );
 
             let (e3, _) = {
                 let mut f = big::Float::new();
@@ -2493,31 +2840,39 @@ fn main() {
                 f.SetFloat64(0.5);
                 f.GobEncode()
             };
-            check(&*e3 == &[0x01u8, 0x0a, 0, 0, 0, 0x40, 0, 0, 0, 0,
-                0x80, 0, 0, 0, 0, 0, 0, 0][..],
-                b"float Gob bytes == Go (p64 0.5)");
+            check(
+                &*e3 == &[
+                    0x01u8, 0x0a, 0, 0, 0, 0x40, 0, 0, 0, 0, 0x80, 0, 0, 0, 0, 0, 0, 0,
+                ][..],
+                b"float Gob bytes == Go (p64 0.5)",
+            );
 
             // Decode a Go-produced blob → correct value + precision.
             let goblob = slice::<goish::byte>::__from_vec(alloc::vec![
-                0x01u8, 0x0a, 0, 0, 0, 0x50, 0, 0, 0, 0x01,
-                0xc0, 0, 0, 0, 0, 0, 0, 0]);
+                0x01u8, 0x0a, 0, 0, 0, 0x50, 0, 0, 0, 0x01, 0xc0, 0, 0, 0, 0, 0, 0, 0
+            ]);
             let mut dec = big::Float::new();
             let derr2 = dec.GobDecode(goblob);
             let mut want15 = big::Float::new();
             want15.SetPrec(80);
             want15.SetFloat64(1.5);
-            check(derr2 == goish::nil && dec.Cmp(&want15) == 0
-                && dec.Prec() == 80, b"float Gob decode Go blob (p80 1.5)");
+            check(
+                derr2 == goish::nil && dec.Cmp(&want15) == 0 && dec.Prec() == 80,
+                b"float Gob decode Go blob (p80 1.5)",
+            );
 
             // Decode a Go arithmetic-built blob whose mantissa carries
             // an extra trailing zero word (2.0 @ prec 256, 16-byte mant).
             let goblob2 = slice::<goish::byte>::__from_vec(alloc::vec![
-                0x01u8, 0x0a, 0, 0, 0x01, 0, 0, 0, 0, 0x02,
-                0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+                0x01u8, 0x0a, 0, 0, 0x01, 0, 0, 0, 0, 0x02, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0
+            ]);
             let mut dec2 = big::Float::new();
             let derr3 = dec2.GobDecode(goblob2);
-            check(derr3 == goish::nil && dec2.Cmp(&big::NewFloat(2.0)) == 0,
-                b"float Gob decode Go blob (longer mantissa)");
+            check(
+                derr3 == goish::nil && dec2.Cmp(&big::NewFloat(2.0)) == 0,
+                b"float Gob decode Go blob (longer mantissa)",
+            );
         }
     }
 
@@ -2599,7 +2954,10 @@ fn main() {
         // %x — base 16, matches Text(16).
         let mut st = TestState::new();
         v.Format(&mut st, 'x' as goish::rune);
-        check(st.buf == v.Text(16).as_bytes(), b"Int.Format %x == Text(16)");
+        check(
+            st.buf == v.Text(16).as_bytes(),
+            b"Int.Format %x == Text(16)",
+        );
 
         // %d — base 10.
         let mut st = TestState::new();
@@ -2667,7 +3025,10 @@ fn main() {
         // %f — fixed point, default precision 6.
         let mut st = TestState::new();
         fv.Format(&mut st, 'f' as goish::rune);
-        check(st.buf == fv.Text(b'f', 6).as_bytes(), b"Float.Format %f default prec");
+        check(
+            st.buf == fv.Text(b'f', 6).as_bytes(),
+            b"Float.Format %f default prec",
+        );
 
         // %.2f — precision from State.
         let mut st = TestState::new().with_prec(2);
@@ -2712,8 +3073,10 @@ fn main() {
         // %v handled like %g.
         let mut st = TestState::new();
         big::NewFloat(3.5).Format(&mut st, 'v' as goish::rune);
-        check(st.buf == big::NewFloat(3.5).String().as_bytes()
-            || st.buf == b"3.5", b"Float.Format %v like g");
+        check(
+            st.buf == big::NewFloat(3.5).String().as_bytes() || st.buf == b"3.5",
+            b"Float.Format %v like g",
+        );
 
         // Unsupported verb → %!<verb>(big.Float=...).
         let mut st = TestState::new();
@@ -2742,7 +3105,10 @@ fn main() {
         let mut z = big::Int::new();
         let mut cur = ScanCursor::new(want.String().as_bytes());
         let err = z.Scan(&mut cur, 'd' as goish::rune);
-        check(err == goish::nil && z.Cmp(&want) == 0, b"Int.Scan multi-limb");
+        check(
+            err == goish::nil && z.Cmp(&want) == 0,
+            b"Int.Scan multi-limb",
+        );
 
         // Int.Scan — hex literal under the 'x' verb (0xff == 255).
         let mut z = big::Int::new();
@@ -2766,19 +3132,19 @@ fn main() {
         let mut r = big::Rat::default();
         let mut cur = ScanCursor::new(b"22/7");
         let err = r.Scan(&mut cur, 'v' as goish::rune);
-        check(err == goish::nil
-            && r.Num().Int64() == 22
-            && r.Denom().Int64() == 7,
-            b"Rat.Scan 22/7");
+        check(
+            err == goish::nil && r.Num().Int64() == 22 && r.Denom().Int64() == 7,
+            b"Rat.Scan 22/7",
+        );
 
         // Rat.Scan — a plain integer "3" → 3/1.
         let mut r = big::Rat::default();
         let mut cur = ScanCursor::new(b"3");
         let err = r.Scan(&mut cur, 'g' as goish::rune);
-        check(err == goish::nil
-            && r.Num().Int64() == 3
-            && r.Denom().Int64() == 1,
-            b"Rat.Scan 3");
+        check(
+            err == goish::nil && r.Num().Int64() == 3 && r.Denom().Int64() == 1,
+            b"Rat.Scan 3",
+        );
 
         // Rat.Scan — unsupported verb → non-nil error.
         let mut r = big::Rat::default();
@@ -2791,16 +3157,20 @@ fn main() {
         let mut cur = ScanCursor::new(b"3.14159");
         let err = fl.Scan(&mut cur, 'g' as goish::rune);
         let (fv, _) = fl.Float64();
-        check(err == goish::nil && (fv - 3.14159).abs() < 1e-9,
-            b"Float.Scan 3.14159");
+        check(
+            err == goish::nil && (fv - 3.14159).abs() < 1e-9,
+            b"Float.Scan 3.14159",
+        );
 
         // Float.Scan — scientific "-2.5e3" under the 'e' verb.
         let mut fl = big::Float::new();
         let mut cur = ScanCursor::new(b"-2.5e3");
         let err = fl.Scan(&mut cur, 'e' as goish::rune);
         let (fv, _) = fl.Float64();
-        check(err == goish::nil && (fv - (-2500.0)).abs() < 1e-6,
-            b"Float.Scan -2.5e3");
+        check(
+            err == goish::nil && (fv - (-2500.0)).abs() < 1e-6,
+            b"Float.Scan -2.5e3",
+        );
 
         // Float.Scan — unsupported verb → non-nil error.
         let mut fl = big::Float::new();
@@ -2863,7 +3233,10 @@ fn main() {
         // Rat.SetInt gives denominator 1.
         let mut ri = big::Rat::new();
         ri.SetInt(&big::NewInt(42));
-        check(ri.Num().Int64() == 42 && ri.Denom().Int64() == 1, b"rat setint 42");
+        check(
+            ri.Num().Int64() == 42 && ri.Denom().Int64() == 1,
+            b"rat setint 42",
+        );
 
         // SetFrac normalizes too, so (2/3)*(3/4) reads back as 1/2 and
         // not 6/12 -- Go's Rat has no unreduced state at all: every
@@ -2877,7 +3250,10 @@ fn main() {
         ub.SetFrac(&big::NewInt(3), &big::NewInt(4));
         let mut uc = big::Rat::new();
         uc.Mul(&ua, &ub);
-        check(uc.Num().Int64() == 1 && uc.Denom().Int64() == 2, b"rat setfrac mul reduces");
+        check(
+            uc.Num().Int64() == 1 && uc.Denom().Int64() == 2,
+            b"rat setfrac mul reduces",
+        );
 
         // val.Mul(val, mv) -- the self-aliasing shape fmt's Sscanf
         // driver uses when accumulating a scanned decimal.
@@ -2887,7 +3263,10 @@ fn main() {
         mv.SetInt(&big::NewInt(3)); // 3/1
         let val_src = val.clone();
         val.Mul(&val_src, &mv);
-        check(val.Num().Int64() == 21 && val.Denom().Int64() == 2, b"rat mul self-aliased");
+        check(
+            val.Num().Int64() == 21 && val.Denom().Int64() == 2,
+            b"rat mul self-aliased",
+        );
 
         // parse_decimal_into_rat -- reached indirectly through
         // fmt.Sscanf("%f") (see examples/fmt_sscanf_smoke.rs); these
@@ -2900,18 +3279,30 @@ fn main() {
         //     SetString("-0.5") num=-1  denom=2
         let mut p1 = big::Rat::new();
         let ok1 = big::parse_decimal_into_rat("3.14", &mut p1);
-        check(ok1 && p1.Num().Int64() == 157 && p1.Denom().Int64() == 50, b"parse rat 3.14");
+        check(
+            ok1 && p1.Num().Int64() == 157 && p1.Denom().Int64() == 50,
+            b"parse rat 3.14",
+        );
 
         let mut p2 = big::Rat::new();
         let ok2 = big::parse_decimal_into_rat("100", &mut p2);
-        check(ok2 && p2.Num().Int64() == 100 && p2.Denom().Int64() == 1, b"parse rat 100");
+        check(
+            ok2 && p2.Num().Int64() == 100 && p2.Denom().Int64() == 1,
+            b"parse rat 100",
+        );
 
         let mut p3 = big::Rat::new();
         let ok3 = big::parse_decimal_into_rat("-0.5", &mut p3);
-        check(ok3 && p3.Num().Int64() == -1 && p3.Denom().Int64() == 2, b"parse rat -0.5");
+        check(
+            ok3 && p3.Num().Int64() == -1 && p3.Denom().Int64() == 2,
+            b"parse rat -0.5",
+        );
 
         let mut p4 = big::Rat::new();
-        check(!big::parse_decimal_into_rat("not-a-number", &mut p4), b"parse rat rejects junk");
+        check(
+            !big::parse_decimal_into_rat("not-a-number", &mut p4),
+            b"parse rat rejects junk",
+        );
     }
 
     let _ = &int::from(0);

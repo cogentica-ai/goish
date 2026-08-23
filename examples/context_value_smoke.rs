@@ -8,10 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::context;
+use goish::fmt;
+use goish::syscall;
 use goish::time::Milliseconds;
-use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -143,8 +143,7 @@ fn main() {
 
     // 8. Deadline forwarded through WithValue.
     {
-        let (ctx, _cancel) =
-            context::WithTimeout(context::Background(), Milliseconds(100));
+        let (ctx, _cancel) = context::WithTimeout(context::Background(), Milliseconds(100));
         let ctx2 = context::WithValue(ctx, "k", 1i64);
         if ctx2.Deadline().is_some() {
             fmt::Println!("[ 8] Deadline forwarded        PASS");

@@ -92,10 +92,7 @@ fn only_subtests(t: &mut testing::T) {
 fn main() {
     let mut failed = 0;
 
-    let code = testing::Main(&[
-        ("Parent", parent_test),
-        ("OnlySubtests", only_subtests),
-    ]);
+    let code = testing::Main(&[("Parent", parent_test), ("OnlySubtests", only_subtests)]);
 
     // 1. The tree ran green — none of the shims perturbed it.
     {
@@ -126,7 +123,11 @@ fn main() {
         if get("child.dest.live") == s("Parent/child") {
             fmt::Println!("[ 3] live test is its own dest PASS");
         } else {
-            fmt::Println!("[ 3] live test is its own dest FAIL [", get("child.dest.live"), "]");
+            fmt::Println!(
+                "[ 3] live test is its own dest FAIL [",
+                get("child.dest.live"),
+                "]"
+            );
             failed += 1;
         }
     }
@@ -138,7 +139,11 @@ fn main() {
         if get("child.dest.done") == s("Parent") {
             fmt::Println!("[ 4] done test re-homes up     PASS");
         } else {
-            fmt::Println!("[ 4] done test re-homes up     FAIL [", get("child.dest.done"), "]");
+            fmt::Println!(
+                "[ 4] done test re-homes up     FAIL [",
+                get("child.dest.done"),
+                "]"
+            );
             failed += 1;
         }
     }

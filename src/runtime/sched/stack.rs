@@ -371,7 +371,9 @@ impl Drop for Stack {
         if self.pool_span_idx != super::stackpool::NIL_SPAN {
             // Pool-managed: return slot to the stackpool. The pool
             // will munmap the span when fully empty.
-            unsafe { super::stackpool::free(self.pool_span_idx, self.base); }
+            unsafe {
+                super::stackpool::free(self.pool_span_idx, self.base);
+            }
             return;
         }
         if self.guarded {

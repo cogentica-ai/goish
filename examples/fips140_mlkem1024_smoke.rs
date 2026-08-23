@@ -166,15 +166,13 @@ fn main() {
     check("expanded parse decapsulates", hx(&K4), SHARED_KEY);
 
     // ── Error paths ───────────────────────────────────────────────────
-    let (_, err) =
-        mlkem::NewDecapsulationKey1024(slice::__from_vec(alloc::vec![0u8; 63]));
+    let (_, err) = mlkem::NewDecapsulationKey1024(slice::__from_vec(alloc::vec![0u8; 63]));
     check(
         "short seed rejected",
         fmt::Sprintf!("%v", err.Error()),
         "mlkem: invalid seed length",
     );
-    let (_, err) =
-        mlkem::NewEncapsulationKey1024(slice::__from_vec(alloc::vec![0u8; 10]));
+    let (_, err) = mlkem::NewEncapsulationKey1024(slice::__from_vec(alloc::vec![0u8; 10]));
     check(
         "short encapsulation key rejected",
         fmt::Sprintf!("%v", err.Error()),

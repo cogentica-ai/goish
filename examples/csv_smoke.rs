@@ -8,9 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
 use goish::encoding::csv;
+use goish::fmt;
 use goish::strings;
 use goish::{string, syscall};
 
@@ -37,7 +37,12 @@ fn main() {
         let r = strings::NewReader(string(input));
         let mut cr = csv::NewReader(r);
         let (rec, err) = cr.Read();
-        if err.IsNil() && rec.Len() == 3 && rec[0] == "hello, world" && rec[1] == "a\"b" && rec[2] == "c" {
+        if err.IsNil()
+            && rec.Len() == 3
+            && rec[0] == "hello, world"
+            && rec[1] == "a\"b"
+            && rec[2] == "c"
+        {
             fmt::Println!("[ 2] Quoted comma + escape    PASS");
         } else {
             fmt::Println!("[ 2] Quoted comma + escape    FAIL");
@@ -143,7 +148,9 @@ fn main() {
 
     // 10. Writer simple.
     {
-        let mut buf = bytes::NewBuffer(goish::goslice::slice::<goish::types::byte>::__from_vec(alloc::vec![]));
+        let mut buf = bytes::NewBuffer(goish::goslice::slice::<goish::types::byte>::__from_vec(
+            alloc::vec![],
+        ));
         let mut w = csv::NewWriter(&mut buf);
         let recs = [string("a"), string("b"), string("c")];
         let _ = w.Write(&recs);
@@ -159,7 +166,9 @@ fn main() {
 
     // 11. Writer quotes when needed.
     {
-        let mut buf = bytes::NewBuffer(goish::goslice::slice::<goish::types::byte>::__from_vec(alloc::vec![]));
+        let mut buf = bytes::NewBuffer(goish::goslice::slice::<goish::types::byte>::__from_vec(
+            alloc::vec![],
+        ));
         let mut w = csv::NewWriter(&mut buf);
         let recs = [string("hello, world"), string("plain")];
         let _ = w.Write(&recs);
@@ -175,7 +184,9 @@ fn main() {
 
     // 12. Writer escapes embedded quote.
     {
-        let mut buf = bytes::NewBuffer(goish::goslice::slice::<goish::types::byte>::__from_vec(alloc::vec![]));
+        let mut buf = bytes::NewBuffer(goish::goslice::slice::<goish::types::byte>::__from_vec(
+            alloc::vec![],
+        ));
         let mut w = csv::NewWriter(&mut buf);
         let recs = [string("she said \"hi\""), string("ok")];
         let _ = w.Write(&recs);
@@ -191,7 +202,9 @@ fn main() {
 
     // 13. Writer + Reader round-trip.
     {
-        let mut buf = bytes::NewBuffer(goish::goslice::slice::<goish::types::byte>::__from_vec(alloc::vec![]));
+        let mut buf = bytes::NewBuffer(goish::goslice::slice::<goish::types::byte>::__from_vec(
+            alloc::vec![],
+        ));
         let mut w = csv::NewWriter(&mut buf);
         let r1 = [string("a"), string("b,c")];
         let r2 = [string("\"d\""), string("e")];
@@ -218,7 +231,9 @@ fn main() {
 
     // 14. UseCRLF writer.
     {
-        let mut buf = bytes::NewBuffer(goish::goslice::slice::<goish::types::byte>::__from_vec(alloc::vec![]));
+        let mut buf = bytes::NewBuffer(goish::goslice::slice::<goish::types::byte>::__from_vec(
+            alloc::vec![],
+        ));
         let mut w = csv::NewWriter(&mut buf);
         w.UseCRLF = true;
         let recs = [string("a"), string("b")];

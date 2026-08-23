@@ -32,7 +32,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::crypto::cipher::Block as CipherBlock;
-use crate::errors::{self as errors, ErrorTrait, error};
+use crate::errors::{self as errors, error, ErrorTrait};
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
@@ -70,8 +70,7 @@ const SSH_MSG_CHANNEL_FAILURE: byte = 100;
 // ─── DH Group 14 constants (RFC 3526, 2048-bit MODP) ──────────────────────
 
 /// DH Group 14 prime (2048 bits), hex-encoded (upper-case, no spaces).
-const DH_GROUP14_P_HEX: &str =
-    "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74\
+const DH_GROUP14_P_HEX: &str = "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74\
      020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F1437\
      4FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED\
      EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF05\
@@ -103,15 +102,17 @@ fn ssh_err<S: Into<string>>(s: S) -> error {
 fn put_u32(buf: &mut Vec<byte>, n: u32) {
     buf.push((n >> 24) as u8); // goishlint:ignore GOISH005
     buf.push((n >> 16) as u8); // goishlint:ignore GOISH005
-    buf.push((n >> 8) as u8);  // goishlint:ignore GOISH005
-    buf.push(n as u8);         // goishlint:ignore GOISH005
+    buf.push((n >> 8) as u8); // goishlint:ignore GOISH005
+    buf.push(n as u8); // goishlint:ignore GOISH005
 }
 
 #[inline]
 fn get_u32(buf: &[byte], off: usize) -> (u32, usize) {
-    if off + 4 > buf.len() { return (0, off); }
+    if off + 4 > buf.len() {
+        return (0, off);
+    }
     let v = ((buf[off] as u32) << 24) | ((buf[off+1] as u32) << 16) // goishlint:ignore GOISH005
-          | ((buf[off+2] as u32) << 8) | (buf[off+3] as u32);        // goishlint:ignore GOISH005
+          | ((buf[off+2] as u32) << 8) | (buf[off+3] as u32); // goishlint:ignore GOISH005
     (v, off + 4)
 }
 
@@ -121,10 +122,14 @@ fn put_ssh_string(buf: &mut Vec<byte>, data: &[byte]) {
 }
 
 fn get_ssh_string(buf: &[byte], off: usize) -> (Vec<byte>, usize) {
-    if off + 4 > buf.len() { return (Vec::new(), off); }
+    if off + 4 > buf.len() {
+        return (Vec::new(), off);
+    }
     let (len, off2) = get_u32(buf, off);
     let end = off2 + len as usize; // goishlint:ignore GOISH005
-    if end > buf.len() { return (Vec::new(), off2); }
+    if end > buf.len() {
+        return (Vec::new(), off2);
+    }
     (buf[off2..end].to_vec(), end)
 }
 
@@ -135,19 +140,25 @@ fn put_bool(buf: &mut Vec<byte>, b: bool) {
 
 #[inline]
 fn get_bool(buf: &[byte], off: usize) -> (bool, usize) {
-    if off >= buf.len() { return (false, off); }
+    if off >= buf.len() {
+        return (false, off);
+    }
     (buf[off] != 0, off + 1)
 }
 
 /// Encode an mpint: strip leading zeros; add 0x00 prefix if high bit set.
 fn put_mpint(buf: &mut Vec<byte>, bytes: &[byte]) {
     let mut start = 0usize;
-    while start < bytes.len() && bytes[start] == 0 { start += 1; }
+    while start < bytes.len() && bytes[start] == 0 {
+        start += 1;
+    }
     let trimmed = &bytes[start..];
     let needs_zero = !trimmed.is_empty() && (trimmed[0] & 0x80) != 0;
     let len = trimmed.len() + if needs_zero { 1 } else { 0 };
     put_u32(buf, len as u32); // goishlint:ignore GOISH005
-    if needs_zero { buf.push(0x00); }
+    if needs_zero {
+        buf.push(0x00);
+    }
     buf.extend_from_slice(trimmed);
 }
 
@@ -155,14 +166,18 @@ fn put_mpint(buf: &mut Vec<byte>, bytes: &[byte]) {
 fn get_mpint(buf: &[byte], off: usize) -> (Vec<byte>, usize) {
     let (data, new_off) = get_ssh_string(buf, off);
     let mut start = 0usize;
-    while start < data.len() && data[start] == 0 { start += 1; }
+    while start < data.len() && data[start] == 0 {
+        start += 1;
+    }
     (data[start..].to_vec(), new_off)
 }
 
 fn name_list_bytes(names: &[&str]) -> Vec<byte> {
     let mut buf: Vec<byte> = Vec::new();
     for (i, n) in names.iter().enumerate() {
-        if i > 0 { buf.push(b','); }
+        if i > 0 {
+            buf.push(b',');
+        }
         buf.extend_from_slice(n.as_bytes());
     }
     buf
@@ -188,7 +203,12 @@ impl Aes128Ctr {
         let mut ctr = [0u8; 16];
         let copy_len = iv.len().min(16);
         ctr[..copy_len].copy_from_slice(&iv[..copy_len]);
-        Aes128Ctr { cipher, ctr, ks_buf: Vec::new(), ks_pos: 0 }
+        Aes128Ctr {
+            cipher,
+            ctr,
+            ks_buf: Vec::new(),
+            ks_pos: 0,
+        }
     }
 
     fn xor_keystream(&mut self, data: &mut [byte]) {
@@ -206,7 +226,9 @@ impl Aes128Ctr {
                 let mut i = 15i32;
                 while i >= 0 {
                     self.ctr[i as usize] = self.ctr[i as usize].wrapping_add(1);
-                    if self.ctr[i as usize] != 0 { break; }
+                    if self.ctr[i as usize] != 0 {
+                        break;
+                    }
                     i -= 1;
                 }
             }
@@ -226,11 +248,15 @@ fn read_exact_tcp(conn: &mut crate::net::TCPConn, n: usize) -> (Vec<byte>, error
     while total < n {
         let mut tmp: slice<byte> = slice::__from_vec(alloc::vec![0u8; n - total]);
         let (got, err) = conn.Read(&mut tmp);
-        if !err.IsNil() { return (Vec::new(), err); }
-        if got == 0 { return (Vec::new(), ssh_err("ssh: unexpected EOF")); }
+        if !err.IsNil() {
+            return (Vec::new(), err);
+        }
+        if got == 0 {
+            return (Vec::new(), ssh_err("ssh: unexpected EOF"));
+        }
         let g = got as usize;
         let v = tmp.__into_vec();
-        buf[total..total+g].copy_from_slice(&v[..g]);
+        buf[total..total + g].copy_from_slice(&v[..g]);
         total += g;
     }
     (buf, errors::nil)
@@ -257,9 +283,12 @@ struct Framing {
 impl Framing {
     fn new() -> Self {
         Framing {
-            seq_r: 0, seq_w: 0,
-            cipher_r: None, cipher_w: None,
-            mac_key_r: None, mac_key_w: None,
+            seq_r: 0,
+            seq_w: 0,
+            cipher_r: None,
+            cipher_w: None,
+            mac_key_r: None,
+            mac_key_w: None,
         }
     }
 
@@ -267,15 +296,21 @@ impl Framing {
     fn read_packet(&mut self, conn: &mut crate::net::TCPConn) -> (Vec<byte>, error) {
         // Read first 4 bytes (may be encrypted)
         let (mut hdr, err) = read_exact_tcp(conn, 4);
-        if !err.IsNil() { return (Vec::new(), err); }
-        if let Some(ref mut c) = self.cipher_r { c.xor_keystream(&mut hdr); }
+        if !err.IsNil() {
+            return (Vec::new(), err);
+        }
+        if let Some(ref mut c) = self.cipher_r {
+            c.xor_keystream(&mut hdr);
+        }
         let (pkt_len, _) = get_u32(&hdr, 0);
         if pkt_len > 35000 || pkt_len < 5 {
             return (Vec::new(), ssh_err("ssh: implausible packet length"));
         }
         let mac_len: usize = if self.mac_key_r.is_some() { 32 } else { 0 };
         let (mut rest, err) = read_exact_tcp(conn, pkt_len as usize + mac_len);
-        if !err.IsNil() { return (Vec::new(), err); }
+        if !err.IsNil() {
+            return (Vec::new(), err);
+        }
         // Decrypt rest (not MAC)
         if let Some(ref mut c) = self.cipher_r {
             c.xor_keystream(&mut rest[..pkt_len as usize]);
@@ -298,7 +333,7 @@ impl Framing {
         if payload_len == 0 || 1 + payload_len > pkt_len as usize {
             return (Vec::new(), ssh_err("ssh: bad padding length"));
         }
-        (rest[1..1+payload_len].to_vec(), errors::nil)
+        (rest[1..1 + payload_len].to_vec(), errors::nil)
     }
 
     /// Write one SSH binary packet.
@@ -306,15 +341,23 @@ impl Framing {
         let block_size: usize = if self.cipher_w.is_some() { 16 } else { 8 };
         let need = 1 + payload.len();
         let rem = need % block_size;
-        let mut pad_len = if rem == 0 { block_size } else { block_size - rem };
-        if pad_len < 4 { pad_len += block_size; }
+        let mut pad_len = if rem == 0 {
+            block_size
+        } else {
+            block_size - rem
+        };
+        if pad_len < 4 {
+            pad_len += block_size;
+        }
         let pkt_len = (1 + payload.len() + pad_len) as u32; // goishlint:ignore GOISH005
 
         let mut pkt: Vec<byte> = Vec::with_capacity(4 + pkt_len as usize + 32);
         put_u32(&mut pkt, pkt_len);
         pkt.push(pad_len as byte); // goishlint:ignore GOISH005
         pkt.extend_from_slice(payload);
-        for _ in 0..pad_len { pkt.push(0u8); }
+        for _ in 0..pad_len {
+            pkt.push(0u8);
+        }
 
         let mac: Vec<byte> = if let Some(ref mac_key) = self.mac_key_w {
             let mut mac_data: Vec<byte> = Vec::new();
@@ -325,12 +368,18 @@ impl Framing {
             Vec::new()
         };
 
-        if let Some(ref mut c) = self.cipher_w { c.xor_keystream(&mut pkt); }
+        if let Some(ref mut c) = self.cipher_w {
+            c.xor_keystream(&mut pkt);
+        }
         let err = write_all_tcp(conn, &pkt);
-        if !err.IsNil() { return err; }
+        if !err.IsNil() {
+            return err;
+        }
         if !mac.is_empty() {
             let err = write_all_tcp(conn, &mac);
-            if !err.IsNil() { return err; }
+            if !err.IsNil() {
+                return err;
+            }
         }
         self.seq_w = self.seq_w.wrapping_add(1);
         errors::nil
@@ -392,7 +441,13 @@ fn dh_shared_secret(f_bytes: &[byte], x_bytes: &[byte], p: &BigInt) -> Vec<byte>
 
 // ─── Key derivation ───────────────────────────────────────────────────────
 
-fn derive_key(k_mpint: &[byte], h: &[byte], letter: byte, session_id: &[byte], needed: usize) -> Vec<byte> {
+fn derive_key(
+    k_mpint: &[byte],
+    h: &[byte],
+    letter: byte,
+    session_id: &[byte],
+    needed: usize,
+) -> Vec<byte> {
     let mut out: Vec<byte> = Vec::new();
     let mut prev: Vec<byte> = Vec::new();
     while out.len() < needed {
@@ -415,12 +470,12 @@ fn derive_key(k_mpint: &[byte], h: &[byte], letter: byte, session_id: &[byte], n
 
 // ─── KEXINIT ──────────────────────────────────────────────────────────────
 
-const KEX_ALGOS: &[&str]      = &["diffie-hellman-group14-sha256"];
+const KEX_ALGOS: &[&str] = &["diffie-hellman-group14-sha256"];
 const HOST_KEY_ALGOS: &[&str] = &["ssh-ed25519"];
-const CIPHER_ALGOS: &[&str]   = &["aes128-ctr"];
-const MAC_ALGOS: &[&str]      = &["hmac-sha2-256"];
+const CIPHER_ALGOS: &[&str] = &["aes128-ctr"];
+const MAC_ALGOS: &[&str] = &["hmac-sha2-256"];
 const COMPRESS_ALGOS: &[&str] = &["none"];
-const LANG_ALGOS: &[&str]     = &[];
+const LANG_ALGOS: &[&str] = &[];
 
 fn build_kexinit(cookie: &[byte; 16]) -> Vec<byte> {
     let mut buf: Vec<byte> = Vec::new();
@@ -444,9 +499,13 @@ fn build_kexinit(cookie: &[byte; 16]) -> Vec<byte> {
 
 fn parse_ed25519_pubkey(blob: &[byte]) -> Option<[byte; 32]> {
     let (key_type, off) = get_ssh_string(blob, 0);
-    if key_type != b"ssh-ed25519" { return None; }
+    if key_type != b"ssh-ed25519" {
+        return None;
+    }
     let (key_bytes, _) = get_ssh_string(blob, off);
-    if key_bytes.len() != 32 { return None; }
+    if key_bytes.len() != 32 {
+        return None;
+    }
     let mut arr = [0u8; 32];
     arr.copy_from_slice(&key_bytes);
     Some(arr)
@@ -458,9 +517,13 @@ fn verify_ed25519_sig(key_blob: &[byte], sig_blob: &[byte], message: &[byte]) ->
         None => return false,
     };
     let (sig_type, off) = get_ssh_string(sig_blob, 0);
-    if sig_type != b"ssh-ed25519" { return false; }
+    if sig_type != b"ssh-ed25519" {
+        return false;
+    }
     let (sig_bytes, _) = get_ssh_string(sig_blob, off);
-    if sig_bytes.len() != 64 { return false; }
+    if sig_bytes.len() != 64 {
+        return false;
+    }
     let pk_slice: slice<byte> = slice::__from_vec(pk_bytes.to_vec());
     let pub_key = crate::crypto::ed25519::PublicKey(pk_slice);
     let msg_slice: slice<byte> = slice::__from_vec(message.to_vec());
@@ -480,7 +543,9 @@ pub struct PasswordAuth {
 }
 
 impl AuthMethod for PasswordAuth {
-    fn method(&self) -> &'static str { "password" }
+    fn method(&self) -> &'static str {
+        "password"
+    }
     fn auth_payload(&self, user: &str, _session_id: &[byte]) -> Vec<byte> {
         let mut buf: Vec<byte> = Vec::new();
         buf.push(SSH_MSG_USERAUTH_REQUEST);
@@ -498,7 +563,9 @@ pub struct PublicKeyAuth {
 }
 
 impl AuthMethod for PublicKeyAuth {
-    fn method(&self) -> &'static str { "publickey" }
+    fn method(&self) -> &'static str {
+        "publickey"
+    }
     fn auth_payload(&self, user: &str, session_id: &[byte]) -> Vec<byte> {
         let pk = self.private_key.PublicKey();
         let pk_raw: Vec<byte> = pk.0.__into_vec();
@@ -552,8 +619,11 @@ pub fn InsecureIgnoreHostKey() -> HostKeyCallback {
 pub fn FixedHostKey(expected: slice<byte>) -> HostKeyCallback {
     let exp_vec: Vec<byte> = expected.__into_vec();
     Box::new(move |_addr, key_blob| {
-        if key_blob == exp_vec.as_slice() { errors::nil }
-        else { ssh_err("ssh: host key mismatch") }
+        if key_blob == exp_vec.as_slice() {
+            errors::nil
+        } else {
+            ssh_err("ssh: host key mismatch")
+        }
     })
 }
 
@@ -591,8 +661,12 @@ impl ConnInner {
     fn recv(&mut self) -> (Vec<byte>, error) {
         loop {
             let (pkt, err) = self.framing.read_packet(&mut self.conn);
-            if !err.IsNil() { return (Vec::new(), err); }
-            if pkt.is_empty() { continue; }
+            if !err.IsNil() {
+                return (Vec::new(), err);
+            }
+            if pkt.is_empty() {
+                continue;
+            }
             match pkt[0] {
                 SSH_MSG_IGNORE => continue,
                 SSH_MSG_DISCONNECT => return (Vec::new(), ssh_err("ssh: server disconnected")),
@@ -637,12 +711,21 @@ impl Client {
             if !err.IsNil() {
                 return (Session::dead(self.inner.clone(), local_chan), err);
             }
-            if pkt.is_empty() { continue; }
+            if pkt.is_empty() {
+                continue;
+            }
             match pkt[0] {
                 SSH_MSG_CHANNEL_OPEN_CONFIRMATION => {
                     let (_, off1) = get_u32(&pkt, 1);
                     let (remote_chan, _) = get_u32(&pkt, off1);
-                    return (Session { inner: self.inner.clone(), local_chan, remote_chan }, errors::nil);
+                    return (
+                        Session {
+                            inner: self.inner.clone(),
+                            local_chan,
+                            remote_chan,
+                        },
+                        errors::nil,
+                    );
                 }
                 SSH_MSG_CHANNEL_OPEN_FAILURE => {
                     let (code, off1) = get_u32(&pkt, 1);
@@ -654,8 +737,10 @@ impl Client {
                     msgv.extend_from_slice(code_s.as_bytes());
                     msgv.extend_from_slice(b" reason=");
                     msgv.extend_from_slice(reason_str.as_bytes());
-                    return (Session::dead(self.inner.clone(), local_chan),
-                        ssh_err(string::from_bytes(&msgv)));
+                    return (
+                        Session::dead(self.inner.clone(), local_chan),
+                        ssh_err(string::from_bytes(&msgv)),
+                    );
                 }
                 _ => {}
             }
@@ -673,13 +758,19 @@ pub struct Session {
 
 impl Session {
     fn dead(inner: Arc<Mutex<ConnInner>>, local_chan: u32) -> Self {
-        Session { inner, local_chan, remote_chan: 0 }
+        Session {
+            inner,
+            local_chan,
+            remote_chan: 0,
+        }
     }
 
     pub fn CombinedOutput<S: Into<string>>(&mut self, cmd: S) -> (slice<byte>, error) {
         let cmd_str: string = cmd.into();
         let err = self.start_exec(cmd_str.as_ref());
-        if !err.IsNil() { return (slice::__from_vec(Vec::new()), err); }
+        if !err.IsNil() {
+            return (slice::__from_vec(Vec::new()), err);
+        }
         let (data, err) = self.collect_output();
         (slice::__from_vec(data), err)
     }
@@ -687,7 +778,9 @@ impl Session {
     pub fn Run<S: Into<string>>(&mut self, cmd: S) -> error {
         let cmd_str: string = cmd.into();
         let err = self.start_exec(cmd_str.as_ref());
-        if !err.IsNil() { return err; }
+        if !err.IsNil() {
+            return err;
+        }
         let (_, err) = self.collect_output();
         err
     }
@@ -700,11 +793,17 @@ impl Session {
         put_bool(&mut buf, true);
         put_ssh_string(&mut buf, cmd.as_bytes());
         let err = self.inner.Lock().send(&buf);
-        if !err.IsNil() { return err; }
+        if !err.IsNil() {
+            return err;
+        }
         loop {
             let (pkt, err) = self.inner.Lock().recv();
-            if !err.IsNil() { return err; }
-            if pkt.is_empty() { continue; }
+            if !err.IsNil() {
+                return err;
+            }
+            if pkt.is_empty() {
+                continue;
+            }
             match pkt[0] {
                 SSH_MSG_CHANNEL_SUCCESS => return errors::nil,
                 SSH_MSG_CHANNEL_FAILURE => return ssh_err("ssh: exec request failed"),
@@ -720,18 +819,24 @@ impl Session {
         let remote_chan = self.remote_chan;
         loop {
             let (pkt, err) = self.inner.Lock().recv();
-            if !err.IsNil() { return (out, err); }
-            if pkt.is_empty() { continue; }
+            if !err.IsNil() {
+                return (out, err);
+            }
+            if pkt.is_empty() {
+                continue;
+            }
             match pkt[0] {
                 SSH_MSG_CHANNEL_DATA => {
                     let (data, _) = get_ssh_string(&pkt, 5);
                     out.extend_from_slice(&data);
-                    let _ = self.send_window_adjust(remote_chan, data.len() as u32); // goishlint:ignore GOISH005
+                    let _ = self.send_window_adjust(remote_chan, data.len() as u32);
+                    // goishlint:ignore GOISH005
                 }
                 SSH_MSG_CHANNEL_EXTENDED_DATA => {
                     let (data, _) = get_ssh_string(&pkt, 9);
                     out.extend_from_slice(&data);
-                    let _ = self.send_window_adjust(remote_chan, data.len() as u32); // goishlint:ignore GOISH005
+                    let _ = self.send_window_adjust(remote_chan, data.len() as u32);
+                    // goishlint:ignore GOISH005
                 }
                 SSH_MSG_CHANNEL_REQUEST => {
                     let (req_type, off) = get_ssh_string(&pkt, 5);
@@ -785,16 +890,25 @@ pub fn Dial<N: Into<string>, A: Into<string>>(
 
     // 1. TCP connection
     let (mut conn, err) = crate::net::Dial(network.clone(), addr.clone());
-    if !err.IsNil() { return (make_dead_client(), err); }
+    if !err.IsNil() {
+        return (make_dead_client(), err);
+    }
 
     // 2. Version exchange
     let client_version: &[byte] = b"SSH-2.0-Goish_0.1\r\n";
     let err = write_all_tcp(&mut conn, client_version);
-    if !err.IsNil() { return (make_dead_client(), err); }
+    if !err.IsNil() {
+        return (make_dead_client(), err);
+    }
     let (server_version_raw, err) = read_line_lf_tcp(&mut conn, 256);
-    if !err.IsNil() { return (make_dead_client(), err); }
+    if !err.IsNil() {
+        return (make_dead_client(), err);
+    }
     if !server_version_raw.starts_with(b"SSH-2.0") {
-        return (make_dead_client(), ssh_err("ssh: server does not speak SSH 2.0"));
+        return (
+            make_dead_client(),
+            ssh_err("ssh: server does not speak SSH 2.0"),
+        );
     }
 
     let mut framing = Framing::new();
@@ -813,10 +927,14 @@ pub fn Dial<N: Into<string>, A: Into<string>>(
     our_kexinit_pkt.push(SSH_MSG_KEXINIT);
     our_kexinit_pkt.extend_from_slice(&client_kexinit);
     let err = framing.write_packet(&mut conn, &our_kexinit_pkt);
-    if !err.IsNil() { return (make_dead_client(), err); }
+    if !err.IsNil() {
+        return (make_dead_client(), err);
+    }
 
     let (server_kexinit_pkt, err) = framing.read_packet(&mut conn);
-    if !err.IsNil() { return (make_dead_client(), err); }
+    if !err.IsNil() {
+        return (make_dead_client(), err);
+    }
     if server_kexinit_pkt.is_empty() || server_kexinit_pkt[0] != SSH_MSG_KEXINIT {
         return (make_dead_client(), ssh_err("ssh: expected KEXINIT"));
     }
@@ -839,10 +957,14 @@ pub fn Dial<N: Into<string>, A: Into<string>>(
     kexdh_init.push(SSH_MSG_KEXDH_INIT);
     put_mpint(&mut kexdh_init, &e_bytes);
     let err = framing.write_packet(&mut conn, &kexdh_init);
-    if !err.IsNil() { return (make_dead_client(), err); }
+    if !err.IsNil() {
+        return (make_dead_client(), err);
+    }
 
     let (kexdh_reply, err) = framing.read_packet(&mut conn);
-    if !err.IsNil() { return (make_dead_client(), err); }
+    if !err.IsNil() {
+        return (make_dead_client(), err);
+    }
     if kexdh_reply.is_empty() || kexdh_reply[0] != SSH_MSG_KEXDH_REPLY {
         return (make_dead_client(), ssh_err("ssh: expected KEXDH_REPLY"));
     }
@@ -869,22 +991,31 @@ pub fn Dial<N: Into<string>, A: Into<string>>(
     let h_slice = h.to_vec();
 
     if !verify_ed25519_sig(&ks_blob, &sig_blob, &h_slice) {
-        return (make_dead_client(), ssh_err("ssh: host key signature verification failed"));
+        return (
+            make_dead_client(),
+            ssh_err("ssh: host key signature verification failed"),
+        );
     }
 
     let addr_str = addr.as_ref();
     let err = (cfg.HostKeyCallback)(addr_str, &ks_blob);
-    if !err.IsNil() { return (make_dead_client(), err); }
+    if !err.IsNil() {
+        return (make_dead_client(), err);
+    }
 
     let session_id = h_slice.clone();
 
     // Send NEWKEYS
     let err = framing.write_packet(&mut conn, &[SSH_MSG_NEWKEYS]);
-    if !err.IsNil() { return (make_dead_client(), err); }
+    if !err.IsNil() {
+        return (make_dead_client(), err);
+    }
 
     // Read NEWKEYS
     let (newkeys_reply, err) = framing.read_packet(&mut conn);
-    if !err.IsNil() { return (make_dead_client(), err); }
+    if !err.IsNil() {
+        return (make_dead_client(), err);
+    }
     if newkeys_reply.is_empty() || newkeys_reply[0] != SSH_MSG_NEWKEYS {
         return (make_dead_client(), ssh_err("ssh: expected NEWKEYS"));
     }
@@ -893,27 +1024,31 @@ pub fn Dial<N: Into<string>, A: Into<string>>(
     let mut k_mpint_buf: Vec<byte> = Vec::new();
     put_mpint(&mut k_mpint_buf, &k_bytes);
 
-    let iv_c2s  = derive_key(&k_mpint_buf, &h_slice, b'A', &session_id, 16);
-    let iv_s2c  = derive_key(&k_mpint_buf, &h_slice, b'B', &session_id, 16);
+    let iv_c2s = derive_key(&k_mpint_buf, &h_slice, b'A', &session_id, 16);
+    let iv_s2c = derive_key(&k_mpint_buf, &h_slice, b'B', &session_id, 16);
     let key_c2s = derive_key(&k_mpint_buf, &h_slice, b'C', &session_id, 16);
     let key_s2c = derive_key(&k_mpint_buf, &h_slice, b'D', &session_id, 16);
     let mac_c2s = derive_key(&k_mpint_buf, &h_slice, b'E', &session_id, 32);
     let mac_s2c = derive_key(&k_mpint_buf, &h_slice, b'F', &session_id, 32);
 
-    framing.cipher_w   = Some(Aes128Ctr::new(&key_c2s, &iv_c2s));
-    framing.mac_key_w  = Some(mac_c2s);
-    framing.cipher_r   = Some(Aes128Ctr::new(&key_s2c, &iv_s2c));
-    framing.mac_key_r  = Some(mac_s2c);
+    framing.cipher_w = Some(Aes128Ctr::new(&key_c2s, &iv_c2s));
+    framing.mac_key_w = Some(mac_c2s);
+    framing.cipher_r = Some(Aes128Ctr::new(&key_s2c, &iv_s2c));
+    framing.mac_key_r = Some(mac_s2c);
 
     // 6. Service request
     let mut svc_req: Vec<byte> = Vec::new();
     svc_req.push(SSH_MSG_SERVICE_REQUEST);
     put_ssh_string(&mut svc_req, b"ssh-userauth");
     let err = framing.write_packet(&mut conn, &svc_req);
-    if !err.IsNil() { return (make_dead_client(), err); }
+    if !err.IsNil() {
+        return (make_dead_client(), err);
+    }
 
     let (svc_accept, err) = framing.read_packet(&mut conn);
-    if !err.IsNil() { return (make_dead_client(), err); }
+    if !err.IsNil() {
+        return (make_dead_client(), err);
+    }
     if svc_accept.is_empty() || svc_accept[0] != SSH_MSG_SERVICE_ACCEPT {
         return (make_dead_client(), ssh_err("ssh: service request rejected"));
     }
@@ -921,24 +1056,43 @@ pub fn Dial<N: Into<string>, A: Into<string>>(
     // 7. Authentication
     let user_str = cfg.User.as_ref();
     let mut auth_ok = false;
-    let mut ci = ConnInner { conn, framing, session_id: session_id.clone() };
+    let mut ci = ConnInner {
+        conn,
+        framing,
+        session_id: session_id.clone(),
+    };
 
     for method in &cfg.Auth {
         let payload = method.auth_payload(user_str, &session_id);
         let err = ci.send(&payload);
-        if !err.IsNil() { return (make_dead_client(), err); }
+        if !err.IsNil() {
+            return (make_dead_client(), err);
+        }
         loop {
             let (auth_reply, err) = ci.recv();
-            if !err.IsNil() { return (make_dead_client(), err); }
-            if auth_reply.is_empty() { continue; }
+            if !err.IsNil() {
+                return (make_dead_client(), err);
+            }
+            if auth_reply.is_empty() {
+                continue;
+            }
             match auth_reply[0] {
-                SSH_MSG_USERAUTH_SUCCESS => { auth_ok = true; break; }
-                SSH_MSG_USERAUTH_FAILURE => { break; }
+                SSH_MSG_USERAUTH_SUCCESS => {
+                    auth_ok = true;
+                    break;
+                }
+                SSH_MSG_USERAUTH_FAILURE => {
+                    break;
+                }
                 SSH_MSG_USERAUTH_BANNER => {}
-                _ => { break; }
+                _ => {
+                    break;
+                }
             }
         }
-        if auth_ok { break; }
+        if auth_ok {
+            break;
+        }
     }
     if !auth_ok {
         return (make_dead_client(), ssh_err("ssh: authentication failed"));
@@ -976,24 +1130,36 @@ fn read_line_lf_tcp(conn: &mut crate::net::TCPConn, max_len: usize) -> (Vec<byte
     let mut line: Vec<byte> = Vec::new();
     loop {
         let (b, err) = read_exact_tcp(conn, 1);
-        if !err.IsNil() { return (Vec::new(), err); }
-        if b[0] == b'\n' { break; }
-        if b[0] != b'\r' { line.push(b[0]); }
-        if line.len() > max_len { return (Vec::new(), ssh_err("ssh: version line too long")); }
+        if !err.IsNil() {
+            return (Vec::new(), err);
+        }
+        if b[0] == b'\n' {
+            break;
+        }
+        if b[0] != b'\r' {
+            line.push(b[0]);
+        }
+        if line.len() > max_len {
+            return (Vec::new(), ssh_err("ssh: version line too long"));
+        }
     }
     (line, errors::nil)
 }
 
 fn trim_crlf(b: &[byte]) -> Vec<byte> {
     let mut v = b.to_vec();
-    while v.ends_with(b"\r") || v.ends_with(b"\n") { v.pop(); }
+    while v.ends_with(b"\r") || v.ends_with(b"\n") {
+        v.pop();
+    }
     v
 }
 
 // ─── Public constructor helpers ───────────────────────────────────────────
 
 pub fn Password<S: Into<string>>(pw: S) -> Box<dyn AuthMethod> {
-    Box::new(PasswordAuth { password: pw.into() })
+    Box::new(PasswordAuth {
+        password: pw.into(),
+    })
 }
 
 pub fn PublicKeys(key: crate::crypto::ed25519::PrivateKey) -> Box<dyn AuthMethod> {
@@ -1005,15 +1171,23 @@ pub fn PublicKeys(key: crate::crypto::ed25519::PrivateKey) -> Box<dyn AuthMethod
 pub fn test_kexinit_roundtrip() -> bool {
     let cookie = [0x42u8; 16];
     let payload = build_kexinit(&cookie);
-    if payload.len() < 16 { return false; }
-    for i in 0..16 { if payload[i] != 0x42 { return false; } }
+    if payload.len() < 16 {
+        return false;
+    }
+    for i in 0..16 {
+        if payload[i] != 0x42 {
+            return false;
+        }
+    }
     true
 }
 
 pub fn test_dh_group14_small_exp() -> bool {
     let p = dh_group14_p();
-    let x_bytes = [0u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]; // x = 1
+    let x_bytes = [
+        0u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 1,
+    ]; // x = 1
     let e = dh_exp(2, &x_bytes, &p);
     e == [0x02u8].as_slice()
 }
@@ -1051,10 +1225,10 @@ pub fn test_hmac_sha256() -> bool {
 pub fn test_mpint_encoding() -> bool {
     let mut buf: Vec<byte> = Vec::new();
     put_mpint(&mut buf, &[0x80u8, 0x00u8]); // high bit set, needs zero prefix
-    // Result: [0,0,0,3, 0x00, 0x80, 0x00]
-    // buf[0..4] = big-endian length = 3
-    // buf[4] = 0x00 (zero prefix because high bit of 0x80 is set)
-    // buf[5] = 0x80
-    // buf[6] = 0x00
+                                            // Result: [0,0,0,3, 0x00, 0x80, 0x00]
+                                            // buf[0..4] = big-endian length = 3
+                                            // buf[4] = 0x00 (zero prefix because high bit of 0x80 is set)
+                                            // buf[5] = 0x80
+                                            // buf[6] = 0x00
     buf.len() == 7 && buf[3] == 3 && buf[4] == 0x00 && buf[5] == 0x80
 }

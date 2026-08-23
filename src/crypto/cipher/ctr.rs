@@ -117,7 +117,12 @@ pub fn NewCTR<B: Block>(b: B, iv: slice<byte>) -> CTR<B> {
     let ctr_v: Vec<byte> = iv.__into_vec();
     // Go: out: make([]byte, 0, bufSize)
     let out: Vec<byte> = Vec::with_capacity(bufSize as usize);
-    return CTR { b, ctr: ctr_v, out, out_used: 0 };
+    return CTR {
+        b,
+        ctr: ctr_v,
+        out,
+        out_used: 0,
+    };
 }
 
 impl<B: Block> CTR<B> {
@@ -145,7 +150,8 @@ impl<B: Block> CTR<B> {
         let mut remain: usize = self.out.len() - self.out_used;
         // Go: copy(x.out, x.out[x.outUsed:])
         if remain > 0 {
-            self.out.copy_within(self.out_used..self.out_used + remain, 0);
+            self.out
+                .copy_within(self.out_used..self.out_used + remain, 0);
         }
         // Go: x.out = x.out[:cap(x.out)]
         let cap = self.out.capacity();
@@ -162,8 +168,7 @@ impl<B: Block> CTR<B> {
             let src: slice<byte> = slice::__from_vec(self.ctr.clone());
             // Stage into a fresh slice<byte> dst then copy back, since
             // we can't hand a sub-region of self.out as &mut slice<byte>.
-            let mut dst_block: slice<byte> =
-                slice::__from_vec(alloc::vec![0u8; bs]);
+            let mut dst_block: slice<byte> = slice::__from_vec(alloc::vec![0u8; bs]);
             self.b.Encrypt(&mut dst_block, src);
             let dst_v = dst_block.__into_vec();
             self.out[remain..remain + bs].copy_from_slice(&dst_v);

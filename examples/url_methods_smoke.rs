@@ -8,8 +8,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::net::http;
 use goish::{string, syscall};
 
@@ -57,8 +57,7 @@ fn main() {
 
     // 3. Hostname only — no port.
     {
-        let (req, _) =
-            http::NewRequest(string("GET"), string("http://example.com/foo"), bytes(""));
+        let (req, _) = http::NewRequest(string("GET"), string("http://example.com/foo"), bytes(""));
         if req.URL.Hostname() == "example.com" && req.URL.Port() == "" {
             fmt::Println!("[ 3] hostname no port           PASS");
         } else {
@@ -81,7 +80,10 @@ fn main() {
         let q = req.URL.Query();
         let (a_vals, ok_a) = q.Get(string("a"));
         let (b_vals, ok_b) = q.Get(string("b"));
-        if ok_a && a_vals.Len() == 2 && a_vals[0] == "1" && a_vals[1] == "2"
+        if ok_a
+            && a_vals.Len() == 2
+            && a_vals[0] == "1"
+            && a_vals[1] == "2"
             && ok_b
             && b_vals[0] == "two"
         {
@@ -98,7 +100,10 @@ fn main() {
         if req.URL.RequestURI() == "/" {
             fmt::Println!("[ 5] empty path → /             PASS");
         } else {
-            fmt::Println!("[ 5] empty path → /             FAIL got={}", req.URL.RequestURI());
+            fmt::Println!(
+                "[ 5] empty path → /             FAIL got={}",
+                req.URL.RequestURI()
+            );
             failed += 1;
         }
     }

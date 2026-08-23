@@ -3,8 +3,8 @@
 
 extern crate alloc;
 
-use goish::fmt;
 use goish::encoding::json;
+use goish::fmt;
 use goish::{bytes, nil, string};
 
 #[goish::main]
@@ -19,7 +19,10 @@ fn main() {
         }
         match tok {
             json::Token::Delim(d) => {
-                fmt::Println!("Delim:", string::__from_vec(alloc::vec::Vec::from(&[d.as_byte()])));
+                fmt::Println!(
+                    "Delim:",
+                    string::__from_vec(alloc::vec::Vec::from(&[d.as_byte()]))
+                );
             }
             json::Token::String(s) => {
                 fmt::Println!("String:", s);

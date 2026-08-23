@@ -124,10 +124,7 @@ struct SequencerState {
 impl sequencer {
     fn new() -> Self {
         sequencer {
-            state: Mutex::new(SequencerState {
-                id: 0,
-                wait: None,
-            }),
+            state: Mutex::new(SequencerState { id: 0, wait: None }),
         }
     }
 
@@ -149,7 +146,7 @@ impl sequencer {
             return;
         }
         // Go: c := make(chan struct{})
-        let c: chan<()> = crate::make!(chan ());
+        let c: chan<()> = crate::make!(chan());
         // Go: if s.wait == nil { s.wait = make(map[uint]chan struct{}) }
         if g.wait.is_none() {
             g.wait = Some(BTreeMap::new());

@@ -22,12 +22,12 @@
 
 extern crate alloc;
 
+use crate::convert::{uint32, uint8};
 use crate::crypto::cipher::Stream;
-use crate::errors::{ErrorTrait, Wrap, error, nil};
+use crate::errors::{error, nil, ErrorTrait, Wrap};
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::strconv;
-use crate::convert::{uint8, uint32};
 use crate::types::{byte, int};
 
 // go: sdk 1.25.5 crypto/rc4/rc4.go:20-23 Cipher
@@ -80,7 +80,11 @@ pub fn NewCipher(key: slice<byte>) -> (Option<Cipher>, error) {
         return (None, Wrap(KeySizeError(k)));
     }
     // Go: var c Cipher
-    let mut c = Cipher { s: [0u32; 256], i: 0, j: 0 };
+    let mut c = Cipher {
+        s: [0u32; 256],
+        i: 0,
+        j: 0,
+    };
     // Go: for i := 0; i < 256; i++ { c.s[i] = uint32(i) }
     let mut i: int = 0;
     while i < 256 {

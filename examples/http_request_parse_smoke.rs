@@ -28,7 +28,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::net::http::request::{idnaASCII, parseBasicAuth, parseRequestLine, validMethod, ParseHTTPVersion};
+use goish::net::http::request::{
+    idnaASCII, parseBasicAuth, parseRequestLine, validMethod, ParseHTTPVersion,
+};
 use goish::{fmt, string, syscall};
 
 #[goish::main]

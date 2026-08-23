@@ -70,11 +70,17 @@ fn main() {
     // (1) Two simple lines, '\n' terminated.
     let lines = collect_lines(b"hello\nworld\n");
     let want: slice<string> = goish::slice!([]string{ "hello", "world" });
-    check(slices::Equal(&lines, &want), b"bufio: simple two-line wrong\n");
+    check(
+        slices::Equal(&lines, &want),
+        b"bufio: simple two-line wrong\n",
+    );
 
     // (2) Trailing newline missing — last line still returned.
     let lines = collect_lines(b"hello\nworld");
-    check(slices::Equal(&lines, &want), b"bufio: missing-newline last-line wrong\n");
+    check(
+        slices::Equal(&lines, &want),
+        b"bufio: missing-newline last-line wrong\n",
+    );
 
     // (3) CRLF line endings stripped.
     let lines = collect_lines(b"hello\r\nworld\r\n");
@@ -87,7 +93,10 @@ fn main() {
     // (5) Empty lines preserved.
     let lines = collect_lines(b"a\n\nb\n");
     let want: slice<string> = goish::slice!([]string{ "a", "", "b" });
-    check(slices::Equal(&lines, &want), b"bufio: empty-line preservation wrong\n");
+    check(
+        slices::Equal(&lines, &want),
+        b"bufio: empty-line preservation wrong\n",
+    );
 
     // (6) ScanWords — split on whitespace runs.
     let r = ByteReader::new(b"  foo \t bar\n  baz  ");
@@ -132,7 +141,11 @@ fn main() {
             i += 1;
         }
         if at_eof && !data.is_empty() {
-            return (data.len() as int, Some(slice::__from_vec(data.to_vec())), nil.into());
+            return (
+                data.len() as int,
+                Some(slice::__from_vec(data.to_vec())),
+                nil.into(),
+            );
         }
         (0, None, nil.into())
     });

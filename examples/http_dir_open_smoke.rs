@@ -52,12 +52,20 @@ fn main() {
         fmt::Println!("setup: MkdirAll failed: ", err);
         syscall::Exit(1);
     }
-    let werr = os::WriteFile(root.clone() + "/hello.txt", goish::convert::bytes(string("Hello, world.")), 0o644);
+    let werr = os::WriteFile(
+        root.clone() + "/hello.txt",
+        goish::convert::bytes(string("Hello, world.")),
+        0o644,
+    );
     if werr != goish::nil {
         fmt::Println!("setup: WriteFile failed: ", werr);
         syscall::Exit(1);
     }
-    let _ = os::WriteFile(root.clone() + "/sub/deep.txt", goish::convert::bytes(string("deep")), 0o644);
+    let _ = os::WriteFile(
+        root.clone() + "/sub/deep.txt",
+        goish::convert::bytes(string("deep")),
+        0o644,
+    );
 
     let d = NewDir(root.clone());
 

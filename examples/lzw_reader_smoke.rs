@@ -25,11 +25,11 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
-use goish::error;
 use goish::bytes;
 use goish::compress::lzw::{self, LSB, MSB};
+use goish::error;
 use goish::errors;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::io;
 use goish::runtime::sched::schedule;
@@ -193,9 +193,7 @@ fn test_6_tobe_msb_8() {
 }
 
 fn test_7_tobe_truncated() {
-    let r = bytes::NewReader(from_bytes(
-        b"\x54\x9e\x08\x29\xf2\x44\x8a\x93\x27\x54\x04",
-    ));
+    let r = bytes::NewReader(from_bytes(b"\x54\x9e\x08\x29\xf2\x44\x8a\x93\x27\x54\x04"));
     let mut rc = lzw::NewReader(r, LSB, 8);
     let (_got, err) = read_all(&mut rc);
     let _ = rc.Close();

@@ -82,7 +82,9 @@ fn certFiles() -> slice<string> {
     // OpenELEC
     v.push(string::from("/etc/pki/tls/cacert.pem"));
     // CentOS/RHEL 7
-    v.push(string::from("/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"));
+    v.push(string::from(
+        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+    ));
     // Alpine Linux
     v.push(string::from("/etc/ssl/cert.pem"));
     return slice::__from_vec(v);
@@ -106,10 +108,7 @@ impl Certificate {
     /// and windows build-tag variants of this file are where it has a
     /// body. Dead code in goish — see the banner.
     #[allow(dead_code)]
-    pub(super) fn systemVerify(
-        &self,
-        _opts: &VerifyOptions,
-    ) -> (slice<slice<Certificate>>, error) {
+    pub(super) fn systemVerify(&self, _opts: &VerifyOptions) -> (slice<slice<Certificate>>, error) {
         return (slice::new(), errors::nil);
     }
 }
@@ -192,10 +191,7 @@ pub(super) fn readUniqueDirectoryEntries(
 // go: sdk 1.25.5 crypto/x509/root_unix.go:100-108 isSameDirSymlink
 /// Report whether `f` in `dir` is a symlink with a target not containing
 /// a slash.
-pub(super) fn isSameDirSymlink(
-    f: &Arc<dyn fs::DirEntry + Send + Sync>,
-    dir: &string,
-) -> bool {
+pub(super) fn isSameDirSymlink(f: &Arc<dyn fs::DirEntry + Send + Sync>, dir: &string) -> bool {
     if f.Type().0 & fs::ModeSymlink.0 == 0 {
         return false;
     }

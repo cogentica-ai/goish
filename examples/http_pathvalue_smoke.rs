@@ -64,7 +64,8 @@ fn main() {
 
         let mux: Arc<dyn http::Handler> = Arc::new(mux);
         for p in ["/a/x", "/m/x/c/y", "/f/x/y/z", "/only/"].iter() {
-            let (req, err) = http::NewRequest(string("GET"), string("http://x") + string(*p), goish::nil);
+            let (req, err) =
+                http::NewRequest(string("GET"), string("http://x") + string(*p), goish::nil);
             if err != goish::errors::nil {
                 fmt::Println!("FAIL NewRequest ", *p, ": ", err.Error());
                 BAD.fetch_add(1, Ordering::SeqCst);
@@ -78,7 +79,11 @@ fn main() {
         {
             let (mut req, _) = http::NewRequest(string("GET"), string("http://x/a/x"), goish::nil);
             req.SetPathValue(string("injected"), string("zzz"));
-            want(req.PathValue(string("injected")), "zzz", "SetPathValue round-trip");
+            want(
+                req.PathValue(string("injected")),
+                "zzz",
+                "SetPathValue round-trip",
+            );
         }
 
         let ran = RAN.load(Ordering::SeqCst);

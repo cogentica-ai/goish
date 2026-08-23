@@ -148,7 +148,8 @@ static PARSE_VECS: &[(&str, &str, bool)] = &[
     ("yue", "yue", false),
     ("cmn", "cmn", false),
     ("haw", "haw", false),
-    ("gsw", "gsw", false),];
+    ("gsw", "gsw", false),
+];
 
 // (input, index, confidence as int) matched against typescript-go's
 // supported list — from real x/text v0.38.0. Confidence: 0=No 1=Low
@@ -261,7 +262,8 @@ static MATCH_VECS: &[(&str, i64, i64)] = &[
     ("yue", 2, 0),
     ("cmn", 1, 3),
     ("haw", 0, 2),
-    ("gsw", 4, 2),];
+    ("gsw", 4, 2),
+];
 
 fn conf_int(c: language::Confidence) -> i64 {
     if c == language::No {
@@ -296,8 +298,8 @@ fn main() {
     let mut supported = alloc::vec::Vec::new();
     supported.push(language::English);
     for s in [
-        "zh-CN", "zh-TW", "cs-CZ", "de-DE", "es-ES", "fr-FR", "it-IT", "ja-JP",
-        "ko-KR", "pl-PL", "pt-BR", "ru-RU", "tr-TR",
+        "zh-CN", "zh-TW", "cs-CZ", "de-DE", "es-ES", "fr-FR", "it-IT", "ja-JP", "ko-KR", "pl-PL",
+        "pt-BR", "ru-RU", "tr-TR",
     ] {
         supported.push(language::MustParse(s));
     }
@@ -309,7 +311,16 @@ fn main() {
         }
         let (_, idx, conf) = matcher.Match([tag]);
         if idx != *want_idx || conf_int(conf) != *want_conf {
-            fmt::Println!("match:", *input, "got", idx, conf_int(conf), "want", *want_idx, *want_conf);
+            fmt::Println!(
+                "match:",
+                *input,
+                "got",
+                idx,
+                conf_int(conf),
+                "want",
+                *want_idx,
+                *want_conf
+            );
             die(b"t2: Match mismatch\n");
         }
     }

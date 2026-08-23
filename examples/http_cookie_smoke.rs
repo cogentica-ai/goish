@@ -110,7 +110,10 @@ fn main() {
         if ok {
             fmt::Println!("[ 6] round-trip parse          PASS");
         } else {
-            fmt::Println!("[ 6] round-trip parse          FAIL serialized={}", serialized);
+            fmt::Println!(
+                "[ 6] round-trip parse          FAIL serialized={}",
+                serialized
+            );
             failed += 1;
         }
     }
@@ -161,7 +164,13 @@ fn main() {
         } else {
             fmt::Println!(
                 "[ 9] Expires round-trip        FAIL serialized={} y={} m={} d={} {}:{}:{}",
-                s, y, m, d, hh, mm, ss
+                s,
+                y,
+                m,
+                d,
+                hh,
+                mm,
+                ss
             );
             failed += 1;
         }
@@ -226,7 +235,10 @@ fn main() {
                 while i + needle.len() <= whole.len() {
                     if &whole[i..i + needle.len()] == needle {
                         let after = &whole[i + needle.len()..];
-                        let crlf = after.iter().position(|&b| b == b'\r').unwrap_or(after.len());
+                        let crlf = after
+                            .iter()
+                            .position(|&b| b == b'\r')
+                            .unwrap_or(after.len());
                         sc_line = Some(&after[..crlf]);
                         break;
                     }

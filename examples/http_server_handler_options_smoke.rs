@@ -64,8 +64,16 @@ fn main() {
         let cl = rec.Header().Get(string("Content-Length"));
         if body != *wantBody || cl != *wantCL {
             fmt::Println!(
-                "     disable=", *disable, " ", *method, " ", *uri,
-                " -> cl=", cl, " body=", body
+                "     disable=",
+                *disable,
+                " ",
+                *method,
+                " ",
+                *uri,
+                " -> cl=",
+                cl,
+                " body=",
+                body
             );
             bad += 1;
         }

@@ -174,10 +174,7 @@ fn run_tests() {
     // line 0 — still a valid (ok==true) result, so no constraint.
     let _ = pc;
     let sym_consistent = if line > 0 { file.Len() > 0 } else { true };
-    check(
-        sym_consistent,
-        b"Caller symbolization result consistent   ",
-    );
+    check(sym_consistent, b"Caller symbolization result consistent   ");
 }
 
 #[goish::main]

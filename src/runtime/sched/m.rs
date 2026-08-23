@@ -16,23 +16,26 @@
 //         m: SpinLock<M>,                            // offset 8
 //     }
 //
-// At init, we plant `&storage.m` into `storage.tls_self`. Then
-// `arch_prctl(ARCH_SET_FS, &storage.tls_self)` makes the calling
-// thread's `fs` segment base equal `&storage.tls_self`, so a
-// `mov %fs:0, _` reads back `&storage.m` — the SpinLock guarding
+// At init, we plant `&storage.m` into `storage.tls_self`. The default
+// runtime makes FS point at that slot. The `ffi-system-tls` feature
+// instead uses GS, leaving the platform's FS-based TLS intact for
+// dynamically loaded foreign libraries. A segment-relative load at
+// offset zero then reads back `&storage.m` — the SpinLock guarding
 // this thread's M. `current_m()` does exactly that.
 //
-// For workers, `clone(2)` with `CLONE_SETTLS` and `tls = &storage
-// .tls_self` sets the child's fs base atomically with thread
-// creation; the child's first `current_m()` already returns its
-// own M.
+// For workers, the default clone trampoline uses `CLONE_SETTLS` to
+// set FS atomically. In `ffi-system-tls` mode it inherits FS and sets
+// GS with a raw `arch_prctl` syscall before entering Rust. Either way,
+// the child's first `current_m()` already returns its own M.
 //
 // The `#[repr(C)]` attribute on `MStorage` and the tls_self field
-// at offset 0 are load-bearing — `mov %fs:0` reads from offset 0.
+// at offset 0 are load-bearing — the segment load reads offset 0.
 
 use core::cell::UnsafeCell;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
+use core::sync::atomic::{
+    AtomicBool, AtomicI32, AtomicI64, AtomicPtr, AtomicU32, AtomicUsize, Ordering,
+};
 
 use super::g::G;
 use super::p::P;
@@ -99,14 +102,15 @@ impl M {
 
 /// Per-thread storage that holds the M, the TLS self-pointer, and
 /// the M's park note. `#[repr(C)]` pins `tls_self` to offset 0 so
-/// `mov %fs:0, _` reads it back as a `*const SpinLock<M>`.
+/// a segment-relative load reads it back as a `*const SpinLock<M>`.
 ///
 /// `park` is a `Note` — Go's one-shot wait/wake primitive
 /// (lock_futex.go). Mirrors `m.park` (runtime2.go). Its address is
 /// the futex word the kernel binds wait/wake to.
 #[repr(C)]
 pub struct MStorage {
-    /// Self-pointer to `m`. Read by `current_m()` via `mov %fs:0`.
+    /// Self-pointer to `m`. Read by `current_m()` through Goish's TLS
+    /// segment (FS by default, GS with `ffi-system-tls`).
     /// Written exactly once at init, then immutable for the
     /// lifetime of the storage.
     pub tls_self: UnsafeCell<*const SpinLock<M>>,
@@ -181,15 +185,22 @@ impl MStorage {
     /// Plant the self-pointer. Idempotent: writes the address of
     /// `self.m` into `self.tls_self`.
     pub fn init_tls_self(&'static self) {
-        unsafe { *self.tls_self.get() = &self.m; }
+        unsafe {
+            *self.tls_self.get() = &self.m;
+        }
     }
 
-    /// Address that `arch_prctl(ARCH_SET_FS, _)` should be called
-    /// with, or that `clone(2)` should pass as `tls`. This is the
-    /// address of the `tls_self` field — `fs:[0]` will read its
-    /// stored pointer (= `&self.m`).
-    pub fn fs_base(&self) -> usize {
+    /// Address that Goish's selected TLS segment should use, or that
+    /// `clone(2)` should pass as `tls`. This is the address of the
+    /// `tls_self` field; segment offset zero reads its stored pointer
+    /// (= `&self.m`).
+    pub fn tls_base(&self) -> usize {
         self.tls_self.get() as usize
+    }
+
+    /// Backward-compatible name for [`Self::tls_base`].
+    pub fn fs_base(&self) -> usize {
+        self.tls_base()
     }
 }
 
@@ -197,16 +208,15 @@ impl MStorage {
 /// `setup_main_tls()`; subsequent `current_m()` reads are TLS-backed.
 pub static MAIN_M: MStorage = MStorage::new(0);
 
-/// Process-wide flag: `true` once the main thread has planted its
-/// `fs` base via `setup_main_tls`. Before this point, `current_m()`
-/// reads from `fs:0` would dereference an unset segment register;
+/// Process-wide flag: `true` once the main thread has planted Goish's
+/// TLS segment base via `setup_main_tls`. Before this point,
+/// `current_m()` would dereference an unset segment register;
 /// `acquirem`/`releasem` consult this flag and become no-ops while
 /// it is `false` so SpinLocks taken during pre-TLS init (e.g.
 /// `args::__set`) don't crash.
 ///
-/// Workers see `true` from their first instruction because their
-/// `fs` base is planted by `clone(2)` with `CLONE_SETTLS` atomically
-/// with thread creation, before any user code on the worker runs.
+/// Workers see `true` from their first instruction because their TLS
+/// base is planted by the clone trampoline before any Rust code runs.
 static TLS_READY: AtomicBool = AtomicBool::new(false);
 
 /// Pre-goish fs base (the glibc TCB planted by ld.so), saved by
@@ -239,7 +249,10 @@ pub fn pre_goish_fs_base() -> usize {
 #[inline]
 pub fn current_g0_gobuf() -> *mut crate::runtime::sched::gobuf::Gobuf {
     let g0_ptr = current_m_storage().g0.load(Ordering::Acquire);
-    debug_assert!(!g0_ptr.is_null(), "current_g0_gobuf: g0 not yet initialized");
+    debug_assert!(
+        !g0_ptr.is_null(),
+        "current_g0_gobuf: g0 not yet initialized"
+    );
     unsafe { &mut (*g0_ptr).gobuf as *mut crate::runtime::sched::gobuf::Gobuf }
 }
 
@@ -279,8 +292,8 @@ pub fn is_tls_ready() -> bool {
 /// > 0 forever (never preemptible again) and the new M's matching
 /// `releasem` underflows to `u32::MAX`, after which the preempt
 /// checks misread "one lock held" as "none held" and preempt inside
-/// critical sections. With fs-relative addressing the per-M address
-/// is never held in a register across a preemptible instruction —
+/// critical sections. With TLS-segment-relative addressing the per-M
+/// address is never held in a register across a preemptible instruction —
 /// the RMW always hits the M we are executing on *at that instant*.
 #[inline(never)]
 #[link_section = "goish_rt_text"]
@@ -289,8 +302,15 @@ pub fn acquirem() {
         return;
     }
     unsafe {
+        #[cfg(not(feature = "ffi-system-tls"))]
         core::arch::asm!(
             "lock add dword ptr fs:[{off}], 1",
+            off = const core::mem::offset_of!(MStorage, locks),
+            options(nostack),
+        );
+        #[cfg(feature = "ffi-system-tls")]
+        core::arch::asm!(
+            "lock add dword ptr gs:[{off}], 1",
             off = const core::mem::offset_of!(MStorage, locks),
             options(nostack),
         );
@@ -301,7 +321,7 @@ pub fn acquirem() {
 /// Pairs with `acquirem`. Mirrors Go's `releasem`
 /// (runtime/runtime1.go:638).
 ///
-/// Single fs-relative `xadd` for the same migration-atomicity
+/// Single TLS-segment-relative `xadd` for the same migration-atomicity
 /// reason as `acquirem` (see there); `xadd` rather than `sub` so
 /// the previous value feeds the underflow tripwire.
 #[inline(never)]
@@ -312,9 +332,18 @@ pub fn releasem() {
     }
     let prev: u32;
     unsafe {
+        #[cfg(not(feature = "ffi-system-tls"))]
         core::arch::asm!(
             "mov {p:e}, -1",
             "lock xadd dword ptr fs:[{off}], {p:e}",
+            p = out(reg) prev,
+            off = const core::mem::offset_of!(MStorage, locks),
+            options(nostack),
+        );
+        #[cfg(feature = "ffi-system-tls")]
+        core::arch::asm!(
+            "mov {p:e}, -1",
+            "lock xadd dword ptr gs:[{off}], {p:e}",
             p = out(reg) prev,
             off = const core::mem::offset_of!(MStorage, locks),
             options(nostack),
@@ -347,17 +376,30 @@ pub fn releasem() {
             while hops < 10 && rbp != 0 && rbp & 7 == 0 {
                 let next = *(rbp as *const u64);
                 let pc = *((rbp + 8) as *const u64);
-                if pc == 0 { break; }
+                if pc == 0 {
+                    break;
+                }
                 let mut buf = [b'0'; 19];
-                buf[0] = b' '; buf[1] = b'0'; buf[2] = b'x';
+                buf[0] = b' ';
+                buf[1] = b'0';
+                buf[2] = b'x';
                 let mut v = pc;
                 let mut i = 18;
-                while i >= 3 { let nib = crate::convert::uint8(v & 0xf);
-                    buf[i] = if nib < 10 { b'0' + nib } else { b'a' + nib - 10 };
-                    v >>= 4; i -= 1; }
+                while i >= 3 {
+                    let nib = crate::convert::uint8(v & 0xf);
+                    buf[i] = if nib < 10 {
+                        b'0' + nib
+                    } else {
+                        b'a' + nib - 10
+                    };
+                    v >>= 4;
+                    i -= 1;
+                }
                 crate::syscall::Write(crate::syscall::STDERR, buf.as_ptr(), buf.len());
                 crate::syscall::Write(crate::syscall::STDERR, b"\n".as_ptr(), 1);
-                if next <= rbp || next - rbp > 1 << 20 { break; }
+                if next <= rbp || next - rbp > 1 << 20 {
+                    break;
+                }
                 rbp = next;
                 hops += 1;
             }
@@ -422,9 +464,7 @@ pub fn install_signal_stack() {
         _pad0: 0,
         ss_size: SIGNAL_STACK_SIZE,
     };
-    let r = unsafe {
-        syscall::Sigaltstack(&st as *const _, core::ptr::null_mut())
-    };
+    let r = unsafe { syscall::Sigaltstack(&st as *const _, core::ptr::null_mut()) };
     if r != 0 {
         const MSG: &[u8] = b"goish: install_signal_stack: sigaltstack failed\n";
         syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
@@ -432,37 +472,40 @@ pub fn install_signal_stack() {
     }
 }
 
-/// Initialize the main thread's TLS slot and plant `fs`.
+/// Initialize the main thread's TLS slot and plant Goish's selected
+/// segment (FS by default, GS with `ffi-system-tls`).
 ///
 /// **Must be called exactly once, very early in `__goish_rt0`** —
 /// before any code that reads `current_m()` (chans, scheduler, etc.).
 /// After this call, every subsequent `current_m()` on the main
-/// thread reads `&MAIN_M.m` via `mov %fs:0`.
+/// thread reads `&MAIN_M.m` via a segment-relative load.
 pub fn setup_main_tls() {
-    // Preserve the pre-goish fs base before hijacking fs for the M
-    // slot. In dynamically-linked processes ld.so has already planted
-    // the glibc TCB here; glibc-using foreign code (CUDA, libstdc++)
-    // can only run on a thread whose fs points at that TCB — e.g. an
-    // FFI worker spawned with CLONE_SETTLS = pre_goish_fs_base().
+    // Preserve the platform FS base. In default builds Goish replaces
+    // FS with its M slot. In `ffi-system-tls` builds FS is never
+    // changed, so dynamically loaded foreign code keeps access to its
+    // system TLS while Goish uses GS.
     // Zero in static builds (no ld.so, nothing to preserve).
     // NB: ARCH_GET_FS *writes* the base to the given address.
     let mut saved_base: usize = 0;
-    let r = syscall::ArchPrctl(
-        syscall::ARCH_GET_FS,
-        &mut saved_base as *mut usize as usize,
-    );
+    let r = syscall::ArchPrctl(syscall::ARCH_GET_FS, &mut saved_base as *mut usize as usize);
     if r == 0 && saved_base != 0 {
         PRE_GOISH_FS_BASE.store(saved_base, Ordering::Release);
     }
     MAIN_M.init_tls_self();
-    let fs_base = MAIN_M.fs_base();
-    let r = syscall::ArchPrctl(syscall::ARCH_SET_FS, fs_base);
+    let tls_base = MAIN_M.tls_base();
+    #[cfg(not(feature = "ffi-system-tls"))]
+    let r = syscall::ArchPrctl(syscall::ARCH_SET_FS, tls_base);
+    #[cfg(feature = "ffi-system-tls")]
+    let r = syscall::ArchPrctl(syscall::ARCH_SET_GS, tls_base);
     if r != 0 {
+        #[cfg(not(feature = "ffi-system-tls"))]
         const MSG: &[u8] = b"goish: arch_prctl(ARCH_SET_FS) failed\n";
+        #[cfg(feature = "ffi-system-tls")]
+        const MSG: &[u8] = b"goish: arch_prctl(ARCH_SET_GS) failed\n";
         syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
         syscall::Exit(2);
     }
-    // Activate `acquirem` / `releasem` after fs is planted; before
+    // Activate `acquirem` / `releasem` after TLS is planted; before
     // this they short-circuit to keep pre-TLS SpinLock callers
     // (e.g. `args::__set`) from dereferencing an uninitialized
     // segment.
@@ -552,18 +595,24 @@ pub fn setup_main_g0() {
 }
 
 /// Pointer to the currently-running M's `SpinLock<M>`, read from the
-/// thread's `fs` register. Each thread's fs base was planted at init
-/// (main: `setup_main_tls`; workers: `CLONE_SETTLS` + per-thread
-/// `MStorage`), so this is a single instruction on the hot path.
+/// thread's Goish TLS segment. Each thread's base was planted at init,
+/// so this is a single instruction on the hot path.
 ///
-/// **Must not be called before `setup_main_tls()`** — fs is
+/// **Must not be called before `setup_main_tls()`** — the segment is
 /// uninitialized at process entry; reading it would yield garbage.
 #[inline]
 pub fn current_m() -> &'static SpinLock<M> {
     let ptr: *const SpinLock<M>;
     unsafe {
+        #[cfg(not(feature = "ffi-system-tls"))]
         core::arch::asm!(
             "mov %fs:0, {0}",
+            out(reg) ptr,
+            options(nostack, preserves_flags, att_syntax),
+        );
+        #[cfg(feature = "ffi-system-tls")]
+        core::arch::asm!(
+            "mov %gs:0, {0}",
             out(reg) ptr,
             options(nostack, preserves_flags, att_syntax),
         );

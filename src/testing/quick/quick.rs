@@ -138,9 +138,7 @@ impl Config {
         // Go returns c.Rand when set; goish's Rand is not Clone, so the
         // caller keeps ownership of theirs and this hands back a fresh
         // one only for the nil case.
-        return crate::math::rand::New(crate::math::rand::NewSource(
-            crate::time::Now().UnixNano(),
-        ));
+        return crate::math::rand::New(crate::math::rand::NewSource(crate::time::Now().UnixNano()));
     }
 
     // go: sdk 1.25.5 testing/quick/quick.go:208-219 Config.getMaxCount

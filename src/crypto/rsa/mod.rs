@@ -6,8 +6,8 @@ mod pkcs1v15;
 mod rsa;
 
 pub use fips::{
-    DecryptOAEP, EncryptOAEP, PSSOptions, PSSSaltLengthAuto, PSSSaltLengthEqualsHash,
-    SignPKCS1v15, SignPSS, VerifyPKCS1v15, VerifyPSS,
+    DecryptOAEP, EncryptOAEP, PSSOptions, PSSSaltLengthAuto, PSSSaltLengthEqualsHash, SignPKCS1v15,
+    SignPSS, VerifyPKCS1v15, VerifyPSS,
 };
 pub use pkcs1v15::{
     DecryptPKCS1v15, DecryptPKCS1v15SessionKey, EncryptPKCS1v15, PKCS1v15DecryptOptions,

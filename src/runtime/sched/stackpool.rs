@@ -281,8 +281,7 @@ pub unsafe fn free(span_idx: u32, slot: *mut u8) {
     let span = &mut g.spans[span_idx as usize];
     let off = ((slot as usize) - span.base) as u32;
     debug_assert!(
-        (off as usize) < STACK_CACHE_SIZE
-            && off.is_multiple_of(span.elemsize),
+        (off as usize) < STACK_CACHE_SIZE && off.is_multiple_of(span.elemsize),
         "stackpool::free: slot offset {} invalid for elemsize {}",
         off,
         span.elemsize,
@@ -290,7 +289,9 @@ pub unsafe fn free(span_idx: u32, slot: *mut u8) {
     let was_full = span.free_count == 0;
     // Push slot onto the head of the freelist.
     let prev_head = span.free_head_off;
-    unsafe { (slot as *mut u64).write(prev_head as u64); }
+    unsafe {
+        (slot as *mut u64).write(prev_head as u64);
+    }
     span.free_head_off = off;
     span.free_count += 1;
 
@@ -307,7 +308,9 @@ pub unsafe fn free(span_idx: u32, slot: *mut u8) {
         g.partial_remove(span_idx);
         g.release_span_idx(span_idx);
         drop(g);
-        unsafe { munmap_span(base); }
+        unsafe {
+            munmap_span(base);
+        }
     }
 }
 

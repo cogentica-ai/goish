@@ -9,8 +9,8 @@ extern crate alloc;
 extern crate goish;
 
 use goish::fmt;
+use goish::syscall;
 use goish::time::{Unix, UnixMicro, UnixMilli};
-use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -34,7 +34,12 @@ fn main() {
         if t.Unix() == 1 && t.UnixMilli() == 1234 {
             fmt::Println!("[ 2] UnixMilli(1234) round-trip PASS");
         } else {
-            fmt::Println!("[ 2] UnixMilli(1234) round-trip FAIL sec=", t.Unix(), "ms=", t.UnixMilli());
+            fmt::Println!(
+                "[ 2] UnixMilli(1234) round-trip FAIL sec=",
+                t.Unix(),
+                "ms=",
+                t.UnixMilli()
+            );
             failed += 1;
         }
     }
@@ -71,7 +76,10 @@ fn main() {
             fmt::Println!("[ 5] UnixMicro(1.5e6) round     PASS");
         } else {
             fmt::Println!(
-                "[ 5] UnixMicro(1.5e6) round     FAIL sec=", t.Unix(), "us=", t.UnixMicro()
+                "[ 5] UnixMicro(1.5e6) round     FAIL sec=",
+                t.Unix(),
+                "us=",
+                t.UnixMicro()
             );
             failed += 1;
         }

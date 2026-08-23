@@ -39,7 +39,11 @@ impl http::Handler for Slow {
     }
 }
 
-fn drive(dt: time::Duration, msg: &'static str, sleep: time::Duration) -> (goish::types::int, string) {
+fn drive(
+    dt: time::Duration,
+    msg: &'static str,
+    sleep: time::Duration,
+) -> (goish::types::int, string) {
     let th = http::TimeoutHandler(Slow(sleep), dt, string(msg));
     let rec = httptest::NewRecorder();
     let (req, _) = http::NewRequest(string("GET"), string("http://x/"), goish::nil);
@@ -48,7 +52,13 @@ fn drive(dt: time::Duration, msg: &'static str, sleep: time::Duration) -> (goish
     return (res.StatusCode, string::from_bytes(&rec.Body()));
 }
 
-fn eq(got: (goish::types::int, string), code: goish::types::int, body: &str, what: &str, bad: &mut i32) {
+fn eq(
+    got: (goish::types::int, string),
+    code: goish::types::int,
+    body: &str,
+    what: &str,
+    bad: &mut i32,
+) {
     if got.0 != code || got.1 != body {
         fmt::Println!("FAIL ", what);
         fmt::Println!("  got  code=", got.0, " body=", got.1);
@@ -63,9 +73,27 @@ fn main() {
         let mut bad = 0i32;
         let ms = |n: i64| time::Duration(n * 1_000_000);
 
-        eq(drive(ms(500), "", ms(0)), 201, "inner body", "fast passes through", &mut bad);
-        eq(drive(ms(30), "", ms(300)), 503, DEFAULT_BODY, "timeout default body", &mut bad);
-        eq(drive(ms(30), "too slow", ms(300)), 503, "too slow", "timeout custom msg", &mut bad);
+        eq(
+            drive(ms(500), "", ms(0)),
+            201,
+            "inner body",
+            "fast passes through",
+            &mut bad,
+        );
+        eq(
+            drive(ms(30), "", ms(300)),
+            503,
+            DEFAULT_BODY,
+            "timeout default body",
+            &mut bad,
+        );
+        eq(
+            drive(ms(30), "too slow", ms(300)),
+            503,
+            "too slow",
+            "timeout custom msg",
+            &mut bad,
+        );
 
         if bad == 0 {
             fmt::Println!("TIMEOUTHANDLER_OK 3/3");

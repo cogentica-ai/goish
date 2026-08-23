@@ -120,10 +120,12 @@ pub const FUTEX_WAKE_PRIVATE: i32 = 1 | FUTEX_PRIVATE_FLAG;
 
 // ─── arch_prctl(2) op codes (M17a-β2) ──────────────────────────────────
 //
-// `arch_prctl(2)` is x86-only; we use it to plant a per-thread fs base
-// so `mov %fs:0, _` reads back a pointer to the calling M.
+// `arch_prctl(2)` is x86-only; we use it to plant a per-thread segment
+// base so a segment-relative load reads back a pointer to the calling M.
+pub const ARCH_SET_GS: i32 = 0x1001;
 pub const ARCH_SET_FS: i32 = 0x1002;
 pub const ARCH_GET_FS: i32 = 0x1003;
+pub const ARCH_GET_GS: i32 = 0x1004;
 
 // ─── clone(2) flags (M17a) ─────────────────────────────────────────────
 //
@@ -509,9 +511,7 @@ pub fn Fork() -> i32 {
 /// wait4 and a non-zero exit). On failure, returns -errno.
 #[allow(non_snake_case)]
 pub fn Execve(path: *const u8, argv: *const *const u8, envp: *const *const u8) -> i32 {
-    unsafe {
-        syscall3(SYS_EXECVE, path as usize, argv as usize, envp as usize) as i32
-    }
+    unsafe { syscall3(SYS_EXECVE, path as usize, argv as usize, envp as usize) as i32 }
 }
 
 /// `wait4(2)` — wait for the given pid and return its raw status word
@@ -521,7 +521,13 @@ pub fn Execve(path: *const u8, argv: *const *const u8, envp: *const *const u8) -
 #[allow(non_snake_case)]
 pub fn Wait4(pid: i32, status: *mut i32, options: i32, rusage: *mut u8) -> i32 {
     unsafe {
-        syscall4(SYS_WAIT4, pid as usize, status as usize, options as usize, rusage as usize) as i32
+        syscall4(
+            SYS_WAIT4,
+            pid as usize,
+            status as usize,
+            options as usize,
+            rusage as usize,
+        ) as i32
     }
 }
 
@@ -532,7 +538,6 @@ pub fn Wait4(pid: i32, status: *mut i32, options: i32, rusage: *mut u8) -> i32 {
 pub fn Dup3(oldfd: i32, newfd: i32, flags: i32) -> i32 {
     unsafe { syscall3(SYS_DUP3, oldfd as usize, newfd as usize, flags as usize) as i32 }
 }
-
 
 // ─── stat / fstat (Linux x86_64 layout) ──────────────────────────────
 
@@ -628,13 +633,29 @@ pub fn Lseek(fd: i32, offset: i64, whence: i32) -> i64 {
 /// `pread64(fd, buf, count, offset)` — read from file at given offset.
 #[allow(non_snake_case)]
 pub fn Pread64(fd: i32, buf: *mut u8, count: usize, offset: i64) -> isize {
-    unsafe { syscall4(SYS_PREAD64, fd as usize, buf as usize, count, offset as usize) as isize }
+    unsafe {
+        syscall4(
+            SYS_PREAD64,
+            fd as usize,
+            buf as usize,
+            count,
+            offset as usize,
+        ) as isize
+    }
 }
 
 /// `pwrite64(fd, buf, count, offset)` — write to file at given offset.
 #[allow(non_snake_case)]
 pub fn Pwrite64(fd: i32, buf: *const u8, count: usize, offset: i64) -> isize {
-    unsafe { syscall4(SYS_PWRITE64, fd as usize, buf as usize, count, offset as usize) as isize }
+    unsafe {
+        syscall4(
+            SYS_PWRITE64,
+            fd as usize,
+            buf as usize,
+            count,
+            offset as usize,
+        ) as isize
+    }
 }
 
 /// `ftruncate(fd, length)` — truncate file to given length.
@@ -685,6 +706,7 @@ pub const SYS_FLOCK: usize = 73;
 pub const SYS_PIPE2: usize = 293;
 pub const SYS_CHOWN: usize = 92;
 pub const SYS_LCHOWN: usize = 94;
+pub const SYS_UMASK: usize = 95;
 
 /// `mkdir(path, mode)`. Returns 0 on success, -errno on failure.
 #[allow(non_snake_case)]
@@ -721,6 +743,13 @@ pub fn Chdir(path: *const u8) -> i32 {
 #[allow(non_snake_case)]
 pub fn Chmod(path: *const u8, mode: u32) -> i32 {
     unsafe { syscall2(SYS_CHMOD, path as usize, mode as usize) as i32 }
+}
+
+// go: sdk 1.25.5 syscall/zsyscall_linux_amd64.go:914-918 Umask
+/// `Umask(mask)` sets the process file-creation mask and returns the previous mask.
+#[allow(non_snake_case)]
+pub fn Umask(mask: crate::int) -> crate::int {
+    return crate::int(unsafe { syscall1(SYS_UMASK, mask as usize) }); // goishlint:ignore GOISH005 — syscall ABI requires a machine word.
 }
 
 /// `fchmod(fd, mode)`. Returns 0 on success, -errno on failure.
@@ -910,7 +939,7 @@ pub fn Mmap(addr: *mut u8, length: usize, prot: i32, flags: i32, fd: i32, offset
             length,
             prot as usize,
             flags as usize,
-            fd as usize,        // -1 for anonymous; kernel ignores
+            fd as usize, // -1 for anonymous; kernel ignores
             offset as usize,
         )
     };
@@ -1108,11 +1137,7 @@ pub struct Sigaction {
 /// or be null. The handler in `new.sa_handler` must be an
 /// `extern "C" fn(i32)` for the simple case (no SA_SIGINFO).
 #[allow(non_snake_case)]
-pub unsafe fn RtSigaction(
-    sig: i32,
-    new: *const Sigaction,
-    old: *mut Sigaction,
-) -> isize {
+pub unsafe fn RtSigaction(sig: i32, new: *const Sigaction, old: *mut Sigaction) -> isize {
     syscall6(
         SYS_RT_SIGACTION,
         sig as usize,
@@ -1169,7 +1194,7 @@ pub unsafe fn Sigaltstack(new: *const SigaltstackT, old: *mut SigaltstackT) -> i
 #[allow(non_snake_case)]
 pub unsafe extern "C" fn SigreturnTrampoline() {
     core::arch::naked_asm!(
-        "movq $15, %rax",   // SYS_rt_sigreturn
+        "movq $15, %rax", // SYS_rt_sigreturn
         "syscall",
         // Should never return; if it does, INT3.
         "int3",
@@ -1198,12 +1223,7 @@ pub fn SchedYield() -> isize {
 /// sys_linux_amd64.s for SYS_FUTEX = 202). `addr2` and `val3` are
 /// only used by REQUEUE/CMP_REQUEUE; we always pass null/0.
 #[allow(non_snake_case)]
-pub fn Futex(
-    addr: *const u32,
-    op: i32,
-    val: u32,
-    ts: *const Timespec,
-) -> isize {
+pub fn Futex(addr: *const u32, op: i32, val: u32, ts: *const Timespec) -> isize {
     unsafe {
         syscall6(
             SYS_FUTEX,
@@ -1229,7 +1249,14 @@ pub fn Futex(
 /// `runtime.getCPUCount` (os_linux.go:104).
 #[allow(non_snake_case)]
 pub fn SchedGetaffinity(pid: i32, cpusetsize: usize, mask: *mut u8) -> isize {
-    unsafe { syscall3(SYS_SCHED_GETAFFINITY, pid as usize, cpusetsize, mask as usize) }
+    unsafe {
+        syscall3(
+            SYS_SCHED_GETAFFINITY,
+            pid as usize,
+            cpusetsize,
+            mask as usize,
+        )
+    }
 }
 
 /// `arch_prctl(code, addr)` — amd64-specific thread-state op. We use
@@ -1261,9 +1288,12 @@ pub fn ExitThread(code: i32) -> ! {
 /// `extern "C"` and never return; it should call `ExitThread` when
 /// done.
 ///
-/// `tls`: if nonzero, the kernel sets the child's `fs` segment base
-/// to this address (CLONE_SETTLS is OR'd into flags by the trampoline).
-/// Pass 0 to inherit the parent's fs (matches M17a-α behavior).
+/// `tls`: Goish's per-M TLS base. In the default configuration, if
+/// nonzero, the kernel sets the child's `fs` segment base to this
+/// address (`CLONE_SETTLS` is OR'd into flags by the trampoline).
+/// With `ffi-system-tls`, the child inherits the platform `fs` base and
+/// the trampoline installs this address in `gs` using `arch_prctl`
+/// before entering Rust. Pass 0 to inherit both segment bases.
 ///
 /// Returns the child TID on the parent path. Never returns directly
 /// in the child — the child immediately tail-jumps to `child_entry`.
@@ -1281,6 +1311,7 @@ pub fn ExitThread(code: i32) -> ! {
 /// passing stale pointers will SIGSEGV the child.
 #[allow(non_snake_case)]
 #[unsafe(naked)]
+#[cfg(not(feature = "ffi-system-tls"))]
 pub unsafe extern "C" fn Clone(
     _flags: u64,
     _child_stack: *mut u8,
@@ -1306,9 +1337,9 @@ pub unsafe extern "C" fn Clone(
         "orq $0x80000, %rdi",
         "3:",
         // Step 4: clone(2) syscall.
-        "movq $56, %rax",          // SYS_clone
-        "xorq %rdx, %rdx",         // ptid = 0
-        "xorq %r10, %r10",         // ctid = 0
+        "movq $56, %rax",  // SYS_clone
+        "xorq %rdx, %rdx", // ptid = 0
+        "xorq %r10, %r10", // ctid = 0
         "syscall",
         // Both threads continue here. Parent: rax > 0; child: rax = 0
         // and rsp = child_stack-8 (kernel set rsp from rsi).
@@ -1324,6 +1355,55 @@ pub unsafe extern "C" fn Clone(
         "movq (%rsp), %rax",
         "jmpq *%rax",
         // PARENT: rax holds child_pid; just return.
+        "2:",
+        "retq",
+        options(att_syntax),
+    )
+}
+
+/// `clone(2)` trampoline for `ffi-system-tls` builds.
+///
+/// Linux's `CLONE_SETTLS` argument configures FS on x86-64, so it
+/// cannot install Goish's GS-based runtime slot. This variant leaves FS
+/// inherited, then performs the raw `arch_prctl(ARCH_SET_GS, tls)`
+/// syscall in the child before tail-jumping to any Rust code.
+#[allow(non_snake_case)]
+#[unsafe(naked)]
+#[cfg(feature = "ffi-system-tls")]
+pub unsafe extern "C" fn Clone(
+    _flags: u64,
+    _child_stack: *mut u8,
+    _child_entry: extern "C" fn() -> !,
+    _tls: u64,
+) -> i64 {
+    core::arch::naked_asm!(
+        "subq $16, %rsi",
+        "movq %rdx, 0(%rsi)",
+        "movq %rcx, 8(%rsi)",
+        "andq $-524289, %rdi", // !CLONE_SETTLS (0x80000)
+        "movq $56, %rax",      // SYS_clone
+        "xorq %rdx, %rdx",     // ptid = 0
+        "xorq %r10, %r10",     // ctid = 0
+        "xorq %r8, %r8",       // newtls unused without CLONE_SETTLS
+        "syscall",
+        "testq %rax, %rax",
+        "jnz 2f",
+        "movq 8(%rsp), %rsi",
+        "testq %rsi, %rsi",
+        "jz 3f",
+        "movq $158, %rax",    // SYS_arch_prctl
+        "movq $0x1001, %rdi", // ARCH_SET_GS
+        "syscall",
+        "testq %rax, %rax",
+        "jz 3f",
+        "movq $60, %rax", // SYS_exit (this thread only)
+        "movq $2, %rdi",
+        "syscall",
+        "ud2",
+        "3:",
+        "movq 0(%rsp), %rax",
+        "addq $8, %rsp",
+        "jmpq *%rax",
         "2:",
         "retq",
         options(att_syntax),
@@ -1526,14 +1606,7 @@ pub fn Socket(domain: i32, type_: i32, protocol: i32) -> i32 {
 /// success, `-errno` on failure.
 #[allow(non_snake_case)]
 pub fn Bind(fd: i32, addr: *const SockaddrIn, addrlen: u32) -> i32 {
-    unsafe {
-        syscall3(
-            SYS_BIND,
-            fd as usize,
-            addr as usize,
-            addrlen as usize,
-        ) as i32
-    }
+    unsafe { syscall3(SYS_BIND, fd as usize, addr as usize, addrlen as usize) as i32 }
 }
 
 /// `listen(2)` — mark a socket as accepting connections. Returns
@@ -1548,12 +1621,7 @@ pub fn Listen(fd: i32, backlog: i32) -> i32 {
 /// the new fd on success, `-errno` on failure. `addr` may be null
 /// when the caller doesn't need the peer address.
 #[allow(non_snake_case)]
-pub fn Accept4(
-    fd: i32,
-    addr: *mut SockaddrIn,
-    addrlen: *mut u32,
-    flags: i32,
-) -> i32 {
+pub fn Accept4(fd: i32, addr: *mut SockaddrIn, addrlen: *mut u32, flags: i32) -> i32 {
     unsafe {
         syscall6(
             SYS_ACCEPT4,
@@ -1572,25 +1640,12 @@ pub fn Accept4(
 /// non-blocking sockets).
 #[allow(non_snake_case)]
 pub fn Connect(fd: i32, addr: *const SockaddrIn, addrlen: u32) -> i32 {
-    unsafe {
-        syscall3(
-            SYS_CONNECT,
-            fd as usize,
-            addr as usize,
-            addrlen as usize,
-        ) as i32
-    }
+    unsafe { syscall3(SYS_CONNECT, fd as usize, addr as usize, addrlen as usize) as i32 }
 }
 
 /// `setsockopt(2)`. Returns `0` on success, `-errno` on failure.
 #[allow(non_snake_case)]
-pub fn Setsockopt(
-    fd: i32,
-    level: i32,
-    name: i32,
-    val: *const u8,
-    len: u32,
-) -> i32 {
+pub fn Setsockopt(fd: i32, level: i32, name: i32, val: *const u8, len: u32) -> i32 {
     unsafe {
         syscall6(
             SYS_SETSOCKOPT,
@@ -1610,7 +1665,12 @@ pub fn Setsockopt(
 /// exactly like Go's `var n = int32(value); setsockopt(..., &n, 4)`.
 /// Returns `nil` on success, a `syscall.Errno` on failure.
 #[allow(non_snake_case)]
-pub fn SetsockoptInt(fd: crate::int, level: crate::int, opt: crate::int, value: crate::int) -> crate::error {
+pub fn SetsockoptInt(
+    fd: crate::int,
+    level: crate::int,
+    opt: crate::int,
+    value: crate::int,
+) -> crate::error {
     let n: i32 = value as i32;
     let rc = Setsockopt(
         fd as i32,
@@ -1663,13 +1723,7 @@ impl RawConn {
 
 /// `getsockopt(2)`. `len` is in/out. Returns `0` on success.
 #[allow(non_snake_case)]
-pub fn Getsockopt(
-    fd: i32,
-    level: i32,
-    name: i32,
-    val: *mut u8,
-    len: *mut u32,
-) -> i32 {
+pub fn Getsockopt(fd: i32, level: i32, name: i32, val: *mut u8, len: *mut u32) -> i32 {
     unsafe {
         syscall6(
             SYS_GETSOCKOPT,
@@ -1693,14 +1747,7 @@ pub fn Shutdown(fd: i32, how: i32) -> i32 {
 /// pass `0`. Returns the result on success, `-errno` on failure.
 #[allow(non_snake_case)]
 pub fn Fcntl(fd: i32, cmd: i32, arg: i32) -> i32 {
-    unsafe {
-        syscall3(
-            SYS_FCNTL,
-            fd as usize,
-            cmd as usize,
-            arg as usize,
-        ) as i32
-    }
+    unsafe { syscall3(SYS_FCNTL, fd as usize, cmd as usize, arg as usize) as i32 }
 }
 
 /// `epoll_create1(2)`. Returns the epoll fd or `-errno`. Pass
@@ -1713,12 +1760,7 @@ pub fn EpollCreate1(flags: i32) -> i32 {
 /// `epoll_ctl(2)`. `op` is `EPOLL_CTL_{ADD,DEL,MOD}`. `event` may
 /// be null for `EPOLL_CTL_DEL`.
 #[allow(non_snake_case)]
-pub fn EpollCtl(
-    epfd: i32,
-    op: i32,
-    fd: i32,
-    event: *mut EpollEvent,
-) -> i32 {
+pub fn EpollCtl(epfd: i32, op: i32, fd: i32, event: *mut EpollEvent) -> i32 {
     unsafe {
         syscall6(
             SYS_EPOLL_CTL,
@@ -1934,9 +1976,7 @@ pub fn InotifyRmWatch(fd: crate::int, watchdesc: u32) -> (crate::int, crate::err
 /// group. Most reporting modes need CAP_SYS_ADMIN; unprivileged
 /// callers get EPERM (the watcher's cue to fall back to inotify).
 pub fn FanotifyInit(flags: u32, event_f_flags: u32) -> (crate::int, crate::error) {
-    let rc = unsafe {
-        syscall2(SYS_FANOTIFY_INIT, flags as usize, event_f_flags as usize)
-    };
+    let rc = unsafe { syscall2(SYS_FANOTIFY_INIT, flags as usize, event_f_flags as usize) };
     if rc < 0 {
         return (-1, Errno(-(rc as i32)).into());
     }
@@ -2003,7 +2043,12 @@ pub struct FileHandle {
 
 impl core::fmt::Debug for FileHandle {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "FileHandle{{type: {}, {} bytes}}", self.handle_type, self.bytes.as_ref().len())
+        write!(
+            f,
+            "FileHandle{{type: {}, {} bytes}}",
+            self.handle_type,
+            self.bytes.as_ref().len()
+        )
     }
 }
 
@@ -2128,7 +2173,11 @@ pub struct Statfs_t {
 pub fn Statfs<P: Into<crate::string>>(path: P, buf: &mut Statfs_t) -> crate::error {
     let p = __c_path(path.into());
     let rc = unsafe {
-        syscall2(SYS_STATFS, p.as_ptr() as usize, buf as *mut Statfs_t as usize)
+        syscall2(
+            SYS_STATFS,
+            p.as_ptr() as usize,
+            buf as *mut Statfs_t as usize,
+        )
     };
     if rc < 0 {
         return Errno(-(rc as i32)).into();

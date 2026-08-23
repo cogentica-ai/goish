@@ -38,11 +38,11 @@ use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::crypto::ed25519;
+use goish::crypto::x509::pkix;
 use goish::crypto::x509::{
     CertificateRequest, CreateCertificate, CreateCertificateRequest, CreateRevocationList,
     MarshalPKIXPublicKey, OIDFromInts, ParseCertificate, RevocationList, RevocationListEntry,
 };
-use goish::crypto::x509::pkix;
 use goish::encoding::asn1;
 use goish::encoding::hex;
 use goish::error;
@@ -198,7 +198,11 @@ fn main() {
         let mut r = fixedReader { n: 0 };
         let (der, err) = CreateCertificate(&mut r, &tmpl, &tmpl, &pub_, &privAny);
         checkErr(err, "<nil>", "CreateCertificate self-signed err");
-        checkHex(&der, CERT_SELFSIGNED, "CreateCertificate self-signed == Go DER");
+        checkHex(
+            &der,
+            CERT_SELFSIGNED,
+            "CreateCertificate self-signed == Go DER",
+        );
 
         // And it parses back, through the sibling parser.
         let (_, perr) = ParseCertificate(der.clone());
@@ -219,7 +223,11 @@ fn main() {
         let mut r = fixedReader { n: 0 };
         let (der, err) = CreateCertificate(&mut r, &tmpl, &tmpl, &pub_, &privAny);
         checkErr(err, "<nil>", "CreateCertificate derived-SKID err");
-        checkHex(&der, CERT_DERIVED_SKID, "SubjectKeyId derived per RFC 7093 == Go");
+        checkHex(
+            &der,
+            CERT_DERIVED_SKID,
+            "SubjectKeyId derived per RFC 7093 == Go",
+        );
     }
 
     // ── CreateCertificate: every buildCertExtensions branch ──────────
@@ -287,17 +295,26 @@ fn main() {
         let mut r = fixedReader { n: 0 };
         let (der, err) = CreateCertificate(&mut r, &tmpl, &tmpl, &pub_, &privAny);
         checkErr(err, "<nil>", "CreateCertificate kitchen-sink err");
-        checkHex(&der, CERT_KITCHEN, "every buildCertExtensions branch == Go DER");
+        checkHex(
+            &der,
+            CERT_KITCHEN,
+            "every buildCertExtensions branch == Go DER",
+        );
     }
 
     // ── KeyUsage bit layout: reverseBitsInAByte + asn1BitLength ──────
     // goref: CERT_KU
     {
         let cases: [(goish::crypto::x509::KeyUsage, &'static str, &'static str); 5] = [
-            (goish::crypto::x509::KeyUsageDigitalSignature, CERT_KU_1, "KeyUsage digitalSignature"),
+            (
+                goish::crypto::x509::KeyUsageDigitalSignature,
+                CERT_KU_1,
+                "KeyUsage digitalSignature",
+            ),
             (
                 goish::crypto::x509::KeyUsage(
-                    goish::crypto::x509::KeyUsageCertSign.0 | goish::crypto::x509::KeyUsageCRLSign.0,
+                    goish::crypto::x509::KeyUsageCertSign.0
+                        | goish::crypto::x509::KeyUsageCRLSign.0,
                 ),
                 CERT_KU_96,
                 "KeyUsage certSign|cRLSign",
@@ -347,7 +364,11 @@ fn main() {
         let mut r = fixedReader { n: 0 };
         let (der, err) = CreateCertificate(&mut r, &tmpl, &tmpl, &pub_, &privAny);
         checkErr(err, "<nil>", "CreateCertificate generated-serial err");
-        checkHex(&der, CERT_GENSERIAL, "nil SerialNumber draws 20 bytes from rand == Go");
+        checkHex(
+            &der,
+            CERT_GENSERIAL,
+            "nil SerialNumber draws 20 bytes from rand == Go",
+        );
     }
 
     // ── Empty subject forces a critical SAN (RFC 5280 4.2.1.6) ───────
@@ -361,7 +382,11 @@ fn main() {
         let mut r = fixedReader { n: 0 };
         let (der, err) = CreateCertificate(&mut r, &tmpl, &tmpl, &pub_, &privAny);
         checkErr(err, "<nil>", "CreateCertificate empty-subject err");
-        checkHex(&der, CERT_EMPTYSUBJ, "empty subject marks SAN critical == Go");
+        checkHex(
+            &der,
+            CERT_EMPTYSUBJ,
+            "empty subject marks SAN critical == Go",
+        );
     }
 
     // ── CreateCertificate rejections ─────────────────────────────────
@@ -374,7 +399,11 @@ fn main() {
         bad.NotAfter = notAfter();
         bad.BasicConstraintsValid = true;
         let (_, err) = CreateCertificate(&mut r, &bad, &bad, &pub_, &privAny);
-        checkErr(err, "x509: serial number must be positive", "negative serial rejected");
+        checkErr(
+            err,
+            "x509: serial number must be positive",
+            "negative serial rejected",
+        );
 
         let mut bad2 = x509Cert();
         bad2.SerialNumber = bigFromI64(1);
@@ -447,7 +476,11 @@ fn main() {
         let mut r = fixedReader { n: 0 };
         let (der, err) = CreateRevocationList(&mut r, &rl, &ca, &priv_);
         checkErr(err, "<nil>", "CreateRevocationList err");
-        checkHex(&der, CRL, "CreateRevocationList (reasonCode + plain entry) == Go");
+        checkHex(
+            &der,
+            CRL,
+            "CreateRevocationList (reasonCode + plain entry) == Go",
+        );
     }
 
     // goref: CRL_EMPTY — revokedCertificates must be omitted entirely
@@ -459,7 +492,11 @@ fn main() {
         let mut r = fixedReader { n: 0 };
         let (der, err) = CreateRevocationList(&mut r, &rl, &ca, &priv_);
         checkErr(err, "<nil>", "CreateRevocationList empty err");
-        checkHex(&der, CRL_EMPTY, "no entries omits revokedCertificates == Go");
+        checkHex(
+            &der,
+            CRL_EMPTY,
+            "no entries omits revokedCertificates == Go",
+        );
     }
 
     // goref: CRL_DEPRECATED — the RevokedCertificates fallback
@@ -476,7 +513,11 @@ fn main() {
         let mut r = fixedReader { n: 0 };
         let (der, err) = CreateRevocationList(&mut r, &rl, &ca, &priv_);
         checkErr(err, "<nil>", "CreateRevocationList deprecated-field err");
-        checkHex(&der, CRL_DEPRECATED, "deprecated RevokedCertificates path == Go");
+        checkHex(
+            &der,
+            CRL_DEPRECATED,
+            "deprecated RevokedCertificates path == Go",
+        );
     }
 
     // goref: CRL_EXTRAEXT
@@ -516,7 +557,11 @@ fn main() {
         rl.ThisUpdate = notBefore();
         rl.NextUpdate = notAfter();
         let (_, err) = CreateRevocationList(&mut r, &rl, &ca, &priv_);
-        checkErr(err, "x509: template contains nil Number field", "nil Number rejected");
+        checkErr(
+            err,
+            "x509: template contains nil Number field",
+            "nil Number rejected",
+        );
 
         let mut noCRLSign = ca.clone();
         noCRLSign.KeyUsage = goish::crypto::x509::KeyUsageCertSign;
@@ -601,7 +646,11 @@ fn main() {
         rl.ThisUpdate = notBefore();
         rl.NextUpdate = notAfter();
         let (_, err) = CreateRevocationList(&mut r, &rl, &ca, &priv_);
-        checkErr(err, "x509: CRL number exceeds 20 octets", "21-octet CRL number rejected");
+        checkErr(
+            err,
+            "x509: CRL number exceeds 20 octets",
+            "21-octet CRL number rejected",
+        );
     }
 
     // ── Certificate.CreateCRL (deprecated) ───────────────────────────
@@ -645,7 +694,11 @@ fn main() {
     {
         let cases: [(&[int], &'static str, &'static str); 3] = [
             (&[1, 2, 3, 4], "06032a0304", "OID DER 1.2.3.4"),
-            (&[2, 23, 140, 1, 2, 1], "060667810c010201", "OID DER 2.23.140.1.2.1"),
+            (
+                &[2, 23, 140, 1, 2, 1],
+                "060667810c010201",
+                "OID DER 2.23.140.1.2.1",
+            ),
             (
                 &[1, 3, 6, 1, 4, 1, 311, 21, 8],
                 "06092b0601040182371508",
@@ -698,7 +751,11 @@ fn main() {
         let mut r = fixedReader { n: 0 };
         let (der, err) = CreateCertificateRequest(&mut r, &t, &privAny);
         checkErr(err, "<nil>", "CreateCertificateRequest full err");
-        checkHex(&der, CSR_FULL, "CSR with every SAN kind + ExtraExtensions == Go DER");
+        checkHex(
+            &der,
+            CSR_FULL,
+            "CSR with every SAN kind + ExtraExtensions == Go DER",
+        );
 
         // The extensionsAppended path: Attributes already carries an
         // extensionRequest, so the SAN is merged into it. This is the
@@ -719,7 +776,11 @@ fn main() {
         let mut r = fixedReader { n: 0 };
         let (der, err) = CreateCertificateRequest(&mut r, &t, &privAny);
         checkErr(err, "<nil>", "CreateCertificateRequest appended err");
-        checkHex(&der, CSR_APPENDED, "SAN merged into an existing attribute == Go DER");
+        checkHex(
+            &der,
+            CSR_APPENDED,
+            "SAN merged into an existing attribute == Go DER",
+        );
 
         // Same, but Attributes already specifies the SAN OID, so the
         // attribute wins and buildCSRExtensions' value is dropped.
@@ -738,7 +799,11 @@ fn main() {
         let mut r = fixedReader { n: 0 };
         let (der, err) = CreateCertificateRequest(&mut r, &t, &privAny);
         checkErr(err, "<nil>", "CreateCertificateRequest dup-OID err");
-        checkHex(&der, CSR_DUP, "an Attributes-specified extension takes priority == Go DER");
+        checkHex(
+            &der,
+            CSR_DUP,
+            "an Attributes-specified extension takes priority == Go DER",
+        );
     }
 
     // -- An OPTIONAL time::Time at its zero value ---------------------
@@ -805,7 +870,11 @@ fn main() {
 
     let ran = RAN.load(Ordering::Acquire);
     let failed = FAILED.load(Ordering::Acquire);
-    fmt::Printf!("x509_create_smoke: %d checks, %d failed\n", int(ran), int(failed));
+    fmt::Printf!(
+        "x509_create_smoke: %d checks, %d failed\n",
+        int(ran),
+        int(failed)
+    );
     if failed != 0 {
         goish::os::Exit(1);
     }

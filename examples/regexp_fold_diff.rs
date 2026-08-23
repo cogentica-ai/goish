@@ -131,16 +131,75 @@ fn patterns() -> Vec<&'static str> {
 
 fn inputs() -> Vec<&'static str> {
     alloc::vec![
-        "", "a", "A", "b", "B", "ab", "aB", "Ab", "AB", "abc", "ABC", "aBc", "c", "C", "cd", "CD",
-        "Cd", "z", "Z", "q", "Q", "_", "-", "_-1", "0", "9", "0.0.0", "1.2.3", "1.2.3-Alpha.1",
-        "1.2.3-ALPHA.1+Build.5", "1.2.3+BUILD", "01", "1.2.3-", "abcdef", "ABCDEF", "aBcDeF", "gG",
-        "abC", "aBC", "AbC", "abcD", "aBcD", "[", "]", "^", "a.b", "aXb", "a*b", "\\", "1", "12", "aab", "aaB",
+        "",
+        "a",
+        "A",
+        "b",
+        "B",
+        "ab",
+        "aB",
+        "Ab",
+        "AB",
+        "abc",
+        "ABC",
+        "aBc",
+        "c",
+        "C",
+        "cd",
+        "CD",
+        "Cd",
+        "z",
+        "Z",
+        "q",
+        "Q",
+        "_",
+        "-",
+        "_-1",
+        "0",
+        "9",
+        "0.0.0",
+        "1.2.3",
+        "1.2.3-Alpha.1",
+        "1.2.3-ALPHA.1+Build.5",
+        "1.2.3+BUILD",
+        "01",
+        "1.2.3-",
+        "abcdef",
+        "ABCDEF",
+        "aBcDeF",
+        "gG",
+        "abC",
+        "aBC",
+        "AbC",
+        "abcD",
+        "aBcD",
+        "[",
+        "]",
+        "^",
+        "a.b",
+        "aXb",
+        "a*b",
+        "\\",
+        "1",
+        "12",
+        "aab",
+        "aaB",
     ]
 }
 
 fn allPatterns() -> Vec<&'static str> {
     alloc::vec![
-        r"a*", r"a", r",", r"\s+", r"\|\|", r"x*", r"(a)(b)?", r"(?i)a+", r"(?i)[a-c]", r"^", r"$",
+        r"a*",
+        r"a",
+        r",",
+        r"\s+",
+        r"\|\|",
+        r"x*",
+        r"(a)(b)?",
+        r"(?i)a+",
+        r"(?i)[a-c]",
+        r"^",
+        r"$",
         // `.` is absent — see the note in tools/gen_regexpfold_ref.go.
         r"",
     ]
@@ -148,8 +207,20 @@ fn allPatterns() -> Vec<&'static str> {
 
 fn allInputs() -> Vec<&'static str> {
     alloc::vec![
-        "", "a", "abaabaccadaaae", "a,b,,c", "  a  b ", "a||b||c", "a|b", ",a,", ",,", "banana",
-        "AaBbCc", "héllo", "日本語", "aé a",
+        "",
+        "a",
+        "abaabaccadaaae",
+        "a,b,,c",
+        "  a  b ",
+        "a||b||c",
+        "a|b",
+        ",a,",
+        ",,",
+        "banana",
+        "AaBbCc",
+        "héllo",
+        "日本語",
+        "aé a",
     ]
 }
 
@@ -193,7 +264,11 @@ fn main() {
             got.push(' ');
             push_usize(&mut got, ii);
             got.push(' ');
-            got.push_str(if re.MatchString(*inp) { "true" } else { "false" });
+            got.push_str(if re.MatchString(*inp) {
+                "true"
+            } else {
+                "false"
+            });
             got.push('\n');
 
             // Go returns nil for no-match; goish returns an empty slice,
@@ -334,7 +409,15 @@ fn main() {
     // Compile-time rejection is part of the contract: `(?s)`/`(?m)` and
     // every other `(?...)` construct must still fail loudly rather than
     // silently parsing as something else.
-    for bad in [r"(?s)a", r"(?m)a", r"(?U)a", r"(?)a", r"(?-)a", r"(?=a)", r"(?P<n>a)"] {
+    for bad in [
+        r"(?s)a",
+        r"(?m)a",
+        r"(?U)a",
+        r"(?)a",
+        r"(?-)a",
+        r"(?=a)",
+        r"(?P<n>a)",
+    ] {
         let (_, err) = regexp::Compile(bad);
         if err == goish::nil {
             die(b"regexp_fold: unsupported (?...) construct compiled\n");

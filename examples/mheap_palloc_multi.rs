@@ -181,13 +181,13 @@ fn test_grow_then_alloc_in_grown_region() {
     // Free everything.
     p.free(block_chunk0, PALLOC_CHUNK_PAGES);
     p.free(a, span);
-    check(
-        p.allocated_pages() == 0,
-        b"grow-alloc: post-free nonzero\n",
-    );
+    check(p.allocated_pages() == 0, b"grow-alloc: post-free nonzero\n");
 
     // The full 4-chunk heap should be available as one contiguous
     // run, demonstrating the post-grow summary tree is coherent.
     let whole = p.alloc(4 * PALLOC_CHUNK_PAGES);
-    check(whole == arena_base, b"grow-alloc: post-free whole-heap fail\n");
+    check(
+        whole == arena_base,
+        b"grow-alloc: post-free whole-heap fail\n",
+    );
 }

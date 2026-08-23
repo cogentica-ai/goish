@@ -65,22 +65,38 @@ pub fn TrailingZeros(x: uint) -> int {
 
 /// `bits.TrailingZeros8(x)` — result is 8 for `x == 0`.
 pub fn TrailingZeros8(x: u8) -> int {
-    if x == 0 { 8 } else { x.trailing_zeros() as int }
+    if x == 0 {
+        8
+    } else {
+        x.trailing_zeros() as int
+    }
 }
 
 /// `bits.TrailingZeros16(x)` — result is 16 for `x == 0`.
 pub fn TrailingZeros16(x: u16) -> int {
-    if x == 0 { 16 } else { x.trailing_zeros() as int }
+    if x == 0 {
+        16
+    } else {
+        x.trailing_zeros() as int
+    }
 }
 
 /// `bits.TrailingZeros32(x)` — result is 32 for `x == 0`.
 pub fn TrailingZeros32(x: u32) -> int {
-    if x == 0 { 32 } else { x.trailing_zeros() as int }
+    if x == 0 {
+        32
+    } else {
+        x.trailing_zeros() as int
+    }
 }
 
 /// `bits.TrailingZeros64(x)` — result is 64 for `x == 0`.
 pub fn TrailingZeros64(x: u64) -> int {
-    if x == 0 { 64 } else { x.trailing_zeros() as int }
+    if x == 0 {
+        64
+    } else {
+        x.trailing_zeros() as int
+    }
 }
 
 // ─── OnesCount (bits.go:117) ──────────────────────────────────────────
@@ -308,10 +324,7 @@ pub fn Mul64(x: u64, y: u64) -> (u64, u64) {
     let t = x1.wrapping_mul(y0).wrapping_add(w0 >> 32);
     let w1 = (t & mask32).wrapping_add(x0.wrapping_mul(y1));
     let w2 = t >> 32;
-    let hi = x1
-        .wrapping_mul(y1)
-        .wrapping_add(w2)
-        .wrapping_add(w1 >> 32);
+    let hi = x1.wrapping_mul(y1).wrapping_add(w2).wrapping_add(w1 >> 32);
     let lo = x.wrapping_mul(y);
     (hi, lo)
 }
@@ -367,7 +380,11 @@ pub fn Div64(hi: u64, lo: u64, mut y: u64) -> (u64, u64) {
     let yn0 = y & mask32;
     // Go: un32 := hi<<s | lo>>(64-s)
     //     un10 := lo << s
-    let un32: u64 = if s == 0 { hi } else { (hi << s) | (lo >> (64 - s)) };
+    let un32: u64 = if s == 0 {
+        hi
+    } else {
+        (hi << s) | (lo >> (64 - s))
+    };
     let un10 = lo << s;
     let un1 = un10 >> 32;
     let un0 = un10 & mask32;

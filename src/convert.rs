@@ -218,18 +218,78 @@ macro_rules! __num_conv {
             x.__conv()
         }
         // Numeric source impls — `as` covers truncation/widening per Go.
-        impl $trait for u8 {  #[inline] fn __conv(self) -> $target { self as $target } }
-        impl $trait for i8 {  #[inline] fn __conv(self) -> $target { self as $target } }
-        impl $trait for u16 { #[inline] fn __conv(self) -> $target { self as $target } }
-        impl $trait for i16 { #[inline] fn __conv(self) -> $target { self as $target } }
-        impl $trait for u32 { #[inline] fn __conv(self) -> $target { self as $target } }
-        impl $trait for i32 { #[inline] fn __conv(self) -> $target { self as $target } }
-        impl $trait for u64 { #[inline] fn __conv(self) -> $target { self as $target } }
-        impl $trait for i64 { #[inline] fn __conv(self) -> $target { self as $target } }
-        impl $trait for usize { #[inline] fn __conv(self) -> $target { self as $target } }
-        impl $trait for isize { #[inline] fn __conv(self) -> $target { self as $target } }
-        impl $trait for f32 { #[inline] fn __conv(self) -> $target { self as $target } }
-        impl $trait for f64 { #[inline] fn __conv(self) -> $target { self as $target } }
+        impl $trait for u8 {
+            #[inline]
+            fn __conv(self) -> $target {
+                self as $target
+            }
+        }
+        impl $trait for i8 {
+            #[inline]
+            fn __conv(self) -> $target {
+                self as $target
+            }
+        }
+        impl $trait for u16 {
+            #[inline]
+            fn __conv(self) -> $target {
+                self as $target
+            }
+        }
+        impl $trait for i16 {
+            #[inline]
+            fn __conv(self) -> $target {
+                self as $target
+            }
+        }
+        impl $trait for u32 {
+            #[inline]
+            fn __conv(self) -> $target {
+                self as $target
+            }
+        }
+        impl $trait for i32 {
+            #[inline]
+            fn __conv(self) -> $target {
+                self as $target
+            }
+        }
+        impl $trait for u64 {
+            #[inline]
+            fn __conv(self) -> $target {
+                self as $target
+            }
+        }
+        impl $trait for i64 {
+            #[inline]
+            fn __conv(self) -> $target {
+                self as $target
+            }
+        }
+        impl $trait for usize {
+            #[inline]
+            fn __conv(self) -> $target {
+                self as $target
+            }
+        }
+        impl $trait for isize {
+            #[inline]
+            fn __conv(self) -> $target {
+                self as $target
+            }
+        }
+        impl $trait for f32 {
+            #[inline]
+            fn __conv(self) -> $target {
+                self as $target
+            }
+        }
+        impl $trait for f64 {
+            #[inline]
+            fn __conv(self) -> $target {
+                self as $target
+            }
+        }
     };
 }
 
@@ -252,12 +312,16 @@ __num_conv!(__ByteConv, byte, crate::types::byte);
 // `rune('x')` should work the same as Go's `'x'` in a rune context.
 impl __RuneConv for char {
     #[inline]
-    fn __conv(self) -> crate::types::rune { self as crate::types::rune }
+    fn __conv(self) -> crate::types::rune {
+        self as crate::types::rune
+    }
 }
 // char → byte: `byte('x')` converts an ASCII char to a u8.
 impl __ByteConv for char {
     #[inline]
-    fn __conv(self) -> crate::types::byte { self as crate::types::byte }
+    fn __conv(self) -> crate::types::byte {
+        self as crate::types::byte
+    }
 }
 
 // ─── NumCast — type-parameter numeric conversion ────────────────────
@@ -322,13 +386,63 @@ pub trait __SliceIndex {
     #[doc(hidden)]
     fn __sidx(self) -> usize;
 }
-impl __SliceIndex for u8    { #[inline] fn __sidx(self) -> usize { self as usize } }
-impl __SliceIndex for i8    { #[inline] fn __sidx(self) -> usize { self as usize } }
-impl __SliceIndex for u16   { #[inline] fn __sidx(self) -> usize { self as usize } }
-impl __SliceIndex for i16   { #[inline] fn __sidx(self) -> usize { self as usize } }
-impl __SliceIndex for u32   { #[inline] fn __sidx(self) -> usize { self as usize } }
-impl __SliceIndex for i32   { #[inline] fn __sidx(self) -> usize { self as usize } }
-impl __SliceIndex for u64   { #[inline] fn __sidx(self) -> usize { self as usize } }
-impl __SliceIndex for i64   { #[inline] fn __sidx(self) -> usize { self as usize } }
-impl __SliceIndex for usize { #[inline] fn __sidx(self) -> usize { self } }
-impl __SliceIndex for isize { #[inline] fn __sidx(self) -> usize { self as usize } }
+impl __SliceIndex for u8 {
+    #[inline]
+    fn __sidx(self) -> usize {
+        self as usize
+    }
+}
+impl __SliceIndex for i8 {
+    #[inline]
+    fn __sidx(self) -> usize {
+        self as usize
+    }
+}
+impl __SliceIndex for u16 {
+    #[inline]
+    fn __sidx(self) -> usize {
+        self as usize
+    }
+}
+impl __SliceIndex for i16 {
+    #[inline]
+    fn __sidx(self) -> usize {
+        self as usize
+    }
+}
+impl __SliceIndex for u32 {
+    #[inline]
+    fn __sidx(self) -> usize {
+        self as usize
+    }
+}
+impl __SliceIndex for i32 {
+    #[inline]
+    fn __sidx(self) -> usize {
+        self as usize
+    }
+}
+impl __SliceIndex for u64 {
+    #[inline]
+    fn __sidx(self) -> usize {
+        self as usize
+    }
+}
+impl __SliceIndex for i64 {
+    #[inline]
+    fn __sidx(self) -> usize {
+        self as usize
+    }
+}
+impl __SliceIndex for usize {
+    #[inline]
+    fn __sidx(self) -> usize {
+        self
+    }
+}
+impl __SliceIndex for isize {
+    #[inline]
+    fn __sidx(self) -> usize {
+        self as usize
+    }
+}

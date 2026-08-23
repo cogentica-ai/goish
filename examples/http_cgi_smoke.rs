@@ -119,7 +119,12 @@ fn main() {
         {
             fmt::Println!("[3] full env: URL, HTTP_* headers, RemoteAddr  PASS");
         } else {
-            fmt::Println!("[3] full env  FAIL url=", r.URL.String(), " remote=", r.RemoteAddr);
+            fmt::Println!(
+                "[3] full env  FAIL url=",
+                r.URL.String(),
+                " remote=",
+                r.RemoteAddr
+            );
             failed += 1;
         }
     }
@@ -141,10 +146,14 @@ fn main() {
         let (u2, t2) = mk("ON");
         let (u3, t3) = mk("1");
         let (u4, t4) = mk("off");
-        if u1 == "https://e.com/" && t1
-            && u2 == "https://e.com/" && t2
-            && u3 == "https://e.com/" && t3
-            && u4 == "http://e.com/" && !t4
+        if u1 == "https://e.com/"
+            && t1
+            && u2 == "https://e.com/"
+            && t2
+            && u3 == "https://e.com/"
+            && t3
+            && u4 == "http://e.com/"
+            && !t4
         {
             fmt::Println!("[4] HTTPS on/ON/1 -> TLS, off -> plaintext  PASS");
         } else {

@@ -17,8 +17,8 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use crate::crypto::chacha20;
-use crate::crypto::poly1305;
 use crate::crypto::cipher::AEAD as AEADTrait;
+use crate::crypto::poly1305;
 use crate::errors::{self, error};
 use crate::goslice::slice;
 use crate::types::{byte, int};
@@ -65,13 +65,21 @@ fn write_with_padding(p: &mut poly1305::MAC, b: &[byte]) {
 
 impl ChaCha20Poly1305 {
     /// `sealGeneric` — encrypt plaintext + compute Poly1305 tag.
-    fn seal_generic(&self, dst: &[byte], nonce: &[byte], plaintext: &[byte], aad: &[byte]) -> Vec<byte> {
+    fn seal_generic(
+        &self,
+        dst: &[byte],
+        nonce: &[byte],
+        plaintext: &[byte],
+        aad: &[byte],
+    ) -> Vec<byte> {
         // Generate Poly1305 key (first 32 bytes of ChaCha20 block 0)
         // XOR zeros with keystream = keystream itself
         let zeros32 = [0u8; 32];
         let mut poly_key = [0u8; 32];
         let (mut cipher, _) = chacha20::new_from_bytes(&self.key, nonce);
-        let c = cipher.as_mut().expect("chacha20poly1305: cipher init failed");
+        let c = cipher
+            .as_mut()
+            .expect("chacha20poly1305: cipher init failed");
         c.XORKeyStream(&mut poly_key, &zeros32);
         c.SetCounter(1); // skip first block (used for poly key)
 
@@ -89,7 +97,8 @@ impl ChaCha20Poly1305 {
         p.Sum(&mut tag_vec);
 
         // Build output: dst || ciphertext || tag
-        let mut out: Vec<byte> = Vec::with_capacity(dst.len() + ciphertext.len() + poly1305::TagSize);
+        let mut out: Vec<byte> =
+            Vec::with_capacity(dst.len() + ciphertext.len() + poly1305::TagSize);
         out.extend_from_slice(dst);
         out.extend_from_slice(&ciphertext);
         out.extend_from_slice(&tag_vec[..poly1305::TagSize]);
@@ -97,7 +106,13 @@ impl ChaCha20Poly1305 {
     }
 
     /// `openGeneric` — verify Poly1305 tag and decrypt.
-    fn open_generic(&self, dst: &[byte], nonce: &[byte], ciphertext: &[byte], aad: &[byte]) -> (Vec<byte>, error) {
+    fn open_generic(
+        &self,
+        dst: &[byte],
+        nonce: &[byte],
+        ciphertext: &[byte],
+        aad: &[byte],
+    ) -> (Vec<byte>, error) {
         let tag = &ciphertext[ciphertext.len() - 16..];
         let ciphertext = &ciphertext[..ciphertext.len() - 16];
 
@@ -105,7 +120,9 @@ impl ChaCha20Poly1305 {
         let zeros32 = [0u8; 32];
         let mut poly_key = [0u8; 32];
         let (mut cipher, _) = chacha20::new_from_bytes(&self.key, nonce);
-        let c = cipher.as_mut().expect("chacha20poly1305: cipher init failed");
+        let c = cipher
+            .as_mut()
+            .expect("chacha20poly1305: cipher init failed");
         c.XORKeyStream(&mut poly_key, &zeros32);
         c.SetCounter(1);
 
@@ -116,7 +133,10 @@ impl ChaCha20Poly1305 {
         write_uint64(&mut p, aad.len());
         write_uint64(&mut p, ciphertext.len());
         if !p.Verify(tag) {
-            return (Vec::new(), errors::New("chacha20poly1305: message authentication failed"));
+            return (
+                Vec::new(),
+                errors::New("chacha20poly1305: message authentication failed"),
+            );
         }
 
         // Decrypt
@@ -178,8 +198,10 @@ impl AEADTrait for ChaCha20Poly1305 {
             panic!("chacha20poly1305: bad nonce length passed to Open");
         }
         if ciphertext_v.len() < 16 {
-            return (slice::<byte>::__from_vec(Vec::new()),
-                    errors::New("chacha20poly1305: message authentication failed"));
+            return (
+                slice::<byte>::__from_vec(Vec::new()),
+                errors::New("chacha20poly1305: message authentication failed"),
+            );
         }
 
         let (out, err) = self.open_generic(&dst_v, &nonce_v, &ciphertext_v, &aad_v);

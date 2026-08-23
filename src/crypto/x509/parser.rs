@@ -53,10 +53,10 @@ use super::oid::{newOIDFromDER, OID};
 use super::verify::parseRFC2821Mailbox;
 use super::x509::{
     extKeyUsageFromOID, getPublicKeyAlgorithmFromOID, getSignatureAlgorithmFromAI, isIA5String,
-    namedCurveFromOID, nameTypeDNS, nameTypeEmail, nameTypeIP, nameTypeURI,
+    nameTypeDNS, nameTypeEmail, nameTypeIP, nameTypeURI, namedCurveFromOID,
     oidAuthorityInfoAccessIssuers, oidAuthorityInfoAccessOcsp, oidExtensionAuthorityInfoAccess,
-    oidPublicKeyDSA, oidPublicKeyECDSA, oidPublicKeyEd25519, oidPublicKeyRSA, oidPublicKeyX25519,
-    oidExtensionAuthorityKeyId, oidExtensionCRLNumber, oidExtensionReasonCode, publicKeyInfo,
+    oidExtensionAuthorityKeyId, oidExtensionCRLNumber, oidExtensionReasonCode, oidPublicKeyDSA,
+    oidPublicKeyECDSA, oidPublicKeyEd25519, oidPublicKeyRSA, oidPublicKeyX25519, publicKeyInfo,
     Certificate, ExtKeyUsage, KeyUsage, PolicyMapping, RevocationList, RevocationListEntry,
     UnknownPublicKeyAlgorithm,
 };
@@ -71,12 +71,12 @@ use crate::goany::Any;
 use crate::gomap::map;
 use crate::goslice::slice;
 use crate::gostring::string;
+use crate::int;
 use crate::math::big;
 use crate::net;
 use crate::net::url;
 use crate::strings;
 use crate::time;
-use crate::int;
 use crate::types::byte;
 use crate::unicode::{utf16, utf8};
 
@@ -164,7 +164,8 @@ fn parseASN1String(tag: cryptobyte_asn1::Tag, value: slice<byte>) -> (string, er
         let mut s: Vec<u16> = Vec::with_capacity(value.len() / 2);
         let mut i: usize = 0;
         while i < value.len() {
-            let point: crate::types::uint16 = (crate::uint16(value[i]) << 8) + crate::uint16(value[i + 1]);
+            let point: crate::types::uint16 =
+                (crate::uint16(value[i]) << 8) + crate::uint16(value[i + 1]);
             // Reject UTF-16 code points that are permanently reserved
             // noncharacters (0xfffe, 0xffff, and 0xfdd0-0xfdef) and surrogates
             // (0xd800-0xdfff).
@@ -263,13 +264,12 @@ fn parseName(raw: CBString) -> (pkix::RDNSequence, error) {
             rdnSet.push(attr);
         }
 
-        rdnSeq.push(pkix::RelativeDistinguishedNameSET(slice::__from_vec(rdnSet)));
+        rdnSeq.push(pkix::RelativeDistinguishedNameSET(slice::__from_vec(
+            rdnSet,
+        )));
     }
 
-    return (
-        pkix::RDNSequence(slice::__from_vec(rdnSeq)),
-        errors::nil,
-    );
+    return (pkix::RDNSequence(slice::__from_vec(rdnSeq)), errors::nil);
 }
 
 // go: sdk 1.25.5 crypto/x509/parser.go:184-200 parseAI
@@ -401,7 +401,10 @@ pub(super) fn parsePublicKey(keyData: &publicKeyInfo) -> (Any, error) {
         let mut paramsDer = CBString::New(params.FullBytes.clone());
         let mut namedCurveOID = asn1::ObjectIdentifier::default();
         if !paramsDer.ReadASN1ObjectIdentifier(&mut namedCurveOID) {
-            return (Any::default(), errors::New("x509: invalid ECDSA parameters"));
+            return (
+                Any::default(),
+                errors::New("x509: invalid ECDSA parameters"),
+            );
         }
         let namedCurve = match namedCurveFromOID(&namedCurveOID) {
             None => {
@@ -544,7 +547,10 @@ fn parseBasicConstraintsExtension(der: CBString) -> (bool, int, error) {
 }
 
 // go: sdk 1.25.5 crypto/x509/parser.go:390-406 forEachSAN
-pub(super) fn forEachSAN<F: FnMut(int, slice<byte>) -> error>(der: CBString, mut callback: F) -> error {
+pub(super) fn forEachSAN<F: FnMut(int, slice<byte>) -> error>(
+    der: CBString,
+    mut callback: F,
+) -> error {
     let mut der = der;
     let mut inner = CBString::default();
     if !der.ReadASN1(&mut inner, cryptobyte_asn1::SEQUENCE) {
@@ -842,9 +848,7 @@ fn nameConstraintValues(
                     b,
                     c,
                     d,
-                    errors::New(
-                        string::from("x509: invalid constraint value: ") + err.Error(),
-                    ),
+                    errors::New(string::from("x509: invalid constraint value: ") + err.Error()),
                 );
             }
 
@@ -855,10 +859,7 @@ fn nameConstraintValues(
                     b,
                     c,
                     d,
-                    crate::fmt::Errorf!(
-                        "x509: failed to parse dnsName constraint %q",
-                        domain
-                    ),
+                    crate::fmt::Errorf!("x509: failed to parse dnsName constraint %q", domain),
                 );
             }
             dnsNames.push(domain);
@@ -881,10 +882,7 @@ fn nameConstraintValues(
                         b,
                         c,
                         d,
-                        crate::fmt::Errorf!(
-                            "x509: IP constraint contained value of length %d",
-                            l
-                        ),
+                        crate::fmt::Errorf!("x509: IP constraint contained value of length %d", l),
                     );
                 }
             };
@@ -896,10 +894,7 @@ fn nameConstraintValues(
                     b,
                     c,
                     d,
-                    crate::fmt::Errorf!(
-                        "x509: IP constraint contained invalid mask %x",
-                        mask
-                    ),
+                    crate::fmt::Errorf!("x509: IP constraint contained invalid mask %x", mask),
                 );
             }
 
@@ -917,9 +912,7 @@ fn nameConstraintValues(
                     b,
                     c,
                     d,
-                    errors::New(
-                        string::from("x509: invalid constraint value: ") + err.Error(),
-                    ),
+                    errors::New(string::from("x509: invalid constraint value: ") + err.Error()),
                 );
             }
 
@@ -964,9 +957,7 @@ fn nameConstraintValues(
                     b,
                     c,
                     d,
-                    errors::New(
-                        string::from("x509: invalid constraint value: ") + err.Error(),
-                    ),
+                    errors::New(string::from("x509: invalid constraint value: ") + err.Error()),
                 );
             }
 
@@ -1046,12 +1037,13 @@ fn parseNameConstraintsExtension(out: &mut Certificate, e: &pkix::Extension) -> 
         )
         || !toplevel.Empty()
     {
-        return (false, errors::New("x509: invalid NameConstraints extension"));
+        return (
+            false,
+            errors::New("x509: invalid NameConstraints extension"),
+        );
     }
 
-    if !havePermitted && !haveExcluded
-        || permitted.0.Len() == 0 && excluded.0.Len() == 0
-    {
+    if !havePermitted && !haveExcluded || permitted.0.Len() == 0 && excluded.0.Len() == 0 {
         // From RFC 5280, Section 4.2.1.10:
         //   "either the permittedSubtrees field
         //   or the excludedSubtrees MUST be
@@ -1061,8 +1053,7 @@ fn parseNameConstraintsExtension(out: &mut Certificate, e: &pkix::Extension) -> 
 
     let mut unhandled = false;
 
-    let (dnsNames, ips, emails, uriDomains, err) =
-        nameConstraintValues(permitted, &mut unhandled);
+    let (dnsNames, ips, emails, uriDomains, err) = nameConstraintValues(permitted, &mut unhandled);
     if err != crate::nil {
         return (false, err);
     }
@@ -1071,8 +1062,7 @@ fn parseNameConstraintsExtension(out: &mut Certificate, e: &pkix::Extension) -> 
     out.PermittedEmailAddresses = emails;
     out.PermittedURIDomains = uriDomains;
 
-    let (dnsNames, ips, emails, uriDomains, err) =
-        nameConstraintValues(excluded, &mut unhandled);
+    let (dnsNames, ips, emails, uriDomains, err) = nameConstraintValues(excluded, &mut unhandled);
     if err != crate::nil {
         return (false, err);
     }
@@ -1182,9 +1172,7 @@ fn processExtensions(out: &mut Certificate) -> error {
                         }
                         dpNameDER = inner;
                         while !dpNameDER.Empty() {
-                            if !dpNameDER
-                                .PeekASN1Tag(cryptobyte_asn1::Tag(6).ContextSpecific())
-                            {
+                            if !dpNameDER.PeekASN1Tag(cryptobyte_asn1::Tag(6).ContextSpecific()) {
                                 break;
                             }
                             let mut uri = CBString::default();
@@ -1216,10 +1204,9 @@ fn processExtensions(out: &mut Certificate) -> error {
                     val = inner;
                     if val.PeekASN1Tag(cryptobyte_asn1::Tag(0).ContextSpecific()) {
                         let mut v: crate::types::int64 = 0;
-                        if !val.ReadASN1Int64WithTag(
-                            &mut v,
-                            cryptobyte_asn1::Tag(0).ContextSpecific(),
-                        ) {
+                        if !val
+                            .ReadASN1Int64WithTag(&mut v, cryptobyte_asn1::Tag(0).ContextSpecific())
+                        {
                             return errors::New("x509: invalid policy constraints extension");
                         }
                         out.RequireExplicitPolicy = v;
@@ -1229,10 +1216,9 @@ fn processExtensions(out: &mut Certificate) -> error {
                     }
                     if val.PeekASN1Tag(cryptobyte_asn1::Tag(1).ContextSpecific()) {
                         let mut v: crate::types::int64 = 0;
-                        if !val.ReadASN1Int64WithTag(
-                            &mut v,
-                            cryptobyte_asn1::Tag(1).ContextSpecific(),
-                        ) {
+                        if !val
+                            .ReadASN1Int64WithTag(&mut v, cryptobyte_asn1::Tag(1).ContextSpecific())
+                        {
                             return errors::New("x509: invalid policy constraints extension");
                         }
                         out.InhibitPolicyMapping = v;
@@ -1389,13 +1375,19 @@ fn parseCertificate(der: &slice<byte>) -> (Certificate, error) {
     // SEQUENCE so it can be operated on
     let mut elem = CBString::default();
     if !input.ReadASN1Element(&mut elem, cryptobyte_asn1::SEQUENCE) {
-        return (Certificate::default(), errors::New("x509: malformed certificate"));
+        return (
+            Certificate::default(),
+            errors::New("x509: malformed certificate"),
+        );
     }
     input = elem;
     cert.Raw = input.0.clone();
     let mut inner = CBString::default();
     if !input.ReadASN1(&mut inner, cryptobyte_asn1::SEQUENCE) {
-        return (Certificate::default(), errors::New("x509: malformed certificate"));
+        return (
+            Certificate::default(),
+            errors::New("x509: malformed certificate"),
+        );
     }
     input = inner;
 
@@ -1423,10 +1415,16 @@ fn parseCertificate(der: &slice<byte>) -> (Certificate, error) {
         cryptobyte_asn1::Tag(0).Constructed().ContextSpecific(),
         0,
     ) {
-        return (Certificate::default(), errors::New("x509: malformed version"));
+        return (
+            Certificate::default(),
+            errors::New("x509: malformed version"),
+        );
     }
     if cert.Version < 0 {
-        return (Certificate::default(), errors::New("x509: malformed version"));
+        return (
+            Certificate::default(),
+            errors::New("x509: malformed version"),
+        );
     }
     // for backwards compat reasons Version is one-indexed,
     // rather than zero-indexed as defined in 5280
@@ -1481,7 +1479,10 @@ fn parseCertificate(der: &slice<byte>) -> (Certificate, error) {
 
     let mut issuerSeq = CBString::default();
     if !tbs.ReadASN1Element(&mut issuerSeq, cryptobyte_asn1::SEQUENCE) {
-        return (Certificate::default(), errors::New("x509: malformed issuer"));
+        return (
+            Certificate::default(),
+            errors::New("x509: malformed issuer"),
+        );
     }
     cert.RawIssuer = issuerSeq.0.clone();
     let (issuerRDNs, err) = parseName(issuerSeq);
@@ -1492,7 +1493,10 @@ fn parseCertificate(der: &slice<byte>) -> (Certificate, error) {
 
     let mut validity = CBString::default();
     if !tbs.ReadASN1(&mut validity, cryptobyte_asn1::SEQUENCE) {
-        return (Certificate::default(), errors::New("x509: malformed validity"));
+        return (
+            Certificate::default(),
+            errors::New("x509: malformed validity"),
+        );
     }
     let (notBefore, notAfter, err) = parseValidity(validity);
     if err != crate::nil {
@@ -1503,7 +1507,10 @@ fn parseCertificate(der: &slice<byte>) -> (Certificate, error) {
 
     let mut subjectSeq = CBString::default();
     if !tbs.ReadASN1Element(&mut subjectSeq, cryptobyte_asn1::SEQUENCE) {
-        return (Certificate::default(), errors::New("x509: malformed issuer"));
+        return (
+            Certificate::default(),
+            errors::New("x509: malformed issuer"),
+        );
     }
     cert.RawSubject = subjectSeq.0.clone();
     let (subjectRDNs, err) = parseName(subjectSeq);
@@ -1625,7 +1632,10 @@ fn parseCertificate(der: &slice<byte>) -> (Certificate, error) {
 
     let mut signature = asn1::BitString::default();
     if !input.ReadASN1BitString(&mut signature) {
-        return (Certificate::default(), errors::New("x509: malformed signature"));
+        return (
+            Certificate::default(),
+            errors::New("x509: malformed signature"),
+        );
     }
     cert.Signature = signature.RightAlign();
 
@@ -1725,7 +1735,6 @@ pub(super) fn domainNameValid(s: &string, constraint: bool) -> bool {
 
     return true;
 }
-
 
 // Go parser.go:1112
 //   const x509v2Version = 1

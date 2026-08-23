@@ -19,9 +19,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::crypto::cipher;
 use goish::crypto::cipher::{Block, Stream};
+use goish::fmt;
 use goish::types::{byte, int};
 use goish::{slice, syscall};
 
@@ -62,8 +62,7 @@ fn main() {
     let mk_block = || ToyBlock {
         key: alloc::vec![0xa5, 0x5a, 0xc3, 0x3c, 0xf0, 0x0f, 0x96, 0x69],
     };
-    let iv: alloc::vec::Vec<byte> =
-        alloc::vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+    let iv: alloc::vec::Vec<byte> = alloc::vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
 
     // 1. Construct + single XORKeyStream over 16 bytes (two block lengths).
     {
@@ -84,8 +83,7 @@ fn main() {
 
     // 2. Encrypt → decrypt round-trip recovers the plaintext.
     {
-        let plain: alloc::vec::Vec<byte> =
-            b"Goish lives at the boundary of trust.".to_vec();
+        let plain: alloc::vec::Vec<byte> = b"Goish lives at the boundary of trust.".to_vec();
         let n = plain.len();
 
         // Encrypt

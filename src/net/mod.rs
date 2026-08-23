@@ -40,33 +40,35 @@ use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 use crate::errors::{self, error};
 use crate::goslice::slice;
-use crate::string;
 use crate::io;
 use crate::runtime::netpoll::{self, BlockResult, PollDesc};
-use alloc::sync::Arc;
+use crate::string;
 use crate::syscall;
 use crate::types::{byte, int};
+use alloc::sync::Arc;
 
-mod parse;
-mod mac;
-pub mod dnsmessage;
-mod dnsconfig;
 pub mod dnsclient;
-pub mod lookup;
+mod dnsconfig;
+pub mod dnsmessage;
 pub mod http;
+pub mod lookup;
+mod mac;
 pub mod mail;
 pub mod net;
-pub use net::{Addr, AddrError, DNSConfigError, DNSError, ErrClosed, ErrWriteToConnected, InvalidAddrError, OpError, ParseError, UnknownNetworkError};
+mod parse;
+pub use net::{
+    Addr, AddrError, DNSConfigError, DNSError, ErrClosed, ErrWriteToConnected, InvalidAddrError,
+    OpError, ParseError, UnknownNetworkError,
+};
 pub mod textproto;
 pub mod url;
 
+pub use lookup::{
+    IPAddr as LookupIPAddr, LookupAddr, LookupCNAME, LookupHost, LookupIP, LookupMX, LookupNS,
+    LookupSRV, LookupTXT, Resolver, MX, NS, SRV,
+};
 pub use mac::{HardwareAddr, HardwareAddrString, ParseMAC};
 pub use parse::TCPAddr;
-pub use lookup::{
-    Resolver, IPAddr as LookupIPAddr, SRV, MX, NS,
-    LookupHost, LookupIP, LookupCNAME, LookupAddr,
-    LookupTXT, LookupNS, LookupMX, LookupSRV,
-};
 
 /// `EAGAIN` / `EWOULDBLOCK` (Linux: same value, 11). The non-blocking
 /// I/O retry signal — caller parks on the netpoller and re-attempts.
@@ -171,10 +173,8 @@ impl Listener {
                 // retry) — same contract as the parked case.
                 return (TCPConn::dead(), ErrClosed.into(), false);
             }
-            let temporary = errno == EMFILE
-                || errno == ENFILE
-                || errno == ENOBUFS
-                || errno == ENOMEM;
+            let temporary =
+                errno == EMFILE || errno == ENFILE || errno == ENOBUFS || errno == ENOMEM;
             return (TCPConn::dead(), errno_error("accept", errno), temporary);
         }
     }
@@ -283,12 +283,10 @@ impl Listener {
             None => return self.pd.load(Ordering::Acquire),
         };
         let new = Arc::into_raw(arc) as *mut PollDesc;
-        match self.pd.compare_exchange(
-            ptr::null_mut(),
-            new,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
+        match self
+            .pd
+            .compare_exchange(ptr::null_mut(), new, Ordering::AcqRel, Ordering::Acquire)
+        {
             Ok(_) => new as *const PollDesc,
             Err(_) => {
                 // Lost the install race — close our orphan Arc (which
@@ -429,7 +427,8 @@ impl TCPConn {
             pd: AtomicPtr::new(self.pd.load(core::sync::atomic::Ordering::Acquire)),
         };
         self.fd = -1;
-        self.pd.store(ptr::null_mut(), core::sync::atomic::Ordering::Release);
+        self.pd
+            .store(ptr::null_mut(), core::sync::atomic::Ordering::Release);
         return out;
     }
 
@@ -546,12 +545,10 @@ impl TCPConn {
             None => return self.pd.load(Ordering::Acquire),
         };
         let new = Arc::into_raw(arc) as *mut PollDesc;
-        match self.pd.compare_exchange(
-            ptr::null_mut(),
-            new,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
+        match self
+            .pd
+            .compare_exchange(ptr::null_mut(), new, Ordering::AcqRel, Ordering::Acquire)
+        {
             Ok(_) => new as *const PollDesc,
             Err(_) => {
                 let orphan = unsafe { Arc::from_raw(new as *const PollDesc) };
@@ -850,9 +847,7 @@ impl IP {
         let ip4 = self.To4();
         if ip4.bytes.Len() == 4 {
             // Go: ip4[0] == 224 && ip4[1] == 0 && ip4[2] == 0
-            return ip4.bytes[0] == 224
-                && ip4.bytes[1] == 0
-                && ip4.bytes[2] == 0;
+            return ip4.bytes[0] == 224 && ip4.bytes[1] == 0 && ip4.bytes[2] == 0;
         }
         false
     }
@@ -927,10 +922,7 @@ impl IP {
         let buf = slice::<byte>::__from_vec(alloc::vec::Vec::with_capacity(24));
         let (out, err) = self.AppendText(buf);
         if !err.IsNil() {
-            return (
-                slice::<byte>::__from_vec(alloc::vec::Vec::new()),
-                err,
-            );
+            return (slice::<byte>::__from_vec(alloc::vec::Vec::new()), err);
         }
         (out, errors::nil)
     }
@@ -967,33 +959,21 @@ impl IP {
         if self.bytes.Len() == 4 {
             // strconv::AppendInt + literal '.' separators.
             let mut buf: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(15);
-            buf = crate::strconv::AppendInt(
-                slice::<byte>::__from_vec(buf),
-                self.bytes[0] as int,
-                10,
-            )
-            .__into_vec();
+            buf =
+                crate::strconv::AppendInt(slice::<byte>::__from_vec(buf), self.bytes[0] as int, 10)
+                    .__into_vec();
             buf.push(b'.');
-            buf = crate::strconv::AppendInt(
-                slice::<byte>::__from_vec(buf),
-                self.bytes[1] as int,
-                10,
-            )
-            .__into_vec();
+            buf =
+                crate::strconv::AppendInt(slice::<byte>::__from_vec(buf), self.bytes[1] as int, 10)
+                    .__into_vec();
             buf.push(b'.');
-            buf = crate::strconv::AppendInt(
-                slice::<byte>::__from_vec(buf),
-                self.bytes[2] as int,
-                10,
-            )
-            .__into_vec();
+            buf =
+                crate::strconv::AppendInt(slice::<byte>::__from_vec(buf), self.bytes[2] as int, 10)
+                    .__into_vec();
             buf.push(b'.');
-            buf = crate::strconv::AppendInt(
-                slice::<byte>::__from_vec(buf),
-                self.bytes[3] as int,
-                10,
-            )
-            .__into_vec();
+            buf =
+                crate::strconv::AppendInt(slice::<byte>::__from_vec(buf), self.bytes[3] as int, 10)
+                    .__into_vec();
             return string::from_bytes(&buf);
         }
         // Slim: any other length is not a recognized form.
@@ -1546,9 +1526,7 @@ fn addr_error(addr: crate::string, why: &'static str) -> crate::error {
 /// listen address, and a `syscall.RawConn` giving raw fd access.
 /// Named so user code can spell the field type without writing the
 /// `dyn Fn` form (same pattern as `http::BaseContextFn`).
-pub type ControlFn = Arc<
-    dyn Fn(string, string, syscall::RawConn) -> error + Send + Sync,
->;
+pub type ControlFn = Arc<dyn Fn(string, string, syscall::RawConn) -> error + Send + Sync>;
 
 /// `net.ListenConfig` (dial.go:741) — options for listening to an
 /// address. v1 carries the `Control` hook (the field callers use for
@@ -1990,8 +1968,7 @@ impl crate::reflect::Reflect for IP {
 /// registries. Idempotent; called from `goish::init()`.
 pub fn register_net_impls() {
     use crate::io::{
-        __goish_register_Closer_impl, __goish_register_Reader_impl,
-        __goish_register_Writer_impl,
+        __goish_register_Closer_impl, __goish_register_Reader_impl, __goish_register_Writer_impl,
     };
     __goish_register_Reader_impl::<TCPConn>();
     __goish_register_Writer_impl::<TCPConn>();

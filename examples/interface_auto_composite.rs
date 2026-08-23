@@ -12,8 +12,8 @@
 extern crate alloc;
 
 use alloc::sync::Arc;
-use goish::any::AsExt;
 use goish::any::__HasNilSentinel;
+use goish::any::AsExt;
 use goish::fmt;
 use goish::syscall;
 use goish::testing;
@@ -114,7 +114,10 @@ fn test_composite_arc_downcasts_to_concrete(t: &mut testing::T) {
                 t.Fatal(fmt::Sprintf!("n: got %d, want 7", got.n));
             }
             if got.local_method() != 8 {
-                t.Fatal(fmt::Sprintf!("local_method: got %d, want 8", got.local_method()));
+                t.Fatal(fmt::Sprintf!(
+                    "local_method: got %d, want 8",
+                    got.local_method()
+                ));
             }
         }
         None => t.Fatal(fmt::Sprintf!("expected Some(&Concrete), got None")),
@@ -126,7 +129,9 @@ fn test_composite_arc_miss_returns_none(t: &mut testing::T) {
     let arc: Arc<dyn Composite> = Arc::new(Concrete::default());
     let r: &(dyn Composite + Send + Sync) = &*arc;
     if r.As::<Other>().is_some() {
-        t.Fatal(fmt::Sprintf!("expected None for wrong concrete type, got Some"));
+        t.Fatal(fmt::Sprintf!(
+            "expected None for wrong concrete type, got Some"
+        ));
     }
 }
 
@@ -154,8 +159,8 @@ fn test_composite_has_nil_sentinel_is_false(t: &mut testing::T) {
 
 // ── Test 4: trivial trait retains cast!() and nil sentinel ─────────────────
 fn test_trivial_keeps_cast_and_nil_sentinel(t: &mut testing::T) {
-    use goish::cast;
     use goish::any::NilDyn;
+    use goish::cast;
 
     // Register TConcrete in the per-trait registry so cast! can find it.
     __goish_register_Trivial_impl::<TConcrete>();
@@ -182,10 +187,22 @@ fn test_trivial_keeps_cast_and_nil_sentinel(t: &mut testing::T) {
 #[goish::main]
 fn main() {
     let tests: &[(&str, testing::TestFn)] = &[
-        ("TestCompositeArcDowncastsToConcrete", test_composite_arc_downcasts_to_concrete),
-        ("TestCompositeArcMissReturnsNone", test_composite_arc_miss_returns_none),
-        ("TestCompositeHasNilSentinelIsFalse", test_composite_has_nil_sentinel_is_false),
-        ("TestTrivialKeepsCastAndNilSentinel", test_trivial_keeps_cast_and_nil_sentinel),
+        (
+            "TestCompositeArcDowncastsToConcrete",
+            test_composite_arc_downcasts_to_concrete,
+        ),
+        (
+            "TestCompositeArcMissReturnsNone",
+            test_composite_arc_miss_returns_none,
+        ),
+        (
+            "TestCompositeHasNilSentinelIsFalse",
+            test_composite_has_nil_sentinel_is_false,
+        ),
+        (
+            "TestTrivialKeepsCastAndNilSentinel",
+            test_trivial_keeps_cast_and_nil_sentinel,
+        ),
     ];
     let code = testing::Main(tests);
     syscall::Exit(code as i32);

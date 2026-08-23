@@ -6,9 +6,9 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use goish::{byte, int, io, nil, slice, string, syscall};
-use goish::io::Reader as _; // bring trait into scope for tr.Read()
 use goish::archive::tar;
+use goish::io::Reader as _; // bring trait into scope for tr.Read()
+use goish::{byte, int, io, nil, slice, string, syscall};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -16,13 +16,20 @@ fn die(msg: &[u8]) -> ! {
 }
 
 fn check(cond: bool, msg: &[u8]) {
-    if !cond { die(msg); }
+    if !cond {
+        die(msg);
+    }
 }
 
-struct MemReader { data: Vec<u8>, pos: usize }
+struct MemReader {
+    data: Vec<u8>,
+    pos: usize,
+}
 
 impl MemReader {
-    fn new(data: Vec<u8>) -> Self { Self { data, pos: 0 } }
+    fn new(data: Vec<u8>) -> Self {
+        Self { data, pos: 0 }
+    }
 }
 
 impl io::Reader for MemReader {
@@ -101,8 +108,14 @@ fn ustar_entry(name: &[u8], content: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(512 + ((size + 511) & !511));
     out.extend_from_slice(&hdr);
     out.extend_from_slice(content);
-    let pad = if size % 512 == 0 { 0 } else { 512 - (size % 512) };
-    for _ in 0..pad { out.push(0); }
+    let pad = if size % 512 == 0 {
+        0
+    } else {
+        512 - (size % 512)
+    };
+    for _ in 0..pad {
+        out.push(0);
+    }
     out
 }
 
@@ -120,19 +133,31 @@ fn main() {
     // Entry 1
     let (hdr, err) = tr.Next();
     check(err == nil, b"tar: Next() error on entry 1\n");
-    check(hdr.Name == string::from_static("hello.txt"), b"tar: entry 1 name wrong\n");
+    check(
+        hdr.Name == string::from_static("hello.txt"),
+        b"tar: entry 1 name wrong\n",
+    );
     check(hdr.Size == 6, b"tar: entry 1 size wrong\n");
-    check(hdr.Typeflag == tar::TypeReg, b"tar: entry 1 typeflag wrong\n");
+    check(
+        hdr.Typeflag == tar::TypeReg,
+        b"tar: entry 1 typeflag wrong\n",
+    );
 
     let mut buf = goish::make!([]byte, hdr.Size as int);
     let (n, _) = tr.Read(&mut buf);
     check(n == 6, b"tar: entry 1 read n wrong\n");
-    check(buf[0] == b'h' && buf[4] == b'o', b"tar: entry 1 content wrong\n");
+    check(
+        buf[0] == b'h' && buf[4] == b'o',
+        b"tar: entry 1 content wrong\n",
+    );
 
     // Entry 2
     let (hdr, err) = tr.Next();
     check(err == nil, b"tar: Next() error on entry 2\n");
-    check(hdr.Name == string::from_static("world.txt"), b"tar: entry 2 name wrong\n");
+    check(
+        hdr.Name == string::from_static("world.txt"),
+        b"tar: entry 2 name wrong\n",
+    );
     check(hdr.Size == 6, b"tar: entry 2 size wrong\n");
 
     let mut buf2 = goish::make!([]byte, hdr.Size as int);

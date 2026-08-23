@@ -25,7 +25,9 @@ struct PageSink {
 
 impl PageSink {
     fn new(size: usize) -> Self {
-        Self { buf: alloc::vec![0u8; size] }
+        Self {
+            buf: alloc::vec![0u8; size],
+        }
     }
 }
 

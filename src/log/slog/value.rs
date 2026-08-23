@@ -111,41 +111,74 @@ fn group_of(v: &Value) -> crate::goslice::slice<Attr> {
 pub fn AnyValue(v: GoishAny) -> Value {
     // Go: case string: return StringValue(v)
     if let Some(x) = v.As::<crate::gostring::string>() {
-        return Value { kind: super::KindString, any: GoishAny::new(x.clone()) };
+        return Value {
+            kind: super::KindString,
+            any: GoishAny::new(x.clone()),
+        };
     }
     // Go: case bool: return BoolValue(v)
     if let Some(x) = v.As::<bool>() {
-        return Value { kind: super::KindBool, any: GoishAny::new(*x) };
+        return Value {
+            kind: super::KindBool,
+            any: GoishAny::new(*x),
+        };
     }
     // Go: every signed width folds to KindInt64.
     if let Some(x) = v.As::<crate::types::int>() {
-        return Value { kind: super::KindInt64, any: GoishAny::new(*x) };
+        return Value {
+            kind: super::KindInt64,
+            any: GoishAny::new(*x),
+        };
     }
     if let Some(x) = v.As::<i8>() {
-        return Value { kind: super::KindInt64, any: GoishAny::new(crate::types::int::from(*x)) };
+        return Value {
+            kind: super::KindInt64,
+            any: GoishAny::new(crate::types::int::from(*x)),
+        };
     }
     if let Some(x) = v.As::<i16>() {
-        return Value { kind: super::KindInt64, any: GoishAny::new(crate::types::int::from(*x)) };
+        return Value {
+            kind: super::KindInt64,
+            any: GoishAny::new(crate::types::int::from(*x)),
+        };
     }
     if let Some(x) = v.As::<i32>() {
-        return Value { kind: super::KindInt64, any: GoishAny::new(crate::types::int::from(*x)) };
+        return Value {
+            kind: super::KindInt64,
+            any: GoishAny::new(crate::types::int::from(*x)),
+        };
     }
     // Go: every unsigned width folds to KindUint64.
     if let Some(x) = v.As::<u8>() {
-        return Value { kind: super::KindUint64, any: GoishAny::new(u64::from(*x)) };
+        return Value {
+            kind: super::KindUint64,
+            any: GoishAny::new(u64::from(*x)),
+        };
     }
     if let Some(x) = v.As::<u16>() {
-        return Value { kind: super::KindUint64, any: GoishAny::new(u64::from(*x)) };
+        return Value {
+            kind: super::KindUint64,
+            any: GoishAny::new(u64::from(*x)),
+        };
     }
     if let Some(x) = v.As::<u32>() {
-        return Value { kind: super::KindUint64, any: GoishAny::new(u64::from(*x)) };
+        return Value {
+            kind: super::KindUint64,
+            any: GoishAny::new(u64::from(*x)),
+        };
     }
     if let Some(x) = v.As::<u64>() {
-        return Value { kind: super::KindUint64, any: GoishAny::new(*x) };
+        return Value {
+            kind: super::KindUint64,
+            any: GoishAny::new(*x),
+        };
     }
     // Go: both float widths fold to KindFloat64.
     if let Some(x) = v.As::<crate::types::float64>() {
-        return Value { kind: super::KindFloat64, any: GoishAny::new(*x) };
+        return Value {
+            kind: super::KindFloat64,
+            any: GoishAny::new(*x),
+        };
     }
     if let Some(x) = v.As::<crate::types::float32>() {
         return Value {
@@ -155,10 +188,16 @@ pub fn AnyValue(v: GoishAny) -> Value {
     }
     // Go: case time.Duration / time.Time
     if let Some(x) = v.As::<crate::time::Duration>() {
-        return Value { kind: super::KindDuration, any: GoishAny::new(*x) };
+        return Value {
+            kind: super::KindDuration,
+            any: GoishAny::new(*x),
+        };
     }
     if let Some(x) = v.As::<crate::time::Time>() {
-        return Value { kind: super::KindTime, any: GoishAny::new(*x) };
+        return Value {
+            kind: super::KindTime,
+            any: GoishAny::new(*x),
+        };
     }
     // Go: case []Attr: return GroupValue(v...)
     if let Some(x) = v.As::<crate::goslice::slice<Attr>>() {
@@ -170,7 +209,10 @@ pub fn AnyValue(v: GoishAny) -> Value {
         return x.clone();
     }
     // Go: default: return Value{any: v}
-    return Value { kind: super::KindAny, any: v };
+    return Value {
+        kind: super::KindAny,
+        any: v,
+    };
 }
 
 // go: sdk 1.25.5 log/slog/value.go:487-489 LogValuer
@@ -203,11 +245,7 @@ impl crate::reflect::Reflect for LogValuerBox {
     // go: none — goish idiom: minimal descriptor so the box can live in
     // a `goany::Any`, which requires Reflect. Nothing walks it.
     fn __reflect_type() -> crate::reflect::Type {
-        return crate::reflect::Type::__new(
-            crate::reflect::Kind::Struct,
-            "LogValuerBox",
-            &[],
-        );
+        return crate::reflect::Type::__new(crate::reflect::Kind::Struct, "LogValuerBox", &[]);
     }
     // go: none — goish idiom: as __reflect_type.
     fn __reflect_value(&self) -> crate::reflect::Value {

@@ -123,6 +123,10 @@ pub fn dump_to_stderr() {
 
 fn write_one(label: &[u8], flag: &AtomicBool) {
     crate::syscall::Write(crate::syscall::STDERR, label.as_ptr(), label.len());
-    let v: &[u8] = if flag.load(Ordering::Relaxed) { b"1" } else { b"0" };
+    let v: &[u8] = if flag.load(Ordering::Relaxed) {
+        b"1"
+    } else {
+        b"0"
+    };
     crate::syscall::Write(crate::syscall::STDERR, v.as_ptr(), v.len());
 }

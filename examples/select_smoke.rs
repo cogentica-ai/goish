@@ -77,7 +77,10 @@ fn test_pass1_recv_bare() {
         });
     }
     schedule();
-    check(GOT.load(Ordering::Relaxed) == 0xCAFE, b"t1: wrong recv value\n");
+    check(
+        GOT.load(Ordering::Relaxed) == 0xCAFE,
+        b"t1: wrong recv value\n",
+    );
 }
 
 // ─── Test 2: pass-1 send (buffered slot available) ────────────────
@@ -181,7 +184,10 @@ fn test_default_fires() {
         });
     }
     schedule();
-    check(FIRED.load(Ordering::Relaxed) == 9, b"t5: default didn't fire\n");
+    check(
+        FIRED.load(Ordering::Relaxed) == 9,
+        b"t5: default didn't fire\n",
+    );
 }
 
 // ─── Test 6: park then send fires ─────────────────────────────────
@@ -212,8 +218,14 @@ fn test_park_then_send() {
         });
     }
     schedule();
-    check(FIRED.load(Ordering::Relaxed) == 2, b"t6: send arm didn't fire\n");
-    check(SEND_GOT.load(Ordering::Relaxed) == 11, b"t6: recv missed value\n");
+    check(
+        FIRED.load(Ordering::Relaxed) == 2,
+        b"t6: send arm didn't fire\n",
+    );
+    check(
+        SEND_GOT.load(Ordering::Relaxed) == 11,
+        b"t6: recv missed value\n",
+    );
 }
 
 // ─── Test 7: park then recv fires ─────────────────────────────────
@@ -242,8 +254,14 @@ fn test_park_then_recv() {
         go!(move || cr.Send(0xBEEF));
     }
     schedule();
-    check(FIRED.load(Ordering::Relaxed) == 1, b"t7: recv arm didn't fire\n");
-    check(GOT.load(Ordering::Relaxed) == 0xBEEF, b"t7: wrong recv value\n");
+    check(
+        FIRED.load(Ordering::Relaxed) == 1,
+        b"t7: recv arm didn't fire\n",
+    );
+    check(
+        GOT.load(Ordering::Relaxed) == 0xBEEF,
+        b"t7: wrong recv value\n",
+    );
 }
 
 // ─── Test 8: many iterations, mixed counterparts ──────────────────
@@ -300,7 +318,10 @@ fn test_many_iterations() {
     // pulled from `cr` is therefore fixed, regardless of which
     // selectors won the race.
     let expected_recv: i64 = (0..N as i64).filter(|i| i % 2 == 1).map(|i| i + 1000).sum();
-    check(RECV_SUM.load(Ordering::Relaxed) == expected_recv, b"t8: recv sum\n");
+    check(
+        RECV_SUM.load(Ordering::Relaxed) == expected_recv,
+        b"t8: recv sum\n",
+    );
 
     // SEND_SUM is NOT deterministic. With M17b-γ work-stealing the
     // 100 selectors run in parallel across worker Ms; *which* 50
@@ -346,7 +367,10 @@ fn test_paren_chan_recv() {
         });
     }
     schedule();
-    check(GOT.load(Ordering::Relaxed) == 0xF00D, b"t9: paren-chan recv missed\n");
+    check(
+        GOT.load(Ordering::Relaxed) == 0xF00D,
+        b"t9: paren-chan recv missed\n",
+    );
 }
 
 // ─── Test 10: multi-recv on same chan (auto-clone) ────────────────

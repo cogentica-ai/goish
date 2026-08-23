@@ -9,6 +9,4 @@ mod md5;
 mod md5block;
 mod md5block_generic;
 
-pub use md5::{
-    register_md5_impls, BlockSize, Digest, New, NewHash, Size, Sum,
-};
+pub use md5::{register_md5_impls, BlockSize, Digest, New, NewHash, Size, Sum};

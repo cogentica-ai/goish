@@ -114,9 +114,18 @@ fn main() {
 
     schedule();
 
-    check(FEEDER_DONE.load(Ordering::Acquire) == 1, b"multiconsumer: feeder didn't finish\n");
-    check(CONSUMER_DONE.load(Ordering::Acquire) == 1, b"multiconsumer: consumer didn't finish\n");
-    check(WORKERS_REMAINING.load(Ordering::Acquire) == 0, b"multiconsumer: workers leaked\n");
+    check(
+        FEEDER_DONE.load(Ordering::Acquire) == 1,
+        b"multiconsumer: feeder didn't finish\n",
+    );
+    check(
+        CONSUMER_DONE.load(Ordering::Acquire) == 1,
+        b"multiconsumer: consumer didn't finish\n",
+    );
+    check(
+        WORKERS_REMAINING.load(Ordering::Acquire) == 0,
+        b"multiconsumer: workers leaked\n",
+    );
     let expect = EXPECT.load(Ordering::Acquire);
     let got_n = GOT_N.load(Ordering::Acquire);
     let got_s = GOT_SUM.load(Ordering::Acquire);

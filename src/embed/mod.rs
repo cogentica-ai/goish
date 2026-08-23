@@ -35,8 +35,8 @@
 // not-exist / not-a-directory error identities.
 
 use crate::errors::{self, error};
-use crate::gostring::string;
 use crate::goslice::slice;
+use crate::gostring::string;
 use crate::io::fs;
 use crate::types::{byte, int};
 
@@ -115,12 +115,13 @@ impl FS {
         }
         if name == "." {
             // Synthesized root directory.
-            static ROOT: __File = __File { name: "./", data: b"" };
+            static ROOT: __File = __File {
+                name: "./",
+                data: b"",
+            };
             return Some(&ROOT);
         }
-        self.files
-            .iter()
-            .find(|f| f.path() == name)
+        self.files.iter().find(|f| f.path() == name)
     }
 
     // Entries directly under `dir` ("." = root), in stored (sorted)
@@ -164,11 +165,21 @@ impl FS {
         if file.is_dir() || n == "." {
             let files = self.children(if n == "." { "." } else { file.path() });
             return (
-                Arc::new(OpenDir { file, files, offset: AtomicUsize::new(0) }),
+                Arc::new(OpenDir {
+                    file,
+                    files,
+                    offset: AtomicUsize::new(0),
+                }),
                 errors::nil,
             );
         }
-        (Arc::new(OpenFile { file, offset: AtomicUsize::new(0) }), errors::nil)
+        (
+            Arc::new(OpenFile {
+                file,
+                offset: AtomicUsize::new(0),
+            }),
+            errors::nil,
+        )
     }
 
     /// ReadDir reads and returns the entire named directory.
@@ -188,7 +199,10 @@ impl FS {
             return (slice::new(), errors::Wrap(err));
         };
         if !file.is_dir() && n != "." {
-            return (slice::new(), errors::New(read_err_msg(n, "not a directory")));
+            return (
+                slice::new(),
+                errors::New(read_err_msg(n, "not a directory")),
+            );
         }
         let children = self.children(if n == "." { "." } else { file.path() });
         let mut out: Vec<Arc<dyn fs::DirEntry + Send + Sync>> = Vec::with_capacity(children.len());
@@ -321,7 +335,10 @@ impl fs::File for OpenDir {
         (Arc::new(Info { file: self.file }), errors::nil)
     }
     fn Read(&self, _p: &mut slice<byte>) -> (int, error) {
-        (0, errors::New(read_err_msg(self.file.path(), "is a directory")))
+        (
+            0,
+            errors::New(read_err_msg(self.file.path(), "is a directory")),
+        )
     }
     fn Close(&self) -> error {
         errors::nil

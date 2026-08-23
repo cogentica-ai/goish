@@ -222,7 +222,9 @@ impl MCentral {
         for w in &s.alloc_bits {
             w.store(0, Ordering::Relaxed);
         }
-        unsafe { *s.alloc_cache.get() = 0; }
+        unsafe {
+            *s.alloc_cache.get() = 0;
+        }
         s.next = NIL_SPAN;
         s.prev = NIL_SPAN;
 

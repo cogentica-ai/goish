@@ -28,14 +28,14 @@ use crate::string;
 use super::client::{
     drain_to_eof, read_full_into, read_response_head, Body, BodyKind, BufioPassthrough,
 };
-use crate::io::Reader;
-use crate::types::byte;
-use crate::{bufio, errors, io, make};
 use super::header::Header;
 use super::request::Request;
 use super::url::URL;
 use crate::gonilable::nilable;
+use crate::io::Reader;
+use crate::types::byte;
 use crate::types::int;
+use crate::{bufio, errors, io, make};
 
 // go: sdk 1.25.5 net/http/response.go:32-123 Response
 //
@@ -45,7 +45,7 @@ use crate::types::int;
 /// (Go's `io.ReadCloser` shape) — see the `Body` type below.
 #[derive(Clone)]
 pub struct Response {
-    pub Status: string,    // "200 OK"
+    pub Status: string, // "200 OK"
     pub StatusCode: int,
     pub Proto: string,
     pub ProtoMajor: int,
@@ -222,8 +222,7 @@ impl Response {
     /// Reports whether the HTTP protocol used in the response is at
     /// least major.minor.
     pub fn ProtoAtLeast(&self, major: crate::types::int, minor: crate::types::int) -> bool {
-        return self.ProtoMajor > major
-            || self.ProtoMajor == major && self.ProtoMinor >= minor;
+        return self.ProtoMajor > major || self.ProtoMajor == major && self.ProtoMinor >= minor;
     }
 
     // go: sdk 1.25.5 net/http/response.go:245-334 Response.Write

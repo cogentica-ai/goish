@@ -9,8 +9,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::os;
 use goish::{string, syscall};
 
@@ -33,7 +33,10 @@ fn main() {
         if err.IsNil() && e.IsNil() && (fi.Mode() & 0o777) == 0o600 {
             fmt::Println!("[ 1] Chmod 0600                PASS");
         } else {
-            fmt::Println!("[ 1] Chmod 0600                FAIL mode=", fi.Mode().Bits());
+            fmt::Println!(
+                "[ 1] Chmod 0600                FAIL mode=",
+                fi.Mode().Bits()
+            );
             failed += 1;
         }
     }

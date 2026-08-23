@@ -8,9 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::crypto::cipher;
 use goish::crypto::cipher::{Block, Stream};
+use goish::fmt;
 use goish::types::{byte, int};
 use goish::{slice, syscall};
 
@@ -47,15 +47,11 @@ fn main() {
     let mk_block = || ToyBlock {
         key: alloc::vec![0xa5, 0x5a, 0xc3, 0x3c, 0xf0, 0x0f, 0x96, 0x69],
     };
-    let iv: alloc::vec::Vec<byte> =
-        alloc::vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+    let iv: alloc::vec::Vec<byte> = alloc::vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
 
     // 1. CFB encrypt produces non-trivial ciphertext.
     {
-        let mut e = cipher::NewCFBEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut e = cipher::NewCFBEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let plain: alloc::vec::Vec<byte> = (0..16u8).collect();
         let mut ct = slice::__from_vec(alloc::vec![0u8; 16]);
         e.XORKeyStream(&mut ct, slice::__from_vec(plain.clone()));
@@ -69,22 +65,15 @@ fn main() {
 
     // 2. CFB encrypt → decrypt round-trip recovers plaintext.
     {
-        let plain: alloc::vec::Vec<byte> =
-            b"Goish CFB round-trip text.".to_vec();
+        let plain: alloc::vec::Vec<byte> = b"Goish CFB round-trip text.".to_vec();
         let n = plain.len();
 
-        let mut enc = cipher::NewCFBEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut enc = cipher::NewCFBEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut ct = slice::__from_vec(alloc::vec![0u8; n]);
         enc.XORKeyStream(&mut ct, slice::__from_vec(plain.clone()));
         let ct_v = ct.__into_vec();
 
-        let mut dec = cipher::NewCFBDecrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut dec = cipher::NewCFBDecrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut pt2 = slice::__from_vec(alloc::vec![0u8; n]);
         dec.XORKeyStream(&mut pt2, slice::__from_vec(ct_v));
         if pt2.__into_vec() == plain {
@@ -99,18 +88,12 @@ fn main() {
     {
         let plain: alloc::vec::Vec<byte> = (0..40u8).collect();
 
-        let mut s1 = cipher::NewCFBEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut s1 = cipher::NewCFBEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut ct1 = slice::__from_vec(alloc::vec![0u8; 40]);
         s1.XORKeyStream(&mut ct1, slice::__from_vec(plain.clone()));
         let want = ct1.__into_vec();
 
-        let mut s2 = cipher::NewCFBEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut s2 = cipher::NewCFBEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut got: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(40);
         for &n in &[7usize, 13, 20] {
             let off = got.len();
@@ -131,23 +114,16 @@ fn main() {
     //    holds. CFB chains plaintext into the next encryption, so this
     //    exercises the feedback loop across many blocks.
     {
-        let mut plain: alloc::vec::Vec<byte> =
-            alloc::vec::Vec::with_capacity(1024);
+        let mut plain: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(1024);
         for i in 0..1024u32 {
             plain.push((i.wrapping_mul(31) & 0xff) as byte);
         }
-        let mut enc = cipher::NewCFBEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut enc = cipher::NewCFBEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut ct = slice::__from_vec(alloc::vec![0u8; 1024]);
         enc.XORKeyStream(&mut ct, slice::__from_vec(plain.clone()));
         let ct_v = ct.__into_vec();
 
-        let mut dec = cipher::NewCFBDecrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut dec = cipher::NewCFBDecrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut pt2 = slice::__from_vec(alloc::vec![0u8; 1024]);
         dec.XORKeyStream(&mut pt2, slice::__from_vec(ct_v));
         if pt2.__into_vec() == plain {
@@ -163,18 +139,12 @@ fn main() {
         let plain: alloc::vec::Vec<byte> = b"CFB byte-by-byte test.".to_vec();
         let n = plain.len();
 
-        let mut s1 = cipher::NewCFBEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut s1 = cipher::NewCFBEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut ct1 = slice::__from_vec(alloc::vec![0u8; n]);
         s1.XORKeyStream(&mut ct1, slice::__from_vec(plain.clone()));
         let want = ct1.__into_vec();
 
-        let mut s2 = cipher::NewCFBEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut s2 = cipher::NewCFBEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut got: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(n);
         for &b in plain.iter() {
             let mut one = slice::__from_vec(alloc::vec![0u8; 1]);
@@ -192,17 +162,11 @@ fn main() {
     // 6. Same key+iv on two encryptors → identical ciphertext.
     {
         let plain: alloc::vec::Vec<byte> = (0..32u8).collect();
-        let mut s1 = cipher::NewCFBEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut s1 = cipher::NewCFBEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut ct1 = slice::__from_vec(alloc::vec![0u8; 32]);
         s1.XORKeyStream(&mut ct1, slice::__from_vec(plain.clone()));
 
-        let mut s2 = cipher::NewCFBEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut s2 = cipher::NewCFBEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut ct2 = slice::__from_vec(alloc::vec![0u8; 32]);
         s2.XORKeyStream(&mut ct2, slice::__from_vec(plain));
 
@@ -219,20 +183,14 @@ fn main() {
     //    and the *next* block's plaintext (one-byte-of-feedback chain).
     {
         let plain: alloc::vec::Vec<byte> = alloc::vec![0u8; 32];
-        let mut enc = cipher::NewCFBEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut enc = cipher::NewCFBEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut ct = slice::__from_vec(alloc::vec![0u8; 32]);
         enc.XORKeyStream(&mut ct, slice::__from_vec(plain.clone()));
         let mut ct_v = ct.__into_vec();
         // Corrupt byte 0.
         ct_v[0] ^= 0xff;
 
-        let mut dec = cipher::NewCFBDecrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut dec = cipher::NewCFBDecrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut pt2 = slice::__from_vec(alloc::vec![0u8; 32]);
         dec.XORKeyStream(&mut pt2, slice::__from_vec(ct_v));
         let pt2_v = pt2.__into_vec();
@@ -252,18 +210,12 @@ fn main() {
 
     // 8. Empty src is a no-op for both encrypt and decrypt.
     {
-        let mut e = cipher::NewCFBEncrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut e = cipher::NewCFBEncrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut dst1 = slice::__from_vec(alloc::vec![0u8; 8]);
         let before1 = dst1.clone().__into_vec();
         e.XORKeyStream(&mut dst1, slice::__from_vec(alloc::vec![]));
 
-        let mut d = cipher::NewCFBDecrypter(
-            mk_block(),
-            slice::__from_vec(iv.clone()),
-        );
+        let mut d = cipher::NewCFBDecrypter(mk_block(), slice::__from_vec(iv.clone()));
         let mut dst2 = slice::__from_vec(alloc::vec![0u8; 8]);
         let before2 = dst2.clone().__into_vec();
         d.XORKeyStream(&mut dst2, slice::__from_vec(alloc::vec![]));

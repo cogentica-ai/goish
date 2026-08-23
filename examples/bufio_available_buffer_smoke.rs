@@ -10,13 +10,13 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
-use goish::fmt;
 use goish::bufio;
 use goish::bytes;
 use goish::convert::bytes as to_bytes;
+use goish::fmt;
 use goish::goslice::slice;
+use goish::syscall;
 use goish::types::byte;
-use goish::{syscall};
 
 #[goish::main]
 fn main() {

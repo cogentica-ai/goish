@@ -31,9 +31,7 @@
 // pop are O(1) and allocation-free, so the slow path no longer
 // re-enters the allocator under the Sema lock.
 
-use crate::runtime::sched::{
-    chan_park_commit, current_g, gopark, goready, G,
-};
+use crate::runtime::sched::{chan_park_commit, current_g, gopark, goready, G};
 use crate::runtime::spin::{raw_lock, raw_unlock, SpinLock};
 use core::ptr::NonNull;
 
@@ -70,11 +68,15 @@ impl Sema {
     /// `runtime_Semacquire`.
     pub fn acquire(&self) {
         let lock_atom = self.state.lock_atom();
-        unsafe { raw_lock(lock_atom); }
+        unsafe {
+            raw_lock(lock_atom);
+        }
         let s = unsafe { self.state.data_unchecked() };
         if s.credit > 0 {
             s.credit -= 1;
-            unsafe { raw_unlock(lock_atom); }
+            unsafe {
+                raw_unlock(lock_atom);
+            }
             return;
         }
         let g = current_g().expect("Sema::acquire outside any goroutine");
@@ -100,15 +102,21 @@ impl Sema {
     /// credit. Mirrors `runtime_Semrelease`.
     pub fn release(&self) {
         let lock_atom = self.state.lock_atom();
-        unsafe { raw_lock(lock_atom); }
+        unsafe {
+            raw_lock(lock_atom);
+        }
         let s = unsafe { self.state.data_unchecked() };
         let g = unsafe { pop_head(s) };
         if let Some(g) = g {
-            unsafe { raw_unlock(lock_atom); }
+            unsafe {
+                raw_unlock(lock_atom);
+            }
             goready(g);
         } else {
             s.credit += 1;
-            unsafe { raw_unlock(lock_atom); }
+            unsafe {
+                raw_unlock(lock_atom);
+            }
         }
     }
 

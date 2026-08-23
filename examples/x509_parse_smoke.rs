@@ -117,7 +117,10 @@ fn main() {
     // ── the TBS scaffolding ──────────────────────────────────────────
     check(c.Version == 3, "Version=3");
     // goref: SerialNumber=4328719365
-    check(c.SerialNumber.Int64() == 4328719365, "SerialNumber=4328719365");
+    check(
+        c.SerialNumber.Int64() == 4328719365,
+        "SerialNumber=4328719365",
+    );
     check(
         c.SignatureAlgorithm.String().as_bytes() == b"SHA256-RSA",
         "SignatureAlgorithm=SHA256-RSA",
@@ -131,19 +134,30 @@ fn main() {
     // goref: len(Raw)=1252 len(RawTBSCertificate)=972 len(RawSubject)=110
     //        len(RawIssuer)=110 len(RawSPKI)=294 len(Signature)=256
     check(c.Raw.Len() == 1252, "len(Raw)=1252");
-    check(c.RawTBSCertificate.Len() == 972, "len(RawTBSCertificate)=972");
+    check(
+        c.RawTBSCertificate.Len() == 972,
+        "len(RawTBSCertificate)=972",
+    );
     check(c.RawSubject.Len() == 110, "len(RawSubject)=110");
     check(c.RawIssuer.Len() == 110, "len(RawIssuer)=110");
-    check(c.RawSubjectPublicKeyInfo.Len() == 294, "len(RawSubjectPublicKeyInfo)=294");
+    check(
+        c.RawSubjectPublicKeyInfo.Len() == 294,
+        "len(RawSubjectPublicKeyInfo)=294",
+    );
     check(c.Signature.Len() == 256, "len(Signature)=256");
     // goref: RawSubjectHex=306c310b3009060355040613025448...
     check(
-        hexs(&c.RawSubject).as_bytes().starts_with(b"306c310b30090603550406130254483110300e0603550407130742616e676b6f6b"),
+        hexs(&c.RawSubject)
+            .as_bytes()
+            .starts_with(b"306c310b30090603550406130254483110300e0603550407130742616e676b6f6b"),
         "RawSubject DER matches Go byte-for-byte (prefix)",
     );
 
     // ── the RDN walk (parseName + parseASN1String) ───────────────────
-    check(c.Subject.CommonName.as_bytes() == b"goish leaf", "Subject.CommonName");
+    check(
+        c.Subject.CommonName.as_bytes() == b"goish leaf",
+        "Subject.CommonName",
+    );
     check(
         c.Subject.Organization.Len() == 1
             && c.Subject.Organization[0].as_bytes() == b"Goish Test Org",
@@ -162,8 +176,14 @@ fn main() {
         c.Subject.Locality.Len() == 1 && c.Subject.Locality[0].as_bytes() == b"Bangkok",
         "Subject.Locality",
     );
-    check(c.Subject.SerialNumber.as_bytes() == b"SN-7", "Subject.SerialNumber");
-    check(c.Issuer.CommonName.as_bytes() == b"goish leaf", "Issuer.CommonName");
+    check(
+        c.Subject.SerialNumber.as_bytes() == b"SN-7",
+        "Subject.SerialNumber",
+    );
+    check(
+        c.Issuer.CommonName.as_bytes() == b"goish leaf",
+        "Issuer.CommonName",
+    );
 
     // ── validity (cryptobyte's UTCTime reader) ───────────────────────
     // goref: NotBefore=1709294400 NotAfter=1996060455
@@ -197,7 +217,10 @@ fn main() {
             }
         }
     }
-    check(ext_ok, "Extensions: ids, criticality and value lengths in Go's order");
+    check(
+        ext_ok,
+        "Extensions: ids, criticality and value lengths in Go's order",
+    );
     check(
         c.UnhandledCriticalExtensions.Len() == 0,
         "len(UnhandledCriticalExtensions)=0",
@@ -233,8 +256,7 @@ fn main() {
         "DNSNames",
     );
     check(
-        c.EmailAddresses.Len() == 1
-            && c.EmailAddresses[0].as_bytes() == b"port@goish.example",
+        c.EmailAddresses.Len() == 1 && c.EmailAddresses[0].as_bytes() == b"port@goish.example",
         "EmailAddresses",
     );
     check(
@@ -248,8 +270,7 @@ fn main() {
 
     // authorityInfoAccess — goref: one OCSP, one caIssuers
     check(
-        c.OCSPServer.Len() == 1
-            && c.OCSPServer[0].as_bytes() == b"http://ocsp.goish.example",
+        c.OCSPServer.Len() == 1 && c.OCSPServer[0].as_bytes() == b"http://ocsp.goish.example",
         "OCSPServer",
     );
     check(
@@ -267,13 +288,11 @@ fn main() {
 
     // nameConstraints — goref: permitted DNS + IP 10.0.0.0/8, excluded DNS
     check(
-        c.PermittedDNSDomains.Len() == 1
-            && c.PermittedDNSDomains[0].as_bytes() == b"goish.example",
+        c.PermittedDNSDomains.Len() == 1 && c.PermittedDNSDomains[0].as_bytes() == b"goish.example",
         "PermittedDNSDomains",
     );
     check(
-        c.ExcludedDNSDomains.Len() == 1
-            && c.ExcludedDNSDomains[0].as_bytes() == b"bad.example",
+        c.ExcludedDNSDomains.Len() == 1 && c.ExcludedDNSDomains[0].as_bytes() == b"bad.example",
         "ExcludedDNSDomains",
     );
     check(
@@ -300,7 +319,9 @@ fn main() {
     check(pk.E == 65537, "PublicKey.E=65537");
     check(pk.N.BitLen() == 2048, "PublicKey.N.BitLen=2048");
     check(
-        hexs(&pk.N.Bytes()).as_bytes().starts_with(b"c4137cd932080b89"),
+        hexs(&pk.N.Bytes())
+            .as_bytes()
+            .starts_with(b"c4137cd932080b89"),
         "PublicKey.N.Bytes[0:8]=c4137cd932080b89",
     );
 
@@ -334,7 +355,11 @@ fn main() {
     if failed == 0 {
         fmt::Printf!("x509_parse_smoke OK %d/%d\n", ran as i64, ran as i64);
     } else {
-        fmt::Printf!("x509_parse_smoke FAILED %d of %d\n", failed as i64, ran as i64);
+        fmt::Printf!(
+            "x509_parse_smoke FAILED %d of %d\n",
+            failed as i64,
+            ran as i64
+        );
         goish::syscall::Exit(1);
     }
 }

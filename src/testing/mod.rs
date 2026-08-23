@@ -46,25 +46,28 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 
+mod allocs;
 pub mod benchmark;
-pub mod fstest;
 pub mod example;
-pub mod internal;
-pub mod quick;
-pub mod run_example;
+pub mod fstest;
 pub mod fuzz;
-pub mod slogtest;
+pub mod internal;
 pub mod iotest;
 pub mod r#match;
-mod allocs;
 mod newcover;
+pub mod quick;
+pub mod run_example;
+pub mod slogtest;
 mod testing;
 pub use allocs::AllocsPerRun;
 pub use newcover::Coverage;
 pub use testing::{
-    callerName, chattyFlag, chattyPrinter, fmtDuration, marker, newChattyPrinter, parseCpuList,
-    pcToName, prefix, testBinary, CoverMode, Init, Short, Testing, Verbose,
-    indenter, newTestState, outputWriter, runningList, listTests, shouldFailFast, toOutputDir, testState, testStateCounts, __run_skip_patterns, __shim_destination, __shim_err_main, __shim_call_site, __shim_cleanup_handle, __shim_mark_done, __shim_output_buf, CleanupHandle, __shim_ran_done, __shim_match_string_only, __DepsProbe,
+    __DepsProbe, __run_skip_patterns, __shim_call_site, __shim_cleanup_handle, __shim_destination,
+    __shim_err_main, __shim_mark_done, __shim_match_string_only, __shim_output_buf,
+    __shim_ran_done, callerName, chattyFlag, chattyPrinter, fmtDuration, indenter, listTests,
+    marker, newChattyPrinter, newTestState, outputWriter, parseCpuList, pcToName, prefix,
+    runningList, shouldFailFast, testBinary, testState, testStateCounts, toOutputDir,
+    CleanupHandle, CoverMode, Init, Short, Testing, Verbose,
 };
 
 extern crate alloc;
@@ -363,7 +366,6 @@ pub(crate) fn indent_for(depth: usize) -> string {
 /// any of the assertion / logging methods.
 pub type TestFn = fn(&mut T);
 
-
 /// `testing.Main(tests)` — run the given list of (name, fn) pairs
 /// in registration order, print PASS/FAIL/SKIP per test, and
 /// return an exit code (0 if all passed, 1 if any failed).
@@ -412,8 +414,6 @@ pub fn Main(tests: &[(&'static str, TestFn)]) -> int {
     }
     return 1;
 }
-
-
 
 // `string::as_bytes()` is `pub(crate)` and the `testing` module is
 // inside the goish crate, so we can call it directly without an

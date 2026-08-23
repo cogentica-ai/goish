@@ -45,8 +45,8 @@ extern crate alloc;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use crate::errors;
 use crate::error;
+use crate::errors;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
@@ -184,12 +184,18 @@ pub struct Cmd {
     pub Dir: string,
     /// Optional stdin source. If set, a pipe is created and a goroutine
     /// copies from this reader to the child's stdin.
-    pub Stdin: Option<Arc<crate::sync::Mutex<core::cell::UnsafeCell<alloc::boxed::Box<dyn io::Reader + Send>>>>>,
+    pub Stdin: Option<
+        Arc<crate::sync::Mutex<core::cell::UnsafeCell<alloc::boxed::Box<dyn io::Reader + Send>>>>,
+    >,
     /// Where to copy the child's stdout. None ≡ inherit (v2: discard
     /// captured bytes).
-    pub Stdout: Option<Arc<crate::sync::Mutex<core::cell::UnsafeCell<alloc::boxed::Box<dyn io::Writer + Send>>>>>,
+    pub Stdout: Option<
+        Arc<crate::sync::Mutex<core::cell::UnsafeCell<alloc::boxed::Box<dyn io::Writer + Send>>>>,
+    >,
     /// Where to copy the child's stderr. None ≡ inherit (v2: discard).
-    pub Stderr: Option<Arc<crate::sync::Mutex<core::cell::UnsafeCell<alloc::boxed::Box<dyn io::Writer + Send>>>>>,
+    pub Stderr: Option<
+        Arc<crate::sync::Mutex<core::cell::UnsafeCell<alloc::boxed::Box<dyn io::Writer + Send>>>>,
+    >,
     /// PID of the running child; set by Start(), cleared by Wait().
     /// -1 means "not started" or "already waited".
     pid: i32,
@@ -214,12 +220,12 @@ impl Cmd {
     /// dance the field expects.
     pub fn SetStdout<W: io::Writer + Send + 'static>(&mut self, w: W) {
         self.Stdout = Some(Arc::new(crate::sync::Mutex::new(
-            core::cell::UnsafeCell::new(alloc::boxed::Box::new(w))
+            core::cell::UnsafeCell::new(alloc::boxed::Box::new(w)),
         )));
     }
     pub fn SetStderr<W: io::Writer + Send + 'static>(&mut self, w: W) {
         self.Stderr = Some(Arc::new(crate::sync::Mutex::new(
-            core::cell::UnsafeCell::new(alloc::boxed::Box::new(w))
+            core::cell::UnsafeCell::new(alloc::boxed::Box::new(w)),
         )));
     }
 
@@ -230,7 +236,7 @@ impl Cmd {
     /// Mirrors Go's `cmd.Stdin = reader` assignment.
     pub fn SetStdin<R: io::Reader + Send + 'static>(&mut self, r: R) {
         self.Stdin = Some(Arc::new(crate::sync::Mutex::new(
-            core::cell::UnsafeCell::new(alloc::boxed::Box::new(r))
+            core::cell::UnsafeCell::new(alloc::boxed::Box::new(r)),
         )));
     }
 
@@ -245,18 +251,24 @@ impl Cmd {
     /// Mirrors Go's `(*Cmd).StdinPipe() (io.WriteCloser, error)`.
     pub fn StdinPipe(&mut self) -> (FdWriter, error) {
         if self.stdin_pipe_read_fd >= 0 {
-            return (FdWriter::from_raw(-1),
-                    errors::New("os/exec: StdinPipe already called"));
+            return (
+                FdWriter::from_raw(-1),
+                errors::New("os/exec: StdinPipe already called"),
+            );
         }
         if self.pid >= 0 {
-            return (FdWriter::from_raw(-1),
-                    errors::New("os/exec: StdinPipe called after Start"));
+            return (
+                FdWriter::from_raw(-1),
+                errors::New("os/exec: StdinPipe called after Start"),
+            );
         }
         let mut pipe_fds = [-1i32; 2];
         let r = syscall::Pipe2(&mut pipe_fds, syscall::O_CLOEXEC);
         if r < 0 {
-            return (FdWriter::from_raw(-1),
-                    errors::New("os/exec: StdinPipe pipe2 failed"));
+            return (
+                FdWriter::from_raw(-1),
+                errors::New("os/exec: StdinPipe pipe2 failed"),
+            );
         }
         // pipe_fds[0] = read end (child will inherit via dup3)
         // pipe_fds[1] = write end (returned to caller)
@@ -276,18 +288,24 @@ impl Cmd {
     /// Mirrors Go's `(*Cmd).StdoutPipe() (io.ReadCloser, error)`.
     pub fn StdoutPipe(&mut self) -> (FdReader, error) {
         if self.stdout_pipe_write_fd >= 0 || self.Stdout.is_some() {
-            return (FdReader::from_raw(-1),
-                    errors::New("os/exec: Stdout already set"));
+            return (
+                FdReader::from_raw(-1),
+                errors::New("os/exec: Stdout already set"),
+            );
         }
         if self.pid >= 0 {
-            return (FdReader::from_raw(-1),
-                    errors::New("os/exec: StdoutPipe called after Start"));
+            return (
+                FdReader::from_raw(-1),
+                errors::New("os/exec: StdoutPipe called after Start"),
+            );
         }
         let mut pipe_fds = [-1i32; 2];
         let r = syscall::Pipe2(&mut pipe_fds, syscall::O_CLOEXEC);
         if r < 0 {
-            return (FdReader::from_raw(-1),
-                    errors::New("os/exec: StdoutPipe pipe2 failed"));
+            return (
+                FdReader::from_raw(-1),
+                errors::New("os/exec: StdoutPipe pipe2 failed"),
+            );
         }
         // pipe_fds[0] = read end (returned to caller)
         // pipe_fds[1] = write end (child's fd 1 via dup3 in Start)
@@ -302,18 +320,24 @@ impl Cmd {
     /// Mirrors Go's `(*Cmd).StderrPipe() (io.ReadCloser, error)`.
     pub fn StderrPipe(&mut self) -> (FdReader, error) {
         if self.stderr_pipe_write_fd >= 0 || self.Stderr.is_some() {
-            return (FdReader::from_raw(-1),
-                    errors::New("os/exec: Stderr already set"));
+            return (
+                FdReader::from_raw(-1),
+                errors::New("os/exec: Stderr already set"),
+            );
         }
         if self.pid >= 0 {
-            return (FdReader::from_raw(-1),
-                    errors::New("os/exec: StderrPipe called after Start"));
+            return (
+                FdReader::from_raw(-1),
+                errors::New("os/exec: StderrPipe called after Start"),
+            );
         }
         let mut pipe_fds = [-1i32; 2];
         let r = syscall::Pipe2(&mut pipe_fds, syscall::O_CLOEXEC);
         if r < 0 {
-            return (FdReader::from_raw(-1),
-                    errors::New("os/exec: StderrPipe pipe2 failed"));
+            return (
+                FdReader::from_raw(-1),
+                errors::New("os/exec: StderrPipe pipe2 failed"),
+            );
         }
         self.stderr_pipe_write_fd = pipe_fds[1];
         (FdReader::from_raw(pipe_fds[0]), crate::nilval::nil.into())
@@ -331,7 +355,11 @@ pub fn Command<S: Into<string>>(name: S, args: slice<string>) -> Cmd {
         name.clone()
     } else {
         let (p, err) = LookPath(name.clone());
-        if err == crate::nilval::nil { p } else { name.clone() }
+        if err == crate::nilval::nil {
+            p
+        } else {
+            name.clone()
+        }
     };
     let mut full = crate::make!([]string, 0, crate::len(&args) + 1);
     full = crate::append!(full, name);
@@ -377,7 +405,9 @@ pub fn LookPath<S: Into<string>>(file: S) -> (string, error) {
     while i < n {
         let dir = dirs[i].clone();
         i += 1;
-        if dir.Len() == 0 { continue; }
+        if dir.Len() == 0 {
+            continue;
+        }
         let candidate = dir + string::from_static("/") + file.clone();
         if file_is_accessible(&candidate) {
             return (candidate, crate::nilval::nil.into());
@@ -391,7 +421,9 @@ fn name_has_slash(s: &string) -> bool {
     let n = s.__len();
     let mut i: int = 0;
     while i < n {
-        if s[i] == b'/' { return true; }
+        if s[i] == b'/' {
+            return true;
+        }
         i += 1;
     }
     false
@@ -403,7 +435,9 @@ fn file_is_accessible(path: &string) -> bool {
     // wired in goish::syscall yet. For v1 a regular-file existence
     // check is enough: $PATH lookups by definition target executables.
     let mut buf: Vec<u8> = Vec::with_capacity(path.Len() as usize + 1);
-    for &b in path.as_bytes() { buf.push(b); }
+    for &b in path.as_bytes() {
+        buf.push(b);
+    }
     buf.push(0);
     let mut st: syscall::Stat_t = Default::default();
     let r = unsafe {
@@ -442,7 +476,9 @@ impl Cmd {
         let mut argv_bufs: Vec<Vec<u8>> = Vec::with_capacity(crate::len(&self.Args) as usize);
         for_each_arg(&self.Args, |s| {
             let mut b = Vec::with_capacity(s.Len() as usize + 1);
-            for &x in s.as_bytes() { b.push(x); }
+            for &x in s.as_bytes() {
+                b.push(x);
+            }
             b.push(0);
             argv_bufs.push(b);
         });
@@ -451,7 +487,9 @@ impl Cmd {
 
         // ── Path NUL-buffer ─────────────────────────────────────────
         let mut path_buf = Vec::with_capacity(self.Path.Len() as usize + 1);
-        for &x in self.Path.as_bytes() { path_buf.push(x); }
+        for &x in self.Path.as_bytes() {
+            path_buf.push(x);
+        }
         path_buf.push(0);
 
         // ── Dir NUL-buffer ──────────────────────────────────────────
@@ -461,7 +499,9 @@ impl Cmd {
         let mut dir_buf: Vec<u8> = Vec::new();
         if self.Dir.Len() > 0 {
             dir_buf.reserve(self.Dir.Len() as usize + 1);
-            for &x in self.Dir.as_bytes() { dir_buf.push(x); }
+            for &x in self.Dir.as_bytes() {
+                dir_buf.push(x);
+            }
             dir_buf.push(0);
         }
 
@@ -474,7 +514,9 @@ impl Cmd {
         let mut envp_bufs: Vec<Vec<u8>> = Vec::with_capacity(crate::len(&env_strings) as usize);
         for_each_arg(&env_strings, |s| {
             let mut b = Vec::with_capacity(s.Len() as usize + 1);
-            for &x in s.as_bytes() { b.push(x); }
+            for &x in s.as_bytes() {
+                b.push(x);
+            }
             b.push(0);
             envp_bufs.push(b);
         });
@@ -489,7 +531,7 @@ impl Cmd {
         let mut in_pipe = [-1i32; 2]; // [read_end, write_end]
         let mut in_write_fd_for_goroutine: i32 = -1; // write end to hand to goroutine
         let want_in_reader = self.Stdin.is_some();
-        let want_in_pipe   = self.stdin_pipe_read_fd >= 0;
+        let want_in_pipe = self.stdin_pipe_read_fd >= 0;
 
         if want_in_reader {
             let r = syscall::Pipe2(&mut in_pipe, syscall::O_CLOEXEC);
@@ -519,7 +561,10 @@ impl Cmd {
         if want_out {
             let r = syscall::Pipe2(&mut out_pipe, syscall::O_CLOEXEC);
             if r < 0 {
-                if want_in_reader { syscall::Close(in_pipe[0]); syscall::Close(in_pipe[1]); }
+                if want_in_reader {
+                    syscall::Close(in_pipe[0]);
+                    syscall::Close(in_pipe[1]);
+                }
                 return errors::New("os/exec: pipe2 failed for stdout");
             }
         } else if want_out_pipe {
@@ -529,8 +574,14 @@ impl Cmd {
         if want_err {
             let r = syscall::Pipe2(&mut err_pipe, syscall::O_CLOEXEC);
             if r < 0 {
-                if want_in_reader { syscall::Close(in_pipe[0]); syscall::Close(in_pipe[1]); }
-                if want_out { syscall::Close(out_pipe[0]); syscall::Close(out_pipe[1]); }
+                if want_in_reader {
+                    syscall::Close(in_pipe[0]);
+                    syscall::Close(in_pipe[1]);
+                }
+                if want_out {
+                    syscall::Close(out_pipe[0]);
+                    syscall::Close(out_pipe[1]);
+                }
                 return errors::New("os/exec: pipe2 failed for stderr");
             }
         } else if want_err_pipe {
@@ -540,13 +591,28 @@ impl Cmd {
         // ── Fork ─────────────────────────────────────────────────────
         let pid = syscall::Fork();
         if pid < 0 {
-            if want_in_reader { syscall::Close(in_pipe[0]); syscall::Close(in_pipe[1]); }
-            if want_out { syscall::Close(out_pipe[0]); syscall::Close(out_pipe[1]); }
-            if want_err { syscall::Close(err_pipe[0]); syscall::Close(err_pipe[1]); }
+            if want_in_reader {
+                syscall::Close(in_pipe[0]);
+                syscall::Close(in_pipe[1]);
+            }
+            if want_out {
+                syscall::Close(out_pipe[0]);
+                syscall::Close(out_pipe[1]);
+            }
+            if want_err {
+                syscall::Close(err_pipe[0]);
+                syscall::Close(err_pipe[1]);
+            }
             // For the StdoutPipe/StderrPipe cases we own only the write end; the
             // caller holds the read end and will see EOF once it is closed.
-            if want_out_pipe { syscall::Close(out_pipe[1]); self.stdout_pipe_write_fd = -1; }
-            if want_err_pipe { syscall::Close(err_pipe[1]); self.stderr_pipe_write_fd = -1; }
+            if want_out_pipe {
+                syscall::Close(out_pipe[1]);
+                self.stdout_pipe_write_fd = -1;
+            }
+            if want_err_pipe {
+                syscall::Close(err_pipe[1]);
+                self.stderr_pipe_write_fd = -1;
+            }
             return errors::New("os/exec: fork failed");
         }
 
@@ -570,14 +636,22 @@ impl Cmd {
 
             // Wire stdout (fd 1). Covers both SetStdout (capture) and StdoutPipe.
             if want_out || want_out_pipe {
-                if out_pipe[0] >= 0 { syscall::Close(out_pipe[0]); }
-                if syscall::Dup3(out_pipe[1], 1, 0) < 0 { child_die(127); }
+                if out_pipe[0] >= 0 {
+                    syscall::Close(out_pipe[0]);
+                }
+                if syscall::Dup3(out_pipe[1], 1, 0) < 0 {
+                    child_die(127);
+                }
                 syscall::Close(out_pipe[1]);
             }
             // Wire stderr (fd 2). Covers both SetStderr (capture) and StderrPipe.
             if want_err || want_err_pipe {
-                if err_pipe[0] >= 0 { syscall::Close(err_pipe[0]); }
-                if syscall::Dup3(err_pipe[1], 2, 0) < 0 { child_die(127); }
+                if err_pipe[0] >= 0 {
+                    syscall::Close(err_pipe[0]);
+                }
+                if syscall::Dup3(err_pipe[1], 2, 0) < 0 {
+                    child_die(127);
+                }
                 syscall::Close(err_pipe[1]);
             }
 
@@ -590,11 +664,7 @@ impl Cmd {
                 child_die(127);
             }
 
-            let _ = syscall::Execve(
-                path_buf.as_ptr(),
-                argv_ptrs.as_ptr(),
-                envp_ptrs.as_ptr(),
-            );
+            let _ = syscall::Execve(path_buf.as_ptr(), argv_ptrs.as_ptr(), envp_ptrs.as_ptr());
             child_die(127);
         }
 
@@ -611,13 +681,23 @@ impl Cmd {
         }
 
         // Close write ends of stdout/stderr (they belong to the child).
-        if want_out { syscall::Close(out_pipe[1]); }
-        if want_err { syscall::Close(err_pipe[1]); }
+        if want_out {
+            syscall::Close(out_pipe[1]);
+        }
+        if want_err {
+            syscall::Close(err_pipe[1]);
+        }
         // StdoutPipe/StderrPipe: the write end now lives in the child; close the
         // parent's copy so the caller's reader sees EOF when the child exits.
         // The caller keeps and closes the read end itself.
-        if want_out_pipe { syscall::Close(out_pipe[1]); self.stdout_pipe_write_fd = -1; }
-        if want_err_pipe { syscall::Close(err_pipe[1]); self.stderr_pipe_write_fd = -1; }
+        if want_out_pipe {
+            syscall::Close(out_pipe[1]);
+            self.stdout_pipe_write_fd = -1;
+        }
+        if want_err_pipe {
+            syscall::Close(err_pipe[1]);
+            self.stderr_pipe_write_fd = -1;
+        }
 
         // ── Feed stdin from reader via goroutine ─────────────────────
         // If Stdin was set, spawn a goroutine that copies from the reader
@@ -737,8 +817,12 @@ fn for_each_arg<F: FnMut(&string)>(args: &slice<string>, mut f: F) {
 
 #[inline]
 fn child_die(code: i32) -> ! {
-    unsafe { syscall::syscall1(syscall::SYS_EXIT, code as usize); }
-    loop { core::hint::spin_loop(); }
+    unsafe {
+        syscall::syscall1(syscall::SYS_EXIT, code as usize);
+    }
+    loop {
+        core::hint::spin_loop();
+    }
 }
 
 /// Decode the raw `wait4(2)` status word into a goish `error`.
@@ -759,17 +843,20 @@ fn decode_wait_status(status: i32) -> error {
 /// Loop terminates on EOF (read returns 0) or any read error.
 fn drain_into(
     fd: i32,
-    writer: Arc<crate::sync::Mutex<core::cell::UnsafeCell<alloc::boxed::Box<dyn io::Writer + Send>>>>,
+    writer: Arc<
+        crate::sync::Mutex<core::cell::UnsafeCell<alloc::boxed::Box<dyn io::Writer + Send>>>,
+    >,
 ) {
     let mut buf = [0u8; 4096];
     loop {
         let n = syscall::Read(fd, buf.as_mut_ptr(), buf.len());
-        if n <= 0 { break; }
+        if n <= 0 {
+            break;
+        }
         let bytes_slice: slice<byte> = slice::__from_vec(buf[..n as usize].to_vec());
         let g = writer.Lock();
         // SAFETY: the Mutex guard serialises access to the inner Box.
-        let w: &mut alloc::boxed::Box<dyn io::Writer + Send> =
-            unsafe { &mut *g.get() };
+        let w: &mut alloc::boxed::Box<dyn io::Writer + Send> = unsafe { &mut *g.get() };
         let _ = w.Write(bytes_slice);
         drop(g);
     }
@@ -781,8 +868,7 @@ fn drain_into(
 /// Idempotent; called from `goish::init()`.
 pub fn register_exec_impls() {
     use crate::io::{
-        __goish_register_Closer_impl, __goish_register_Reader_impl,
-        __goish_register_Writer_impl,
+        __goish_register_Closer_impl, __goish_register_Reader_impl, __goish_register_Writer_impl,
     };
     __goish_register_Reader_impl::<FdReader>();
     __goish_register_Closer_impl::<FdReader>();

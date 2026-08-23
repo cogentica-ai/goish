@@ -127,7 +127,10 @@ fn main() {
         Headers: goish::gomap::map::<goish::string, goish::string>::new(),
         Bytes: bytes(&[1, 2, 3]),
     };
-    check(!IsEncryptedPEMBlock(&plain), "IsEncryptedPEMBlock(plain)=false");
+    check(
+        !IsEncryptedPEMBlock(&plain),
+        "IsEncryptedPEMBlock(plain)=false",
+    );
     let (_, e) = DecryptPEMBlock(&plain, pw.clone());
     check(
         e.Error().as_bytes() == b"x509: no DEK-Info header in block",
@@ -163,7 +166,11 @@ fn main() {
     if failed == 0 {
         fmt::Printf!("x509_pem_decrypt_smoke OK %d/%d\n", ran as i64, ran as i64);
     } else {
-        fmt::Printf!("x509_pem_decrypt_smoke FAILED %d of %d\n", failed as i64, ran as i64);
+        fmt::Printf!(
+            "x509_pem_decrypt_smoke FAILED %d of %d\n",
+            failed as i64,
+            ran as i64
+        );
         goish::syscall::Exit(1);
     }
 }

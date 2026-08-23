@@ -20,7 +20,7 @@ extern crate goish;
 use alloc::sync::Arc;
 use goish::gostring::string;
 use goish::io::fs::{self, DirEntry, FileInfo};
-use goish::testing::fstest::{fsTester, MapFile, MapFS};
+use goish::testing::fstest::{fsTester, MapFS, MapFile};
 use goish::types::int;
 use goish::{errors, fmt, slice, syscall};
 
@@ -110,7 +110,10 @@ fn main() {
         if t.Errors().Len() == 0 {
             fmt::Println!("[ 1] MapFS paths agree         PASS");
         } else {
-            fmt::Println!("[ 1] MapFS paths agree         FAIL ", t.Errors()[0].Error());
+            fmt::Println!(
+                "[ 1] MapFS paths agree         FAIL ",
+                t.Errors()[0].Error()
+            );
             failed += 1;
         }
     }
@@ -131,7 +134,10 @@ fn main() {
         if errs.Len() == 1 && msg == "ok" {
             fmt::Println!("[ 2] missing path: one error   PASS");
         } else {
-            fmt::Println!("[ 2] missing path: one error   FAIL got ", errs.Len() as i64);
+            fmt::Println!(
+                "[ 2] missing path: one error   FAIL got ",
+                errs.Len() as i64
+            );
             failed += 1;
         }
     }

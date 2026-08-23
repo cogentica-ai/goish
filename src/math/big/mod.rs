@@ -89,7 +89,10 @@ pub struct Rat {
 impl Rat {
     /// `var z big.Rat` — fresh zero-valued Rat (0/1).
     pub fn new() -> Self {
-        Rat { num: Int::default(), den: NewInt(1) }
+        Rat {
+            num: Int::default(),
+            den: NewInt(1),
+        }
     }
 
     /// `(*Rat).SetFrac(a, b)` — set z = a/b, reduced to lowest terms.
@@ -427,10 +430,7 @@ impl Rat {
                 None => return (self, false),
             };
             // Denominator may not be signed.
-            if den_part.is_empty()
-                || den_part[0] == b'+'
-                || den_part[0] == b'-'
-            {
+            if den_part.is_empty() || den_part[0] == b'+' || den_part[0] == b'-' {
                 return (self, false);
             }
             let den = match scan_int(den_part, 0) {
@@ -572,10 +572,7 @@ impl Rat {
 
     /// `(*Rat).UnmarshalText(text)` — parse `text` into x. Returns a
     /// non-nil error if `text` is not a valid rational.
-    pub fn UnmarshalText(
-        &mut self,
-        text: crate::slice<crate::types::byte>,
-    ) -> crate::error {
+    pub fn UnmarshalText(&mut self, text: crate::slice<crate::types::byte>) -> crate::error {
         let s = crate::string::from_bytes(&text);
         let (_, ok) = self.SetString(s.clone());
         if ok {
@@ -658,7 +655,9 @@ impl Rat {
 }
 
 impl AsRef<Rat> for Rat {
-    fn as_ref(&self) -> &Rat { self }
+    fn as_ref(&self) -> &Rat {
+        self
+    }
 }
 
 impl AsRef<Rat> for crate::nilable<Rat> {
@@ -686,8 +685,14 @@ pub fn parse_decimal_into_rat(s: &str, out: &mut Rat) -> bool {
     }
     let mut i = 0;
     let neg = match bytes[0] {
-        b'+' => { i += 1; false }
-        b'-' => { i += 1; true }
+        b'+' => {
+            i += 1;
+            false
+        }
+        b'-' => {
+            i += 1;
+            true
+        }
         _ => false,
     };
     let mut digits: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
@@ -800,12 +805,21 @@ pub fn NewRat(a: i64, b: i64) -> Rat {
 impl Int {
     /// `var z big.Int` — fresh zero-valued Int.
     pub fn new() -> Self {
-        Int { neg: false, abs: Vec::new() }
+        Int {
+            neg: false,
+            abs: Vec::new(),
+        }
     }
 
     /// `(*Int).Sign()` — -1, 0, or +1.
     pub fn Sign(&self) -> int {
-        if self.abs.is_empty() { 0 } else if self.neg { -1 } else { 1 }
+        if self.abs.is_empty() {
+            0
+        } else if self.neg {
+            -1
+        } else {
+            1
+        }
     }
 
     /// `(*Int).SetInt64(x)` — assign and return self (Go: `z *Int`).
@@ -830,7 +844,11 @@ impl Int {
     /// `(*Int).Int64()` — low 64 bits as a signed value (Go bit-truncates).
     pub fn Int64(&self) -> i64 {
         let mag = limbs_to_u64(&self.abs);
-        if self.neg { -(mag as i64) } else { mag as i64 }
+        if self.neg {
+            -(mag as i64)
+        } else {
+            mag as i64
+        }
     }
 
     /// `(*Int).Cmp(y)` — -1 / 0 / 1.
@@ -839,9 +857,21 @@ impl Int {
             (a, b) if a < b => -1,
             (a, b) if a > b => 1,
             _ => match abs_cmp(&self.abs, &y.abs) {
-                Ordering::Less => if self.neg { 1 } else { -1 },
+                Ordering::Less => {
+                    if self.neg {
+                        1
+                    } else {
+                        -1
+                    }
+                }
                 Ordering::Equal => 0,
-                Ordering::Greater => if self.neg { -1 } else { 1 },
+                Ordering::Greater => {
+                    if self.neg {
+                        -1
+                    } else {
+                        1
+                    }
+                }
             },
         }
     }
@@ -985,12 +1015,20 @@ impl Int {
 
         // Run extended Euclidean on the magnitudes |a|, |b|.
         // Maintain: r0 = ca*|a| + cb*|b|, r1 = da*|a| + db*|b|.
-        let mut r0 = Int { neg: false, abs: a0.abs.clone() };
-        let mut r1 = Int { neg: false, abs: b0.abs.clone() };
-        let mut ca = Int::new(); ca.SetInt64(1); // 1
-        let mut cb = Int::new();                 // 0
-        let mut da = Int::new();                 // 0
-        let mut db = Int::new(); db.SetInt64(1); // 1
+        let mut r0 = Int {
+            neg: false,
+            abs: a0.abs.clone(),
+        };
+        let mut r1 = Int {
+            neg: false,
+            abs: b0.abs.clone(),
+        };
+        let mut ca = Int::new();
+        ca.SetInt64(1); // 1
+        let mut cb = Int::new(); // 0
+        let mut da = Int::new(); // 0
+        let mut db = Int::new();
+        db.SetInt64(1); // 1
 
         while r1.Sign() != 0 {
             // q = r0 div r1, rem = r0 mod r1 (both magnitudes positive).
@@ -1120,7 +1158,10 @@ impl Int {
         // T-division: q sign = x.neg != y.neg; r sign follows x.
         let q_neg_t = !q_abs.is_empty() && (x.neg != y.neg);
         let r_neg_t = !r_abs.is_empty() && x.neg;
-        let mut q = Int { neg: q_neg_t, abs: q_abs };
+        let mut q = Int {
+            neg: q_neg_t,
+            abs: q_abs,
+        };
         // Euclidean correction: if r_t < 0, adjust q by ±1.
         if r_neg_t {
             if y.neg {
@@ -1152,7 +1193,10 @@ impl Int {
         // T-division then Euclidean correction.
         let q_neg_t = !q_abs.is_empty() && (x.neg != y.neg);
         let r_neg_t = !r_abs.is_empty() && x.neg;
-        let mut q = Int { neg: q_neg_t, abs: q_abs };
+        let mut q = Int {
+            neg: q_neg_t,
+            abs: q_abs,
+        };
         let mut rem_abs = r_abs;
         let mut rem_neg = r_neg_t;
         if rem_neg {
@@ -1270,7 +1314,10 @@ impl Int {
         let x = x.as_ref();
         let y = y.as_ref();
         // -y: flip the sign of y's magnitude (zero stays non-negative).
-        let neg_y = Int { neg: !y.neg && !y.abs.is_empty(), abs: y.abs.clone() };
+        let neg_y = Int {
+            neg: !y.neg && !y.abs.is_empty(),
+            abs: y.abs.clone(),
+        };
         let res = add_signed(x, &neg_y);
         self.neg = res.neg;
         self.abs = res.abs;
@@ -1807,8 +1854,7 @@ impl Int {
             return false;
         }
         // Small primes that fit in i64 — settles 2, 3, even-ness early.
-        const SMALL_PRIMES: [u32; 12] =
-            [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37];
+        const SMALL_PRIMES: [u32; 12] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37];
 
         let mut one = Int::new();
         one.SetInt64(1);
@@ -1820,8 +1866,8 @@ impl Int {
             let mut pi = Int::new();
             pi.SetInt64(p as i64);
             match self.Cmp(&pi) {
-                0 => return true,         // x is itself a small prime
-                -1 => return false,       // 2 < x < p, already trial-divided
+                0 => return true,   // x is itself a small prime
+                -1 => return false, // 2 < x < p, already trial-divided
                 _ => {}
             }
             let mut r = Int::new();
@@ -2059,10 +2105,7 @@ impl Int {
 
     /// `(*Int).UnmarshalText(text)` — parse decimal `text` into `self`.
     /// Returns a non-nil error if `text` is not a valid integer.
-    pub fn UnmarshalText(
-        &mut self,
-        text: crate::slice<crate::types::byte>,
-    ) -> crate::error {
+    pub fn UnmarshalText(&mut self, text: crate::slice<crate::types::byte>) -> crate::error {
         match scan_int(&text, 0) {
             Some((neg, abs)) => {
                 self.neg = neg && !abs.is_empty();
@@ -2091,11 +2134,7 @@ impl Int {
     /// exact bit count, and reject any candidate `>= n` so the
     /// distribution stays uniform. As this uses `math/rand`, it must
     /// not be used for security-sensitive work.
-    pub fn Rand(
-        &mut self,
-        rnd: &mut crate::math::rand::Rand,
-        n: &Int,
-    ) -> &mut Self {
+    pub fn Rand(&mut self, rnd: &mut crate::math::rand::Rand, n: &Int) -> &mut Self {
         // n <= 0 → result is 0. (n.neg or empty magnitude.)
         if n.neg || n.abs.is_empty() {
             self.neg = false;
@@ -2110,10 +2149,7 @@ impl Int {
     /// `(*Int).UnmarshalJSON(text)` — parse JSON `text` into `self`. A
     /// JSON `null` leaves the receiver unchanged (matching Go);
     /// otherwise behaves like `UnmarshalText`.
-    pub fn UnmarshalJSON(
-        &mut self,
-        text: crate::slice<crate::types::byte>,
-    ) -> crate::error {
+    pub fn UnmarshalJSON(&mut self, text: crate::slice<crate::types::byte>) -> crate::error {
         if &*text == b"null" {
             return crate::errors::nil;
         }
@@ -2262,8 +2298,7 @@ mod fmt_pad {
         // field pad from width.
         let mut left: int = 0;
         let mut right: int = 0;
-        let length = sign.len() as int + prefix.len() as int + zeros
-            + digits.len() as int;
+        let length = sign.len() as int + prefix.len() as int + zeros + digits.len() as int;
         let (width, width_set) = s.Width();
         if width_set && length < width {
             let d = width - length;
@@ -2342,13 +2377,14 @@ impl crate::fmt::Formatter for Int {
         // determine base from the verb.
         let base: int = match c {
             x if x == 'b' as crate::types::rune => 2,
-            x if x == 'o' as crate::types::rune
-                || x == 'O' as crate::types::rune => 8,
+            x if x == 'o' as crate::types::rune || x == 'O' as crate::types::rune => 8,
             x if x == 'd' as crate::types::rune
                 || x == 's' as crate::types::rune
-                || x == 'v' as crate::types::rune => 10,
-            x if x == 'x' as crate::types::rune
-                || x == 'X' as crate::types::rune => 16,
+                || x == 'v' as crate::types::rune =>
+            {
+                10
+            }
+            x if x == 'x' as crate::types::rune || x == 'X' as crate::types::rune => 16,
             _ => {
                 // unknown verb.
                 let dec = self.Text(10);
@@ -2423,8 +2459,7 @@ impl crate::fmt::Formatter for Float {
             // 'F' is handled like 'f'.
             x if x == 'F' as crate::types::rune => b'f',
             // 'v' is handled like 'g'.
-            x if x == 'v' as crate::types::rune
-                || x == 'g' as crate::types::rune => {
+            x if x == 'v' as crate::types::rune || x == 'g' as crate::types::rune => {
                 if !has_prec {
                     prec = -1;
                 }
@@ -2499,14 +2534,17 @@ mod scan_tok {
         matches!(ch as u32 as u8 as char,
             '+' | '-' | '_' | '.'
             | '0'..='9' | 'a'..='z' | 'A'..='Z')
-            && ch >= 0 && ch < 128
+            && ch >= 0
+            && ch < 128
     }
 
     /// Predicate for `Rat.Scan` — Go's `ratTok`: `"+-/0123456789.eE"`.
     pub fn rat_tok(ch: rune) -> bool {
-        matches!(ch as u32 as u8 as char,
-            '+' | '-' | '/' | '.' | 'e' | 'E' | '0'..='9')
-            && ch >= 0 && ch < 128
+        matches!(
+            ch as u32 as u8 as char,
+            '+' | '-' | '/' | '.' | 'e' | 'E' | '0'..='9'
+        ) && ch >= 0
+            && ch < 128
     }
 
     /// Predicate for `Float.Scan`: a float literal's character set —
@@ -2516,7 +2554,8 @@ mod scan_tok {
         matches!(ch as u32 as u8 as char,
             '+' | '-' | '_' | '.'
             | '0'..='9' | 'a'..='z' | 'A'..='Z')
-            && ch >= 0 && ch < 128
+            && ch >= 0
+            && ch < 128
     }
 
     /// Pull a numeric token out of `state` using `pred`, skipping any
@@ -2546,10 +2585,8 @@ impl crate::fmt::Scanner for Int {
             x if x == 'b' as crate::types::rune => 2,
             x if x == 'o' as crate::types::rune => 8,
             x if x == 'd' as crate::types::rune => 10,
-            x if x == 'x' as crate::types::rune
-                || x == 'X' as crate::types::rune => 16,
-            x if x == 's' as crate::types::rune
-                || x == 'v' as crate::types::rune => 0,
+            x if x == 'x' as crate::types::rune || x == 'X' as crate::types::rune => 16,
+            x if x == 's' as crate::types::rune || x == 'v' as crate::types::rune => 0,
             _ => return crate::errors::New("Int.Scan: invalid verb"),
         };
         let (tok, err) = scan_tok::token(state, scan_tok::int_tok);
@@ -3042,9 +3079,7 @@ fn divmod_limbs(num: &[u32], den: &[u32]) -> (Vec<u32>, Vec<u32>) {
         let mut qhat = num_hi / dn_hi;
         let mut rhat = num_hi % dn_hi;
         // Refine: q̂ is at most 2 too large.
-        while qhat >= base
-            || qhat * dn_lo > (rhat << 32) | (un[j + n - 2] as u64)
-        {
+        while qhat >= base || qhat * dn_lo > (rhat << 32) | (un[j + n - 2] as u64) {
             qhat -= 1;
             rhat += dn_hi;
             if rhat >= base {
@@ -3168,8 +3203,7 @@ pub const MAX_BASE: int = 62;
 const MAX_BASE_SMALL: int = 36;
 
 /// Go's `digits` table: digit value → ASCII character.
-const DIGIT_CHARS: &[u8; 62] =
-    b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const DIGIT_CHARS: &[u8; 62] = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 /// Map an ASCII character to its digit value, or `None` if it is not a
 /// digit. For `base <= 36`, `A`-`Z` alias `a`-`z`; above that they
@@ -3188,7 +3222,11 @@ fn digit_value(ch: u8, base: int) -> Option<u32> {
     } else {
         return None;
     };
-    if (d as int) < base { Some(d) } else { None }
+    if (d as int) < base {
+        Some(d)
+    } else {
+        None
+    }
 }
 
 /// In-place multiply-and-add: `limbs = limbs*mul + add` (base 2^32).
@@ -3220,8 +3258,14 @@ fn scan_int(bytes: &[u8], base: int) -> Option<(bool, Vec<u32>)> {
     let mut i = 0usize;
     // Optional sign.
     let neg = match bytes.first().copied() {
-        Some(b'-') => { i += 1; true }
-        Some(b'+') => { i += 1; false }
+        Some(b'-') => {
+            i += 1;
+            true
+        }
+        Some(b'+') => {
+            i += 1;
+            false
+        }
         _ => false,
     };
 
@@ -3241,10 +3285,25 @@ fn scan_int(bytes: &[u8], base: int) -> Option<(bool, Vec<u32>)> {
             prev = b'0';
             i += 1;
             match bytes.get(i).copied() {
-                Some(b'b') | Some(b'B') => { b = 2; prefix = b'b'; i += 1; }
-                Some(b'o') | Some(b'O') => { b = 8; prefix = b'o'; i += 1; }
-                Some(b'x') | Some(b'X') => { b = 16; prefix = b'x'; i += 1; }
-                _ => { b = 8; prefix = b'0'; }
+                Some(b'b') | Some(b'B') => {
+                    b = 2;
+                    prefix = b'b';
+                    i += 1;
+                }
+                Some(b'o') | Some(b'O') => {
+                    b = 8;
+                    prefix = b'o';
+                    i += 1;
+                }
+                Some(b'x') | Some(b'X') => {
+                    b = 16;
+                    prefix = b'x';
+                    i += 1;
+                }
+                _ => {
+                    b = 8;
+                    prefix = b'0';
+                }
             }
         }
     }
@@ -3427,7 +3486,11 @@ fn nat_random(rnd: &mut crate::math::rand::Rand, limit: &[u32], n: int) -> Vec<u
     let len = limit.len();
     let bit_len_of_msw = {
         let r = (n as u32) % 32;
-        if r == 0 { 32 } else { r }
+        if r == 0 {
+            32
+        } else {
+            r
+        }
     };
     // mask for the most-significant word.
     let mask: u32 = if bit_len_of_msw == 32 {
@@ -3518,12 +3581,12 @@ fn f64_from_u64(x: u64) -> f64 {
 /// exponent is well within the normal f64 range for any practical Int.
 fn round_limbs_to_f64(abs: &[u32]) -> (f64, Accuracy) {
     let n = bit_len(abs); // > 53 here
-    // Take the top 54 bits: 53 to keep plus 1 guard bit.
+                          // Take the top 54 bits: 53 to keep plus 1 guard bit.
     let drop = n - 54; // number of low bits discarded (>= 0)
     let top54 = extract_high_bits(abs, drop, 54);
     let guard = top54 & 1;
     let mut keep = top54 >> 1; // 53 bits
-    // Sticky: any set bit strictly below the guard bit.
+                               // Sticky: any set bit strictly below the guard bit.
     let sticky = !low_bits_all_zero(abs, drop);
     let mut acc = Accuracy::Exact;
     if guard == 1 {
@@ -3735,13 +3798,25 @@ fn xor_limbs(x: &[u32], y: &[u32]) -> Vec<u32> {
 /// Signed addition: a + b respecting signs.
 fn add_signed(a: &Int, b: &Int) -> Int {
     if a.neg == b.neg {
-        Int { neg: a.neg && !(a.abs.is_empty() && b.abs.is_empty()), abs: add_limbs(&a.abs, &b.abs) }
+        Int {
+            neg: a.neg && !(a.abs.is_empty() && b.abs.is_empty()),
+            abs: add_limbs(&a.abs, &b.abs),
+        }
     } else {
         // Different signs: subtract smaller magnitude from larger.
         match abs_cmp(&a.abs, &b.abs) {
-            Ordering::Equal => Int { neg: false, abs: Vec::new() },
-            Ordering::Greater => Int { neg: a.neg, abs: sub_limbs(&a.abs, &b.abs) },
-            Ordering::Less => Int { neg: b.neg, abs: sub_limbs(&b.abs, &a.abs) },
+            Ordering::Equal => Int {
+                neg: false,
+                abs: Vec::new(),
+            },
+            Ordering::Greater => Int {
+                neg: a.neg,
+                abs: sub_limbs(&a.abs, &b.abs),
+            },
+            Ordering::Less => Int {
+                neg: b.neg,
+                abs: sub_limbs(&b.abs, &a.abs),
+            },
         }
     }
 }
@@ -4070,9 +4145,7 @@ impl Float {
             let inc = match self.mode {
                 RoundingMode::ToNegativeInf => self.neg,
                 RoundingMode::ToZero => false,
-                RoundingMode::ToNearestEven => {
-                    rbit != 0 && (sbit != 0 || self.mant[0] & lsb != 0)
-                }
+                RoundingMode::ToNearestEven => rbit != 0 && (sbit != 0 || self.mant[0] & lsb != 0),
                 RoundingMode::ToNearestAway => rbit != 0,
                 RoundingMode::AwayFromZero => true,
                 RoundingMode::ToPositiveInf => !self.neg,
@@ -4553,11 +4626,7 @@ impl Float {
                 if self.exp <= 63 {
                     // i = trunc(x) fits into an i64 (excluding MinInt64).
                     let mag = msb64(&self.mant) >> (64 - self.exp as u32);
-                    let i = if self.neg {
-                        -(mag as i64)
-                    } else {
-                        mag as i64
-                    };
+                    let i = if self.neg { -(mag as i64) } else { mag as i64 };
                     if self.MinPrec() <= self.exp as crate::types::uint {
                         return (i, Accuracy::Exact);
                     }
@@ -4793,7 +4862,8 @@ impl Float {
                     (Int::default(), acc)
                 } else {
                     // exp > 0: 1 <= |x| < +Inf
-                    let all_bits = (self.mant.len() as crate::types::uint) * (FW as crate::types::uint);
+                    let all_bits =
+                        (self.mant.len() as crate::types::uint) * (FW as crate::types::uint);
                     let exp = self.exp as crate::types::uint;
                     if self.MinPrec() <= exp {
                         acc = Accuracy::Exact;
@@ -4844,7 +4914,10 @@ impl Float {
                     r.den = NewInt(1);
                 } else if exp < all_bits {
                     // value = mant / 2^(all_bits-exp), then reduce.
-                    r.num = Int { neg: self.neg, abs: trim(self.mant.clone()) };
+                    r.num = Int {
+                        neg: self.neg,
+                        abs: trim(self.mant.clone()),
+                    };
                     r.den = Int {
                         neg: false,
                         abs: lsh_limbs(&[1u32], (all_bits - exp) as u64),
@@ -4852,7 +4925,10 @@ impl Float {
                     r.norm();
                 } else {
                     // exp == all_bits → integer mant / 1
-                    r.num = Int { neg: self.neg, abs: trim(self.mant.clone()) };
+                    r.num = Int {
+                        neg: self.neg,
+                        abs: trim(self.mant.clone()),
+                    };
                     r.den = NewInt(1);
                 }
                 (r, Accuracy::Exact)
@@ -4977,9 +5053,7 @@ impl Float {
         let d = xadj.len() as i64 - y.mant.len() as i64;
         let (q, r) = divmod_limbs(&xadj, &y.mant);
         self.mant = q;
-        let e = i64::from(x.exp)
-            - i64::from(y.exp)
-            - (d - self.mant.len() as i64) * i64::from(FW);
+        let e = i64::from(x.exp) - i64::from(y.exp) - (d - self.mant.len() as i64) * i64::from(FW);
 
         // A non-zero remainder means the (uncomputed) fractional part
         // would have a non-zero sticky bit.
@@ -5317,11 +5391,19 @@ impl Float {
         // Top 64 bits of the msb-normalized mantissa.
         let n = self.mant.len();
         let hi = u64::from(self.mant[n - 1]);
-        let lo = if n >= 2 { u64::from(self.mant[n - 2]) } else { 0 };
+        let lo = if n >= 2 {
+            u64::from(self.mant[n - 2])
+        } else {
+            0
+        };
         let m = (hi << 32) | lo; // msb set (normalized)
-        // m represents the fraction m / 2^64, so value = m · 2^(exp-64).
+                                 // m represents the fraction m / 2^64, so value = m · 2^(exp-64).
         let v = ldexp_f64(m, i64::from(self.exp) - 64);
-        if self.neg { -v } else { v }
+        if self.neg {
+            -v
+        } else {
+            v
+        }
     }
 
     // ─── string I/O — formatting ─────────────────────────────────────
@@ -5683,10 +5765,7 @@ impl Float {
     /// `(*Float).SetString(s)` — set `self` to the value of `s`
     /// (base 0). Returns `(self, ok)`; on failure `ok` is false and
     /// `self`'s value is undefined.
-    pub fn SetString<S: Into<crate::string>>(
-        &mut self,
-        s: S,
-    ) -> (&mut Float, bool) {
+    pub fn SetString<S: Into<crate::string>>(&mut self, s: S) -> (&mut Float, bool) {
         let (_, _, err) = self.Parse(s, 0);
         let ok = err == crate::errors::nil;
         (self, ok)
@@ -5716,10 +5795,7 @@ impl Float {
     /// `(*Float).UnmarshalText(text)` — parse `text` (base 0) into
     /// `self`, rounded per `self`'s precision and mode (precision 0
     /// becomes 64). Returns a non-nil error if `text` is invalid.
-    pub fn UnmarshalText(
-        &mut self,
-        text: crate::slice<crate::types::byte>,
-    ) -> crate::error {
+    pub fn UnmarshalText(&mut self, text: crate::slice<crate::types::byte>) -> crate::error {
         let s = crate::string::from_bytes(&text);
         let (_, _, err) = self.Parse(s.clone(), 0);
         if err != crate::errors::nil {
@@ -5770,8 +5846,7 @@ impl Float {
             let n_limbs = words * 2;
             let take = core::cmp::min(self.mant.len(), n_limbs);
             let mut framed = alloc::vec![0u32; n_limbs];
-            framed[n_limbs - take..]
-                .copy_from_slice(&self.mant[self.mant.len() - take..]);
+            framed[n_limbs - take..].copy_from_slice(&self.mant[self.mant.len() - take..]);
             out.extend_from_slice(&limbs_to_be_bytes_fixed(&framed));
         }
 
@@ -6086,8 +6161,7 @@ fn round_shortest(d: &mut Decimal, x: &Float) {
         let u = upper.at(i as int);
 
         let okdown = l != m || (inclusive && i + 1 == lower.mant.len());
-        let okup = m != u
-            && (inclusive || m + 1 < u || i + 1 < upper.mant.len());
+        let okup = m != u && (inclusive || m + 1 < u || i + 1 < upper.mant.len());
 
         if okdown && okup {
             d.round(i as int + 1);
@@ -6348,9 +6422,7 @@ fn float_scan(bytes: &[u8], base: int) -> Result<FloatScan, crate::string> {
                     continue;
                 }
                 if c.is_ascii_digit() {
-                    exp = exp
-                        .saturating_mul(10)
-                        .saturating_add(i64::from(c - b'0'));
+                    exp = exp.saturating_mul(10).saturating_add(i64::from(c - b'0'));
                     ecount += 1;
                     eprev_digit = true;
                     eprev_us = false;
@@ -6363,9 +6435,7 @@ fn float_scan(bytes: &[u8], base: int) -> Result<FloatScan, crate::string> {
                 return Err(crate::string::from("exponent has no digits"));
             }
             if eprev_us || invalid_sep {
-                return Err(crate::string::from(
-                    "'_' must separate successive digits",
-                ));
+                return Err(crate::string::from("'_' must separate successive digits"));
             }
             if eneg {
                 exp = -exp;
@@ -6573,7 +6643,11 @@ fn sqrt_f64(x: f64) -> f64 {
     // Seed: halve the biased exponent (the classic "fast" estimate).
     let bits = x.to_bits();
     let seed = f64::from_bits(((bits >> 1) + (0x1ff8_0000_0000_0000u64)) & !(1u64 << 63));
-    let mut g = if seed > 0.0 && seed.is_finite() { seed } else { x };
+    let mut g = if seed > 0.0 && seed.is_finite() {
+        seed
+    } else {
+        x
+    };
     // Newton: g ← ½(g + x/g).
     for _ in 0..8 {
         g = 0.5 * (g + x / g);
@@ -6734,7 +6808,9 @@ impl MaybeMutRat for crate::nilable<Rat> {
 // via the `AsRef<Int>` trait. Each wrapper exposes the inner Int.
 
 impl AsRef<Int> for Int {
-    fn as_ref(&self) -> &Int { self }
+    fn as_ref(&self) -> &Int {
+        self
+    }
 }
 
 impl AsRef<Int> for crate::nilable<Int> {
@@ -6774,11 +6850,15 @@ pub trait AsMutInt {
 }
 
 impl AsMutInt for Int {
-    fn as_mut_int(&mut self) -> &mut Int { self }
+    fn as_mut_int(&mut self) -> &mut Int {
+        self
+    }
 }
 
 impl AsMutInt for &mut Int {
-    fn as_mut_int(&mut self) -> &mut Int { *self }
+    fn as_mut_int(&mut self) -> &mut Int {
+        *self
+    }
 }
 
 impl<'a> AsMutInt for crate::gonilable_ref::nilable_refmut<'a, Int> {
@@ -6805,28 +6885,42 @@ pub trait MaybeMutInt {
 }
 
 impl MaybeMutInt for Int {
-    fn maybe_mut_int(&mut self) -> Option<&mut Int> { Some(self) }
+    fn maybe_mut_int(&mut self) -> Option<&mut Int> {
+        Some(self)
+    }
 }
 
 impl MaybeMutInt for &mut Int {
-    fn maybe_mut_int(&mut self) -> Option<&mut Int> { Some(*self) }
+    fn maybe_mut_int(&mut self) -> Option<&mut Int> {
+        Some(*self)
+    }
 }
 
 impl MaybeMutInt for crate::nilval::Nil {
-    fn maybe_mut_int(&mut self) -> Option<&mut Int> { None }
+    fn maybe_mut_int(&mut self) -> Option<&mut Int> {
+        None
+    }
 }
 
 impl<'a> MaybeMutInt for crate::gonilable_ref::nilable_refmut<'a, Int> {
     #[track_caller]
     fn maybe_mut_int(&mut self) -> Option<&mut Int> {
-        if self.IsNil() { None } else { Some(self.MustMutRef()) }
+        if self.IsNil() {
+            None
+        } else {
+            Some(self.MustMutRef())
+        }
     }
 }
 
 impl MaybeMutInt for crate::nilable<Int> {
     #[track_caller]
     fn maybe_mut_int(&mut self) -> Option<&mut Int> {
-        if self.IsNil() { None } else { Some(self.MustMut()) }
+        if self.IsNil() {
+            None
+        } else {
+            Some(self.MustMut())
+        }
     }
 }
 

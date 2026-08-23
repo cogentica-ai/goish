@@ -12,7 +12,6 @@
 
 extern crate alloc;
 
-
 use crate::crypto::internal::fips140::hmac as fipshmac;
 use crate::goslice::slice;
 use crate::hash::IntoHashFunc;
@@ -27,7 +26,6 @@ pub fn New<H: IntoHashFunc>(h: H, key: slice<byte>) -> HMAC {
     // Go: return hmac.New(h, key)
     return fipshmac::New(h, key);
 }
-
 
 // ─── Equal — constant-time MAC compare (Go: hmac.go:60) ───────────────
 

@@ -18,8 +18,8 @@ extern crate goish;
 
 use goish::crypto::tls;
 use goish::fmt;
-use goish::gostring::string;
 use goish::goslice::slice;
+use goish::gostring::string;
 use goish::types::{byte, int};
 
 // Matching RSA-2048 cert+key (CN=localhost), the same embedded pair
@@ -178,12 +178,36 @@ fn eq(what: &'static str, got: string, want: &'static str) {
 #[goish::main]
 fn main() {
     // ─── SignatureScheme.String ───────────────────────────────────────
-    eq("PKCS1WithSHA256", tls::PKCS1WithSHA256.String(), "PKCS1WithSHA256");
-    eq("PKCS1WithSHA384", tls::PKCS1WithSHA384.String(), "PKCS1WithSHA384");
-    eq("PKCS1WithSHA512", tls::PKCS1WithSHA512.String(), "PKCS1WithSHA512");
-    eq("PSSWithSHA256", tls::PSSWithSHA256.String(), "PSSWithSHA256");
-    eq("PSSWithSHA384", tls::PSSWithSHA384.String(), "PSSWithSHA384");
-    eq("PSSWithSHA512", tls::PSSWithSHA512.String(), "PSSWithSHA512");
+    eq(
+        "PKCS1WithSHA256",
+        tls::PKCS1WithSHA256.String(),
+        "PKCS1WithSHA256",
+    );
+    eq(
+        "PKCS1WithSHA384",
+        tls::PKCS1WithSHA384.String(),
+        "PKCS1WithSHA384",
+    );
+    eq(
+        "PKCS1WithSHA512",
+        tls::PKCS1WithSHA512.String(),
+        "PKCS1WithSHA512",
+    );
+    eq(
+        "PSSWithSHA256",
+        tls::PSSWithSHA256.String(),
+        "PSSWithSHA256",
+    );
+    eq(
+        "PSSWithSHA384",
+        tls::PSSWithSHA384.String(),
+        "PSSWithSHA384",
+    );
+    eq(
+        "PSSWithSHA512",
+        tls::PSSWithSHA512.String(),
+        "PSSWithSHA512",
+    );
     eq(
         "ECDSAWithP256AndSHA256",
         tls::ECDSAWithP256AndSHA256.String(),
@@ -200,8 +224,16 @@ fn main() {
         "ECDSAWithP521AndSHA512",
     );
     eq("Ed25519", tls::Ed25519.String(), "Ed25519");
-    eq("PKCS1WithSHA1", tls::PKCS1WithSHA1.String(), "PKCS1WithSHA1");
-    eq("ECDSAWithSHA1", tls::ECDSAWithSHA1.String(), "ECDSAWithSHA1");
+    eq(
+        "PKCS1WithSHA1",
+        tls::PKCS1WithSHA1.String(),
+        "PKCS1WithSHA1",
+    );
+    eq(
+        "ECDSAWithSHA1",
+        tls::ECDSAWithSHA1.String(),
+        "ECDSAWithSHA1",
+    );
     // Go prints the fallback in DECIMAL: 0x9999 == 39321.
     eq(
         "SignatureScheme fallback",
@@ -214,12 +246,24 @@ fn main() {
     eq("CurveP384", tls::CurveP384.String(), "CurveP384");
     eq("CurveP521", tls::CurveP521.String(), "CurveP521");
     eq("X25519", tls::X25519.String(), "X25519");
-    eq("X25519MLKEM768", tls::X25519MLKEM768.String(), "X25519MLKEM768");
-    eq("CurveID fallback", tls::CurveID(999).String(), "CurveID(999)");
+    eq(
+        "X25519MLKEM768",
+        tls::X25519MLKEM768.String(),
+        "X25519MLKEM768",
+    );
+    eq(
+        "CurveID fallback",
+        tls::CurveID(999).String(),
+        "CurveID(999)",
+    );
 
     // ─── ClientAuthType.String ────────────────────────────────────────
     eq("NoClientCert", tls::NoClientCert.String(), "NoClientCert");
-    eq("RequestClientCert", tls::RequestClientCert.String(), "RequestClientCert");
+    eq(
+        "RequestClientCert",
+        tls::RequestClientCert.String(),
+        "RequestClientCert",
+    );
     eq(
         "RequireAnyClientCert",
         tls::RequireAnyClientCert.String(),
@@ -290,14 +334,26 @@ fn main() {
     if sa.Len() == 12 {
         // PSS-SHA256 first, SHA-1 last — the security-relevant ends.
         check_n("sigalg[0] PSSWithSHA256", goish::int(sa[0].0), 0x0804);
-        check_n("sigalg[1] ECDSAWithP256AndSHA256", goish::int(sa[1].0), 0x0403);
+        check_n(
+            "sigalg[1] ECDSAWithP256AndSHA256",
+            goish::int(sa[1].0),
+            0x0403,
+        );
         check_n("sigalg[2] Ed25519", goish::int(sa[2].0), 0x0807);
         check_n("sigalg[10] PKCS1WithSHA1", goish::int(sa[10].0), 0x0201);
         check_n("sigalg[11] ECDSAWithSHA1", goish::int(sa[11].0), 0x0203);
     }
 
-    check_n("supportedCipherSuites(true) len", tls::defaults_supportedCipherSuites(true).Len(), 22);
-    check_n("supportedCipherSuites(false) len", tls::defaults_supportedCipherSuites(false).Len(), 22);
+    check_n(
+        "supportedCipherSuites(true) len",
+        tls::defaults_supportedCipherSuites(true).Len(),
+        22,
+    );
+    check_n(
+        "supportedCipherSuites(false) len",
+        tls::defaults_supportedCipherSuites(false).Len(),
+        22,
+    );
     let sc = tls::defaults_supportedCipherSuites(true);
     if sc.Len() == 22 {
         check_n("aesGCM-preferred head", goish::int(sc[0]), 0xc02b);
@@ -325,7 +381,11 @@ fn main() {
         }
         check("defaultCipherSuites(true) exact order", ok);
     }
-    check_n("defaultCipherSuites(false) len", tls::defaults_defaultCipherSuites(false).Len(), 10);
+    check_n(
+        "defaultCipherSuites(false) len",
+        tls::defaults_defaultCipherSuites(false).Len(),
+        10,
+    );
 
     // ─── prf.go — the TLS 1.0/1.2 PRF. Every vector from goref.sh.
     //     A PRF that is subtly wrong still produces plausible-looking
@@ -421,9 +481,9 @@ fn main() {
     );
     eq(
         "certificateStatusMsg",
-        hexOf(tls::msg_certificateStatus_marshal(slice::__from_vec(alloc::vec![
-            0x30u8, 0x03, 0x0a, 0x01, 0x00
-        ]))),
+        hexOf(tls::msg_certificateStatus_marshal(slice::__from_vec(
+            alloc::vec![0x30u8, 0x03, 0x0a, 0x01, 0x00],
+        ))),
         "160000090100000530030a0100",
     );
 
@@ -495,7 +555,11 @@ fn main() {
     );
 
     let (b, ok, got) = tls::msg_simple_roundtrip(2, body);
-    eq("newSessionTicketMsg", hexOf(b.clone()), "0400000a000000000004deadbeef");
+    eq(
+        "newSessionTicketMsg",
+        hexOf(b.clone()),
+        "0400000a000000000004deadbeef",
+    );
     check("newSessionTicket round-trip", ok);
     eq("newSessionTicket body", hexOf(got), "deadbeef");
     let raw: &[byte] = &b;
@@ -506,7 +570,11 @@ fn main() {
 
     // ─── cipher_suites.go's public surface. All from goref.sh.
     check_n("CipherSuites length", tls::CipherSuites().Len(), 13);
-    check_n("InsecureCipherSuites length", tls::InsecureCipherSuites().Len(), 12);
+    check_n(
+        "InsecureCipherSuites length",
+        tls::InsecureCipherSuites().Len(),
+        12,
+    );
     eq(
         "CipherSuiteName TLS1.3 AES128",
         tls::CipherSuiteName(0x1301),
@@ -534,19 +602,34 @@ fn main() {
         "TLS_RSA_WITH_3DES_EDE_CBC_SHA",
     );
     // Unknown IDs fall back to uppercase hex, not decimal.
-    eq("CipherSuiteName fallback", tls::CipherSuiteName(0x9999), "0x9999");
+    eq(
+        "CipherSuiteName fallback",
+        tls::CipherSuiteName(0x9999),
+        "0x9999",
+    );
 
     let first = tls::CipherSuites();
     if first.Len() == 13 {
         check_n("CipherSuites[0].ID", goish::int(first[0].ID), 0x1301);
         check("CipherSuites[0] is not insecure", !first[0].Insecure);
-        check_n("CipherSuites[0] is TLS1.3-only", first[0].SupportedVersions.Len(), 1);
+        check_n(
+            "CipherSuites[0] is TLS1.3-only",
+            first[0].SupportedVersions.Len(),
+            1,
+        );
     }
     let ins = tls::InsecureCipherSuites();
     if ins.Len() == 12 {
         check_n("InsecureCipherSuites[0].ID", goish::int(ins[0].ID), 0x0005);
-        check("InsecureCipherSuites[0] is flagged insecure", ins[0].Insecure);
-        check_n("InsecureCipherSuites[0] spans TLS1.0-1.2", ins[0].SupportedVersions.Len(), 3);
+        check(
+            "InsecureCipherSuites[0] is flagged insecure",
+            ins[0].Insecure,
+        );
+        check_n(
+            "InsecureCipherSuites[0] spans TLS1.0-1.2",
+            ins[0].SupportedVersions.Len(),
+            3,
+        );
     }
 
     // ─── key_agreement.go — the ServerKeyExchange transcript digest.
@@ -618,7 +701,11 @@ fn main() {
         slice::__from_vec(alloc::vec![0xccu8]),
     ]);
     let (b, ok, n) = tls::msg_certificate_roundtrip(certs);
-    eq("certificateMsg", hexOf(b.clone()), "0b00000c000009000002aabb000001cc");
+    eq(
+        "certificateMsg",
+        hexOf(b.clone()),
+        "0b00000c000009000002aabb000001cc",
+    );
     check("certificateMsg round-trip", ok);
     check_n("certificateMsg recovered 2 certs", n, 2);
 
@@ -660,7 +747,11 @@ fn main() {
     // ─── tls.go's timeoutError. Both predicates are true in Go —
     //     a timed-out dial is reported as temporary as well.
     let te = tls::timeoutError {};
-    eq("timeoutError.Error", te.Error(), "tls: DialWithDialer timed out");
+    eq(
+        "timeoutError.Error",
+        te.Error(),
+        "tls: DialWithDialer timed out",
+    );
     check("timeoutError.Timeout", te.Timeout());
     check("timeoutError.Temporary", te.Temporary());
 
@@ -700,9 +791,18 @@ fn main() {
     // ─── certificateRequestMsgTLS13 (RFC 8446 §4.3.2). Every extension
     //     is conditional, so the all-default form is a bare header.
     let none = slice::__from_vec(alloc::vec![]);
-    let (b, ok, _, _, _) =
-        tls::msg_crt13_roundtrip(false, false, none.clone(), none.clone(), slice::__from_vec(alloc::vec![]));
-    eq("certificateRequestMsgTLS13 empty", hexOf(b), "0d000003000000");
+    let (b, ok, _, _, _) = tls::msg_crt13_roundtrip(
+        false,
+        false,
+        none.clone(),
+        none.clone(),
+        slice::__from_vec(alloc::vec![]),
+    );
+    eq(
+        "certificateRequestMsgTLS13 empty",
+        hexOf(b),
+        "0d000003000000",
+    );
     check("crt13 empty round-trips", ok);
 
     let (fb, fok, ns, nsc, nca) = tls::msg_crt13_roundtrip(
@@ -757,7 +857,11 @@ fn main() {
         slice::__from_vec(alloc::vec![]),
         slice::__from_vec(alloc::vec![]),
     );
-    eq("certificateRequestMsg TLS1.0", hexOf(b2), "0d00000401010000");
+    eq(
+        "certificateRequestMsg TLS1.0",
+        hexOf(b2),
+        "0d00000401010000",
+    );
     check("crm TLS1.0 round-trips", ok2);
 
     // ─── the unmarshal halves the subset never had.
@@ -767,12 +871,13 @@ fn main() {
     check("finishedMsg round-trips", fok);
     eq("finishedMsg verifyData", hexOf(fv), "112233");
 
-    let (cb, cok, alg) = tls::msg_certVerify_roundtrip(
-        true,
-        0x0804,
-        slice::__from_vec(alloc::vec![0xaau8, 0xbb]),
+    let (cb, cok, alg) =
+        tls::msg_certVerify_roundtrip(true, 0x0804, slice::__from_vec(alloc::vec![0xaau8, 0xbb]));
+    eq(
+        "certificateVerifyMsg",
+        hexOf(cb.clone()),
+        "0f00000608040002aabb",
     );
-    eq("certificateVerifyMsg", hexOf(cb.clone()), "0f00000608040002aabb");
     check("certificateVerifyMsg round-trips", cok);
     check_n("certificateVerifyMsg algorithm", goish::int(alg), 0x0804);
     // Same flag-is-load-bearing property as certificateRequestMsg.
@@ -793,17 +898,16 @@ fn main() {
     check("ee serverNameAck", sniAck);
 
     // A DUPLICATE extension is rejected — unique to this message.
-    let dup = slice::__from_vec(alloc::vec![
-        8u8, 0, 0, 12, 0, 10, 0, 42, 0, 0, 0, 42, 0, 0
-    ]);
+    let dup = slice::__from_vec(alloc::vec![8u8, 0, 0, 12, 0, 10, 0, 42, 0, 0, 0, 42, 0, 0]);
     let (dok, _, _, _) = tls::msg_ee_unmarshal(dup);
     check("ee rejects a duplicate extension", !dok);
 
     // ─── unmarshalCertificate — a TLS 1.3 CertificateEntry list.
     //     Leaf carries an OCSP staple; a second cert follows with no
     //     extensions. Bytes built by Go.
-    let (ok, nchain, ocsp, nscts) =
-        tls::msg_unmarshalCertificate(unhexOf("000017000002aabb000a00050006010000020102000001cc0000"));
+    let (ok, nchain, ocsp, nscts) = tls::msg_unmarshalCertificate(unhexOf(
+        "000017000002aabb000a00050006010000020102000001cc0000",
+    ));
     check("unmarshalCertificate parses Go's entry list", ok);
     check_n("chain has 2 certificates", nchain, 2);
     eq("leaf OCSP staple", hexOf(ocsp), "0102");
@@ -876,9 +980,21 @@ fn main() {
     // ─── QUICEncryptionLevel.String. The fallback prints in DECIMAL
     //     (%v on an int), unlike VersionName's %04X — and negatives are
     //     reachable because the type is a signed int.
-    eq("QUIC level Initial", tls::QUICEncryptionLevelInitial.String(), "Initial");
-    eq("QUIC level Early", tls::QUICEncryptionLevelEarly.String(), "Early");
-    eq("QUIC level Handshake", tls::QUICEncryptionLevelHandshake.String(), "Handshake");
+    eq(
+        "QUIC level Initial",
+        tls::QUICEncryptionLevelInitial.String(),
+        "Initial",
+    );
+    eq(
+        "QUIC level Early",
+        tls::QUICEncryptionLevelEarly.String(),
+        "Early",
+    );
+    eq(
+        "QUIC level Handshake",
+        tls::QUICEncryptionLevelHandshake.String(),
+        "Handshake",
+    );
     eq(
         "QUIC level Application",
         tls::QUICEncryptionLevelApplication.String(),
@@ -911,82 +1027,149 @@ fn main() {
 
     // aeadAESGCM — TLS 1.2, eight explicit nonce bytes per record.
     let (ct12, ns12, oh12, ex12) = tls::cipher_suites_aeadSeal(
-        string::from_static("aesgcm12"), key16.clone(), prefix4.clone(),
-        seq1.clone(), pt.clone(), ad.clone(),
+        string::from_static("aesgcm12"),
+        key16.clone(),
+        prefix4.clone(),
+        seq1.clone(),
+        pt.clone(),
+        ad.clone(),
     );
     check_n("aesgcm12 NonceSize", ns12, 8);
     check_n("aesgcm12 Overhead", oh12, 16);
     check_n("aesgcm12 explicitNonceLen", ex12, 8);
-    eq("aesgcm12 Seal", hexOf(ct12.clone()),
-       "c2933f2b5e6be6bc68b27ec505948f77a9015e821e655298a5");
+    eq(
+        "aesgcm12 Seal",
+        hexOf(ct12.clone()),
+        "c2933f2b5e6be6bc68b27ec505948f77a9015e821e655298a5",
+    );
     let (op12, err12) = tls::cipher_suites_aeadOpen(
-        string::from_static("aesgcm12"), key16.clone(), prefix4.clone(),
-        seq1.clone(), ct12, ad.clone(),
+        string::from_static("aesgcm12"),
+        key16.clone(),
+        prefix4.clone(),
+        seq1.clone(),
+        ct12,
+        ad.clone(),
     );
     check("aesgcm12 Open ok", err12 == goish::errors::nil);
-    eq("aesgcm12 Open plaintext", string::from_bytes(&op12), "hello tls");
+    eq(
+        "aesgcm12 Open plaintext",
+        string::from_bytes(&op12),
+        "hello tls",
+    );
     // A second record under the same key: the prefix is untouched and
     // only the explicit half of the nonce moves.
     let (ct12b, _, _, _) = tls::cipher_suites_aeadSeal(
-        string::from_static("aesgcm12"), key16.clone(), prefix4,
-        seq2, pt.clone(), ad.clone(),
+        string::from_static("aesgcm12"),
+        key16.clone(),
+        prefix4,
+        seq2,
+        pt.clone(),
+        ad.clone(),
     );
-    eq("aesgcm12 Seal seq=2", hexOf(ct12b),
-       "59490d99705e7293656871352e58321e6d2f19aa53777c7840");
+    eq(
+        "aesgcm12 Seal seq=2",
+        hexOf(ct12b),
+        "59490d99705e7293656871352e58321e6d2f19aa53777c7840",
+    );
 
     // aeadAESGCMTLS13 — XOR-masked nonce, nothing explicit on the wire.
     let (ct13, ns13, oh13, ex13) = tls::cipher_suites_aeadSeal(
-        string::from_static("aesgcm13"), key32.clone(), mask12.clone(),
-        seq0.clone(), pt.clone(), ad.clone(),
+        string::from_static("aesgcm13"),
+        key32.clone(),
+        mask12.clone(),
+        seq0.clone(),
+        pt.clone(),
+        ad.clone(),
     );
     check_n("aesgcm13 NonceSize", ns13, 8);
     check_n("aesgcm13 Overhead", oh13, 16);
     check_n("aesgcm13 explicitNonceLen", ex13, 0);
-    eq("aesgcm13 Seal", hexOf(ct13.clone()),
-       "ce4f395c4504c3193d11306ac3cac0aa93ebff6b0594638548");
+    eq(
+        "aesgcm13 Seal",
+        hexOf(ct13.clone()),
+        "ce4f395c4504c3193d11306ac3cac0aa93ebff6b0594638548",
+    );
     let (op13, err13) = tls::cipher_suites_aeadOpen(
-        string::from_static("aesgcm13"), key32.clone(), mask12.clone(),
-        seq0.clone(), ct13, ad.clone(),
+        string::from_static("aesgcm13"),
+        key32.clone(),
+        mask12.clone(),
+        seq0.clone(),
+        ct13,
+        ad.clone(),
     );
     check("aesgcm13 Open ok", err13 == goish::errors::nil);
-    eq("aesgcm13 Open plaintext", string::from_bytes(&op13), "hello tls");
-    let (ct13b, _, _, _) = tls::cipher_suites_aeadSeal(
-        string::from_static("aesgcm13"), key32.clone(), mask12.clone(),
-        seq1.clone(), pt.clone(), ad.clone(),
+    eq(
+        "aesgcm13 Open plaintext",
+        string::from_bytes(&op13),
+        "hello tls",
     );
-    eq("aesgcm13 Seal seq=1", hexOf(ct13b),
-       "8ab61cf658c86aaccfc4b8f95c5111d292099e2d6ff3a20726");
+    let (ct13b, _, _, _) = tls::cipher_suites_aeadSeal(
+        string::from_static("aesgcm13"),
+        key32.clone(),
+        mask12.clone(),
+        seq1.clone(),
+        pt.clone(),
+        ad.clone(),
+    );
+    eq(
+        "aesgcm13 Seal seq=1",
+        hexOf(ct13b),
+        "8ab61cf658c86aaccfc4b8f95c5111d292099e2d6ff3a20726",
+    );
 
     // aeadChaCha20Poly1305 — same xorNonceAEAD wrapper, different AEAD.
     let (ctc, nsc, ohc, exc) = tls::cipher_suites_aeadSeal(
-        string::from_static("chacha"), key32.clone(), mask12.clone(),
-        seq0.clone(), pt.clone(), ad.clone(),
+        string::from_static("chacha"),
+        key32.clone(),
+        mask12.clone(),
+        seq0.clone(),
+        pt.clone(),
+        ad.clone(),
     );
     check_n("chacha NonceSize", nsc, 8);
     check_n("chacha Overhead", ohc, 16);
     check_n("chacha explicitNonceLen", exc, 0);
-    eq("chacha Seal", hexOf(ctc.clone()),
-       "07e9fbacea89d6f6941461e9e1db04b96ed84390b0975cc7ba");
+    eq(
+        "chacha Seal",
+        hexOf(ctc.clone()),
+        "07e9fbacea89d6f6941461e9e1db04b96ed84390b0975cc7ba",
+    );
     let (opc, errc) = tls::cipher_suites_aeadOpen(
-        string::from_static("chacha"), key32.clone(), mask12.clone(),
-        seq0.clone(), ctc, ad.clone(),
+        string::from_static("chacha"),
+        key32.clone(),
+        mask12.clone(),
+        seq0.clone(),
+        ctc,
+        ad.clone(),
     );
     check("chacha Open ok", errc == goish::errors::nil);
-    eq("chacha Open plaintext", string::from_bytes(&opc), "hello tls");
-    let (ctc1, _, _, _) = tls::cipher_suites_aeadSeal(
-        string::from_static("chacha"), key32.clone(), mask12.clone(),
-        seq1.clone(), pt.clone(), ad.clone(),
+    eq(
+        "chacha Open plaintext",
+        string::from_bytes(&opc),
+        "hello tls",
     );
-    eq("chacha Seal seq=1", hexOf(ctc1.clone()),
-       "13951be5fb1928d16c1bdc2004d96e655e67233a268c4902d9");
+    let (ctc1, _, _, _) = tls::cipher_suites_aeadSeal(
+        string::from_static("chacha"),
+        key32.clone(),
+        mask12.clone(),
+        seq1.clone(),
+        pt.clone(),
+        ad.clone(),
+    );
+    eq(
+        "chacha Seal seq=1",
+        hexOf(ctc1.clone()),
+        "13951be5fb1928d16c1bdc2004d96e655e67233a268c4902d9",
+    );
     // Opening a record under the wrong sequence number must fail: this
     // is the check that the nonce mask is actually XORed back out.
-    let (_, errBad) = tls::cipher_suites_aeadOpen(
-        string::from_static("chacha"), key32, mask12,
-        seq0, ctc1, ad,
+    let (_, errBad) =
+        tls::cipher_suites_aeadOpen(string::from_static("chacha"), key32, mask12, seq0, ctc1, ad);
+    eq(
+        "chacha Open wrong seq",
+        errBad.Error(),
+        "chacha20poly1305: message authentication failed",
     );
-    eq("chacha Open wrong seq", errBad.Error(),
-       "chacha20poly1305: message authentication failed");
 
     // macSHA1 / macSHA256 and tls10MAC.
     let mkey = slice::__from_vec(alloc::vec![9u8, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
@@ -994,42 +1177,77 @@ fn main() {
     let hdr = slice::__from_vec(alloc::vec![0x17u8, 0x03, 0x03, 0x00, 0x09]);
     let empty: slice<byte> = slice::new();
     let (mac1, size1, block1) = tls::cipher_suites_tls10MAC(
-        string::from_static("sha1"), mkey.clone(), empty.clone(),
-        seq3.clone(), hdr.clone(), pt.clone(), empty.clone(),
+        string::from_static("sha1"),
+        mkey.clone(),
+        empty.clone(),
+        seq3.clone(),
+        hdr.clone(),
+        pt.clone(),
+        empty.clone(),
     );
     check_n("macSHA1 Size", size1, 20);
     check_n("macSHA1 BlockSize", block1, 64);
-    eq("tls10MAC sha1", hexOf(mac1), "36ce0951d217cbfaaad9a8824538696b80cc028d");
+    eq(
+        "tls10MAC sha1",
+        hexOf(mac1),
+        "36ce0951d217cbfaaad9a8824538696b80cc028d",
+    );
     let (mac2, size2, block2) = tls::cipher_suites_tls10MAC(
-        string::from_static("sha256"), mkey.clone(), empty.clone(),
-        seq3.clone(), hdr.clone(), pt.clone(), empty.clone(),
+        string::from_static("sha256"),
+        mkey.clone(),
+        empty.clone(),
+        seq3.clone(),
+        hdr.clone(),
+        pt.clone(),
+        empty.clone(),
     );
     check_n("macSHA256 Size", size2, 32);
     check_n("macSHA256 BlockSize", block2, 64);
-    eq("tls10MAC sha256", hexOf(mac2),
-       "74e1e7b495dbeffc9687e6119e613228c29b4199bfea1c2f5759f46732684228");
+    eq(
+        "tls10MAC sha256",
+        hexOf(mac2),
+        "74e1e7b495dbeffc9687e6119e613228c29b4199bfea1c2f5759f46732684228",
+    );
     // tls10MAC appends to out, as Go's Sum(out) does.
     let (mac3, _, _) = tls::cipher_suites_tls10MAC(
-        string::from_static("sha1"), mkey.clone(),
+        string::from_static("sha1"),
+        mkey.clone(),
         slice::__from_vec(alloc::vec![0xAAu8, 0xBB]),
-        seq3.clone(), hdr.clone(), pt.clone(), empty.clone(),
+        seq3.clone(),
+        hdr.clone(),
+        pt.clone(),
+        empty.clone(),
     );
-    eq("tls10MAC appends to out", hexOf(mac3),
-       "aabb36ce0951d217cbfaaad9a8824538696b80cc028d");
+    eq(
+        "tls10MAC appends to out",
+        hexOf(mac3),
+        "aabb36ce0951d217cbfaaad9a8824538696b80cc028d",
+    );
     // The Lucky13 extra write must not change the returned MAC.
     let (mac4, _, _) = tls::cipher_suites_tls10MAC(
-        string::from_static("sha1"), mkey, empty,
-        seq3, hdr, pt.clone(),
+        string::from_static("sha1"),
+        mkey,
+        empty,
+        seq3,
+        hdr,
+        pt.clone(),
         slice::__from_vec(alloc::vec![1u8, 2, 3]),
     );
-    eq("tls10MAC extra does not change res", hexOf(mac4),
-       "36ce0951d217cbfaaad9a8824538696b80cc028d");
+    eq(
+        "tls10MAC extra does not change res",
+        hexOf(mac4),
+        "36ce0951d217cbfaaad9a8824538696b80cc028d",
+    );
 
     // cthWrapper — the constant-time SHA-1 that macSHA1 hashes through.
     let (cth, cthSize, cthBlock) = tls::cipher_suites_constantTimeSHA1(pt);
     check_n("cthWrapper Size", cthSize, 20);
     check_n("cthWrapper BlockSize", cthBlock, 64);
-    eq("cthWrapper Sum", hexOf(cth), "af0cf397878763fbce6ceaf416de1bf10da1c527");
+    eq(
+        "cthWrapper Sum",
+        hexOf(cth),
+        "af0cf397878763fbce6ceaf416de1bf10da1c527",
+    );
 
     // cipherSuiteTLS13ByID / mutualCipherSuiteTLS13.
     let (ok1, kl1, h1) = tls::cipher_suites_tls13ByID(tls::TLS_AES_128_GCM_SHA256);
@@ -1074,74 +1292,140 @@ fn main() {
     let ts48 = seqBytes(48, 0x10);
     let tr = slice::__from_vec(b"transcript bytes".to_vec());
 
-    eq("nextTrafficSecret 1301",
-       hexOf(tls::key_schedule_nextTrafficSecret(tls::TLS_AES_128_GCM_SHA256, ts32.clone())),
-       "e4756ada14b821096dcb5fe83781e02f4cc43801e86e5b96060f3640a97a173c");
+    eq(
+        "nextTrafficSecret 1301",
+        hexOf(tls::key_schedule_nextTrafficSecret(
+            tls::TLS_AES_128_GCM_SHA256,
+            ts32.clone(),
+        )),
+        "e4756ada14b821096dcb5fe83781e02f4cc43801e86e5b96060f3640a97a173c",
+    );
     let (k1, iv1) = tls::key_schedule_trafficKey(tls::TLS_AES_128_GCM_SHA256, ts32.clone());
-    eq("trafficKey 1301 key", hexOf(k1), "e1fe01058052434bb45b521dfb4c2e1e");
+    eq(
+        "trafficKey 1301 key",
+        hexOf(k1),
+        "e1fe01058052434bb45b521dfb4c2e1e",
+    );
     eq("trafficKey 1301 iv", hexOf(iv1), "de35160fc967050cc3a670cb");
-    eq("finishedHash 1301",
-       hexOf(tls::key_schedule_finishedHash(tls::TLS_AES_128_GCM_SHA256, ts32.clone(), tr.clone())),
-       "735706744aa50bc380b7c25bb737ffb5d45ac0d14698b7670e0b7ead70f4eb81");
+    eq(
+        "finishedHash 1301",
+        hexOf(tls::key_schedule_finishedHash(
+            tls::TLS_AES_128_GCM_SHA256,
+            ts32.clone(),
+            tr.clone(),
+        )),
+        "735706744aa50bc380b7c25bb737ffb5d45ac0d14698b7670e0b7ead70f4eb81",
+    );
 
     eq("nextTrafficSecret 1302",
        hexOf(tls::key_schedule_nextTrafficSecret(tls::TLS_AES_256_GCM_SHA384, ts48.clone())),
        "01479e4017373e6f64ccfda3059ed620eaa3944d3e4515a2bd07d397fdeaff04323403769a33d4df6e239ec97443d6bc");
     let (k2, iv2) = tls::key_schedule_trafficKey(tls::TLS_AES_256_GCM_SHA384, ts48.clone());
-    eq("trafficKey 1302 key", hexOf(k2),
-       "8c79ea88d236da33f9352d7f563b5de77fc7c51ed2c58308985e021c289f3d1f");
+    eq(
+        "trafficKey 1302 key",
+        hexOf(k2),
+        "8c79ea88d236da33f9352d7f563b5de77fc7c51ed2c58308985e021c289f3d1f",
+    );
     eq("trafficKey 1302 iv", hexOf(iv2), "f805445c73e0d53a5e909fb4");
     eq("finishedHash 1302",
        hexOf(tls::key_schedule_finishedHash(tls::TLS_AES_256_GCM_SHA384, ts48, tr.clone())),
        "3a6962c9090c09df1dc39ce851e24cbb4bb054017e7289a91b854996b3ac857eb82964ae227bfd79c539cca538ee0830");
 
-    eq("nextTrafficSecret 1303",
-       hexOf(tls::key_schedule_nextTrafficSecret(tls::TLS_CHACHA20_POLY1305_SHA256, ts32.clone())),
-       "e4756ada14b821096dcb5fe83781e02f4cc43801e86e5b96060f3640a97a173c");
+    eq(
+        "nextTrafficSecret 1303",
+        hexOf(tls::key_schedule_nextTrafficSecret(
+            tls::TLS_CHACHA20_POLY1305_SHA256,
+            ts32.clone(),
+        )),
+        "e4756ada14b821096dcb5fe83781e02f4cc43801e86e5b96060f3640a97a173c",
+    );
     let (k3, iv3) = tls::key_schedule_trafficKey(tls::TLS_CHACHA20_POLY1305_SHA256, ts32.clone());
-    eq("trafficKey 1303 key", hexOf(k3),
-       "bdcb20ed5464d52006d3bb92af2b0938180b7f98b7106007c57ad1eb8ffdab08");
+    eq(
+        "trafficKey 1303 key",
+        hexOf(k3),
+        "bdcb20ed5464d52006d3bb92af2b0938180b7f98b7106007c57ad1eb8ffdab08",
+    );
     eq("trafficKey 1303 iv", hexOf(iv3), "de35160fc967050cc3a670cb");
-    eq("finishedHash 1303",
-       hexOf(tls::key_schedule_finishedHash(tls::TLS_CHACHA20_POLY1305_SHA256, ts32, tr.clone())),
-       "735706744aa50bc380b7c25bb737ffb5d45ac0d14698b7670e0b7ead70f4eb81");
+    eq(
+        "finishedHash 1303",
+        hexOf(tls::key_schedule_finishedHash(
+            tls::TLS_CHACHA20_POLY1305_SHA256,
+            ts32,
+            tr.clone(),
+        )),
+        "735706744aa50bc380b7c25bb737ffb5d45ac0d14698b7670e0b7ead70f4eb81",
+    );
 
     // exportKeyingMaterial — RFC 5705 over the TLS 1.3 schedule.
     let (ekm, ekmOK) = tls::key_schedule_exportKeyingMaterial(
-        tls::TLS_AES_128_GCM_SHA256, tr.clone(),
+        tls::TLS_AES_128_GCM_SHA256,
+        tr.clone(),
         string::from_static("EXPERIMENTAL label"),
-        slice::__from_vec(alloc::vec![1u8, 2, 3]), 32,
+        slice::__from_vec(alloc::vec![1u8, 2, 3]),
+        32,
     );
     check("exportKeyingMaterial err is nil", ekmOK);
-    eq("exportKeyingMaterial", hexOf(ekm),
-       "5b414550cb62c2d2b236c6f9be6e1528148670c10bca755cc8816c2d3382a391");
-    let (ekm2, _) = tls::key_schedule_exportKeyingMaterial(
-        tls::TLS_AES_128_GCM_SHA256, tr,
-        string::from_static("EXPERIMENTAL label"), slice::new(), 16,
+    eq(
+        "exportKeyingMaterial",
+        hexOf(ekm),
+        "5b414550cb62c2d2b236c6f9be6e1528148670c10bca755cc8816c2d3382a391",
     );
-    eq("exportKeyingMaterial nil context", hexOf(ekm2),
-       "bead27d1376dd883644ea39535f6c396");
+    let (ekm2, _) = tls::key_schedule_exportKeyingMaterial(
+        tls::TLS_AES_128_GCM_SHA256,
+        tr,
+        string::from_static("EXPERIMENTAL label"),
+        slice::new(),
+        16,
+    );
+    eq(
+        "exportKeyingMaterial nil context",
+        hexOf(ekm2),
+        "bead27d1376dd883644ea39535f6c396",
+    );
 
     // curveForCurveID — the hybrid group has no plain ECDH curve.
-    check("curveForCurveID X25519", tls::key_schedule_curveForCurveID(tls::X25519));
-    check("curveForCurveID CurveP256", tls::key_schedule_curveForCurveID(tls::CurveP256));
-    check("curveForCurveID CurveP384", tls::key_schedule_curveForCurveID(tls::CurveP384));
-    check("curveForCurveID CurveP521", tls::key_schedule_curveForCurveID(tls::CurveP521));
-    check("curveForCurveID X25519MLKEM768 is not a curve",
-          !tls::key_schedule_curveForCurveID(tls::X25519MLKEM768));
+    check(
+        "curveForCurveID X25519",
+        tls::key_schedule_curveForCurveID(tls::X25519),
+    );
+    check(
+        "curveForCurveID CurveP256",
+        tls::key_schedule_curveForCurveID(tls::CurveP256),
+    );
+    check(
+        "curveForCurveID CurveP384",
+        tls::key_schedule_curveForCurveID(tls::CurveP384),
+    );
+    check(
+        "curveForCurveID CurveP521",
+        tls::key_schedule_curveForCurveID(tls::CurveP521),
+    );
+    check(
+        "curveForCurveID X25519MLKEM768 is not a curve",
+        !tls::key_schedule_curveForCurveID(tls::X25519MLKEM768),
+    );
 
     // generateECDHEKey, over a reader that yields 7, 8, 9, … so the keys
     // are reproducible. P-256/384/521 reject and retry candidates, which
     // is why their first private byte is not 0x07.
     let (p1, q1, e1) = tls::key_schedule_generateECDHEKey(&mut constReader(7), tls::X25519);
     eq("generateECDHEKey X25519 err", e1, "");
-    eq("generateECDHEKey X25519 priv", hexOf(p1),
-       "0708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223242526");
-    eq("generateECDHEKey X25519 pub", hexOf(q1),
-       "07b8c542487686a78301855fcb6d3f6a8a911cd7f1983a9b44dc9dcd22839d23");
+    eq(
+        "generateECDHEKey X25519 priv",
+        hexOf(p1),
+        "0708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223242526",
+    );
+    eq(
+        "generateECDHEKey X25519 pub",
+        hexOf(q1),
+        "07b8c542487686a78301855fcb6d3f6a8a911cd7f1983a9b44dc9dcd22839d23",
+    );
     let (p2, q2, _) = tls::key_schedule_generateECDHEKey(&mut constReader(7), tls::CurveP256);
-    eq("generateECDHEKey P256 priv", hexOf(p2),
-       "074a090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223242526");
+    eq(
+        "generateECDHEKey P256 priv",
+        hexOf(p2),
+        "074a090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223242526",
+    );
     eq("generateECDHEKey P256 pub", hexOf(q2),
        "0402436461aed56f46fadbea20ec3192ec3cc88df2c4dad317659d4bade48ede2130333d845e7fe62fc09c225ff512029ec5628ba3704fdd485e7482317c0e5f2c");
     let (p3, _, _) = tls::key_schedule_generateECDHEKey(&mut constReader(7), tls::CurveP384);
@@ -1151,7 +1435,11 @@ fn main() {
     eq("generateECDHEKey P521 priv", hexOf(p4),
        "014a090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748");
     let (_, _, e5) = tls::key_schedule_generateECDHEKey(&mut constReader(7), tls::X25519MLKEM768);
-    eq("generateECDHEKey hybrid is rejected", e5, "tls: internal error: unsupported curve");
+    eq(
+        "generateECDHEKey hybrid is rejected",
+        e5,
+        "tls: internal error: unsupported curve",
+    );
 
     // ─── handshake_messages.go: the ClientHello encoder. The three hex
     //     strings are the full 226-byte message, the ECH-inner variant
@@ -1164,7 +1452,11 @@ fn main() {
        "010000de0303000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f040102030400041301c02f010000ad00000010000e00000b6578616d706c652e636f6d000b00020100002300020909ff010001000017000000120000002a000000390000fe0d0002dead000500050100000000000a00060004001d0017000d000600040804040300320004000204010010000e000c02683208687474702f312e31002b00050403040303002c000500030707070033000a0008001d000405050505002d000201010029001100080002abcd1122334400050401020304");
     eq("clientHello marshalMsg(echInner)", hexOf(chInner),
        "0100007f0303000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0000041301c02f0100005200000010000e00000b6578616d706c652e636f6d00120000002a000000390000fe0d0002deadfd000013120005000a000d00320010002b002c0033002d0029001100080002abcd1122334400050401020304");
-    check_n("clientHello marshalWithoutBinders len", chNoBinders.Len(), 219);
+    check_n(
+        "clientHello marshalWithoutBinders len",
+        chNoBinders.Len(),
+        219,
+    );
     eq("clientHello marshalWithoutBinders", hexOf(chNoBinders),
        "010000de0303000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f040102030400041301c02f010000ad00000010000e00000b6578616d706c652e636f6d000b00020100002300020909ff010001000017000000120000002a000000390000fe0d0002dead000500050100000000000a00060004001d0017000d000600040804040300320004000204010010000e000c02683208687474702f312e31002b00050403040303002c000500030707070033000a0008001d000405050505002d000201010029001100080002abcd11223344");
 
@@ -1178,21 +1470,36 @@ fn main() {
     check("clientHello re-marshal is identical", rtSame);
     check("clientHello originalBytes is the input", rtOrig);
     check_n("clientHello extensions recorded", rtExts, 19);
-    check("clientHello quicTransportParameters present but empty", rtQuic);
+    check(
+        "clientHello quicTransportParameters present but empty",
+        rtQuic,
+    );
     eq("clientHello encryptedClientHello", hexOf(rtECH), "dead");
 
-    check("clientHello clone re-marshals identically",
-          tls::handshake_messages_clientHelloCloneEqual());
+    check(
+        "clientHello clone re-marshals identically",
+        tls::handshake_messages_clientHelloCloneEqual(),
+    );
 
     let (ubErr0, ubTail) = tls::handshake_messages_clientHelloUpdateBinders(0);
     eq("updateBinders matching err", ubErr0, "");
-    eq("updateBinders rewrote the binder", hexOf(ubTail), "4400050409090909");
+    eq(
+        "updateBinders rewrote the binder",
+        hexOf(ubTail),
+        "4400050409090909",
+    );
     let (ubErr1, _) = tls::handshake_messages_clientHelloUpdateBinders(1);
-    eq("updateBinders count mismatch", ubErr1,
-       "tls: internal error: pskBinders length mismatch");
+    eq(
+        "updateBinders count mismatch",
+        ubErr1,
+        "tls: internal error: pskBinders length mismatch",
+    );
     let (ubErr2, _) = tls::handshake_messages_clientHelloUpdateBinders(2);
-    eq("updateBinders length mismatch", ubErr2,
-       "tls: internal error: pskBinders length mismatch");
+    eq(
+        "updateBinders length mismatch",
+        ubErr2,
+        "tls: internal error: pskBinders length mismatch",
+    );
 
     let (chMin, chMinErr) = tls::handshake_messages_clientHelloMinimal(32);
     eq("clientHello minimal err", chMinErr, "");
@@ -1201,8 +1508,11 @@ fn main() {
     // addBytesWithLength exists to make this a build error, not a
     // silently short message.
     let (_, chBadErr) = tls::handshake_messages_clientHelloMinimal(31);
-    eq("clientHello wrong random length", chBadErr,
-       "invalid value length: expected 32, got 31");
+    eq(
+        "clientHello wrong random length",
+        chBadErr,
+        "invalid value length: expected 32, got 31",
+    );
 
     let (shd, shdOK4, shdOK3) = tls::handshake_messages_serverHelloDone();
     eq("serverHelloDone marshal", hexOf(shd), "0e000000");
@@ -1214,59 +1524,108 @@ fn main() {
     let sv = |m: u16| -> string {
         let mut out = alloc::string::String::new();
         for (i, v) in goish::range!(tls::common_supportedVersionsFromMax(m)) {
-            if i > 0 { out.push(' '); }
+            if i > 0 {
+                out.push(' ');
+            }
             out.push_str(match *v {
-                0x0304 => "1.3", 0x0303 => "1.2", 0x0302 => "1.1", 0x0301 => "1.0", _ => "?",
+                0x0304 => "1.3",
+                0x0303 => "1.2",
+                0x0302 => "1.1",
+                0x0301 => "1.0",
+                _ => "?",
             });
         }
         return string::from_bytes(out.as_bytes());
     };
-    eq("supportedVersionsFromMax 1.3", sv(0x0304), "1.3 1.2 1.1 1.0");
+    eq(
+        "supportedVersionsFromMax 1.3",
+        sv(0x0304),
+        "1.3 1.2 1.1 1.0",
+    );
     eq("supportedVersionsFromMax 1.2", sv(0x0303), "1.2 1.1 1.0");
     eq("supportedVersionsFromMax 1.1", sv(0x0302), "1.1 1.0");
     eq("supportedVersionsFromMax 1.0", sv(0x0301), "1.0");
     eq("supportedVersionsFromMax SSL3 is empty", sv(0x0300), "");
-    eq("supportedVersionsFromMax 0xffff", sv(0xffff), "1.3 1.2 1.1 1.0");
+    eq(
+        "supportedVersionsFromMax 0xffff",
+        sv(0xffff),
+        "1.3 1.2 1.1 1.0",
+    );
 
     // TLS 1.3 drops PKCS#1 v1.5 (10 -> 7); the _cert list keeps SHA-1
     // and PKCS#1 v1.5 on purpose, so it is the widest at 12.
-    check_n("supportedSignatureAlgorithms(1.0)",
-            tls::common_supportedSignatureAlgorithms(0x0301).Len(), 10);
-    check_n("supportedSignatureAlgorithms(1.2)",
-            tls::common_supportedSignatureAlgorithms(0x0303).Len(), 10);
-    check_n("supportedSignatureAlgorithms(1.3)",
-            tls::common_supportedSignatureAlgorithms(0x0304).Len(), 7);
-    check_n("supportedSignatureAlgorithmsCert",
-            tls::common_supportedSignatureAlgorithmsCert().Len(), 12);
+    check_n(
+        "supportedSignatureAlgorithms(1.0)",
+        tls::common_supportedSignatureAlgorithms(0x0301).Len(),
+        10,
+    );
+    check_n(
+        "supportedSignatureAlgorithms(1.2)",
+        tls::common_supportedSignatureAlgorithms(0x0303).Len(),
+        10,
+    );
+    check_n(
+        "supportedSignatureAlgorithms(1.3)",
+        tls::common_supportedSignatureAlgorithms(0x0304).Len(),
+        7,
+    );
+    check_n(
+        "supportedSignatureAlgorithmsCert",
+        tls::common_supportedSignatureAlgorithmsCert().Len(),
+        12,
+    );
 
     // SHA-1 is off in TLS 1.2 as of Go 1.25, and PKCS#1 v1.5 is off in
     // TLS 1.3 — but both stay allowed on a certificate.
-    check("isDisabled PKCS1WithSHA1 at 1.2",
-          tls::common_isDisabledSignatureAlgorithm(0x0303, tls::PKCS1WithSHA1, false));
-    check("isDisabled ECDSAWithSHA1 at 1.2",
-          tls::common_isDisabledSignatureAlgorithm(0x0303, tls::ECDSAWithSHA1, false));
-    check("isDisabled PKCS1WithSHA1 on a cert is allowed",
-          !tls::common_isDisabledSignatureAlgorithm(0, tls::PKCS1WithSHA1, true));
-    check("PKCS1WithSHA256 allowed at 1.2",
-          !tls::common_isDisabledSignatureAlgorithm(0x0303, tls::PKCS1WithSHA256, false));
-    check("PKCS1WithSHA256 disabled at 1.3",
-          tls::common_isDisabledSignatureAlgorithm(0x0304, tls::PKCS1WithSHA256, false));
-    check("PSSWithSHA256 allowed at 1.3",
-          !tls::common_isDisabledSignatureAlgorithm(0x0304, tls::PSSWithSHA256, false));
-    check("Ed25519 allowed at 1.3",
-          !tls::common_isDisabledSignatureAlgorithm(0x0304, tls::Ed25519, false));
-    check("ECDSAWithP256AndSHA256 allowed at 1.3",
-          !tls::common_isDisabledSignatureAlgorithm(0x0304, tls::ECDSAWithP256AndSHA256, false));
+    check(
+        "isDisabled PKCS1WithSHA1 at 1.2",
+        tls::common_isDisabledSignatureAlgorithm(0x0303, tls::PKCS1WithSHA1, false),
+    );
+    check(
+        "isDisabled ECDSAWithSHA1 at 1.2",
+        tls::common_isDisabledSignatureAlgorithm(0x0303, tls::ECDSAWithSHA1, false),
+    );
+    check(
+        "isDisabled PKCS1WithSHA1 on a cert is allowed",
+        !tls::common_isDisabledSignatureAlgorithm(0, tls::PKCS1WithSHA1, true),
+    );
+    check(
+        "PKCS1WithSHA256 allowed at 1.2",
+        !tls::common_isDisabledSignatureAlgorithm(0x0303, tls::PKCS1WithSHA256, false),
+    );
+    check(
+        "PKCS1WithSHA256 disabled at 1.3",
+        tls::common_isDisabledSignatureAlgorithm(0x0304, tls::PKCS1WithSHA256, false),
+    );
+    check(
+        "PSSWithSHA256 allowed at 1.3",
+        !tls::common_isDisabledSignatureAlgorithm(0x0304, tls::PSSWithSHA256, false),
+    );
+    check(
+        "Ed25519 allowed at 1.3",
+        !tls::common_isDisabledSignatureAlgorithm(0x0304, tls::Ed25519, false),
+    );
+    check(
+        "ECDSAWithP256AndSHA256 allowed at 1.3",
+        !tls::common_isDisabledSignatureAlgorithm(0x0304, tls::ECDSAWithP256AndSHA256, false),
+    );
 
     let supported = slice::__from_vec(alloc::vec![tls::Ed25519, tls::PSSWithSHA256]);
-    check("isSupportedSignatureAlgorithm hit",
-          tls::common_isSupportedSignatureAlgorithm(tls::PSSWithSHA256, supported.clone()));
-    check("isSupportedSignatureAlgorithm miss",
-          !tls::common_isSupportedSignatureAlgorithm(tls::PKCS1WithSHA1, supported));
+    check(
+        "isSupportedSignatureAlgorithm hit",
+        tls::common_isSupportedSignatureAlgorithm(tls::PSSWithSHA256, supported.clone()),
+    );
+    check(
+        "isSupportedSignatureAlgorithm miss",
+        !tls::common_isSupportedSignatureAlgorithm(tls::PKCS1WithSHA1, supported),
+    );
 
     let (cveMsg, cveUnwrap, cveIs) = tls::common_certificateVerificationError();
-    eq("CertificateVerificationError.Error", cveMsg,
-       "tls: failed to verify certificate: boom");
+    eq(
+        "CertificateVerificationError.Error",
+        cveMsg,
+        "tls: failed to verify certificate: boom",
+    );
     eq("CertificateVerificationError.Unwrap", cveUnwrap, "boom");
     check("CertificateVerificationError unwraps for errors::Is", cveIs);
 
@@ -1275,16 +1634,26 @@ fn main() {
                                           string::from_static("*tls.serverHelloMsg")),
        "tls: received unexpected handshake message of type *tls.serverHelloMsg when waiting for *tls.clientHelloMsg");
 
-    check("isCertificateAllowedFIPS RSA-2048",
-          tls::defaults_fips140_isCertificateAllowedFIPS(0));
-    check("isCertificateAllowedFIPS rejects RSA-1024",
-          !tls::defaults_fips140_isCertificateAllowedFIPS(1));
-    check("isCertificateAllowedFIPS P-256",
-          tls::defaults_fips140_isCertificateAllowedFIPS(2));
-    check("isCertificateAllowedFIPS rejects P-224",
-          !tls::defaults_fips140_isCertificateAllowedFIPS(3));
-    check("isCertificateAllowedFIPS rejects a keyless certificate",
-          !tls::defaults_fips140_isCertificateAllowedFIPS(4));
+    check(
+        "isCertificateAllowedFIPS RSA-2048",
+        tls::defaults_fips140_isCertificateAllowedFIPS(0),
+    );
+    check(
+        "isCertificateAllowedFIPS rejects RSA-1024",
+        !tls::defaults_fips140_isCertificateAllowedFIPS(1),
+    );
+    check(
+        "isCertificateAllowedFIPS P-256",
+        tls::defaults_fips140_isCertificateAllowedFIPS(2),
+    );
+    check(
+        "isCertificateAllowedFIPS rejects P-224",
+        !tls::defaults_fips140_isCertificateAllowedFIPS(3),
+    );
+    check(
+        "isCertificateAllowedFIPS rejects a keyless certificate",
+        !tls::defaults_fips140_isCertificateAllowedFIPS(4),
+    );
     let (nv, nc, ns_, nsuite) = tls::defaults_fips140_tableSizes();
     check_n("allowedSupportedVersionsFIPS", nv, 2);
     check_n("allowedCurvePreferencesFIPS", nc, 4);
@@ -1296,13 +1665,19 @@ fn main() {
     //     extensions block is empty even though the chain shares one
     //     Certificate value. From goref.sh.
     let (mcRaw, mcFull, mcBare) = tls::handshake_messages_certificateEncodings();
-    eq("marshalCertificate", hexOf(mcRaw),
-       "000028000003aabbcc001900050008010000040102030400120009000700021122000133000002ddee0000");
+    eq(
+        "marshalCertificate",
+        hexOf(mcRaw),
+        "000028000003aabbcc001900050008010000040102030400120009000700021122000133000002ddee0000",
+    );
     eq("certificateMsgTLS13 marshal", hexOf(mcFull),
        "0b00002c00000028000003aabbcc001900050008010000040102030400120009000700021122000133000002ddee0000");
     // With ocspStapling/scts clear, Go strips both before marshalling.
-    eq("certificateMsgTLS13 flags off", hexOf(mcBare),
-       "0b0000130000000f000003aabbcc0000000002ddee0000");
+    eq(
+        "certificateMsgTLS13 flags off",
+        hexOf(mcBare),
+        "0b0000130000000f000003aabbcc0000000002ddee0000",
+    );
     let (ctOK, ctOcsp, ctScts, ctN, ctStaple, ctSct0) =
         tls::handshake_messages_certificateRoundTrip();
     check("certificateMsgTLS13 unmarshal ok", ctOK);
@@ -1315,48 +1690,81 @@ fn main() {
     // ─── auth.go's Certificate-driven selection. Ed25519 only: goish's
     //     ecdsa::PrivateKey does not implement crypto::Signer yet, and
     //     generating an RSA key would blow the e2e timeout.
-    eq("unsupportedCertificateError no key",
-       tls::auth_unsupportedCertificateError(0),
-       "tls: certificate private key does not implement crypto.Signer");
-    eq("unsupportedCertificateError ed25519",
-       tls::auth_unsupportedCertificateError(1),
-       "tls: internal error: unsupported key");
-    eq("unsupportedCertificateError ed25519 with custom algorithms",
-       tls::auth_unsupportedCertificateError(2),
-       "tls: peer doesn't support the certificate custom signature algorithms");
+    eq(
+        "unsupportedCertificateError no key",
+        tls::auth_unsupportedCertificateError(0),
+        "tls: certificate private key does not implement crypto.Signer",
+    );
+    eq(
+        "unsupportedCertificateError ed25519",
+        tls::auth_unsupportedCertificateError(1),
+        "tls: internal error: unsupported key",
+    );
+    eq(
+        "unsupportedCertificateError ed25519 with custom algorithms",
+        tls::auth_unsupportedCertificateError(2),
+        "tls: peer doesn't support the certificate custom signature algorithms",
+    );
 
     let allAlgs = slice::__from_vec(alloc::vec![
-        tls::PSSWithSHA256, tls::PKCS1WithSHA256,
-        tls::ECDSAWithP256AndSHA256, tls::Ed25519
+        tls::PSSWithSHA256,
+        tls::PKCS1WithSHA256,
+        tls::ECDSAWithP256AndSHA256,
+        tls::Ed25519
     ]);
     let (ss12, se12) = tls::auth_selectSignatureScheme(1, 0x0303, allAlgs.clone());
     eq("selectSignatureScheme ed25519 at 1.2 err", se12, "");
-    eq("selectSignatureScheme ed25519 at 1.2", ss12.String(), "Ed25519");
+    eq(
+        "selectSignatureScheme ed25519 at 1.2",
+        ss12.String(),
+        "Ed25519",
+    );
     let (ss13, se13) = tls::auth_selectSignatureScheme(1, 0x0304, allAlgs.clone());
     eq("selectSignatureScheme ed25519 at 1.3 err", se13, "");
-    eq("selectSignatureScheme ed25519 at 1.3", ss13.String(), "Ed25519");
+    eq(
+        "selectSignatureScheme ed25519 at 1.3",
+        ss13.String(),
+        "Ed25519",
+    );
     let (_, seNo) = tls::auth_selectSignatureScheme(
-        1, 0x0304, slice::__from_vec(alloc::vec![tls::PSSWithSHA256]));
-    eq("selectSignatureScheme no overlap", seNo,
-       "tls: peer doesn't support any of the certificate's signature algorithms");
+        1,
+        0x0304,
+        slice::__from_vec(alloc::vec![tls::PSSWithSHA256]),
+    );
+    eq(
+        "selectSignatureScheme no overlap",
+        seNo,
+        "tls: peer doesn't support any of the certificate's signature algorithms",
+    );
     // RFC 9155 made signature_algorithms mandatory in TLS 1.2, and Go
     // gates the SHA-1 fallback behind GODEBUG=tlssha1=1.
     let (_, seEmpty) = tls::auth_selectSignatureScheme(1, 0x0303, slice::new());
-    eq("selectSignatureScheme empty peer list at 1.2", seEmpty,
-       "tls: missing signature_algorithms from TLS 1.2 peer");
+    eq(
+        "selectSignatureScheme empty peer list at 1.2",
+        seEmpty,
+        "tls: missing signature_algorithms from TLS 1.2 peer",
+    );
     let (_, seCustom) = tls::auth_selectSignatureScheme(2, 0x0304, allAlgs.clone());
-    eq("selectSignatureScheme custom algorithms exclude the key", seCustom,
-       "tls: peer doesn't support the certificate custom signature algorithms");
+    eq(
+        "selectSignatureScheme custom algorithms exclude the key",
+        seCustom,
+        "tls: peer doesn't support the certificate custom signature algorithms",
+    );
     let (_, seNoKey) = tls::auth_selectSignatureScheme(0, 0x0304, allAlgs);
-    eq("selectSignatureScheme without a private key", seNoKey,
-       "tls: certificate private key does not implement crypto.Signer");
+    eq(
+        "selectSignatureScheme without a private key",
+        seNoKey,
+        "tls: certificate private key does not implement crypto.Signer",
+    );
 
     // ─── common.go: Config's version, curve and cipher-suite
     //     negotiation. From goref.sh.
     let hexU16 = |v: slice<u16>| -> string {
         let mut out = alloc::string::String::new();
         for (i, x) in goish::range!(v) {
-            if i > 0 { out.push(' '); }
+            if i > 0 {
+                out.push(' ');
+            }
             const HEX: &[u8; 16] = b"0123456789abcdef";
             for sh in [12u32, 8, 4, 0] {
                 out.push(HEX[((*x >> sh) & 0xf) as usize] as char);
@@ -1367,11 +1775,18 @@ fn main() {
     let decCurves = |v: slice<tls::CurveID>| -> string {
         let mut out = alloc::string::String::new();
         for (i, x) in goish::range!(v) {
-            if i > 0 { out.push(' '); }
+            if i > 0 {
+                out.push(' ');
+            }
             let mut n = x.0 as u32;
             let mut d = alloc::vec::Vec::new();
-            if n == 0 { d.push(b'0'); }
-            while n > 0 { d.push(b'0' + (n % 10) as u8); n /= 10; }
+            if n == 0 {
+                d.push(b'0');
+            }
+            while n > 0 {
+                d.push(b'0' + (n % 10) as u8);
+                n /= 10;
+            }
             d.reverse();
             out.push_str(core::str::from_utf8(&d).unwrap());
         }
@@ -1380,29 +1795,62 @@ fn main() {
 
     // A zero Config offers 1.3 and 1.2 only: TLS 1.0/1.1 are off unless
     // MinVersion asks for them, and for a server also GODEBUG=tls10server=1.
-    eq("Config.supportedVersions zero client",
-       hexU16(tls::common_configSupportedVersions(0, true)), "0304 0303");
-    eq("Config.supportedVersions zero server",
-       hexU16(tls::common_configSupportedVersions(0, false)), "0304 0303");
-    eq("Config.supportedVersions MinVersion=1.0 client",
-       hexU16(tls::common_configSupportedVersions(1, true)), "0304 0303 0302 0301");
-    eq("Config.supportedVersions MaxVersion=1.2 client",
-       hexU16(tls::common_configSupportedVersions(2, true)), "0303");
-    eq("Config.supportedVersions band 1.1-1.2",
-       hexU16(tls::common_configSupportedVersions(3, true)), "0303 0302");
+    eq(
+        "Config.supportedVersions zero client",
+        hexU16(tls::common_configSupportedVersions(0, true)),
+        "0304 0303",
+    );
+    eq(
+        "Config.supportedVersions zero server",
+        hexU16(tls::common_configSupportedVersions(0, false)),
+        "0304 0303",
+    );
+    eq(
+        "Config.supportedVersions MinVersion=1.0 client",
+        hexU16(tls::common_configSupportedVersions(1, true)),
+        "0304 0303 0302 0301",
+    );
+    eq(
+        "Config.supportedVersions MaxVersion=1.2 client",
+        hexU16(tls::common_configSupportedVersions(2, true)),
+        "0303",
+    );
+    eq(
+        "Config.supportedVersions band 1.1-1.2",
+        hexU16(tls::common_configSupportedVersions(3, true)),
+        "0303 0302",
+    );
     // ECH requires TLS 1.3 — but only on the client side.
-    eq("Config.supportedVersions ECH client",
-       hexU16(tls::common_configSupportedVersions(4, true)), "0304");
-    eq("Config.supportedVersions ECH server is unaffected",
-       hexU16(tls::common_configSupportedVersions(5 - 1, false)), "0304 0303 0302 0301");
-    eq("Config.supportedVersions Min>Max is empty",
-       hexU16(tls::common_configSupportedVersions(5, true)), "");
-    check_n("Config.maxSupportedVersion zero",
-            tls::common_configMaxSupportedVersion(0, true) as int, 0x0304);
-    check_n("Config.maxSupportedVersion MaxVersion=1.2",
-            tls::common_configMaxSupportedVersion(2, true) as int, 0x0303);
-    check_n("Config.maxSupportedVersion Min>Max",
-            tls::common_configMaxSupportedVersion(5, true) as int, 0);
+    eq(
+        "Config.supportedVersions ECH client",
+        hexU16(tls::common_configSupportedVersions(4, true)),
+        "0304",
+    );
+    eq(
+        "Config.supportedVersions ECH server is unaffected",
+        hexU16(tls::common_configSupportedVersions(5 - 1, false)),
+        "0304 0303 0302 0301",
+    );
+    eq(
+        "Config.supportedVersions Min>Max is empty",
+        hexU16(tls::common_configSupportedVersions(5, true)),
+        "",
+    );
+    check_n(
+        "Config.maxSupportedVersion zero",
+        tls::common_configMaxSupportedVersion(0, true) as int,
+        0x0304,
+    );
+    check_n(
+        "Config.maxSupportedVersion MaxVersion=1.2",
+        tls::common_configMaxSupportedVersion(2, true) as int,
+        0x0303,
+    );
+    check_n(
+        "Config.maxSupportedVersion Min>Max",
+        tls::common_configMaxSupportedVersion(5, true) as int,
+        0,
+    );
 
     let mv = |which: int, peer: alloc::vec::Vec<u16>| -> (u16, bool) {
         return tls::common_configMutualVersion(which, true, slice::__from_vec(peer));
@@ -1417,41 +1865,68 @@ fn main() {
     check("mutualVersion rejects 1.0 against a zero Config", !ok3);
     let (_, ok4) = mv(0, alloc::vec![]);
     check("mutualVersion rejects an empty peer list", !ok4);
-    let (m5, ok5) = tls::common_configMutualVersion(
-        1, false, slice::__from_vec(alloc::vec![0x0301u16]));
+    let (m5, ok5) =
+        tls::common_configMutualVersion(1, false, slice::__from_vec(alloc::vec![0x0301u16]));
     check("mutualVersion server MinVersion=1.0 accepts 1.0", ok5);
     check_n("mutualVersion server picks 1.0", m5 as int, 0x0301);
 
     // X25519MLKEM768 (4588) is TLS 1.3 only, so it drops out at 1.2.
-    eq("Config.curvePreferences 1.3",
-       decCurves(tls::common_configCurvePreferences(0, 0x0304)), "4588 29 23 24 25");
-    eq("Config.curvePreferences 1.2 drops the hybrid",
-       decCurves(tls::common_configCurvePreferences(0, 0x0303)), "29 23 24 25");
+    eq(
+        "Config.curvePreferences 1.3",
+        decCurves(tls::common_configCurvePreferences(0, 0x0304)),
+        "4588 29 23 24 25",
+    );
+    eq(
+        "Config.curvePreferences 1.2 drops the hybrid",
+        decCurves(tls::common_configCurvePreferences(0, 0x0303)),
+        "29 23 24 25",
+    );
     // A pinned list filters the default order but does not reorder it.
-    eq("Config.curvePreferences pinned",
-       decCurves(tls::common_configCurvePreferences(6, 0x0304)), "29 24");
-    check("Config.supportsCurve 1.3 X25519",
-          tls::common_configSupportsCurve(0, 0x0304, tls::X25519));
-    check("Config.supportsCurve 1.2 rejects the hybrid",
-          !tls::common_configSupportsCurve(0, 0x0303, tls::X25519MLKEM768));
-    check("Config.supportsCurve pinned rejects P-256",
-          !tls::common_configSupportsCurve(6, 0x0304, tls::CurveP256));
+    eq(
+        "Config.curvePreferences pinned",
+        decCurves(tls::common_configCurvePreferences(6, 0x0304)),
+        "29 24",
+    );
+    check(
+        "Config.supportsCurve 1.3 X25519",
+        tls::common_configSupportsCurve(0, 0x0304, tls::X25519),
+    );
+    check(
+        "Config.supportsCurve 1.2 rejects the hybrid",
+        !tls::common_configSupportsCurve(0, 0x0303, tls::X25519MLKEM768),
+    );
+    check(
+        "Config.supportsCurve pinned rejects P-256",
+        !tls::common_configSupportsCurve(6, 0x0304, tls::CurveP256),
+    );
 
-    eq("Config.cipherSuites default, AES preferred",
-       hexU16(tls::common_configCipherSuites(0, true)),
-       "c02b c02f c02c c030 cca9 cca8 c009 c013 c00a c014");
-    eq("Config.cipherSuites default, no AES hardware",
-       hexU16(tls::common_configCipherSuites(0, false)),
-       "cca9 cca8 c02b c02f c02c c030 c009 c013 c00a c014");
+    eq(
+        "Config.cipherSuites default, AES preferred",
+        hexU16(tls::common_configCipherSuites(0, true)),
+        "c02b c02f c02c c030 cca9 cca8 c009 c013 c00a c014",
+    );
+    eq(
+        "Config.cipherSuites default, no AES hardware",
+        hexU16(tls::common_configCipherSuites(0, false)),
+        "cca9 cca8 c02b c02f c02c c030 c009 c013 c00a c014",
+    );
     // A pinned list is a filter over the supported set, so a legacy
     // suite the default list omits comes back.
-    eq("Config.cipherSuites pinned",
-       hexU16(tls::common_configCipherSuites(7, true)), "c02f 002f");
-    eq("Config.supportedCipherSuites zero",
-       hexU16(tls::common_configSupportedCipherSuites(0)),
-       "cca9 cca8 c02b c02f c02c c030 c009 c013 c00a c014");
-    eq("Config.supportedCipherSuites pinned",
-       hexU16(tls::common_configSupportedCipherSuites(7)), "c02f 002f");
+    eq(
+        "Config.cipherSuites pinned",
+        hexU16(tls::common_configCipherSuites(7, true)),
+        "c02f 002f",
+    );
+    eq(
+        "Config.supportedCipherSuites zero",
+        hexU16(tls::common_configSupportedCipherSuites(0)),
+        "cca9 cca8 c02b c02f c02c c030 c009 c013 c00a c014",
+    );
+    eq(
+        "Config.supportedCipherSuites pinned",
+        hexU16(tls::common_configSupportedCipherSuites(7)),
+        "c02f 002f",
+    );
 
     // ─── key_agreement.go: the TLS 1.0-1.2 key agreements. The ECDHE
     //     case runs the whole exchange — server SKX, client verify,
@@ -1462,34 +1937,71 @@ fn main() {
         tls::key_agreement_ecdheRoundTrip();
     eq("ECDHE round trip err", kaErr, "");
     check_n("ECDHE ServerKeyExchange length", skxLen, 104);
-    eq("ECDHE signature algorithm is Ed25519", hexOf(sigAlg), "0807");
+    eq(
+        "ECDHE signature algorithm is Ed25519",
+        hexOf(sigAlg),
+        "0807",
+    );
     check_n("ECDHE signature length", sigLen, 64);
     check_n("ECDHE premaster secret length", pmsLen, 32);
     check_n("ECDHE ClientKeyExchange length", ckxLen, 33);
     check("ECDHE both sides agree on X25519 and the secret", agreed);
 
-    eq("rsaKeyAgreement generateServerKeyExchange is nil, nil",
-       tls::key_agreement_errorPath(0), "");
-    eq("rsaKeyAgreement rejects a ServerKeyExchange",
-       tls::key_agreement_errorPath(1), "tls: unexpected ServerKeyExchange");
-    eq("rsa CKX empty", tls::key_agreement_errorPath(2),
-       "tls: invalid ClientKeyExchange message");
-    eq("rsa CKX one byte", tls::key_agreement_errorPath(3),
-       "tls: invalid ClientKeyExchange message");
-    eq("rsa CKX length mismatch", tls::key_agreement_errorPath(4),
-       "tls: invalid ClientKeyExchange message");
-    eq("rsa CKX without a Decrypter", tls::key_agreement_errorPath(5),
-       "tls: certificate private key does not implement crypto.Decrypter");
-    eq("ecdhe SKX with no curves offered", tls::key_agreement_errorPath(6),
-       "tls: no supported elliptic curves offered");
-    eq("ecdhe CKX before a ServerKeyExchange", tls::key_agreement_errorPath(7),
-       "tls: missing ServerKeyExchange message");
-    eq("ecdhe SKX too short", tls::key_agreement_errorPath(8),
-       "tls: invalid ServerKeyExchange message");
-    eq("ecdhe SKX with a non-named curve", tls::key_agreement_errorPath(9),
-       "tls: server selected unsupported curve");
-    eq("ecdhe SKX with an unoffered curve", tls::key_agreement_errorPath(10),
-       "tls: server selected unoffered curve");
+    eq(
+        "rsaKeyAgreement generateServerKeyExchange is nil, nil",
+        tls::key_agreement_errorPath(0),
+        "",
+    );
+    eq(
+        "rsaKeyAgreement rejects a ServerKeyExchange",
+        tls::key_agreement_errorPath(1),
+        "tls: unexpected ServerKeyExchange",
+    );
+    eq(
+        "rsa CKX empty",
+        tls::key_agreement_errorPath(2),
+        "tls: invalid ClientKeyExchange message",
+    );
+    eq(
+        "rsa CKX one byte",
+        tls::key_agreement_errorPath(3),
+        "tls: invalid ClientKeyExchange message",
+    );
+    eq(
+        "rsa CKX length mismatch",
+        tls::key_agreement_errorPath(4),
+        "tls: invalid ClientKeyExchange message",
+    );
+    eq(
+        "rsa CKX without a Decrypter",
+        tls::key_agreement_errorPath(5),
+        "tls: certificate private key does not implement crypto.Decrypter",
+    );
+    eq(
+        "ecdhe SKX with no curves offered",
+        tls::key_agreement_errorPath(6),
+        "tls: no supported elliptic curves offered",
+    );
+    eq(
+        "ecdhe CKX before a ServerKeyExchange",
+        tls::key_agreement_errorPath(7),
+        "tls: missing ServerKeyExchange message",
+    );
+    eq(
+        "ecdhe SKX too short",
+        tls::key_agreement_errorPath(8),
+        "tls: invalid ServerKeyExchange message",
+    );
+    eq(
+        "ecdhe SKX with a non-named curve",
+        tls::key_agreement_errorPath(9),
+        "tls: server selected unsupported curve",
+    );
+    eq(
+        "ecdhe SKX with an unoffered curve",
+        tls::key_agreement_errorPath(10),
+        "tls: server selected unoffered curve",
+    );
 
     // ─── cipher_suites.go's TLS 1.0-1.2 record and prf.go's key
     //     schedule. Every hex string is from goref.sh.
@@ -1510,40 +2022,67 @@ fn main() {
         tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
         tls::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
     ]);
-    check("mutualCipherSuite hit",
-          tls::cipher_suites_mutual(two.clone(), tls::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384));
-    check("mutualCipherSuite miss",
-          !tls::cipher_suites_mutual(two, tls::TLS_RSA_WITH_RC4_128_SHA));
+    check(
+        "mutualCipherSuite hit",
+        tls::cipher_suites_mutual(two.clone(), tls::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384),
+    );
+    check(
+        "mutualCipherSuite miss",
+        !tls::cipher_suites_mutual(two, tls::TLS_RSA_WITH_RC4_128_SHA),
+    );
 
     // isAESGCMPreferred answers on the FIRST known suite in the peer's
     // list and stops there — an unknown id is skipped, a known non-GCM
     // one ends the scan.
     let pref = |v: alloc::vec::Vec<u16>| tls::cipher_suites_isAESGCMPreferred(slice::__from_vec(v));
-    check("isAESGCMPreferred ECDHE-RSA-AES128-GCM",
-          pref(alloc::vec![tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]));
-    check("isAESGCMPreferred rejects ChaCha20",
-          !pref(alloc::vec![tls::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305]));
-    check("isAESGCMPreferred TLS 1.3 AES-128-GCM",
-          pref(alloc::vec![tls::TLS_AES_128_GCM_SHA256]));
-    check("isAESGCMPreferred rejects TLS 1.3 ChaCha20",
-          !pref(alloc::vec![tls::TLS_CHACHA20_POLY1305_SHA256]));
+    check(
+        "isAESGCMPreferred ECDHE-RSA-AES128-GCM",
+        pref(alloc::vec![tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]),
+    );
+    check(
+        "isAESGCMPreferred rejects ChaCha20",
+        !pref(alloc::vec![tls::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305]),
+    );
+    check(
+        "isAESGCMPreferred TLS 1.3 AES-128-GCM",
+        pref(alloc::vec![tls::TLS_AES_128_GCM_SHA256]),
+    );
+    check(
+        "isAESGCMPreferred rejects TLS 1.3 ChaCha20",
+        !pref(alloc::vec![tls::TLS_CHACHA20_POLY1305_SHA256]),
+    );
     check("isAESGCMPreferred on an empty list", !pref(alloc::vec![]));
-    check("isAESGCMPreferred skips an unknown id",
-          pref(alloc::vec![0x9999u16, tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]));
-    check("isAESGCMPreferred with only an unknown id", !pref(alloc::vec![0x9999u16]));
+    check(
+        "isAESGCMPreferred skips an unknown id",
+        pref(alloc::vec![
+            0x9999u16,
+            tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        ]),
+    );
+    check(
+        "isAESGCMPreferred with only an unknown id",
+        !pref(alloc::vec![0x9999u16]),
+    );
 
-    check_n("selectCipherSuite picks the first ECDHE suite",
-            tls::cipher_suites_selectECDHE(
-                slice::__from_vec(alloc::vec![
-                    tls::TLS_RSA_WITH_RC4_128_SHA,
-                    tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]),
-                slice::__from_vec(alloc::vec![tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]),
-            ) as int, 0xc02f);
-    check_n("selectCipherSuite honours the filter",
-            tls::cipher_suites_selectECDHE(
-                slice::__from_vec(alloc::vec![tls::TLS_RSA_WITH_RC4_128_SHA]),
-                slice::__from_vec(alloc::vec![tls::TLS_RSA_WITH_RC4_128_SHA]),
-            ) as int, 0);
+    check_n(
+        "selectCipherSuite picks the first ECDHE suite",
+        tls::cipher_suites_selectECDHE(
+            slice::__from_vec(alloc::vec![
+                tls::TLS_RSA_WITH_RC4_128_SHA,
+                tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+            ]),
+            slice::__from_vec(alloc::vec![tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]),
+        ) as int,
+        0xc02f,
+    );
+    check_n(
+        "selectCipherSuite honours the filter",
+        tls::cipher_suites_selectECDHE(
+            slice::__from_vec(alloc::vec![tls::TLS_RSA_WITH_RC4_128_SHA]),
+            slice::__from_vec(alloc::vec![tls::TLS_RSA_WITH_RC4_128_SHA]),
+        ) as int,
+        0,
+    );
 
     // The schedule itself, at TLS 1.0 (MD5+SHA-1 PRF) and TLS 1.2
     // (SHA-256), and for the SHA-384 suite.
@@ -1555,14 +2094,26 @@ fn main() {
        "3b72140af74bdf7907992fc157473c645448f17cdefeb4bef081ba0f98ef826724af941cae89bb4da1fc7168c150455e");
     eq("extMasterFromPreMasterSecret 1.0", hexOf(ems10),
        "845c9c8be52957295cc3df719f20cc36b909029d6503c4fd7b7357c95c810f384d642bb04ed796da6ec0f52089bec0e2");
-    eq("keysFromMasterSecret 1.0 clientMAC", hexOf(keys10[0].clone()),
-       "880a1b65ae7cc1516f5c5cb2bacec5b6539bebab");
-    eq("keysFromMasterSecret 1.0 serverKey", hexOf(keys10[3].clone()),
-       "77f291ed9f07163d9e1611facdbbfc19");
-    eq("keysFromMasterSecret 1.0 serverIV", hexOf(keys10[5].clone()),
-       "301dcc016f3a613aa7e45e6f3fdebfb2");
-    eq("finishedHash.Sum 1.0 is MD5+SHA-1", hexOf(sum10),
-       "806c77077c44f23699469230a02b0caf44e3489a4299bf057e9f0ab0d17c3e7acf833588");
+    eq(
+        "keysFromMasterSecret 1.0 clientMAC",
+        hexOf(keys10[0].clone()),
+        "880a1b65ae7cc1516f5c5cb2bacec5b6539bebab",
+    );
+    eq(
+        "keysFromMasterSecret 1.0 serverKey",
+        hexOf(keys10[3].clone()),
+        "77f291ed9f07163d9e1611facdbbfc19",
+    );
+    eq(
+        "keysFromMasterSecret 1.0 serverIV",
+        hexOf(keys10[5].clone()),
+        "301dcc016f3a613aa7e45e6f3fdebfb2",
+    );
+    eq(
+        "finishedHash.Sum 1.0 is MD5+SHA-1",
+        hexOf(sum10),
+        "806c77077c44f23699469230a02b0caf44e3489a4299bf057e9f0ab0d17c3e7acf833588",
+    );
     eq("clientSum 1.0", hexOf(cs10), "c7ea94a23f4aee04632c218c");
     eq("serverSum 1.0", hexOf(ss10), "ac57e50a2e8f5ef9b8ffe344");
 
@@ -1573,44 +2124,81 @@ fn main() {
        "a1b3c58fbcafdd223ec0a71efbb1f6be268642b5ce2ae0a70f69273cd5e3af02ec675cd902da4b307993a7a6e3f3c441");
     eq("extMasterFromPreMasterSecret 1.2 goes through fips140/tls12", hexOf(ems12),
        "d8932ce1860ee4f1874a7535032cceccf17730a5a26fb0172619bf6438949f9d9a51a1c1f7d8c9ef19119217fef56b27");
-    eq("keysFromMasterSecret 1.2 clientKey", hexOf(keys12[2].clone()),
-       "c26d16bd6c9325ad256addbf8978c596");
-    eq("finishedHash.Sum 1.2", hexOf(sum12),
-       "864b05f143787661708f0a162c52170368def8fa53f942601f933b2db8ee99c0");
+    eq(
+        "keysFromMasterSecret 1.2 clientKey",
+        hexOf(keys12[2].clone()),
+        "c26d16bd6c9325ad256addbf8978c596",
+    );
+    eq(
+        "finishedHash.Sum 1.2",
+        hexOf(sum12),
+        "864b05f143787661708f0a162c52170368def8fa53f942601f933b2db8ee99c0",
+    );
     eq("clientSum 1.2", hexOf(cs12), "6ece4efc6c40b46dc6620f9d");
     eq("serverSum 1.2", hexOf(ss12), "183b4eb7d97e6fcfb98318ce");
 
     let (h384, ms384, _, _, sum384, cs384, _) =
         sched(tls::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, 0x0303);
-    check_n("prfAndHashForVersion picks SHA-384 on a suiteSHA384 suite", h384, 6);
+    check_n(
+        "prfAndHashForVersion picks SHA-384 on a suiteSHA384 suite",
+        h384,
+        6,
+    );
     eq("masterFromPreMasterSecret 1.2/SHA-384", hexOf(ms384),
        "89f5a0912340fc16083ccf6048e820e04431bcd8ea2f6945c8573077c17c8045f538747e67106bd634b1c52c9359bc1c");
     eq("finishedHash.Sum 1.2/SHA-384", hexOf(sum384),
        "96b73bf47ebf9822d1047033b527dd2102a14af20e02a9ae3d8d157315a4a8f22e87453a7e8affe593f69a959f7df81c");
-    eq("clientSum 1.2/SHA-384", hexOf(cs384), "c0ec016a5fa874b4ad0153c4");
+    eq(
+        "clientSum 1.2/SHA-384",
+        hexOf(cs384),
+        "c0ec016a5fa874b4ad0153c4",
+    );
 
     // Ed25519 signs the transcript whole; everything else pre-hashes.
     let (ecdsaH, edH, ekm, ekmNil, ekmErr) =
         tls::prf_certHashAndEKM(tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, 0x0303);
-    eq("hashForClientCertificate ECDSA at 1.2", hexOf(ecdsaH),
-       "864b05f143787661708f0a162c52170368def8fa53f942601f933b2db8ee99c0");
-    eq("hashForClientCertificate Ed25519 is the raw buffer", hexOf(edH),
-       "68616e647368616b65207472616e736372697074");
-    eq("ekmFromMasterSecret 1.2", hexOf(ekm),
-       "98160b3d7d7ced8229f7c8af129fa81f560ce8f6b3123addf3b0ba0d15c10cb6");
-    eq("ekmFromMasterSecret 1.2 nil context", hexOf(ekmNil),
-       "35a35e1d84eea3c887a017d67129c257");
-    eq("ekmFromMasterSecret rejects a reserved label", ekmErr,
-       "crypto/tls: reserved ExportKeyingMaterial label: master secret");
+    eq(
+        "hashForClientCertificate ECDSA at 1.2",
+        hexOf(ecdsaH),
+        "864b05f143787661708f0a162c52170368def8fa53f942601f933b2db8ee99c0",
+    );
+    eq(
+        "hashForClientCertificate Ed25519 is the raw buffer",
+        hexOf(edH),
+        "68616e647368616b65207472616e736372697074",
+    );
+    eq(
+        "ekmFromMasterSecret 1.2",
+        hexOf(ekm),
+        "98160b3d7d7ced8229f7c8af129fa81f560ce8f6b3123addf3b0ba0d15c10cb6",
+    );
+    eq(
+        "ekmFromMasterSecret 1.2 nil context",
+        hexOf(ekmNil),
+        "35a35e1d84eea3c887a017d67129c257",
+    );
+    eq(
+        "ekmFromMasterSecret rejects a reserved label",
+        ekmErr,
+        "crypto/tls: reserved ExportKeyingMaterial label: master secret",
+    );
     // At TLS 1.0 the server hash is the SHA-1 half only.
     let (ecdsaH10, _, ekm10, _, _) =
         tls::prf_certHashAndEKM(tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, 0x0301);
-    eq("hashForClientCertificate ECDSA at 1.0 is SHA-1 only", hexOf(ecdsaH10),
-       "44e3489a4299bf057e9f0ab0d17c3e7acf833588");
-    eq("ekmFromMasterSecret 1.0", hexOf(ekm10),
-       "df27b3357e0ac1be167ce83a4a3e018ca3a5b5fb38394b584f5016c16deb80b1");
-    check("discardHandshakeBuffer clears the buffer",
-          tls::prf_discardHandshakeBuffer());
+    eq(
+        "hashForClientCertificate ECDSA at 1.0 is SHA-1 only",
+        hexOf(ecdsaH10),
+        "44e3489a4299bf057e9f0ab0d17c3e7acf833588",
+    );
+    eq(
+        "ekmFromMasterSecret 1.0",
+        hexOf(ekm10),
+        "df27b3357e0ac1be167ce83a4a3e018ca3a5b5fb38394b584f5016c16deb80b1",
+    );
+    check(
+        "discardHandshakeBuffer clears the buffer",
+        tls::prf_discardHandshakeBuffer(),
+    );
 
     // ─── conn.go: the record layer's cipher state. extractPadding is
     //     the Lucky13/POODLE-relevant one — it must be constant time and
@@ -1661,19 +2249,42 @@ fn main() {
 
     let (nonceNil, ccsAlert, nonce13, seqZero, level) = tls::conn_halfConnTrafficSecret();
     check_n("halfConn.explicitNonceLen with no cipher", nonceNil, 0);
-    eq("changeCipherSpec without a next cipher", ccsAlert, "tls: internal error");
-    check_n("halfConn.explicitNonceLen after setTrafficSecret", nonce13, 0);
+    eq(
+        "changeCipherSpec without a next cipher",
+        ccsAlert,
+        "tls: internal error",
+    );
+    check_n(
+        "halfConn.explicitNonceLen after setTrafficSecret",
+        nonce13,
+        0,
+    );
     check("setTrafficSecret zeroes the sequence number", seqZero);
     eq("setTrafficSecret records the QUIC level", level, "Initial");
 
-    eq("incSeq once", hexOf(tls::conn_incSeq(0)), "0000000000000001");
-    eq("incSeq carries", hexOf(tls::conn_incSeq(1)), "0000000000000100");
-    eq("incSeq carries twice", hexOf(tls::conn_incSeq(2)), "0000000000010000");
+    eq(
+        "incSeq once",
+        hexOf(tls::conn_incSeq(0)),
+        "0000000000000001",
+    );
+    eq(
+        "incSeq carries",
+        hexOf(tls::conn_incSeq(1)),
+        "0000000000000100",
+    );
+    eq(
+        "incSeq carries twice",
+        hexOf(tls::conn_incSeq(2)),
+        "0000000000010000",
+    );
 
-    eq("RecordHeaderError.Error",
-       tls::conn_recordHeaderError(
-           string::from_static("first record does not look like a TLS handshake")),
-       "tls: first record does not look like a TLS handshake");
+    eq(
+        "RecordHeaderError.Error",
+        tls::conn_recordHeaderError(string::from_static(
+            "first record does not look like a TLS handshake",
+        )),
+        "tls: first record does not look like a TLS handshake",
+    );
     let (peMsg, peUnwrap, peTimeout, peTemp) = tls::conn_permanentError();
     eq("permanentError.Error", peMsg, "boom");
     eq("permanentError.Unwrap", peUnwrap, "boom");
@@ -1684,21 +2295,45 @@ fn main() {
     //     Both encodings and every error string are from goref.sh.
     let (tk13, tk13Err) = tls::ticket_sessionStateBytes(0);
     eq("SessionState.Bytes 1.3 err", tk13Err, "");
-    eq("SessionState.Bytes TLS 1.3 server", hexOf(tk13),
-       "03040113011122334455667788080102030405060708000009000001aa000002bbcc0000000000000000");
+    eq(
+        "SessionState.Bytes TLS 1.3 server",
+        hexOf(tk13),
+        "03040113011122334455667788080102030405060708000009000001aa000002bbcc0000000000000000",
+    );
     let (tk12, _) = tls::ticket_sessionStateBytes(1);
     // Below TLS 1.3 the encoding ends with the curveID instead of the
     // client's useBy/ageAdd, and EarlyData adds the ALPN protocol.
-    eq("SessionState.Bytes TLS 1.2 server", hexOf(tk12),
-       "030301c02f00000000000000070209090000000101000000000000026832001d");
+    eq(
+        "SessionState.Bytes TLS 1.2 server",
+        hexOf(tk12),
+        "030301c02f00000000000000070209090000000101000000000000026832001d",
+    );
 
-    let (rtErr, rtV, rtSuite, rtCreated, rtSecret, rtExtra, rtEMS, rtEarly, rtAlpn, rtCurve, rtSame) =
-        tls::ticket_roundTrip(0);
+    let (
+        rtErr,
+        rtV,
+        rtSuite,
+        rtCreated,
+        rtSecret,
+        rtExtra,
+        rtEMS,
+        rtEarly,
+        rtAlpn,
+        rtCurve,
+        rtSame,
+    ) = tls::ticket_roundTrip(0);
     eq("ParseSessionState 1.3 err", rtErr, "");
     check_n("ParseSessionState version", rtV, 0x0304);
     check_n("ParseSessionState cipherSuite", rtSuite, 0x1301);
-    check("ParseSessionState createdAt", rtCreated == 0x1122334455667788u64);
-    eq("ParseSessionState secret", hexOf(rtSecret), "0102030405060708");
+    check(
+        "ParseSessionState createdAt",
+        rtCreated == 0x1122334455667788u64,
+    );
+    eq(
+        "ParseSessionState secret",
+        hexOf(rtSecret),
+        "0102030405060708",
+    );
     check_n("ParseSessionState Extra count", rtExtra, 2);
     check("ParseSessionState extMasterSecret", !rtEMS);
     check("ParseSessionState EarlyData", !rtEarly);
@@ -1717,31 +2352,53 @@ fn main() {
     check_n("ParseSessionState 1.2 curveID is X25519", rtCurve2, 29);
     check("ParseSessionState 1.2 re-encodes identically", rtSame2);
 
-    eq("ParseSessionState empty", tls::ticket_parseError(0),
-       "tls: invalid session encoding");
-    eq("ParseSessionState truncated", tls::ticket_parseError(1),
-       "tls: invalid session encoding");
-    eq("ParseSessionState unknown role byte", tls::ticket_parseError(2),
-       "tls: unknown session encoding");
-    eq("ParseSessionState empty secret", tls::ticket_parseError(3),
-       "tls: invalid session encoding");
+    eq(
+        "ParseSessionState empty",
+        tls::ticket_parseError(0),
+        "tls: invalid session encoding",
+    );
+    eq(
+        "ParseSessionState truncated",
+        tls::ticket_parseError(1),
+        "tls: invalid session encoding",
+    );
+    eq(
+        "ParseSessionState unknown role byte",
+        tls::ticket_parseError(2),
+        "tls: unknown session encoding",
+    );
+    eq(
+        "ParseSessionState empty secret",
+        tls::ticket_parseError(3),
+        "tls: invalid session encoding",
+    );
 
     // ─── ech.go: the encrypted_client_hello extension codec and config
     //     selection (draft-ietf-tls-esni). From goref.sh.
     let pe = |v: alloc::vec::Vec<u8>| tls::ech_parseExt(slice::__from_vec(v));
     let (_, _, _, _, _, _, e0) = pe(alloc::vec![]);
-    eq("parseECHExt empty", e0, "tls: malformed encrypted_client_hello extension");
+    eq(
+        "parseECHExt empty",
+        e0,
+        "tls: malformed encrypted_client_hello extension",
+    );
     let (t1, _, _, _, _, _, e1) = pe(alloc::vec![0x01u8]);
     check_n("parseECHExt inner type", t1, 1);
     eq("parseECHExt inner err", e1, "");
     let (_, _, _, _, _, _, e2) = pe(alloc::vec![0x01u8, 0x00]);
-    eq("parseECHExt inner with trailing data", e2,
-       "tls: malformed encrypted_client_hello extension");
+    eq(
+        "parseECHExt inner with trailing data",
+        e2,
+        "tls: malformed encrypted_client_hello extension",
+    );
     // An unknown type is *invalid*, not malformed — the server answers
     // with illegal_parameter rather than decode_error on that one.
     let (_, _, _, _, _, _, e3) = pe(alloc::vec![0x02u8]);
-    eq("parseECHExt unknown type", e3,
-       "tls: client sent invalid encrypted_client_hello extension");
+    eq(
+        "parseECHExt unknown type",
+        e3,
+        "tls: client sent invalid encrypted_client_hello extension",
+    );
     let (t4, kdf4, aead4, id4, encap4, pay4, e4) = pe(alloc::vec![
         0x00u8, 0x00, 0x01, 0x00, 0x01, 0x2a, 0x00, 0x02, 0xaa, 0xbb, 0x00, 0x03, 1, 2, 3
     ]);
@@ -1753,15 +2410,24 @@ fn main() {
     eq("parseECHExt encap", hexOf(encap4), "aabb");
     eq("parseECHExt payload", hexOf(pay4), "010203");
     let (_, _, _, _, _, _, e5) = pe(alloc::vec![0x00u8, 0x00, 0x01]);
-    eq("parseECHExt truncated outer", e5,
-       "tls: malformed encrypted_client_hello extension");
+    eq(
+        "parseECHExt truncated outer",
+        e5,
+        "tls: malformed encrypted_client_hello extension",
+    );
 
     let outer = tls::ech_generateOuterExt(
-        0x2a, 0x0001, 0x0002,
+        0x2a,
+        0x0001,
+        0x0002,
         slice::__from_vec(alloc::vec![0xaau8, 0xbb]),
         slice::__from_vec(alloc::vec![1u8, 2, 3]),
     );
-    eq("generateOuterECHExt", hexOf(outer.clone()), "00000100022a0002aabb0003010203");
+    eq(
+        "generateOuterECHExt",
+        hexOf(outer.clone()),
+        "00000100022a0002aabb0003010203",
+    );
     let (rt, rtKdf, rtAead, rtId, _, _, rtErr) = tls::ech_parseExt(outer);
     eq("generateOuterECHExt round-trips err", rtErr, "");
     check_n("generateOuterECHExt round-trips type", rt, 0);
@@ -1769,21 +2435,36 @@ fn main() {
     check_n("generateOuterECHExt round-trips AEADID", rtAead, 2);
     check_n("generateOuterECHExt round-trips configID", rtId, 42);
 
-    eq("marshalEncryptedClientHelloConfigList",
-       hexOf(tls::ech_marshalConfigList(0)), "00050102030405");
-    eq("marshalEncryptedClientHelloConfigList empty",
-       hexOf(tls::ech_marshalConfigList(1)), "0000");
+    eq(
+        "marshalEncryptedClientHelloConfigList",
+        hexOf(tls::ech_marshalConfigList(0)),
+        "00050102030405",
+    );
+    eq(
+        "marshalEncryptedClientHelloConfigList empty",
+        hexOf(tls::ech_marshalConfigList(1)),
+        "0000",
+    );
 
     let pcs = |v: alloc::vec::Vec<u16>| tls::ech_pickCipherSuite(slice::__from_vec(v));
     let (_, _, pe0) = pcs(alloc::vec![]);
-    eq("pickECHCipherSuite empty", pe0,
-       "tls: no supported symmetric ciphersuites for ECH");
+    eq(
+        "pickECHCipherSuite empty",
+        pe0,
+        "tls: no supported symmetric ciphersuites for ECH",
+    );
     let (_, _, pe1) = pcs(alloc::vec![0x9999u16, 0x0001]);
-    eq("pickECHCipherSuite unknown KDF", pe1,
-       "tls: no supported symmetric ciphersuites for ECH");
+    eq(
+        "pickECHCipherSuite unknown KDF",
+        pe1,
+        "tls: no supported symmetric ciphersuites for ECH",
+    );
     let (_, _, pe2) = pcs(alloc::vec![0x0001u16, 0x9999]);
-    eq("pickECHCipherSuite unknown AEAD", pe2,
-       "tls: no supported symmetric ciphersuites for ECH");
+    eq(
+        "pickECHCipherSuite unknown AEAD",
+        pe2,
+        "tls: no supported symmetric ciphersuites for ECH",
+    );
     // The first *valid* suite wins, not the first suite.
     let (k3, a3, pe3) = pcs(alloc::vec![0x9999u16, 0x9999, 0x0001, 0x0003]);
     eq("pickECHCipherSuite skips to the first valid err", pe3, "");
@@ -1792,32 +2473,72 @@ fn main() {
 
     check("pickECHConfig empty list", !tls::ech_pickConfig(0));
     check("pickECHConfig usable", tls::ech_pickConfig(1));
-    check("pickECHConfig rejects an unknown KEM", !tls::ech_pickConfig(2));
-    check("pickECHConfig rejects an empty public name", !tls::ech_pickConfig(3));
-    check("pickECHConfig rejects an unusable cipher suite", !tls::ech_pickConfig(4));
+    check(
+        "pickECHConfig rejects an unknown KEM",
+        !tls::ech_pickConfig(2),
+    );
+    check(
+        "pickECHConfig rejects an empty public name",
+        !tls::ech_pickConfig(3),
+    );
+    check(
+        "pickECHConfig rejects an unusable cipher suite",
+        !tls::ech_pickConfig(4),
+    );
     // The high bit of the extension type means mandatory; goish supports
     // no ECH extensions, so a mandatory one disqualifies the config.
-    check("pickECHConfig rejects a mandatory extension", !tls::ech_pickConfig(5));
-    check("pickECHConfig accepts an optional extension", tls::ech_pickConfig(6));
-    check("pickECHConfig skips to the first usable", tls::ech_pickConfig(7));
+    check(
+        "pickECHConfig rejects a mandatory extension",
+        !tls::ech_pickConfig(5),
+    );
+    check(
+        "pickECHConfig accepts an optional extension",
+        tls::ech_pickConfig(6),
+    );
+    check(
+        "pickECHConfig skips to the first usable",
+        tls::ech_pickConfig(7),
+    );
 
     // The padding rule targets a length ≡ 31 (mod 32) before the four
     // stripped header bytes, so both cases land on a fixed size.
-    check_n("encodeInnerClientHello without SNI", tls::ech_encodeInner(string::from_static("")), 55);
-    check_n("encodeInnerClientHello with SNI",
-            tls::ech_encodeInner(string::from_static("example.com")), 75);
+    check_n(
+        "encodeInnerClientHello without SNI",
+        tls::ech_encodeInner(string::from_static("")),
+        55,
+    );
+    check_n(
+        "encodeInnerClientHello with SNI",
+        tls::ech_encodeInner(string::from_static("example.com")),
+        75,
+    );
 
     let (extTypes, exErr) = tls::ech_extractRawExtensions(true);
     eq("extractRawExtensions err", exErr, "");
     check_n("extractRawExtensions count", extTypes.Len(), 3);
-    check_n("extractRawExtensions first is server_name", extTypes[0] as int, 0);
+    check_n(
+        "extractRawExtensions first is server_name",
+        extTypes[0] as int,
+        0,
+    );
     check_n("extractRawExtensions second is SCT", extTypes[1] as int, 18);
-    check_n("extractRawExtensions third is early_data", extTypes[2] as int, 42);
+    check_n(
+        "extractRawExtensions third is early_data",
+        extTypes[2] as int,
+        42,
+    );
     let (_, exErr2) = tls::ech_extractRawExtensions(false);
-    eq("extractRawExtensions on a truncated hello", exErr2,
-       "tls: malformed outer client hello");
+    eq(
+        "extractRawExtensions on a truncated hello",
+        exErr2,
+        "tls: malformed outer client hello",
+    );
 
-    eq("ECHRejectionError.Error", tls::ech_rejectionError(), "tls: server rejected ECH");
+    eq(
+        "ECHRejectionError.Error",
+        tls::ech_rejectionError(),
+        "tls: server rejected ECH",
+    );
 
     // ─── common.go: ticket-key derivation and the FIPS chain filter.
     //     ticketKeyFromBytes expands 32 external bytes through SHA-512
@@ -1826,11 +2547,27 @@ fn main() {
     //     goref.sh.
     let seq32 = seqBytes(32, 0);
     let (tkAes, tkHmac) = tls::common_ticketKeyFromBytes(seq32);
-    eq("ticketKeyFromBytes aesKey", hexOf(tkAes), "9d6d1440dede12e6a125f1841fff8e6f");
-    eq("ticketKeyFromBytes hmacKey", hexOf(tkHmac), "a9d71862a3e5746b571be3d187b00410");
+    eq(
+        "ticketKeyFromBytes aesKey",
+        hexOf(tkAes),
+        "9d6d1440dede12e6a125f1841fff8e6f",
+    );
+    eq(
+        "ticketKeyFromBytes hmacKey",
+        hexOf(tkHmac),
+        "a9d71862a3e5746b571be3d187b00410",
+    );
     let (tzAes, tzHmac) = tls::common_ticketKeyFromBytes(slice::__from_vec(alloc::vec![0u8; 32]));
-    eq("ticketKeyFromBytes zero aesKey", hexOf(tzAes), "58b57970b5267a90f57960924a87f196");
-    eq("ticketKeyFromBytes zero hmacKey", hexOf(tzHmac), "0a6a85eaa642dac835424b5d7c8d637c");
+    eq(
+        "ticketKeyFromBytes zero aesKey",
+        hexOf(tzAes),
+        "58b57970b5267a90f57960924a87f196",
+    );
+    eq(
+        "ticketKeyFromBytes zero hmacKey",
+        hexOf(tzHmac),
+        "0a6a85eaa642dac835424b5d7c8d637c",
+    );
 
     // fips140tls is not required by default, so chains pass through
     // untouched — including an empty list, which does NOT error.
@@ -1840,16 +2577,33 @@ fn main() {
     let (fc0, fe0) = tls::common_fipsAllowedChains(0);
     check_n("fipsAllowedChains passes an empty list through", fc0, 0);
     eq("fipsAllowedChains empty err", fe0, "");
-    check("fipsAllowChain rejects an empty chain", !tls::common_fipsAllowChain(0));
-    check("fipsAllowChain rejects a keyless certificate", !tls::common_fipsAllowChain(1));
+    check(
+        "fipsAllowChain rejects an empty chain",
+        !tls::common_fipsAllowChain(0),
+    );
+    check(
+        "fipsAllowChain rejects a keyless certificate",
+        !tls::common_fipsAllowChain(1),
+    );
 
-    check("defaultConfig is the zero Config", tls::common_defaultConfigIsZero());
+    check(
+        "defaultConfig is the zero Config",
+        tls::common_defaultConfigIsZero(),
+    );
 
     // ─── common.go: the session-ticket key machinery. From goref.sh.
     let (nKeys, aes0, aes1) = tls::common_setSessionTicketKeys();
     check_n("SetSessionTicketKeys count", nKeys, 2);
-    eq("SetSessionTicketKeys first key", hexOf(aes0), "9d6d1440dede12e6a125f1841fff8e6f");
-    eq("SetSessionTicketKeys second key", hexOf(aes1), "d7af5146e44e427c6692245783e5f27a");
+    eq(
+        "SetSessionTicketKeys first key",
+        hexOf(aes0),
+        "9d6d1440dede12e6a125f1841fff8e6f",
+    );
+    eq(
+        "SetSessionTicketKeys second key",
+        hexOf(aes1),
+        "d7af5146e44e427c6692245783e5f27a",
+    );
 
     let (nDis, _, _, _) = tls::common_ticketKeys(0);
     check_n("ticketKeys with tickets disabled is empty", nDis, 0);
@@ -1860,19 +2614,32 @@ fn main() {
     check("ticketKeys auto key is stable across calls", autoStable);
     // The randomised SessionTicketKey gets the DEPRECATED prefix written
     // over it, so it is never usable as an actual ticket key.
-    check("auto SessionTicketKey carries the DEPRECATED prefix", autoDeprecated);
+    check(
+        "auto SessionTicketKey carries the DEPRECATED prefix",
+        autoDeprecated,
+    );
     // A user-set SessionTicketKey seeds sessionTicketKeys instead.
     let (nUser, userAes, _, _) = tls::common_ticketKeys(2);
     check_n("ticketKeys from a user SessionTicketKey", nUser, 1);
-    eq("ticketKeys user key matches ticketKeyFromBytes", hexOf(userAes),
-       "9d6d1440dede12e6a125f1841fff8e6f");
+    eq(
+        "ticketKeys user key matches ticketKeyFromBytes",
+        hexOf(userAes),
+        "9d6d1440dede12e6a125f1841fff8e6f",
+    );
     // A configForClient with explicit keys wins over the server Config.
     let (nCfc, cfcAes, _, _) = tls::common_ticketKeys(3);
     check_n("ticketKeys configForClient wins", nCfc, 1);
-    eq("ticketKeys configForClient key", hexOf(cfcAes),
-       "d7af5146e44e427c6692245783e5f27a");
+    eq(
+        "ticketKeys configForClient key",
+        hexOf(cfcAes),
+        "d7af5146e44e427c6692245783e5f27a",
+    );
     let (nCfcDis, _, _, _) = tls::common_ticketKeys(4);
-    check_n("ticketKeys configForClient disabled short-circuits", nCfcDis, 0);
+    check_n(
+        "ticketKeys configForClient disabled short-circuits",
+        nCfcDis,
+        0,
+    );
 
     let (clName, clMin, clDisabled) = tls::common_configClone();
     eq("Config.Clone ServerName", clName, "example.com");
@@ -1884,34 +2651,67 @@ fn main() {
     //     message is from goref.sh.
     let sc = |w: int, k: bool| tls::common_supportsCertificate(w, k);
     eq("SupportsCertificate TLS 1.3 Ed25519", sc(0, true), "");
-    eq("SupportsCertificate with no mutual version", sc(1, true),
-       "no mutually supported protocol versions");
-    eq("SupportsCertificate TLS 1.3 with no usable scheme", sc(2, true),
-       "tls: peer doesn't support any of the certificate's signature algorithms");
-    eq("SupportsCertificate with no private key", sc(0, false),
-       "tls: certificate private key does not implement crypto.Signer");
+    eq(
+        "SupportsCertificate with no mutual version",
+        sc(1, true),
+        "no mutually supported protocol versions",
+    );
+    eq(
+        "SupportsCertificate TLS 1.3 with no usable scheme",
+        sc(2, true),
+        "tls: peer doesn't support any of the certificate's signature algorithms",
+    );
+    eq(
+        "SupportsCertificate with no private key",
+        sc(0, false),
+        "tls: certificate private key does not implement crypto.Signer",
+    );
     // Below TLS 1.3 the only signed key exchange is ECDHE, so a client
     // that offers no curves falls through to the static-RSA check.
-    eq("SupportsCertificate TLS 1.2 with no curves", sc(3, true),
-       "client doesn't support ECDHE, can only use legacy RSA key exchange");
+    eq(
+        "SupportsCertificate TLS 1.2 with no curves",
+        sc(3, true),
+        "client doesn't support ECDHE, can only use legacy RSA key exchange",
+    );
     eq("SupportsCertificate TLS 1.2 ECDHE-ECDSA", sc(4, true), "");
     // An Ed25519 certificate needs a suiteECSign suite; offering only
     // ECDHE-RSA ones is a mismatch even though ECDHE is available.
-    eq("SupportsCertificate TLS 1.2 with only RSA suites", sc(5, true),
-       "client doesn't support any cipher suites compatible with the certificate");
-    eq("SupportsCertificate TLS 1.2 with an incompatible point format", sc(6, true),
-       "tls: client offered only incompatible point formats");
+    eq(
+        "SupportsCertificate TLS 1.2 with only RSA suites",
+        sc(5, true),
+        "client doesn't support any cipher suites compatible with the certificate",
+    );
+    eq(
+        "SupportsCertificate TLS 1.2 with an incompatible point format",
+        sc(6, true),
+        "tls: client offered only incompatible point formats",
+    );
     // Ed25519 below TLS 1.3 requires signature_algorithms to be present.
-    eq("SupportsCertificate TLS 1.2 Ed25519 without signature_algorithms", sc(7, true),
-       "connection doesn't support Ed25519");
+    eq(
+        "SupportsCertificate TLS 1.2 Ed25519 without signature_algorithms",
+        sc(7, true),
+        "connection doesn't support Ed25519",
+    );
 
-    eq("CertificateRequestInfo.SupportsCertificate", tls::common_criSupportsCertificate(0), "");
-    eq("CertificateRequestInfo without a private key", tls::common_criSupportsCertificate(1),
-       "tls: certificate private key does not implement crypto.Signer");
-    eq("CertificateRequestInfo with unmatched AcceptableCAs",
-       tls::common_criSupportsCertificate(2), "chain is not signed by an acceptable CA");
-    check("ClientHelloInfo/CertificateRequestInfo contexts start nil",
-          tls::common_infoContextsAreNil());
+    eq(
+        "CertificateRequestInfo.SupportsCertificate",
+        tls::common_criSupportsCertificate(0),
+        "",
+    );
+    eq(
+        "CertificateRequestInfo without a private key",
+        tls::common_criSupportsCertificate(1),
+        "tls: certificate private key does not implement crypto.Signer",
+    );
+    eq(
+        "CertificateRequestInfo with unmatched AcceptableCAs",
+        tls::common_criSupportsCertificate(2),
+        "chain is not signed by an acceptable CA",
+    );
+    check(
+        "ClientHelloInfo/CertificateRequestInfo contexts start nil",
+        tls::common_infoContextsAreNil(),
+    );
 
     let se = |c: alloc::vec::Vec<tls::CurveID>, p: alloc::vec::Vec<u8>| {
         return tls::handshake_server_supportsECDHE(slice::__from_vec(c), slice::__from_vec(p));
@@ -1926,8 +2726,11 @@ fn main() {
     check("supportsECDHE with uncompressed", e3);
     let (e4, err4) = se(alloc::vec![tls::X25519], alloc::vec![1u8]);
     check("supportsECDHE with only a compressed format", !e4);
-    eq("supportsECDHE compressed-only error", err4,
-       "tls: client offered only incompatible point formats");
+    eq(
+        "supportsECDHE compressed-only error",
+        err4,
+        "tls: client offered only incompatible point formats",
+    );
     let (e5, _) = se(alloc::vec![tls::X25519], alloc::vec![0u8, 1]);
     check("supportsECDHE with both formats", e5);
 
@@ -1936,9 +2739,12 @@ fn main() {
     //     particular, which is not what it looks like: after reading a,
     //     b, c in that order, c is most-recently-used and a is least, so
     //     inserting d evicts *a*.
-    let (lruTicketA, lruA, lruB, lruC, lruD, lruANil, lruReplaced) =
-        tls::common_lruSessionCache();
-    eq("lruSessionCache Get returns the stored ticket", hexOf(lruTicketA), "0101");
+    let (lruTicketA, lruA, lruB, lruC, lruD, lruANil, lruReplaced) = tls::common_lruSessionCache();
+    eq(
+        "lruSessionCache Get returns the stored ticket",
+        hexOf(lruTicketA),
+        "0101",
+    );
     check("lruSessionCache evicts the least-recently-used key", !lruA);
     check("lruSessionCache keeps b", lruB);
     check("lruSessionCache keeps c", lruC);
@@ -1946,8 +2752,15 @@ fn main() {
     // Go quirk worth pinning: Put(key, nil) for a key that is NOT in the
     // cache still consumes a slot — it reuses the oldest entry and sets
     // its state to nil — so the key reads back as present with no state.
-    check("lruSessionCache Put(absent key, nil) still inserts the key", lruANil);
-    eq("lruSessionCache replaces an existing key in place", hexOf(lruReplaced), "09");
+    check(
+        "lruSessionCache Put(absent key, nil) still inserts the key",
+        lruANil,
+    );
+    eq(
+        "lruSessionCache replaces an existing key in place",
+        hexOf(lruReplaced),
+        "09",
+    );
 
     let (k0, k1, k64) = tls::common_lruDefaultCapacity();
     check("lruSessionCache capacity 0 takes the default of 64", !k0);
@@ -1955,20 +2768,41 @@ fn main() {
     check("lruSessionCache default capacity keeps k64", k64);
 
     let (zeroTicket, zeroState, rsTicket, rsSecret) = tls::ticket_resumptionState();
-    check("ResumptionState on a zero value returns no ticket", zeroTicket);
-    check("ResumptionState on a zero value returns no state", zeroState);
-    eq("NewResumptionState round-trips the ticket", hexOf(rsTicket), "aabb");
-    eq("NewResumptionState round-trips the state", hexOf(rsSecret), "07");
+    check(
+        "ResumptionState on a zero value returns no ticket",
+        zeroTicket,
+    );
+    check(
+        "ResumptionState on a zero value returns no state",
+        zeroState,
+    );
+    eq(
+        "NewResumptionState round-trips the ticket",
+        hexOf(rsTicket),
+        "aabb",
+    );
+    eq(
+        "NewResumptionState round-trips the state",
+        hexOf(rsSecret),
+        "07",
+    );
 
     // ─── common.go: ConnectionState.ExportKeyingMaterial and the last
     //     two Config accessors. From goref.sh.
     eq("ExportKeyingMaterial without EMS", tls::common_exportKeyingMaterial(0),
        "crypto/tls: ExportKeyingMaterial is unavailable when neither TLS 1.3 nor Extended Master Secret are negotiated; override with GODEBUG=tlsunsafeekm=1");
-    eq("ExportKeyingMaterial with renegotiation", tls::common_exportKeyingMaterial(1),
-       "crypto/tls: ExportKeyingMaterial is unavailable when renegotiation is enabled");
+    eq(
+        "ExportKeyingMaterial with renegotiation",
+        tls::common_exportKeyingMaterial(1),
+        "crypto/tls: ExportKeyingMaterial is unavailable when renegotiation is enabled",
+    );
 
     let (gcErr0, _) = tls::common_getCertificate(0);
-    eq("getCertificate with no certificates", gcErr0, "tls: no certificates configured");
+    eq(
+        "getCertificate with no certificates",
+        gcErr0,
+        "tls: no certificates configured",
+    );
     let (gcErr1, gc1) = tls::common_getCertificate(1);
     eq("getCertificate with one certificate err", gcErr1, "");
     eq("getCertificate with one certificate", hexOf(gc1), "01");
@@ -1978,61 +2812,128 @@ fn main() {
     eq("getCertificate falls back to the first", hexOf(gc2), "01");
     // NameToCertificate is keyed on the lower-cased SNI.
     let (_, gc3) = tls::common_getCertificate(3);
-    eq("getCertificate matches NameToCertificate case-insensitively", hexOf(gc3), "02");
+    eq(
+        "getCertificate matches NameToCertificate case-insensitively",
+        hexOf(gc3),
+        "02",
+    );
     // A miss on the exact name retries with the first label replaced by "*".
     let (_, gc4) = tls::common_getCertificate(4);
     eq("getCertificate matches a wildcard entry", hexOf(gc4), "02");
 
-    eq("keyLogLine format", tls::common_keyLogLine(), "CLIENT_RANDOM 0102 0304\n");
-    check("writeKeyLog with no writer returns nil", tls::common_writeKeyLogIsNil());
+    eq(
+        "keyLogLine format",
+        tls::common_keyLogLine(),
+        "CLIENT_RANDOM 0102 0304\n",
+    );
+    check(
+        "writeKeyLog with no writer returns nil",
+        tls::common_writeKeyLogIsNil(),
+    );
 
     // ─── conn.go: the record codec. This is the whole TLS 1.3 record
     //     protection path — seal, advance the sequence number, open,
     //     reject a tampered record, and pass a change_cipher_spec
     //     through undecrypted. Ciphertexts from goref.sh.
-    let (rec1, pt1, rec2, pt2, tampered, ccsType, ccsPayload) =
-        tls::conn_recordRoundTrip();
-    eq("halfConn.encrypt TLS 1.3 record 1", hexOf(rec1),
-       "17030300233fac4db4987147c7d7da22f39a92720e7cd5cd6627abd8dc74ea0ebc828f8e67722620");
-    eq("halfConn.decrypt TLS 1.3 record 1", pt1, "hello record layer");
+    let (rec1, pt1, rec2, pt2, tampered, ccsType, ccsPayload) = tls::conn_recordRoundTrip();
+    eq(
+        "halfConn.encrypt TLS 1.3 record 1",
+        hexOf(rec1),
+        "17030300233fac4db4987147c7d7da22f39a92720e7cd5cd6627abd8dc74ea0ebc828f8e67722620",
+    );
+    eq(
+        "halfConn.decrypt TLS 1.3 record 1",
+        pt1,
+        "hello record layer",
+    );
     // The second record differs only because the sequence number moved:
     // the nonce is the XOR of the write IV with the record counter.
-    eq("halfConn.encrypt TLS 1.3 record 2", hexOf(rec2),
-       "1703030023df2eeae304afa5d126fb24d5992db74d0b204947c12504dc92d11445c723e092d21715");
-    eq("halfConn.decrypt TLS 1.3 record 2", pt2, "hello record layer");
-    eq("halfConn.decrypt rejects a tampered record", tampered, "tls: bad record MAC");
+    eq(
+        "halfConn.encrypt TLS 1.3 record 2",
+        hexOf(rec2),
+        "1703030023df2eeae304afa5d126fb24d5992db74d0b204947c12504dc92d11445c723e092d21715",
+    );
+    eq(
+        "halfConn.decrypt TLS 1.3 record 2",
+        pt2,
+        "hello record layer",
+    );
+    eq(
+        "halfConn.decrypt rejects a tampered record",
+        tampered,
+        "tls: bad record MAC",
+    );
     // RFC 8446 Appendix D.4: at TLS 1.3 a change_cipher_spec is ignored
     // without being decrypted, so it survives an active read key.
-    check_n("halfConn.decrypt passes change_cipher_spec through", ccsType, 20);
+    check_n(
+        "halfConn.decrypt passes change_cipher_spec through",
+        ccsType,
+        20,
+    );
     eq("change_cipher_spec payload", hexOf(ccsPayload), "01");
 
     let (plainRec, plainPT, plainType) = tls::conn_recordPlaintext();
-    eq("halfConn.encrypt with no cipher appends", hexOf(plainRec),
-       "160303000068656c6c6f207265636f7264206c61796572");
-    eq("halfConn.decrypt with no cipher passes through", plainPT, "hello record layer");
-    check_n("halfConn.decrypt with no cipher keeps the type", plainType, 22);
+    eq(
+        "halfConn.encrypt with no cipher appends",
+        hexOf(plainRec),
+        "160303000068656c6c6f207265636f7264206c61796572",
+    );
+    eq(
+        "halfConn.decrypt with no cipher passes through",
+        plainPT,
+        "hello record layer",
+    );
+    check_n(
+        "halfConn.decrypt with no cipher keeps the type",
+        plainType,
+        22,
+    );
 
     // ─── ticket.go: session ticket sealing. AES-CTR under the first
     //     ticket key with an HMAC-SHA256 tag over IV||ciphertext, and a
     //     scan over every key on the way back. From goref.sh.
-    let (tkLen, tkV, tkSuite, tkCreated, tkSecret, tkTampered, tkShort, tkWrongKey,
-         tkRotated, tkNoKeys) = tls::ticket_sealRoundTrip();
+    let (
+        tkLen,
+        tkV,
+        tkSuite,
+        tkCreated,
+        tkSecret,
+        tkTampered,
+        tkShort,
+        tkWrongKey,
+        tkRotated,
+        tkNoKeys,
+    ) = tls::ticket_sealRoundTrip();
     // 16-byte IV + 30-byte state + 32-byte MAC.
     check_n("EncryptTicket length", tkLen, 77);
     check_n("DecryptTicket round-trips the version", tkV, 0x0304);
-    check_n("DecryptTicket round-trips the cipher suite", tkSuite, 0x1301);
+    check_n(
+        "DecryptTicket round-trips the cipher suite",
+        tkSuite,
+        0x1301,
+    );
     check("DecryptTicket round-trips createdAt", tkCreated == 7u64);
-    eq("DecryptTicket round-trips the secret", hexOf(tkSecret), "01020304");
+    eq(
+        "DecryptTicket round-trips the secret",
+        hexOf(tkSecret),
+        "01020304",
+    );
     // Every rejection is silent — Go returns (nil, nil), never an error,
     // so a bad ticket falls back to a full handshake instead of failing.
     check("DecryptTicket drops a tampered ticket", tkTampered);
     check("DecryptTicket drops a short ticket", tkShort);
-    check("DecryptTicket drops a ticket sealed under another key", tkWrongKey);
+    check(
+        "DecryptTicket drops a ticket sealed under another key",
+        tkWrongKey,
+    );
     // A rotated key set still opens tickets sealed under an older key,
     // because decryptTicket scans all of them.
     check("DecryptTicket accepts a rotated key set", tkRotated);
-    eq("encryptTicket with no keys", tkNoKeys,
-       "tls: internal error: session ticket keys unavailable");
+    eq(
+        "encryptTicket with no keys",
+        tkNoKeys,
+        "tls: internal error: session ticket keys unavailable",
+    );
 
     // ─── ech.go: inner-hello reconstruction. The inner hello is sent
     //     with its shared extensions replaced by an ech_outer_extensions
@@ -2041,42 +2942,85 @@ fn main() {
     let (echEncLen, echSNI, echSID, echCurve, echVers, echShortErr, echPadErr) =
         tls::ech_decodeInnerRoundTrip();
     check_n("encodeInnerClientHello length", echEncLen, 109);
-    eq("decodeInnerClientHello recovers the inner SNI", echSNI, "inner.example");
+    eq(
+        "decodeInnerClientHello recovers the inner SNI",
+        echSNI,
+        "inner.example",
+    );
     // The session id comes from the OUTER hello — the inner one sends it
     // empty, which is what makes ECH's two hellos share a session.
-    eq("decodeInnerClientHello takes the outer session id", hexOf(echSID), "090909");
+    eq(
+        "decodeInnerClientHello takes the outer session id",
+        hexOf(echSID),
+        "090909",
+    );
     // supported_groups and supported_versions were compressed out of the
     // inner hello and spliced back from the outer one.
-    check_n("decodeInnerClientHello splices supported_groups back", echCurve, 29);
-    check_n("decodeInnerClientHello splices supported_versions back", echVers, 0x0304);
-    eq("decodeInnerClientHello rejects a short input", echShortErr,
-       "tls: invalid inner client hello");
+    check_n(
+        "decodeInnerClientHello splices supported_groups back",
+        echCurve,
+        29,
+    );
+    check_n(
+        "decodeInnerClientHello splices supported_versions back",
+        echVers,
+        0x0304,
+    );
+    eq(
+        "decodeInnerClientHello rejects a short input",
+        echShortErr,
+        "tls: invalid inner client hello",
+    );
     // draft-ietf-tls-esni: the trailing padding must be all zeros, which
     // is unusual for TLS — trailing garbage is normally ignored.
-    eq("decodeInnerClientHello rejects nonzero padding", echPadErr,
-       "tls: invalid inner client hello");
+    eq(
+        "decodeInnerClientHello rejects nonzero padding",
+        echPadErr,
+        "tls: invalid inner client hello",
+    );
 
-    check_n("buildRetryConfigList with no retry keys is empty",
-            tls::ech_buildRetryConfigList(0).Len(), 0);
-    eq("buildRetryConfigList emits only the SendAsRetry keys",
-       hexOf(tls::ech_buildRetryConfigList(1)), "0003030405");
+    check_n(
+        "buildRetryConfigList with no retry keys is empty",
+        tls::ech_buildRetryConfigList(0).Len(),
+        0,
+    );
+    eq(
+        "buildRetryConfigList emits only the SendAsRetry keys",
+        hexOf(tls::ech_buildRetryConfigList(1)),
+        "0003030405",
+    );
 
     // ─── conn.go: Go's Conn record and the methods that read it without
     //     driving the handshake. Nothing here is reachable from goish's
     //     own client yet — tls::Conn is still the hand-written wrapper —
     //     so this is the shape it has to become. From goref.sh.
-    eq("VerifyHostname on a server connection", tls::conn_verifyHostname(0),
-       "tls: VerifyHostname called on TLS server connection");
-    eq("VerifyHostname before the handshake", tls::conn_verifyHostname(1),
-       "tls: handshake has not yet been performed");
-    eq("VerifyHostname without a verified chain", tls::conn_verifyHostname(2),
-       "tls: handshake did not verify certificate chain");
+    eq(
+        "VerifyHostname on a server connection",
+        tls::conn_verifyHostname(0),
+        "tls: VerifyHostname called on TLS server connection",
+    );
+    eq(
+        "VerifyHostname before the handshake",
+        tls::conn_verifyHostname(1),
+        "tls: handshake has not yet been performed",
+    );
+    eq(
+        "VerifyHostname without a verified chain",
+        tls::conn_verifyHostname(2),
+        "tls: handshake did not verify certificate chain",
+    );
 
     // A handshake record is never dynamically sized.
-    check_n("maxPayloadSizeForWrite for a handshake record",
-            tls::conn_maxPayloadSizeForWrite(0)[0], 16384);
-    check_n("maxPayloadSizeForWrite with dynamic sizing disabled",
-            tls::conn_maxPayloadSizeForWrite(1)[0], 16384);
+    check_n(
+        "maxPayloadSizeForWrite for a handshake record",
+        tls::conn_maxPayloadSizeForWrite(0)[0],
+        16384,
+    );
+    check_n(
+        "maxPayloadSizeForWrite with dynamic sizing disabled",
+        tls::conn_maxPayloadSizeForWrite(1)[0],
+        16384,
+    );
     // Application records grow in arithmetic progression from one TCP
     // segment, so early writes fit in one packet and latency stays low.
     let mp = tls::conn_maxPayloadSizeForWrite(2);
@@ -2090,11 +3034,25 @@ fn main() {
     check_n("maxPayloadSizeForWrite AEAD packet 1", mp13[0], 1186);
     check_n("maxPayloadSizeForWrite AEAD packet 2", mp13[1], 2372);
     check_n("maxPayloadSizeForWrite AEAD packet 3", mp13[2], 3558);
-    check_n("maxPayloadSizeForWrite past the boost threshold",
-            tls::conn_maxPayloadSizeForWrite(4)[0], 16384);
+    check_n(
+        "maxPayloadSizeForWrite past the boost threshold",
+        tls::conn_maxPayloadSizeForWrite(4)[0],
+        16384,
+    );
 
-    let (csComplete, csVers, csSuite, csSNI, csALPN, csMutual, csCurve, csUnique,
-         csEkmErr, csUnique13Empty, csRenegErr) = tls::conn_connectionState();
+    let (
+        csComplete,
+        csVers,
+        csSuite,
+        csSNI,
+        csALPN,
+        csMutual,
+        csCurve,
+        csUnique,
+        csEkmErr,
+        csUnique13Empty,
+        csRenegErr,
+    ) = tls::conn_connectionState();
     check("ConnectionState HandshakeComplete", csComplete);
     check_n("ConnectionState Version", csVers, 0x0303);
     check_n("ConnectionState CipherSuite", csSuite, 0xc02f);
@@ -2104,35 +3062,64 @@ fn main() {
     check("ConnectionState NegotiatedProtocolIsMutual", csMutual);
     check_n("ConnectionState CurveID", csCurve, 29);
     // tls-unique is the client Finished when the client went first.
-    eq("ConnectionState TLSUnique", hexOf(csUnique), "010203000000000000000000");
+    eq(
+        "ConnectionState TLSUnique",
+        hexOf(csUnique),
+        "010203000000000000000000",
+    );
     // Below TLS 1.3 without EMS the exporter refuses.
     eq("ConnectionState exporter without EMS", csEkmErr,
        "crypto/tls: ExportKeyingMaterial is unavailable when neither TLS 1.3 nor Extended Master Secret are negotiated; override with GODEBUG=tlsunsafeekm=1");
     // RFC 5929 tls-unique does not exist at TLS 1.3.
-    check("ConnectionState has no TLSUnique at TLS 1.3", csUnique13Empty);
+    check(
+        "ConnectionState has no TLSUnique at TLS 1.3",
+        csUnique13Empty,
+    );
     // Renegotiation disables the exporter outright, even at TLS 1.3.
-    eq("ConnectionState exporter with renegotiation enabled", csRenegErr,
-       "crypto/tls: ExportKeyingMaterial is unavailable when renegotiation is enabled");
+    eq(
+        "ConnectionState exporter with renegotiation enabled",
+        csRenegErr,
+        "crypto/tls: ExportKeyingMaterial is unavailable when renegotiation is enabled",
+    );
 
     let (rheMsg, rheHeader) = tls::conn_newRecordHeaderError();
     eq("newRecordHeaderError message", rheMsg, "tls: boom");
-    eq("newRecordHeaderError captures the record header", hexOf(rheHeader), "1603010005");
+    eq(
+        "newRecordHeaderError captures the record header",
+        hexOf(rheHeader),
+        "1603010005",
+    );
 
     // ─── conn.go: the record write path. Wire bytes from goref.sh.
     let (wr0, _, _, _) = tls::conn_writeRecord(0);
     // With no negotiated version yet the record header says TLS 1.0 —
     // some servers reject a higher version on the initial ClientHello.
-    eq("writeRecordLocked with no version yet", hexOf(wr0), "1603010003010203");
+    eq(
+        "writeRecordLocked with no version yet",
+        hexOf(wr0),
+        "1603010003010203",
+    );
     let (wr1, _, _, _) = tls::conn_writeRecord(1);
     // RFC 8446 §5.1 freezes the record-layer version at 1.2 for TLS 1.3.
-    eq("writeRecordLocked freezes TLS 1.3 records at 0x0303", hexOf(wr1),
-       "16030300020405");
+    eq(
+        "writeRecordLocked freezes TLS 1.3 records at 0x0303",
+        hexOf(wr1),
+        "16030300020405",
+    );
     let (wr2, _, _, _) = tls::conn_writeRecord(2);
     eq("writeRecordLocked at TLS 1.2", hexOf(wr2), "160303000106");
     let (wr3, beforeFlush, flushed, stillBuffering) = tls::conn_writeRecord(3);
-    check_n("writeRecordLocked while buffering writes nothing", beforeFlush, 0);
+    check_n(
+        "writeRecordLocked while buffering writes nothing",
+        beforeFlush,
+        0,
+    );
     check_n("flush writes the buffered record", flushed, 6);
-    eq("flush emits the buffered record", hexOf(wr3), "160301000107");
+    eq(
+        "flush emits the buffered record",
+        hexOf(wr3),
+        "160301000107",
+    );
     check("flush clears the buffering flag", !stillBuffering);
 
     // close_notify is level warning (0x01) and is NOT an error;
@@ -2142,41 +3129,79 @@ fn main() {
     eq("sendAlert close_notify wire", hexOf(aw0), "15030300020100");
     let (al1, aw1) = tls::conn_sendAlert(1);
     eq("sendAlert bad_record_mac err", al1, "tls: bad record MAC");
-    eq("sendAlert bad_record_mac wire", hexOf(aw1), "15030300020214");
+    eq(
+        "sendAlert bad_record_mac wire",
+        hexOf(aw1),
+        "15030300020214",
+    );
     let (al2, aw2) = tls::conn_sendAlert(2);
-    eq("sendAlert no_renegotiation err", al2, "tls: no renegotiation");
+    eq(
+        "sendAlert no_renegotiation err",
+        al2,
+        "tls: no renegotiation",
+    );
     // no_renegotiation is a warning on the wire but still an error to
     // the caller — the level byte and the return value disagree.
-    eq("sendAlert no_renegotiation wire", hexOf(aw2), "15030300020164");
+    eq(
+        "sendAlert no_renegotiation wire",
+        hexOf(aw2),
+        "15030300020164",
+    );
     let (al3, aw3) = tls::conn_sendAlert(3);
-    eq("writeChangeCipherRecord without a next cipher", al3, "tls: internal error");
+    eq(
+        "writeChangeCipherRecord without a next cipher",
+        al3,
+        "tls: internal error",
+    );
     // The CCS record still goes out; the internal-error alert follows it.
-    eq("writeChangeCipherRecord wire", hexOf(aw3),
-       "14030300010115030300020250");
+    eq(
+        "writeChangeCipherRecord wire",
+        hexOf(aw3),
+        "14030300010115030300020250",
+    );
 
     // ─── conn.go: the record read path. Every message from goref.sh.
     let rr = |w: int| tls::conn_readRecord(w);
     let (rd0, hand0, _) = rr(0);
     eq("readRecord handshake err", rd0, "");
-    eq("readRecord buffers the handshake body", hexOf(hand0), "010203");
+    eq(
+        "readRecord buffers the handshake body",
+        hexOf(hand0),
+        "010203",
+    );
     // A first byte of 0x80 is an SSLv2 ClientHello, not a TLS record.
     let (rd1, _, _) = rr(1);
-    eq("readRecord detects an SSLv2 handshake", rd1,
-       "tls: unsupported SSLv2 handshake received");
+    eq(
+        "readRecord detects an SSLv2 handshake",
+        rd1,
+        "tls: unsupported SSLv2 handshake received",
+    );
     // Before a version is negotiated, only alert and handshake records
     // are plausible, and a version >= 16.0 is not real.
     let (rd2, _, _) = rr(2);
-    eq("readRecord rejects a non-handshake first record", rd2,
-       "tls: first record does not look like a TLS handshake");
+    eq(
+        "readRecord rejects a non-handshake first record",
+        rd2,
+        "tls: first record does not look like a TLS handshake",
+    );
     let (rd3, _, _) = rr(3);
-    eq("readRecord rejects an absurd first version", rd3,
-       "tls: first record does not look like a TLS handshake");
+    eq(
+        "readRecord rejects an absurd first version",
+        rd3,
+        "tls: first record does not look like a TLS handshake",
+    );
     let (rd4, _, _) = rr(4);
-    eq("readRecord rejects a version mismatch once negotiated", rd4,
-       "tls: received record with version 301 when expecting version 303");
+    eq(
+        "readRecord rejects a version mismatch once negotiated",
+        rd4,
+        "tls: received record with version 301 when expecting version 303",
+    );
     let (rd5, _, _) = rr(5);
-    eq("readRecord rejects an oversized record", rd5,
-       "tls: oversized record received with length 65535");
+    eq(
+        "readRecord rejects an oversized record",
+        rd5,
+        "tls: oversized record received with length 65535",
+    );
     // close_notify is reported as EOF, not as an alert.
     let (rd6, _, _) = rr(6);
     eq("readRecord maps close_notify to EOF", rd6, "EOF");
@@ -2184,18 +3209,28 @@ fn main() {
     // "remote error: " first; goish has no OpError and stores the alert
     // itself, so the prefix is absent and the alert text is identical.
     let (rd7, _, _) = rr(7);
-    eq("readRecord surfaces a fatal alert", rd7, "tls: handshake failure");
+    eq(
+        "readRecord surfaces a fatal alert",
+        rd7,
+        "tls: handshake failure",
+    );
     // A warning alert is dropped and the read retried — here nothing
     // follows, so the retry hits EOF with the counter at 1.
     let (rd8, _, retry8) = rr(8);
     eq("readRecord drops a warning alert and retries", rd8, "EOF");
     check_n("readRecord counted the ignored record", retry8, 1);
     let (rd9, _, _) = rr(9);
-    eq("readRecord rejects an unexpected change_cipher_spec", rd9,
-       "tls: received record with version 301 when expecting version 303");
+    eq(
+        "readRecord rejects an unexpected change_cipher_spec",
+        rd9,
+        "tls: received record with version 301 when expecting version 303",
+    );
     let (rd11, _, _) = rr(11);
-    eq("readRecord rejects application data before the handshake", rd11,
-       "tls: received record with version 301 when expecting version 303");
+    eq(
+        "readRecord rejects application data before the handshake",
+        rd11,
+        "tls: received record with version 301 when expecting version 303",
+    );
     let (rd12, _, _) = rr(12);
     eq("readRecord on an empty stream", rd12, "EOF");
 
@@ -2203,47 +3238,102 @@ fn main() {
     //     Dialer.netDialer. From goref.sh.
     let (cwEarly, cwErr, cwWire, cwGrew, hb3Err, hb3, hbShortErr, hbShort) =
         tls::conn_closeAndHandshakeBytes();
-    eq("CloseWrite before the handshake", cwEarly,
-       "tls: CloseWrite called before handshake complete");
+    eq(
+        "CloseWrite before the handshake",
+        cwEarly,
+        "tls: CloseWrite called before handshake complete",
+    );
     eq("CloseWrite after the handshake err", cwErr, "");
-    eq("CloseWrite sends close_notify", hexOf(cwWire), "15030300020100");
+    eq(
+        "CloseWrite sends close_notify",
+        hexOf(cwWire),
+        "15030300020100",
+    );
     // closeNotifySent makes the second call a no-op — a second alert on
     // the wire would be a protocol error.
     check("CloseWrite is idempotent", !cwGrew);
     // readHandshakeBytes keeps pulling records until it has enough, so
     // one handshake message can span two records.
     eq("readHandshakeBytes across two records err", hb3Err, "");
-    eq("readHandshakeBytes across two records", hexOf(hb3), "01020304");
+    eq(
+        "readHandshakeBytes across two records",
+        hexOf(hb3),
+        "01020304",
+    );
     // Short of the requested count it surfaces the read error, keeping
     // whatever it managed to buffer.
-    eq("readHandshakeBytes on a truncated stream", hbShortErr, "EOF");
-    eq("readHandshakeBytes keeps the partial buffer", hexOf(hbShort), "0102");
+    eq(
+        "readHandshakeBytes on a truncated stream",
+        hbShortErr,
+        "EOF",
+    );
+    eq(
+        "readHandshakeBytes keeps the partial buffer",
+        hexOf(hbShort),
+        "0102",
+    );
 
     let (ndDefault, ndExplicit) = tls::tls_dialerNetDialer();
-    check("Dialer.netDialer defaults to a zero net::Dialer", ndDefault == 0i64);
-    check("Dialer.netDialer returns the configured one",
-          ndExplicit == 5_000_000_000i64);
+    check(
+        "Dialer.netDialer defaults to a zero net::Dialer",
+        ndDefault == 0i64,
+    );
+    check(
+        "Dialer.netDialer returns the configured one",
+        ndExplicit == 5_000_000_000i64,
+    );
 
     // ─── handshake_client.go / handshake_server.go: SNI and ALPN. From
     //     goref.sh.
     let sni = |h: &'static str| tls::handshake_client_hostnameInSNI(string::from_static(h));
-    eq("hostnameInSNI passes a hostname through", sni("example.com"), "example.com");
+    eq(
+        "hostnameInSNI passes a hostname through",
+        sni("example.com"),
+        "example.com",
+    );
     // RFC 6066 §3: an absolute FQDN is not a valid SNI value, so the
     // trailing dots are stripped — all of them.
-    eq("hostnameInSNI strips a trailing dot", sni("example.com."), "example.com");
-    eq("hostnameInSNI strips repeated trailing dots", sni("example.com.."), "example.com");
+    eq(
+        "hostnameInSNI strips a trailing dot",
+        sni("example.com."),
+        "example.com",
+    );
+    eq(
+        "hostnameInSNI strips repeated trailing dots",
+        sni("example.com.."),
+        "example.com",
+    );
     // Literal IP addresses are not permitted either.
-    eq("hostnameInSNI rejects an IPv4 literal", sni("127.0.0.1"), "");
+    eq(
+        "hostnameInSNI rejects an IPv4 literal",
+        sni("127.0.0.1"),
+        "",
+    );
     // KNOWN GAP, asserted so it cannot drift silently: goish's
     // net::ParseIP is IPv4-only, so IPv6 literals are not recognised as
     // addresses and come back as hostnames. Go returns "" for all three.
     // See the note on hostnameInSNI in handshake_client.rs.
-    eq("hostnameInSNI IPv6 literal — goish gap", sni("[::1]"), "[::1]");
-    eq("hostnameInSNI zoned IPv6 literal — goish gap", sni("[fe80::1%eth0]"),
-       "[fe80::1%eth0]");
-    eq("hostnameInSNI bare IPv6 literal — goish gap", sni("::1"), "::1");
+    eq(
+        "hostnameInSNI IPv6 literal — goish gap",
+        sni("[::1]"),
+        "[::1]",
+    );
+    eq(
+        "hostnameInSNI zoned IPv6 literal — goish gap",
+        sni("[fe80::1%eth0]"),
+        "[fe80::1%eth0]",
+    );
+    eq(
+        "hostnameInSNI bare IPv6 literal — goish gap",
+        sni("::1"),
+        "::1",
+    );
     // Something that merely looks numeric is not an IP and survives.
-    eq("hostnameInSNI keeps a non-IP dotted name", sni("1.2.3.4.5"), "1.2.3.4.5");
+    eq(
+        "hostnameInSNI keeps a non-IP dotted name",
+        sni("1.2.3.4.5"),
+        "1.2.3.4.5",
+    );
 
     let (ks1, ok1) = tls::handshake_client_checkKeySize(4096);
     check_n("checkKeySize limit", ks1, 8192);
@@ -2253,34 +3343,58 @@ fn main() {
 
     let ca = |c: alloc::vec::Vec<&'static str>, sp: &'static str, q: bool| {
         let v: alloc::vec::Vec<string> = c.into_iter().map(string::from_static).collect();
-        return tls::handshake_client_checkALPN(
-            slice::__from_vec(v), string::from_static(sp), q);
+        return tls::handshake_client_checkALPN(slice::__from_vec(v), string::from_static(sp), q);
     };
-    eq("checkALPN with no protocols either side", ca(alloc::vec![], "", false), "");
+    eq(
+        "checkALPN with no protocols either side",
+        ca(alloc::vec![], "", false),
+        "",
+    );
     // RFC 9001 §8.1: over QUIC the server must select a protocol.
-    eq("checkALPN QUIC without a selection", ca(alloc::vec!["h2"], "", true),
-       "tls: server did not select an ALPN protocol");
-    eq("checkALPN unrequested extension", ca(alloc::vec![], "h2", false),
-       "tls: server advertised unrequested ALPN extension");
-    eq("checkALPN accepts an offered protocol",
-       ca(alloc::vec!["h2", "http/1.1"], "h2", false), "");
-    eq("checkALPN rejects an unadvertised protocol",
-       ca(alloc::vec!["http/1.1"], "h2", false),
-       "tls: server selected unadvertised ALPN protocol");
+    eq(
+        "checkALPN QUIC without a selection",
+        ca(alloc::vec!["h2"], "", true),
+        "tls: server did not select an ALPN protocol",
+    );
+    eq(
+        "checkALPN unrequested extension",
+        ca(alloc::vec![], "h2", false),
+        "tls: server advertised unrequested ALPN extension",
+    );
+    eq(
+        "checkALPN accepts an offered protocol",
+        ca(alloc::vec!["h2", "http/1.1"], "h2", false),
+        "",
+    );
+    eq(
+        "checkALPN rejects an unadvertised protocol",
+        ca(alloc::vec!["http/1.1"], "h2", false),
+        "tls: server selected unadvertised ALPN protocol",
+    );
 
     let na = |sp: alloc::vec::Vec<&'static str>, c: alloc::vec::Vec<&'static str>, q: bool| {
         let sv: alloc::vec::Vec<string> = sp.into_iter().map(string::from_static).collect();
         let cv: alloc::vec::Vec<string> = c.into_iter().map(string::from_static).collect();
         return tls::handshake_server_negotiateALPN(
-            slice::__from_vec(sv), slice::__from_vec(cv), q);
+            slice::__from_vec(sv),
+            slice::__from_vec(cv),
+            q,
+        );
     };
     let (np0, ne0) = na(alloc::vec![], alloc::vec![], false);
     eq("negotiateALPN with neither side offering", np0, "");
     eq("negotiateALPN with neither side offering err", ne0, "");
     let (_, ne1) = na(alloc::vec!["h2"], alloc::vec![], true);
-    eq("negotiateALPN QUIC with no client protocols", ne1,
-       "tls: client did not request an application protocol");
-    let (np2, _) = na(alloc::vec!["h2", "http/1.1"], alloc::vec!["http/1.1"], false);
+    eq(
+        "negotiateALPN QUIC with no client protocols",
+        ne1,
+        "tls: client did not request an application protocol",
+    );
+    let (np2, _) = na(
+        alloc::vec!["h2", "http/1.1"],
+        alloc::vec!["http/1.1"],
+        false,
+    );
     // Server preference order wins, not the client's.
     eq("negotiateALPN picks in server order", np2, "http/1.1");
     // Go issue 46310: an http/1.1 client against an h2-only server is
@@ -2289,15 +3403,20 @@ fn main() {
     eq("negotiateALPN http/1.1 fallback selects nothing", np3, "");
     eq("negotiateALPN http/1.1 fallback is not an error", ne3, "");
     let (_, ne4) = na(alloc::vec!["h2"], alloc::vec!["spdy"], false);
-    eq("negotiateALPN with no overlap", ne4,
-       "tls: client requested unsupported application protocols ([\"spdy\"])");
+    eq(
+        "negotiateALPN with no overlap",
+        ne4,
+        "tls: client requested unsupported application protocols ([\"spdy\"])",
+    );
 
     // ─── handshake_client.go: certificateRequestInfoFromMsg. From
     //     goref.sh.
     let schemes = |v: slice<tls::SignatureScheme>| -> string {
         let mut out = alloc::string::String::new();
         for (i, s2) in goish::range!(v) {
-            if i > 0 { out.push(' '); }
+            if i > 0 {
+                out.push(' ');
+            }
             out.push_str(core::str::from_utf8(s2.String().as_bytes()).unwrap_or("?"));
         }
         return string::from_bytes(out.as_bytes());
@@ -2312,11 +3431,17 @@ fn main() {
     // the hash half of each name is a lie, since 1.0/1.1 always use
     // MD5+SHA1 for RSA and SHA1 for ECDSA.
     let (_, _, s1) = cri(1);
-    eq("RSA certificate type invents the PKCS#1 list", schemes(s1),
-       "PKCS1WithSHA256 PKCS1WithSHA384 PKCS1WithSHA512 PKCS1WithSHA1");
+    eq(
+        "RSA certificate type invents the PKCS#1 list",
+        schemes(s1),
+        "PKCS1WithSHA256 PKCS1WithSHA384 PKCS1WithSHA512 PKCS1WithSHA1",
+    );
     let (_, _, s2) = cri(2);
-    eq("ECDSA certificate type invents the ECDSA list", schemes(s2),
-       "ECDSAWithP256AndSHA256 ECDSAWithP384AndSHA384 ECDSAWithP521AndSHA512");
+    eq(
+        "ECDSA certificate type invents the ECDSA list",
+        schemes(s2),
+        "ECDSAWithP256AndSHA256 ECDSAWithP384AndSHA384 ECDSAWithP521AndSHA512",
+    );
     let (_, _, s3) = cri(3);
     eq("both certificate types put ECDSA first", schemes(s3),
        "ECDSAWithP256AndSHA256 ECDSAWithP384AndSHA384 ECDSAWithP521AndSHA512 PKCS1WithSHA256 PKCS1WithSHA384 PKCS1WithSHA512 PKCS1WithSHA1");
@@ -2324,37 +3449,68 @@ fn main() {
     // certificate type instead — RFC 5246 §7.4.4, which Go's own comment
     // calls "somewhat complicated". Ed25519 counts as an EC type.
     let (_, _, s5) = cri(5);
-    eq("RSA-only filters to the RSA schemes", schemes(s5),
-       "PSSWithSHA256 PKCS1WithSHA1");
+    eq(
+        "RSA-only filters to the RSA schemes",
+        schemes(s5),
+        "PSSWithSHA256 PKCS1WithSHA1",
+    );
     let (_, _, s6) = cri(6);
-    eq("ECDSA-only filters to the EC schemes, Ed25519 included", schemes(s6),
-       "ECDSAWithP256AndSHA256 Ed25519");
+    eq(
+        "ECDSA-only filters to the EC schemes, Ed25519 included",
+        schemes(s6),
+        "ECDSAWithP256AndSHA256 Ed25519",
+    );
     let (_, ca7, s7) = cri(7);
-    check_n("certificateRequestInfoFromMsg carries AcceptableCAs", ca7, 1);
+    check_n(
+        "certificateRequestInfoFromMsg carries AcceptableCAs",
+        ca7,
+        1,
+    );
     // The unknown scheme 0x9999 is dropped, not passed through.
-    eq("both types keep everything typeAndHash recognises", schemes(s7),
-       "PSSWithSHA256 ECDSAWithP256AndSHA256 Ed25519 PKCS1WithSHA1");
+    eq(
+        "both types keep everything typeAndHash recognises",
+        schemes(s7),
+        "PSSWithSHA256 ECDSAWithP256AndSHA256 Ed25519 PKCS1WithSHA1",
+    );
 
     // ─── handshake_server_tls13.go: the HelloRetryRequest change check
     //     and the two state predicates. From goref.sh.
     let ic = |w: int| tls::handshake_server_tls13_illegalChange(w);
-    check("illegalClientHelloChange accepts an identical hello", !ic(0));
+    check(
+        "illegalClientHelloChange accepts an identical hello",
+        !ic(0),
+    );
     // RFC 8446 §4.1.2 lets the second ClientHello change exactly these:
     // the key shares, early data, and the PSK identities. Everything
     // else must be byte-identical.
     check("illegalClientHelloChange permits new key shares", !ic(1));
     check("illegalClientHelloChange permits early_data", !ic(2));
-    check("illegalClientHelloChange permits new PSK identities", !ic(3));
-    check("illegalClientHelloChange rejects a changed server name", ic(4));
-    check("illegalClientHelloChange rejects changed cipher suites", ic(5));
-    check("illegalClientHelloChange rejects an added cipher suite", ic(6));
+    check(
+        "illegalClientHelloChange permits new PSK identities",
+        !ic(3),
+    );
+    check(
+        "illegalClientHelloChange rejects a changed server name",
+        ic(4),
+    );
+    check(
+        "illegalClientHelloChange rejects changed cipher suites",
+        ic(5),
+    );
+    check(
+        "illegalClientHelloChange rejects an added cipher suite",
+        ic(6),
+    );
     check("illegalClientHelloChange rejects a changed random", ic(7));
     check("illegalClientHelloChange rejects a changed cookie", ic(8));
     check("illegalClientHelloChange rejects changed ALPN", ic(9));
 
     let (st0, st1, st2, rc0, rc1, rc2) = tls::handshake_server_tls13_stateFlags();
     check("shouldSendSessionTickets by default", st0);
-    check("shouldSendSessionTickets honours SessionTicketsDisabled", !st1);
+    check(
+        "shouldSendSessionTickets honours SessionTicketsDisabled",
+        !st1,
+    );
     // RFC 8446 §4.2.9: don't send a ticket the client could not use.
     check("shouldSendSessionTickets needs psk_dhe_ke", !st2);
     check("requestClientCert is off by default", !rc0);
@@ -2369,10 +3525,16 @@ fn main() {
     //     and unmarshals it into a fresh one. From goref.sh.
     let (chOK, chOrig, chClone, chCross) = tls::handshake_server_tls13_cloneHash();
     check("cloneHash forks a SHA-256 transcript", chOK);
-    eq("cloneHash original continues independently", hexOf(chOrig),
-       "2c3481a1dc99aea7952f8431bc1df79d5d8b26f92499a0459d8d8a614f31231a");
-    eq("cloneHash clone continues independently", hexOf(chClone),
-       "0314f19141319de98f41525b12b579fa7110bc5481850826d2260cfc4a84550a");
+    eq(
+        "cloneHash original continues independently",
+        hexOf(chOrig),
+        "2c3481a1dc99aea7952f8431bc1df79d5d8b26f92499a0459d8d8a614f31231a",
+    );
+    eq(
+        "cloneHash clone continues independently",
+        hexOf(chClone),
+        "0314f19141319de98f41525b12b579fa7110bc5481850826d2260cfc4a84550a",
+    );
     // Unmarshalling SHA-256 state into a SHA-384 hash is refused by the
     // unmarshaller, so cloneHash returns nil rather than a wrong hash.
     check("cloneHash refuses a cross-algorithm clone", chCross);
@@ -2380,8 +3542,8 @@ fn main() {
     // ─── handshake_messages.go: serverHelloMsg.unmarshal. The counterpart
     //     of the already-ported marshal, so the pair round-trips. From
     //     goref.sh.
-    let (shEnc, shOK, shVers, shSuite, shSID, shSupported, shGroup, shShare,
-         shOrig, shTruncated) = tls::handshake_messages_serverHelloRoundTrip();
+    let (shEnc, shOK, shVers, shSuite, shSID, shSupported, shGroup, shShare, shOrig, shTruncated) =
+        tls::handshake_messages_serverHelloRoundTrip();
     eq("serverHelloMsg.marshal", hexOf(shEnc),
        "0200003c030300000000000000000000000000000000000000000000000000000000000000000201021301000012002b0002030400330008001d000409090909");
     check("serverHelloMsg.unmarshal ok", shOK);
@@ -2394,7 +3556,10 @@ fn main() {
     check_n("serverHelloMsg key share group", shGroup, 29);
     eq("serverHelloMsg key share data", hexOf(shShare), "09090909");
     check("serverHelloMsg.originalBytes is the input", shOrig);
-    check("serverHelloMsg.unmarshal rejects a truncated input", shTruncated);
+    check(
+        "serverHelloMsg.unmarshal rejects a truncated input",
+        shTruncated,
+    );
 
     // ─── handshake_server.go: cipherSuiteOk and clientHelloInfo. From
     //     goref.sh. cipherSuiteOk is the filter pickCipherSuite hands to
@@ -2405,7 +3570,10 @@ fn main() {
     let ecdheECDSA = tls::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
     let rsaKex = tls::TLS_RSA_WITH_AES_128_CBC_SHA;
     let cbcSHA = tls::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA;
-    check("cipherSuiteOk accepts ECDHE-RSA when everything is available", cso(0, ecdheRSA));
+    check(
+        "cipherSuiteOk accepts ECDHE-RSA when everything is available",
+        cso(0, ecdheRSA),
+    );
     check("cipherSuiteOk accepts ECDHE-ECDSA", cso(0, ecdheECDSA));
     check("cipherSuiteOk accepts static RSA", cso(0, rsaKex));
     // Each capability gates exactly one branch.
@@ -2430,11 +3598,22 @@ fn main() {
     check_n("clientHelloInfo Extensions", chiExts, 2);
     // With no supported_versions extension the list is derived from the
     // legacy version, which is how a pre-1.3 ClientHello is understood.
-    check_n("clientHelloInfo derives versions from legacy_version", chiVers.Len(), 3);
-    check_n("clientHelloInfo highest derived version", chiVers[0] as int, 0x0303);
+    check_n(
+        "clientHelloInfo derives versions from legacy_version",
+        chiVers.Len(),
+        3,
+    );
+    check_n(
+        "clientHelloInfo highest derived version",
+        chiVers[0] as int,
+        0x0303,
+    );
     let (_, _, _, _, _, _, _, chiVers2) = tls::handshake_server_clientHelloInfo(false);
-    check_n("clientHelloInfo derives versions for an empty hello too",
-            chiVers2.Len(), 3);
+    check_n(
+        "clientHelloInfo derives versions for an empty hello too",
+        chiVers2.Len(),
+        3,
+    );
 
     // ─── handshake_client.go / handshake_server.go: version and cipher
     //     suite selection. From goref.sh.
@@ -2449,40 +3628,75 @@ fn main() {
     // supported_versions wins over legacy_version when present.
     check_n("pickTLSVersion prefers supported_versions", pv1v, 0x0304);
     let (pv2e, pv2v, _) = pv(2);
-    eq("pickTLSVersion rejects TLS 1.0", pv2e,
-       "tls: server selected unsupported protocol version 301");
-    check_n("pickTLSVersion leaves the version unset on refusal", pv2v, 0);
+    eq(
+        "pickTLSVersion rejects TLS 1.0",
+        pv2e,
+        "tls: server selected unsupported protocol version 301",
+    );
+    check_n(
+        "pickTLSVersion leaves the version unset on refusal",
+        pv2v,
+        0,
+    );
     let (pv3e, _, _) = pv(3);
-    eq("pickTLSVersion rejects an unknown version", pv3e,
-       "tls: server selected unsupported protocol version 305");
+    eq(
+        "pickTLSVersion rejects an unknown version",
+        pv3e,
+        "tls: server selected unsupported protocol version 305",
+    );
 
     let (cp0e, cp0s, cp0c) = tls::handshake_client_pickCipherSuite(
-        slice::__from_vec(alloc::vec![0xc02fu16, 0xc030]), 0xc030);
+        slice::__from_vec(alloc::vec![0xc02fu16, 0xc030]),
+        0xc030,
+    );
     eq("client pickCipherSuite err", cp0e, "");
-    check_n("client pickCipherSuite selects the server's choice", cp0s, 0xc030);
-    check_n("client pickCipherSuite records it on the Conn", cp0c, 0xc030);
-    let (cp1e, _, _) = tls::handshake_client_pickCipherSuite(
-        slice::__from_vec(alloc::vec![0xc02fu16]), 0xc030);
+    check_n(
+        "client pickCipherSuite selects the server's choice",
+        cp0s,
+        0xc030,
+    );
+    check_n(
+        "client pickCipherSuite records it on the Conn",
+        cp0c,
+        0xc030,
+    );
+    let (cp1e, _, _) =
+        tls::handshake_client_pickCipherSuite(slice::__from_vec(alloc::vec![0xc02fu16]), 0xc030);
     // A server that picks a suite the client did not offer is refused.
-    eq("client pickCipherSuite rejects an unoffered suite", cp1e,
-       "tls: server chose an unconfigured cipher suite");
+    eq(
+        "client pickCipherSuite rejects an unoffered suite",
+        cp1e,
+        "tls: server chose an unconfigured cipher suite",
+    );
 
     let (sp0e, sp0s) = tls::handshake_server_pickCipherSuite(
-        slice::__from_vec(alloc::vec![0xc02fu16, 0xc030]), false);
+        slice::__from_vec(alloc::vec![0xc02fu16, 0xc030]),
+        false,
+    );
     eq("server pickCipherSuite err", sp0e, "");
     // Server preference order decides, so 0xc02f wins over 0xc030 even
     // though the client listed both.
-    check_n("server pickCipherSuite follows server preference", sp0s, 0xc02f);
-    let (sp1e, _) = tls::handshake_server_pickCipherSuite(
-        slice::__from_vec(alloc::vec![0x0005u16]), false);
+    check_n(
+        "server pickCipherSuite follows server preference",
+        sp0s,
+        0xc02f,
+    );
+    let (sp1e, _) =
+        tls::handshake_server_pickCipherSuite(slice::__from_vec(alloc::vec![0x0005u16]), false);
     // RC4 is not in the default list, so there is no overlap. Go renders
     // the offered list as a bracketed hex list, not a flat byte string.
-    eq("server pickCipherSuite with no overlap", sp1e,
-       "tls: no cipher suite supported by both client and server; client offered: [5]");
-    let (sp2e, _) = tls::handshake_server_pickCipherSuite(
-        slice::__from_vec(alloc::vec![0xc02fu16]), true);
-    eq("server pickCipherSuite with ECDHE unavailable", sp2e,
-       "tls: no cipher suite supported by both client and server; client offered: [c02f]");
+    eq(
+        "server pickCipherSuite with no overlap",
+        sp1e,
+        "tls: no cipher suite supported by both client and server; client offered: [5]",
+    );
+    let (sp2e, _) =
+        tls::handshake_server_pickCipherSuite(slice::__from_vec(alloc::vec![0xc02fu16]), true);
+    eq(
+        "server pickCipherSuite with ECDHE unavailable",
+        sp2e,
+        "tls: no cipher suite supported by both client and server; client offered: [c02f]",
+    );
 
     // ─── handshake_server.go: establishKeys. Derives the six connection
     //     keys and STAGES them — they only go live at the
@@ -2491,12 +3705,24 @@ fn main() {
     let (ekErr, ekBefore, ekAfter, ekStaged, ekCK, ekSK, ekCIV, ekSIV) =
         tls::handshake_server_establishKeys(tls::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256);
     eq("establishKeys AEAD err", ekErr, "");
-    check_n("establishKeys leaves the read half unprotected", ekBefore, 0);
+    check_n(
+        "establishKeys leaves the read half unprotected",
+        ekBefore,
+        0,
+    );
     check("establishKeys staged a cipher spec", ekStaged);
     // AES-GCM at TLS 1.2 carries an 8-byte explicit nonce per record.
     check_n("establishKeys AEAD explicit nonce after CCS", ekAfter, 8);
-    eq("establishKeys AEAD clientKey", hexOf(ekCK), "c2d0c1b8d0565b9bc1f091845a22a0cc");
-    eq("establishKeys AEAD serverKey", hexOf(ekSK), "c7fb39fefc7c819b17b1a03df8664f27");
+    eq(
+        "establishKeys AEAD clientKey",
+        hexOf(ekCK),
+        "c2d0c1b8d0565b9bc1f091845a22a0cc",
+    );
+    eq(
+        "establishKeys AEAD serverKey",
+        hexOf(ekSK),
+        "c7fb39fefc7c819b17b1a03df8664f27",
+    );
     eq("establishKeys AEAD clientIV", hexOf(ekCIV), "7dc4f575");
     eq("establishKeys AEAD serverIV", hexOf(ekSIV), "22fe1ae8");
 
@@ -2507,8 +3733,16 @@ fn main() {
     // which is the BEAST countermeasure — and the same master secret
     // yields entirely different keys, because macLen/keyLen/ivLen differ.
     check_n("establishKeys CBC explicit IV after CCS", cbAfter, 16);
-    eq("establishKeys CBC clientKey", hexOf(cbCK), "3ee24aef9a586bcdcb64a4e16bebafba");
-    eq("establishKeys CBC clientIV", hexOf(cbCIV), "c80c4de292da0d7ea050ddc3c2d521aa");
+    eq(
+        "establishKeys CBC clientKey",
+        hexOf(cbCK),
+        "3ee24aef9a586bcdcb64a4e16bebafba",
+    );
+    eq(
+        "establishKeys CBC clientIV",
+        hexOf(cbCIV),
+        "c80c4de292da0d7ea050ddc3c2d521aa",
+    );
 
     // ─── handshake_server.go: checkForResumption. Every rejection is
     //     silent — the handshake falls back to a full exchange rather
@@ -2520,7 +3754,10 @@ fn main() {
     check("checkForResumption selects the session's suite", r0s);
     let (r1e, r1d, _) = cfr(1);
     eq("checkForResumption with tickets disabled err", r1e, "");
-    check("checkForResumption declines when tickets are disabled", !r1d);
+    check(
+        "checkForResumption declines when tickets are disabled",
+        !r1d,
+    );
     let (r2e, r2d, _) = cfr(2);
     eq("checkForResumption across versions err", r2e, "");
     // Never resume across a version change, even with a valid ticket.
@@ -2532,18 +3769,34 @@ fn main() {
     eq("checkForResumption with an expired ticket err", r4e, "");
     // TLS 1.2 tickets have no native lifetime; Go caps them at 7 days so
     // the same master secret is not re-wrapped indefinitely.
-    check("checkForResumption declines a ticket past its lifetime", !r4d);
+    check(
+        "checkForResumption declines a ticket past its lifetime",
+        !r4d,
+    );
     // The one hard failure: RFC 7627 §5.3 makes dropping EMS a MUST-not,
     // so a client that used to support it and now does not aborts.
     let (r5e, r5d, _) = cfr(5);
-    eq("checkForResumption aborts on an EMS downgrade", r5e,
-       "tls: session supported extended_master_secret but client does not");
-    check("checkForResumption does not resume on an EMS downgrade", !r5d);
+    eq(
+        "checkForResumption aborts on an EMS downgrade",
+        r5e,
+        "tls: session supported extended_master_secret but client does not",
+    );
+    check(
+        "checkForResumption does not resume on an EMS downgrade",
+        !r5d,
+    );
     // The reverse — client offers EMS, session lacks it — is a silent
     // decline, not an abort.
     let (r6e, r6d, _) = cfr(6);
-    eq("checkForResumption declines silently when only the client has EMS", r6e, "");
-    check("checkForResumption does not resume without session EMS", !r6d);
+    eq(
+        "checkForResumption declines silently when only the client has EMS",
+        r6e,
+        "",
+    );
+    check(
+        "checkForResumption does not resume without session EMS",
+        !r6d,
+    );
 
     // ─── handshake_client.go: establishKeys and serverResumedSession.
     //     From goref.sh.
@@ -2557,14 +3810,22 @@ fn main() {
     // decrypt anything.
     check_n("client establishKeys read half is AEAD", cekNonce, 8);
 
-    check("serverResumedSession with matching session ids",
-          tls::handshake_client_serverResumedSession(0));
-    check("serverResumedSession with different session ids",
-          !tls::handshake_client_serverResumedSession(1));
-    check("serverResumedSession without a session",
-          !tls::handshake_client_serverResumedSession(2));
-    check("serverResumedSession when the client sent no session id",
-          !tls::handshake_client_serverResumedSession(3));
+    check(
+        "serverResumedSession with matching session ids",
+        tls::handshake_client_serverResumedSession(0),
+    );
+    check(
+        "serverResumedSession with different session ids",
+        !tls::handshake_client_serverResumedSession(1),
+    );
+    check(
+        "serverResumedSession without a session",
+        !tls::handshake_client_serverResumedSession(2),
+    );
+    check(
+        "serverResumedSession when the client sent no session id",
+        !tls::handshake_client_serverResumedSession(3),
+    );
 
     // ─── handshake_client.go: processServerHello. From goref.sh.
     let psh = |w: int| tls::handshake_client_processServerHello(w);
@@ -2572,40 +3833,73 @@ fn main() {
     eq("processServerHello plain err", p0e, "");
     check("processServerHello does not resume without a session", !p0r);
     let (_, p1e, _, _, _) = psh(1);
-    eq("processServerHello rejects a compression method", p1e,
-       "tls: server selected unsupported compression format");
+    eq(
+        "processServerHello rejects a compression method",
+        p1e,
+        "tls: server selected unsupported compression format",
+    );
     let (_, p2e, _, _, _) = psh(2);
-    eq("processServerHello rejects incompatible point formats", p2e,
-       "tls: server offered only incompatible point formats");
+    eq(
+        "processServerHello rejects incompatible point formats",
+        p2e,
+        "tls: server offered only incompatible point formats",
+    );
     let (_, p3e, _, _, _) = psh(3);
-    eq("processServerHello rejects an unrequested ALPN protocol", p3e,
-       "tls: server advertised unrequested ALPN extension");
+    eq(
+        "processServerHello rejects an unrequested ALPN protocol",
+        p3e,
+        "tls: server advertised unrequested ALPN extension",
+    );
     let (_, p4e, _, p4p, _) = psh(4);
-    eq("processServerHello accepts a matching ALPN protocol err", p4e, "");
-    eq("processServerHello records the negotiated protocol", p4p, "h2");
+    eq(
+        "processServerHello accepts a matching ALPN protocol err",
+        p4e,
+        "",
+    );
+    eq(
+        "processServerHello records the negotiated protocol",
+        p4p,
+        "h2",
+    );
     // RFC 5746: on the FIRST handshake the renegotiation extension must
     // be empty; a non-empty one means the peer thinks it is renegotiating.
     let (_, p5e, _, _, _) = psh(5);
-    eq("processServerHello rejects a non-empty first renegotiation", p5e,
-       "tls: initial handshake had non-empty renegotiation extension");
+    eq(
+        "processServerHello rejects a non-empty first renegotiation",
+        p5e,
+        "tls: initial handshake had non-empty renegotiation extension",
+    );
 
     let (p6r, p6e, p6ms, _, p6d) = psh(6);
     eq("processServerHello resumption err", p6e, "");
     check("processServerHello reports a resumption", p6r);
-    eq("processServerHello restores the master secret", hexOf(p6ms), "0909");
+    eq(
+        "processServerHello restores the master secret",
+        hexOf(p6ms),
+        "0909",
+    );
     // It restores the session state but does NOT mark the connection
     // resumed — that happens later, after the server's Finished is
     // verified. Folding the two would claim resumption unauthenticated.
     check("processServerHello leaves didResume unset", !p6d);
     let (_, p7e, _, _, _) = psh(7);
-    eq("processServerHello rejects a cross-version resumption", p7e,
-       "tls: server resumed a session with a different version");
+    eq(
+        "processServerHello rejects a cross-version resumption",
+        p7e,
+        "tls: server resumed a session with a different version",
+    );
     let (_, p8e, _, _, _) = psh(8);
-    eq("processServerHello rejects a cross-suite resumption", p8e,
-       "tls: server resumed a session with a different cipher suite");
+    eq(
+        "processServerHello rejects a cross-suite resumption",
+        p8e,
+        "tls: server resumed a session with a different cipher suite",
+    );
     let (_, p9e, _, _, _) = psh(9);
-    eq("processServerHello rejects an EMS mismatch on resumption", p9e,
-       "tls: server resumed a session with a different EMS extension");
+    eq(
+        "processServerHello rejects an EMS mismatch on resumption",
+        p9e,
+        "tls: server resumed a session with a different EMS extension",
+    );
 
     // ─── handshake_server_tls13.go: pickCertificate;
     //     handshake_client.go: getClientCertificate. From goref.sh.
@@ -2618,10 +3912,17 @@ fn main() {
     // so its absence is a missing_extension alert rather than a plain
     // error — note the "local error: " prefix Go's OpError adds.
     let (pc1e, _, _) = pc(1);
-    eq("pickCertificate requires signature_algorithms", pc1e, "tls: missing extension");
+    eq(
+        "pickCertificate requires signature_algorithms",
+        pc1e,
+        "tls: missing extension",
+    );
     let (pc2e, _, pc2c) = pc(2);
-    eq("pickCertificate with no certificates configured", pc2e,
-       "tls: no certificates configured");
+    eq(
+        "pickCertificate with no certificates configured",
+        pc2e,
+        "tls: no certificates configured",
+    );
     check("pickCertificate stores nothing on failure", !pc2c);
     // PSK and certificates are mutually exclusive: resuming skips the
     // certificate entirely rather than picking one and ignoring it.
@@ -2629,21 +3930,39 @@ fn main() {
     eq("pickCertificate is a no-op when using a PSK", pc3e, "");
     check("pickCertificate stores nothing when using a PSK", !pc3c);
     let (pc4e, _, _) = pc(4);
-    eq("pickCertificate rejects an unusable signature algorithm", pc4e,
-       "tls: peer doesn't support any of the certificate's signature algorithms");
+    eq(
+        "pickCertificate rejects an unusable signature algorithm",
+        pc4e,
+        "tls: peer doesn't support any of the certificate's signature algorithms",
+    );
 
     let (gc0e, gc0d) = tls::handshake_client_getClientCertificate(0);
     eq("getClientCertificate err", gc0e, "");
-    eq("getClientCertificate returns the matching chain", hexOf(gc0d), "01");
+    eq(
+        "getClientCertificate returns the matching chain",
+        hexOf(gc0d),
+        "01",
+    );
     // No acceptable certificate is NOT an error — the client sends an
     // empty Certificate message and lets the server decide.
     let (gc1e, gc1d) = tls::handshake_client_getClientCertificate(1);
-    eq("getClientCertificate with no acceptable chain is not an error", gc1e, "");
+    eq(
+        "getClientCertificate with no acceptable chain is not an error",
+        gc1e,
+        "",
+    );
     check_n("getClientCertificate returns an empty chain", gc1d.Len(), 0);
     let (gc2e, gc2d) = tls::handshake_client_getClientCertificate(2);
-    eq("getClientCertificate with no certificates is not an error", gc2e, "");
-    check_n("getClientCertificate returns nothing to send", gc2d.Len(), 0);
-
+    eq(
+        "getClientCertificate with no certificates is not an error",
+        gc2e,
+        "",
+    );
+    check_n(
+        "getClientCertificate returns nothing to send",
+        gc2d.Len(),
+        0,
+    );
 
     // ── Conn.readHandshake / Conn.unmarshalHandshakeMessage ─────────
     //
@@ -2652,27 +3971,57 @@ fn main() {
     // for each body and printing `%T`, `marshal()` and the digest the
     // transcript hash was fed.
     let rhWant: [(&'static str, &'static str, &'static str); 6] = [
-        ("serverHelloDoneMsg", "0e000000",
-         "01b4f6bd5d6a06a7b74a8565ceb4f845afe0ae96a0ac05cf5e86066bf7b538ec"),
-        ("helloRequestMsg", "00000000",
-         "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"),
-        ("finishedMsg", "1400000c0102030405060708090a0b0c",
-         "e090a1048ae699f503bd6e47a4b7a8fd5ac7660bd108e960d3688a2260f5ef5f"),
-        ("keyUpdateMsg", "1800000100",
-         "fb5fd87163806a21c517ae4e9bd4ccefa6ad64afff3cf74db69f2650555b55d7"),
-        ("newSessionTicketMsg", "04000006000000000000",
-         "736f122cc68af1f81449aafefa61f6ad792662f576e0bee5c31b16c0db2343c6"),
-        ("newSessionTicketMsgTLS13", "0400000d00000000000000000000000000",
-         "a2cc6fd538ed7c0832290b223df17ce231ecbafe1fc1dea40eeca7293369ae5d"),
+        (
+            "serverHelloDoneMsg",
+            "0e000000",
+            "01b4f6bd5d6a06a7b74a8565ceb4f845afe0ae96a0ac05cf5e86066bf7b538ec",
+        ),
+        (
+            "helloRequestMsg",
+            "00000000",
+            "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+        ),
+        (
+            "finishedMsg",
+            "1400000c0102030405060708090a0b0c",
+            "e090a1048ae699f503bd6e47a4b7a8fd5ac7660bd108e960d3688a2260f5ef5f",
+        ),
+        (
+            "keyUpdateMsg",
+            "1800000100",
+            "fb5fd87163806a21c517ae4e9bd4ccefa6ad64afff3cf74db69f2650555b55d7",
+        ),
+        (
+            "newSessionTicketMsg",
+            "04000006000000000000",
+            "736f122cc68af1f81449aafefa61f6ad792662f576e0bee5c31b16c0db2343c6",
+        ),
+        (
+            "newSessionTicketMsgTLS13",
+            "0400000d00000000000000000000000000",
+            "a2cc6fd538ed7c0832290b223df17ce231ecbafe1fc1dea40eeca7293369ae5d",
+        ),
     ];
     let mut rhI: int = 0;
     while rhI < 6 {
         let (want_name, want_marshal, want_digest) = rhWant[rhI as usize];
         let (e, name, b, d) = tls::conn_readHandshake(rhI);
         eq("readHandshake succeeds", e, "");
-        eq("readHandshake picks the concrete message type", name, want_name);
-        eq("readHandshake round-trips the message", hexOf(b), want_marshal);
-        eq("readHandshake feeds the transcript the raw bytes", hexOf(d), want_digest);
+        eq(
+            "readHandshake picks the concrete message type",
+            name,
+            want_name,
+        );
+        eq(
+            "readHandshake round-trips the message",
+            hexOf(b),
+            want_marshal,
+        );
+        eq(
+            "readHandshake feeds the transcript the raw bytes",
+            hexOf(d),
+            want_digest,
+        );
         rhI += 1;
     }
 
@@ -2684,7 +4033,10 @@ fn main() {
 
     // An unrecognised handshake type is alertUnexpectedMessage.
     let (e6, name6, _, _) = tls::conn_readHandshake(6);
-    check("an unknown handshake type is an error", e6 != string::from_static(""));
+    check(
+        "an unknown handshake type is an error",
+        e6 != string::from_static(""),
+    );
     eq("an unknown handshake type yields no message", name6, "");
     // A declared length one over maxHandshake is refused before the
     // body is read at all.
@@ -2696,7 +4048,10 @@ fn main() {
     );
     // Well-formed header, body that does not parse: alertDecodeError.
     let (e8, name8, _, _) = tls::conn_readHandshake(8);
-    check("a body that does not parse is an error", e8 != string::from_static(""));
+    check(
+        "a body that does not parse is an error",
+        e8 != string::from_static(""),
+    );
     eq("a body that does not parse yields no message", name8, "");
 
     // ── transcriptMsg ───────────────────────────────────────────────
@@ -2713,7 +4068,6 @@ fn main() {
         "transcriptMsg hashes an in-memory hello's marshalled bytes",
         hexOf(tm2) == hexOf(tm3),
     );
-
 
     // ── Conn.writeHandshakeRecord / handleKeyUpdate / sessionState ──
     //
@@ -2745,12 +4099,20 @@ fn main() {
         hexOf(kuOut0),
         "05060708",
     );
-    check_n("handleKeyUpdate writes nothing when none was requested", kuWire0.Len(), 0);
+    check_n(
+        "handleKeyUpdate writes nothing when none was requested",
+        kuWire0.Len(),
+        0,
+    );
 
     // updateRequested = true: our own KeyUpdate goes out and the write
     // secret rotates too.
     let (_, _, _, kuErr1, kuIn1, kuOut1, kuWire1) = tls::conn_handshakeRecordAndKeyUpdate(true);
-    eq("handleKeyUpdate with a requested update succeeds", kuErr1, "");
+    eq(
+        "handleKeyUpdate with a requested update succeeds",
+        kuErr1,
+        "",
+    );
     eq(
         "handleKeyUpdate rotates the read secret the same way either way",
         hexOf(kuIn1),
@@ -2773,13 +4135,19 @@ fn main() {
     check_n("sessionState carries the version", ssV, 0x0304);
     check_n("sessionState carries the cipher suite", ssCS, 0x1301);
     eq("sessionState carries the ALPN protocol", ssAlpn, "h2");
-    eq("sessionState carries the OCSP response", hexOf(ssOcsp), "0909");
+    eq(
+        "sessionState carries the OCSP response",
+        hexOf(ssOcsp),
+        "0909",
+    );
     check_n("sessionState carries the SCTs", ssScts, 2);
     check("sessionState carries isClient", ssClient);
     check("sessionState carries extMasterSecret", ssEms);
     check_n("sessionState carries the curve", ssCurve, 29);
-    check("sessionState stamps createdAt from config.time()", ssCreated);
-
+    check(
+        "sessionState stamps createdAt from config.time()",
+        ssCreated,
+    );
 
     // ── the TLS 1.2 Finished exchange ───────────────────────────────
     //
@@ -2839,9 +4207,12 @@ fn main() {
         "tls: server sent unrequested session ticket",
     );
     let (rst2e, rst2t) = tls::handshake_client_readSessionTicket(2);
-    eq("readSessionTicket is a no-op when none was offered", rst2e, "");
+    eq(
+        "readSessionTicket is a no-op when none was offered",
+        rst2e,
+        "",
+    );
     check_n("readSessionTicket leaves the ticket empty", rst2t.Len(), 0);
-
 
     // ── Conn.verifyServerCertificate ────────────────────────────────
     //
@@ -2881,7 +4252,6 @@ fn main() {
         vscI += 1;
     }
 
-
     // ── clientHandshakeState.saveSessionTicket ──────────────────────
     //
     // Ground truth: scripts/goref.sh crypto/tls with a recording
@@ -2889,21 +4259,40 @@ fn main() {
     let (sst0e, sst0n, sst0k, sst0s, sst0t, sst0v) = tls::handshake_client_saveSessionTicket(0);
     eq("saveSessionTicket succeeds", sst0e, "");
     check_n("saveSessionTicket puts once", sst0n, 1);
-    eq("saveSessionTicket keys on the server name", sst0k, "goish.example");
+    eq(
+        "saveSessionTicket keys on the server name",
+        sst0k,
+        "goish.example",
+    );
     eq(
         "saveSessionTicket caches the master secret",
         hexOf(sst0s),
         "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f30",
     );
-    eq("saveSessionTicket caches the ticket", hexOf(sst0t), "aabbcc");
+    eq(
+        "saveSessionTicket caches the ticket",
+        hexOf(sst0t),
+        "aabbcc",
+    );
     check_n("saveSessionTicket stamps the version", sst0v, 0x0303);
     let (sst1e, sst1n, _, _, _, _) = tls::handshake_client_saveSessionTicket(1);
-    eq("saveSessionTicket with no ticket is not an error", sst1e, "");
+    eq(
+        "saveSessionTicket with no ticket is not an error",
+        sst1e,
+        "",
+    );
     check_n("saveSessionTicket with no ticket caches nothing", sst1n, 0);
     let (sst2e, sst2n, _, _, _, _) = tls::handshake_client_saveSessionTicket(2);
-    eq("saveSessionTicket with no cache key is not an error", sst2e, "");
-    check_n("saveSessionTicket with no cache key caches nothing", sst2n, 0);
-
+    eq(
+        "saveSessionTicket with no cache key is not an error",
+        sst2e,
+        "",
+    );
+    check_n(
+        "saveSessionTicket with no cache key caches nothing",
+        sst2n,
+        0,
+    );
 
     // ── clientHandshakeStateTLS13.checkServerHelloOrHRR ─────────────
     //
@@ -2911,14 +4300,34 @@ fn main() {
     // ServerHello/ClientHello pair, one tweak at a time.
     let cshWant: [(&'static str, int, int); 9] = [
         ("", 0x1301, 0x1301),
-        ("tls: server selected TLS 1.3 using the legacy version field", 0, 0),
-        ("tls: server selected an invalid version after a HelloRetryRequest", 0, 0),
+        (
+            "tls: server selected TLS 1.3 using the legacy version field",
+            0,
+            0,
+        ),
+        (
+            "tls: server selected an invalid version after a HelloRetryRequest",
+            0,
+            0,
+        ),
         ("tls: server sent an incorrect legacy version", 0, 0),
-        ("tls: server sent a ServerHello extension forbidden in TLS 1.3", 0, 0),
+        (
+            "tls: server sent a ServerHello extension forbidden in TLS 1.3",
+            0,
+            0,
+        ),
         ("tls: server did not echo the legacy session ID", 0, 0),
-        ("tls: server sent non-zero legacy TLS compression method", 0, 0),
+        (
+            "tls: server sent non-zero legacy TLS compression method",
+            0,
+            0,
+        ),
         // The suite is left at what an earlier HelloRetryRequest chose.
-        ("tls: server changed cipher suite after a HelloRetryRequest", 0x1302, 0),
+        (
+            "tls: server changed cipher suite after a HelloRetryRequest",
+            0x1302,
+            0,
+        ),
         ("tls: server chose an unconfigured cipher suite", 0, 0),
     ];
     let mut cshI: int = 0;
@@ -2950,8 +4359,18 @@ fn main() {
     // ── clientHandshakeStateTLS13.processServerHello ────────────────
     let pshWant: [(&'static str, bool, bool, int); 9] = [
         ("", false, false, 0),
-        ("tls: server sent two HelloRetryRequest messages", false, false, 0),
-        ("tls: server sent a cookie in a normal ServerHello", false, false, 0),
+        (
+            "tls: server sent two HelloRetryRequest messages",
+            false,
+            false,
+            0,
+        ),
+        (
+            "tls: server sent a cookie in a normal ServerHello",
+            false,
+            false,
+            0,
+        ),
         ("tls: malformed key_share extension", false, false, 0),
         ("tls: server did not send a key share", false, false, 0),
         ("tls: server selected unsupported group", false, false, 0),
@@ -2976,13 +4395,13 @@ fn main() {
         pshI += 1;
     }
 
-
     // ── clientHandshakeStateTLS13 readServerFinished/sendClientFinished
     //
     // Ground truth: scripts/goref.sh crypto/tls off the same fixed key
     // schedule — an empty PSK, a 1..32 shared secret, and a transcript
     // seeded with one four-byte message.
-    let (rf0e, rf0mac, rf0traffic, rf0in, _, _, _, rf0ekm) = tls::handshake_client_tls13_finished(0);
+    let (rf0e, rf0mac, rf0traffic, rf0in, _, _, _, rf0ekm) =
+        tls::handshake_client_tls13_finished(0);
     eq(
         "readServerFinished expects Go's server MAC",
         hexOf(rf0mac),
@@ -3032,7 +4451,6 @@ fn main() {
         "b4ac5ab995a64d62675a4379d70ba8cc0014d3236590e0fc49f8d497d4509818",
     );
 
-
     // ── clientHandshakeStateTLS13.readServerParameters ──────────────
     //
     // Ground truth: scripts/goref.sh crypto/tls, one EncryptedExtensions
@@ -3066,10 +4484,13 @@ fn main() {
         let (e, proto, retry) = tls::handshake_client_tls13_readServerParameters(rspI);
         eq("readServerParameters error", e, wantErr);
         eq("readServerParameters c.clientProtocol", proto, wantProto);
-        eq("readServerParameters echContext.retryConfigs", hexOf(retry), wantRetry);
+        eq(
+            "readServerParameters echContext.retryConfigs",
+            hexOf(retry),
+            wantRetry,
+        );
         rspI += 1;
     }
-
 
     // ── encryptedExtensionsMsg.marshal, all extensions ──────────────
     //
@@ -3094,9 +4515,12 @@ fn main() {
         "010203",
     );
     check("encryptedExtensionsMsg keeps earlyData", eeEarly);
-    eq("encryptedExtensionsMsg keeps echRetryConfigs", hexOf(eeEch), "070707");
+    eq(
+        "encryptedExtensionsMsg keeps echRetryConfigs",
+        hexOf(eeEch),
+        "070707",
+    );
     check("encryptedExtensionsMsg keeps serverNameAck", eeSni);
-
 
     // ── every marshal, fully populated, against Go's bytes ──────────
     //
@@ -3133,7 +4557,6 @@ fn main() {
         eq(what, hexOf(got), wantHex);
         maI += 1;
     }
-
 
     // ── readServerCertificate / sendClientCertificate ───────────────
     //
@@ -3183,7 +4606,6 @@ fn main() {
         certI += 1;
     }
 
-
     // ── computeAndUpdatePSK ─────────────────────────────────────────
     //
     // Ground truth: scripts/goref.sh crypto/tls. The binder is a MAC
@@ -3214,7 +4636,6 @@ fn main() {
         "6f3e162e5a1c3f48842b5501c1cda5b10043bee48d7226ddb2153070a4b93950",
     );
 
-
     // ── serverHandshakeStateTLS13.readClientFinished ────────────────
     //
     // Ground truth: scripts/goref.sh crypto/tls. The read half must
@@ -3235,11 +4656,18 @@ fn main() {
         let (wantErr, wantIn, wantWire) = rcfWant[rcfI as usize];
         let (e, inSec, wire) = tls::handshake_server_tls13_readClientFinished(rcfI);
         eq("readClientFinished error", e, wantErr);
-        eq("readClientFinished c.in.trafficSecret", hexOf(inSec), wantIn);
-        eq("readClientFinished alert on the wire", hexOf(wire), wantWire);
+        eq(
+            "readClientFinished c.in.trafficSecret",
+            hexOf(inSec),
+            wantIn,
+        );
+        eq(
+            "readClientFinished alert on the wire",
+            hexOf(wire),
+            wantWire,
+        );
         rcfI += 1;
     }
-
 
     // ── serverHandshakeStateTLS13.sendServerCertificate ─────────────
     //
@@ -3272,13 +4700,21 @@ fn main() {
     // PSK: only one of PSK and certificates is used, so nothing goes out.
     let (ssc0e, ssc0len, _, _) = sscRec(0);
     eq("sendServerCertificate under PSK succeeds", ssc0e, "");
-    check_n("sendServerCertificate under PSK writes nothing", ssc0len.Len(), 0);
+    check_n(
+        "sendServerCertificate under PSK writes nothing",
+        ssc0len.Len(),
+        0,
+    );
 
     // Client cert requested, with a ClientCAs pool: the
     // CertificateRequest carries the pool's subjects.
     let (ssc1e, ssc1len, ssc1first, ssc1last) = sscRec(1);
     eq("sendServerCertificate with a CA pool succeeds", ssc1e, "");
-    check_n("sendServerCertificate sends three records", ssc1len.Len(), 3);
+    check_n(
+        "sendServerCertificate sends three records",
+        ssc1len.Len(),
+        3,
+    );
     eq(
         "the CertificateRequest carries the ClientCAs subjects",
         ssc1first,
@@ -3292,8 +4728,16 @@ fn main() {
 
     // Requested without a pool: the same request minus the authorities.
     let (ssc2e, ssc2len, ssc2first, ssc2last) = sscRec(2);
-    eq("sendServerCertificate without a CA pool succeeds", ssc2e, "");
-    check_n("sendServerCertificate still sends three records", ssc2len.Len(), 3);
+    eq(
+        "sendServerCertificate without a CA pool succeeds",
+        ssc2e,
+        "",
+    );
+    check_n(
+        "sendServerCertificate still sends three records",
+        ssc2len.Len(),
+        3,
+    );
     eq(
         "the CertificateRequest omits the authorities",
         ssc2first,
@@ -3309,7 +4753,11 @@ fn main() {
 
     // No client cert requested: Certificate then CertificateVerify only.
     let (ssc3e, ssc3len, _, ssc3last) = sscRec(3);
-    eq("sendServerCertificate without a request succeeds", ssc3e, "");
+    eq(
+        "sendServerCertificate without a request succeeds",
+        ssc3e,
+        "",
+    );
     check_n("sendServerCertificate sends two records", ssc3len.Len(), 2);
     check_n("the Certificate record is the fixture", ssc3len[0], 1265);
     eq(
@@ -3363,7 +4811,11 @@ fn main() {
     // ECH offered but not accepted: EncryptedExtensions carries the
     // retry configs built from the SendAsRetry keys only.
     let (ssp1e, ssp1w, ssp1in, _, ssp1tr, _) = ssp(1);
-    eq("sendServerParameters with retry configs succeeds", ssp1e, "");
+    eq(
+        "sendServerParameters with retry configs succeeds",
+        ssp1e,
+        "",
+    );
     eq(
         "the retry-config flight is byte-identical to Go",
         ssp1w,
@@ -3420,7 +4872,15 @@ fn main() {
     // AES-CBC body, HMAC, age_add — are byte-for-byte Go's.
     let ssf = |which: int| -> (string, string, string, string, string, string, string) {
         let (e, w, ca, sa, cf, rs, tr) = tls::handshake_server_tls13_sendServerFinished(which);
-        return (e, hexOf(w), hexOf(ca), hexOf(sa), hexOf(cf), hexOf(rs), hexOf(tr));
+        return (
+            e,
+            hexOf(w),
+            hexOf(ca),
+            hexOf(sa),
+            hexOf(cf),
+            hexOf(rs),
+            hexOf(tr),
+        );
     };
 
     // psk_dhe_ke offered, no client cert: Finished + NewSessionTicket.
@@ -3533,7 +4993,11 @@ fn main() {
     check_n("the selected identity is 0", cfr0sel, 0);
 
     let (_, _, cfr1e, cfr1psk, _, _, _) = cfr(1);
-    eq("a corrupted binder is rejected", cfr1e, "tls: invalid PSK binder");
+    eq(
+        "a corrupted binder is rejected",
+        cfr1e,
+        "tls: invalid PSK binder",
+    );
     check("a corrupted binder does not resume", !cfr1psk);
 
     let (_, _, cfr2e, cfr2psk, _, _, _) = cfr(2);
@@ -3593,7 +5057,11 @@ fn main() {
         hrr1e,
         "tls: client sent unexpected key share in second ClientHello",
     );
-    eq("the rejection appends an illegal_parameter alert", hrr1w, alertWire);
+    eq(
+        "the rejection appends an illegal_parameter alert",
+        hrr1w,
+        alertWire,
+    );
     check("didHRR stays unset on rejection", !hrr1did);
 
     let (hrr2e, hrr2w, _, _, _, _) = hrr(2);
@@ -3631,7 +5099,11 @@ fn main() {
 
     let (pe0e, pe0sni, pe0inner, _, pe0acc) = pech(0);
     eq("an inner ECH ext returns nil error", pe0e, "");
-    eq("the outer hello is returned unchanged", pe0sni, "inner.example");
+    eq(
+        "the outer hello is returned unchanged",
+        pe0sni,
+        "inner.example",
+    );
     check("the context is marked inner", pe0inner);
     check("echAccepted stays false for an inner hello", !pe0acc);
 
@@ -3661,8 +5133,7 @@ fn main() {
                 goish::int(su), goish::int(cv), pr, sni);
     };
     let pchErr = |which: int| -> string {
-        let (e, _, _, _, _, _, _, _, _) =
-            tls::handshake_server_tls13_processClientHello(which);
+        let (e, _, _, _, _, _, _, _, _) = tls::handshake_server_tls13_processClientHello(which);
         return e;
     };
 
@@ -3684,7 +5155,11 @@ fn main() {
         pc0sk,
         "6507535577682400296442117aa2a18748d244f837402318f9a0805dba4d103b",
     );
-    check_n("the negotiated suite is TLS_AES_128_GCM_SHA256", pc0su, 0x1301);
+    check_n(
+        "the negotiated suite is TLS_AES_128_GCM_SHA256",
+        pc0su,
+        0x1301,
+    );
     check_n("the curve ID is recorded", pc0cv, 29);
     eq("ALPN negotiates h2", pc0pr, "h2");
     eq("the server name is recorded", pc0sni, "server.example");
@@ -3743,7 +5218,11 @@ fn main() {
     let (pcc0e, pcc0pc, pcc0vc) = pcc(0);
     eq("a valid cert with no requirement is accepted", pcc0e, "");
     check_n("the peer certificate is recorded", pcc0pc, 1);
-    check_n("no chain is built without VerifyClientCertIfGiven", pcc0vc, 0);
+    check_n(
+        "no chain is built without VerifyClientCertIfGiven",
+        pcc0vc,
+        0,
+    );
 
     let (pcc1e, _, _) = pcc(1);
     eq(
@@ -3757,7 +5236,11 @@ fn main() {
     check_n("no peer certificate is recorded when none sent", pcc2pc, 0);
 
     let (pcc3e, pcc3pc, pcc3vc) = pcc(3);
-    eq("a self-signed leaf trusted via ClientCAs verifies", pcc3e, "");
+    eq(
+        "a self-signed leaf trusted via ClientCAs verifies",
+        pcc3e,
+        "",
+    );
     check_n("the verified peer cert is recorded", pcc3pc, 1);
     check_n("a verified chain is built", pcc3vc, 1);
 
@@ -3786,7 +5269,11 @@ fn main() {
     };
     eq("no client cert requested, no hook, succeeds", rcc(0), "");
     eq("VerifyConnection returning nil succeeds", rcc(1), "");
-    eq("VerifyConnection returning an error propagates", rcc(2), "vc rejected");
+    eq(
+        "VerifyConnection returning an error propagates",
+        rcc(2),
+        "vc rejected",
+    );
 
     // ── Conn.makeClientHello ────────────────────────────────────────
     //
@@ -3801,15 +5288,41 @@ fn main() {
     // (AES-first). Order is therefore asserted as goish's own, and the
     // Go-faithful invariants tested here are the version gating (which
     // suites appear) and counts, which the constant does not affect.
-    let mch = |which: int| -> (string, int, string, string, string, string, string, int, int, string, string, int) {
+    let mch = |which: int| -> (
+        string,
+        int,
+        string,
+        string,
+        string,
+        string,
+        string,
+        int,
+        int,
+        string,
+        string,
+        int,
+    ) {
         let (e, v, r, sid, cs, cv, sni, k0l, k0g, k0tail, k1d, kc) =
             tls::handshake_client_makeClientHello(which);
-        return (e, goish::int(v), hexOf(r), hexOf(sid), u16sOf(cs), u16sOf(cv),
-                sni, k0l, goish::int(k0g), hexOf(k0tail), hexOf(k1d), goish::int(kc));
+        return (
+            e,
+            goish::int(v),
+            hexOf(r),
+            hexOf(sid),
+            u16sOf(cs),
+            u16sOf(cv),
+            sni,
+            k0l,
+            goish::int(k0g),
+            hexOf(k0tail),
+            hexOf(k1d),
+            goish::int(kc),
+        );
     };
 
     // basic: full TLS 1.3-capable ClientHello.
-    let (mc1e, mc1v, mc1r, mc1sid, mc1cs, mc1cv, mc1sni, mc1k0l, mc1k0g, mc1k0t, mc1k1d, mc1kc) = mch(1);
+    let (mc1e, mc1v, mc1r, mc1sid, mc1cs, mc1cv, mc1sni, mc1k0l, mc1k0g, mc1k0t, mc1k1d, mc1kc) =
+        mch(1);
     eq("makeClientHello succeeds", mc1e, "");
     check_n("the legacy version is capped at TLS 1.2", mc1v, 0x303);
     eq(
@@ -3831,7 +5344,11 @@ fn main() {
         "the suite list contains TLS_AES_128_GCM_SHA256",
         goish::strings::Contains(mc1cs, string::from_static("1301")),
     );
-    eq("the curves match Go (order fixed, not hardware-dependent)", mc1cv, "11ec 1d 17 18 19");
+    eq(
+        "the curves match Go (order fixed, not hardware-dependent)",
+        mc1cv,
+        "11ec 1d 17 18 19",
+    );
     eq("the SNI is the server name", mc1sni, "example.com");
     check_n("the X25519MLKEM768 share is 1216 bytes", mc1k0l, 1216);
     check_n("the first key share is X25519MLKEM768", mc1k0g, 4588);
@@ -3852,7 +5369,11 @@ fn main() {
         "TLS 1.2-max no longer offers a TLS 1.3 suite",
         !goish::strings::Contains(mc3cs, string::from_static("1301")),
     );
-    eq("TLS 1.2-max drops X25519MLKEM768 from curves", mc3cv, "1d 17 18 19");
+    eq(
+        "TLS 1.2-max drops X25519MLKEM768 from curves",
+        mc3cv,
+        "1d 17 18 19",
+    );
     check_n("TLS 1.2-max sends no key share", mc3k0l, 0);
     check_n("TLS 1.2-max builds no keyShareKeys", mc3kc, 0);
 
@@ -3873,7 +5394,11 @@ fn main() {
         "tls: either ServerName or InsecureSkipVerify must be specified in the tls.Config",
     );
     let (mc6e, _, _, _, _, _, _, _, _, _, _, _) = mch(6);
-    eq("an empty NextProtos value is rejected", mc6e, "tls: invalid NextProtos value");
+    eq(
+        "an empty NextProtos value is rejected",
+        mc6e,
+        "tls: invalid NextProtos value",
+    );
 
     // ── Conn.loadSession ────────────────────────────────────────────
     //
@@ -3882,10 +5407,31 @@ fn main() {
     // obfuscated ticket age), the resumption binder key, and the binder
     // over the ClientHello are all deterministic and byte-compared; the
     // TLS 1.2 sessionTicket path and the no-cache short-circuit too.
-    let ls = |which: int| -> (string, bool, bool, string, bool, int, string, int, string, string) {
-        let (e, s, es, bk, ts, ni, lbl, age, bnd, st) =
-            tls::handshake_client_loadSession(which);
-        return (e, s, es, hexOf(bk), ts, ni, hexOf(lbl), goish::int(age), hexOf(bnd), hexOf(st));
+    let ls = |which: int| -> (
+        string,
+        bool,
+        bool,
+        string,
+        bool,
+        int,
+        string,
+        int,
+        string,
+        string,
+    ) {
+        let (e, s, es, bk, ts, ni, lbl, age, bnd, st) = tls::handshake_client_loadSession(which);
+        return (
+            e,
+            s,
+            es,
+            hexOf(bk),
+            ts,
+            ni,
+            hexOf(lbl),
+            goish::int(age),
+            hexOf(bnd),
+            hexOf(st),
+        );
     };
 
     // TLS 1.3 resume: full PSK setup.
@@ -3896,11 +5442,7 @@ fn main() {
     check("ticketSupported is set", ls0ts);
     check_n("one PSK identity is offered", ls0ni, 1);
     eq("the PSK identity label is the ticket", ls0lbl, "aabbccdd");
-    check_n(
-        "the obfuscated ticket age matches Go",
-        ls0age,
-        0x652e1744,
-    );
+    check_n("the obfuscated ticket age matches Go", ls0age, 0x652e1744);
     eq(
         "the resumption binder key matches Go",
         ls0bk,
@@ -3939,12 +5481,28 @@ fn main() {
     // This also closes the decrypt path deferred when processECHClientHello
     // was ported.
     let (rtInner, rtOuter, rtSeal, rtOpen, rtAcc, rtRec) = tls::handshake_client_echRoundTrip();
-    eq("the inner hello carries the real server name", rtInner, "secret.example");
-    eq("the outer hello is rewritten to the public name", rtOuter, "public.example");
+    eq(
+        "the inner hello carries the real server name",
+        rtInner,
+        "secret.example",
+    );
+    eq(
+        "the outer hello is rewritten to the public name",
+        rtOuter,
+        "public.example",
+    );
     eq("the client seals the inner without error", rtSeal, "");
-    eq("the server opens the ECH extension without error", rtOpen, "");
+    eq(
+        "the server opens the ECH extension without error",
+        rtOpen,
+        "",
+    );
     check("the server accepts the ECH", rtAcc);
-    eq("the server recovers the real inner server name", rtRec, "secret.example");
+    eq(
+        "the server recovers the real inner server name",
+        rtRec,
+        "secret.example",
+    );
 
     // ── clientHandshakeStateTLS13.establishHandshakeKeys ────────────
     //
@@ -3959,7 +5517,11 @@ fn main() {
 
     let (ehk0e, ehk0cid, ehk0cs, ehk0ss) = ehk(0);
     eq("establishHandshakeKeys succeeds", ehk0e, "");
-    check_n("the curve ID is recorded from the server share", ehk0cid, 29);
+    check_n(
+        "the curve ID is recorded from the server share",
+        ehk0cid,
+        29,
+    );
     eq(
         "the client handshake traffic secret matches Go",
         ehk0cs,
@@ -3985,7 +5547,11 @@ fn main() {
     );
 
     let (ehk2e, _, _, _) = ehk(2);
-    eq("an invalid server key share is rejected", ehk2e, "tls: invalid server key share");
+    eq(
+        "an invalid server key share is rejected",
+        ehk2e,
+        "tls: invalid server key share",
+    );
 
     // ── clientHandshakeStateTLS13.processHelloRetryRequest ──────────
     //
@@ -4056,7 +5622,11 @@ fn main() {
         e,
         "tls: unexpected encrypted client hello extension in serverHello",
     );
-    eq("the unsupported_extension alert matches Go", sink, "1503030002026e");
+    eq(
+        "the unsupported_extension alert matches Go",
+        sink,
+        "1503030002026e",
+    );
     eq(
         "the transcript still absorbed the HRR",
         tsum,
@@ -4071,7 +5641,11 @@ fn main() {
         e,
         "tls: server sent an unnecessary HelloRetryRequest message",
     );
-    eq("the illegal_parameter alert matches Go", sink, "1503030002022f");
+    eq(
+        "the illegal_parameter alert matches Go",
+        sink,
+        "1503030002022f",
+    );
     eq(
         "the no-op HRR transcript matches Go",
         tsum,
@@ -4104,7 +5678,11 @@ fn main() {
         e,
         "tls: server selected unsupported group",
     );
-    eq("the unsupported-group alert matches Go", sink, "1503030002022f");
+    eq(
+        "the unsupported-group alert matches Go",
+        sink,
+        "1503030002022f",
+    );
     eq(
         "the unsupported-group transcript matches Go",
         tsum,
@@ -4118,7 +5696,11 @@ fn main() {
         e,
         "tls: server sent an unnecessary HelloRetryRequest key_share",
     );
-    eq("the unnecessary-keyshare alert matches Go", sink, "1503030002022f");
+    eq(
+        "the unnecessary-keyshare alert matches Go",
+        sink,
+        "1503030002022f",
+    );
     eq(
         "the unnecessary-keyshare transcript matches Go",
         tsum,
@@ -4130,7 +5712,11 @@ fn main() {
     eq("selecting a fresh group completes the retry", e, "");
     check_n("the retried hello's record length matches Go", sinkLen, 176);
     check("didHRR is recorded after a group change", didHRR);
-    eq("a fresh P-256 key share replaces the X25519 one", ks, "g23:l65;");
+    eq(
+        "a fresh P-256 key share replaces the X25519 one",
+        ks,
+        "g23:l65;",
+    );
 
     // v7 psk_mismatch: the session hash disagrees, binders are dropped.
     let (e, sink, _, tsum, _, didHRR, _, psks, _, _, _, _, _) = phrr(7);
@@ -4166,7 +5752,11 @@ fn main() {
 
     // v9 ech_mismatch: the confirmation fails, the outer hello proceeds.
     let (e, sink, _, tsum, cookie, didHRR, _, _, _, ech, _, isum, _) = phrr(9);
-    eq("a failed ECH confirmation falls back to the outer hello", e, "");
+    eq(
+        "a failed ECH confirmation falls back to the outer hello",
+        e,
+        "",
+    );
     eq(
         "the outer hello is resent unchanged, matching Go",
         sink,
@@ -4211,9 +5801,17 @@ fn main() {
     let (e, _, sinkLen, _, cookie, didHRR, ks, _, _, ech, sni, isum, echLen) = phrr(11);
     eq("a matching ECH confirmation is accepted", e, "");
     check_n("the resealed outer record length matches Go", sinkLen, 306);
-    eq("the cookie goes to the inner hello, not the outer", cookie, "");
+    eq(
+        "the cookie goes to the inner hello, not the outer",
+        cookie,
+        "",
+    );
     check("didHRR is recorded after an ECH accept", didHRR);
-    eq("the outer key shares are synced from the inner", ks, "g29:l32;");
+    eq(
+        "the outer key shares are synced from the inner",
+        ks,
+        "g29:l32;",
+    );
     check("ECH is accepted", ech);
     eq("the true server name is restored", sni, "secret.example");
     eq(
@@ -4233,7 +5831,16 @@ fn main() {
     let phd = |which: int| -> (string, string, string, string, bool, bool, string, bool) {
         let (e, sink, cs, ss, echAcc, echRej, sni, didHRR) =
             tls::handshake_client_tls13_handshake(which);
-        return (e, hexOf(sink), hexOf(cs), hexOf(ss), echAcc, echRej, sni, didHRR);
+        return (
+            e,
+            hexOf(sink),
+            hexOf(cs),
+            hexOf(ss),
+            echAcc,
+            echRej,
+            sni,
+            didHRR,
+        );
     };
 
     let (e, sink, _, _, _, _, _, _) = phd(0);
@@ -4242,7 +5849,11 @@ fn main() {
         e,
         "tls: server selected TLS 1.3 in a renegotiation",
     );
-    eq("the protocol_version alert matches Go", sink, "15030300020246");
+    eq(
+        "the protocol_version alert matches Go",
+        sink,
+        "15030300020246",
+    );
 
     // Go says "local error: tls: internal error" — the "local error: "
     // prefix is net.OpError's, which goish's sendAlertLocked documents
@@ -4253,7 +5864,11 @@ fn main() {
         e,
         "tls: internal error",
     );
-    eq("the internal_error alert matches Go", sink, "15030300020250");
+    eq(
+        "the internal_error alert matches Go",
+        sink,
+        "15030300020250",
+    );
 
     let (e, sink, _, _, _, _, _, _) = phd(2);
     eq(
@@ -4261,7 +5876,11 @@ fn main() {
         e,
         "tls: server selected TLS 1.3 using the legacy version field",
     );
-    eq("the legacy-version alert matches Go", sink, "1503030002026d");
+    eq(
+        "the legacy-version alert matches Go",
+        sink,
+        "1503030002026d",
+    );
 
     let (e, _, cs, ss, _, _, _, didHRR) = phd(3);
     eq("the plain driver runs to the encrypted flight", e, "EOF");
@@ -4298,9 +5917,16 @@ fn main() {
 
     let (e, _, cs, ss, echAcc, echRej, sni, _) = phd(5);
     eq("the ECH-accept path runs to the encrypted flight", e, "EOF");
-    check("the ServerHello random confirmation accepts the ECH", echAcc);
+    check(
+        "the ServerHello random confirmation accepts the ECH",
+        echAcc,
+    );
     check("the ECH is not rejected", !echRej);
-    eq("the true server name is restored by the driver", sni, "secret.example");
+    eq(
+        "the true server name is restored by the driver",
+        sni,
+        "secret.example",
+    );
     eq(
         "the inner-transcript client handshake secret matches Go",
         cs,
@@ -4315,7 +5941,10 @@ fn main() {
     let (e, _, cs, ss, echAcc, echRej, _, _) = phd(6);
     eq("the ECH-reject path runs to the encrypted flight", e, "EOF");
     check("a mismatched confirmation is not accepted", !echAcc);
-    check("the rejection is recorded for the retry-config error", echRej);
+    check(
+        "the rejection is recorded for the retry-config error",
+        echRej,
+    );
     eq(
         "the outer-transcript client handshake secret matches Go",
         cs,
@@ -4334,15 +5963,18 @@ fn main() {
     // TLS 1.2 dispatch (via the predictable compatibility session ID),
     // and the deferred drop-ticket-on-failure semantics.
     let cch = |which: int| -> (string, int, bool, string, int, int) {
-        let (e, vers, didResume, sni, puts, putNils) =
-            tls::handshake_client_clientHandshake(which);
+        let (e, vers, didResume, sni, puts, putNils) = tls::handshake_client_clientHandshake(which);
         return (e, goish::int(vers), didResume, sni, puts, putNils);
     };
 
     let (e, vers, _, sni, _, _) = cch(0);
     eq("the hello goes out and the read hits EOF", e, "EOF");
     check_n("no version is negotiated at EOF", vers, 0);
-    eq("the server name is recorded before sending", sni, "example.com");
+    eq(
+        "the server name is recorded before sending",
+        sni,
+        "example.com",
+    );
 
     let (e, _, _, _, _, _) = cch(1);
     eq(
@@ -4357,7 +5989,11 @@ fn main() {
         e,
         "tls: downgrade attempt detected, possibly due to a MitM attack or a broken middlebox",
     );
-    check_n("the canary check happens after the version pick", vers, 0x0303);
+    check_n(
+        "the canary check happens after the version pick",
+        vers,
+        0x0303,
+    );
 
     let (e, vers, _, _, _, _) = cch(3);
     eq(
@@ -4368,7 +6004,11 @@ fn main() {
     check_n("the connection is TLS 1.2 at that point", vers, 0x0303);
 
     let (e, vers, didResume, _, _, _) = cch(4);
-    eq("the TLS 1.2 full handshake runs to the server flight", e, "EOF");
+    eq(
+        "the TLS 1.2 full handshake runs to the server flight",
+        e,
+        "EOF",
+    );
     check_n("the TLS 1.2 dispatch picked the version", vers, 0x0303);
     check("no resumption happened", !didResume);
 
@@ -4379,7 +6019,11 @@ fn main() {
         "tls: server selected unsupported protocol version 300",
     );
     check_n("the deferred drop calls Put once", puts, 1);
-    check_n("the deferred drop passes nil, discarding the ticket", putNils, 1);
+    check_n(
+        "the deferred drop passes nil, discarding the ticket",
+        putNils,
+        1,
+    );
 
     // ── Conn.handleNewSessionTicket ─────────────────────────────────
     //
@@ -4432,7 +6076,11 @@ fn main() {
     );
     check("the useBy stamp matches Go", useBy == 1700003600);
     check("the ageAdd is copied from the ticket", ageAdd == 42);
-    eq("the opaque label is the stored ticket", ticket, "aaabacadaeafb0b1b2b3b4b5b6b7b8b9");
+    eq(
+        "the opaque label is the stored ticket",
+        ticket,
+        "aaabacadaeafb0b1b2b3b4b5b6b7b8b9",
+    );
 
     // ── serverHandshakeState: the deterministic TLS 1.2 methods ─────
     //
@@ -4442,15 +6090,18 @@ fn main() {
     // and the NewSessionTicket wire (fixed WrapSession) all byte-compared.
     // (The driver and full handshake are covered by tls_server_smoke's
     // client<->server loopback.)
-    let (e, random, alpn, ecdheOk, ecSignOk, rsaSignOk, _) =
-        tls::handshake_server_tls12_method(1);
+    let (e, random, alpn, ecdheOk, ecSignOk, rsaSignOk, _) = tls::handshake_server_tls12_method(1);
     eq("processClientHello builds the ServerHello scaffold", e, "");
     eq(
         "the server random carries the TLS 1.2 downgrade canary, matching Go",
         hexOf(random),
         "909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7444f574e47524401",
     );
-    eq("ALPN negotiates the mutually-supported protocol", alpn, "http/1.1");
+    eq(
+        "ALPN negotiates the mutually-supported protocol",
+        alpn,
+        "http/1.1",
+    );
     check("ECDHE is offered", ecdheOk);
     check("the Ed25519 certificate enables EC signing", ecSignOk);
     check("RSA signing stays off for an EC certificate", !rsaSignOk);
@@ -4492,8 +6143,15 @@ fn main() {
         let (c13e, s13e, m13, cv13, _) = tls::handshake_loopback(cert.clone(), true);
         eq("TLS 1.3 loopback: the client handshake succeeds", c13e, "");
         eq("TLS 1.3 loopback: the server handshake succeeds", s13e, "");
-        check("TLS 1.3 loopback: both halves derive matching traffic secrets", m13);
-        check_n("TLS 1.3 loopback negotiates 0x0304", goish::int(cv13), 0x0304);
+        check(
+            "TLS 1.3 loopback: both halves derive matching traffic secrets",
+            m13,
+        );
+        check_n(
+            "TLS 1.3 loopback negotiates 0x0304",
+            goish::int(cv13),
+            0x0304,
+        );
 
         // TLS 1.2 derives keys into the record-layer ciphers, not a
         // trafficSecret, so the match flag is 1.3-only. A clean
@@ -4507,7 +6165,11 @@ fn main() {
             s12e,
             "",
         );
-        check_n("TLS 1.2 loopback negotiates 0x0303", goish::int(cv12), 0x0303);
+        check_n(
+            "TLS 1.2 loopback negotiates 0x0303",
+            goish::int(cv12),
+            0x0303,
+        );
     }
 
     // ── Conn.handlePostHandshakeMessage ─────────────────────────────
@@ -4530,14 +6192,30 @@ fn main() {
         e,
         "tls: no renegotiation",
     );
-    eq("the no_renegotiation alert matches Go", sink, "15030300020164");
-    check_n("renegotiation does not bump the useless-record counter", retry, 0);
+    eq(
+        "the no_renegotiation alert matches Go",
+        sink,
+        "15030300020164",
+    );
+    check_n(
+        "renegotiation does not bump the useless-record counter",
+        retry,
+        0,
+    );
 
     // A TLS 1.3 NewSessionTicket dispatches to handleNewSessionTicket,
     // which returns nil with no client session cache configured.
     let (e, _, retry) = phm(1);
-    eq("a post-handshake NewSessionTicket in TLS 1.3 is accepted", e, "");
-    check_n("reading the record bumps the useless-record counter", retry, 1);
+    eq(
+        "a post-handshake NewSessionTicket in TLS 1.3 is accepted",
+        e,
+        "",
+    );
+    check_n(
+        "reading the record bumps the useless-record counter",
+        retry,
+        1,
+    );
 
     // A TLS 1.3 message with no post-handshake meaning is rejected.
     let (e, sink, retry) = phm(2);
@@ -4546,7 +6224,11 @@ fn main() {
         e,
         "tls: received unexpected handshake message of type *tls.certificateRequestMsgTLS13",
     );
-    eq("the unexpected_message alert matches Go", sink, "1503030002020a");
+    eq(
+        "the unexpected_message alert matches Go",
+        sink,
+        "1503030002020a",
+    );
     check_n("the rejected record still bumped the counter", retry, 1);
 
     unsafe {
@@ -4554,7 +6236,11 @@ fn main() {
         // them straight to Printf! takes a shared reference to a
         // `static mut`, which Rust 2024 rejects.
         let (pass, fail) = (PASS, FAIL);
-        fmt::Printf!("tls_common_smoke: %v checks, %v failed\n", pass + fail, fail);
+        fmt::Printf!(
+            "tls_common_smoke: %v checks, %v failed\n",
+            pass + fail,
+            fail
+        );
         if fail > 0 {
             goish::syscall::Exit(1);
         }

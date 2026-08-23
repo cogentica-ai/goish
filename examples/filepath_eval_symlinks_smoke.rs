@@ -9,8 +9,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::os;
 use goish::path::filepath;
 use goish::{string, syscall};
@@ -128,9 +128,7 @@ fn main() {
 
     // 9. EvalSymlinks on missing path → error.
     {
-        let (_, err) = filepath::EvalSymlinks(string(
-            "/tmp/goish-evalsymlinks-smoke/missing.txt",
-        ));
+        let (_, err) = filepath::EvalSymlinks(string("/tmp/goish-evalsymlinks-smoke/missing.txt"));
         if !err.IsNil() {
             fmt::Println!("[ 9] EvalSymlinks missing      PASS");
         } else {

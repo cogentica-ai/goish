@@ -114,8 +114,7 @@ impl<S: Stream, W: io::Writer> io::Writer for StreamWriter<S, W> {
     fn Write(&mut self, src: slice<byte>) -> (int, error) {
         let n_src = src.Len();
         // Go: c := make([]byte, len(src))
-        let mut c: slice<byte> =
-            slice::__from_vec(alloc::vec![0u8; n_src as usize]);
+        let mut c: slice<byte> = slice::__from_vec(alloc::vec![0u8; n_src as usize]);
         // Go: w.S.XORKeyStream(c, src)
         self.S.XORKeyStream(&mut c, src);
         // Go: n, err = w.W.Write(c)

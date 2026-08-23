@@ -84,15 +84,12 @@ fn run() {
         finish();
     }
 
-    let tr = NewFileTransport(Arc::new(goish::net::http::fs::NewDir(dir.clone())) as Arc<dyn goish::net::http::fs::FileSystem + Send + Sync>);
+    let tr = NewFileTransport(Arc::new(goish::net::http::fs::NewDir(dir.clone()))
+        as Arc<dyn goish::net::http::fs::FileSystem + Send + Sync>);
 
     // ── 1. a present file ──
     {
-        let (req, e) = http::NewRequest(
-            string("GET"),
-            string("file:///hello.txt"),
-            slice::new(),
-        );
+        let (req, e) = http::NewRequest(string("GET"), string("file:///hello.txt"), slice::new());
         if !e.IsNil() {
             check("NewRequest", false, fmt::Sprintf!("%v", e));
             finish();
@@ -105,7 +102,10 @@ fn run() {
                 && resp.StatusCode == 200
                 && resp.Status == "200 OK"
                 && body.Len() == 40960
-                && { let bs: &str = body.as_ref(); bs.starts_with("abcdefghij") },
+                && {
+                    let bs: &str = body.as_ref();
+                    bs.starts_with("abcdefghij")
+                },
             fmt::Sprintf!(
                 "status=%d %q len=%d",
                 resp.StatusCode,
@@ -117,7 +117,9 @@ fn run() {
         // Proto/ProtoMajor/Close are fixed by newPopulateResponseWriter.
         check(
             "response carries HTTP/1.0, Close, ContentLength -1",
-            resp.Proto == "HTTP/1.0" && resp.ProtoMajor == 1 && resp.Close
+            resp.Proto == "HTTP/1.0"
+                && resp.ProtoMajor == 1
+                && resp.Close
                 && resp.ContentLength == -1,
             fmt::Sprintf!(
                 "proto=%s major=%d close=%v cl=%d",
@@ -139,11 +141,7 @@ fn run() {
 
     // ── 2. a missing file → 404, not a hang ──
     {
-        let (req, _) = http::NewRequest(
-            string("GET"),
-            string("file:///nope.txt"),
-            slice::new(),
-        );
+        let (req, _) = http::NewRequest(string("GET"), string("file:///nope.txt"), slice::new());
         let (mut resp, rerr) = tr.RoundTrip(&req);
         let _ = drain(&mut resp.Body);
         check(
@@ -157,11 +155,7 @@ fn run() {
     {
         let fsys = os::DirFS(dir.clone());
         let tr2 = NewFileTransportFS(fsys);
-        let (req, _) = http::NewRequest(
-            string("GET"),
-            string("file:///hello.txt"),
-            slice::new(),
-        );
+        let (req, _) = http::NewRequest(string("GET"), string("file:///hello.txt"), slice::new());
         let (mut resp, rerr) = tr2.RoundTrip(&req);
         let body = drain(&mut resp.Body);
         check(

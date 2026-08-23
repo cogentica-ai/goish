@@ -8,8 +8,8 @@
 #![no_main]
 #![allow(non_snake_case)]
 
-use goish::{fmt, strings, syscall, testing};
 use goish::types::int;
+use goish::{fmt, strings, syscall, testing};
 
 fn TestAddition(t: &mut testing::T) {
     let got: int = 2 + 3;
@@ -28,8 +28,12 @@ fn TestSubtests(t: &mut testing::T) {
 
     t.Run("cleanup", |t| {
         // Cleanups run LIFO when the test function returns, as in Go.
-        t.Cleanup(|| { fmt::Println!("second"); });
-        t.Cleanup(|| { fmt::Println!("first"); });
+        t.Cleanup(|| {
+            fmt::Println!("second");
+        });
+        t.Cleanup(|| {
+            fmt::Println!("first");
+        });
     });
 }
 

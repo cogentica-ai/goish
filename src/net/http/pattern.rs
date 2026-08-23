@@ -211,10 +211,7 @@ pub fn parsePattern<S: Into<string>>(s: S) -> (pattern, error) {
             // Go: if name == "$" { … {$} marker … }
             if name == "$" {
                 if rest.Len() != 0 {
-                    return (
-                        defaultPattern(),
-                        errors::New(string("{$} not at end")),
-                    );
+                    return (defaultPattern(), errors::New(string("{$} not at end")));
                 }
                 segments.push(segment {
                     s: string("/"),
@@ -302,8 +299,7 @@ impl pattern {
         // ("GET matches HEAD too"); the response writer suppresses
         // the body for HEAD.
         if self.method.Len() > 0 && self.method != *method {
-            let get_matches_head =
-                self.method == string("GET") && *method == string("HEAD");
+            let get_matches_head = self.method == string("GET") && *method == string("HEAD");
             if !get_matches_head {
                 return None;
             }
@@ -532,10 +528,7 @@ impl pattern {
         let n2 = p2.segments.Len();
         let mut i: int = 0;
         while i < n1 && i < n2 {
-            rel = combineRelationships(
-                rel,
-                compareSegments(&self.segments[i], &p2.segments[i]),
-            );
+            rel = combineRelationships(rel, compareSegments(&self.segments[i], &p2.segments[i]));
             if rel == disjoint {
                 return rel;
             }

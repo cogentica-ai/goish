@@ -62,16 +62,31 @@ fn main() {
 
     r.Body = http::Body::from_bytes(slice::<u8>::__from_vec(b"hello".to_vec()));
     r.ContentLength = 5;
-    eqi(httputil::outgoingLength(&r), 5, "5-byte body, CL=5", &mut bad);
+    eqi(
+        httputil::outgoingLength(&r),
+        5,
+        "5-byte body, CL=5",
+        &mut bad,
+    );
 
     r.ContentLength = 0;
-    eqi(httputil::outgoingLength(&r), -1, "body with CL forced 0", &mut bad);
+    eqi(
+        httputil::outgoingLength(&r),
+        -1,
+        "body with CL forced 0",
+        &mut bad,
+    );
 
     // goish has no NoBody sentinel; an empty slice IS that state, and
     // Go answers 0 for it.
     r.Body = http::Body::from_bytes(slice::<u8>::new());
     r.ContentLength = 0;
-    eqi(httputil::outgoingLength(&r), 0, "NoBody equivalent", &mut bad);
+    eqi(
+        httputil::outgoingLength(&r),
+        0,
+        "NoBody equivalent",
+        &mut bad,
+    );
 
     if bad == 0 {
         fmt::Println!("DUMP_HELPERS_OK 6/6");

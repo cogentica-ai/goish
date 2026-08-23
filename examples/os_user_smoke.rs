@@ -21,8 +21,8 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::errors::{self, error};
+use goish::fmt;
 use goish::gostring::string;
 use goish::os::user::{
     self, UnknownGroupError, UnknownGroupIdError, UnknownUserError, UnknownUserIdError,

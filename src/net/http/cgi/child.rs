@@ -37,7 +37,7 @@ use crate::strings;
 use crate::types::{byte, int};
 
 use super::super::header::Header;
-use super::super::request::{Request, ParseHTTPVersion};
+use super::super::request::{ParseHTTPVersion, Request};
 use super::super::url::URL;
 
 // go: sdk 1.25.5 net/http/cgi/child.go:39-48 envMap
@@ -100,13 +100,19 @@ pub fn RequestFromMap(params: &map<string, string>) -> (Request, error) {
     };
 
     if r.Method == "" {
-        return (r, errors::New(string("cgi: no REQUEST_METHOD in environment")));
+        return (
+            r,
+            errors::New(string("cgi: no REQUEST_METHOD in environment")),
+        );
     }
 
     r.Proto = get("SERVER_PROTOCOL");
     let (major, minor, ok) = ParseHTTPVersion(r.Proto.clone());
     if !ok {
-        return (r, errors::New(string("cgi: invalid SERVER_PROTOCOL version")));
+        return (
+            r,
+            errors::New(string("cgi: invalid SERVER_PROTOCOL version")),
+        );
     }
     r.ProtoMajor = major;
     r.ProtoMinor = minor;
@@ -119,9 +125,7 @@ pub fn RequestFromMap(params: &map<string, string>) -> (Request, error) {
         if err != crate::nil {
             return (
                 r,
-                errors::New(
-                    string("cgi: bad CONTENT_LENGTH in environment: ") + lenstr,
-                ),
+                errors::New(string("cgi: bad CONTENT_LENGTH in environment: ") + lenstr),
             );
         }
         r.ContentLength = clen;
@@ -140,8 +144,10 @@ pub fn RequestFromMap(params: &map<string, string>) -> (Request, error) {
         }
         let (after, found) = strings::CutPrefix(k.clone(), string("HTTP_"));
         if found {
-            r.Header
-                .Add(strings::ReplaceAll(after, string("_"), string("-")), v.clone());
+            r.Header.Add(
+                strings::ReplaceAll(after, string("_"), string("-")),
+                v.clone(),
+            );
         }
     }
 
@@ -192,9 +198,7 @@ pub fn RequestFromMap(params: &map<string, string>) -> (Request, error) {
         if err != crate::nil {
             return (
                 r,
-                errors::New(
-                    string("cgi: failed to parse REQUEST_URI into a URL: ") + uriStr,
-                ),
+                errors::New(string("cgi: failed to parse REQUEST_URI into a URL: ") + uriStr),
             );
         }
         r.URL = u;
@@ -204,10 +208,7 @@ pub fn RequestFromMap(params: &map<string, string>) -> (Request, error) {
     // server, so we do here too." Atoi's error is deliberately dropped
     // — an unset or invalid REMOTE_PORT becomes zero.
     let (remotePort, _) = crate::strconv::Atoi(get("REMOTE_PORT"));
-    r.RemoteAddr = crate::net::JoinHostPort(
-        get("REMOTE_ADDR"),
-        crate::strconv::Itoa(remotePort),
-    );
+    r.RemoteAddr = crate::net::JoinHostPort(get("REMOTE_ADDR"), crate::strconv::Itoa(remotePort));
 
     return (r, errors::nil);
 }
@@ -277,7 +278,10 @@ impl response {
     // `w` is type-erased for the same reason Go's `bufw *bufio.Writer`
     // is: the writer is stdout in production and a buffer under test,
     // and Go's own tests construct this struct over a bytes.Buffer.
-    pub fn new(req: &Request, w: alloc::boxed::Box<dyn crate::io::Writer + Send + Sync>) -> response {
+    pub fn new(
+        req: &Request,
+        w: alloc::boxed::Box<dyn crate::io::Writer + Send + Sync>,
+    ) -> response {
         return response {
             req_url: req.URL.String(),
             header: super::super::responsewriter::HeaderHandle::new(Header::new()),

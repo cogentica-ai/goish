@@ -12,7 +12,7 @@ extern crate alloc;
 extern crate goish;
 
 use core::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
-use goish::io::{Reader, Writer, Closer};
+use goish::io::{Closer, Reader, Writer};
 use goish::net;
 use goish::runtime::sched::schedule;
 use goish::{bytes, go, make, string, syscall};
@@ -90,10 +90,7 @@ fn main() {
     let mut buf = make!([]u8, 32);
     let (n, err) = conn.Read(&mut buf);
     check(err.IsNil() && n == 3, b"server Read short\n");
-    check(
-        &(*buf)[..3] == b"hi\n",
-        b"server got wrong bytes\n",
-    );
+    check(&(*buf)[..3] == b"hi\n", b"server got wrong bytes\n");
     let (_n, err) = conn.Write(bytes("pong"));
     check(err.IsNil(), b"server Write failed\n");
     let _ = conn.Close();

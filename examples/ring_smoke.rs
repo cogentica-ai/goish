@@ -9,10 +9,10 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::container::ring;
+use goish::fmt;
+use goish::syscall;
 use goish::types::int;
-use goish::{syscall};
 
 // Initialise an n-element ring with 0..n stored at successive
 // positions. Returns the head handle (still pointing at element with
@@ -227,11 +227,7 @@ fn main() {
         let n = r.Next();
         let p = r.Prev();
         let m = r.Move(7); // wraps around 7 times to same node
-        if r.Len() == 1
-            && n.Value() == Some(42)
-            && p.Value() == Some(42)
-            && m.Value() == Some(42)
-        {
+        if r.Len() == 1 && n.Value() == Some(42) && p.Value() == Some(42) && m.Value() == Some(42) {
             fmt::Println!("[11] Single-element ring        PASS");
         } else {
             fmt::Println!("[11] Single-element ring        FAIL");
@@ -246,10 +242,7 @@ fn main() {
         let n = r.Next();
         let p = r.Prev();
         // After init, ring is 1-element pointing at self.
-        if r.Len() == 1
-            && n.Value().is_none()
-            && p.Value().is_none()
-        {
+        if r.Len() == 1 && n.Value().is_none() && p.Value().is_none() {
             fmt::Println!("[12] Lazy init via Next/Prev    PASS");
         } else {
             fmt::Println!("[12] Lazy init via Next/Prev    FAIL");

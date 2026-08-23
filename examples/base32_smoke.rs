@@ -11,12 +11,12 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::convert::{bytes as to_bytes, string as to_string};
 use goish::encoding::base32;
+use goish::fmt;
 use goish::goslice::slice;
+use goish::syscall;
 use goish::types::byte;
-use goish::{syscall};
 
 fn raw(s: &slice<byte>) -> &[byte] {
     s

@@ -65,7 +65,10 @@ fn main() {
 
     schedule();
 
-    check(DONE.load(Ordering::Acquire) == 1, b"winch: receiver didn't fire\n");
+    check(
+        DONE.load(Ordering::Acquire) == 1,
+        b"winch: receiver didn't fire\n",
+    );
     check(
         GOT_SIG.load(Ordering::Acquire) == syscall::SIGWINCH as i64,
         b"winch: wrong signal received\n",

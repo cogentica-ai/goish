@@ -214,10 +214,7 @@ impl socksUsernamePassword {
             return errors::nil;
         }
         if auth == socksAuthMethodUsernamePassword {
-            if self.Username.Len() == 0
-                || self.Username.Len() > 255
-                || self.Password.Len() > 255
-            {
+            if self.Username.Len() == 0 || self.Username.Len() > 255 || self.Password.Len() > 255 {
                 return errors::New(string("invalid username/password"));
             }
             let mut b: Vec<u8> = Vec::new();
@@ -449,10 +446,7 @@ impl socksDialer {
         if cmdErr != socksStatusSucceeded {
             return (
                 None,
-                errors::New(crate::fmt::Sprintf!(
-                    "unknown error %s",
-                    cmdErr.String()
-                )),
+                errors::New(crate::fmt::Sprintf!("unknown error %s", cmdErr.String())),
             );
         }
         if rep[int(2)] != 0 {

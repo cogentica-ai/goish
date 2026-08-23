@@ -69,8 +69,10 @@ fn run() {
         }
         w.Header().Set(string("X-Sum"), string("42"));
         w.Header().Set(string("X-Bad"), string("nope"));
-        w.Header().Set(string("Content-Type"), string("should-not-appear"));
-        w.Header().Set(string("If-Match"), string("should-not-appear"));
+        w.Header()
+            .Set(string("Content-Type"), string("should-not-appear"));
+        w.Header()
+            .Set(string("If-Match"), string("should-not-appear"));
         // The magic-prefix route, which does NOT go through
         // ValidTrailerHeader — Go emits these even when forbidden.
         w.Header().Set(
@@ -78,7 +80,10 @@ fn run() {
             string("late-value"),
         );
         w.Header().Set(
-            fmt::Sprintf!("%sContent-Length", string(goish::net::http::server::TrailerPrefix)),
+            fmt::Sprintf!(
+                "%sContent-Length",
+                string(goish::net::http::server::TrailerPrefix)
+            ),
             string("bad"),
         );
     });

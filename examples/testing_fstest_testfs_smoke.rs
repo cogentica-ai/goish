@@ -26,7 +26,7 @@ extern crate goish;
 use alloc::sync::Arc;
 use goish::gostring::string;
 use goish::io::fs;
-use goish::testing::fstest::{MapFile, MapFS, TestFS};
+use goish::testing::fstest::{MapFS, MapFile, TestFS};
 use goish::{errors, fmt, slice, syscall};
 
 fn s(x: &str) -> string {

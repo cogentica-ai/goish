@@ -27,12 +27,12 @@ extern crate alloc;
 use alloc::boxed::Box;
 
 use crate::bufio;
+use crate::errors::nil;
 use crate::errors::{self, error};
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::io;
 use crate::types::{byte, int, uint};
-use crate::errors::nil;
 
 // Go: const ( LSB Order = iota; MSB )
 //
@@ -214,11 +214,7 @@ impl<R: io::Reader> Reader<R> {
                 }
                 self.output[i as usize] = c as byte;
                 // Go: r.o += copy(r.output[r.o:], r.output[i:])
-                let n = copy_within_output(
-                    &mut self.output[..],
-                    self.o as usize,
-                    i as usize,
-                );
+                let n = copy_within_output(&mut self.output[..], self.o as usize, i as usize);
                 self.o += n;
                 if self.last != DECODER_INVALID_CODE {
                     self.suffix[self.hi as usize] = c as byte;
@@ -434,7 +430,7 @@ const MAX_CODE: u32 = (1 << 12) - 1;
 const INVALID_CODE: u32 = u32::MAX;
 // Go: tableSize = 4 * 1<<12
 const TABLE_SIZE: usize = 4 * (1 << 12); // 16384
-// Go: tableMask = tableSize - 1
+                                         // Go: tableMask = tableSize - 1
 const TABLE_MASK: u32 = (TABLE_SIZE as u32) - 1;
 // Go: invalidEntry = 0
 const INVALID_ENTRY: u32 = 0;
@@ -549,8 +545,7 @@ impl<W: io::Writer> Writer<W> {
             for i in 0..(p.Len() as usize) {
                 let x = p[i as int];
                 if x > maxLit {
-                    self.err =
-                        errors::New("lzw: input byte too large for the litWidth");
+                    self.err = errors::New("lzw: input byte too large for the litWidth");
                     return (0, self.err.clone());
                 }
             }
@@ -692,11 +687,7 @@ impl<W: io::Writer> Writer<W> {
         }
         self.order = order;
         if lit_width < 2 || 8 < lit_width {
-            self.err = crate::Sprintf!(
-                "lzw: litWidth %d out of range",
-                lit_width
-            )
-            .into_error();
+            self.err = crate::Sprintf!("lzw: litWidth %d out of range", lit_width).into_error();
             return;
         }
         let lw = lit_width as uint;

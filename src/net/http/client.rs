@@ -56,8 +56,8 @@ use crate::types::{byte, int};
 use crate::{append, make};
 
 use super::header::Header;
-use super::response::Response;
 use super::request::Request;
+use super::response::Response;
 use super::url::URL;
 
 // ─── Body — Go's `Response.Body io.ReadCloser`, streaming ────────────
@@ -177,9 +177,7 @@ impl ConnSrc {
         return out;
     }
 
-    pub(crate) fn split_for_upgrade(
-        self,
-    ) -> (Option<(ConnSrc, crate::net::TCPConn)>, error) {
+    pub(crate) fn split_for_upgrade(self) -> (Option<(ConnSrc, crate::net::TCPConn)>, error) {
         let out = match self {
             ConnSrc::Tcp(mut br) => {
                 let (w, e) = br.__rd_mut().__dup_handle();
@@ -217,22 +215,36 @@ impl crate::io::Writer for ConnSrcWriter<'_> {
 /// close). `Eager` is a fully-materialized body (ReadResponse,
 /// DumpResponse replacement, `Body::from`).
 enum FramedBody {
-    Eager { data: slice<byte>, off: int },
-    Cl { src: ConnSrc, remaining: int },
-    Chunked { cr: super::internal::chunked::ChunkedReader<ConnSrc> },
-    UntilEof { src: ConnSrc },
+    Eager {
+        data: slice<byte>,
+        off: int,
+    },
+    Cl {
+        src: ConnSrc,
+        remaining: int,
+    },
+    Chunked {
+        cr: super::internal::chunked::ChunkedReader<ConnSrc>,
+    },
+    UntilEof {
+        src: ConnSrc,
+    },
     /// An arbitrary `io.ReadCloser` standing in for the body — Go's
     /// `Response.Body` is that interface, so anything can fill it. The
     /// other variants are conn-backed; this one exists for bodies with
     /// no connection behind them, such as `io.Pipe`'s read half in
     /// filetransport.go.
-    Piped { r: alloc::boxed::Box<dyn crate::io::ReadCloser + Send + Sync> },
+    Piped {
+        r: alloc::boxed::Box<dyn crate::io::ReadCloser + Send + Sync>,
+    },
     /// A 101 Switching Protocols response: the connection itself IS
     /// the body (Go: newReadWriteCloserBody, transport.go:2548).
     /// Reads drain any bytes the peer sent past the head (still in
     /// the bufio buffer), then the conn; the proxy extracts the whole
     /// carrier with `__take_upgraded` to pump both directions.
-    Upgraded { src: ConnSrc },
+    Upgraded {
+        src: ConnSrc,
+    },
     Closed,
 }
 
@@ -303,10 +315,7 @@ fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
         FramedBody::UntilEof { src } => src.Read(p),
         FramedBody::Upgraded { src } => src.Read(p),
         FramedBody::Piped { r } => r.Read(p),
-        FramedBody::Closed => (
-            0,
-            errors::New(string("http: read on closed response body")),
-        ),
+        FramedBody::Closed => (0, errors::New(string("http: read on closed response body"))),
     };
     // A read interrupted by the cancel watcher surfaces as a timeout
     // off the netpoller; prefer ctx.Err() (context canceled /
@@ -432,9 +441,7 @@ impl Body {
     /// enum over the conn-backed framings, so this is the escape hatch
     /// for a body with no connection — `io.Pipe` in filetransport.go,
     /// and anything a future RoundTripper wants to hand back.
-    pub fn from_reader(
-        r: alloc::boxed::Box<dyn crate::io::ReadCloser + Send + Sync>,
-    ) -> Body {
+    pub fn from_reader(r: alloc::boxed::Box<dyn crate::io::ReadCloser + Send + Sync>) -> Body {
         return Body::from_parts(FramedBody::Piped { r }, None, None);
     }
 
@@ -589,8 +596,7 @@ impl Closer for Body {
     }
 }
 
-impl Response {
-}
+impl Response {}
 
 // ─── ReadResponse ────────────────────────────────────────────────────
 
@@ -606,7 +612,6 @@ pub(crate) enum BodyKind {
     /// No CL, no TE, `Connection: close` — body runs to conn EOF.
     UntilEof,
 }
-
 
 /// Parse status line + headers + framing decision, WITHOUT touching
 /// body bytes. `resp.ContentLength` / `resp.Close` are set; the
@@ -736,11 +741,7 @@ pub(crate) fn __attach_loop_body(
             done(None);
         }
         BodyKind::Cl(n) => {
-            resp.Body = Body::from_parts(
-                FramedBody::Cl { src, remaining: n },
-                None,
-                None,
-            );
+            resp.Body = Body::from_parts(FramedBody::Cl { src, remaining: n }, None, None);
             resp.Body.__set_reuse(done);
         }
         BodyKind::Chunked => {
@@ -801,7 +802,10 @@ pub(crate) fn drain_to_eof<R: Reader>(r: &mut R, mut body: slice<byte>) -> (slic
 /// Read exactly `len(buf)` bytes from `r` into `buf`. Returns the
 /// short count + error on EOF mid-read. Mirrors `io.ReadFull` over a
 /// goish buffered reader.
-pub(crate) fn read_full_into<R: Reader>(r: &mut bufio::Reader<R>, buf: &mut slice<byte>) -> (int, error) {
+pub(crate) fn read_full_into<R: Reader>(
+    r: &mut bufio::Reader<R>,
+    buf: &mut slice<byte>,
+) -> (int, error) {
     let want = buf.Len();
     let mut got: int = 0;
     while got < want {
@@ -868,9 +872,8 @@ pub trait RoundTripper: Send + Sync {
 /// can be assigned in via the `Transport.Proxy` field. The function
 /// shape is left as `Arc<dyn Fn>` rather than a typed closure so we
 /// don't need a public URL type in the surface.
-pub type ProxyResolver = alloc::sync::Arc<
-    dyn Fn(&Request) -> (super::url::URL, error) + Send + Sync,
->;
+pub type ProxyResolver =
+    alloc::sync::Arc<dyn Fn(&Request) -> (super::url::URL, error) + Send + Sync>;
 /// Type alias for the dial-context closure. Same opaque shape as
 /// `ProxyResolver` — the real signature would carry `(Context, network,
 /// addr) -> (Conn, error)` but those are inert in v1.
@@ -918,9 +921,8 @@ pub struct Transport {
     /// (transport.go:307), populated by `RegisterProtocol`. goish uses
     /// a Mutex-guarded map — the atomic.Value dance exists to make the
     /// read path lock-free, which goish's v1 does not need.
-    pub(crate) __alt_proto: crate::sync::Mutex<
-        crate::gomap::map<string, Option<alloc::sync::Arc<dyn RoundTripper>>>,
-    >,
+    pub(crate) __alt_proto:
+        crate::sync::Mutex<crate::gomap::map<string, Option<alloc::sync::Arc<dyn RoundTripper>>>>,
     /// Maximum time `RoundTrip` will spend on the entire request
     /// (dial + write + read). Zero ≡ no timeout.
     pub Timeout: time::Duration,
@@ -973,9 +975,7 @@ impl Default for Transport {
     fn default() -> Self {
         Transport {
             __idle: Arc::new(crate::sync::Mutex::new(super::transport::idlePool::new())),
-            __conns_per_host: crate::sync::Mutex::new(
-                super::transport::connsPerHost::new(),
-            ),
+            __conns_per_host: crate::sync::Mutex::new(super::transport::connsPerHost::new()),
             MaxResponseHeaderBytes: 0,
             WriteBufferSize: 0,
             ReadBufferSize: 0,
@@ -1069,7 +1069,9 @@ impl RoundTripper for Transport {
         if !is_http && !is_https {
             return (
                 Response::default(),
-                errors::New(string("http: only scheme=http and scheme=https are supported")),
+                errors::New(string(
+                    "http: only scheme=http and scheme=https are supported",
+                )),
             );
         }
 
@@ -1109,7 +1111,11 @@ impl RoundTripper for Transport {
             let dial_addr = ensure_default_port(&host, if is_https { 443 } else { 80 });
             let cm = super::transport::connectMethod {
                 proxyURL: None,
-                targetScheme: if is_https { string("https") } else { string("http") },
+                targetScheme: if is_https {
+                    string("https")
+                } else {
+                    string("http")
+                },
                 targetAddr: dial_addr.clone(),
                 onlyH1: false,
             };
@@ -1165,10 +1171,7 @@ impl RoundTripper for Transport {
                         let _ = src.__set_deadline(time::Time::default());
                     }
                     let (wfd, wpd) = pc.__watch_parts();
-                    arm_cancel_watch(
-                        &ctx,
-                        (wfd, wpd as *const crate::runtime::netpoll::PollDesc),
-                    )
+                    arm_cancel_watch(&ctx, (wfd, wpd as *const crate::runtime::netpoll::PollDesc))
                 };
 
                 // Write the request: head, then stream the body (see
@@ -1190,10 +1193,7 @@ impl RoundTripper for Transport {
                 // after the timeout, all fed through the verbatim
                 // waitForContinue closure.
                 let mut skip_body = false;
-                if head_werr.IsNil()
-                    && tw.Body.is_some()
-                    && rt_req.expectsContinue()
-                {
+                if head_werr.IsNil() && tw.Body.is_some() && rt_req.expectsContinue() {
                     let continue_ch: crate::gochan::chan<bool> = crate::make!(chan bool, 1);
                     let ect = self.ExpectContinueTimeout;
                     if ect.0 > 0 {
@@ -1238,7 +1238,9 @@ impl RoundTripper for Transport {
                         // closure's timer immediately — body sent.
                         let _ = continue_ch.Send(true);
                     }
-                    if let Some(wait) = pc.waitForContinue(self.ExpectContinueTimeout, Some(continue_ch)) {
+                    if let Some(wait) =
+                        pc.waitForContinue(self.ExpectContinueTimeout, Some(continue_ch))
+                    {
                         if !wait() {
                             skip_body = true;
                         }
@@ -1360,48 +1362,48 @@ impl RoundTripper for Transport {
                 // Go's bodyEOFSignal bank-back: reusable when the
                 // server didn't ask to close and the framing has a
                 // clean end (Empty now, Content-Length at body Close).
-                let bank: Option<alloc::boxed::Box<dyn FnOnce(Option<ConnSrc>) + Send>> =
-                    if !self.DisableKeepAlives
-                        && !resp.Close
-                        && matches!(kind, BodyKind::Empty | BodyKind::Cl(_))
-                    {
-                        let idle = self.__idle.clone();
-                        let cfg = self.__bank_cfg();
-                        let pc2 = pc.clone();
-                        let idle_timeout = self.IdleConnTimeout;
-                        Some(alloc::boxed::Box::new(move |s: Option<ConnSrc>| {
-                            let mut s = match s {
-                                Some(s) => s,
-                                // Dirty close: the conn died with the
-                                // body; nothing to bank.
-                                None => return,
-                            };
-                            // Clear the per-request deadline before the
-                            // conn waits idle.
-                            let _ = s.__set_deadline(time::Time::default());
-                            pc2.__put_src(s);
-                            let e = super::transport::__try_put_idle(&idle, &cfg, &pc2);
-                            if !e.IsNil() {
-                                // Pool refused (full/closed): release.
-                                pc2.close(e);
-                                return;
-                            }
-                            // Go: pc.idleTimer = time.AfterFunc(
-                            // t.IdleConnTimeout, pc.closeConnIfStillIdle)
-                            // — armed per idle cycle, stopped when the
-                            // conn is taken (__take_src).
-                            if idle_timeout.0 > 0 {
-                                let pc3 = pc2.clone();
-                                let idle3 = idle.clone();
-                                let t = crate::time::AfterFunc(idle_timeout, move || {
-                                    pc3.closeConnIfStillIdle(&idle3);
-                                });
-                                pc2.__arm_idle_timer(t);
-                            }
-                        }))
-                    } else {
-                        None
-                    };
+                let bank: Option<alloc::boxed::Box<dyn FnOnce(Option<ConnSrc>) + Send>> = if !self
+                    .DisableKeepAlives
+                    && !resp.Close
+                    && matches!(kind, BodyKind::Empty | BodyKind::Cl(_))
+                {
+                    let idle = self.__idle.clone();
+                    let cfg = self.__bank_cfg();
+                    let pc2 = pc.clone();
+                    let idle_timeout = self.IdleConnTimeout;
+                    Some(alloc::boxed::Box::new(move |s: Option<ConnSrc>| {
+                        let mut s = match s {
+                            Some(s) => s,
+                            // Dirty close: the conn died with the
+                            // body; nothing to bank.
+                            None => return,
+                        };
+                        // Clear the per-request deadline before the
+                        // conn waits idle.
+                        let _ = s.__set_deadline(time::Time::default());
+                        pc2.__put_src(s);
+                        let e = super::transport::__try_put_idle(&idle, &cfg, &pc2);
+                        if !e.IsNil() {
+                            // Pool refused (full/closed): release.
+                            pc2.close(e);
+                            return;
+                        }
+                        // Go: pc.idleTimer = time.AfterFunc(
+                        // t.IdleConnTimeout, pc.closeConnIfStillIdle)
+                        // — armed per idle cycle, stopped when the
+                        // conn is taken (__take_src).
+                        if idle_timeout.0 > 0 {
+                            let pc3 = pc2.clone();
+                            let idle3 = idle.clone();
+                            let t = crate::time::AfterFunc(idle_timeout, move || {
+                                pc3.closeConnIfStillIdle(&idle3);
+                            });
+                            pc2.__arm_idle_timer(t);
+                        }
+                    }))
+                } else {
+                    None
+                };
                 attach_stream_body(&mut resp, kind, src, ctx, watch, bank);
                 return (resp, errors::nil);
             }
@@ -1444,14 +1446,7 @@ fn attach_stream_body(
             resp.Body = Body::default();
         }
         BodyKind::Cl(n) => {
-            resp.Body = Body::from_parts(
-                FramedBody::Cl {
-                    src,
-                    remaining: n,
-                },
-                ctx,
-                watch,
-            );
+            resp.Body = Body::from_parts(FramedBody::Cl { src, remaining: n }, ctx, watch);
             if let Some(b) = bank {
                 resp.Body.__set_reuse(b);
             }
@@ -1475,10 +1470,7 @@ impl Transport {
     /// Effective conn deadline for one roundtrip: `Transport.Timeout`
     /// (if set) tightened by the request ctx's deadline (if any).
     /// Zero Time ⇒ no deadline.
-    fn effective_deadline(
-        &self,
-        ctx: &Option<Arc<dyn crate::context::Context>>,
-    ) -> time::Time {
+    fn effective_deadline(&self, ctx: &Option<Arc<dyn crate::context::Context>>) -> time::Time {
         let mut dl = time::Time::default();
         if self.Timeout.0 > 0 {
             dl = time::Now().Add(self.Timeout);
@@ -1959,11 +1951,7 @@ pub(crate) fn send(
     ireq: &Request,
     rt: &Arc<dyn RoundTripper>,
     deadline: crate::time::Time,
-) -> (
-    Response,
-    Arc<dyn Fn() -> bool + Send + Sync>,
-    error,
-) {
+) -> (Response, Arc<dyn Fn() -> bool + Send + Sync>, error) {
     let af: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(|| alwaysFalse());
     // Go: req is a lazy shallow fork of ireq; goish Requests clone
     // cheaply (Arc-backed innards), so the fork is unconditional.
@@ -2187,9 +2175,11 @@ impl Client {
                         GetBody: None,
                         RemoteAddr: string::new(),
                         pat: None,
-        matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
-        otherValues: crate::gomap::map::<string, string>::new(),
-                        form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(super::request::FormCell::default())),
+                        matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
+                        otherValues: crate::gomap::map::<string, string>::new(),
+                        form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(
+                            super::request::FormCell::default(),
+                        )),
                         // Redirect hops inherit the original request's
                         // context (Go client.go:665: ireq.Context()).
                         ctx: current.ctx.clone(),
@@ -2321,8 +2311,8 @@ impl Client {
     /// `string`, and `&str` literals all work (same `__RequestBody`
     /// dispatch as `NewRequest`).
     // go: sdk 1.25.5 net/http/client.go:843-845 Post
-//
-pub fn Post<U: Into<string>, C: Into<string>, B: __RequestBody>(
+    //
+    pub fn Post<U: Into<string>, C: Into<string>, B: __RequestBody>(
         &self,
         url: U,
         content_type: C,
@@ -2340,13 +2330,13 @@ pub fn Post<U: Into<string>, C: Into<string>, B: __RequestBody>(
     //
     /// `(*Client).PostForm(url, vals)` — POST `application/x-www-form-urlencoded`
     /// body built from key=value pairs.
-    pub fn PostForm<U: Into<string>>(&self, url: U, vals: &[(string, string)]) -> (Response, error) {
+    pub fn PostForm<U: Into<string>>(
+        &self,
+        url: U,
+        vals: &[(string, string)],
+    ) -> (Response, error) {
         let body = encode_form(vals);
-        self.Post(
-            url,
-            string("application/x-www-form-urlencoded"),
-            body,
-        )
+        self.Post(url, string("application/x-www-form-urlencoded"), body)
     }
 }
 
@@ -2548,7 +2538,9 @@ pub fn NewRequest<M: Into<string>, U: Into<string>, B: __RequestBody>(
         pat: None,
         matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
         otherValues: crate::gomap::map::<string, string>::new(),
-        form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(super::request::FormCell::default())),
+        form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(
+            super::request::FormCell::default(),
+        )),
         ctx: None,
     };
     (req, errors::nil)
@@ -2575,7 +2567,9 @@ fn default_request() -> Request {
         pat: None,
         matches: crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
         otherValues: crate::gomap::map::<string, string>::new(),
-        form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(super::request::FormCell::default())),
+        form_state: alloc::sync::Arc::new(crate::sync::Mutex::new(
+            super::request::FormCell::default(),
+        )),
         ctx: None,
     }
 }
@@ -2723,9 +2717,7 @@ pub fn serialize_request_head(
     host: &string,
     using_proxy: bool,
 ) -> (slice<byte>, super::transfer::transferWriter, error) {
-    let (tw, terr) = super::transfer::newTransferWriter(
-        super::transfer::TransferMsg::Req(req),
-    );
+    let (tw, terr) = super::transfer::newTransferWriter(super::transfer::TransferMsg::Req(req));
     if !terr.IsNil() {
         return (slice::<byte>::__from_vec(Vec::new()), tw, terr);
     }
@@ -2874,7 +2866,6 @@ fn query_escape(s: string) -> string {
     }
     b.String()
 }
-
 
 // go: none — goish idiom: `ConnSrc` is unexported, so only this module
 // can register it. See AGENTS.md §9b.

@@ -43,8 +43,8 @@ use alloc::vec::Vec;
 use crate::errors;
 use crate::goslice::slice;
 use crate::types::byte;
-use crate::{int, uint16, uint32, uint64};
 use crate::{error, int64, uint8};
+use crate::{int, uint16, uint32, uint64};
 
 // Go: builder.go:23-33
 //   type Builder struct { err error; result []byte; fixedSize bool;
@@ -124,10 +124,7 @@ impl Builder {
     /// occurred during building.
     pub fn Bytes(&self) -> (slice<byte>, error) {
         if self.err != crate::nil {
-            return (
-                slice::__from_vec(Vec::<byte>::new()),
-                self.err.clone(),
-            );
+            return (slice::__from_vec(Vec::<byte>::new()), self.err.clone());
         }
         return (
             slice::__from_vec(self.result[self.offset..].to_vec()),

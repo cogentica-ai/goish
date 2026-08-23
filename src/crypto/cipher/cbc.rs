@@ -57,8 +57,8 @@ use alloc::vec::Vec;
 
 use crate::crypto::cipher::{Block, BlockMode};
 use crate::goslice::slice;
-use crate::types::byte;
 use crate::int;
+use crate::types::byte;
 
 // Go cbc.go:22
 //   type cbc struct {
@@ -91,7 +91,12 @@ fn newCBC<B: Block>(b: B, iv: slice<byte>) -> cbc<B> {
     let iv_v: Vec<byte> = iv.__into_vec();
     // Go: tmp: make([]byte, b.BlockSize())
     let tmp: Vec<byte> = alloc::vec![0u8; bs];
-    return cbc { b, blockSize, iv: iv_v, tmp };
+    return cbc {
+        b,
+        blockSize,
+        iv: iv_v,
+        tmp,
+    };
 }
 
 // Go cbc.go:38
@@ -193,8 +198,7 @@ impl<B: Block> BlockMode for CBCEncrypter<B> {
             // Go: x.b.Encrypt(dst[:x.blockSize], dst[:x.blockSize])
             //   In goish: encrypt staging buffer into a fresh dst block.
             let src_block: slice<byte> = slice::__from_vec(xor_buf.clone());
-            let mut dst_block: slice<byte> =
-                slice::__from_vec(alloc::vec![0u8; bs]);
+            let mut dst_block: slice<byte> = slice::__from_vec(alloc::vec![0u8; bs]);
             self.0.b.Encrypt(&mut dst_block, src_block);
             let enc_v = dst_block.__into_vec();
             // Write encrypted block to dst[off..off+bs]
@@ -336,10 +340,8 @@ impl<B: Block> BlockMode for CBCDecrypter<B> {
         //   Loop over all but the first block, walking BACKWARDS.
         while start > 0 {
             // Go: x.b.Decrypt(dst[start:end], src[start:end])
-            let src_block: slice<byte> =
-                slice::__from_vec(src_v[start..end].to_vec());
-            let mut dst_block: slice<byte> =
-                slice::__from_vec(alloc::vec![0u8; bs]);
+            let src_block: slice<byte> = slice::__from_vec(src_v[start..end].to_vec());
+            let mut dst_block: slice<byte> = slice::__from_vec(alloc::vec![0u8; bs]);
             self.0.b.Decrypt(&mut dst_block, src_block);
             let dec_v = dst_block.__into_vec();
             // Go: subtle.XORBytes(dst[start:end], dst[start:end], src[prev:start])
@@ -356,10 +358,8 @@ impl<B: Block> BlockMode for CBCDecrypter<B> {
 
         // Go: x.b.Decrypt(dst[start:end], src[start:end])
         //   First block uses the saved iv.
-        let src_block: slice<byte> =
-            slice::__from_vec(src_v[start..end].to_vec());
-        let mut dst_block: slice<byte> =
-            slice::__from_vec(alloc::vec![0u8; bs]);
+        let src_block: slice<byte> = slice::__from_vec(src_v[start..end].to_vec());
+        let mut dst_block: slice<byte> = slice::__from_vec(alloc::vec![0u8; bs]);
         self.0.b.Decrypt(&mut dst_block, src_block);
         let dec_v = dst_block.__into_vec();
         // Go: subtle.XORBytes(dst[start:end], dst[start:end], x.iv)

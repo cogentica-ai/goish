@@ -102,8 +102,7 @@ fn err_negative_write() -> error {
 ///   * `None`           — "no token, read more or stop"
 ///   * `Some(empty)`    — "this is an empty token (e.g., a blank line)"
 ///   * `Some(non-empty)`— normal token
-pub type SplitFunc =
-    Box<dyn FnMut(&[byte], bool) -> (int, Option<slice<byte>>, error) + 'static>;
+pub type SplitFunc = Box<dyn FnMut(&[byte], bool) -> (int, Option<slice<byte>>, error) + 'static>;
 
 // ─── Scanner ──────────────────────────────────────────────────────────
 
@@ -248,8 +247,7 @@ impl<R: io::Reader> Scanner<R> {
             // Read more.
             //
             // Shift to start if buffer is full or more than half-consumed.
-            if self.start > 0 && (self.end == self.buf.len() || self.start > self.buf.len() / 2)
-            {
+            if self.start > 0 && (self.end == self.buf.len() || self.start > self.buf.len() / 2) {
                 self.buf.copy_within(self.start..self.end, 0);
                 self.end -= self.start;
                 self.start = 0;
@@ -316,8 +314,16 @@ pub fn ScanLines(data: &[byte], at_eof: bool) -> (int, Option<slice<byte>>, erro
         return (0, None, nil);
     }
     if let Some(i) = index_byte(data, b'\n') {
-        let end = if i > 0 && data[i - 1] == b'\r' { i - 1 } else { i };
-        return ((i + 1) as int, Some(slice::__from_vec(data[..end].to_vec())), nil);
+        let end = if i > 0 && data[i - 1] == b'\r' {
+            i - 1
+        } else {
+            i
+        };
+        return (
+            (i + 1) as int,
+            Some(slice::__from_vec(data[..end].to_vec())),
+            nil,
+        );
     }
     if at_eof {
         let end = if !data.is_empty() && data[data.len() - 1] == b'\r' {
@@ -622,8 +628,7 @@ impl<R: io::Reader> Reader<R> {
             }
             let src = tmp.__into_vec();
             if n > 0 {
-                self.buf[self.w..self.w + n as usize]
-                    .copy_from_slice(&src[..n as usize]);
+                self.buf[self.w..self.w + n as usize].copy_from_slice(&src[..n as usize]);
                 self.w += n as usize;
             }
             self.scratch = src;
@@ -1031,7 +1036,11 @@ pub fn NewWriter<W: io::Writer>(wr: W) -> Writer<W> {
 
 /// `bufio.NewWriterSize(wr, size)` — buffered writer with `size` bytes.
 pub fn NewWriterSize<W: io::Writer>(wr: W, size: int) -> Writer<W> {
-    let sz = if size <= 0 { defaultBufSize as usize } else { size as usize };
+    let sz = if size <= 0 {
+        defaultBufSize as usize
+    } else {
+        size as usize
+    };
     let mut buf: Vec<byte> = Vec::with_capacity(sz);
     buf.resize(sz, 0);
     Writer {
@@ -1047,13 +1056,13 @@ pub fn NewWriterSize<W: io::Writer>(wr: W, size: int) -> Writer<W> {
 // the buffer, not the Writer, is the pooled unit.
 /// Build a Writer around a recycled backing buffer, resized to
 /// `size`. The put half is `__into_buf`.
-pub(crate) fn __new_writer_with_buf<W: io::Writer>(
-    wr: W,
-    buf: PoolBuf,
-    size: int,
-) -> Writer<W> {
+pub(crate) fn __new_writer_with_buf<W: io::Writer>(wr: W, buf: PoolBuf, size: int) -> Writer<W> {
     let mut buf = buf.0;
-    let sz = if size <= 0 { defaultBufSize as usize } else { size as usize };
+    let sz = if size <= 0 {
+        defaultBufSize as usize
+    } else {
+        size as usize
+    };
     buf.resize(sz, 0);
     return Writer {
         err: nil,
@@ -1304,8 +1313,7 @@ impl<W: io::Writer> Writer<W> {
                 // Copy what we got back into our buffer.
                 if mm > 0 {
                     let src = tmp.__into_vec();
-                    self.buf[self.n..self.n + mm as usize]
-                        .copy_from_slice(&src[..mm as usize]);
+                    self.buf[self.n..self.n + mm as usize].copy_from_slice(&src[..mm as usize]);
                 }
                 if mm != 0 || err != nil {
                     break;
@@ -1314,7 +1322,10 @@ impl<W: io::Writer> Writer<W> {
             }
             // Go: if nr == maxConsecutiveEmptyReads { return n, io.ErrNoProgress }
             if nr == maxConsecutiveEmptyReads {
-                return (n, errors::New("multiple Read calls return no data or error"));
+                return (
+                    n,
+                    errors::New("multiple Read calls return no data or error"),
+                );
             }
             // Go: b.n += m; n += int64(m)
             self.n += m as usize;
@@ -1355,9 +1366,9 @@ pub struct ReadWriter<R: io::Reader, W: io::Writer> {
 }
 
 /// `bufio.NewReadWriter(r, w)` — pair of buffered Reader and Writer.
-pub fn NewReadWriter<R: io::Reader, W: io::Writer>(
-    r: Reader<R>,
-    w: Writer<W>,
-) -> ReadWriter<R, W> {
-    ReadWriter { reader: r, writer: w }
+pub fn NewReadWriter<R: io::Reader, W: io::Writer>(r: Reader<R>, w: Writer<W>) -> ReadWriter<R, W> {
+    ReadWriter {
+        reader: r,
+        writer: w,
+    }
 }

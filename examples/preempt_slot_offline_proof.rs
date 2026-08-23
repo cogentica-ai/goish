@@ -166,7 +166,11 @@ fn write_hex(label: &[u8], v: u64) {
     buf[1] = b'x';
     for i in 0..16 {
         let nib = ((v >> ((15 - i) * 4)) & 0xf) as u8;
-        buf[2 + i] = if nib < 10 { b'0' + nib } else { b'a' + (nib - 10) };
+        buf[2 + i] = if nib < 10 {
+            b'0' + nib
+        } else {
+            b'a' + (nib - 10)
+        };
     }
     syscall::Write(syscall::STDERR, buf.as_ptr(), buf.len());
     syscall::Write(syscall::STDERR, b"\n".as_ptr(), 1);

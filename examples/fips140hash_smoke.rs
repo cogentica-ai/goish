@@ -21,9 +21,9 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::boxed::Box;
+use goish::crypto::internal::fips140::hmac;
 use goish::crypto::internal::fips140hash;
 use goish::crypto::sha3;
-use goish::crypto::internal::fips140::hmac;
 use goish::encoding::hex;
 use goish::fmt;
 use goish::goslice::slice;

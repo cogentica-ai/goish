@@ -11,8 +11,8 @@ extern crate goish;
 use goish::fmt;
 use goish::goslice::slice;
 use goish::math::rand::v2::{self as rand, Source};
+use goish::syscall;
 use goish::types::byte;
-use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -33,7 +33,12 @@ fn main() {
         for i in 0..5 {
             let got = r.Uint64();
             if got != want[i] {
-                fmt::Println!("[ 1] Uint64 seq             FAIL i={} got={} want={}", i, got, want[i]);
+                fmt::Println!(
+                    "[ 1] Uint64 seq             FAIL i={} got={} want={}",
+                    i,
+                    got,
+                    want[i]
+                );
                 ok = false;
                 break;
             }
@@ -55,7 +60,12 @@ fn main() {
         for i in 0..5 {
             let got = r.Int64N(100);
             if got != want[i] {
-                fmt::Println!("[ 2] Int64N seq             FAIL i={} got={} want={}", i, got, want[i]);
+                fmt::Println!(
+                    "[ 2] Int64N seq             FAIL i={} got={} want={}",
+                    i,
+                    got,
+                    want[i]
+                );
                 ok = false;
                 break;
             }
@@ -214,7 +224,11 @@ fn main() {
         let _ = p.Uint64();
         let (data, e) = p.MarshalBinary();
         if !e.IsNil() || data.len() != 20 {
-            fmt::Println!("[10] MarshalBinary           FAIL e={:?} len={}", e.IsNil(), data.len());
+            fmt::Println!(
+                "[10] MarshalBinary           FAIL e={:?} len={}",
+                e.IsNil(),
+                data.len()
+            );
             failed += 1;
         } else {
             // First 4 bytes should be "pcg:".

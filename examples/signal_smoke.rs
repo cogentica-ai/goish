@@ -74,7 +74,10 @@ fn test_notify_then_recv() {
 
     schedule();
 
-    check(DONE.load(Ordering::Acquire) == 1, b"notify-recv: receiver didn't fire\n");
+    check(
+        DONE.load(Ordering::Acquire) == 1,
+        b"notify-recv: receiver didn't fire\n",
+    );
     check(
         GOT_SIG.load(Ordering::Acquire) == syscall::SIGUSR1 as i64,
         b"notify-recv: wrong signal received\n",

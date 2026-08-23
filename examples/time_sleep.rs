@@ -17,7 +17,7 @@
 use core::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
 use goish::runtime::sched::schedule;
-use goish::time::{Now, Sleep, Since, Milliseconds};
+use goish::time::{Milliseconds, Now, Since, Sleep};
 use goish::{go, syscall};
 
 fn die(msg: &[u8]) -> ! {
@@ -56,7 +56,10 @@ fn test_single_sleep() {
     });
     schedule();
 
-    check(DONE.load(Ordering::Acquire) == 1, b"single: didn't finish\n");
+    check(
+        DONE.load(Ordering::Acquire) == 1,
+        b"single: didn't finish\n",
+    );
     let elapsed = GOT.load(Ordering::Acquire);
     // 10ms = 10_000_000 ns. Allow up to 30ms upper bound for sysmon
     // poll latency under stress.
@@ -128,6 +131,12 @@ fn test_sleeper_doesnt_block_m() {
 
     schedule();
 
-    check(SLEEPER_DONE.load(Ordering::Acquire) == 1, b"coexist: sleeper missing\n");
-    check(WORKER_DONE.load(Ordering::Acquire) == 1, b"coexist: worker missing\n");
+    check(
+        SLEEPER_DONE.load(Ordering::Acquire) == 1,
+        b"coexist: sleeper missing\n",
+    );
+    check(
+        WORKER_DONE.load(Ordering::Acquire) == 1,
+        b"coexist: worker missing\n",
+    );
 }

@@ -40,7 +40,11 @@ pub struct Point {
 fn main() {
     // Construct so the example actually allocates the struct (proves
     // #[goish::reflect] re-emitted a usable struct definition).
-    let _p = Person { Name: string("alice"), Age: 30, secret: 7 };
+    let _p = Person {
+        Name: string("alice"),
+        Age: 30,
+        secret: 7,
+    };
     let _q = Point { X: 1, Y: 2 };
 
     // ─── TypeOf / Kind / Name / NumField ─────────────────────────────
@@ -52,7 +56,10 @@ fn main() {
     // ─── Field(0) — Name + Tag.Get ───────────────────────────────────
     let f0 = t.Field(0);
     check(f0.Name == "Name", b"reflect: f0 Name\n");
-    check((f0.Type)().Kind() == reflect::Kind::String, b"reflect: f0 Type.Kind\n");
+    check(
+        (f0.Type)().Kind() == reflect::Kind::String,
+        b"reflect: f0 Type.Kind\n",
+    );
     check((f0.Type)().Name() == "string", b"reflect: f0 Type.Name\n");
     check(f0.Tag.Get("json") == "name", b"reflect: f0 json tag\n");
     check(f0.Tag.Get("xml") == "name,attr", b"reflect: f0 xml tag\n");
@@ -61,7 +68,10 @@ fn main() {
     // ─── Field(1) — int with json:"age,omitempty" ────────────────────
     let f1 = t.Field(1);
     check(f1.Name == "Age", b"reflect: f1 Name\n");
-    check((f1.Type)().Kind() == reflect::Kind::Int, b"reflect: f1 Type.Kind\n");
+    check(
+        (f1.Type)().Kind() == reflect::Kind::Int,
+        b"reflect: f1 Type.Kind\n",
+    );
     let (v, ok) = f1.Tag.Lookup("json");
     check(v == "age,omitempty" && ok, b"reflect: f1 json Lookup\n");
 
@@ -82,20 +92,41 @@ fn main() {
     check(pt.Name() == "Point", b"reflect: Point Name\n");
     check(pt.NumField() == 2, b"reflect: Point NumField\n");
     let p0 = pt.Field(0);
-    check(p0.Name == "X" && p0.Tag.Get("any") == "", b"reflect: Point f0\n");
+    check(
+        p0.Name == "X" && p0.Tag.Get("any") == "",
+        b"reflect: Point f0\n",
+    );
 
     // ─── Built-in primitives via TypeOf ──────────────────────────────
     let s = string("hi");
     let n: int = 42;
     let b: bool = true;
-    check(reflect::TypeOf(&s).Kind() == reflect::Kind::String, b"reflect: string Kind\n");
-    check(reflect::TypeOf(&n).Kind() == reflect::Kind::Int, b"reflect: int Kind\n");
-    check(reflect::TypeOf(&b).Kind() == reflect::Kind::Bool, b"reflect: bool Kind\n");
+    check(
+        reflect::TypeOf(&s).Kind() == reflect::Kind::String,
+        b"reflect: string Kind\n",
+    );
+    check(
+        reflect::TypeOf(&n).Kind() == reflect::Kind::Int,
+        b"reflect: int Kind\n",
+    );
+    check(
+        reflect::TypeOf(&b).Kind() == reflect::Kind::Bool,
+        b"reflect: bool Kind\n",
+    );
 
     // ─── Kind.String() — Go-faithful labels ──────────────────────────
-    check(reflect::Kind::Struct.String() == "struct", b"reflect: Kind::Struct.String\n");
-    check(reflect::Kind::Int.String() == "int", b"reflect: Kind::Int.String\n");
-    check(reflect::Kind::String.String() == "string", b"reflect: Kind::String.String\n");
+    check(
+        reflect::Kind::Struct.String() == "struct",
+        b"reflect: Kind::Struct.String\n",
+    );
+    check(
+        reflect::Kind::Int.String() == "int",
+        b"reflect: Kind::Int.String\n",
+    );
+    check(
+        reflect::Kind::String.String() == "string",
+        b"reflect: Kind::String.String\n",
+    );
 
     // ─── Escape sequences in tag values (Go's strconv.Unquote rules) ─
     // \"  inside the quoted value should round-trip.
@@ -108,8 +139,14 @@ fn main() {
     // Primitives.
     check(reflect::DeepEqual(&1i64, &1i64), b"DeepEqual: int eq\n");
     check(!reflect::DeepEqual(&1i64, &2i64), b"DeepEqual: int neq\n");
-    check(reflect::DeepEqual(&string("hi"), &string("hi")), b"DeepEqual: str eq\n");
-    check(!reflect::DeepEqual(&string("hi"), &string("ho")), b"DeepEqual: str neq\n");
+    check(
+        reflect::DeepEqual(&string("hi"), &string("hi")),
+        b"DeepEqual: str eq\n",
+    );
+    check(
+        !reflect::DeepEqual(&string("hi"), &string("ho")),
+        b"DeepEqual: str neq\n",
+    );
     check(reflect::DeepEqual(&true, &true), b"DeepEqual: bool eq\n");
 
     // NaN ≠ NaN, matching Go.
@@ -117,18 +154,39 @@ fn main() {
     check(!reflect::DeepEqual(&nan, &nan), b"DeepEqual: NaN != NaN\n");
 
     // Different Kinds — false.
-    check(!reflect::DeepEqual(&1i64, &string("hi")), b"DeepEqual: kind mismatch\n");
+    check(
+        !reflect::DeepEqual(&1i64, &string("hi")),
+        b"DeepEqual: kind mismatch\n",
+    );
 
     // Struct: same name + equal fields → true.
-    let p1 = Person { Name: string("alice"), Age: 30, secret: 7 };
-    let p2 = Person { Name: string("alice"), Age: 30, secret: 7 };
-    let p3 = Person { Name: string("alice"), Age: 31, secret: 7 };
+    let p1 = Person {
+        Name: string("alice"),
+        Age: 30,
+        secret: 7,
+    };
+    let p2 = Person {
+        Name: string("alice"),
+        Age: 30,
+        secret: 7,
+    };
+    let p3 = Person {
+        Name: string("alice"),
+        Age: 31,
+        secret: 7,
+    };
     check(reflect::DeepEqual(&p1, &p2), b"DeepEqual: struct eq\n");
-    check(!reflect::DeepEqual(&p1, &p3), b"DeepEqual: struct neq (field)\n");
+    check(
+        !reflect::DeepEqual(&p1, &p3),
+        b"DeepEqual: struct neq (field)\n",
+    );
 
     // Distinct struct types — false even with similar shapes.
     let pt = Point { X: 1, Y: 2 };
-    check(!reflect::DeepEqual(&p1, &pt), b"DeepEqual: distinct struct types\n");
+    check(
+        !reflect::DeepEqual(&p1, &pt),
+        b"DeepEqual: distinct struct types\n",
+    );
 
     // Slice: element-wise.
     let s1 = goish::slice!([]int{1, 2, 3});
@@ -147,8 +205,14 @@ fn main() {
     let mut m3 = make!(map[string]int);
     m3.Set(string("a"), 1);
     m3.Set(string("b"), 9);
-    check(reflect::DeepEqual(&m1, &m2), b"DeepEqual: map eq (insertion order)\n");
-    check(!reflect::DeepEqual(&m1, &m3), b"DeepEqual: map neq (value)\n");
+    check(
+        reflect::DeepEqual(&m1, &m2),
+        b"DeepEqual: map eq (insertion order)\n",
+    );
+    check(
+        !reflect::DeepEqual(&m1, &m3),
+        b"DeepEqual: map neq (value)\n",
+    );
 
     const OK: &[u8] = b"reflect: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

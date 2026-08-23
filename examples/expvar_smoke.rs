@@ -22,8 +22,8 @@ extern crate goish;
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::expvar::{self, Var};
+use goish::fmt;
 use goish::gostring::string;
 use goish::runtime::sched::schedule;
 use goish::sync::WaitGroup;
@@ -231,10 +231,10 @@ fn test_9_json_quote_escapes() {
         string::from_bytes(&buf.__into_vec())
     }
 
-    let qnewline = quote("a\nb");        // "a\nb"
-    let qbackslash = quote("\\");         // "\\"
-    let qquote = quote("\"");             // "\""
-    let qhtml = quote("<&>");             // "<&>"
+    let qnewline = quote("a\nb"); // "a\nb"
+    let qbackslash = quote("\\"); // "\\"
+    let qquote = quote("\""); // "\""
+    let qhtml = quote("<&>"); // "<&>"
 
     let want_n = s("\"a\\nb\"");
     let want_bs = s("\"\\\\\"");

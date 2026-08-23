@@ -39,7 +39,8 @@ fn main() {
     let mux = http::ServeMux::new();
     mux.HandleFunc(string("/"), |w, _r| {
         // Hostile values, as if echoed from user input.
-        w.Header().Set(string("X-Evil"), string("a\r\nX-Injected: yes"));
+        w.Header()
+            .Set(string("X-Evil"), string("a\r\nX-Injected: yes"));
         w.Header().Set(string("Bad Name"), string("v"));
         w.Header().Set(string("X-Fine"), string("ok"));
         let _ = w.Write(bytes("body"));

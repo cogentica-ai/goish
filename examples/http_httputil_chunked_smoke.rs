@@ -10,8 +10,8 @@ extern crate goish;
 
 use alloc::vec::Vec;
 
-use goish::fmt;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::io::{Closer, Reader, Writer};
 use goish::net::http;
 use goish::net::http::httputil;
@@ -25,8 +25,7 @@ fn main() {
     //    httputil::NewChunkedReader. The dechunked output must match
     //    the original body byte-for-byte.
     {
-        let mut buf =
-            goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
+        let mut buf = goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
         {
             let mut cw = httputil::NewChunkedWriter(&mut buf);
             let _ = cw.Write(bytes("hello "));

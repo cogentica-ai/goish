@@ -26,19 +26,19 @@ use crate::strings;
 use crate::time;
 use crate::types::{byte, int, rune};
 
+use super::header::{ParseTime, TimeFormat};
 use super::request::Request;
 use super::responsewriter::ResponseWriter;
 use super::server::Handler;
-use crate::io::fs;
-use super::header::{ParseTime, TimeFormat};
 use super::status::{
     StatusForbidden, StatusInternalServerError, StatusMovedPermanently, StatusNotFound,
     StatusNotModified, StatusPreconditionFailed,
 };
+use crate::io::fs;
 use crate::len;
+use crate::net::textproto;
 use crate::nil;
 use crate::nilable;
-use crate::net::textproto;
 
 /// `http.Dir(root)` — bind a filesystem root directory. Mirrors Go's
 /// `type Dir string` (fs.go:44).
@@ -93,7 +93,10 @@ impl FileSystem for Dir {
                     if e != nil {
                         return (crate::nil.into(), e);
                     }
-                    return (Arc::new(fi) as Arc<dyn fs::FileInfo + Send + Sync>, nil.into());
+                    return (
+                        Arc::new(fi) as Arc<dyn fs::FileInfo + Send + Sync>,
+                        nil.into(),
+                    );
                 },
             );
             return (crate::nil.into(), mapped);
@@ -140,7 +143,12 @@ fn html_replace(s: string) -> string {
     b.String()
 }
 
-fn serve_regular_file(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request, path: string, fi: os::FileInfoData) {
+fn serve_regular_file(
+    w: &(dyn ResponseWriter + Send + Sync + 'static),
+    r: &Request,
+    path: string,
+    fi: os::FileInfoData,
+) {
     // Open + read fully into a slice<byte>. Range slicing happens
     // after the read since v1 has no streaming Read with seek loops.
     let (mut f, err) = os::Open(path.clone());
@@ -158,11 +166,7 @@ fn serve_regular_file(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Requ
     let mut body = make_zero_buf(want);
     let (got, _e) = f.Read(&mut body);
     let _ = f.Close();
-    let body = if got < want {
-        body.slice(0, got)
-    } else {
-        body
-    };
+    let body = if got < want { body.slice(0, got) } else { body };
     let size = body.Len();
 
     // Content-Type via extension lookup, then sniffing fallback.
@@ -197,10 +201,8 @@ fn serve_regular_file(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Requ
         let (ranges, perr) = parseRange(range_hdr, size);
         if !perr.IsNil() || ranges.Len() == 0 {
             // Malformed → 416 Requested Range Not Satisfiable.
-            w.Header().Set(
-                string("Content-Range"),
-                crate::Sprintf!("bytes */{}", size),
-            );
+            w.Header()
+                .Set(string("Content-Range"), crate::Sprintf!("bytes */{}", size));
             w.WriteHeader(super::status::StatusRequestedRangeNotSatisfiable);
             return;
         }
@@ -230,8 +232,8 @@ fn imf_fixdate_into<'a>(
     const DAYS: [&[crate::types::byte; 3]; 7] =
         [b"Sun", b"Mon", b"Tue", b"Wed", b"Thu", b"Fri", b"Sat"];
     const MONS: [&[crate::types::byte; 3]; 12] = [
-        b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun",
-        b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
+        b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov",
+        b"Dec",
     ];
     let weekday = (t.Weekday().Int() as usize) % 7;
     let (year, month, day) = t.Date();
@@ -302,7 +304,13 @@ impl Handler for fileHandler {
         if !strings::HasPrefix(upath.clone(), string("/")) {
             upath = string("/") + upath;
         }
-        serveFile(w, crate::nilable_ref::new(r), self.root.clone(), crate::path::Clean(upath), true);
+        serveFile(
+            w,
+            crate::nilable_ref::new(r),
+            self.root.clone(),
+            crate::path::Clean(upath),
+            true,
+        );
     }
 }
 
@@ -473,7 +481,6 @@ pub fn serveFile(
     let _ = f.Close();
 }
 
-
 // ─── Range header parsing (fs.go:998-1116) ───────────────────────────
 
 // go: sdk 1.25.5 net/http/fs.go:268-268 errNoOverlap
@@ -548,7 +555,10 @@ pub fn parseRange<S: Into<string>>(s: S, size: int) -> (slice<httpRange>, error)
         }
         let start = textproto::TrimString(start);
         let end = textproto::TrimString(end);
-        let mut r = httpRange { start: 0, length: 0 };
+        let mut r = httpRange {
+            start: 0,
+            length: 0,
+        };
         if start == "" {
             // If no start is specified, end specifies the range start
             // relative to the end of the file, and we are dealing with
@@ -634,11 +644,7 @@ impl crate::io::Writer for countingWriter {
 // `http::Header` is a struct, so the mimeHeader map is copied into one
 // here. Both keys mimeHeader produces are already canonical, so `Add`
 // does not rewrite them.
-pub fn rangesMIMESize(
-    ranges: &slice<httpRange>,
-    contentType: string,
-    contentSize: int,
-) -> int {
+pub fn rangesMIMESize(ranges: &slice<httpRange>, contentType: string, contentSize: int) -> int {
     let mut w = countingWriter(0);
     let mut encSize: int = 0;
     {
@@ -787,7 +793,8 @@ pub fn toHTTPError(err: error) -> (string, int) {
 }
 
 // go: sdk 1.25.5 net/http/fs.go:614-614 unixEpochTime
-pub static unixEpochTime: crate::lazy::Lazy<time::Time> = crate::lazy::Lazy::new(|| time::Unix(0, 0));
+pub static unixEpochTime: crate::lazy::Lazy<time::Time> =
+    crate::lazy::Lazy::new(|| time::Unix(0, 0));
 
 // go: sdk 1.25.5 net/http/fs.go:436-459 scanETag
 pub fn scanETag<S: Into<string>>(s: S) -> (string, string) {
@@ -798,7 +805,9 @@ pub fn scanETag<S: Into<string>>(s: S) -> (string, string) {
     if strings::HasPrefix(s.clone(), string("W/")) {
         start = 2;
     }
-    if len(&s.slice(start, len(&s))) < 2 || s[start] != 34 /*'"'*/ {
+    if len(&s.slice(start, len(&s))) < 2 || s[start] != 34
+    /*'"'*/
+    {
         return (string(""), string(""));
     }
     {
@@ -806,8 +815,13 @@ pub fn scanETag<S: Into<string>>(s: S) -> (string, string) {
         while i < len(&s) {
             let c = s[i];
             if c == 0x21 || c >= 0x23 && c <= 0x7E || c >= 0x80 {
-            } else if c == 34 /*'"'*/ {
-                return (s.slice(0, i.wrapping_add(1)), s.slice(i.wrapping_add(1), len(&s)));
+            } else if c == 34
+            /*'"'*/
+            {
+                return (
+                    s.slice(0, i.wrapping_add(1)),
+                    s.slice(i.wrapping_add(1), len(&s)),
+                );
             } else {
                 return (string(""), string(""));
             }
@@ -843,7 +857,8 @@ pub fn checkIfModifiedSince(r: nilable![&Request], mut modtime: time::Time) -> c
 // go: sdk 1.25.5 net/http/fs.go:621-625 setLastModified
 pub fn setLastModified(w: &(dyn ResponseWriter + Send + Sync + 'static), modtime: time::Time) {
     if !isZeroTime(modtime) {
-        w.Header().Set(string("Last-Modified"), modtime.UTC().Format(TimeFormat));
+        w.Header()
+            .Set(string("Last-Modified"), modtime.UTC().Format(TimeFormat));
     }
 }
 
@@ -873,7 +888,10 @@ pub const condTrue: condResult = condResult(1);
 pub const condFalse: condResult = condResult(2);
 
 // go: sdk 1.25.5 net/http/fs.go:483-511 checkIfMatch
-pub fn checkIfMatch(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nilable![&Request]) -> condResult {
+pub fn checkIfMatch(
+    w: &(dyn ResponseWriter + Send + Sync + 'static),
+    r: nilable![&Request],
+) -> condResult {
     let mut im = r.Must().Header.Get(string("If-Match"));
     if im == "" {
         return condNone;
@@ -883,11 +901,15 @@ pub fn checkIfMatch(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nilable
         if len(&im) == 0 {
             break;
         }
-        if im[0] == 44 /*','*/ {
+        if im[0] == 44
+        /*','*/
+        {
             im = im.slice(1, len(&im));
             continue;
         }
-        if im[0] == 42 /*'*'*/ {
+        if im[0] == 42
+        /*'*'*/
+        {
             return condTrue;
         }
         let (etag, remain) = scanETag(im.clone());
@@ -923,7 +945,10 @@ pub fn checkIfUnmodifiedSince(r: nilable![&Request], mut modtime: time::Time) ->
 }
 
 // go: sdk 1.25.5 net/http/fs.go:532-560 checkIfNoneMatch
-pub fn checkIfNoneMatch(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nilable![&Request]) -> condResult {
+pub fn checkIfNoneMatch(
+    w: &(dyn ResponseWriter + Send + Sync + 'static),
+    r: nilable![&Request],
+) -> condResult {
     let inm = r.Must().Header.Get(string("If-None-Match"));
     if inm == "" {
         return condNone;
@@ -934,11 +959,15 @@ pub fn checkIfNoneMatch(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nil
         if len(&buf) == 0 {
             break;
         }
-        if buf[0] == 44 /*','*/ {
+        if buf[0] == 44
+        /*','*/
+        {
             buf = buf.slice(1, len(&buf));
             continue;
         }
-        if buf[0] == 42 /*'*'*/ {
+        if buf[0] == 42
+        /*'*'*/
+        {
             return condFalse;
         }
         let (etag, remain) = scanETag(buf.clone());
@@ -954,7 +983,11 @@ pub fn checkIfNoneMatch(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nil
 }
 
 // go: sdk 1.25.5 net/http/fs.go:583-612 checkIfRange
-pub fn checkIfRange(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nilable![&Request], modtime: time::Time) -> condResult {
+pub fn checkIfRange(
+    w: &(dyn ResponseWriter + Send + Sync + 'static),
+    r: nilable![&Request],
+    modtime: time::Time,
+) -> condResult {
     if r.Must().Method != "GET" && r.Must().Method != "HEAD" {
         return condNone;
     }
@@ -984,7 +1017,11 @@ pub fn checkIfRange(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nilable
 }
 
 // go: sdk 1.25.5 net/http/fs.go:645-676 checkPreconditions
-pub fn checkPreconditions(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nilable![&Request], modtime: time::Time) -> (bool, string) {
+pub fn checkPreconditions(
+    w: &(dyn ResponseWriter + Send + Sync + 'static),
+    r: nilable![&Request],
+    modtime: time::Time,
+) -> (bool, string) {
     #[allow(unused_mut)]
     let mut ch = checkIfMatch(w, r);
     if ch == condNone {
@@ -1066,11 +1103,19 @@ impl dirEntryDirs {
 // only reachable state here — the deletion below is exactly Go's
 // behaviour. Declaring a stub whose Value() is always "" would add
 // surface that reads as wired-up and is not.
-pub fn serveError<S: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'static), text: S, code: int) {
+pub fn serveError<S: Into<string>>(
+    w: &(dyn ResponseWriter + Send + Sync + 'static),
+    text: S,
+    code: int,
+) {
     let text = text.into();
     let h = w.Header();
-    for k in [string("Cache-Control"), string("Content-Encoding"),
-                  string("Etag"), string("Last-Modified")] {
+    for k in [
+        string("Cache-Control"),
+        string("Content-Encoding"),
+        string("Etag"),
+        string("Last-Modified"),
+    ] {
         if !h.has(k.clone()) {
             continue;
         }
@@ -1083,7 +1128,11 @@ pub fn serveError<S: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'stat
 }
 
 // go: sdk 1.25.5 net/http/fs.go:785-791 localRedirect
-pub fn localRedirect<S: Into<string>>(w: &(dyn ResponseWriter + Send + Sync + 'static), r: nilable![&Request], newPath: S) {
+pub fn localRedirect<S: Into<string>>(
+    w: &(dyn ResponseWriter + Send + Sync + 'static),
+    r: nilable![&Request],
+    newPath: S,
+) {
     #[allow(unused_mut)]
     let mut newPath = newPath.into();
     {
@@ -1203,7 +1252,11 @@ pub fn serveContent<C: crate::io::Reader + crate::io::Seeker>(
         w.Header().Set(string("Content-Type"), ctype.clone());
     } else {
         let ctypes = w.Header().Values(string("Content-Type"));
-        ctype = if len(&ctypes) > 0 { ctypes[0].clone() } else { string("") };
+        ctype = if len(&ctypes) > 0 {
+            ctypes[0].clone()
+        } else {
+            string("")
+        };
     }
 
     let (size, serr) = sizeAndErr;
@@ -1233,10 +1286,8 @@ pub fn serveContent<C: crate::io::Reader + crate::io::Seeker>(
             ranges = slice::new();
         } else {
             if errors::Is(perr.clone(), errNoOverlap) {
-                w.Header().Set(
-                    string("Content-Range"),
-                    crate::Sprintf!("bytes */%d", size),
-                );
+                w.Header()
+                    .Set(string("Content-Range"), crate::Sprintf!("bytes */%d", size));
             }
             serveError(
                 w,
@@ -1296,8 +1347,7 @@ pub fn serveContent<C: crate::io::Reader + crate::io::Seeker>(
                 serveError(w, serr.Error(), StatusInternalServerError);
                 return;
             }
-            let mut part: slice<byte> =
-                slice::__from_vec(alloc::vec![0u8; ra.length as usize]);
+            let mut part: slice<byte> = slice::__from_vec(alloc::vec![0u8; ra.length as usize]);
             let (rn, rerr) = crate::io::ReadFull(content, &mut part);
             if rerr != nil && rn == 0 {
                 serveError(w, rerr.Error(), StatusInternalServerError);
@@ -1400,10 +1450,8 @@ pub fn dirList(
     //         return dirs.name(i) < dirs.name(j) })
     names.sort_by(|a, b| crate::strings::Compare(a.0.clone(), b.0.clone()).cmp(&0));
 
-    w.Header().Set(
-        string("Content-Type"),
-        string("text/html; charset=utf-8"),
-    );
+    w.Header()
+        .Set(string("Content-Type"), string("text/html; charset=utf-8"));
     let mut buf = strings::Builder::new();
     let _ = buf.WriteString("<!doctype html>\n");
     let _ = buf.WriteString("<meta name=\"viewport\" content=\"width=device-width\">\n");
@@ -1537,7 +1585,10 @@ impl File for osFile {
         if err != nil {
             return (crate::nil.into(), err);
         }
-        return (Arc::new(fi) as Arc<dyn fs::FileInfo + Send + Sync>, nil.into());
+        return (
+            Arc::new(fi) as Arc<dyn fs::FileInfo + Send + Sync>,
+            nil.into(),
+        );
     }
 
     // go: none — Go's os.File.Readdir reads the directory stream and
@@ -1552,8 +1603,7 @@ impl File for osFile {
         if err != nil {
             return (slice::new(), err);
         }
-        let mut out: alloc::vec::Vec<Arc<dyn fs::FileInfo + Send + Sync>> =
-            alloc::vec::Vec::new();
+        let mut out: alloc::vec::Vec<Arc<dyn fs::FileInfo + Send + Sync>> = alloc::vec::Vec::new();
         let n = len(&entries);
         let mut i: int = 0;
         while i < n {
@@ -1637,7 +1687,10 @@ impl ioFS {
             });
             return (crate::nil.into(), mapped);
         }
-        return (Arc::new(ioFile { file }) as Arc<dyn File + Send + Sync>, nil.into());
+        return (
+            Arc::new(ioFile { file }) as Arc<dyn File + Send + Sync>,
+            nil.into(),
+        );
     }
 }
 
@@ -1754,6 +1807,12 @@ pub trait File {
     fn Close(&self) -> error;
     fn Read(&self, p: &mut slice<byte>) -> (int, error);
     fn Seek(&self, offset: crate::types::int64, whence: int) -> (crate::types::int64, error);
-    fn Readdir(&self, count: int) -> (slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>>, error);
+    fn Readdir(
+        &self,
+        count: int,
+    ) -> (
+        slice<alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>>,
+        error,
+    );
     fn Stat(&self) -> (alloc::sync::Arc<dyn fs::FileInfo + Send + Sync>, error);
 }

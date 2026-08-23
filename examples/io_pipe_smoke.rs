@@ -20,8 +20,8 @@
 
 extern crate alloc;
 
-use goish::error;
 use goish::convert;
+use goish::error;
 use goish::errors;
 use goish::io;
 use goish::{go, make, string, syscall};
@@ -51,10 +51,7 @@ fn main() {
             a.Error() == "io: read/write on closed pipe",
             b"io_pipe: T1 ErrClosedPipe message wrong\n",
         );
-        check(
-            errors::Is(a, b),
-            b"io_pipe: T1 ErrClosedPipe not stable\n",
-        );
+        check(errors::Is(a, b), b"io_pipe: T1 ErrClosedPipe not stable\n");
     }
 
     // ─── Test 2: Write -> Read; Writer.Close() -> Reader EOF ──────
@@ -75,11 +72,7 @@ fn main() {
         check(err.IsNil(), b"io_pipe: T2 1st Read returned non-nil err\n");
         check(n == 5, b"io_pipe: T2 1st Read returned wrong n\n");
         check(
-            buf[0] == b'H'
-                && buf[1] == b'e'
-                && buf[2] == b'l'
-                && buf[3] == b'l'
-                && buf[4] == b'o',
+            buf[0] == b'H' && buf[1] == b'e' && buf[2] == b'l' && buf[3] == b'l' && buf[4] == b'o',
             b"io_pipe: T2 payload corrupted\n",
         );
         // Second Read: should return (0, EOF) because Writer.Close().

@@ -115,7 +115,10 @@ fn main() {
         ("TestFatalMidway", TestFatalMidway),
         ("TestRunsAfterFatal", TestRunsAfterFatal),
         ("TestFatalInSubtestSpares", TestFatalInSubtestSpares),
-        ("TestFailPropagatesUpImmediately", TestFailPropagatesUpImmediately),
+        (
+            "TestFailPropagatesUpImmediately",
+            TestFailPropagatesUpImmediately,
+        ),
     ];
     let code = testing::Main(tests);
 

@@ -17,10 +17,12 @@
 pub mod child;
 pub mod fcgi;
 
-pub use child::{newChild, ProcessEnv, Serve, addFastCGIEnvToContext, filterOutUsedEnvVars, newRequest, request};
+pub use child::{
+    addFastCGIEnvToContext, filterOutUsedEnvVars, newChild, newRequest, request, ProcessEnv, Serve,
+};
 pub use fcgi::{
-    bufWriter, conn, newConn, newWriter, record, streamWriter, writePairs, ReadWriteCloser,
-    encodeSize, readSize, readString, recType, typeAbortRequest, typeBeginRequest, typeData,
-    typeEndRequest, typeGetValues, typeGetValuesResult, typeParams, typeStderr, typeStdin,
-    typeStdout, typeUnknownType,
+    bufWriter, conn, encodeSize, newConn, newWriter, readSize, readString, recType, record,
+    streamWriter, typeAbortRequest, typeBeginRequest, typeData, typeEndRequest, typeGetValues,
+    typeGetValuesResult, typeParams, typeStderr, typeStdin, typeStdout, typeUnknownType,
+    writePairs, ReadWriteCloser,
 };

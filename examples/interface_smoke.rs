@@ -67,7 +67,10 @@ fn main() {
     check(null.__is_nil_iface(), b"interface: nil sentinel not nil\n");
 
     // 4. A non-nil value reports not-nil.
-    check(!boxed.__is_nil_iface(), b"interface: concrete reports nil\n");
+    check(
+        !boxed.__is_nil_iface(),
+        b"interface: concrete reports nil\n",
+    );
 
     // 5. &dyn Greeter borrow dispatch.
     let r: &(dyn Greeter + Send + Sync) = &Hi;

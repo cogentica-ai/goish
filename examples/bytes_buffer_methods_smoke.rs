@@ -8,9 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
-use goish::{syscall};
+use goish::fmt;
+use goish::syscall;
 
 #[goish::main]
 fn main() {
@@ -47,10 +47,7 @@ fn main() {
         let (c2, e2) = b.ReadByte();
         let (c3, e3) = b.ReadByte();
         let eof = goish::io::EOF;
-        if c1 == b'a' && e1.IsNil()
-            && c2 == b'b' && e2.IsNil()
-            && c3 == 0 && e3 == eof
-        {
+        if c1 == b'a' && e1.IsNil() && c2 == b'b' && e2.IsNil() && c3 == 0 && e3 == eof {
             fmt::Println!("[ 3] ReadByte sequence + EOF   PASS");
         } else {
             fmt::Println!("[ 3] ReadByte sequence + EOF   FAIL");
@@ -88,9 +85,7 @@ fn main() {
     {
         let mut b = bytes::NewBufferString("foo,bar,baz");
         let (line, err) = b.ReadBytes(b',');
-        if err.IsNil() && line.Len() == 4
-            && line[0] == b'f' && line[3] == b','
-        {
+        if err.IsNil() && line.Len() == 4 && line[0] == b'f' && line[3] == b',' {
             fmt::Println!("[ 6] ReadBytes incl delim      PASS");
         } else {
             fmt::Println!("[ 6] ReadBytes incl delim      FAIL n={}", line.Len());

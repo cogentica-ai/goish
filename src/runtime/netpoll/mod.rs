@@ -37,7 +37,7 @@ use alloc::vec::Vec;
 use core::ptr::{self, NonNull};
 use core::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU32, AtomicUsize, Ordering};
 
-use crate::runtime::sched::{current_m, goready, gopark, G};
+use crate::runtime::sched::{current_m, gopark, goready, G};
 use crate::runtime::spin::SpinLock;
 use crate::syscall;
 
@@ -123,7 +123,8 @@ pub struct PollDesc {
     /// The armed hook (request-context cancel). Guarded by a
     /// SpinLock: `poll` takes it exactly once on disconnect;
     /// disarm drops it.
-    pub watch_hook: crate::runtime::spin::SpinLock<Option<alloc::sync::Arc<dyn Fn() + Send + Sync>>>,
+    pub watch_hook:
+        crate::runtime::spin::SpinLock<Option<alloc::sync::Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl PollDesc {
@@ -560,10 +561,7 @@ pub fn open(fd: i32) -> Option<Arc<PollDesc>> {
 
     let fdseq = arc.fdseq.load(Ordering::Relaxed);
     let mut ev = syscall::EpollEvent {
-        events: syscall::EPOLLIN
-            | syscall::EPOLLOUT
-            | syscall::EPOLLRDHUP
-            | syscall::EPOLLET,
+        events: syscall::EPOLLIN | syscall::EPOLLOUT | syscall::EPOLLRDHUP | syscall::EPOLLET,
         data: pack_event_data(slot, fdseq),
     };
     let r = syscall::EpollCtl(
@@ -629,7 +627,11 @@ pub fn close(pd: Arc<PollDesc>) {
 /// Pick the right slot for `mode`. `b'r'` → rg, anything else → wg.
 #[inline]
 fn slot(pd: &PollDesc, mode: u8) -> &AtomicUsize {
-    if mode == b'r' { &pd.rg } else { &pd.wg }
+    if mode == b'r' {
+        &pd.rg
+    } else {
+        &pd.wg
+    }
 }
 
 /// Park the current goroutine on `pd.{rg,wg}` for I/O readiness.
@@ -836,11 +838,7 @@ pub fn poll_shard(shard: usize, delay_ms: i32) -> Vec<NonNull<G>> {
             continue;
         }
         let pd: &PollDesc = &arc;
-        if evbits
-            & (syscall::EPOLLIN
-                | syscall::EPOLLRDHUP
-                | syscall::EPOLLHUP
-                | syscall::EPOLLERR)
+        if evbits & (syscall::EPOLLIN | syscall::EPOLLRDHUP | syscall::EPOLLHUP | syscall::EPOLLERR)
             != 0
         {
             // Client-disconnect watch: a readable event on a watched

@@ -173,7 +173,11 @@ fn main() {
 
     let mut mac = hmac::New(sha256::NewHash, key.clone());
     let _ = io::Writer::Write(&mut mac, msg.clone());
-    check("hmac first pass (RFC 4231 tc2)", hexsum(&mac), goish::string::from(rfc4231_tc2));
+    check(
+        "hmac first pass (RFC 4231 tc2)",
+        hexsum(&mac),
+        goish::string::from(rfc4231_tc2),
+    );
 
     // Reset caches the marshaled ipad/opad state. Every subsequent pass
     // takes the restore path, and must still agree with the first.
@@ -194,7 +198,11 @@ fn main() {
     Hash::Reset(&mut mac);
     let _ = io::Writer::Write(&mut mac, bytes_of("what do ya "));
     let _ = io::Writer::Write(&mut mac, bytes_of("want for nothing?"));
-    check("hmac split writes", hexsum(&mac), goish::string::from(rfc4231_tc2));
+    check(
+        "hmac split writes",
+        hexsum(&mac),
+        goish::string::from(rfc4231_tc2),
+    );
 
     // ── HMAC Clone ────────────────────────────────────────────────────
     let mut src = hmac::New(sha256::NewHash, key.clone());
@@ -205,11 +213,19 @@ fn main() {
         unsafe { FAILED = true };
     }
     let _ = io::Writer::Write(&mut *hclone, bytes_of("want for nothing?"));
-    check("hmac clone completes the MAC", hexsum(&*hclone), goish::string::from(rfc4231_tc2));
+    check(
+        "hmac clone completes the MAC",
+        hexsum(&*hclone),
+        goish::string::from(rfc4231_tc2),
+    );
 
     // The source must be unaffected by the clone's writes.
     let _ = io::Writer::Write(&mut src, bytes_of("want for nothing?"));
-    check("hmac clone is independent", hexsum(&src), goish::string::from(rfc4231_tc2));
+    check(
+        "hmac clone is independent",
+        hexsum(&src),
+        goish::string::from(rfc4231_tc2),
+    );
 
     // Cloning a hash with no Cloner impl must report ErrUnsupported
     // rather than panicking or silently producing a broken MAC.
@@ -242,7 +258,11 @@ fn main() {
     let first = hexsum(&sha3mac);
     Hash::Reset(&mut sha3mac);
     let _ = io::Writer::Write(&mut sha3mac, msg.clone());
-    check("hmac-sha3 after Reset (marshaled path)", hexsum(&sha3mac), first);
+    check(
+        "hmac-sha3 after Reset (marshaled path)",
+        hexsum(&sha3mac),
+        first,
+    );
 
     // ── md5 / sha1: same marshal surface, now on the fast path ────────
     let mut md5mac = hmac::New(goish::crypto::md5::NewHash, key.clone());

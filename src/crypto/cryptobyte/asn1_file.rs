@@ -53,7 +53,7 @@ use crate::goslice::slice;
 use crate::math::big;
 use crate::time;
 use crate::types::byte;
-use crate::{int, int64, uint64, uint32, uint8};
+use crate::{int, int64, uint32, uint64, uint8};
 
 impl Builder {
     // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/asn1.go:230-242 Builder.AddASN1
@@ -249,10 +249,7 @@ impl CBString {
     // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/asn1.go:453-488 ReadASN1ObjectIdentifier
     /// Decode an ASN.1 OBJECT IDENTIFIER into out and advance. It reports
     /// whether the read was successful.
-    pub fn ReadASN1ObjectIdentifier(
-        &mut self,
-        out: &mut encoding_asn1::ObjectIdentifier,
-    ) -> bool {
+    pub fn ReadASN1ObjectIdentifier(&mut self, out: &mut encoding_asn1::ObjectIdentifier) -> bool {
         let mut bytes = CBString::default();
         if !self.ReadASN1(&mut bytes, asn1_tags::OBJECT_IDENTIFIER) || bytes.0.Len() == 0 {
             return false;

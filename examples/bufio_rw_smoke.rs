@@ -73,7 +73,10 @@ fn main() {
         check(e == goish::nil, b"r3: unread err\n");
 
         let (b, err) = r.ReadByte();
-        check(err == goish::nil && b == b'x', b"r3: byte 1 (after unread)\n");
+        check(
+            err == goish::nil && b == b'x',
+            b"r3: byte 1 (after unread)\n",
+        );
 
         let (b, _) = r.ReadByte();
         check(b == b'y', b"r3: byte 2\n");
@@ -89,8 +92,10 @@ fn main() {
         let (peek, err) = r.Peek(3);
         check(err == goish::nil, b"r4: peek err\n");
         check(peek.Len() == 3, b"r4: peek len\n");
-        check(peek[0] == b'h' && peek[1] == b'e' && peek[2] == b'l',
-              b"r4: peek bytes\n");
+        check(
+            peek[0] == b'h' && peek[1] == b'e' && peek[2] == b'l',
+            b"r4: peek bytes\n",
+        );
 
         // Reading after Peek returns the same bytes.
         let (b, _) = r.ReadByte();
@@ -117,8 +122,10 @@ fn main() {
         let (line, prefix, err) = r.ReadLine();
         check(err == goish::nil, b"r6: line 1 err\n");
         check(!prefix, b"r6: line 1 prefix\n");
-        check(line.Len() == 2 && line[0] == b'h' && line[1] == b'i',
-              b"r6: line 1 bytes\n");
+        check(
+            line.Len() == 2 && line[0] == b'h' && line[1] == b'i',
+            b"r6: line 1 bytes\n",
+        );
 
         let (line, prefix, err) = r.ReadLine();
         check(err == goish::nil, b"r6: line 2 err\n");
@@ -167,8 +174,10 @@ fn main() {
             check(err == goish::nil && n == 32, b"w2: writestring n\n");
             check(w.Flush() == goish::nil, b"w2: flush\n");
         }
-        check(dst.String() == "0123456789ABCDEF0123456789abcdef",
-              b"w2: dst contents\n");
+        check(
+            dst.String() == "0123456789ABCDEF0123456789abcdef",
+            b"w2: dst contents\n",
+        );
     }
 
     // ─── Writer: WriteByte and WriteRune ─────────────────────────────
@@ -184,8 +193,10 @@ fn main() {
             check(w.Flush() == goish::nil, b"w3: flush\n");
         }
         let bs = dst.Bytes();
-        check(bs.Len() == 3 && bs[0] == b'A' && bs[1] == 0xC3 && bs[2] == 0xA9,
-              b"w3: dst bytes\n");
+        check(
+            bs.Len() == 3 && bs[0] == b'A' && bs[1] == 0xC3 && bs[2] == 0xA9,
+            b"w3: dst bytes\n",
+        );
     }
 
     // ─── Round-trip: Writer → bytes.Buffer → Reader ──────────────────

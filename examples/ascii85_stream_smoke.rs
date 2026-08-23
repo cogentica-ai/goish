@@ -12,9 +12,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
 use goish::encoding::ascii85;
+use goish::fmt;
 use goish::io;
 use goish::types::byte;
 use goish::{slice, syscall};
@@ -29,8 +29,7 @@ fn main() {
         let mut buf = bytes::Buffer::new();
         {
             let mut e = ascii85::NewEncoder(&mut buf);
-            let payload: slice<byte> =
-                goish::slice::__from_vec(b"abcd".to_vec());
+            let payload: slice<byte> = goish::slice::__from_vec(b"abcd".to_vec());
             let (_, werr) = e.Write(payload);
             let cerr = e.Close();
             if !werr.IsNil() || !cerr.IsNil() {
@@ -176,8 +175,7 @@ fn main() {
 
     // 7. NewDecoder — single Read covers full input.
     {
-        let enc: slice<byte> =
-            goish::slice::__from_vec(b"@:E_W".to_vec()); // "abcd"
+        let enc: slice<byte> = goish::slice::__from_vec(b"@:E_W".to_vec()); // "abcd"
         let r = bytes::NewReader(enc);
         let mut dec = ascii85::NewDecoder(r);
         let mut out: slice<byte> = goish::slice::__from_vec(alloc::vec![0u8; 16]);
@@ -194,9 +192,8 @@ fn main() {
 
     // 8. NewDecoder — io::ReadAll drains until EOF.
     {
-        let enc: slice<byte> =
-            goish::slice::__from_vec(b"@:E_WBl/Q+87bRm".to_vec()); // "abcdefgh\0\0" 12 chars
-        // Reference: encode "abcdefghijkl" then decode.
+        let enc: slice<byte> = goish::slice::__from_vec(b"@:E_WBl/Q+87bRm".to_vec()); // "abcdefgh\0\0" 12 chars
+                                                                                      // Reference: encode "abcdefghijkl" then decode.
         let plain = b"abcdefghijkl".to_vec();
         let dst = goish::slice::__from_vec(alloc::vec![0u8; 32]);
         let src = goish::slice::__from_vec(plain.clone());
@@ -221,8 +218,7 @@ fn main() {
         // Plain 12 bytes → 15 ascii85 chars across multiple decode rounds.
         let plain = b"Goish! Stream".to_vec(); // 13 bytes
         let dst_buf = goish::slice::__from_vec(alloc::vec![0u8; 32]);
-        let (enc_slice, n) =
-            ascii85::Encode(dst_buf, goish::slice::__from_vec(plain.clone()));
+        let (enc_slice, n) = ascii85::Encode(dst_buf, goish::slice::__from_vec(plain.clone()));
         let mut enc_v = enc_slice.__into_vec();
         enc_v.truncate(n as usize);
 
@@ -231,8 +227,7 @@ fn main() {
         // Read in 1-byte chunks → forces decoder to stage in outbuf.
         let mut got: alloc::vec::Vec<byte> = alloc::vec::Vec::new();
         loop {
-            let mut tmp: slice<byte> =
-                goish::slice::__from_vec(alloc::vec![0u8; 1]);
+            let mut tmp: slice<byte> = goish::slice::__from_vec(alloc::vec![0u8; 1]);
             let (k, err) = dec.Read(&mut tmp);
             let v = tmp.__into_vec();
             if k > 0 {
@@ -302,8 +297,7 @@ fn main() {
         let bad = b"@:Ev!".to_vec();
         let r = bytes::NewReader(goish::slice::__from_vec(bad));
         let mut dec = ascii85::NewDecoder(r);
-        let mut tmp: slice<byte> =
-            goish::slice::__from_vec(alloc::vec![0u8; 16]);
+        let mut tmp: slice<byte> = goish::slice::__from_vec(alloc::vec![0u8; 16]);
         let mut saw_err = false;
         for _ in 0..4 {
             let (_, err) = dec.Read(&mut tmp);

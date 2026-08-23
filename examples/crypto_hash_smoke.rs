@@ -24,8 +24,8 @@ extern crate goish;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::crypto::{self, RegisterHash, SignerOpts};
+use goish::fmt;
 use goish::gostring::string;
 use goish::io::Writer;
 use goish::types::byte;

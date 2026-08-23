@@ -11,8 +11,8 @@ extern crate goish;
 use goish::fmt;
 use goish::net;
 use goish::string;
+use goish::syscall;
 use goish::types::int;
-use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -115,8 +115,7 @@ fn main() {
     // 9. IPNet.Contains — outside range.
     {
         let (_, network, _) = net::ParseCIDR(string("192.168.1.0/24"));
-        if !network.Contains(net::IPv4(192, 168, 2, 1))
-            && !network.Contains(net::IPv4(10, 0, 0, 1))
+        if !network.Contains(net::IPv4(192, 168, 2, 1)) && !network.Contains(net::IPv4(10, 0, 0, 1))
         {
             fmt::Println!("[ 9] Contains outside          PASS");
         } else {
@@ -142,9 +141,7 @@ fn main() {
     // 11. IPNet.Contains — /32 host-only.
     {
         let (_, network, _) = net::ParseCIDR(string("10.0.0.5/32"));
-        if network.Contains(net::IPv4(10, 0, 0, 5))
-            && !network.Contains(net::IPv4(10, 0, 0, 6))
-        {
+        if network.Contains(net::IPv4(10, 0, 0, 5)) && !network.Contains(net::IPv4(10, 0, 0, 6)) {
             fmt::Println!("[11] Contains /32              PASS");
         } else {
             fmt::Println!("[11] Contains /32              FAIL");

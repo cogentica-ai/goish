@@ -12,8 +12,8 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use goish::fmt;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::io;
 use goish::net;
 use goish::net::http;
@@ -62,7 +62,10 @@ fn main() {
         } else {
             fmt::Println!(
                 "[ 1] dir index 200             FAIL status={} ct={} a={} b={}",
-                resp.StatusCode, ct, has_a, has_b
+                resp.StatusCode,
+                ct,
+                has_a,
+                has_b
             );
             failed += 1;
         }

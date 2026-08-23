@@ -137,8 +137,7 @@ pub fn compress(x: fieldElement, d: uint8) -> uint16 {
     // Go: dividend := uint32(x) << d
     let dividend: uint32 = uint32(x) << d;
     // Go: quotient := uint32(uint64(dividend) * barrettMultiplier >> barrettShift)
-    let mut quotient =
-        uint32((uint64(dividend)).wrapping_mul(barrettMultiplier) >> barrettShift);
+    let mut quotient = uint32((uint64(dividend)).wrapping_mul(barrettMultiplier) >> barrettShift);
     // Go: remainder := dividend - quotient*q
     let remainder = dividend.wrapping_sub(quotient.wrapping_mul(uint32(q)));
 
@@ -508,7 +507,11 @@ pub fn ringCompressAndEncode(s: slice<byte>, f: ringElement, d: uint8) -> slice<
             // Go: b |= byte(c>>cIdx) << bIdx
             b |= uint8((c >> cIdx) & 0xff) << bIdx;
             // Go: bits := min(8-bIdx, d-cIdx)
-            let bits = if 8 - bIdx < d - cIdx { 8 - bIdx } else { d - cIdx };
+            let bits = if 8 - bIdx < d - cIdx {
+                8 - bIdx
+            } else {
+                d - cIdx
+            };
             bIdx += bits;
             cIdx += bits;
             if bIdx == 8 {
@@ -544,7 +547,11 @@ pub fn ringDecodeAndDecompress(b: &[byte], d: uint8) -> ringElement {
             // Go: c |= uint16(b[0]>>bIdx) << cIdx; c &= (1 << d) - 1
             c |= uint16(b[p] >> bIdx) << cIdx;
             c &= (1u16 << d) - 1;
-            let bits = if 8 - bIdx < d - cIdx { 8 - bIdx } else { d - cIdx };
+            let bits = if 8 - bIdx < d - cIdx {
+                8 - bIdx
+            } else {
+                d - cIdx
+            };
             bIdx += bits;
             cIdx += bits;
             if bIdx == 8 {
@@ -790,8 +797,8 @@ pub fn sampleNTT(rho: &[byte], ii: byte, jj: byte) -> nttElement {
             off = 0;
         }
         // Go: d1 := byteorder.LEUint16(buf[off:]) & 0b1111_1111_1111
-        let d1 = byteorder::LEUint16(slice::__from_vec(buf[off..off + 2].to_vec()))
-            & 0b1111_1111_1111;
+        let d1 =
+            byteorder::LEUint16(slice::__from_vec(buf[off..off + 2].to_vec())) & 0b1111_1111_1111;
         // Go: d2 := byteorder.LEUint16(buf[off+1:]) >> 4
         let d2 = byteorder::LEUint16(slice::__from_vec(buf[off + 1..off + 3].to_vec())) >> 4;
         off += 3;

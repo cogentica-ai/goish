@@ -12,14 +12,14 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
-use goish::fmt;
 use goish::convert::bytes as to_bytes;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::hash::adler32;
 use goish::hash::{Hash, Hash32};
 use goish::io::Writer as _;
+use goish::syscall;
 use goish::types::byte;
-use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())

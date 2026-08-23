@@ -289,10 +289,9 @@ impl Drop for G {
     /// on first push). Drop is a no-op in the null case — saves
     /// the 32 B inline `SpinLock<Vec>` per non-grown G.
     fn drop(&mut self) {
-        let chain_ptr = self.growth_chain.swap(
-            core::ptr::null_mut(),
-            core::sync::atomic::Ordering::AcqRel,
-        );
+        let chain_ptr = self
+            .growth_chain
+            .swap(core::ptr::null_mut(), core::sync::atomic::Ordering::AcqRel);
         if !chain_ptr.is_null() {
             unsafe {
                 let chain = alloc::boxed::Box::from_raw(chain_ptr);
@@ -304,7 +303,6 @@ impl Drop for G {
         }
     }
 }
-
 
 // `Box<dyn FnOnce()>` is `Send` only when the closure is `Send`. For
 // M16b we don't move Gs across threads, so the marker isn't needed

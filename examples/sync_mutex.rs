@@ -59,8 +59,14 @@ fn test_lock_unlock_uncontended() {
     });
     schedule();
 
-    check(RAN.load(Ordering::Relaxed) == 2, b"uncontended: didn't run twice\n");
-    check(MU.TryLockManual(), b"uncontended: TryLock failed after Unlock\n");
+    check(
+        RAN.load(Ordering::Relaxed) == 2,
+        b"uncontended: didn't run twice\n",
+    );
+    check(
+        MU.TryLockManual(),
+        b"uncontended: TryLock failed after Unlock\n",
+    );
     MU.Unlock();
 }
 
@@ -70,15 +76,27 @@ fn test_trylock() {
     static MU: Mutex = Mutex::new(());
 
     // Manual (Go-shape, returns bool):
-    check(MU.TryLockManual(), b"trylock: fresh mutex, TryLockManual failed\n");
-    check(!MU.TryLockManual(), b"trylock: locked mutex, TryLockManual succeeded\n");
+    check(
+        MU.TryLockManual(),
+        b"trylock: fresh mutex, TryLockManual failed\n",
+    );
+    check(
+        !MU.TryLockManual(),
+        b"trylock: locked mutex, TryLockManual succeeded\n",
+    );
     MU.Unlock();
 
     // RAII (returns Option<MutexGuard>):
     {
         let g = MU.TryLock();
-        check(g.is_some(), b"trylock: fresh mutex, TryLock returned None\n");
-        check(MU.TryLock().is_none(), b"trylock: TryLock should fail under guard\n");
+        check(
+            g.is_some(),
+            b"trylock: fresh mutex, TryLock returned None\n",
+        );
+        check(
+            MU.TryLock().is_none(),
+            b"trylock: TryLock should fail under guard\n",
+        );
         // g drops at end of block -> unlocks.
     }
 
@@ -120,9 +138,15 @@ fn test_contended_counter() {
     }
     schedule();
 
-    check(GS_DONE.load(Ordering::Relaxed) as i64 == N_GS, b"contended: not all Gs done\n");
+    check(
+        GS_DONE.load(Ordering::Relaxed) as i64 == N_GS,
+        b"contended: not all Gs done\n",
+    );
     let got = SHARED.load(Ordering::Relaxed);
-    check(got == N_GS * N_INCREMENTS, b"contended: counter wrong (lost updates)\n");
+    check(
+        got == N_GS * N_INCREMENTS,
+        b"contended: counter wrong (lost updates)\n",
+    );
 }
 
 // ── Test 4: cross-goroutine handoff — one G locks, another unlocks.
@@ -166,7 +190,16 @@ fn test_cross_g_handoff() {
 
     schedule();
 
-    check(A_LOCKED.load(Ordering::Acquire) == 1, b"handoff: A didn't lock\n");
-    check(B_UNLOCKED.load(Ordering::Acquire) == 1, b"handoff: B didn't unlock\n");
-    check(C_GOT_LOCK.load(Ordering::Acquire) == 1, b"handoff: C didn't acquire\n");
+    check(
+        A_LOCKED.load(Ordering::Acquire) == 1,
+        b"handoff: A didn't lock\n",
+    );
+    check(
+        B_UNLOCKED.load(Ordering::Acquire) == 1,
+        b"handoff: B didn't unlock\n",
+    );
+    check(
+        C_GOT_LOCK.load(Ordering::Acquire) == 1,
+        b"handoff: C didn't acquire\n",
+    );
 }

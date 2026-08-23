@@ -44,8 +44,8 @@ use crate::error;
 use crate::errors;
 use crate::io;
 use crate::slice;
-use crate::string;
 use crate::strconv;
+use crate::string;
 use crate::types::{byte, int};
 
 // ─── Size constants (Go: ed25519.go:30-39) ────────────────────────────
@@ -279,9 +279,7 @@ impl crypto::SignerOpts for Options {
     // (Go's `opts.(*Options)` comma-ok). The transpiler normally emits
     // this override; this module hand-writes the impl, so it is added
     // explicitly here.
-    fn __goish_as_dyn_any(
-        &self,
-    ) -> Option<&(dyn core::any::Any + Send + Sync)> {
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
         Some(self)
     }
 }

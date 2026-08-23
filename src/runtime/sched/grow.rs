@@ -371,12 +371,8 @@ where
     let live = GROW_LIVE.fetch_add(1, Ordering::Relaxed) + 1;
     let mut peak = GROW_PEAK_LIVE.load(Ordering::Relaxed);
     while live > peak {
-        match GROW_PEAK_LIVE.compare_exchange_weak(
-            peak,
-            live,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        ) {
+        match GROW_PEAK_LIVE.compare_exchange_weak(peak, live, Ordering::Relaxed, Ordering::Relaxed)
+        {
             Ok(_) => break,
             Err(p) => peak = p,
         }
@@ -455,40 +451,28 @@ where
 
 fn current_active_stack_lo() -> usize {
     match crate::runtime::sched::scheduler::current_g() {
-        Some(g) => unsafe {
-            (*g.as_ptr()).active_stack_lo.load(Ordering::Acquire)
-        },
+        Some(g) => unsafe { (*g.as_ptr()).active_stack_lo.load(Ordering::Acquire) },
         None => 0,
     }
 }
 
 fn current_active_stack_hi() -> usize {
     match crate::runtime::sched::scheduler::current_g() {
-        Some(g) => unsafe {
-            (*g.as_ptr()).active_stack_hi.load(Ordering::Acquire)
-        },
+        Some(g) => unsafe { (*g.as_ptr()).active_stack_hi.load(Ordering::Acquire) },
         None => 0,
     }
 }
 
 fn swap_active_stack_lo(new: usize) -> usize {
     match crate::runtime::sched::scheduler::current_g() {
-        Some(g) => unsafe {
-            (*g.as_ptr())
-                .active_stack_lo
-                .swap(new, Ordering::AcqRel)
-        },
+        Some(g) => unsafe { (*g.as_ptr()).active_stack_lo.swap(new, Ordering::AcqRel) },
         None => 0,
     }
 }
 
 fn swap_active_stack_hi(new: usize) -> usize {
     match crate::runtime::sched::scheduler::current_g() {
-        Some(g) => unsafe {
-            (*g.as_ptr())
-                .active_stack_hi
-                .swap(new, Ordering::AcqRel)
-        },
+        Some(g) => unsafe { (*g.as_ptr()).active_stack_hi.swap(new, Ordering::AcqRel) },
         None => 0,
     }
 }

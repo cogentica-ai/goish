@@ -16,11 +16,11 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::error;
 use goish::errors;
+use goish::fmt;
 use goish::net::http;
-use goish::{syscall};
+use goish::syscall;
 
 #[goish::main]
 fn main() {
@@ -40,7 +40,8 @@ fn main() {
 
     // 2. ErrNotSupported message matches Go.
     {
-        let __e_s: error = http::ErrNotSupported.into(); let s = __e_s.Error();
+        let __e_s: error = http::ErrNotSupported.into();
+        let s = __e_s.Error();
         if s == "feature not supported" {
             fmt::Println!("[ 2] ErrNotSupported message   PASS");
         } else {
@@ -75,7 +76,8 @@ fn main() {
 
     // 5. ErrHeaderTooLong sentinel + message.
     {
-        let __e_s: error = http::ErrHeaderTooLong.into(); let s = __e_s.Error();
+        let __e_s: error = http::ErrHeaderTooLong.into();
+        let s = __e_s.Error();
         if s == "header too long" {
             fmt::Println!("[ 5] ErrHeaderTooLong message  PASS");
         } else {
@@ -86,7 +88,8 @@ fn main() {
 
     // 6. ErrShortBody sentinel + message.
     {
-        let __e_s: error = http::ErrShortBody.into(); let s = __e_s.Error();
+        let __e_s: error = http::ErrShortBody.into();
+        let s = __e_s.Error();
         if s == "entity body too short" {
             fmt::Println!("[ 6] ErrShortBody message      PASS");
         } else {
@@ -97,7 +100,8 @@ fn main() {
 
     // 7. ErrMissingContentLength sentinel + message.
     {
-        let __e_s: error = http::ErrMissingContentLength.into(); let s = __e_s.Error();
+        let __e_s: error = http::ErrMissingContentLength.into();
+        let s = __e_s.Error();
         if s == "missing ContentLength in HEAD response" {
             fmt::Println!("[ 7] ErrMissingContentLength   PASS");
         } else {
@@ -108,10 +112,9 @@ fn main() {
 
     // 8. Non-ErrNotSupported sentinels do NOT chain to ErrUnsupported.
     {
-        let any_chain =
-               errors::Is(http::ErrUnexpectedTrailer.into(), errors::ErrUnsupported)
-            || errors::Is(http::ErrHeaderTooLong.into(),     errors::ErrUnsupported)
-            || errors::Is(http::ErrShortBody.into(),         errors::ErrUnsupported)
+        let any_chain = errors::Is(http::ErrUnexpectedTrailer.into(), errors::ErrUnsupported)
+            || errors::Is(http::ErrHeaderTooLong.into(), errors::ErrUnsupported)
+            || errors::Is(http::ErrShortBody.into(), errors::ErrUnsupported)
             || errors::Is(http::ErrMissingContentLength.into(), errors::ErrUnsupported);
         if !any_chain {
             fmt::Println!("[ 8] other sentinels !ErrUnsup PASS");
@@ -123,7 +126,9 @@ fn main() {
 
     // 9. User-constructed ProtocolError exposes its ErrorString.
     {
-        let pe = http::ProtocolError { ErrorString: goish::string("custom oops") };
+        let pe = http::ProtocolError {
+            ErrorString: goish::string("custom oops"),
+        };
         let e: error = errors::Wrap(pe);
         let s = e.Error();
         if s == "custom oops" {
@@ -136,7 +141,9 @@ fn main() {
 
     // 10. User-constructed ProtocolError does NOT chain to ErrUnsupported.
     {
-        let pe = http::ProtocolError { ErrorString: goish::string("feature not supported") };
+        let pe = http::ProtocolError {
+            ErrorString: goish::string("feature not supported"),
+        };
         let e: error = errors::Wrap(pe);
         if !errors::Is(e, errors::ErrUnsupported) {
             fmt::Println!("[10] user pe !ErrUnsup chain   PASS");

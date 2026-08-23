@@ -23,8 +23,8 @@ use alloc::vec::Vec;
 
 use super::common::{Certificate, CurveID, VersionTLS13};
 use super::handshake_messages::{
-    addUint64, marshalCertificate, readUint24LengthPrefixed, readUint64,
-    readUint8LengthPrefixed, unmarshalCertificate,
+    addUint64, marshalCertificate, readUint24LengthPrefixed, readUint64, readUint8LengthPrefixed,
+    unmarshalCertificate,
 };
 use crate::crypto::cryptobyte;
 use crate::crypto::cryptobyte::String as CBString;
@@ -415,35 +415,55 @@ pub fn ParseSessionState(data: slice<byte>) -> (SessionState, error) {
 impl SessionState {
     // go: none — goish-only: see above.
     #[doc(hidden)]
-    pub fn __setVersion(&mut self, v: uint16) { self.version = v; }
+    pub fn __setVersion(&mut self, v: uint16) {
+        self.version = v;
+    }
     // go: none — goish-only: see above.
     #[doc(hidden)]
-    pub fn __setCipherSuite(&mut self, v: uint16) { self.cipherSuite = v; }
+    pub fn __setCipherSuite(&mut self, v: uint16) {
+        self.cipherSuite = v;
+    }
     // go: none — goish-only: `SessionState.ocspResponse` is unexported.
     #[doc(hidden)]
-    pub fn __setOcspResponse(&mut self, v: slice<byte>) { self.ocspResponse = v; }
+    pub fn __setOcspResponse(&mut self, v: slice<byte>) {
+        self.ocspResponse = v;
+    }
     // go: none — goish-only: see above.
     #[doc(hidden)]
-    pub fn __setCreatedAt(&mut self, v: uint64) { self.createdAt = v; }
+    pub fn __setCreatedAt(&mut self, v: uint64) {
+        self.createdAt = v;
+    }
     // go: none — goish-only: see above.
     #[doc(hidden)]
-    pub fn __setSecret(&mut self, v: slice<byte>) { self.secret = v; }
+    pub fn __setSecret(&mut self, v: slice<byte>) {
+        self.secret = v;
+    }
     // go: none — goish-only: `SessionState.ticket` is unexported in Go,
     // where the tests are in-package.
     #[doc(hidden)]
-    pub fn __setTicket(&mut self, v: slice<byte>) { self.ticket = v; }
+    pub fn __setTicket(&mut self, v: slice<byte>) {
+        self.ticket = v;
+    }
     // go: none — goish-only: see above.
     #[doc(hidden)]
-    pub fn __setExtMasterSecret(&mut self, v: bool) { self.extMasterSecret = v; }
+    pub fn __setExtMasterSecret(&mut self, v: bool) {
+        self.extMasterSecret = v;
+    }
     // go: none — goish-only: see above.
     #[doc(hidden)]
-    pub fn __setAlpnProtocol(&mut self, v: string) { self.alpnProtocol = v; }
+    pub fn __setAlpnProtocol(&mut self, v: string) {
+        self.alpnProtocol = v;
+    }
     // go: none — goish-only: see above.
     #[doc(hidden)]
-    pub fn __setCurveID(&mut self, v: CurveID) { self.curveID = v; }
+    pub fn __setCurveID(&mut self, v: CurveID) {
+        self.curveID = v;
+    }
     // go: none — goish-only: see above.
     #[doc(hidden)]
-    pub fn __version(&self) -> uint16 { return self.version; }
+    pub fn __version(&self) -> uint16 {
+        return self.version;
+    }
 
     // go: none — goish-only: see `__setVersion`.
     #[doc(hidden)]
@@ -457,38 +477,57 @@ impl SessionState {
     }
     // go: none — goish-only: see `__setVersion`.
     #[doc(hidden)]
-    pub fn __ocspResponse(&self) -> slice<byte> { return self.ocspResponse.clone(); }
+    pub fn __ocspResponse(&self) -> slice<byte> {
+        return self.ocspResponse.clone();
+    }
     // go: none — goish-only: see `__setVersion`.
     #[doc(hidden)]
-    pub fn __scts(&self) -> slice<slice<byte>> { return self.scts.clone(); }
+    pub fn __scts(&self) -> slice<slice<byte>> {
+        return self.scts.clone();
+    }
 
     // go: none — goish-only: see above.
     #[doc(hidden)]
-    pub fn __cipherSuite(&self) -> uint16 { return self.cipherSuite; }
+    pub fn __cipherSuite(&self) -> uint16 {
+        return self.cipherSuite;
+    }
     // go: none — goish-only: see above.
     #[doc(hidden)]
-    pub fn __createdAt(&self) -> uint64 { return self.createdAt; }
+    pub fn __createdAt(&self) -> uint64 {
+        return self.createdAt;
+    }
     // go: none — goish-only: see above.
     #[doc(hidden)]
-    pub fn __secret(&self) -> slice<byte> { return self.secret.clone(); }
+    pub fn __secret(&self) -> slice<byte> {
+        return self.secret.clone();
+    }
     // go: none — goish-only: `SessionState.ticket` is unexported in Go.
     #[doc(hidden)]
-    pub fn __ticket(&self) -> slice<byte> { return self.ticket.clone(); }
+    pub fn __ticket(&self) -> slice<byte> {
+        return self.ticket.clone();
+    }
     // go: none — goish-only: see above.
     #[doc(hidden)]
-    pub fn __extMasterSecret(&self) -> bool { return self.extMasterSecret; }
+    pub fn __extMasterSecret(&self) -> bool {
+        return self.extMasterSecret;
+    }
     // go: none — goish-only: see above.
     #[doc(hidden)]
-    pub fn __alpnProtocol(&self) -> string { return self.alpnProtocol.clone(); }
+    pub fn __alpnProtocol(&self) -> string {
+        return self.alpnProtocol.clone();
+    }
     // go: none — goish-only: see above.
     #[doc(hidden)]
-    pub fn __curveID(&self) -> CurveID { return self.curveID; }
+    pub fn __curveID(&self) -> CurveID {
+        return self.curveID;
+    }
     // go: none — goish-only: `SessionState.isClient` is unexported in
     // Go, where the tests are in-package.
     #[doc(hidden)]
-    pub fn __isClientFlag(&self) -> bool { return self.isClient; }
+    pub fn __isClientFlag(&self) -> bool {
+        return self.isClient;
+    }
 }
-
 
 // ─── ClientSessionState ───────────────────────────────────────────────
 
@@ -507,7 +546,9 @@ impl ClientSessionState {
     // unexported, so sibling modules need a constructor.
     #[doc(hidden)]
     pub fn __of(session: SessionState) -> ClientSessionState {
-        return ClientSessionState { session: Some(session) };
+        return ClientSessionState {
+            session: Some(session),
+        };
     }
 
     // go: none — goish-only: see `__of`.
@@ -542,10 +583,7 @@ impl ClientSessionState {
 /// [Config.UnwrapSession] to resume a previous session. state needs to
 /// be returned by [ParseSessionState], and the ticket and session state
 /// must have been returned by [ClientSessionState.ResumptionState]."
-pub fn NewResumptionState(
-    ticket: slice<byte>,
-    state: SessionState,
-) -> (ClientSessionState, error) {
+pub fn NewResumptionState(ticket: slice<byte>, state: SessionState) -> (ClientSessionState, error) {
     // Go: state.ticket = ticket
     //     return &ClientSessionState{session: state}, nil
     let mut state = state;
@@ -557,7 +595,6 @@ pub fn NewResumptionState(
         crate::errors::nil,
     );
 }
-
 
 // ─── Session ticket sealing ───────────────────────────────────────────
 
@@ -645,8 +682,7 @@ impl Config {
         }
         // Go: cipher.NewCTR(block, iv).XORKeyStream(ciphertext, state)
         let mut ctr = cipher::NewCTR(block.unwrap(), iv.clone());
-        let mut ciphertext: slice<byte> =
-            slice::__from_vec(alloc::vec![0u8; state.Len() as usize]);
+        let mut ciphertext: slice<byte> = slice::__from_vec(alloc::vec![0u8; state.Len() as usize]);
         crate::crypto::cipher::Stream::XORKeyStream(&mut ctr, &mut ciphertext, state);
 
         // Go: mac := hmac.New(sha256.New, key.hmacKey[:])

@@ -136,9 +136,7 @@ pub fn goishParsePKCS1RSAPrivateKey(
 }
 
 // go: none — the shared RSAPrivateKey DER walk.
-fn pkcs8_parse_rsa_private_key(
-    der: slice<byte>,
-) -> (crate::crypto::rsa::PrivateKey, crate::error) {
+fn pkcs8_parse_rsa_private_key(der: slice<byte>) -> (crate::crypto::rsa::PrivateKey, crate::error) {
     let nil_key = crate::crypto::rsa::PrivateKey::default();
 
     // outer SEQUENCE
@@ -230,10 +228,7 @@ fn pkcs8_parse_rsa_private_key(
     primes_vec.push(q_int);
 
     let key = crate::crypto::rsa::PrivateKey {
-        PublicKey: crate::crypto::rsa::PublicKey {
-            N: n_int,
-            E: e_val,
-        },
+        PublicKey: crate::crypto::rsa::PublicKey { N: n_int, E: e_val },
         D: d_int,
         Primes: slice::<big::Int>::__from_vec(primes_vec),
         Precomputed: crate::crypto::rsa::PrecomputedValues {

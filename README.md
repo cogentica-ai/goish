@@ -283,8 +283,8 @@ side-channel analysis. Read this before trusting goish with anything.
   - Coprime-permuted work stealing (`runqgrab`/`runqsteal`/`stealOrder`).
   - `gogo` / `mcall` asm trampoline (`runtime/asm_amd64.s:404,427` shape).
   - Idle-M parking via futex + per-M `Note`.
-- **Async preemption** (M18b): SIGURG handler with per-M `sigaltstack`, handler-direct G-stack write at `[sp - 144]`, sysmon-driven force-preempt + cooperative-preempt safe points. Hardened `m.locks` discipline: the allocator runs preempt-masked (`mallocgc` parity), mask epochs never straddle a park (a `gopark` can resume on a different M), and `acquirem`/`releasem` are single fs-relative asm RMWs so a mid-sequence migration can't charge the wrong M - with a debug-build underflow tripwire.
-- **TLS-backed M discovery**: `arch_prctl(ARCH_SET_FS)` for the main thread, `CLONE_SETTLS` for workers. `current_m()` reads `%fs:0` with one mov.
+- **Async preemption** (M18b): SIGURG handler with per-M `sigaltstack`, handler-direct G-stack write at `[sp - 144]`, sysmon-driven force-preempt + cooperative-preempt safe points. Hardened `m.locks` discipline: the allocator runs preempt-masked (`mallocgc` parity), mask epochs never straddle a park (a `gopark` can resume on a different M), and `acquirem`/`releasem` are single TLS-segment-relative asm RMWs so a mid-sequence migration can't charge the wrong M - with a debug-build underflow tripwire.
+- **TLS-backed M discovery**: FS + `CLONE_SETTLS` by default. The opt-in `ffi-system-tls` Cargo feature preserves platform FS and stores the Goish M pointer in GS, including setting worker GS in the raw clone trampoline before Rust runs.
 - **GOMAXPROCS**: sized from `sched_getaffinity(2)`; one P per CPU.
 
 ### Memory

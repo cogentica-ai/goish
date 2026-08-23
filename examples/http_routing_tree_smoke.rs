@@ -44,11 +44,11 @@ use goish::gomap::map;
 use goish::goslice::slice;
 use goish::gostring::string as gostring;
 use goish::net::http::pattern::parsePattern;
+use goish::net::http::request::Request;
 use goish::net::http::responsewriter::ResponseWriter;
 use goish::net::http::routing_index::routingIndex;
 use goish::net::http::routing_tree::routingNode;
 use goish::net::http::server::Handler;
-use goish::net::http::request::Request;
 use goish::{string, syscall};
 
 struct nopH;
@@ -81,9 +81,12 @@ fn tree() -> routingNode {
 
 /// `(pattern-string, wildcard-matches-joined)` for a request, or
 /// ("<nil>", "") when nothing matched.
-fn hit(root: &routingNode, host: &'static str, method: &'static str, path: &'static str)
-    -> (gostring, gostring)
-{
+fn hit(
+    root: &routingNode,
+    host: &'static str,
+    method: &'static str,
+    path: &'static str,
+) -> (gostring, gostring) {
     let (n, m) = root.r#match(&string(host), &string(method), &string(path));
     let pat = match n {
         Some(n) => match n.pattern.as_ref() {
@@ -101,7 +104,13 @@ fn main() {
     let root = tree();
 
     // (host, method, path, want-pattern, want-matches)
-    let cases: [(&'static str, &'static str, &'static str, &'static str, &'static str); 9] = [
+    let cases: [(
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+    ); 9] = [
         ("", "GET", "/a/b", "/a/b", ""),
         ("", "GET", "/a/z", "/a/{x}", "z"),
         ("", "GET", "/q/c", "/{y}/c", "q"),
@@ -120,8 +129,20 @@ fn main() {
             fmt::Println!("[", i, "] ", *method, " ", *path, " -> ", pat, "  PASS");
         } else {
             fmt::Println!(
-                "[", i, "] ", *method, " ", *path,
-                " FAIL want=", *wantPat, "/", *wantM, " got=", pat, "/", m
+                "[",
+                i,
+                "] ",
+                *method,
+                " ",
+                *path,
+                " FAIL want=",
+                *wantPat,
+                "/",
+                *wantM,
+                " got=",
+                pat,
+                "/",
+                m
             );
             failed += 1;
         }
@@ -183,8 +204,7 @@ fn main() {
     {
         let mut idx = routingIndex::default();
         let reg: [&'static str; 4] = ["/a/b", "/a/{x}", "/c/d", "/e/"];
-        let mut regd: alloc::vec::Vec<goish::net::http::pattern::pattern> =
-            alloc::vec::Vec::new();
+        let mut regd: alloc::vec::Vec<goish::net::http::pattern::pattern> = alloc::vec::Vec::new();
         for s in reg.iter() {
             let (p, _) = parsePattern(string(*s));
             idx.addPattern(&p);
@@ -219,7 +239,12 @@ fn main() {
         if complete && pruned {
             fmt::Println!("[12] index keeps all conflicts PASS");
         } else {
-            fmt::Println!("[12] index keeps all conflicts FAIL complete=", complete, " pruned=", pruned);
+            fmt::Println!(
+                "[12] index keeps all conflicts FAIL complete=",
+                complete,
+                " pruned=",
+                pruned
+            );
             failed += 1;
         }
     }

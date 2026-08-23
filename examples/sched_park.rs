@@ -89,10 +89,8 @@ fn test_park_and_wake() {
         loop {
             let p = SLEEPER_PTR.load(Ordering::Acquire);
             if !p.is_null() {
-                let parked = unsafe {
-                    core::ptr::addr_of!((*p).status).read_volatile()
-                        == GStatus::Waiting
-                };
+                let parked =
+                    unsafe { core::ptr::addr_of!((*p).status).read_volatile() == GStatus::Waiting };
                 if parked {
                     B_RAN.store(true, Ordering::Relaxed);
                     let g = NonNull::new(p).expect("non-null sleeper");

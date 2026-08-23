@@ -8,10 +8,10 @@
 #![allow(unused_mut)]
 
 extern crate alloc;
-use alloc::vec::Vec;
-use alloc::vec;
-use alloc::string::String;
 use alloc::borrow::ToOwned;
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 // ─── DnsConfig ────────────────────────────────────────────────────────────
@@ -223,7 +223,9 @@ pub fn dns_read_config(filename: &str) -> DnsConfig {
                 for &s in &fields[1..] {
                     if let Some(rest) = s.strip_prefix("ndots:") {
                         let mut n: usize = rest.parse().unwrap_or(conf.ndots);
-                        if n > 15 { n = 15; }
+                        if n > 15 {
+                            n = 15;
+                        }
                         conf.ndots = n;
                     } else if let Some(rest) = s.strip_prefix("timeout:") {
                         let n: u64 = rest.parse().unwrap_or(conf.timeout_secs);
@@ -270,10 +272,7 @@ fn ensure_rooted(s: &str) -> String {
 }
 
 fn default_nameservers() -> Vec<String> {
-    vec![
-        "127.0.0.1:53".to_owned(),
-        "[::1]:53".to_owned(),
-    ]
+    vec!["127.0.0.1:53".to_owned(), "[::1]:53".to_owned()]
 }
 
 fn dns_default_search() -> Vec<String> {
@@ -308,23 +307,32 @@ fn is_ip(s: &str) -> bool {
 
 /// Read a file via raw syscall (works in no_std).
 fn read_file_bytes(path: &str) -> Option<Vec<u8>> {
-    
     // Construct a null-terminated path
     let mut path_bytes: Vec<u8> = path.as_bytes().to_vec();
     path_bytes.push(0);
 
     let fd = unsafe {
-        crate::syscall::syscall3(crate::syscall::SYS_OPEN, path_bytes.as_ptr() as usize, 0, 0) as i32
+        crate::syscall::syscall3(crate::syscall::SYS_OPEN, path_bytes.as_ptr() as usize, 0, 0)
+            as i32
     };
-    if fd < 0 { return None; }
+    if fd < 0 {
+        return None;
+    }
 
     let mut buf = vec![0u8; 8192];
     let n = unsafe {
-        crate::syscall::syscall3(crate::syscall::SYS_READ, fd as usize, buf.as_mut_ptr() as usize, buf.len()) as isize
+        crate::syscall::syscall3(
+            crate::syscall::SYS_READ,
+            fd as usize,
+            buf.as_mut_ptr() as usize,
+            buf.len(),
+        ) as isize
     };
     let _ = unsafe { crate::syscall::syscall1(crate::syscall::SYS_CLOSE, fd as usize) };
 
-    if n <= 0 { return None; }
+    if n <= 0 {
+        return None;
+    }
     buf.truncate(n as usize);
     Some(buf)
 }

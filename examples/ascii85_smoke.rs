@@ -12,12 +12,12 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
-use goish::fmt;
 use goish::convert::bytes as to_bytes;
 use goish::encoding::ascii85;
+use goish::fmt;
 use goish::goslice::slice;
+use goish::syscall;
 use goish::types::byte;
-use goish::{syscall};
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -124,7 +124,10 @@ fn main() {
         let dst2 = slice::<byte>::__from_vec(alloc::vec![0; 32]);
         let (decoded, ndst, _nsrc, err) = ascii85::Decode(dst2, enc_slice, true);
         let dec_raw: &[byte] = &decoded;
-        if err.IsNil() && ndst as usize == input.len() && &dec_raw[..input.len()] == input.as_bytes() {
+        if err.IsNil()
+            && ndst as usize == input.len()
+            && &dec_raw[..input.len()] == input.as_bytes()
+        {
             fmt::Println!("[ 7] Round-trip \"Hello,...\"    PASS");
         } else {
             fmt::Println!("[ 7] Round-trip \"Hello,...\"    FAIL");

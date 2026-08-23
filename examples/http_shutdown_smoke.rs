@@ -30,7 +30,6 @@ fn check(cond: bool, msg: &[u8]) {
     }
 }
 
-
 #[goish::main]
 fn main() {
     let mux = http::ServeMux::new();
@@ -83,7 +82,10 @@ fn main() {
         check(err.IsNil(), b"client Dial failed\n");
         let req: &[u8] = b"GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
         let (n, err) = conn.Write(bytes(core::str::from_utf8(req).unwrap()));
-        check(err.IsNil() && n as usize == req.len(), b"client Write failed\n");
+        check(
+            err.IsNil() && n as usize == req.len(),
+            b"client Write failed\n",
+        );
         let mut buf = make!([]u8, 256);
         let _ = conn.Read(&mut buf);
         let _ = conn.Close();

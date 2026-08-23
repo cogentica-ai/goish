@@ -53,11 +53,15 @@ impl FileMode {
 // the newtype so ports keep their idioms without `.0` unwrapping.
 impl core::ops::BitOr for FileMode {
     type Output = FileMode;
-    fn bitor(self, rhs: FileMode) -> FileMode { FileMode(self.0 | rhs.0) }
+    fn bitor(self, rhs: FileMode) -> FileMode {
+        FileMode(self.0 | rhs.0)
+    }
 }
 impl core::ops::BitAnd for FileMode {
     type Output = FileMode;
-    fn bitand(self, rhs: FileMode) -> FileMode { FileMode(self.0 & rhs.0) }
+    fn bitand(self, rhs: FileMode) -> FileMode {
+        FileMode(self.0 & rhs.0)
+    }
 }
 // Mask against a bare integer literal — Go writes `fi.Mode() & 0o777`
 // and the untyped constant coerces to `os.FileMode`. Rust needs the
@@ -65,60 +69,96 @@ impl core::ops::BitAnd for FileMode {
 // literal as `u32` unambiguously.
 impl core::ops::BitAnd<u32> for FileMode {
     type Output = FileMode;
-    fn bitand(self, rhs: u32) -> FileMode { FileMode(self.0 & rhs) }
+    fn bitand(self, rhs: u32) -> FileMode {
+        FileMode(self.0 & rhs)
+    }
 }
 impl core::ops::BitXor for FileMode {
     type Output = FileMode;
-    fn bitxor(self, rhs: FileMode) -> FileMode { FileMode(self.0 ^ rhs.0) }
+    fn bitxor(self, rhs: FileMode) -> FileMode {
+        FileMode(self.0 ^ rhs.0)
+    }
 }
 impl core::ops::BitOrAssign for FileMode {
-    fn bitor_assign(&mut self, rhs: FileMode) { self.0 |= rhs.0; }
+    fn bitor_assign(&mut self, rhs: FileMode) {
+        self.0 |= rhs.0;
+    }
 }
 impl core::ops::BitAndAssign for FileMode {
-    fn bitand_assign(&mut self, rhs: FileMode) { self.0 &= rhs.0; }
+    fn bitand_assign(&mut self, rhs: FileMode) {
+        self.0 &= rhs.0;
+    }
 }
 impl core::ops::Not for FileMode {
     type Output = FileMode;
-    fn not(self) -> FileMode { FileMode(!self.0) }
+    fn not(self) -> FileMode {
+        FileMode(!self.0)
+    }
 }
 
 // Integer-literal coercions. Go writes `os.OpenFile(name, flag, 0666)`
 // and the compiler accepts 0666 as `os.FileMode` because Go has
 // untyped constants. Rust doesn't, so accept the common literal widths
 // via `From` and `impl Into<FileMode>` on call sites that take perm.
-impl From<u32> for FileMode { fn from(v: u32) -> FileMode { FileMode(v) } }
-impl From<i32> for FileMode { fn from(v: i32) -> FileMode { FileMode(v as u32) } }
-impl From<i64> for FileMode { fn from(v: i64) -> FileMode { FileMode(v as u32) } }
-impl From<u64> for FileMode { fn from(v: u64) -> FileMode { FileMode(v as u32) } }
-impl From<u16> for FileMode { fn from(v: u16) -> FileMode { FileMode(v as u32) } }
+impl From<u32> for FileMode {
+    fn from(v: u32) -> FileMode {
+        FileMode(v)
+    }
+}
+impl From<i32> for FileMode {
+    fn from(v: i32) -> FileMode {
+        FileMode(v as u32)
+    }
+}
+impl From<i64> for FileMode {
+    fn from(v: i64) -> FileMode {
+        FileMode(v as u32)
+    }
+}
+impl From<u64> for FileMode {
+    fn from(v: u64) -> FileMode {
+        FileMode(v as u32)
+    }
+}
+impl From<u16> for FileMode {
+    fn from(v: u16) -> FileMode {
+        FileMode(v as u32)
+    }
+}
 impl From<crate::nilval::Nil> for FileMode {
-    fn from(_: crate::nilval::Nil) -> FileMode { FileMode(0) }
+    fn from(_: crate::nilval::Nil) -> FileMode {
+        FileMode(0)
+    }
 }
 
 // Comparison against bare integer 0 — Go's `if perm == 0 { … }`.
 impl PartialEq<i32> for FileMode {
-    fn eq(&self, other: &i32) -> bool { self.0 == *other as u32 }
+    fn eq(&self, other: &i32) -> bool {
+        self.0 == *other as u32
+    }
 }
 impl PartialEq<u32> for FileMode {
-    fn eq(&self, other: &u32) -> bool { self.0 == *other }
+    fn eq(&self, other: &u32) -> bool {
+        self.0 == *other
+    }
 }
 
 // Go: fs.go:179-200 — FileMode constants. The single letters match the
 // abbreviations used by FileMode.String. Bit positions counted from
 // MSB so they stay disjoint from the 9 perm bits.
-pub const ModeDir: FileMode = FileMode(1 << 31);          // d
-pub const ModeAppend: FileMode = FileMode(1 << 30);       // a
-pub const ModeExclusive: FileMode = FileMode(1 << 29);    // l
-pub const ModeTemporary: FileMode = FileMode(1 << 28);    // T
-pub const ModeSymlink: FileMode = FileMode(1 << 27);      // L
-pub const ModeDevice: FileMode = FileMode(1 << 26);       // D
-pub const ModeNamedPipe: FileMode = FileMode(1 << 25);    // p
-pub const ModeSocket: FileMode = FileMode(1 << 24);       // S
-pub const ModeSetuid: FileMode = FileMode(1 << 23);       // u
-pub const ModeSetgid: FileMode = FileMode(1 << 22);       // g
-pub const ModeCharDevice: FileMode = FileMode(1 << 21);   // c
-pub const ModeSticky: FileMode = FileMode(1 << 20);       // t
-pub const ModeIrregular: FileMode = FileMode(1 << 19);    // ?
+pub const ModeDir: FileMode = FileMode(1 << 31); // d
+pub const ModeAppend: FileMode = FileMode(1 << 30); // a
+pub const ModeExclusive: FileMode = FileMode(1 << 29); // l
+pub const ModeTemporary: FileMode = FileMode(1 << 28); // T
+pub const ModeSymlink: FileMode = FileMode(1 << 27); // L
+pub const ModeDevice: FileMode = FileMode(1 << 26); // D
+pub const ModeNamedPipe: FileMode = FileMode(1 << 25); // p
+pub const ModeSocket: FileMode = FileMode(1 << 24); // S
+pub const ModeSetuid: FileMode = FileMode(1 << 23); // u
+pub const ModeSetgid: FileMode = FileMode(1 << 22); // g
+pub const ModeCharDevice: FileMode = FileMode(1 << 21); // c
+pub const ModeSticky: FileMode = FileMode(1 << 20); // t
+pub const ModeIrregular: FileMode = FileMode(1 << 19); // ?
 
 // Go: fs.go:197 — mask for the type bits.
 pub const ModeType: FileMode = FileMode(
@@ -573,10 +613,7 @@ crate::var! {
 /// (`&(dyn DirEntry + Send + Sync + 'static)`); when [`WalkDir`] has no
 /// entry (the failed-`Stat`-on-root case) it passes a nil-interface
 /// sentinel, so `d == crate::nil` is the Go `d == nil` test.
-pub trait WalkDirFunc:
-    Fn(string, &(dyn DirEntry + Send + Sync + 'static), error) -> error
-{
-}
+pub trait WalkDirFunc: Fn(string, &(dyn DirEntry + Send + Sync + 'static), error) -> error {}
 impl<F> WalkDirFunc for F where
     F: Fn(string, &(dyn DirEntry + Send + Sync + 'static), error) -> error
 {
@@ -616,10 +653,7 @@ fn walkDir<F: WalkDirFunc>(
     // Go: for _, d1 := range dirs {
     for (_, d1) in crate::range!(&dirs) {
         // Go: name1 := path.Join(name, d1.Name())
-        let name1 = crate::path::Join(slice::__from_vec(alloc::vec![
-            name.clone(),
-            d1.Name()
-        ]));
+        let name1 = crate::path::Join(slice::__from_vec(alloc::vec![name.clone(), d1.Name()]));
         // Go: if err := walkDir(fsys, name1, d1, walkDirFn); err != nil {
         let err = walkDir(fsys, name1, d1, walkDirFn);
         if err != errors::nil {
@@ -904,7 +938,10 @@ fn _unused_imports() {
 /// delegates. goish has no `GlobFS` trait yet, so it always takes the
 /// ReadDir traversal — the same results, without a filesystem's chance
 /// to answer faster.
-pub fn Glob<S: Into<string>>(fsys: &(dyn FS + Send + Sync + 'static), pattern: S) -> (slice<string>, error) {
+pub fn Glob<S: Into<string>>(
+    fsys: &(dyn FS + Send + Sync + 'static),
+    pattern: S,
+) -> (slice<string>, error) {
     return globWithLimit(fsys, pattern.into(), 0);
 }
 
@@ -1011,10 +1048,10 @@ fn glob(
             return (m, merr);
         }
         if matched {
-            m = crate::append!(m, crate::path::Join(slice::__from_vec(alloc::vec![
-                dir.clone(),
-                n
-            ])));
+            m = crate::append!(
+                m,
+                crate::path::Join(slice::__from_vec(alloc::vec![dir.clone(), n]))
+            );
         }
     }
     return (m, errors::nil);

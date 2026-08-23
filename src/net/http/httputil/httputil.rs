@@ -41,4 +41,3 @@ pub fn NewChunkedWriter<W: Writer>(w: W) -> ChunkedWriter<W> {
 /// `httputil.ErrLineTooLong` (httputil.go:43) — re-export of
 /// `chunked::ErrLineTooLong`. Same Arc identity.
 pub use super::super::internal::chunked::ErrLineTooLong;
-

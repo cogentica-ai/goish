@@ -12,7 +12,7 @@ pub mod crc64;
 pub mod fnv;
 pub mod maphash;
 
-pub use hash::{Cloner, Hash, Hash32, Hash64, HashFunc, IntoHashFunc, XOF, __NilCloner};
+pub use hash::{__NilCloner, Cloner, Hash, Hash32, Hash64, HashFunc, IntoHashFunc, XOF};
 
 // Downcast-registry entry points emitted by `#[goish::interface]`; the
 // implementing packages call these to register their concrete types.

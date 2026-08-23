@@ -24,9 +24,15 @@ fn main() {
     // ─── Sort! / IsSorted ─────────────────────────────────────────────
 
     let mut xs: slice<int> = slice!([]int{ 3, 1, 4, 1, 5, 9, 2, 6 });
-    check(!slices::IsSorted(&xs), b"slices: IsSorted(unsorted) wrong\n");
+    check(
+        !slices::IsSorted(&xs),
+        b"slices: IsSorted(unsorted) wrong\n",
+    );
     slices::Sort!(xs);
-    check(slices::IsSorted(&xs), b"slices: Sort! must produce sorted\n");
+    check(
+        slices::IsSorted(&xs),
+        b"slices: Sort! must produce sorted\n",
+    );
     let want: slice<int> = slice!([]int{ 1, 1, 2, 3, 4, 5, 6, 9 });
     check(slices::Equal(&xs, &want), b"slices: Sort! result wrong\n");
 
@@ -49,7 +55,10 @@ fn main() {
     check(ok && i == 2, b"slices: BinarySearch hit wrong\n");
 
     let (i, ok) = slices::BinarySearch(&sorted, &4);
-    check(!ok && i == 2, b"slices: BinarySearch miss insertion-point wrong\n");
+    check(
+        !ok && i == 2,
+        b"slices: BinarySearch miss insertion-point wrong\n",
+    );
 
     let (i, ok) = slices::BinarySearch(&sorted, &10);
     check(!ok && i == 5, b"slices: BinarySearch above-end wrong\n");
@@ -62,7 +71,10 @@ fn main() {
     check(slices::Equal(&a, &b), b"slices: Equal a==b wrong\n");
     check(!slices::Equal(&a, &c), b"slices: Equal a!=c wrong\n");
     check(slices::Compare(&a, &b) == 0, b"slices: Compare ==0 wrong\n");
-    check(slices::Compare(&a, &c) == -1, b"slices: Compare a<c wrong\n");
+    check(
+        slices::Compare(&a, &c) == -1,
+        b"slices: Compare a<c wrong\n",
+    );
     check(slices::Compare(&c, &a) == 1, b"slices: Compare c>a wrong\n");
 
     // String slice equality.
@@ -76,7 +88,10 @@ fn main() {
     check(slices::Index(&xs, &30) == 2, b"slices: Index hit wrong\n");
     check(slices::Index(&xs, &99) == -1, b"slices: Index miss wrong\n");
     check(slices::Contains(&xs, &20), b"slices: Contains hit wrong\n");
-    check(!slices::Contains(&xs, &99), b"slices: Contains miss wrong\n");
+    check(
+        !slices::Contains(&xs, &99),
+        b"slices: Contains miss wrong\n",
+    );
 
     // ─── Compact ──────────────────────────────────────────────────────
 
@@ -113,7 +128,10 @@ fn main() {
     ys = append!(ys, 5, 3, 8, 1);
     slices::Sort!(ys);
     let want: slice<int> = slice!([]int{ 1, 3, 5, 8 });
-    check(slices::Equal(&ys, &want), b"slices: Sort! after append! wrong\n");
+    check(
+        slices::Equal(&ys, &want),
+        b"slices: Sort! after append! wrong\n",
+    );
 
     // ─── Func variants ────────────────────────────────────────────────
 
@@ -127,7 +145,10 @@ fn main() {
     let mut ws: slice<int> = slice!([]int{ 3, 1, 4, 1, 5, 9, 2 });
     slices::SortStableFunc!(ws, |a: &int, b: &int| *a - *b);
     let want: slice<int> = slice!([]int{ 1, 1, 2, 3, 4, 5, 9 });
-    check(slices::Equal(&ws, &want), b"slices: SortStableFunc asc wrong\n");
+    check(
+        slices::Equal(&ws, &want),
+        b"slices: SortStableFunc asc wrong\n",
+    );
 
     // IsSortedFunc with custom comparator.
     check(
@@ -159,10 +180,13 @@ fn main() {
     check(!ok && i == 3, b"slices: BinarySearchFunc miss wrong\n");
 
     // EqualFunc — two slices equal under case-fold (use ASCII xor 0x20).
-    let p: slice<int> = slice!([]int{ 65, 66, 67 });    // A B C
-    let q: slice<int> = slice!([]int{ 97, 98, 99 });    // a b c
+    let p: slice<int> = slice!([]int{ 65, 66, 67 }); // A B C
+    let q: slice<int> = slice!([]int{ 97, 98, 99 }); // a b c
     let case_eq = |a: &int, b: &int| (*a | 32) == (*b | 32);
-    check(slices::EqualFunc(&p, &q, case_eq), b"slices: EqualFunc case-fold wrong\n");
+    check(
+        slices::EqualFunc(&p, &q, case_eq),
+        b"slices: EqualFunc case-fold wrong\n",
+    );
 
     // CompareFunc — by absolute value.
     let a: slice<int> = slice!([]int{ -3, 5 });
@@ -172,13 +196,25 @@ fn main() {
         let ya = if *y < 0 { -*y } else { *y };
         xa - ya
     };
-    check(slices::CompareFunc(&a, &b, by_abs) == 0, b"slices: CompareFunc by-abs wrong\n");
+    check(
+        slices::CompareFunc(&a, &b, by_abs) == 0,
+        b"slices: CompareFunc by-abs wrong\n",
+    );
 
     // IndexFunc / ContainsFunc — first element > 5.
     let xs: slice<int> = slice!([]int{ 1, 3, 5, 7, 9 });
-    check(slices::IndexFunc(&xs, |e: &int| *e > 5) == 3, b"slices: IndexFunc wrong\n");
-    check(slices::ContainsFunc(&xs, |e: int| e > 100) == false, b"slices: ContainsFunc miss wrong\n");
-    check(slices::ContainsFunc(&xs, |e: int| e == 5), b"slices: ContainsFunc hit wrong\n");
+    check(
+        slices::IndexFunc(&xs, |e: &int| *e > 5) == 3,
+        b"slices: IndexFunc wrong\n",
+    );
+    check(
+        slices::ContainsFunc(&xs, |e: int| e > 100) == false,
+        b"slices: ContainsFunc miss wrong\n",
+    );
+    check(
+        slices::ContainsFunc(&xs, |e: int| e == 5),
+        b"slices: ContainsFunc hit wrong\n",
+    );
 
     // DeleteFunc — drop odd numbers.
     let xs: slice<int> = slice!([]int{ 1, 2, 3, 4, 5, 6 });

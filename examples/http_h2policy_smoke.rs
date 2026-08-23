@@ -84,7 +84,11 @@ fn main() {
 fn run() -> ! {
     // ── protocols(): defaults and the historic disable idiom ──
     let zero = Server::default();
-    check("nil server: h1+h2", protos_str(&zero), "h1=true h2=true uh2=false");
+    check(
+        "nil server: h1+h2",
+        protos_str(&zero),
+        "h1=true h2=true uh2=false",
+    );
 
     let mut disabled = Server::default();
     disabled.TLSNextProto = Some(goish::map::new());
@@ -132,8 +136,7 @@ fn run() -> ! {
     );
     let mut has_h2 = Server::default();
     let mut cfg2 = goish::crypto::tls::Config::default();
-    cfg2.NextProtos =
-        goish::slice::__from_vec(alloc::vec![string("h2"), string("http/1.1")]);
+    cfg2.NextProtos = goish::slice::__from_vec(alloc::vec![string("h2"), string("http/1.1")]);
     has_h2.TLSConfig = Some(cfg2);
     check(
         "TLSConfig with h2: configure",
@@ -150,11 +153,7 @@ fn run() -> ! {
     check(
         "h2 filtered out when disabled, foo kept",
         render(adjustNextProtos(
-            goish::slice::__from_vec(alloc::vec![
-                string("h2"),
-                string("http/1.1"),
-                string("foo")
-            ]),
+            goish::slice::__from_vec(alloc::vec![string("h2"), string("http/1.1"), string("foo")]),
             h1,
         )),
         "[http/1.1 foo]",
@@ -169,7 +168,10 @@ fn run() -> ! {
     );
     check(
         "empty input grows both",
-        render(adjustNextProtos(goish::slice::__from_vec(alloc::vec![]), both)),
+        render(adjustNextProtos(
+            goish::slice::__from_vec(alloc::vec![]),
+            both,
+        )),
         "[h2 http/1.1]",
     );
     check(

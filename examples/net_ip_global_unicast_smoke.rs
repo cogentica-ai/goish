@@ -10,7 +10,7 @@ extern crate goish;
 
 use goish::fmt;
 use goish::net;
-use goish::{syscall};
+use goish::syscall;
 
 #[goish::main]
 fn main() {

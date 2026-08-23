@@ -35,14 +35,18 @@ fn die(msg: &[u8]) -> ! {
 #[inline(never)]
 fn recurse_step(n: i64, sum: i64) -> i64 {
     sched::maybe_grow_step(move || {
-        if n == 0 { return sum; }
+        if n == 0 {
+            return sum;
+        }
         recurse_step(n - 1, sum + n)
     })
 }
 
 #[inline(never)]
 fn recurse_plain(n: i64, sum: i64) -> i64 {
-    if n == 0 { return sum; }
+    if n == 0 {
+        return sum;
+    }
     recurse_plain(n - 1, sum + n)
 }
 
@@ -71,9 +75,7 @@ fn main() {
         STACK_DONE.store(1, Ordering::Release);
     });
 
-    while GROW_DONE.load(Ordering::Acquire) == 0
-        || STACK_DONE.load(Ordering::Acquire) == 0
-    {
+    while GROW_DONE.load(Ordering::Acquire) == 0 || STACK_DONE.load(Ordering::Acquire) == 0 {
         sched::Gosched();
     }
 
@@ -95,15 +97,22 @@ fn main() {
 
     let grow_r = GROW_R.load(Ordering::Acquire);
     let stack_r = STACK_R.load(Ordering::Acquire);
-    if grow_r != 500 * 501 / 2 { die(b"FAIL: bare-grow result wrong\n"); }
-    if stack_r != 50 * 51 / 2 { die(b"FAIL: stack(N) result wrong\n"); }
+    if grow_r != 500 * 501 / 2 {
+        die(b"FAIL: bare-grow result wrong\n");
+    }
+    if stack_r != 50 * 51 / 2 {
+        die(b"FAIL: stack(N) result wrong\n");
+    }
 
     print(b"grow_macro_smoke: ok\n");
     syscall::Exit(0);
 }
 
 fn print_dec(mut n: u64) {
-    if n == 0 { print(b"0"); return; }
+    if n == 0 {
+        print(b"0");
+        return;
+    }
     let mut buf = [0u8; 20];
     let mut i = buf.len();
     while n > 0 {

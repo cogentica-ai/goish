@@ -8,10 +8,10 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::container::list;
+use goish::fmt;
+use goish::syscall;
 use goish::types::int;
-use goish::{syscall};
 
 // Walk a list front→back, collecting Values (T = int).
 fn collect(l: &list::List<int>) -> alloc::vec::Vec<int> {

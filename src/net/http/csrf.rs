@@ -110,7 +110,7 @@ impl CrossOriginProtection {
     // go: sdk 1.25.5 net/http/csrf.go:95-111 CrossOriginProtection.AddInsecureBypassPattern
     /// `AddInsecureBypassPattern(pattern)` (csrf.go:95). Permits all
     /// requests matching `pattern` (uses ServeMux match semantics).
-    pub fn AddInsecureBypassPattern<P: Into<string>>(&self, pattern: P){
+    pub fn AddInsecureBypassPattern<P: Into<string>>(&self, pattern: P) {
         let pattern: string = pattern.into();
         // Go: lazy-init c.bypass via CAS loop.
         let bypass = loop {
@@ -209,22 +209,24 @@ impl CrossOriginProtection {
     /// `Check(r)` first. On rejection, dispatches to the deny handler
     /// (default: 403 Forbidden).
     pub fn Handler(self_arc: Arc<Self>, h: Arc<dyn Handler>) -> Arc<dyn Handler> {
-        Arc::new(HandlerFunc(move |w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request| {
-            // Go: if err := c.Check(r); err != nil { … }
-            let err = self_arc.Check(r);
-            if !err.IsNil() {
-                // Go: if deny := c.deny.Load(); deny != nil { (*deny).ServeHTTP(w, r); return }
-                let deny = self_arc.deny.Lock().clone();
-                if let Some(d) = deny {
-                    d.ServeHTTP(w, r);
+        Arc::new(HandlerFunc(
+            move |w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request| {
+                // Go: if err := c.Check(r); err != nil { … }
+                let err = self_arc.Check(r);
+                if !err.IsNil() {
+                    // Go: if deny := c.deny.Load(); deny != nil { (*deny).ServeHTTP(w, r); return }
+                    let deny = self_arc.deny.Lock().clone();
+                    if let Some(d) = deny {
+                        d.ServeHTTP(w, r);
+                        return;
+                    }
+                    // Go: Error(w, err.Error(), StatusForbidden)
+                    super::server::Error(w, err.Error(), StatusForbidden);
                     return;
                 }
-                // Go: Error(w, err.Error(), StatusForbidden)
-                super::server::Error(w, err.Error(), StatusForbidden);
-                return;
-            }
-            h.ServeHTTP(w, r);
-        }))
+                h.ServeHTTP(w, r);
+            },
+        ))
     }
 }
 

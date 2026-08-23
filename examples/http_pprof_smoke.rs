@@ -30,13 +30,13 @@ use alloc::sync::Arc;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use goish::fmt;
+use goish::io::Closer;
 use goish::net::http;
 use goish::net::http::httptest;
 use goish::net::http::pprof::pprof;
+use goish::runtime::pprof as rpprof;
 use goish::time;
 use goish::{context, string};
-use goish::io::Closer;
-use goish::runtime::pprof as rpprof;
 
 static PASSED: AtomicUsize = AtomicUsize::new(0);
 static FAILED: AtomicUsize = AtomicUsize::new(0);
@@ -99,7 +99,6 @@ fn capture_site(p: &Arc<rpprof::Profile>, value: usize) {
     p.Add(value, 0);
 }
 
-
 #[goish::main]
 fn main() {
     goish::go!(stack(1024 * 1024), move || {
@@ -123,7 +122,11 @@ fn run() -> ! {
             string("Content-Disposition"),
             string("attachment; filename=\"profile\""),
         );
-        pprof::serveError(&w, 400, string("profile duration exceeds server's WriteTimeout"));
+        pprof::serveError(
+            &w,
+            400,
+            string("profile duration exceeds server's WriteTimeout"),
+        );
         let body = goish::string::from_bytes(&w.Body());
         check(
             "serveError writes the status, the marker header and a trailing newline",
@@ -259,9 +262,7 @@ fn run() -> ! {
         // Go: WriteTimeout + seconds, i.e. 10s + 30s from now.
         check(
             "the deadline becomes WriteTimeout + the profile duration",
-            DEADLINES.load(Ordering::Relaxed) == 1
-                && got >= before + 39
-                && got <= before + 41,
+            DEADLINES.load(Ordering::Relaxed) == 1 && got >= before + 39 && got <= before + 41,
             fmt::Sprintf!(
                 "calls=%d delta=%d",
                 DEADLINES.load(Ordering::Relaxed) as i64,
@@ -286,10 +287,18 @@ fn run() -> ! {
     // ── the HTTP surface ──
     let mux = http::ServeMux::new();
     mux.HandleFunc(string("/debug/pprof/"), |w, r| http::pprof::Index(w, r));
-    mux.HandleFunc(string("/debug/pprof/symbol"), |w, r| http::pprof::Symbol(w, r));
-    mux.HandleFunc(string("/debug/pprof/profile"), |w, r| http::pprof::Profile(w, r));
-    mux.HandleFunc(string("/debug/pprof/trace"), |w, r| http::pprof::Trace(w, r));
-    mux.HandleFunc(string("/debug/pprof/cmdline"), |w, r| http::pprof::Cmdline(w, r));
+    mux.HandleFunc(string("/debug/pprof/symbol"), |w, r| {
+        http::pprof::Symbol(w, r)
+    });
+    mux.HandleFunc(string("/debug/pprof/profile"), |w, r| {
+        http::pprof::Profile(w, r)
+    });
+    mux.HandleFunc(string("/debug/pprof/trace"), |w, r| {
+        http::pprof::Trace(w, r)
+    });
+    mux.HandleFunc(string("/debug/pprof/cmdline"), |w, r| {
+        http::pprof::Cmdline(w, r)
+    });
     let ts = http::httptest::NewServer(Arc::new(mux));
     let client = http::Client::default();
     let base = ts.URL();
@@ -366,7 +375,10 @@ fn run() -> ! {
             code == 500 && (body.as_ref() as &str).contains("Could not enable CPU profiling"),
             fmt::Sprintf!("code=%d body=%q", code, body),
         );
-        let (code, body) = get(&client, base.clone() + string("/debug/pprof/trace?seconds=1"));
+        let (code, body) = get(
+            &client,
+            base.clone() + string("/debug/pprof/trace?seconds=1"),
+        );
         check(
             "trace serves Go's could-not-enable arm",
             code == 500 && (body.as_ref() as &str).contains("Could not enable tracing"),
@@ -382,9 +394,7 @@ fn run() -> ! {
         );
         check(
             "delta on a non-builtin profile takes Go's 400 arm",
-            code == 400
-                && (body.as_ref() as &str)
-                    .contains("not supported for this profile type"),
+            code == 400 && (body.as_ref() as &str).contains("not supported for this profile type"),
             fmt::Sprintf!("code=%d body=%q", code, body),
         );
     }
@@ -407,7 +417,11 @@ fn run() -> ! {
     // 8. Cmdline still serves (the original four's representative).
     {
         let (code, _body) = get(&client, base.clone() + string("/debug/pprof/cmdline"));
-        check("cmdline serves 200", code == 200, fmt::Sprintf!("code=%d", code));
+        check(
+            "cmdline serves 200",
+            code == 200,
+            fmt::Sprintf!("code=%d", code),
+        );
     }
 
     ts.Close();

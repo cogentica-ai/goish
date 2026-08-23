@@ -3,10 +3,9 @@
 #![allow(non_snake_case)]
 #![allow(dead_code)]
 
-use crate::types::byte;
 use crate::string;
 use crate::strings;
-
+use crate::types::byte;
 
 // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:275-280 NewSingleHostReverseProxy
 /// Returns a Handler that forwards every request to `target`.
@@ -192,11 +191,7 @@ impl super::super::server::Handler for reverseProxyHandler {
         // nothing below (header copy / body pump) applies.
         if resp.StatusCode == super::super::status::StatusSwitchingProtocols {
             upgrade_response_impl(w, &outreq, &mut resp, &|e| {
-                super::super::server::Error(
-                    w,
-                    e.Error(),
-                    super::super::status::StatusBadGateway,
-                );
+                super::super::server::Error(w, e.Error(), super::super::status::StatusBadGateway);
             });
             return;
         }
@@ -396,8 +391,7 @@ impl switchProtocolCopier {
             let mut buf = crate::make!([]byte, 32 * 1024);
             let (n, rerr) = crate::io::Reader::Read(&mut backend_r, &mut buf);
             if n > 0 {
-                let (_, werr) =
-                    crate::io::Writer::Write(&mut user_w, buf.slice(0, n));
+                let (_, werr) = crate::io::Writer::Write(&mut user_w, buf.slice(0, n));
                 if !werr.IsNil() {
                     errc.Send(werr);
                     return;
@@ -435,8 +429,7 @@ impl switchProtocolCopier {
             let mut buf = crate::make!([]byte, 32 * 1024);
             let (n, rerr) = crate::io::Reader::Read(&mut user_r, &mut buf);
             if n > 0 {
-                let (_, werr) =
-                    crate::io::Writer::Write(&mut backend_w, buf.slice(0, n));
+                let (_, werr) = crate::io::Writer::Write(&mut backend_w, buf.slice(0, n));
                 if !werr.IsNil() {
                     errc.Send(werr);
                     return;
@@ -492,7 +485,6 @@ pub fn cleanQueryParams<S: Into<string>>(s: S) -> string {
     return s;
 }
 
-
 // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:234-252 joinURLPath
 //
 /// Joins the target's path with the incoming request's, returning
@@ -505,12 +497,12 @@ pub fn cleanQueryParams<S: Into<string>>(s: S) -> string {
 /// differ when a segment contains an encoded slash, and getting it
 /// from the decoded path alone would let "%2F" change which target
 /// path a request lands on.
-pub fn joinURLPath(
-    a: &super::super::url::URL,
-    b: &super::super::url::URL,
-) -> (string, string) {
+pub fn joinURLPath(a: &super::super::url::URL, b: &super::super::url::URL) -> (string, string) {
     if a.RawPath.Len() == 0 && b.RawPath.Len() == 0 {
-        return (singleJoiningSlash(a.Path.clone(), b.Path.clone()), string::new());
+        return (
+            singleJoiningSlash(a.Path.clone(), b.Path.clone()),
+            string::new(),
+        );
     }
     let apath = a.EscapedPath();
     let bpath = b.EscapedPath();
@@ -568,9 +560,7 @@ pub struct maxLatencyWriter {
 // timer and the pending flag sit under the mutex — same partition as
 // Go's comment "protects t, flushPending, and dst.Flush".
 struct mlwInner {
-    dst: alloc::sync::Arc<
-        dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static,
-    >,
+    dst: alloc::sync::Arc<dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static>,
     /// Go: "non-zero; negative means to flush immediately".
     latency: crate::time::Duration,
     mu: crate::sync::Mutex<mlwState>,
@@ -588,9 +578,7 @@ struct mlwState {
 // controller is rebuilt per flush instead; it holds nothing but the
 // writer, so this is the same work.
 pub fn __newMaxLatencyWriter(
-    dst: alloc::sync::Arc<
-        dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static,
-    >,
+    dst: alloc::sync::Arc<dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static>,
     latency: crate::time::Duration,
 ) -> maxLatencyWriter {
     return maxLatencyWriter {
@@ -700,8 +688,7 @@ impl crate::io::Writer for maxLatencyWriter {
 /// Go: "whether we're in our own tests". Only the package's own tests
 /// set it; it exists so `shouldPanicOnCopyError` can panic there
 /// without breaking third-party tests written before Go 1.11.
-pub static inOurTests: core::sync::atomic::AtomicBool =
-    core::sync::atomic::AtomicBool::new(false);
+pub static inOurTests: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:574-587 shouldPanicOnCopyError
 /// Go: "reports whether the reverse proxy should panic with
@@ -775,7 +762,9 @@ pub struct ReverseProxy {
     /// Go: "an optional function that modifies the Response from the
     /// backend. […] If it returns an error, ErrorHandler is called."
     pub ModifyResponse: Option<
-        alloc::sync::Arc<dyn Fn(&mut super::super::response::Response) -> crate::errors::error + Send + Sync>,
+        alloc::sync::Arc<
+            dyn Fn(&mut super::super::response::Response) -> crate::errors::error + Send + Sync,
+        >,
     >,
     /// Go: "optionally specifies a buffer pool to get byte slices for
     /// use by [io.CopyBuffer] when copying HTTP response bodies."
@@ -804,133 +793,123 @@ fn upgrade_response_impl(
     res: &mut super::super::response::Response,
     report: &dyn Fn(crate::errors::error),
 ) {
-        let reqUpType = upgradeType(&req.Header);
-        let resUpType = upgradeType(&res.Header);
-        // Go: !ascii.IsPrint(resUpType) → invalid protocol error.
-        if !super::super::internal::ascii::IsPrint(resUpType.clone()) {
-            report(
-                crate::errors::New(crate::fmt::Sprintf!(
-                    "backend tried to switch to invalid protocol %q",
-                    resUpType
-                )),
-            );
-            return;
-        }
-        // Go: !ascii.EqualFold(reqUpType, resUpType) → mismatch error.
-        if !super::super::internal::ascii::EqualFold(reqUpType.clone(), resUpType.clone()) {
-            report(
-                crate::errors::New(crate::fmt::Sprintf!(
-                    "backend tried to switch protocol %q when %q was requested",
-                    resUpType,
-                    reqUpType
-                )),
-            );
-            return;
-        }
+    let reqUpType = upgradeType(&req.Header);
+    let resUpType = upgradeType(&res.Header);
+    // Go: !ascii.IsPrint(resUpType) → invalid protocol error.
+    if !super::super::internal::ascii::IsPrint(resUpType.clone()) {
+        report(crate::errors::New(crate::fmt::Sprintf!(
+            "backend tried to switch to invalid protocol %q",
+            resUpType
+        )));
+        return;
+    }
+    // Go: !ascii.EqualFold(reqUpType, resUpType) → mismatch error.
+    if !super::super::internal::ascii::EqualFold(reqUpType.clone(), resUpType.clone()) {
+        report(crate::errors::New(crate::fmt::Sprintf!(
+            "backend tried to switch protocol %q when %q was requested",
+            resUpType,
+            reqUpType
+        )));
+        return;
+    }
 
-        // Go: backConn, ok := res.Body.(io.ReadWriteCloser)
-        let back = match res.Body.__take_upgraded() {
-            Some(b) => b,
-            None => {
-                report(
-                    crate::errors::New(string(
-                        "internal error: 101 switching protocols response with non-writable body",
-                    )),
-                );
-                return;
-            }
-        };
-        let (split, splerr) = back.split_for_upgrade();
-        if !splerr.IsNil() {
-            report(splerr);
-            return;
-        }
-        let (backend_r, backend_w) = split.unwrap();
-
-        // Go: rc := http.NewResponseController(rw); conn, brw, err := rc.Hijack()
-        // goish: the controller is Arc-shaped and a borrowed handler
-        // writer cannot become one; the cast IS what rc.Hijack does.
-        let (hj, can_hijack) = crate::cast!(rw, super::super::responsewriter::Hijacker);
-        if !can_hijack {
+    // Go: backConn, ok := res.Body.(io.ReadWriteCloser)
+    let back = match res.Body.__take_upgraded() {
+        Some(b) => b,
+        None => {
             report(crate::errors::New(string(
-                "can't switch protocols using non-Hijacker ResponseWriter",
+                "internal error: 101 switching protocols response with non-writable body",
             )));
             return;
         }
-        let (conn, hijackErr) = hj.Hijack();
-        if !hijackErr.IsNil() {
-            report(
-                crate::errors::New(crate::fmt::Sprintf!(
-                    "Hijack failed on protocol switch: %v",
-                    hijackErr
-                )),
-            );
-            return;
-        }
-        let (user_w, duperr) = conn.__dup_handle();
-        if !duperr.IsNil() {
-            report(duperr);
-            return;
-        }
-        let user_r = conn;
-
-        // Go: res.Body = nil; res.Write(brw) — replay the 101 head to
-        // the user verbatim (status line + the backend's headers).
-        {
-            let mut head: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
-            head.extend_from_slice(b"HTTP/1.1 101 ");
-            let text = super::super::status::StatusText(res.StatusCode);
-            if text.Len() != 0 {
-                head.extend_from_slice(text.as_bytes());
-            } else {
-                head.extend_from_slice(b"Switching Protocols");
-            }
-            head.extend_from_slice(b"\r\n");
-            let mut hb = crate::bytes::Buffer::new();
-            let _ = res.Header.WriteSubset(
-                &mut hb,
-                &crate::gomap::map::<string, bool>::new(),
-            );
-            head.extend_from_slice(&hb.Bytes());
-            head.extend_from_slice(b"\r\n");
-            let mut uw = user_w;
-            let (_, werr) = crate::io::Writer::Write(
-                &mut uw,
-                crate::goslice::slice::<byte>::__from_vec(head),
-            );
-            if !werr.IsNil() {
-                report(
-                    crate::errors::New(crate::fmt::Sprintf!("response write: %v", werr)),
-                );
-                return;
-            }
-            // Go: errc := make(chan error, 1)
-            //     spc := switchProtocolCopier{user: conn, backend: backConn}
-            //     go spc.copyToBackend(errc); go spc.copyFromBackend(errc)
-            // Go copies the interface-holding struct into both
-            // goroutines; goish destructures it and sends each copier
-            // the halves it owns.
-            let spc = switchProtocolCopier {
-                user: user_r,
-                backend: backend_r,
-            };
-            let switchProtocolCopier { user, backend } = spc;
-            let errc: crate::gochan::chan<crate::errors::error> =
-                crate::make!(chan crate::errors::error, 1);
-            let e1 = errc.clone();
-            let e2 = errc.clone();
-            crate::go!(stack(256 * crate::KB), move || {
-                switchProtocolCopier::copyToBackend(user, backend_w, e1);
-            });
-            crate::go!(stack(256 * crate::KB), move || {
-                switchProtocolCopier::copyFromBackend(backend, uw, e2);
-            });
-            // Go: <-errc — first finisher decides; both conns drop
-            // (and close) when this frame and the copiers unwind.
-            let _ = errc.Recv();
-        }
+    };
+    let (split, splerr) = back.split_for_upgrade();
+    if !splerr.IsNil() {
+        report(splerr);
         return;
     }
+    let (backend_r, backend_w) = split.unwrap();
+
+    // Go: rc := http.NewResponseController(rw); conn, brw, err := rc.Hijack()
+    // goish: the controller is Arc-shaped and a borrowed handler
+    // writer cannot become one; the cast IS what rc.Hijack does.
+    let (hj, can_hijack) = crate::cast!(rw, super::super::responsewriter::Hijacker);
+    if !can_hijack {
+        report(crate::errors::New(string(
+            "can't switch protocols using non-Hijacker ResponseWriter",
+        )));
+        return;
+    }
+    let (conn, hijackErr) = hj.Hijack();
+    if !hijackErr.IsNil() {
+        report(crate::errors::New(crate::fmt::Sprintf!(
+            "Hijack failed on protocol switch: %v",
+            hijackErr
+        )));
+        return;
+    }
+    let (user_w, duperr) = conn.__dup_handle();
+    if !duperr.IsNil() {
+        report(duperr);
+        return;
+    }
+    let user_r = conn;
+
+    // Go: res.Body = nil; res.Write(brw) — replay the 101 head to
+    // the user verbatim (status line + the backend's headers).
+    {
+        let mut head: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+        head.extend_from_slice(b"HTTP/1.1 101 ");
+        let text = super::super::status::StatusText(res.StatusCode);
+        if text.Len() != 0 {
+            head.extend_from_slice(text.as_bytes());
+        } else {
+            head.extend_from_slice(b"Switching Protocols");
+        }
+        head.extend_from_slice(b"\r\n");
+        let mut hb = crate::bytes::Buffer::new();
+        let _ = res
+            .Header
+            .WriteSubset(&mut hb, &crate::gomap::map::<string, bool>::new());
+        head.extend_from_slice(&hb.Bytes());
+        head.extend_from_slice(b"\r\n");
+        let mut uw = user_w;
+        let (_, werr) =
+            crate::io::Writer::Write(&mut uw, crate::goslice::slice::<byte>::__from_vec(head));
+        if !werr.IsNil() {
+            report(crate::errors::New(crate::fmt::Sprintf!(
+                "response write: %v",
+                werr
+            )));
+            return;
+        }
+        // Go: errc := make(chan error, 1)
+        //     spc := switchProtocolCopier{user: conn, backend: backConn}
+        //     go spc.copyToBackend(errc); go spc.copyFromBackend(errc)
+        // Go copies the interface-holding struct into both
+        // goroutines; goish destructures it and sends each copier
+        // the halves it owns.
+        let spc = switchProtocolCopier {
+            user: user_r,
+            backend: backend_r,
+        };
+        let switchProtocolCopier { user, backend } = spc;
+        let errc: crate::gochan::chan<crate::errors::error> =
+            crate::make!(chan crate::errors::error, 1);
+        let e1 = errc.clone();
+        let e2 = errc.clone();
+        crate::go!(stack(256 * crate::KB), move || {
+            switchProtocolCopier::copyToBackend(user, backend_w, e1);
+        });
+        crate::go!(stack(256 * crate::KB), move || {
+            switchProtocolCopier::copyFromBackend(backend, uw, e2);
+        });
+        // Go: <-errc — first finisher decides; both conns drop
+        // (and close) when this frame and the copiers unwind.
+        let _ = errc.Recv();
+    }
+    return;
+}
 
 impl ReverseProxy {
     // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:684-692 ReverseProxy.logf
@@ -939,11 +918,7 @@ impl ReverseProxy {
     /// pass the finished string. `args` is kept as an empty slice so
     /// the arity matches and a future variadic form has somewhere to
     /// land — the same shape `Server.logf` uses.
-    pub fn logf(
-        &self,
-        format: crate::string,
-        args: crate::goslice::slice<crate::string>,
-    ) {
+    pub fn logf(&self, format: crate::string, args: crate::goslice::slice<crate::string>) {
         // goish's Sprintv takes `slice<Arc<dyn Any>>`; the only caller
         // today passes no args, so the formatted string arrives ready.
         let _ = &args;
@@ -1075,10 +1050,7 @@ impl ReverseProxy {
     /// `text/event-stream` response, and one with an unknown
     /// ContentLength. Buffering either means the client sees nothing
     /// until the backend closes — which for SSE is never.
-    pub fn flushInterval(
-        &self,
-        res: &super::super::response::Response,
-    ) -> crate::time::Duration {
+    pub fn flushInterval(&self, res: &super::super::response::Response) -> crate::time::Duration {
         let resCT = res.Header.Get(crate::string("Content-Type"));
         let (baseCT, _, _) = crate::mime::ParseMediaType(resCT);
         if baseCT == "text/event-stream" {
@@ -1216,9 +1188,7 @@ impl ReverseProxy {
 // `Write(&self, …)` and is not an io::Writer, so the adapter is
 // explicit.
 struct responseWriterWriter {
-    rw: alloc::sync::Arc<
-        dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static,
-    >,
+    rw: alloc::sync::Arc<dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static>,
 }
 
 impl crate::io::Writer for responseWriterWriter {

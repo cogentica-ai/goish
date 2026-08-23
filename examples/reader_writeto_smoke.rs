@@ -8,8 +8,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
+use goish::fmt;
 use goish::io;
 use goish::strings;
 use goish::{make, string, syscall};
@@ -26,7 +26,11 @@ fn main() {
         if err.IsNil() && n == 6 && dst.String() == "abcdef" {
             fmt::Println!("[ 1] bytes.Reader.WriteTo      PASS");
         } else {
-            fmt::Println!("[ 1] bytes.Reader.WriteTo      FAIL n={} dst={}", n, dst.String());
+            fmt::Println!(
+                "[ 1] bytes.Reader.WriteTo      FAIL n={} dst={}",
+                n,
+                dst.String()
+            );
             failed += 1;
         }
     }

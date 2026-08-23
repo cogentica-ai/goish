@@ -10,8 +10,8 @@ extern crate goish;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use goish::fmt;
 use goish::bytes::NewReader;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::io::{self, Reader};
 use goish::net;
@@ -58,7 +58,12 @@ fn main() {
         {
             fmt::Println!("[ 1] http::Error               PASS");
         } else {
-            fmt::Println!("[ 1] http::Error               FAIL status={} ct={} ncto={}", resp.StatusCode, ct, ncto);
+            fmt::Println!(
+                "[ 1] http::Error               FAIL status={} ct={} ncto={}",
+                resp.StatusCode,
+                ct,
+                ncto
+            );
             failed += 1;
         }
     }
@@ -72,7 +77,10 @@ fn main() {
         if resp.StatusCode == 404 && body_eq(&body, b"404 page not found\n") {
             fmt::Println!("[ 2] http::NotFound            PASS");
         } else {
-            fmt::Println!("[ 2] http::NotFound            FAIL status={}", resp.StatusCode);
+            fmt::Println!(
+                "[ 2] http::NotFound            FAIL status={}",
+                resp.StatusCode
+            );
             failed += 1;
         }
     }

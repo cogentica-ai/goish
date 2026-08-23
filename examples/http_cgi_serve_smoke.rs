@@ -132,7 +132,8 @@ fn run() -> ! {
 
     // ── Status: overrides the code and is not echoed as a header ──
     {
-        let h = sh("printf 'Status: 418 I am a teapot\\r\\nContent-Type: text/plain\\r\\n\\r\\nnope'");
+        let h =
+            sh("printf 'Status: 418 I am a teapot\\r\\nContent-Type: text/plain\\r\\n\\r\\nnope'");
         let w = httptest::NewRecorder();
         h.ServeHTTP(&w, &req("/x"));
         check(
@@ -144,12 +145,10 @@ fn run() -> ! {
 
     // ── the CGI environment ──
     {
-        let h = sh(
-            "printf 'Content-Type: text/plain\\r\\n\\r\\n'; \
+        let h = sh("printf 'Content-Type: text/plain\\r\\n\\r\\n'; \
              printf 'M=%s Q=%s P=%s SN=%s PI=%s SP=%s RA=%s' \
              \"$REQUEST_METHOD\" \"$QUERY_STRING\" \"$SCRIPT_FILENAME\" \
-             \"$SERVER_NAME\" \"$PATH_INFO\" \"$SERVER_PORT\" \"$REMOTE_ADDR\"",
-        );
+             \"$SERVER_NAME\" \"$PATH_INFO\" \"$SERVER_PORT\" \"$REMOTE_ADDR\"");
         let w = httptest::NewRecorder();
         h.ServeHTTP(&w, &req("/a/b?q=1&r=2"));
         let body = goish::string::from_bytes(&w.Body());
@@ -189,7 +188,12 @@ fn run() -> ! {
             h.ServeHTTP(&w, &req("/cgi/a/b?q=1&r=2"));
             let body = goish::string::from_bytes(&w.Body());
             if body != *want {
-                bad = fmt::Sprintf!("Root=%q gave %q want %q", string(*root), body, string(*want));
+                bad = fmt::Sprintf!(
+                    "Root=%q gave %q want %q",
+                    string(*root),
+                    body,
+                    string(*want)
+                );
             }
         }
         check(
@@ -201,13 +205,12 @@ fn run() -> ! {
 
     // ── httpoxy: Proxy must not reach the child ──
     {
-        let h = sh(
-            "printf 'Content-Type: text/plain\\r\\n\\r\\n'; \
-             printf 'proxy=[%s] foo=[%s]' \"$HTTP_PROXY\" \"$HTTP_X_FOO\"",
-        );
+        let h = sh("printf 'Content-Type: text/plain\\r\\n\\r\\n'; \
+             printf 'proxy=[%s] foo=[%s]' \"$HTTP_PROXY\" \"$HTTP_X_FOO\"");
         let w = httptest::NewRecorder();
         let mut r = req("/x");
-        r.Header.Set(string("Proxy"), string("http://evil.example/"));
+        r.Header
+            .Set(string("Proxy"), string("http://evil.example/"));
         r.Header.Set(string("X-Foo"), string("kept"));
         h.ServeHTTP(&w, &r);
         let body = goish::string::from_bytes(&w.Body());
@@ -221,10 +224,8 @@ fn run() -> ! {
 
     // ── Cookie joins with "; ", everything else with ", " ──
     {
-        let h = sh(
-            "printf 'Content-Type: text/plain\\r\\n\\r\\n'; \
-             printf 'c=[%s] a=[%s]' \"$HTTP_COOKIE\" \"$HTTP_X_MULTI\"",
-        );
+        let h = sh("printf 'Content-Type: text/plain\\r\\n\\r\\n'; \
+             printf 'c=[%s] a=[%s]' \"$HTTP_COOKIE\" \"$HTTP_X_MULTI\"");
         let w = httptest::NewRecorder();
         let mut r = req("/x");
         r.Header.Add(string("Cookie"), string("a=1"));

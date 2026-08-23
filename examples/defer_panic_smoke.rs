@@ -32,7 +32,11 @@ fn print_dec(n: i64) {
     let mut buf = [0u8; 24];
     let mut i = buf.len();
     let neg = n < 0;
-    let mut x = if neg { (-(n as i128)) as u128 } else { n as u128 };
+    let mut x = if neg {
+        (-(n as i128)) as u128
+    } else {
+        n as u128
+    };
     if x == 0 {
         i -= 1;
         buf[i] = b'0';
@@ -43,15 +47,24 @@ fn print_dec(n: i64) {
             x /= 10;
         }
     }
-    if neg { i -= 1; buf[i] = b'-'; }
+    if neg {
+        i -= 1;
+        buf[i] = b'-';
+    }
     let _ = n;
     syscall::Write(syscall::STDOUT, buf[i..].as_ptr(), buf.len() - i);
 }
 
 // Trace which defer bodies ran, in invocation order.
 static TRACE: [AtomicI64; 8] = [
-    AtomicI64::new(0), AtomicI64::new(0), AtomicI64::new(0), AtomicI64::new(0),
-    AtomicI64::new(0), AtomicI64::new(0), AtomicI64::new(0), AtomicI64::new(0),
+    AtomicI64::new(0),
+    AtomicI64::new(0),
+    AtomicI64::new(0),
+    AtomicI64::new(0),
+    AtomicI64::new(0),
+    AtomicI64::new(0),
+    AtomicI64::new(0),
+    AtomicI64::new(0),
 ];
 static TRACE_LEN: AtomicI64 = AtomicI64::new(0);
 
@@ -70,9 +83,9 @@ fn main() {
         // ── Goroutine A: panics with 3 defers. Should record 3, 2, 1
         // (LIFO) before recovery + Done().
         wg.GoStack(32 * KB, || {
-            defer!{ record(1); }
-            defer!{ record(2); }
-            defer!{ record(3); }
+            defer! { record(1); }
+            defer! { record(2); }
+            defer! { record(3); }
             record(100);
             panic!("intentional panic in goroutine A");
         });
@@ -80,7 +93,7 @@ fn main() {
         // ── Goroutine B: returns normally with one defer. Records
         // 200 first then 4 on scope-exit Drop.
         wg.GoStack(8 * KB, || {
-            defer!{ record(4); }
+            defer! { record(4); }
             record(200);
         });
 

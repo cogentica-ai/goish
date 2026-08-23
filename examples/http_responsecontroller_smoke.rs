@@ -34,8 +34,8 @@ use core::sync::atomic::{AtomicI64, Ordering};
 use goish::errors;
 use goish::fmt;
 use goish::goslice::slice;
+use goish::net::http::responsecontroller::{rwUnwrapper, FlushErrorer, NewResponseController};
 use goish::net::http::responsewriter::{Flusher, HeaderHandle, ResponseWriter};
-use goish::net::http::responsecontroller::{FlushErrorer, NewResponseController, rwUnwrapper};
 use goish::net::http::{ErrNotSupported, Header};
 use goish::types::{byte, int};
 use goish::{string, syscall};
@@ -205,10 +205,7 @@ fn main() {
         let b = rc.SetWriteDeadline(goish::time::Time::default());
         let c = rc.EnableFullDuplex();
         let target: goish::error = ErrNotSupported.into();
-        if errors::Is(a, target.clone())
-            && errors::Is(b, target.clone())
-            && errors::Is(c, target)
-        {
+        if errors::Is(a, target.clone()) && errors::Is(b, target.clone()) && errors::Is(c, target) {
             fmt::Println!("[ 2] deadlines unsupported     PASS");
         } else {
             fmt::Println!("[ 2] deadlines unsupported     FAIL");
@@ -230,7 +227,12 @@ fn main() {
         if is && !same {
             fmt::Println!("[ 3] Is but not ==             PASS");
         } else {
-            fmt::Println!("[ 3] Is but not ==             FAIL is=", is, " same=", same);
+            fmt::Println!(
+                "[ 3] Is but not ==             FAIL is=",
+                is,
+                " same=",
+                same
+            );
             failed += 1;
         }
     }

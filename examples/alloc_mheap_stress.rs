@@ -300,8 +300,14 @@ fn test_arena_reuse_epochs() {
         // collide with a previous-epoch leak.
         for v in blocks.iter() {
             check(v[0] == pattern, b"epochs: head wrong pattern\n");
-            check(v[BLOCK_SIZE / 2] == pattern, b"epochs: middle wrong pattern\n");
-            check(v[BLOCK_SIZE - 1] == pattern, b"epochs: tail wrong pattern\n");
+            check(
+                v[BLOCK_SIZE / 2] == pattern,
+                b"epochs: middle wrong pattern\n",
+            );
+            check(
+                v[BLOCK_SIZE - 1] == pattern,
+                b"epochs: tail wrong pattern\n",
+            );
         }
 
         // Drop everything — mheap_free should reclaim all 128 spans.

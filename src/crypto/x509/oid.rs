@@ -34,8 +34,8 @@ use alloc::vec::Vec;
 use crate::encoding::asn1;
 use crate::errors::{error, nil};
 use crate::goslice::slice;
-use crate::io::Writer;
 use crate::gostring::string;
+use crate::io::Writer;
 use crate::math::big;
 use crate::math::big::Int;
 use crate::strings;
@@ -438,10 +438,7 @@ impl OID {
             }
         }
 
-        return (
-            asn1::ObjectIdentifier::New(slice::__from_vec(out)),
-            true,
-        );
+        return (asn1::ObjectIdentifier::New(slice::__from_vec(out)), true);
     }
 }
 

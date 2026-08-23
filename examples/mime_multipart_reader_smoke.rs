@@ -10,9 +10,9 @@ extern crate goish;
 
 use alloc::vec::Vec;
 
-use goish::fmt;
 use goish::convert::bytes;
 use goish::errors;
+use goish::fmt;
 use goish::io;
 use goish::mime::multipart;
 use goish::types::byte;
@@ -25,8 +25,7 @@ fn main() {
     // 1. Round-trip: Writer assembles two fields + one file, Reader
     //    reproduces them.
     {
-        let mut buf =
-            goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
+        let mut buf = goish::bytes::NewBuffer(goish::goslice::slice::<u8>::__from_vec(Vec::new()));
         let boundary;
         {
             let mut w = multipart::NewWriter(&mut buf);
@@ -92,9 +91,12 @@ fn main() {
         let (p1, e1) = r.NextPart();
         let (p2, e2) = r.NextPart();
         let (_, e3) = r.NextPart();
-        let ok = e1.IsNil() && e2.IsNil()
-            && p1.FormName() == "x" && body_str(&p1.Body) == "hello"
-            && p2.FormName() == "y" && body_str(&p2.Body) == "world"
+        let ok = e1.IsNil()
+            && e2.IsNil()
+            && p1.FormName() == "x"
+            && body_str(&p1.Body) == "hello"
+            && p2.FormName() == "y"
+            && body_str(&p2.Body) == "world"
             && errors::Is(e3, io::EOF);
         if ok {
             fmt::Println!("[ 2] hand-built body           PASS");

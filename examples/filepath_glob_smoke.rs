@@ -9,8 +9,8 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::os;
 use goish::path::filepath;
 use goish::{string, syscall};

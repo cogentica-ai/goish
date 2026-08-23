@@ -811,10 +811,8 @@ fn startServers(cfg: &Arc<Config>) -> (slice<string>, slice<Arc<http::Server>>, 
 /// `nginx -s quit` equivalent: park a goroutine on SIGTERM/SIGINT,
 /// then drain every listener via Server::Shutdown.
 fn installSignalDrain(servers: slice<Arc<http::Server>>, done: chan<bool>) {
-    let (sig_ctx, _sig_stop) = signal::NotifyContext(
-        context::Background(),
-        &[syscall::SIGTERM, syscall::SIGINT],
-    );
+    let (sig_ctx, _sig_stop) =
+        signal::NotifyContext(context::Background(), &[syscall::SIGTERM, syscall::SIGINT]);
     go!(move || {
         let _ = sig_ctx.Done().Recv();
         fmt::Printf!("goginx: signal received, draining\n");
@@ -1076,7 +1074,11 @@ fn selfTest() {
     let _ = os::MkdirAll(fmt::Sprintf!("%s/sub", www_a), 0o755);
     let _ = os::MkdirAll(fmt::Sprintf!("%s/files", www_a), 0o755);
     let _ = os::MkdirAll(www_b.clone(), 0o755);
-    let _ = os::WriteFile(fmt::Sprintf!("%s/index.html", www_a), bytes("<h1>site-a</h1>\n"), 0o644);
+    let _ = os::WriteFile(
+        fmt::Sprintf!("%s/index.html", www_a),
+        bytes("<h1>site-a</h1>\n"),
+        0o644,
+    );
     let _ = os::WriteFile(
         fmt::Sprintf!("%s/hello.txt", www_a),
         bytes("hello from goginx\n"),
@@ -1087,12 +1089,24 @@ fn selfTest() {
         bytes("console.log(\"goginx\");\n"),
         0o644,
     );
-    let _ = os::WriteFile(fmt::Sprintf!("%s/sub/index.html", www_a), bytes("sub index\n"), 0o644);
+    let _ = os::WriteFile(
+        fmt::Sprintf!("%s/sub/index.html", www_a),
+        bytes("sub index\n"),
+        0o644,
+    );
     let _ = os::WriteFile(fmt::Sprintf!("%s/files/a.txt", www_a), bytes("A\n"), 0o644);
     let _ = os::WriteFile(fmt::Sprintf!("%s/files/b.txt", www_a), bytes("B\n"), 0o644);
-    let _ = os::WriteFile(fmt::Sprintf!("%s/index.html", www_b), bytes("<h1>site-b</h1>\n"), 0o644);
+    let _ = os::WriteFile(
+        fmt::Sprintf!("%s/index.html", www_b),
+        bytes("<h1>site-b</h1>\n"),
+        0o644,
+    );
     // Outside every root — must never be reachable.
-    let _ = os::WriteFile(fmt::Sprintf!("%s/secret.txt", dir), bytes("TOPSECRET\n"), 0o644);
+    let _ = os::WriteFile(
+        fmt::Sprintf!("%s/secret.txt", dir),
+        bytes("TOPSECRET\n"),
+        0o644,
+    );
     let cert_path = fmt::Sprintf!("%s/cert.pem", dir);
     let key_path = fmt::Sprintf!("%s/key.pem", dir);
     let _ = os::WriteFile(cert_path.clone(), bytes(CERT_PEM), 0o644);
@@ -1169,7 +1183,11 @@ fn selfTest() {
     // ── boot ──
     let (bounds, servers, lerr) = startServers(&cfg);
     if lerr != nil || len(&bounds) != 2 {
-        fail(fmt::Sprintf!("startServers: %v (groups=%d)", lerr, len(&bounds)));
+        fail(fmt::Sprintf!(
+            "startServers: %v (groups=%d)",
+            lerr,
+            len(&bounds)
+        ));
         finish();
     }
     let plain = bounds[0].clone(); // a.test + b.test vhosts
@@ -1178,7 +1196,9 @@ fn selfTest() {
 
     // 2. static index + MIME
     let (st, body, ct) = get(fmt::Sprintf!("http://%s/", plain));
-    if st == 200 && strings::Contains(body.clone(), "site-a") && strings::Contains(ct.clone(), "text/html")
+    if st == 200
+        && strings::Contains(body.clone(), "site-a")
+        && strings::Contains(ct.clone(), "text/html")
     {
         pass("GET / -> 200 index.html, text/html");
     } else {
@@ -1203,7 +1223,9 @@ fn selfTest() {
 
     // 5. nginx-style 404 page
     let (st, body, _) = get(fmt::Sprintf!("http://%s/missing", plain));
-    if st == 404 && strings::Contains(body.clone(), "404 Not Found") && strings::Contains(body.clone(), "goginx")
+    if st == 404
+        && strings::Contains(body.clone(), "404 Not Found")
+        && strings::Contains(body.clone(), "goginx")
     {
         pass("GET /missing -> nginx-style 404 page");
     } else {
@@ -1242,7 +1264,9 @@ fn selfTest() {
 
     // 9. autoindex listing
     let (st, body, _) = get(fmt::Sprintf!("http://%s/files/", plain));
-    if st == 200 && strings::Contains(body.clone(), "a.txt") && strings::Contains(body.clone(), "b.txt")
+    if st == 200
+        && strings::Contains(body.clone(), "a.txt")
+        && strings::Contains(body.clone(), "b.txt")
     {
         pass("autoindex on -> directory listing");
     } else {

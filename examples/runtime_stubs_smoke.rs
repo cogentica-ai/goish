@@ -12,7 +12,7 @@ use goish::fmt;
 use goish::goslice::slice;
 use goish::runtime;
 use goish::string;
-use goish::{syscall};
+use goish::syscall;
 
 #[goish::main]
 fn main() {
@@ -65,10 +65,7 @@ fn main() {
 
     // 6. Existing constants still readable (regression).
     {
-        if runtime::GOOS == "linux"
-            && runtime::GOARCH == "amd64"
-            && runtime::Compiler == "goish"
-        {
+        if runtime::GOOS == "linux" && runtime::GOARCH == "amd64" && runtime::Compiler == "goish" {
             fmt::Println!("[ 6] GOOS/GOARCH/Compiler      PASS");
         } else {
             fmt::Println!("[ 6] GOOS/GOARCH/Compiler      FAIL");

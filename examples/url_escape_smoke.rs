@@ -80,9 +80,7 @@ fn main() {
 
     // 6. Empty input → empty output, no allocation surprises.
     {
-        if http::QueryEscape(string("")).Len() == 0
-            && http::PathEscape(string("")).Len() == 0
-        {
+        if http::QueryEscape(string("")).Len() == 0 && http::PathEscape(string("")).Len() == 0 {
             fmt::Println!("[ 6] empty                      PASS");
         } else {
             fmt::Println!("[ 6] empty                      FAIL");

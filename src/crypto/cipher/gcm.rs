@@ -277,10 +277,7 @@ fn newGCMFallback<B: Block>(cipher: B, nonceSize: int, tagSize: int) -> (Option<
     }
     // Go: if cipher.BlockSize() != gcmBlockSize { … }
     if cipher.BlockSize() != gcmBlockSize {
-        return (
-            None,
-            ErrNew("cipher: NewGCM requires 128-bit block cipher"),
-        );
+        return (None, ErrNew("cipher: NewGCM requires 128-bit block cipher"));
     }
     // Go: return &gcmFallback{cipher: cipher, nonceSize: nonceSize, tagSize: tagSize}, nil
     return (

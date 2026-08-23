@@ -11,7 +11,7 @@ extern crate goish;
 
 use goish::fmt;
 use goish::net;
-use goish::{syscall};
+use goish::syscall;
 
 #[goish::main]
 fn main() {
@@ -108,9 +108,12 @@ fn main() {
     // 7. nil-IP — all predicates false.
     {
         let nil_ip = net::IP::default();
-        if !nil_ip.IsUnspecified() && !nil_ip.IsLoopback()
-            && !nil_ip.IsPrivate() && !nil_ip.IsMulticast()
-            && !nil_ip.IsLinkLocalMulticast() && !nil_ip.IsLinkLocalUnicast()
+        if !nil_ip.IsUnspecified()
+            && !nil_ip.IsLoopback()
+            && !nil_ip.IsPrivate()
+            && !nil_ip.IsMulticast()
+            && !nil_ip.IsLinkLocalMulticast()
+            && !nil_ip.IsLinkLocalUnicast()
         {
             fmt::Println!("[ 7] nil-IP all-false          PASS");
         } else {

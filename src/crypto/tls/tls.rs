@@ -54,7 +54,6 @@ impl errors::ErrorTrait for timeoutError {
     }
 }
 
-
 // ─── Dialer ───────────────────────────────────────────────────────────
 
 // Go: tls.go:139-152
@@ -175,8 +174,7 @@ pub(crate) fn dial(
     //     if err := conn.HandshakeContext(ctx); err != nil {
     //         rawConn.Close(); return nil, err }
     //     return conn, nil
-    let box_conn: alloc::boxed::Box<dyn crate::net::Conn> =
-        alloc::boxed::Box::new(rawConn);
+    let box_conn: alloc::boxed::Box<dyn crate::net::Conn> = alloc::boxed::Box::new(rawConn);
     let mut conn = super::Client(box_conn, &cfg);
     let herr = conn.Handshake();
     if !herr.IsNil() {

@@ -158,8 +158,7 @@ impl Source64 for rngSource {
             self.feed += RNG_LEN as i32;
         }
         // Wrapping add — Go's int64 addition is two's-complement modulo.
-        let x = (self.vec[self.feed as usize])
-            .wrapping_add(self.vec[self.tap as usize]);
+        let x = (self.vec[self.feed as usize]).wrapping_add(self.vec[self.tap as usize]);
         self.vec[self.feed as usize] = x;
         x as u64
     }
@@ -413,8 +412,8 @@ impl Rand {
             }
             // fn[i] + Float32(Float64()) * (fn[i-1] - fn[i])  <
             //   Float32(math.Exp(-0.5 * x * x))
-            let lhs = ziggurat::FN[i]
-                + (self.Float64() as f32) * (ziggurat::FN[i - 1] - ziggurat::FN[i]);
+            let lhs =
+                ziggurat::FN[i] + (self.Float64() as f32) * (ziggurat::FN[i - 1] - ziggurat::FN[i]);
             let rhs = libm::exp(-0.5 * x * x) as f32;
             if lhs < rhs {
                 return x;
@@ -435,8 +434,8 @@ impl Rand {
             if i == 0 {
                 return RE - libm::log(self.Float64());
             }
-            let lhs = ziggurat::FE[i]
-                + (self.Float64() as f32) * (ziggurat::FE[i - 1] - ziggurat::FE[i]);
+            let lhs =
+                ziggurat::FE[i] + (self.Float64() as f32) * (ziggurat::FE[i - 1] - ziggurat::FE[i]);
             let rhs = libm::exp(-x) as f32;
             if lhs < rhs {
                 return x;
@@ -682,8 +681,7 @@ pub fn NormFloat64() -> f64 {
             }
             return -RN - x_t;
         }
-        let lhs = ziggurat::FN[i]
-            + (Float64() as f32) * (ziggurat::FN[i - 1] - ziggurat::FN[i]);
+        let lhs = ziggurat::FN[i] + (Float64() as f32) * (ziggurat::FN[i - 1] - ziggurat::FN[i]);
         let rhs = libm::exp(-0.5 * x * x) as f32;
         if lhs < rhs {
             return x;
@@ -703,8 +701,7 @@ pub fn ExpFloat64() -> f64 {
         if i == 0 {
             return RE - libm::log(Float64());
         }
-        let lhs = ziggurat::FE[i]
-            + (Float64() as f32) * (ziggurat::FE[i - 1] - ziggurat::FE[i]);
+        let lhs = ziggurat::FE[i] + (Float64() as f32) * (ziggurat::FE[i - 1] - ziggurat::FE[i]);
         let rhs = libm::exp(-x) as f32;
         if lhs < rhs {
             return x;

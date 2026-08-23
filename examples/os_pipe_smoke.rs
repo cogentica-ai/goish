@@ -7,13 +7,13 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::convert::bytes;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::io;
 use goish::os;
+use goish::syscall;
 use goish::types::byte;
-use goish::{syscall};
 
 #[goish::main]
 fn main() {
@@ -28,21 +28,18 @@ fn main() {
         } else {
             let payload = bytes("hello pipe");
             let (n_w, w_err) = w.Write(payload);
-            let mut buf: slice<byte> =
-                slice::__from_vec({
-                    let mut v: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(64);
-                    v.resize(64, 0);
-                    v
-                });
+            let mut buf: slice<byte> = slice::__from_vec({
+                let mut v: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(64);
+                v.resize(64, 0);
+                v
+            });
             let (n_r, r_err) = r.Read(&mut buf);
             let _ = r.Close();
             let _ = w.Close();
             if w_err.IsNil() && r_err.IsNil() && n_w == 10 && n_r == 10 {
                 fmt::Println!("[ 1] Pipe round trip           PASS");
             } else {
-                fmt::Println!(
-                    "[ 1] Pipe round trip           FAIL n_r=", n_r as i64
-                );
+                fmt::Println!("[ 1] Pipe round trip           FAIL n_r=", n_r as i64);
                 failed += 1;
             }
         }

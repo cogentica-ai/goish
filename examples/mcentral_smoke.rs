@@ -75,7 +75,10 @@ fn test_one_class() {
     for i in 0..20 {
         v.push(i as u8);
     }
-    check(mcentral::live_slots() > baseline, b"one-class: no slot taken\n");
+    check(
+        mcentral::live_slots() > baseline,
+        b"one-class: no slot taken\n",
+    );
     for i in 0..20 {
         check(v[i] == i as u8, b"one-class: data corrupted\n");
     }
@@ -212,7 +215,10 @@ fn test_box_at_each_size_class() {
         for v in b.iter_mut() {
             *v = 0x33;
         }
-        check(b[1024] == 0x33, b"box-class: 1025 (boundary into class 33)\n");
+        check(
+            b[1024] == 0x33,
+            b"box-class: 1025 (boundary into class 33)\n",
+        );
     }
     {
         let mut b: Box<[u8; 5000]> = Box::new([0; 5000]);
@@ -227,7 +233,10 @@ fn test_box_at_each_size_class() {
         for v in b.iter_mut() {
             *v = 0x55;
         }
-        check(b[32767] == 0x55, b"box-class: 32768 (boundary into mheap)\n");
+        check(
+            b[32767] == 0x55,
+            b"box-class: 32768 (boundary into mheap)\n",
+        );
     }
     {
         // Above threshold — mheap directly.

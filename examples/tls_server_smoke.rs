@@ -34,9 +34,9 @@ extern crate goish;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
-use goish::crypto::tls;
 use alloc::sync::Arc;
+use goish::crypto::tls;
+use goish::fmt;
 use goish::sync::WaitGroup;
 use goish::{go, string};
 
@@ -322,8 +322,7 @@ fn main() {
         };
         // tls::DialWithDialer with an explicit net.Dialer.
         let nd = goish::net::Dialer::default();
-        let (mut c1, e1) =
-            tls::DialWithDialer(&nd, string("tcp"), addr.clone(), &cfg);
+        let (mut c1, e1) = tls::DialWithDialer(&nd, string("tcp"), addr.clone(), &cfg);
         let ok1 = e1.IsNil() && dial_roundtrip(&mut c1, b"dialer ping");
         if ok1 {
             pass("tls::DialWithDialer handshakes and round-trips");

@@ -236,9 +236,7 @@ impl From<&crate::gostring::string> for slice<crate::types::rune> {
                         Err(e) => {
                             let valid = e.valid_up_to();
                             if valid > 0 {
-                                if let Ok(prefix) =
-                                    core::str::from_utf8(&bytes[i..i + valid])
-                                {
+                                if let Ok(prefix) = core::str::from_utf8(&bytes[i..i + valid]) {
                                     for c in prefix.chars() {
                                         out.push(c as crate::types::rune);
                                     }

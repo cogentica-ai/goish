@@ -165,7 +165,10 @@ impl Digest {
         out.extend_from_slice(&self.x[..self.nx]);
         out.resize(out.len() + (CHUNK - self.nx), 0);
         // Go: b = byteorder.BEAppendUint64(b, d.len); return b, nil
-        return (byteorder::BEAppendUint64(slice::__from_vec(out), self.len), nil);
+        return (
+            byteorder::BEAppendUint64(slice::__from_vec(out), self.len),
+            nil,
+        );
     }
 
     // go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:89-109 Digest.UnmarshalBinary
@@ -223,7 +226,10 @@ impl Digest {
 /// surface, and the borrow avoids a re-wrap per field.
 fn consumeUint64(b: &[byte]) -> (&[byte], uint64) {
     // Go: return b[8:], byteorder.BEUint64(b)
-    return (&b[8..], byteorder::BEUint64(slice::__from_vec(b[..8].to_vec())));
+    return (
+        &b[8..],
+        byteorder::BEUint64(slice::__from_vec(b[..8].to_vec())),
+    );
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:115-117 consumeUint32
@@ -231,7 +237,10 @@ fn consumeUint64(b: &[byte]) -> (&[byte], uint64) {
 /// [`consumeUint64`] for why this borrows.
 fn consumeUint32(b: &[byte]) -> (&[byte], uint32) {
     // Go: return b[4:], byteorder.BEUint32(b)
-    return (&b[4..], byteorder::BEUint32(slice::__from_vec(b[..4].to_vec())));
+    return (
+        &b[4..],
+        byteorder::BEUint32(slice::__from_vec(b[..4].to_vec())),
+    );
 }
 
 // ─── encoding + hash.Cloner interface impls ───────────────────────────
@@ -401,7 +410,11 @@ impl Hash for Digest {
         // Go: if d0.is224 { return append(in, hash[:size224]...) }
         //     return append(in, hash[:]...)
         let mut out: Vec<byte> = b.__into_vec();
-        let limit = if self.is224 { Size224 as usize } else { Size as usize };
+        let limit = if self.is224 {
+            Size224 as usize
+        } else {
+            Size as usize
+        };
         out.extend_from_slice(&digest[..limit]);
         slice::__from_vec(out)
     }
@@ -432,7 +445,11 @@ impl Hash for Digest {
     // go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:163-168 Digest.Size
     fn Size(&self) -> int {
         // Go: if !d.is224 { return size }; return size224
-        if !self.is224 { Size } else { Size224 }
+        if !self.is224 {
+            Size
+        } else {
+            Size224
+        }
     }
     // go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256.go:170-170 Digest.BlockSize
     fn BlockSize(&self) -> int {
@@ -511,4 +528,3 @@ pub fn NewHash() -> alloc::boxed::Box<dyn Hash + Send + Sync> {
 pub fn NewHash224() -> alloc::boxed::Box<dyn Hash + Send + Sync> {
     alloc::boxed::Box::new(New224())
 }
-

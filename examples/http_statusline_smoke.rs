@@ -28,7 +28,8 @@ fn firstLine(port: string, path: &'static str) -> string {
     if err != errors::nil {
         return string("dial error: ") + err.Error();
     }
-    let req = string("GET ") + string(path) + string(" HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    let req =
+        string("GET ") + string(path) + string(" HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
     let _ = io::Writer::Write(&mut c, slice::<u8>::__from_vec(req.as_bytes().to_vec()));
     let mut all: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
     loop {

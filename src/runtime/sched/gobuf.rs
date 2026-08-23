@@ -64,7 +64,7 @@ pub const GOBUF_R12: usize = 0x18;
 pub const GOBUF_R13: usize = 0x20;
 pub const GOBUF_R14: usize = 0x28;
 pub const GOBUF_R15: usize = 0x30;
-pub const GOBUF_PC:  usize = 0x38;
+pub const GOBUF_PC: usize = 0x38;
 
 const _: () = {
     assert!(core::mem::offset_of!(Gobuf, rsp) == GOBUF_RSP);
@@ -74,14 +74,19 @@ const _: () = {
     assert!(core::mem::offset_of!(Gobuf, r13) == GOBUF_R13);
     assert!(core::mem::offset_of!(Gobuf, r14) == GOBUF_R14);
     assert!(core::mem::offset_of!(Gobuf, r15) == GOBUF_R15);
-    assert!(core::mem::offset_of!(Gobuf, pc)  == GOBUF_PC);
+    assert!(core::mem::offset_of!(Gobuf, pc) == GOBUF_PC);
 };
 
 impl Gobuf {
     pub const fn new() -> Self {
         Gobuf {
-            rsp: 0, rbp: 0,
-            rbx: 0, r12: 0, r13: 0, r14: 0, r15: 0,
+            rsp: 0,
+            rbp: 0,
+            rbx: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
             pc: 0,
         }
     }
@@ -330,11 +335,7 @@ pub(crate) unsafe extern "C" fn mcall_asm(
 /// `[stack_base, stack_top)` of at least 16 bytes; `entry` must be a
 /// valid `extern "C" fn() -> !` address; `stack_top` must be 16-byte
 /// aligned.
-pub unsafe fn make_context_gogo(
-    gobuf: &mut Gobuf,
-    stack_top: usize,
-    entry: extern "C" fn() -> !,
-) {
+pub unsafe fn make_context_gogo(gobuf: &mut Gobuf, stack_top: usize, entry: extern "C" fn() -> !) {
     debug_assert!(stack_top % 16 == 0, "stack_top not 16-byte aligned");
     let sp = stack_top - 8;
     // Trampoline catches the case where `entry` returns.

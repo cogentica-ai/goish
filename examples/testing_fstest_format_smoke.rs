@@ -28,7 +28,7 @@ extern crate goish;
 
 use goish::gostring::string;
 use goish::io::fs;
-use goish::testing::fstest::{formatEntry, formatInfo, formatInfoEntry, fsTester, MapFile, MapFS};
+use goish::testing::fstest::{formatEntry, formatInfo, formatInfoEntry, fsTester, MapFS, MapFile};
 use goish::{errors, fmt, syscall};
 
 fn s(x: &str) -> string {
@@ -78,7 +78,13 @@ fn main() {
         {
             fmt::Println!("[ 1] formatEntry type bits     PASS");
         } else {
-            fmt::Println!("[ 1] formatEntry               FAIL [", got_file, "] [", got_dir, "]");
+            fmt::Println!(
+                "[ 1] formatEntry               FAIL [",
+                got_file,
+                "] [",
+                got_dir,
+                "]"
+            );
             failed += 1;
         }
     }
@@ -96,8 +102,11 @@ fn main() {
             }
             if formatEntry(e.as_ref()) != formatInfoEntry(info.as_ref()) {
                 fmt::Println!(
-                    "    mismatch [", formatEntry(e.as_ref()),
-                    "] vs [", formatInfoEntry(info.as_ref()), "]"
+                    "    mismatch [",
+                    formatEntry(e.as_ref()),
+                    "] vs [",
+                    formatInfoEntry(info.as_ref()),
+                    "]"
                 );
                 ok = false;
             }
@@ -137,10 +146,7 @@ fn main() {
         t.errorf(s("boom 42"));
         t.errorf(s("again x"));
         let errs = t.Errors();
-        if errs.Len() == 2
-            && errs[0].Error() == s("boom 42")
-            && errs[1].Error() == s("again x")
-        {
+        if errs.Len() == 2 && errs[0].Error() == s("boom 42") && errs[1].Error() == s("again x") {
             fmt::Println!("[ 4] errorf accumulates        PASS");
         } else {
             fmt::Println!("[ 4] errorf accumulates        FAIL");

@@ -57,16 +57,31 @@ fn main() {
     let mut bad = 0i32;
 
     eq(mk("http://x/a/b", "/c"), "http://x/c", "abs path", &mut bad);
-    eq(mk("http://x/a/b", "c"), "http://x/a/c", "rel path", &mut bad);
+    eq(
+        mk("http://x/a/b", "c"),
+        "http://x/a/c",
+        "rel path",
+        &mut bad,
+    );
     eq(
         mk("http://x/a/b", "http://y/z"),
         "http://y/z",
         "absolute URL",
         &mut bad,
     );
-    eq(mk("http://x/a/b", ""), "ERR", "no Location header", &mut bad);
+    eq(
+        mk("http://x/a/b", ""),
+        "ERR",
+        "no Location header",
+        &mut bad,
+    );
     eq(mk("", "/c"), "/c", "no request URL", &mut bad);
-    eq(mk("http://x/a/b", "../q"), "http://x/q", "dot-dot segment", &mut bad);
+    eq(
+        mk("http://x/a/b", "../q"),
+        "http://x/q",
+        "dot-dot segment",
+        &mut bad,
+    );
     eq(
         mk("http://x/a/b", "//other/p"),
         "http://other/p",
@@ -94,8 +109,10 @@ fn main() {
 
     // Cookies from two Set-Cookie headers.
     let mut rc = http::Response::default();
-    rc.Header.Add(string("Set-Cookie"), string("a=1; Path=/; HttpOnly"));
-    rc.Header.Add(string("Set-Cookie"), string("b=2; Max-Age=60"));
+    rc.Header
+        .Add(string("Set-Cookie"), string("a=1; Path=/; HttpOnly"));
+    rc.Header
+        .Add(string("Set-Cookie"), string("b=2; Max-Age=60"));
     let cs = rc.Cookies();
     if cs.len() != 2 {
         fmt::Println!("FAIL Cookies count ", cs.len());

@@ -19,7 +19,10 @@ struct ByteReader {
 
 impl ByteReader {
     fn new(s: &[u8]) -> Self {
-        Self { data: s.to_vec(), pos: 0 }
+        Self {
+            data: s.to_vec(),
+            pos: 0,
+        }
     }
 }
 
@@ -43,7 +46,9 @@ struct ByteWriter {
 }
 
 impl ByteWriter {
-    fn new() -> Self { Self { data: Vec::new() } }
+    fn new() -> Self {
+        Self { data: Vec::new() }
+    }
 }
 
 impl io::Writer for ByteWriter {
@@ -96,7 +101,9 @@ fn main() {
         let (b, _) = br.ReadByte(); // consume one byte
         let mut sink = ByteWriter::new();
         let (n, err) = br.WriteTo(&mut sink);
-        if err == nil && n == (payload.len() - 1) as int && b == b'a'
+        if err == nil
+            && n == (payload.len() - 1) as int
+            && b == b'a'
             && sink.data.as_slice() == &payload[1..]
         {
             fmt::Println!("[ 3] WriteTo after partial     PASS");

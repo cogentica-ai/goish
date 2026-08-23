@@ -29,24 +29,48 @@ fn main() {
     let xs: slice<int> = goish::slice!([]int{1, 2, 3});
     let t = reflect::TypeOf(&xs);
     check(t.Kind() == reflect::Kind::Slice, b"tier1: slice Kind\n");
-    check(t.Elem().Kind() == reflect::Kind::Int, b"tier1: slice Elem Kind\n");
+    check(
+        t.Elem().Kind() == reflect::Kind::Int,
+        b"tier1: slice Elem Kind\n",
+    );
 
     // ─── Type.Elem + Type.Key on map ─────────────────────────────────
     let mut m = make!(map[string]int);
     m.Set(string("a"), 1);
     let mt = reflect::TypeOf(&m);
     check(mt.Kind() == reflect::Kind::Map, b"tier1: map Kind\n");
-    check(mt.Key().Kind() == reflect::Kind::String, b"tier1: map Key Kind\n");
-    check(mt.Elem().Kind() == reflect::Kind::Int, b"tier1: map Elem Kind\n");
+    check(
+        mt.Key().Kind() == reflect::Kind::String,
+        b"tier1: map Key Kind\n",
+    );
+    check(
+        mt.Elem().Kind() == reflect::Kind::Int,
+        b"tier1: map Elem Kind\n",
+    );
 
     // ─── Type.String — readable representation ───────────────────────
-    check(reflect::TypeOf(&1i64).String() == "int", b"tier1: int.String\n");
-    check(reflect::TypeOf(&true).String() == "bool", b"tier1: bool.String\n");
-    check(reflect::TypeOf(&xs).String() == "[]int", b"tier1: []int.String\n");
-    check(reflect::TypeOf(&m).String() == "map[string]int", b"tier1: map.String\n");
+    check(
+        reflect::TypeOf(&1i64).String() == "int",
+        b"tier1: int.String\n",
+    );
+    check(
+        reflect::TypeOf(&true).String() == "bool",
+        b"tier1: bool.String\n",
+    );
+    check(
+        reflect::TypeOf(&xs).String() == "[]int",
+        b"tier1: []int.String\n",
+    );
+    check(
+        reflect::TypeOf(&m).String() == "map[string]int",
+        b"tier1: map.String\n",
+    );
 
     let p = Point { X: 1, Y: 2 };
-    check(reflect::TypeOf(&p).String() == "Point", b"tier1: Point.String\n");
+    check(
+        reflect::TypeOf(&p).String() == "Point",
+        b"tier1: Point.String\n",
+    );
 
     // Nested: slice<Point>
     let pts: slice<Point> = goish::slice!([]Point { Point { X: 1, Y: 2 } });
@@ -56,12 +80,18 @@ fn main() {
     );
 
     // ─── Type.Comparable ─────────────────────────────────────────────
-    check(reflect::TypeOf(&1i64).Comparable(), b"tier1: int Comparable\n");
+    check(
+        reflect::TypeOf(&1i64).Comparable(),
+        b"tier1: int Comparable\n",
+    );
     check(
         reflect::TypeOf(&string("x")).Comparable(),
         b"tier1: string Comparable\n",
     );
-    check(reflect::TypeOf(&p).Comparable(), b"tier1: Point Comparable\n");
+    check(
+        reflect::TypeOf(&p).Comparable(),
+        b"tier1: Point Comparable\n",
+    );
     check(
         !reflect::TypeOf(&xs).Comparable(),
         b"tier1: []int !Comparable\n",
@@ -80,7 +110,10 @@ fn main() {
     // []int is NOT assignable to []string
     let ss: slice<string> = goish::slice!([]string{"a"});
     let ts = reflect::TypeOf(&ss);
-    check(!tx.AssignableTo(&ts), b"tier1: []int !AssignableTo []string\n");
+    check(
+        !tx.AssignableTo(&ts),
+        b"tier1: []int !AssignableTo []string\n",
+    );
 
     // ─── Value.Cap (= Len in deep-clone goish) ───────────────────────
     let v = reflect::ValueOf(&xs);

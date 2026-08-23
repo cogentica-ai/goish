@@ -1,17 +1,17 @@
 // go: package crypto
 
-mod crypto;
 pub mod aes;
 pub mod chacha20;
 pub mod chacha20poly1305;
 pub mod cipher;
+mod crypto;
 pub mod cryptobyte;
 pub mod des;
 pub mod dsa;
 pub mod ecdh;
-pub mod elliptic;
 pub mod ecdsa;
 pub mod ed25519;
+pub mod elliptic;
 pub mod fips140;
 pub mod hkdf;
 pub mod hmac;

@@ -28,10 +28,7 @@ const N: i64 = 100_000;
 
 #[goish::main]
 fn main() {
-    let c: [chan<i64>; 2] = [
-        make!(chan i64),
-        make!(chan i64, 2),
-    ];
+    let c: [chan<i64>; 2] = [make!(chan i64), make!(chan i64, 2)];
 
     static SEND_TOTAL: AtomicI64 = AtomicI64::new(0);
     static RECV_TOTAL: AtomicI64 = AtomicI64::new(0);

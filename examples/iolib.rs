@@ -78,7 +78,10 @@ fn main() {
     check(n == 5, b"io: BufWriter wrote wrong count\n");
     check(err == nil, b"io: BufWriter err non-nil\n");
     check(w.buf.Len() == 5, b"io: BufWriter buf len wrong\n");
-    check(w.buf[0] == b'h' && w.buf[4] == b'o', b"io: BufWriter bytes wrong\n");
+    check(
+        w.buf[0] == b'h' && w.buf[4] == b'o',
+        b"io: BufWriter bytes wrong\n",
+    );
 
     // (2) WriteString convenience.
     let mut w2 = BufWriter {
@@ -92,8 +95,14 @@ fn main() {
     // (3) EOF is pointer-stable across calls.
     let e1: error = io::EOF.into();
     let e2: error = io::EOF.into();
-    check(e1 == e2, b"io: EOF.into() must be ptr-stable across calls\n");
-    check(errors::Is(e1.clone(), e2.clone()), b"io: EOF.into() errors::Is failed\n");
+    check(
+        e1 == e2,
+        b"io: EOF.into() must be ptr-stable across calls\n",
+    );
+    check(
+        errors::Is(e1.clone(), e2.clone()),
+        b"io: EOF.into() errors::Is failed\n",
+    );
 
     // (4) Other sentinels are also stable. With Doctrine 2 markers,
     // bare `==` works directly (no `.into()` needed at compare positions).
@@ -103,7 +112,10 @@ fn main() {
     let uf1: error = io::ErrUnexpectedEOF.into();
     let uf2: error = io::ErrUnexpectedEOF.into();
     check(uf1 == uf2, b"io: ErrUnexpectedEOF stable\n");
-    check(e1 != io::ErrShortWrite, b"io: distinct sentinels distinct\n");
+    check(
+        e1 != io::ErrShortWrite,
+        b"io: distinct sentinels distinct\n",
+    );
 
     // (5) Reader trait — read until EOF.
     let mut r = BufReader {
@@ -113,11 +125,17 @@ fn main() {
     let mut out = make!([]byte, 4);
     let (n, err) = io::Reader::Read(&mut r, &mut out);
     check(n == 4 && err == nil, b"io: first Read wrong\n");
-    check(out[0] == b'a' && out[3] == b'd', b"io: first Read bytes wrong\n");
+    check(
+        out[0] == b'a' && out[3] == b'd',
+        b"io: first Read bytes wrong\n",
+    );
 
     let (n, err) = io::Reader::Read(&mut r, &mut out);
     check(n == 4 && err == nil, b"io: second Read wrong\n");
-    check(out[0] == b'e' && out[3] == b'h', b"io: second Read bytes wrong\n");
+    check(
+        out[0] == b'e' && out[3] == b'h',
+        b"io: second Read bytes wrong\n",
+    );
 
     let (n, err) = io::Reader::Read(&mut r, &mut out);
     check(n == 2 && err == nil, b"io: third Read short\n");
@@ -137,7 +155,10 @@ fn main() {
     check(err == nil, b"io: Copy err\n");
     check(copied == 19, b"io: Copy bytes count\n");
     check(dst.buf.Len() == 19, b"io: Copy dst length\n");
-    check(dst.buf[0] == b't' && dst.buf[18] == b'x', b"io: Copy dst contents\n");
+    check(
+        dst.buf[0] == b't' && dst.buf[18] == b'x',
+        b"io: Copy dst contents\n",
+    );
 
     const OK: &[u8] = b"io: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

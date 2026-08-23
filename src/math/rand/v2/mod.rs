@@ -50,7 +50,10 @@ pub struct PCG {
 
 /// `rand.NewPCG(seed1, seed2)` — pcg.go:24.
 pub fn NewPCG(seed1: u64, seed2: u64) -> PCG {
-    PCG { hi: seed1, lo: seed2 }
+    PCG {
+        hi: seed1,
+        lo: seed2,
+    }
 }
 
 impl PCG {
@@ -291,8 +294,8 @@ impl<S: Source> Rand<S> {
 // For backoff jitter and non-crypto uses this is perfectly acceptable.
 
 static GLOBAL_INIT: AtomicBool = AtomicBool::new(false);
-static GLOBAL_HI:   AtomicU64  = AtomicU64::new(0);
-static GLOBAL_LO:   AtomicU64  = AtomicU64::new(0);
+static GLOBAL_HI: AtomicU64 = AtomicU64::new(0);
+static GLOBAL_LO: AtomicU64 = AtomicU64::new(0);
 
 fn global_next_u64() -> u64 {
     if !GLOBAL_INIT.swap(true, Ordering::AcqRel) {
@@ -338,27 +341,53 @@ pub fn Int() -> int {
 
 /// `rand.Int64N(n)` — random int64 in [0, n) from the global source.
 pub fn Int64N(n: i64) -> i64 {
-    if n <= 0 { panic!("invalid argument to Int64N"); }
-    let mut r = Rand { src: PCG { hi: GLOBAL_HI.load(Ordering::Relaxed), lo: GLOBAL_LO.load(Ordering::Relaxed) } };
+    if n <= 0 {
+        panic!("invalid argument to Int64N");
+    }
+    let mut r = Rand {
+        src: PCG {
+            hi: GLOBAL_HI.load(Ordering::Relaxed),
+            lo: GLOBAL_LO.load(Ordering::Relaxed),
+        },
+    };
     r.Int64N(n)
 }
 
 /// `rand.IntN(n)` — random int in [0, n) from the global source.
 pub fn IntN(n: int) -> int {
-    if n <= 0 { panic!("invalid argument to IntN"); }
-    let mut r = Rand { src: PCG { hi: GLOBAL_HI.load(Ordering::Relaxed), lo: GLOBAL_LO.load(Ordering::Relaxed) } };
+    if n <= 0 {
+        panic!("invalid argument to IntN");
+    }
+    let mut r = Rand {
+        src: PCG {
+            hi: GLOBAL_HI.load(Ordering::Relaxed),
+            lo: GLOBAL_LO.load(Ordering::Relaxed),
+        },
+    };
     r.IntN(n)
 }
 
 /// `rand.Uint64N(n)` — random uint64 in [0, n) from the global source.
 pub fn Uint64N(n: u64) -> u64 {
-    if n == 0 { panic!("invalid argument to Uint64N"); }
-    let mut r = Rand { src: PCG { hi: GLOBAL_HI.load(Ordering::Relaxed), lo: GLOBAL_LO.load(Ordering::Relaxed) } };
+    if n == 0 {
+        panic!("invalid argument to Uint64N");
+    }
+    let mut r = Rand {
+        src: PCG {
+            hi: GLOBAL_HI.load(Ordering::Relaxed),
+            lo: GLOBAL_LO.load(Ordering::Relaxed),
+        },
+    };
     r.Uint64N(n)
 }
 
 /// `rand.Shuffle(n, swap)` — Fisher-Yates using global source.
 pub fn Shuffle<F: FnMut(int, int)>(n: int, mut swap: F) {
-    let mut r = Rand { src: PCG { hi: GLOBAL_HI.load(Ordering::Relaxed), lo: GLOBAL_LO.load(Ordering::Relaxed) } };
+    let mut r = Rand {
+        src: PCG {
+            hi: GLOBAL_HI.load(Ordering::Relaxed),
+            lo: GLOBAL_LO.load(Ordering::Relaxed),
+        },
+    };
     r.Shuffle(n, &mut swap);
 }

@@ -15,9 +15,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::bytes;
 use goish::convert;
+use goish::fmt;
 use goish::io;
 use goish::{make, syscall};
 
@@ -34,7 +34,11 @@ fn main() {
         if err.IsNil() && n == 13 && dst.String() == "Hello, world!" {
             fmt::Println!("[ 1] CopyBuffer 16-byte buf    PASS");
         } else {
-            fmt::Println!("[ 1] CopyBuffer 16-byte buf    FAIL n={} dst={}", n, dst.String());
+            fmt::Println!(
+                "[ 1] CopyBuffer 16-byte buf    FAIL n={} dst={}",
+                n,
+                dst.String()
+            );
             failed += 1;
         }
     }

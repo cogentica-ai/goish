@@ -91,15 +91,25 @@ fn test_same_chan_dedup_4_cases() {
 
 fn test_eight_distinct_chans_default() {
     let chs: [_; 8] = [
-        make!(chan i64, 0), make!(chan i64, 0),
-        make!(chan i64, 0), make!(chan i64, 0),
-        make!(chan i64, 0), make!(chan i64, 0),
-        make!(chan i64, 0), make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
     ];
     static FIRED: AtomicUsize = AtomicUsize::new(0);
     let cs: [_; 8] = [
-        chs[0].clone(), chs[1].clone(), chs[2].clone(), chs[3].clone(),
-        chs[4].clone(), chs[5].clone(), chs[6].clone(), chs[7].clone(),
+        chs[0].clone(),
+        chs[1].clone(),
+        chs[2].clone(),
+        chs[3].clone(),
+        chs[4].clone(),
+        chs[5].clone(),
+        chs[6].clone(),
+        chs[7].clone(),
     ];
     go!(move || {
         let arm: u8 = select! {
@@ -116,7 +126,10 @@ fn test_eight_distinct_chans_default() {
         FIRED.store(arm as usize, Ordering::Relaxed);
     });
     schedule();
-    check(FIRED.load(Ordering::Relaxed) == 99, b"t2: default not fired\n");
+    check(
+        FIRED.load(Ordering::Relaxed) == 99,
+        b"t2: default not fired\n",
+    );
     // Critical β check: the chans must not still be locked. A
     // subsequent independent op on each should succeed.
     for ch in &chs {
@@ -128,17 +141,27 @@ fn test_eight_distinct_chans_default() {
 
 fn test_eight_distinct_chans_park_then_recv() {
     let chs: [_; 8] = [
-        make!(chan i64, 0), make!(chan i64, 0),
-        make!(chan i64, 0), make!(chan i64, 0),
-        make!(chan i64, 0), make!(chan i64, 0),
-        make!(chan i64, 0), make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
     ];
     static FIRED: AtomicI64 = AtomicI64::new(-1);
     static GOT: AtomicI64 = AtomicI64::new(0);
 
     let cs: [_; 8] = [
-        chs[0].clone(), chs[1].clone(), chs[2].clone(), chs[3].clone(),
-        chs[4].clone(), chs[5].clone(), chs[6].clone(), chs[7].clone(),
+        chs[0].clone(),
+        chs[1].clone(),
+        chs[2].clone(),
+        chs[3].clone(),
+        chs[4].clone(),
+        chs[5].clone(),
+        chs[6].clone(),
+        chs[7].clone(),
     ];
     go!(move || {
         let arm = select! {
@@ -160,7 +183,10 @@ fn test_eight_distinct_chans_park_then_recv() {
     }
     schedule();
     check(FIRED.load(Ordering::Relaxed) == 5, b"t3: wrong arm fired\n");
-    check(GOT.load(Ordering::Relaxed) == 0xABCD, b"t3: wrong recv value\n");
+    check(
+        GOT.load(Ordering::Relaxed) == 0xABCD,
+        b"t3: wrong recv value\n",
+    );
     // β invariant: all 8 chan locks must be released by selparkcommit.
     // Verify by independent ops.
     for ch in &chs {
@@ -172,17 +198,27 @@ fn test_eight_distinct_chans_park_then_recv() {
 
 fn test_eight_distinct_chans_park_then_send() {
     let chs: [_; 8] = [
-        make!(chan i64, 0), make!(chan i64, 0),
-        make!(chan i64, 0), make!(chan i64, 0),
-        make!(chan i64, 0), make!(chan i64, 0),
-        make!(chan i64, 0), make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
+        make!(chan i64, 0),
     ];
     static FIRED: AtomicI64 = AtomicI64::new(-1);
     static SENT: AtomicI64 = AtomicI64::new(0);
 
     let cs: [_; 8] = [
-        chs[0].clone(), chs[1].clone(), chs[2].clone(), chs[3].clone(),
-        chs[4].clone(), chs[5].clone(), chs[6].clone(), chs[7].clone(),
+        chs[0].clone(),
+        chs[1].clone(),
+        chs[2].clone(),
+        chs[3].clone(),
+        chs[4].clone(),
+        chs[5].clone(),
+        chs[6].clone(),
+        chs[7].clone(),
     ];
     go!(move || {
         let arm = select! {
@@ -206,7 +242,10 @@ fn test_eight_distinct_chans_park_then_send() {
     }
     schedule();
     check(FIRED.load(Ordering::Relaxed) == 3, b"t4: wrong arm fired\n");
-    check(SENT.load(Ordering::Relaxed) == 103, b"t4: counterpart got wrong value\n");
+    check(
+        SENT.load(Ordering::Relaxed) == 103,
+        b"t4: counterpart got wrong value\n",
+    );
 }
 
 // ─── Test 5: default fires; verify locks released ─────────────────
@@ -244,7 +283,10 @@ fn test_default_releases_all_locks() {
         });
     }
     schedule();
-    check(DONE.load(Ordering::Relaxed) == 3, b"t5: chan unusable after default\n");
+    check(
+        DONE.load(Ordering::Relaxed) == 3,
+        b"t5: chan unusable after default\n",
+    );
 }
 
 // ─── Test 6: 50 selects in a row on shared chans, no deadlock ─────
@@ -281,5 +323,8 @@ fn test_repeated_selects_no_deadlock() {
         });
     }
     schedule();
-    check(OK_COUNT.load(Ordering::Relaxed) == 50, b"t6: not all 50 selects fired\n");
+    check(
+        OK_COUNT.load(Ordering::Relaxed) == 50,
+        b"t6: not all 50 selects fired\n",
+    );
 }

@@ -51,7 +51,12 @@ fn main() {
             let c = http::Client::default();
             let (resp, err) = c.Get(url.clone() + string("/a"));
             if err != errors::nil || resp.StatusCode != 200 {
-                fmt::Println!("FAIL default: status ", resp.StatusCode, " err ", err.Error());
+                fmt::Println!(
+                    "FAIL default: status ",
+                    resp.StatusCode,
+                    " err ",
+                    err.Error()
+                );
                 bad += 1;
             }
         }
@@ -69,7 +74,11 @@ fn main() {
                 bad += 1;
             }
             if resp.StatusCode != 302 {
-                fmt::Println!("FAIL ErrUseLastResponse: status ", resp.StatusCode, " want 302");
+                fmt::Println!(
+                    "FAIL ErrUseLastResponse: status ",
+                    resp.StatusCode,
+                    " want 302"
+                );
                 bad += 1;
             }
             if resp.Header.Get(string("Location")) != "/b" {

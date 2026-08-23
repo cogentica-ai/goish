@@ -53,14 +53,19 @@ fn test_many_readers() {
         go!(|| {
             RW.RLock();
             // Pretend to read for a moment.
-            for _ in 0..100 { core::hint::spin_loop(); }
+            for _ in 0..100 {
+                core::hint::spin_loop();
+            }
             RW.RUnlock();
             READERS_DONE.fetch_add(1, Ordering::Relaxed);
         });
     }
     schedule();
 
-    check(READERS_DONE.load(Ordering::Relaxed) == N, b"many-readers: not all done\n");
+    check(
+        READERS_DONE.load(Ordering::Relaxed) == N,
+        b"many-readers: not all done\n",
+    );
 }
 
 // ── Test 2: a pending writer blocks new readers from acquiring;
@@ -84,7 +89,9 @@ fn test_writer_blocks_readers() {
         go!(|| {
             RW.RLock();
             R_BEFORE.fetch_add(1, Ordering::Relaxed);
-            for _ in 0..1000 { core::hint::spin_loop(); }
+            for _ in 0..1000 {
+                core::hint::spin_loop();
+            }
             RW.RUnlock();
         });
     }
@@ -107,9 +114,18 @@ fn test_writer_blocks_readers() {
     }
     schedule();
 
-    check(R_BEFORE.load(Ordering::Relaxed) == N_PRE, b"writer-blocks: pre-readers count wrong\n");
-    check(W_RAN.load(Ordering::Relaxed) == 1, b"writer-blocks: writer didn't run\n");
-    check(R_AFTER.load(Ordering::Relaxed) == N_POST, b"writer-blocks: post-readers count wrong\n");
+    check(
+        R_BEFORE.load(Ordering::Relaxed) == N_PRE,
+        b"writer-blocks: pre-readers count wrong\n",
+    );
+    check(
+        W_RAN.load(Ordering::Relaxed) == 1,
+        b"writer-blocks: writer didn't run\n",
+    );
+    check(
+        R_AFTER.load(Ordering::Relaxed) == N_POST,
+        b"writer-blocks: post-readers count wrong\n",
+    );
 }
 
 // ── Test 3: under heavy contention, writers' updates are atomic
@@ -171,7 +187,10 @@ fn test_writer_atomic_update() {
         GS_DONE.load(Ordering::Relaxed) == N_WRITERS + N_READERS,
         b"atomic-update: not all Gs done\n",
     );
-    check(MISMATCHES.load(Ordering::Relaxed) == 0, b"atomic-update: torn read observed\n");
+    check(
+        MISMATCHES.load(Ordering::Relaxed) == 0,
+        b"atomic-update: torn read observed\n",
+    );
     check(
         A.load(Ordering::Relaxed) == (N_WRITERS * ITERS) as i64,
         b"atomic-update: A wrong final\n",
@@ -189,13 +208,22 @@ fn test_trylock_paths() {
 
     check(RW.TryLock(), b"trylock: fresh, TryLock failed\n");
     check(!RW.TryLock(), b"trylock: locked, TryLock succeeded\n");
-    check(!RW.TryRLock(), b"trylock: write-locked, TryRLock succeeded\n");
+    check(
+        !RW.TryRLock(),
+        b"trylock: write-locked, TryRLock succeeded\n",
+    );
     RW.Unlock();
 
     check(RW.TryRLock(), b"trylock: TryRLock failed after Unlock\n");
-    check(RW.TryRLock(), b"trylock: 2nd TryRLock failed (readers should compose)\n");
+    check(
+        RW.TryRLock(),
+        b"trylock: 2nd TryRLock failed (readers should compose)\n",
+    );
     // Writer can't acquire while readers hold.
-    check(!RW.TryLock(), b"trylock: TryLock succeeded with active readers\n");
+    check(
+        !RW.TryLock(),
+        b"trylock: TryLock succeeded with active readers\n",
+    );
     RW.RUnlock();
     RW.RUnlock();
 

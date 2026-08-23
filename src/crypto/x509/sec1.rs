@@ -88,7 +88,10 @@ pub fn ParseECPrivateKey(der: slice<byte>) -> (ecdsa::PrivateKey, error) {
 pub fn MarshalECPrivateKey(key: &ecdsa::PrivateKey) -> (slice<byte>, error) {
     let (oid, ok) = super::x509::oidFromNamedCurve(key.PublicKey.Curve);
     if !ok {
-        return (slice::default(), errors::New("x509: unknown elliptic curve"));
+        return (
+            slice::default(),
+            errors::New("x509: unknown elliptic curve"),
+        );
     }
 
     return marshalECPrivateKeyWithOID(key, Some(&oid));

@@ -69,7 +69,11 @@ fn run() -> ! {
     {
         let f = http::transport_default_other::defaultTransportDialContext(net::Dialer::default());
         f();
-        check("defaultTransportDialContext returns a callable", true, string(""));
+        check(
+            "defaultTransportDialContext returns a callable",
+            true,
+            string(""),
+        );
     }
 
     // ── double WriteHeader: first status wins on the wire ──
@@ -170,7 +174,11 @@ fn run() -> ! {
         };
         let mut lc2 = http::server::newLoggingConn(string("test"), inner);
         let _ = lc2.Close();
-        check("a second wrap of the same baseName is independent", true, string(""));
+        check(
+            "a second wrap of the same baseName is independent",
+            true,
+            string(""),
+        );
     }
 
     finish();

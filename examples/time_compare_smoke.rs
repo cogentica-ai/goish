@@ -10,8 +10,8 @@ extern crate alloc;
 extern crate goish;
 
 use goish::fmt;
-use goish::time::{Date, Now, Sleep, Microsecond};
-use goish::{syscall};
+use goish::syscall;
+use goish::time::{Date, Microsecond, Now, Sleep};
 
 #[goish::main]
 fn main() {

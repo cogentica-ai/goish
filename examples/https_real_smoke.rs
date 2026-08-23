@@ -20,11 +20,11 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::crypto::tls;
 use goish::fmt;
 use goish::io;
 use goish::net::http;
 use goish::{string, syscall};
-use goish::crypto::tls;
 
 /// Attempt a single ChaCha20-Poly1305-forced TLS connection and HTTP GET.
 /// Returns Ok(status_line) on success or Err(err_msg) on failure.
@@ -60,10 +60,11 @@ fn probe_f_attempt(host: &str, addr: &str, path: &str) -> bool {
     let max_reads = 20;
     for _ in 0..max_reads {
         let remaining = resp_buf.len() - total;
-        if remaining == 0 { break; }
-        let mut slice_buf = goish::goslice::slice::<goish::types::byte>::__from_vec(
-            alloc::vec![0u8; remaining]
-        );
+        if remaining == 0 {
+            break;
+        }
+        let mut slice_buf =
+            goish::goslice::slice::<goish::types::byte>::__from_vec(alloc::vec![0u8; remaining]);
         let (n, rerr) = conn.Read(&mut slice_buf);
         if n > 0 {
             let chunk = slice_buf.__into_vec();
@@ -72,11 +73,17 @@ fn probe_f_attempt(host: &str, addr: &str, path: &str) -> bool {
             resp_buf[total..total + copy_len].copy_from_slice(&chunk[..copy_len]);
             total += copy_len;
         }
-        if rerr != goish::nil { break; }
-        if total > 12 { break; }
+        if rerr != goish::nil {
+            break;
+        }
+        if total > 12 {
+            break;
+        }
     }
 
-    if total < 5 { return false; }
+    if total < 5 {
+        return false;
+    }
     &resp_buf[..5] == b"HTTP/"
 }
 
@@ -85,15 +92,25 @@ fn probe_f_attempt(host: &str, addr: &str, path: &str) -> bool {
 /// an alert before we can read the response due to network timing).
 fn probe_f_chacha20_only() -> bool {
     let label = "F_chacha20_only";
-    fmt::Println!(fmt::Sprintf!("[probe %s] DialChaCha20Only tcp cloudflare.com:443 (ChaCha20-Poly1305 only)", label));
+    fmt::Println!(fmt::Sprintf!(
+        "[probe %s] DialChaCha20Only tcp cloudflare.com:443 (ChaCha20-Poly1305 only)",
+        label
+    ));
 
     // Up to 3 attempts to handle server-side timing
     for attempt in 0..3i64 {
         if attempt > 0 {
-            fmt::Println!(fmt::Sprintf!("[probe %s] retry attempt %d", label, attempt + 1));
+            fmt::Println!(fmt::Sprintf!(
+                "[probe %s] retry attempt %d",
+                label,
+                attempt + 1
+            ));
         }
         if probe_f_attempt("cloudflare.com", "cloudflare.com:443", "/") {
-            fmt::Println!(fmt::Sprintf!("[probe %s] PASS (suite=0x1303 — see tls13-debug lines above)", label));
+            fmt::Println!(fmt::Sprintf!(
+                "[probe %s] PASS (suite=0x1303 — see tls13-debug lines above)",
+                label
+            ));
             return true;
         }
     }
@@ -101,22 +118,44 @@ fn probe_f_chacha20_only() -> bool {
     false
 }
 
-fn probe(label: &'static str, url: &'static str, expect_min_size: usize, expect_magic: Option<&'static [u8]>) -> bool {
+fn probe(
+    label: &'static str,
+    url: &'static str,
+    expect_min_size: usize,
+    expect_magic: Option<&'static [u8]>,
+) -> bool {
     fmt::Println!(fmt::Sprintf!("[probe %s] GET %s", label, url));
     let (mut resp, err) = http::Get(string(url));
     if err != goish::nil {
-        fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: http::Get err=%v", label, err));
+        fmt::Println!(fmt::Sprintf!(
+            "[probe %s] FAIL: http::Get err=%v",
+            label,
+            err
+        ));
         return false;
     }
-    fmt::Println!(fmt::Sprintf!("[probe %s] StatusCode=%d", label, resp.StatusCode));
+    fmt::Println!(fmt::Sprintf!(
+        "[probe %s] StatusCode=%d",
+        label,
+        resp.StatusCode
+    ));
     if resp.StatusCode != 200 {
-        fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: expected status 200, got %d", label, resp.StatusCode));
+        fmt::Println!(fmt::Sprintf!(
+            "[probe %s] FAIL: expected status 200, got %d",
+            label,
+            resp.StatusCode
+        ));
         return false;
     }
     let (body, _) = io::ReadAll(&mut resp.Body);
     let _ = goish::io::Closer::Close(&mut resp.Body);
     let body_len = body.Len();
-    fmt::Println!(fmt::Sprintf!("[probe %s] body.Len=%d (expect >= %d)", label, body_len, expect_min_size as i64));
+    fmt::Println!(fmt::Sprintf!(
+        "[probe %s] body.Len=%d (expect >= %d)",
+        label,
+        body_len,
+        expect_min_size as i64
+    ));
     if (body_len as usize) < expect_min_size {
         fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: body too short", label));
         return false;
@@ -124,13 +163,21 @@ fn probe(label: &'static str, url: &'static str, expect_min_size: usize, expect_
     if let Some(magic) = expect_magic {
         let body_bytes: &[u8] = &body;
         if body_bytes.len() < magic.len() {
-            fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: body shorter than magic prefix", label));
+            fmt::Println!(fmt::Sprintf!(
+                "[probe %s] FAIL: body shorter than magic prefix",
+                label
+            ));
             return false;
         }
         for i in 0..magic.len() {
             if body_bytes[i] != magic[i] {
-                fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: magic[%d] expected 0x%02x got 0x%02x",
-                    label, i as i64, magic[i] as i64, body_bytes[i] as i64));
+                fmt::Println!(fmt::Sprintf!(
+                    "[probe %s] FAIL: magic[%d] expected 0x%02x got 0x%02x",
+                    label,
+                    i as i64,
+                    magic[i] as i64,
+                    body_bytes[i] as i64
+                ));
                 return false;
             }
         }
@@ -149,7 +196,7 @@ fn main() {
     let a = probe(
         "A_text_body",
         "https://raw.githubusercontent.com/golang/go/master/src/net/http/status.go",
-        1000,        // > 1KB (~7.6KB)
+        1000, // > 1KB (~7.6KB)
         Some(b"// Copyright"),
     );
     // B. binary body — the concern is binary-safe transfer, not gzip
@@ -157,28 +204,25 @@ fn main() {
     let b = probe(
         "B_binary_body",
         "https://raw.githubusercontent.com/golang/go/master/src/image/testdata/video-001.png",
-        5000,        // > 5KB (~29KB)
-        Some(&[0x89, 0x50, 0x4e, 0x47]),  // PNG magic
+        5000,                            // > 5KB (~29KB)
+        Some(&[0x89, 0x50, 0x4e, 0x47]), // PNG magic
     );
     // C. ECDSA cert, small body
     let c = probe(
         "C_ecdsa_raw",
         "https://raw.githubusercontent.com/stefanprodan/podinfo/master/README.md",
         100,
-        Some(b"#"),  // markdown starts with #
+        Some(b"#"), // markdown starts with #
     );
 
     // D. TLS 1.3 probe: Cloudflare's 1.1.1.1 — reliably returns 200 and negotiates TLS 1.3.
     // Demonstrates that goish TLS 1.3 (suite=0x1301 or 0x1302, version=0x0304) works with a
     // different host than probes A-C.
     // Negotiated version (0x0304) + cipher shown in tls13-debug lines above.
-    let d = probe(
-        "D_tls13_cloudflare",
-        "https://one.one.one.one/",
-        10,
-        None,
-    );
-    fmt::Println!(fmt::Sprintf!("[probe D_tls13_cloudflare] TLS 1.3 (0x0304) — see tls13-debug lines above"));
+    let d = probe("D_tls13_cloudflare", "https://one.one.one.one/", 10, None);
+    fmt::Println!(fmt::Sprintf!(
+        "[probe D_tls13_cloudflare] TLS 1.3 (0x0304) — see tls13-debug lines above"
+    ));
 
     // E. HelloRetryRequest endpoint, which turns out to be a *record
     // version* conformance probe.
@@ -227,11 +271,18 @@ fn main() {
     // Its result is REPORTED but does not decide the exit code — an
     // HRR regression still shows in the log, without a red run meaning
     // "that host is down again".
-    let total = if a { 1 } else { 0 } + if b { 1 } else { 0 } + if c { 1 } else { 0 }
-        + if d { 1 } else { 0 } + if f { 1 } else { 0 } + if g { 1 } else { 0 };
+    let total = if a { 1 } else { 0 }
+        + if b { 1 } else { 0 }
+        + if c { 1 } else { 0 }
+        + if d { 1 } else { 0 }
+        + if f { 1 } else { 0 }
+        + if g { 1 } else { 0 };
     let total_label = fmt::Sprintf!("%d/6 (E skipped: see the note in main)", total);
     let _ = e;
-    fmt::Println!(fmt::Sprintf!("=== https_real_smoke: %s passed ===", total_label));
+    fmt::Println!(fmt::Sprintf!(
+        "=== https_real_smoke: %s passed ===",
+        total_label
+    ));
     syscall::Exit(if total == 6 { 0 } else { 1 });
 }
 
@@ -276,7 +327,9 @@ fn probe_e_rejects_bad_record_version() -> bool {
         let _ = goish::io::Closer::Close(&mut resp.Body);
         fmt::Println!(fmt::Sprintf!(
             "[probe %s] PASS (server took the compliant path: status=%d body=%d bytes)",
-            label, resp.StatusCode, body.Len() as i64
+            label,
+            resp.StatusCode,
+            body.Len() as i64
         ));
         return true;
     }
@@ -291,7 +344,8 @@ fn probe_e_rejects_bad_record_version() -> bool {
     }
     fmt::Println!(fmt::Sprintf!(
         "[probe %s] FAIL: unexpected error (neither success nor Go's rejection): %s",
-        label, got
+        label,
+        got
     ));
     false
 }
@@ -320,7 +374,12 @@ fn probe_g_psk_resumption() -> bool {
     let fetch = |cfg: &tls::Config, round: &'static str| -> bool {
         let (mut conn, err) = tls::Dial(string("tcp"), string(addr), cfg);
         if err != goish::nil {
-            fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: %s dial: %v", label, round, err));
+            fmt::Println!(fmt::Sprintf!(
+                "[probe %s] FAIL: %s dial: %v",
+                label,
+                round,
+                err
+            ));
             return false;
         }
         let req = fmt::Sprintf!(
@@ -329,7 +388,12 @@ fn probe_g_psk_resumption() -> bool {
         );
         let (_, werr) = conn.Write(req.as_bytes());
         if werr != goish::nil {
-            fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: %s write: %v", label, round, werr));
+            fmt::Println!(fmt::Sprintf!(
+                "[probe %s] FAIL: %s write: %v",
+                label,
+                round,
+                werr
+            ));
             return false;
         }
         // One read is enough, and keeps this probe inside e2e's per-example
@@ -342,21 +406,37 @@ fn probe_g_psk_resumption() -> bool {
         let (n, rerr) = conn.Read(&mut buf);
         let total: i64 = if n > 0 { n as i64 } else { 0 };
         if total == 0 && rerr != goish::nil {
-            fmt::Println!(fmt::Sprintf!("[probe %s] FAIL: %s read: %v", label, round, rerr));
+            fmt::Println!(fmt::Sprintf!(
+                "[probe %s] FAIL: %s read: %v",
+                label,
+                round,
+                rerr
+            ));
             let _ = conn.Close();
             return false;
         }
         let _ = conn.Close();
-        fmt::Println!(fmt::Sprintf!("[probe %s] %s read %d bytes", label, round, total));
+        fmt::Println!(fmt::Sprintf!(
+            "[probe %s] %s read %d bytes",
+            label,
+            round,
+            total
+        ));
         total > 0
     };
 
-    fmt::Println!(fmt::Sprintf!("[probe %s] first connection (issues ticket)", label));
+    fmt::Println!(fmt::Sprintf!(
+        "[probe %s] first connection (issues ticket)",
+        label
+    ));
     if !fetch(&cfg, "first") {
         return false;
     }
 
-    fmt::Println!(fmt::Sprintf!("[probe %s] second connection (should resume)", label));
+    fmt::Println!(fmt::Sprintf!(
+        "[probe %s] second connection (should resume)",
+        label
+    ));
     if !fetch(&cfg, "second") {
         return false;
     }

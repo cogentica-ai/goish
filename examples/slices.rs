@@ -6,7 +6,9 @@
 #![no_std]
 #![no_main]
 
-use goish::{append, byte, cap, copy, int, len, make, range, slice, slice as goish_slice, string, syscall};
+use goish::{
+    append, byte, cap, copy, int, len, make, range, slice, slice as goish_slice, string, syscall,
+};
 
 fn die(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
@@ -24,7 +26,10 @@ fn main() {
     // (1) slice!([]int{...}) — typed literal.
     let xs = goish_slice!([]int{1, 2, 3});
     check(len(&xs) == 3, b"slices: literal len wrong\n");
-    check(xs[0] == 1 && xs[1] == 2 && xs[2] == 3, b"slices: literal contents wrong\n");
+    check(
+        xs[0] == 1 && xs[1] == 2 && xs[2] == 3,
+        b"slices: literal contents wrong\n",
+    );
 
     // (2) Empty literal.
     let empty = goish_slice!([]int{});
@@ -60,14 +65,20 @@ fn main() {
     // (8) string-literal slice — &str → string via .into() in slice! macro.
     let names = goish_slice!([]string{"alice", "bob"});
     check(len(&names) == 2, b"slices: names len wrong\n");
-    check(names[0] == "alice" && names[1] == "bob", b"slices: names contents wrong\n");
+    check(
+        names[0] == "alice" && names[1] == "bob",
+        b"slices: names contents wrong\n",
+    );
 
     // (9) copy!(dst, src) — element copy, returns int = min(len(dst), len(src)).
     let mut dst = make!([]int, 5);
     let src = goish_slice!([]int{10, 20, 30});
     let n = copy!(dst, src);
     check(n == 3, b"slices: copy returned wrong count\n");
-    check(dst[0] == 10 && dst[2] == 30, b"slices: copy contents wrong\n");
+    check(
+        dst[0] == 10 && dst[2] == 30,
+        b"slices: copy contents wrong\n",
+    );
     check(dst[3] == 0 && dst[4] == 0, b"slices: copy overwrote tail\n");
 
     // (10) copy! with src longer than dst — caps at dst.len.
@@ -75,7 +86,10 @@ fn main() {
     let big = goish_slice!([]int{1, 2, 3, 4, 5});
     let n = copy!(small, big);
     check(n == 2, b"slices: copy-truncate count wrong\n");
-    check(small[0] == 1 && small[1] == 2, b"slices: copy-truncate contents wrong\n");
+    check(
+        small[0] == 1 && small[1] == 2,
+        b"slices: copy-truncate contents wrong\n",
+    );
 
     // (11) range! over slice — (int, &T).
     let xs = goish_slice!([]int{100, 200, 300});
@@ -91,7 +105,10 @@ fn main() {
     // (12) Round-trip through string — bytes(string("hi")) should give a slice<byte>.
     let s = string("hi");
     let b: slice<byte> = goish::bytes(s.clone());
-    check(len(&b) == 2 && b[0] == b'h' && b[1] == b'i', b"slices: bytes round-trip wrong\n");
+    check(
+        len(&b) == 2 && b[0] == b'h' && b[1] == b'i',
+        b"slices: bytes round-trip wrong\n",
+    );
 
     const OK: &[u8] = b"slices: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

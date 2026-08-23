@@ -72,7 +72,10 @@ fn main() {
         T1.store(burn(8192), Ordering::Release);
     });
     schedule();
-    check(T1.load(Ordering::Acquire) == 8193, b"t1: deep bare-go recursion\n");
+    check(
+        T1.load(Ordering::Acquire) == 8193,
+        b"t1: deep bare-go recursion\n",
+    );
 
     // ─── Test 2: WaitGroup.Go inherits the raised reservation ──────
     //
@@ -85,7 +88,10 @@ fn main() {
         T2.store(burn(8192), Ordering::Release);
     });
     wg.Wait();
-    check(T2.load(Ordering::Acquire) == 8193, b"t2: WaitGroup.Go deep recursion\n");
+    check(
+        T2.load(Ordering::Acquire) == 8193,
+        b"t2: WaitGroup.Go deep recursion\n",
+    );
 
     // ─── Test 3: go!(stack(N)) huge one-off reservation ────────────
     //
@@ -97,7 +103,10 @@ fn main() {
         T3.store(burn(49_152), Ordering::Release);
     });
     schedule();
-    check(T3.load(Ordering::Acquire) == 49_153, b"t3: stack(256MB) deep recursion\n");
+    check(
+        T3.load(Ordering::Acquire) == 49_153,
+        b"t3: stack(256MB) deep recursion\n",
+    );
 
     // ─── Test 4: restore default; pool transition + shallow spawns ─
     //
@@ -114,7 +123,10 @@ fn main() {
         });
     }
     schedule();
-    check(T4.load(Ordering::Acquire) == 8 * 101, b"t4: shallow spawns after restore\n");
+    check(
+        T4.load(Ordering::Acquire) == 8 * 101,
+        b"t4: shallow spawns after restore\n",
+    );
 
     let msg = b"MAXSTACK_OK all 4 tests passed\n";
     syscall::Write(syscall::STDOUT, msg.as_ptr(), msg.len());

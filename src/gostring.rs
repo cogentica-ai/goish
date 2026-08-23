@@ -80,7 +80,9 @@ impl string {
     /// matches Go's value-type-with-shared-backing semantics.
     #[inline]
     pub fn from_bytes(b: &[u8]) -> Self {
-        Self { bytes: Arc::from(b) }
+        Self {
+            bytes: Arc::from(b),
+        }
     }
 
     /// Internal hand-off when an owned `Vec<u8>` is already prepared
@@ -89,7 +91,9 @@ impl string {
     /// public so macros can reach it via path resolution.
     #[doc(hidden)]
     pub fn __from_vec(v: Vec<u8>) -> Self {
-        Self { bytes: Arc::from(v) }
+        Self {
+            bytes: Arc::from(v),
+        }
     }
 
     /// `string(r)` where r is byte/rune/int — Go's int-to-string

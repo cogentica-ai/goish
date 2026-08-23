@@ -82,7 +82,11 @@ fn main() {
         if err.IsNil() && d.Nanoseconds() == want {
             fmt::Println!("[ 6] 1h2m3.456s                PASS");
         } else {
-            fmt::Println!("[ 6] 1h2m3.456s                FAIL ns={} want={}", d.Nanoseconds(), want);
+            fmt::Println!(
+                "[ 6] 1h2m3.456s                FAIL ns={} want={}",
+                d.Nanoseconds(),
+                want
+            );
             failed += 1;
         }
     }
@@ -105,7 +109,11 @@ fn main() {
         if ea.IsNil() && eb.IsNil() && a.Nanoseconds() == 1_000 && b.Nanoseconds() == 1_000 {
             fmt::Println!("[ 8] us == µs                  PASS");
         } else {
-            fmt::Println!("[ 8] us == µs                  FAIL a={} b={}", a.Nanoseconds(), b.Nanoseconds());
+            fmt::Println!(
+                "[ 8] us == µs                  FAIL a={} b={}",
+                a.Nanoseconds(),
+                b.Nanoseconds()
+            );
             failed += 1;
         }
     }

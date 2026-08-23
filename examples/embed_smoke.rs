@@ -31,10 +31,10 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use goish::fmt;
 use goish::compress::gzip;
 use goish::embed;
 use goish::errors;
+use goish::fmt;
 use goish::io::fs;
 use goish::io::fs::ReadDirFile;
 use goish::strings;
@@ -75,21 +75,20 @@ fn walk_lines(fsys: &embed::FS) -> Vec<String> {
     // fs::WalkDir takes an Fn closure; collect through a cell
     // (single-threaded walk).
     let out: core::cell::RefCell<Vec<String>> = core::cell::RefCell::new(Vec::new());
-    let err = fs::WalkDir(fsys, ".", |path: string, d: &(dyn fs::DirEntry + Send + Sync + 'static), err: goish::error| {
-        if err != goish::nil {
-            return err;
-        }
-        let (info, _) = d.Info();
-        let line = fmt::Sprintf!(
-            "%s dir=%t size=%d",
-            path.clone(),
-            d.IsDir(),
-            info.Size()
-        );
-        out.borrow_mut()
-            .push(String::from(core::str::from_utf8(line.as_bytes()).unwrap()));
-        goish::errors::nil
-    });
+    let err = fs::WalkDir(
+        fsys,
+        ".",
+        |path: string, d: &(dyn fs::DirEntry + Send + Sync + 'static), err: goish::error| {
+            if err != goish::nil {
+                return err;
+            }
+            let (info, _) = d.Info();
+            let line = fmt::Sprintf!("%s dir=%t size=%d", path.clone(), d.IsDir(), info.Size());
+            out.borrow_mut()
+                .push(String::from(core::str::from_utf8(line.as_bytes()).unwrap()));
+            goish::errors::nil
+        },
+    );
     if err != goish::nil {
         fmt::Println!("walk error:", err.Error());
         die(b"walk: unexpected error\n");
@@ -134,7 +133,10 @@ fn main() {
 
     // ─── 3. glob pattern ───────────────────────────────────────────
     let (data, err) = txtOnly.ReadFile("embed_fixtures/hello.txt");
-    check(err == goish::nil && data.as_ref() == b"hello, embed\n", b"t3: glob file present\n");
+    check(
+        err == goish::nil && data.as_ref() == b"hello, embed\n",
+        b"t3: glob file present\n",
+    );
     let (_, err) = txtOnly.ReadFile("embed_fixtures/data.bin");
     check(err != goish::nil, b"t3: non-matching file absent\n");
 
@@ -153,20 +155,32 @@ fn main() {
             break;
         }
     }
-    check(out == br#"{"greeting":"hello","n":42}"#, b"t4: gunzipped payload\n");
+    check(
+        out == br#"{"greeting":"hello","n":42}"#,
+        b"t4: gunzipped payload\n",
+    );
 
     // ─── 5. slice<byte> variable ───────────────────────────────────
-    check(helloBytes.as_ref() == b"hello, embed\n", b"t5: bytes variable\n");
+    check(
+        helloBytes.as_ref() == b"hello, embed\n",
+        b"t5: bytes variable\n",
+    );
 
     // ─── 6. Open + Read + Stat; chunked ReadDir ────────────────────
     let (f, err) = content.Open("embed_fixtures/hello.txt");
     check(err == goish::nil, b"t6: Open\n");
     let mut buf = goish::goslice::slice::<byte>::__from_vec(alloc::vec![0u8; 64]);
     let (n, _) = f.Read(&mut buf);
-    check(&buf.as_ref()[..n as usize] == b"hello, embed\n", b"t6: Read\n");
+    check(
+        &buf.as_ref()[..n as usize] == b"hello, embed\n",
+        b"t6: Read\n",
+    );
     let (st, err) = f.Stat();
     check(err == goish::nil, b"t6: Stat err\n");
-    check(st.Name().as_bytes() == b"hello.txt" && st.Size() == 13, b"t6: Stat name/size\n");
+    check(
+        st.Name().as_bytes() == b"hello.txt" && st.Size() == 13,
+        b"t6: Stat name/size\n",
+    );
     check(st.Mode().0 == 0o444, b"t6: file mode 0444\n");
 
     let (df, err) = content.Open("embed_fixtures/sub");
@@ -175,20 +189,35 @@ fn main() {
     check(ok, b"t6: dir file is ReadDirFile\n");
     // Go: chunk(2)=[a.txt b.txt], chunk(2)=[deep], chunk -> EOF.
     let (ents, err) = rdf.ReadDir(2);
-    check(err == goish::nil && goish::len(&ents) == 2, b"t6: first chunk\n");
+    check(
+        err == goish::nil && goish::len(&ents) == 2,
+        b"t6: first chunk\n",
+    );
     check(
         ents[0].Name().as_bytes() == b"a.txt" && ents[1].Name().as_bytes() == b"b.txt",
         b"t6: first chunk names\n",
     );
     let (ents, err) = rdf.ReadDir(2);
-    check(err == goish::nil && goish::len(&ents) == 1, b"t6: second chunk\n");
-    check(ents[0].Name().as_bytes() == b"deep" && ents[0].IsDir(), b"t6: deep is dir\n");
+    check(
+        err == goish::nil && goish::len(&ents) == 1,
+        b"t6: second chunk\n",
+    );
+    check(
+        ents[0].Name().as_bytes() == b"deep" && ents[0].IsDir(),
+        b"t6: deep is dir\n",
+    );
     let (ents, err) = rdf.ReadDir(2);
-    check(goish::len(&ents) == 0 && err == goish::io::EOF, b"t6: chunk EOF\n");
+    check(
+        goish::len(&ents) == 0 && err == goish::io::EOF,
+        b"t6: chunk EOF\n",
+    );
 
     // ReadDir ordering, Go: data.bin hello.txt msg.json.gz sub.
     let (list, err) = content.ReadDir("embed_fixtures");
-    check(err == goish::nil && goish::len(&list) == 4, b"t6: ReadDir count\n");
+    check(
+        err == goish::nil && goish::len(&list) == 4,
+        b"t6: ReadDir count\n",
+    );
     check(
         list[0].Name().as_bytes() == b"data.bin"
             && list[1].Name().as_bytes() == b"hello.txt"
@@ -201,7 +230,10 @@ fn main() {
     // ─── 7. error parity ───────────────────────────────────────────
     let (_, err) = content.Open("embed_fixtures/nope.txt");
     check(err != goish::nil, b"t7: missing file errors\n");
-    check(errors::Is(err.clone(), fs::ErrNotExist), b"t7: missing is fs.ErrNotExist\n");
+    check(
+        errors::Is(err.clone(), fs::ErrNotExist),
+        b"t7: missing is fs.ErrNotExist\n",
+    );
     check(
         err.Error().as_bytes() == b"open embed_fixtures/nope.txt: file does not exist",
         b"t7: missing error text\n",
@@ -224,7 +256,10 @@ fn main() {
     let (sub, err) = fs::Sub(fsys, "embed_fixtures/sub");
     check(err == goish::nil, b"t8: Sub\n");
     let (data, err) = fs::ReadFile(&*sub, "a.txt");
-    check(err == goish::nil && data.as_ref() == b"file a\n", b"t8: Sub ReadFile\n");
+    check(
+        err == goish::nil && data.as_ref() == b"file a\n",
+        b"t8: Sub ReadFile\n",
+    );
 
     let msg = b"EMBED_OK FS walk/glob/all + string/bytes vars + errors vs real Go\n";
     syscall::Write(syscall::STDOUT, msg.as_ptr(), msg.len());

@@ -36,8 +36,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::context;
+use goish::fmt;
 use goish::io::{Closer, Writer};
 use goish::net;
 use goish::net::http;
@@ -216,7 +216,8 @@ fn main() {
             return;
         }
         let id = NOTE_SEQ.fetch_add(1, Ordering::AcqRel) + 1;
-        w.Header().Set("Location", fmt::Sprintf!("/api/notes/%d", id));
+        w.Header()
+            .Set("Location", fmt::Sprintf!("/api/notes/%d", id));
         w.WriteHeader(201);
         let _ = w.Write(goish::convert::bytes(fmt::Sprintf!("{\"id\":%d}", id)));
     });
@@ -272,10 +273,8 @@ fn main() {
     // ── SIGTERM → graceful shutdown (the orchestrator contract) ──
     static SHUTDOWN_NIL: AtomicUsize = AtomicUsize::new(0);
     static SHUTDOWN_DONE: AtomicUsize = AtomicUsize::new(0);
-    let (sig_ctx, sig_stop) = signal::NotifyContext(
-        context::Background(),
-        &[syscall::SIGTERM, syscall::SIGINT],
-    );
+    let (sig_ctx, sig_stop) =
+        signal::NotifyContext(context::Background(), &[syscall::SIGTERM, syscall::SIGINT]);
     let srv_shutdown = srv.clone();
     go!(move || {
         // Park until SIGTERM/SIGINT.
@@ -298,7 +297,10 @@ fn main() {
     // ─── the self-test client ────────────────────────────────────────
 
     // 1. liveness
-    let resp = raw_roundtrip(port, b"GET /healthz HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
+    let resp = raw_roundtrip(
+        port,
+        b"GET /healthz HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+    );
     if status_of(&resp) == 200 {
         pass("GET /healthz -> 200");
     } else {
@@ -340,7 +342,10 @@ fn main() {
     }
 
     // 3. readiness (pre-shutdown)
-    let resp = raw_roundtrip(port, b"GET /readyz HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
+    let resp = raw_roundtrip(
+        port,
+        b"GET /readyz HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+    );
     if status_of(&resp) == 200 {
         pass("GET /readyz -> 200 before shutdown");
     } else {
@@ -359,7 +364,10 @@ fn main() {
     }
 
     // 5. context hooks
-    let resp = raw_roundtrip(port, b"GET /api/whoami HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
+    let resp = raw_roundtrip(
+        port,
+        b"GET /api/whoami HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+    );
     if find(&resp, b"service=taskd conn-tag=true").is_some() {
         pass("BaseContext + ConnContext values reach r.Context()");
     } else {
@@ -411,7 +419,10 @@ fn main() {
     if status_of(&resp) == 417 {
         pass("unknown Expect -> 417");
     } else {
-        fail(fmt::Sprintf!("Expect: teleport -> %d, want 417", status_of(&resp)));
+        fail(fmt::Sprintf!(
+            "Expect: teleport -> %d, want 417",
+            status_of(&resp)
+        ));
     }
 
     // 8. IdleTimeout closes idle keep-alive conns (configured 400ms).
@@ -441,7 +452,10 @@ fn main() {
     }
 
     // 9. handler panic → conn closed + ErrorLog line
-    let _ = raw_roundtrip(port, b"GET /api/boom HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
+    let _ = raw_roundtrip(
+        port,
+        b"GET /api/boom HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+    );
     time::Sleep(time::Millisecond * 100);
     {
         let logged = {
@@ -470,11 +484,17 @@ fn main() {
 
     // readyz must flip 503 while the listener still accepts (the
     // 100ms grace window in the shutdown goroutine).
-    let resp = raw_roundtrip(port, b"GET /readyz HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
+    let resp = raw_roundtrip(
+        port,
+        b"GET /readyz HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+    );
     if status_of(&resp) == 503 {
         pass("readyz -> 503 after SIGTERM (LB drain signal)");
     } else {
-        fail(fmt::Sprintf!("readyz after SIGTERM: %d, want 503", status_of(&resp)));
+        fail(fmt::Sprintf!(
+            "readyz after SIGTERM: %d, want 503",
+            status_of(&resp)
+        ));
     }
 
     // Wait for the drain to finish.

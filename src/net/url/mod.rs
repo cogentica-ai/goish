@@ -16,7 +16,7 @@ use crate::errors::{self, error, ErrorTrait};
 use crate::gomap;
 use crate::strings;
 use crate::types::int;
-use crate::{byte, nil, string, slice};
+use crate::{byte, nil, slice, string};
 
 // ─── Error types ─────────────────────────────────────────────────────
 
@@ -24,7 +24,7 @@ use crate::{byte, nil, string, slice};
 /// Mirrors `net/url.Error` (url.go:28-32).
 #[derive(Clone)]
 pub struct Error {
-    pub Op:  string,
+    pub Op: string,
     pub URL: string,
     pub Err: error,
 }
@@ -45,7 +45,11 @@ impl ErrorTrait for Error {
 
 impl Error {
     pub fn new<O: Into<string>, U: Into<string>>(op: O, url: U, err: error) -> error {
-        errors::Wrap(Error { Op: op.into(), URL: url.into(), Err: err })
+        errors::Wrap(Error {
+            Op: op.into(),
+            URL: url.into(),
+            Err: err,
+        })
     }
 }
 
@@ -128,7 +132,8 @@ fn should_escape(c: byte, mode: Encoding) -> bool {
 
     if mode == EncodeHost || mode == EncodeZone {
         match c {
-            b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' | b':' | b'[' | b']' | b'<' | b'>' | b'"' => {
+            b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' | b':'
+            | b'[' | b']' | b'<' | b'>' | b'"' => {
                 return false;
             }
             _ => {}
@@ -137,16 +142,14 @@ fn should_escape(c: byte, mode: Encoding) -> bool {
 
     match c {
         b'-' | b'_' | b'.' | b'~' => return false,
-        b'$' | b'&' | b'+' | b',' | b'/' | b':' | b';' | b'=' | b'?' | b'@' => {
-            match mode {
-                EncodePath => return c == b'?',
-                EncodePathSegment => return c == b'/' || c == b';' || c == b',' || c == b'?',
-                EncodeUserPassword => return c == b'@' || c == b'/' || c == b'?' || c == b':',
-                EncodeQueryComponent => return true,
-                EncodeFragment => return false,
-                _ => {}
-            }
-        }
+        b'$' | b'&' | b'+' | b',' | b'/' | b':' | b';' | b'=' | b'?' | b'@' => match mode {
+            EncodePath => return c == b'?',
+            EncodePathSegment => return c == b'/' || c == b';' || c == b',' || c == b'?',
+            EncodeUserPassword => return c == b'@' || c == b'/' || c == b'?' || c == b':',
+            EncodeQueryComponent => return true,
+            EncodeFragment => return false,
+            _ => {}
+        },
         _ => {}
     }
 
@@ -165,7 +168,9 @@ fn should_escape(c: byte, mode: Encoding) -> bool {
 fn unescape(s: string, mode: Encoding) -> (string, error) {
     let s_bytes = s.as_bytes();
     let n = s_bytes.iter().filter(|&&c| c == b'%').count();
-    let has_plus = s_bytes.iter().any(|&c| c == b'+' && mode == EncodeQueryComponent);
+    let has_plus = s_bytes
+        .iter()
+        .any(|&c| c == b'+' && mode == EncodeQueryComponent);
 
     if n == 0 && !has_plus {
         return (s, nil.into());
@@ -177,18 +182,25 @@ fn unescape(s: string, mode: Encoding) -> (string, error) {
     while i < len {
         match s_bytes[i as usize] {
             b'%' => {
-                if i + 2 >= len || !is_hex(s_bytes[(i + 1) as usize]) || !is_hex(s_bytes[(i + 2) as usize]) {
+                if i + 2 >= len
+                    || !is_hex(s_bytes[(i + 1) as usize])
+                    || !is_hex(s_bytes[(i + 2) as usize])
+                {
                     let mut sub = s.slice(i, len);
                     if sub.Len() > 3 {
                         sub = sub.slice(0, 3);
                     }
                     return (string::new(), EscapeError::new(sub));
                 }
-                if mode == EncodeHost && un_hex(s_bytes[(i + 1) as usize]) < 8 && s.slice(i, i + 3) != "%25" {
+                if mode == EncodeHost
+                    && un_hex(s_bytes[(i + 1) as usize]) < 8
+                    && s.slice(i, i + 3) != "%25"
+                {
                     return (string::new(), EscapeError::new(s.slice(i, i + 3)));
                 }
                 if mode == EncodeZone {
-                    let v = un_hex(s_bytes[(i + 1) as usize]) << 4 | un_hex(s_bytes[(i + 2) as usize]);
+                    let v =
+                        un_hex(s_bytes[(i + 1) as usize]) << 4 | un_hex(s_bytes[(i + 2) as usize]);
                     if s.slice(i, i + 3) != "%25" && v != b' ' && should_escape(v, EncodeHost) {
                         return (string::new(), EscapeError::new(s.slice(i, i + 3)));
                     }
@@ -199,7 +211,10 @@ fn unescape(s: string, mode: Encoding) -> (string, error) {
                 i += 1;
             }
             _ => {
-                if (mode == EncodeHost || mode == EncodeZone) && s_bytes[i as usize] < 0x80 && should_escape(s_bytes[i as usize], mode) {
+                if (mode == EncodeHost || mode == EncodeZone)
+                    && s_bytes[i as usize] < 0x80
+                    && should_escape(s_bytes[i as usize], mode)
+                {
                     return (string::new(), InvalidHostError::new(s.slice(i, i + 1)));
                 }
                 i += 1;
@@ -305,20 +320,28 @@ pub fn PathEscape<S: Into<string>>(s: S) -> string {
 /// `url.Userinfo` (url.go:401) — username and password information.
 #[derive(Clone, Default)]
 pub struct Userinfo {
-    username:    string,
-    password:    string,
+    username: string,
+    password: string,
     passwordSet: bool,
 }
 
 impl Userinfo {
     /// `User(username)` (url.go:391) — returns Userinfo with username, no password.
     pub fn User<U: Into<string>>(username: U) -> Userinfo {
-        Userinfo { username: username.into(), password: string::new(), passwordSet: false }
+        Userinfo {
+            username: username.into(),
+            password: string::new(),
+            passwordSet: false,
+        }
     }
 
     /// `UserPassword(username, password)` (url.go:399) — returns Userinfo with both.
     pub fn UserPassword<U: Into<string>, P: Into<string>>(username: U, password: P) -> Userinfo {
-        Userinfo { username: username.into(), password: password.into(), passwordSet: true }
+        Userinfo {
+            username: username.into(),
+            password: password.into(),
+            passwordSet: true,
+        }
     }
 
     /// `u.Username()` (url.go:407) — returns the username.
@@ -370,16 +393,16 @@ impl From<crate::nilval::Nil> for Userinfo {
 /// `url.URL` (url.go:375) — represents a parsed URL (URI reference).
 #[derive(Clone, Default)]
 pub struct URL {
-    pub Scheme:      string,
-    pub Opaque:      string,
-    pub User:        Userinfo,
-    pub Host:        string,
-    pub Path:        string,
-    pub RawPath:     string,
-    pub OmitHost:    bool,
-    pub ForceQuery:  bool,
-    pub RawQuery:    string,
-    pub Fragment:    string,
+    pub Scheme: string,
+    pub Opaque: string,
+    pub User: Userinfo,
+    pub Host: string,
+    pub Path: string,
+    pub RawPath: string,
+    pub OmitHost: bool,
+    pub ForceQuery: bool,
+    pub RawQuery: string,
+    pub Fragment: string,
     pub RawFragment: string,
 }
 
@@ -463,7 +486,10 @@ impl URL {
         while i < len {
             let c = bytes[i as usize];
             if c == b'%' {
-                if i + 2 >= len || !is_hex(bytes[(i + 1) as usize]) || !is_hex(bytes[(i + 2) as usize]) {
+                if i + 2 >= len
+                    || !is_hex(bytes[(i + 1) as usize])
+                    || !is_hex(bytes[(i + 2) as usize])
+                {
                     return false;
                 }
             } else if should_escape(c, EncodePath) {
@@ -482,7 +508,10 @@ impl URL {
         while i < len {
             let c = bytes[i as usize];
             if c == b'%' {
-                if i + 2 >= len || !is_hex(bytes[(i + 1) as usize]) || !is_hex(bytes[(i + 2) as usize]) {
+                if i + 2 >= len
+                    || !is_hex(bytes[(i + 1) as usize])
+                    || !is_hex(bytes[(i + 2) as usize])
+                {
                     return false;
                 }
             } else if should_escape(c, EncodeFragment) {
@@ -563,7 +592,10 @@ impl URL {
                 if ref_.RawQuery.Len() == 0 {
                     url.RawQuery = self.RawQuery.clone();
                 }
-            } else if self.Path.Len() != 0 && ref_.Path.Len() != 0 && ref_.Path.as_bytes()[0] != b'/' {
+            } else if self.Path.Len() != 0
+                && ref_.Path.Len() != 0
+                && ref_.Path.as_bytes()[0] != b'/'
+            {
                 let (new_path, new_raw_path) = self.merge_path(ref_);
                 url.Path = new_path;
                 url.RawPath = new_raw_path;
@@ -708,7 +740,14 @@ fn parse(mut rawurl: string, via_request: bool) -> (URL, error) {
         let c = bytes[i as usize];
         if c == b':' {
             if i == 0 {
-                return (URL::default(), Error::new("parse", rawurl.clone(), errors::New("missing protocol scheme")));
+                return (
+                    URL::default(),
+                    Error::new(
+                        "parse",
+                        rawurl.clone(),
+                        errors::New("missing protocol scheme"),
+                    ),
+                );
             }
             scheme = rawurl.slice(0, i);
             path = rawurl.slice(i + 1, raw_len);
@@ -747,7 +786,14 @@ fn parse(mut rawurl: string, via_request: bool) -> (URL, error) {
         }
 
         if via_request {
-            return (URL::default(), Error::new("parse", rawurl.clone(), errors::New("invalid URI for request")));
+            return (
+                URL::default(),
+                Error::new(
+                    "parse",
+                    rawurl.clone(),
+                    errors::New("invalid URI for request"),
+                ),
+            );
         }
 
         let mut u = URL::default();
@@ -778,8 +824,16 @@ fn parse(mut rawurl: string, via_request: bool) -> (URL, error) {
     }
 
     // Check for \r or \n in path
-    if strings::IndexByte(path.clone(), b'\r') >= 0 || strings::IndexByte(path.clone(), b'\n') >= 0 {
-        return (URL::default(), Error::new("parse", rawurl.clone(), errors::New("invalid control character in URL")));
+    if strings::IndexByte(path.clone(), b'\r') >= 0 || strings::IndexByte(path.clone(), b'\n') >= 0
+    {
+        return (
+            URL::default(),
+            Error::new(
+                "parse",
+                rawurl.clone(),
+                errors::New("invalid control character in URL"),
+            ),
+        );
     }
 
     let mut u = URL::default();
@@ -853,17 +907,28 @@ fn parse_authority(authority: string) -> (URL, error) {
             if err != nil {
                 return (URL::default(), Error::new("parse", authority.clone(), err));
             }
-            let (p, err2) = unescape(userinfo.slice(colon + 1, userinfo.Len()), EncodeUserPassword);
+            let (p, err2) = unescape(
+                userinfo.slice(colon + 1, userinfo.Len()),
+                EncodeUserPassword,
+            );
             if err2 != nil {
                 return (URL::default(), Error::new("parse", authority.clone(), err2));
             }
-            user = Userinfo { username: u, password: p, passwordSet: true };
+            user = Userinfo {
+                username: u,
+                password: p,
+                passwordSet: true,
+            };
         } else {
             let (u, err) = unescape(userinfo, EncodeUserPassword);
             if err != nil {
                 return (URL::default(), Error::new("parse", authority.clone(), err));
             }
-            user = Userinfo { username: u, password: string::new(), passwordSet: false };
+            user = Userinfo {
+                username: u,
+                password: string::new(),
+                passwordSet: false,
+            };
         }
         host = authority.slice(host_start, auth_len);
     } else {
@@ -878,21 +943,52 @@ fn parse_authority(authority: string) -> (URL, error) {
     while j < host_len {
         match host_bytes[j as usize] {
             b'%' => {
-                if j + 2 >= host_len || !is_hex(host_bytes[(j + 1) as usize]) || !is_hex(host_bytes[(j + 2) as usize]) {
+                if j + 2 >= host_len
+                    || !is_hex(host_bytes[(j + 1) as usize])
+                    || !is_hex(host_bytes[(j + 2) as usize])
+                {
                     let end = (j + 3).min(host_len);
-                    return (URL::default(), Error::new("parse", authority.clone(), EscapeError::new(host.slice(j, end))));
+                    return (
+                        URL::default(),
+                        Error::new(
+                            "parse",
+                            authority.clone(),
+                            EscapeError::new(host.slice(j, end)),
+                        ),
+                    );
                 }
-                let v = un_hex(host_bytes[(j + 1) as usize]) << 4 | un_hex(host_bytes[(j + 2) as usize]);
+                let v = un_hex(host_bytes[(j + 1) as usize]) << 4
+                    | un_hex(host_bytes[(j + 2) as usize]);
                 if v != b'%' && should_escape(v, EncodeHost) {
-                    return (URL::default(), Error::new("parse", authority.clone(), InvalidHostError::new(string::from_bytes(&[v]))));
+                    return (
+                        URL::default(),
+                        Error::new(
+                            "parse",
+                            authority.clone(),
+                            InvalidHostError::new(string::from_bytes(&[v])),
+                        ),
+                    );
                 }
                 j += 3;
             }
-            b'[' => { in_brackets = true; j += 1; }
-            b']' => { in_brackets = false; j += 1; }
+            b'[' => {
+                in_brackets = true;
+                j += 1;
+            }
+            b']' => {
+                in_brackets = false;
+                j += 1;
+            }
             c => {
                 if !in_brackets && c < 0x80 && should_escape(c, EncodeHost) {
-                    return (URL::default(), Error::new("parse", authority.clone(), InvalidHostError::new(host.slice(j, j + 1))));
+                    return (
+                        URL::default(),
+                        Error::new(
+                            "parse",
+                            authority.clone(),
+                            InvalidHostError::new(host.slice(j, j + 1)),
+                        ),
+                    );
                 }
                 j += 1;
             }
@@ -908,7 +1004,9 @@ fn parse_authority(authority: string) -> (URL, error) {
             if hn > 0 && h[0] == b'[' {
                 // IPv6 bracketed address: [::1]:5000 — find closing bracket
                 let mut bi = 1;
-                while bi < hn && h[bi as usize] != b']' { bi += 1; }
+                while bi < hn && h[bi as usize] != b']' {
+                    bi += 1;
+                }
                 bi += 1; // skip ']'
                 if bi < hn && h[bi as usize] == b':' {
                     Some(host.slice(bi + 1, hn))
@@ -920,8 +1018,13 @@ fn parse_authority(authority: string) -> (URL, error) {
                 let mut ci = hn - 1;
                 let mut found_colon = false;
                 while ci >= 0 {
-                    if h[ci as usize] == b':' { found_colon = true; break; }
-                    if ci == 0 { break; }
+                    if h[ci as usize] == b':' {
+                        found_colon = true;
+                        break;
+                    }
+                    if ci == 0 {
+                        break;
+                    }
                     ci -= 1;
                 }
                 if found_colon && ci > 0 {
@@ -944,7 +1047,10 @@ fn parse_authority(authority: string) -> (URL, error) {
                     k += 1;
                 }
                 if !valid {
-                    return (URL::default(), Error::new("parse", authority.clone(), errors::New("invalid port")));
+                    return (
+                        URL::default(),
+                        Error::new("parse", authority.clone(), errors::New("invalid port")),
+                    );
                 }
             }
         }

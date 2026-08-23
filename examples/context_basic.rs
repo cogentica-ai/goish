@@ -73,9 +73,18 @@ fn test_with_cancel() {
     schedule();
 
     ERR_NIL_AFTER.store(if ctx.Err().IsNil() { 1 } else { 0 }, Ordering::Release);
-    check(ERR_NIL_BEFORE.load(Ordering::Acquire) == 1, b"cancel: pre-Err not nil\n");
-    check(FIRED.load(Ordering::Acquire) == 1, b"cancel: Done didn't fire\n");
-    check(ERR_NIL_AFTER.load(Ordering::Acquire) == 0, b"cancel: post-Err nil\n");
+    check(
+        ERR_NIL_BEFORE.load(Ordering::Acquire) == 1,
+        b"cancel: pre-Err not nil\n",
+    );
+    check(
+        FIRED.load(Ordering::Acquire) == 1,
+        b"cancel: Done didn't fire\n",
+    );
+    check(
+        ERR_NIL_AFTER.load(Ordering::Acquire) == 0,
+        b"cancel: post-Err nil\n",
+    );
 }
 
 // ── Test 3: WithTimeout fires after the deadline ─────────────────
@@ -91,7 +100,10 @@ fn test_with_timeout_fires() {
     });
     schedule();
 
-    check(FIRED.load(Ordering::Acquire) == 1, b"timeout: Done didn't fire\n");
+    check(
+        FIRED.load(Ordering::Acquire) == 1,
+        b"timeout: Done didn't fire\n",
+    );
     check(!ctx.Err().IsNil(), b"timeout: Err nil\n");
 }
 
@@ -113,7 +125,10 @@ fn test_select_done_as_timeout() {
     });
     schedule();
 
-    check(TIMED_OUT.load(Ordering::Acquire) == 1, b"select-done: timeout case missed\n");
+    check(
+        TIMED_OUT.load(Ordering::Acquire) == 1,
+        b"select-done: timeout case missed\n",
+    );
 }
 
 // ── Test 5: parent cancel propagates to derived contexts ────────
@@ -135,7 +150,10 @@ fn test_parent_cancel_propagates() {
 
     schedule();
 
-    check(CHILD_FIRED.load(Ordering::Acquire) == 1, b"propagate: child didn't see\n");
+    check(
+        CHILD_FIRED.load(Ordering::Acquire) == 1,
+        b"propagate: child didn't see\n",
+    );
     check(!parent.Err().IsNil(), b"propagate: parent.Err nil\n");
     check(!child.Err().IsNil(), b"propagate: child.Err nil\n");
 }

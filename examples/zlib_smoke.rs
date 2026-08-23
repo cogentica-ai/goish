@@ -29,10 +29,10 @@ extern crate goish;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use goish::fmt;
 use goish::compress::zlib;
 use goish::error;
 use goish::errors;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::io;
 use goish::runtime::sched::schedule;
@@ -58,9 +58,9 @@ the quick brown fox jumps over the lazy dog. the quick brown fox jumps.";
 // level) compressing INTEROP_INPUT. Header is `78 9c`.
 const GO_STREAM: &[u8] = &[
     120, 156, 74, 206, 207, 45, 40, 74, 45, 46, 214, 175, 202, 201, 76, 82, 200, 204, 43, 73, 45,
-    202, 47, 176, 82, 40, 201, 72, 85, 40, 44, 205, 76, 206, 86, 72, 42, 202, 47, 207, 83, 72,
-    203, 175, 80, 200, 42, 205, 45, 40, 86, 200, 47, 75, 45, 2, 75, 231, 36, 86, 85, 42, 164, 228,
-    167, 235, 81, 73, 177, 30, 32, 0, 0, 255, 255, 27, 64, 51, 6,
+    202, 47, 176, 82, 40, 201, 72, 85, 40, 44, 205, 76, 206, 86, 72, 42, 202, 47, 207, 83, 72, 203,
+    175, 80, 200, 42, 205, 45, 40, 86, 200, 47, 75, 45, 2, 75, 231, 36, 86, 85, 42, 164, 228, 167,
+    235, 81, 73, 177, 30, 32, 0, 0, 255, 255, 27, 64, 51, 6,
 ];
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
@@ -226,8 +226,7 @@ fn mixed_kb() -> Vec<u8> {
 // Round-trip the 4 standard inputs at one level.
 fn test_level(idx: u8, level: int, label: &[u8]) {
     let kb = mixed_kb();
-    let repetitive: &[u8] =
-        b"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc";
+    let repetitive: &[u8] = b"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc";
     let inputs: [&[u8]; 4] = [b"", b"hello, zlib!", repetitive, kb.as_slice()];
 
     let mut ok = true;

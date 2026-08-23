@@ -73,9 +73,11 @@ fn run() -> ! {
         ReadHeaderTimeout: time::Duration(3 * 1_000_000_000),
         ..Default::default()
     });
-    srv.SetConnState(Some(Arc::new(|fd: goish::types::int, cs: http::server::ConnState| {
-        SEEN.Lock().push((fd as i64, cs as i64));
-    })));
+    srv.SetConnState(Some(Arc::new(
+        |fd: goish::types::int, cs: http::server::ConnState| {
+            SEEN.Lock().push((fd as i64, cs as i64));
+        },
+    )));
 
     let (ln, lerr) = net::Listen(string("tcp"), string("127.0.0.1:0"));
     if !lerr.IsNil() {

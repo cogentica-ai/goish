@@ -46,14 +46,54 @@ fn chk(target: &'static str, reqURL: &'static str, want: &str, bad: &mut i32) {
 fn main() {
     let mut bad = 0i32;
 
-    chk("http://back/base", "http://front/dir", "http://back/base/dir", &mut bad);
-    chk("http://back/base/", "http://front/dir", "http://back/base/dir", &mut bad);
-    chk("http://back/base", "http://front/", "http://back/base/", &mut bad);
-    chk("http://back/", "http://front/dir", "http://back/dir", &mut bad);
-    chk("http://back", "http://front/dir", "http://back/dir", &mut bad);
-    chk("http://back/base?t=1", "http://front/dir?r=2", "http://back/base/dir?t=1&r=2", &mut bad);
-    chk("http://back/base?t=1", "http://front/dir", "http://back/base/dir?t=1", &mut bad);
-    chk("http://back/base", "http://front/dir?r=2", "http://back/base/dir?r=2", &mut bad);
+    chk(
+        "http://back/base",
+        "http://front/dir",
+        "http://back/base/dir",
+        &mut bad,
+    );
+    chk(
+        "http://back/base/",
+        "http://front/dir",
+        "http://back/base/dir",
+        &mut bad,
+    );
+    chk(
+        "http://back/base",
+        "http://front/",
+        "http://back/base/",
+        &mut bad,
+    );
+    chk(
+        "http://back/",
+        "http://front/dir",
+        "http://back/dir",
+        &mut bad,
+    );
+    chk(
+        "http://back",
+        "http://front/dir",
+        "http://back/dir",
+        &mut bad,
+    );
+    chk(
+        "http://back/base?t=1",
+        "http://front/dir?r=2",
+        "http://back/base/dir?t=1&r=2",
+        &mut bad,
+    );
+    chk(
+        "http://back/base?t=1",
+        "http://front/dir",
+        "http://back/base/dir?t=1",
+        &mut bad,
+    );
+    chk(
+        "http://back/base",
+        "http://front/dir?r=2",
+        "http://back/base/dir?r=2",
+        &mut bad,
+    );
 
     if bad == 0 {
         fmt::Println!("REWRITEURL_OK 8/8");

@@ -272,9 +272,7 @@ impl<T> nilable<T> {
     /// already nil OR shared, `Some(t)` otherwise.
     #[inline]
     pub fn Take(&mut self) -> Option<T> {
-        self.0
-            .take()
-            .and_then(|arc| Arc::try_unwrap(arc).ok())
+        self.0.take().and_then(|arc| Arc::try_unwrap(arc).ok())
     }
 }
 

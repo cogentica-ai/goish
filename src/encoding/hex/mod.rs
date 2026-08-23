@@ -69,8 +69,7 @@ impl ErrorTrait for InvalidByteError {
     fn Error(&self) -> string {
         // "encoding/hex: invalid byte: 0xNN"
         let prefix = b"encoding/hex: invalid byte: 0x";
-        let mut buf: alloc::vec::Vec<u8> =
-            alloc::vec::Vec::with_capacity(prefix.len() + 2);
+        let mut buf: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(prefix.len() + 2);
         buf.extend_from_slice(prefix);
         buf.push(HEX_TABLE[(self.0 >> 4) as usize]);
         buf.push(HEX_TABLE[(self.0 & 0x0f) as usize]);
@@ -123,7 +122,10 @@ pub fn Decode(dst: &mut [u8], src: &[u8]) -> (int, error) {
         // reporting odd-length (Go's behavior).
         let (_, ok) = from_hex_char(src[src.len() - 1]);
         if !ok {
-            return (i as int, crate::errors::Wrap(InvalidByteError(src[src.len() - 1])));
+            return (
+                i as int,
+                crate::errors::Wrap(InvalidByteError(src[src.len() - 1])),
+            );
         }
         return (i as int, crate::errors::Wrap(ErrLength));
     }
@@ -245,8 +247,7 @@ impl<R: crate::io::Reader> crate::io::Reader for Decoder<R> {
             let num_copy = self.in_buf.len();
             self.arr[..num_copy].copy_from_slice(&self.in_buf);
             // Read remaining bytes after the existing leftover.
-            let mut tail_buf =
-                slice::__from_vec(alloc::vec![0u8; BUFFER_SIZE - num_copy]);
+            let mut tail_buf = slice::__from_vec(alloc::vec![0u8; BUFFER_SIZE - num_copy]);
             let (num_read, err) = self.r.Read(&mut tail_buf);
             let tail_raw: &[byte] = &tail_buf;
             self.arr[num_copy..num_copy + num_read as usize]
@@ -364,10 +365,7 @@ impl<W: crate::io::Writer> crate::io::Writer for Dumper<W> {
     fn Write(&mut self, data: slice<byte>) -> (int, error) {
         // Go: hex.go:262-318
         if self.closed {
-            return (
-                0,
-                crate::errors::New("encoding/hex: dumper closed"),
-            );
+            return (0, crate::errors::New("encoding/hex: dumper closed"));
         }
         let raw: &[byte] = &data;
         let mut written: int = 0;
@@ -458,9 +456,7 @@ impl<W: crate::io::Writer> crate::io::Closer for Dumper<W> {
         }
         self.right_chars[n_bytes as usize] = b'|';
         self.right_chars[(n_bytes + 1) as usize] = b'\n';
-        let chunk = slice::__from_vec(
-            self.right_chars[..(n_bytes + 2) as usize].to_vec(),
-        );
+        let chunk = slice::__from_vec(self.right_chars[..(n_bytes + 2) as usize].to_vec());
         let (_, err) = self.w.Write(chunk);
         err
     }

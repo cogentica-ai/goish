@@ -1,4 +1,4 @@
-// Smoke test: M17a-β2 — TLS infra (arch_prctl + CLONE_SETTLS).
+// Smoke test: M17a-β2 — TLS infra (FS/CLONE_SETTLS or GS/arch_prctl).
 //
 // Spawns 4 worker threads, each with its own `MStorage` allocated on
 // the heap. Each worker is cloned with `CLONE_SETTLS` and its own
@@ -22,6 +22,8 @@ use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 
 use goish::runtime::sched::{acquirem, current_m, releasem, MStorage};
+#[cfg(feature = "ffi-system-tls")]
+use goish::runtime::sched::{current_m_storage, pre_goish_fs_base};
 use goish::syscall;
 
 const N_WORKERS: usize = 4;
@@ -66,6 +68,7 @@ unsafe impl Sync for StaticSlots {}
 static SLOTS: StaticSlots = StaticSlots(UnsafeCell::new([None, None, None, None]));
 
 fn observe_self(slot_idx: u8) {
+    check_ffi_tls_layout();
     let m_lock = current_m();
     let m = m_lock.lock();
     OBSERVED_IDS[slot_idx as usize].store(m.id as i32, Ordering::Release);
@@ -102,8 +105,31 @@ fn check(cond: bool, msg: &[u8]) {
     }
 }
 
+#[cfg(feature = "ffi-system-tls")]
+fn check_ffi_tls_layout() {
+    acquirem();
+    let mut fs_base = usize::MAX;
+    let mut gs_base = usize::MAX;
+    let fs_result = syscall::ArchPrctl(syscall::ARCH_GET_FS, &mut fs_base as *mut usize as usize);
+    let gs_result = syscall::ArchPrctl(syscall::ARCH_GET_GS, &mut gs_base as *mut usize as usize);
+    let goish_base = current_m_storage().tls_base();
+    releasem();
+
+    check(fs_result == 0, b"ARCH_GET_FS failed\n");
+    check(gs_result == 0, b"ARCH_GET_GS failed\n");
+    check(
+        fs_base == pre_goish_fs_base(),
+        b"platform FS was replaced\n",
+    );
+    check(gs_base == goish_base, b"Goish GS base is wrong\n");
+}
+
+#[cfg(not(feature = "ffi-system-tls"))]
+fn check_ffi_tls_layout() {}
+
 #[goish::main]
 fn main() {
+    check_ffi_tls_layout();
     // ── Test 1: the dispatching M's TLS reads are coherent ────────
     //
     // `main` runs on the main *goroutine*, dispatched by whichever M
@@ -152,7 +178,7 @@ fn main() {
                 syscall::CLONE_THREAD_FLAGS,
                 top,
                 entries[i],
-                ws.storage.fs_base() as u64,
+                ws.storage.tls_base() as u64,
             );
             check(tid > 0, b"clone returned non-positive\n");
             // slot_idx is read by the worker; suppress unused warning.

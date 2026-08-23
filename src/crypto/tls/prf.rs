@@ -103,10 +103,20 @@ pub(crate) fn prf10(
     // Go: s1, s2 := splitPreMasterSecret(secret)
     let (s1, s2) = splitPreMasterSecret(secret);
     // Go: pHash(result, s1, labelAndSeed, hashMD5)
-    pHash(&mut result, s1, labelAndSeed.clone(), md5::NewHash as fn() -> alloc::boxed::Box<dyn Hash + Send + Sync>);
+    pHash(
+        &mut result,
+        s1,
+        labelAndSeed.clone(),
+        md5::NewHash as fn() -> alloc::boxed::Box<dyn Hash + Send + Sync>,
+    );
     // Go: result2 := make([]byte, len(result)); pHash(result2, s2, labelAndSeed, hashSHA1)
     let mut result2: slice<byte> = slice::__from_vec(alloc::vec![0u8; result.Len() as usize]);
-    pHash(&mut result2, s2, labelAndSeed, sha1::NewHash as fn() -> alloc::boxed::Box<dyn Hash + Send + Sync>);
+    pHash(
+        &mut result2,
+        s2,
+        labelAndSeed,
+        sha1::NewHash as fn() -> alloc::boxed::Box<dyn Hash + Send + Sync>,
+    );
 
     // Go: for i, b := range result2 { result[i] ^= b }
     for (i, b) in crate::range!(result2) {
@@ -174,11 +184,13 @@ pub(crate) fn noEKMBecauseNoEMS(
     );
 }
 
-
 // ─── The TLS 1.0-1.2 key schedule ─────────────────────────────────────
 
 use super::cipher_suites::{cipherSuite, suiteSHA384};
-use super::common::{signatureECDSA as sigECDSA, signatureEd25519 as sigEd25519, VersionTLS10, VersionTLS11, VersionTLS12};
+use super::common::{
+    signatureECDSA as sigECDSA, signatureEd25519 as sigEd25519, VersionTLS10, VersionTLS11,
+    VersionTLS12,
+};
 use crate::crypto;
 use crate::crypto::sha256;
 use crate::crypto::sha512;
@@ -275,7 +287,8 @@ pub(crate) fn masterFromPreMasterSecret(
 ) -> slice<byte> {
     // Go: seed := make([]byte, 0, len(clientRandom)+len(serverRandom))
     //     seed = append(seed, clientRandom...); seed = append(seed, serverRandom...)
-    let mut seed: Vec<byte> = Vec::with_capacity((clientRandom.Len() + serverRandom.Len()) as usize);
+    let mut seed: Vec<byte> =
+        Vec::with_capacity((clientRandom.Len() + serverRandom.Len()) as usize);
     let cr: &[byte] = &clientRandom;
     let sr: &[byte] = &serverRandom;
     seed.extend_from_slice(cr);
@@ -348,7 +361,8 @@ pub(crate) fn keysFromMasterSecret(
     //
     // Note the order: server random FIRST here, client random first in
     // masterFromPreMasterSecret. RFC 2246 §6.3 versus §8.1.
-    let mut seed: Vec<byte> = Vec::with_capacity((serverRandom.Len() + clientRandom.Len()) as usize);
+    let mut seed: Vec<byte> =
+        Vec::with_capacity((serverRandom.Len() + clientRandom.Len()) as usize);
     let sr: &[byte] = &serverRandom;
     let cr: &[byte] = &clientRandom;
     seed.extend_from_slice(sr);
@@ -382,7 +396,9 @@ pub(crate) fn keysFromMasterSecret(
     at += ivLen;
     let serverIV = keyMaterial.slice(at, at + ivLen);
     // Go: return
-    return (clientMAC, serverMAC, clientKey, serverKey, clientIV, serverIV);
+    return (
+        clientMAC, serverMAC, clientKey, serverKey, clientIV, serverIV,
+    );
 }
 
 // Go: prf.go:167-181
@@ -578,10 +594,7 @@ pub(crate) fn ekmFromMasterSecret(
         {
             return (
                 slice::__from_vec(Vec::new()),
-                crate::fmt::Errorf!(
-                    "crypto/tls: reserved ExportKeyingMaterial label: %s",
-                    label
-                ),
+                crate::fmt::Errorf!("crypto/tls: reserved ExportKeyingMaterial label: %s", label),
             );
         }
 
@@ -630,7 +643,6 @@ pub(crate) fn ekmFromMasterSecret(
         );
     });
 }
-
 
 // go: none — goish-only: in Go `finishedHash` satisfies `io.Writer`
 // (and so `transcriptHash`) structurally, because it has a `Write`

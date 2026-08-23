@@ -66,7 +66,11 @@ fn main() {
         "48",
     );
     let allZero = seen.iter().all(|b| *b == 0);
-    check("entropy is not all zero", fmt::Sprintf!("%v", allZero), "false");
+    check(
+        "entropy is not all zero",
+        fmt::Sprintf!("%v", allZero),
+        "false",
+    );
 
     // Two calls must not return the same seed.
     let mut second: Vec<byte> = Vec::new();

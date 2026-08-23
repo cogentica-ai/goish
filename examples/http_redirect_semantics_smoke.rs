@@ -90,8 +90,18 @@ fn main() {
                 bad += 1;
                 continue;
             }
-            eq(string::from_bytes(&METHOD.Lock()[..]), wantMethod, "redirect method", &mut bad);
-            eq(string::from_bytes(&BODY.Lock()[..]), wantBody, "redirect body", &mut bad);
+            eq(
+                string::from_bytes(&METHOD.Lock()[..]),
+                wantMethod,
+                "redirect method",
+                &mut bad,
+            );
+            eq(
+                string::from_bytes(&BODY.Lock()[..]),
+                wantBody,
+                "redirect body",
+                &mut bad,
+            );
         }
 
         // DELETE + 302 must also become GET.

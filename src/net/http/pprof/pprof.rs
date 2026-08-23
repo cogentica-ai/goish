@@ -45,14 +45,10 @@ use super::super::responsewriter::ResponseWriter;
 /// influenced in the sense that it contains program data, and a
 /// browser sniffing it as HTML would run it.
 pub fn Cmdline(w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request) {
-    w.Header().Set(
-        string("X-Content-Type-Options"),
-        string("nosniff"),
-    );
-    w.Header().Set(
-        string("Content-Type"),
-        string("text/plain; charset=utf-8"),
-    );
+    w.Header()
+        .Set(string("X-Content-Type-Options"), string("nosniff"));
+    w.Header()
+        .Set(string("Content-Type"), string("text/plain; charset=utf-8"));
     let _ = w.Write(crate::convert::bytes(crate::strings::Join(
         crate::os::Args(),
         string("\x00"),
@@ -151,15 +147,9 @@ fn __rw_arc(
 /// proxy in between, and the `Content-Disposition` DELETE matters
 /// because the success path sets one — leaving it on an error would
 /// have the browser save the error text as a .pprof file.
-pub fn serveError(
-    w: &(dyn ResponseWriter + Send + Sync + 'static),
-    status: int,
-    txt: string,
-) {
-    w.Header().Set(
-        string("Content-Type"),
-        string("text/plain; charset=utf-8"),
-    );
+pub fn serveError(w: &(dyn ResponseWriter + Send + Sync + 'static), status: int, txt: string) {
+    w.Header()
+        .Set(string("Content-Type"), string("text/plain; charset=utf-8"));
     w.Header().Set(string("X-Go-Pprof"), string("1"));
     w.Header().Del(string("Content-Disposition"));
     w.WriteHeader(status);
@@ -167,7 +157,6 @@ pub fn serveError(
     let _ = w.Write(crate::convert::bytes(txt + string("\n")));
     return;
 }
-
 
 // go: sdk 1.25.5 net/http/pprof/pprof.go:95-106 init
 /// Go registers the five handlers on the DefaultServeMux at import
@@ -210,7 +199,8 @@ impl crate::io::Writer for __RwSink<'_> {
 /// Go's exact profiler-failure arm (500, "Could not enable CPU
 /// profiling: …").
 pub fn Profile(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
-    w.Header().Set(string("X-Content-Type-Options"), string("nosniff"));
+    w.Header()
+        .Set(string("X-Content-Type-Options"), string("nosniff"));
     let (mut sec, err) = crate::strconv::Atoi(r.FormValue(string("seconds")));
     if sec <= 0 || !err.IsNil() {
         sec = 30;
@@ -220,7 +210,8 @@ pub fn Profile(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
 
     // Go: "Set Content Type assuming StartCPUProfile will work,
     // because if it does it starts writing."
-    w.Header().Set(string("Content-Type"), string("application/octet-stream"));
+    w.Header()
+        .Set(string("Content-Type"), string("application/octet-stream"));
     w.Header().Set(
         string("Content-Disposition"),
         string("attachment; filename=\"profile\""),
@@ -246,7 +237,8 @@ pub fn Profile(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
 /// with Profile, the goish tracer's Start reports unsupported and
 /// this serves Go's failure arm verbatim.
 pub fn Trace(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
-    w.Header().Set(string("X-Content-Type-Options"), string("nosniff"));
+    w.Header()
+        .Set(string("X-Content-Type-Options"), string("nosniff"));
     let (mut sec, err) = crate::strconv::Atoi(r.FormValue(string("seconds")));
     if sec <= 0 || !err.IsNil() {
         sec = 1;
@@ -254,7 +246,8 @@ pub fn Trace(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
 
     configureWriteDeadline(w, r, crate::float64(sec));
 
-    w.Header().Set(string("Content-Type"), string("application/octet-stream"));
+    w.Header()
+        .Set(string("Content-Type"), string("application/octet-stream"));
     w.Header().Set(
         string("Content-Disposition"),
         string("attachment; filename=\"trace\""),
@@ -282,8 +275,10 @@ pub fn Trace(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
 /// query; resolution is LIVE through runtime::FuncForPC (the
 /// symbolizer that also feeds panic backtraces).
 pub fn Symbol(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
-    w.Header().Set(string("X-Content-Type-Options"), string("nosniff"));
-    w.Header().Set(string("Content-Type"), string("text/plain; charset=utf-8"));
+    w.Header()
+        .Set(string("X-Content-Type-Options"), string("nosniff"));
+    w.Header()
+        .Set(string("Content-Type"), string("text/plain; charset=utf-8"));
 
     // Go: "We have to read the whole POST body before writing any
     // output. Buffer the output here."
@@ -309,18 +304,15 @@ pub fn Symbol(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
         }
         // Go: strconv.ParseUint(word, 0, 64) — base 0: 0x-prefixed
         // hex or decimal.
-        let pc: u64 = if let Some(hex) = word.strip_prefix("0x").or_else(|| word.strip_prefix("0X")) {
+        let pc: u64 = if let Some(hex) = word.strip_prefix("0x").or_else(|| word.strip_prefix("0X"))
+        {
             u64::from_str_radix(hex, 16).unwrap_or(0)
         } else {
             word.parse().unwrap_or(0)
         };
         if pc != 0 {
             if let Some(f) = crate::runtime::FuncForPC(pc as crate::types::uintptr) {
-                let _ = buf.WriteString(crate::fmt::Sprintf!(
-                    "0x%x %s\n",
-                    pc,
-                    f.Name()
-                ));
+                let _ = buf.WriteString(crate::fmt::Sprintf!("0x%x %s\n", pc, f.Name()));
             }
         }
     }
@@ -332,7 +324,9 @@ pub fn Symbol(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
 // go: sdk 1.25.5 net/http/pprof/pprof.go:244-246 Handler
 /// Go: "Handler returns an HTTP handler that serves the named
 /// profile. Available profiles can be found in runtime/pprof.Profile."
-pub fn Handler(name: crate::gostring::string) -> alloc::sync::Arc<dyn super::super::server::Handler> {
+pub fn Handler(
+    name: crate::gostring::string,
+) -> alloc::sync::Arc<dyn super::super::server::Handler> {
     return alloc::sync::Arc::new(handler(name));
 }
 
@@ -345,7 +339,8 @@ impl super::super::server::Handler for handler {
     /// profile"), a `seconds` param routes to the delta path, and the
     /// profile renders as text (debug!=0) or attachment.
     fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
-        w.Header().Set(string("X-Content-Type-Options"), string("nosniff"));
+        w.Header()
+            .Set(string("X-Content-Type-Options"), string("nosniff"));
         let p = match crate::runtime::pprof::Lookup(self.0.clone()) {
             None => {
                 serveError(
@@ -366,9 +361,11 @@ impl super::super::server::Handler for handler {
         // goish runtime has no collector to kick.
         let (debug, _) = crate::strconv::Atoi(r.FormValue(string("debug")));
         if debug != 0 {
-            w.Header().Set(string("Content-Type"), string("text/plain; charset=utf-8"));
+            w.Header()
+                .Set(string("Content-Type"), string("text/plain; charset=utf-8"));
         } else {
-            w.Header().Set(string("Content-Type"), string("application/octet-stream"));
+            w.Header()
+                .Set(string("Content-Type"), string("application/octet-stream"));
             w.Header().Set(
                 string("Content-Disposition"),
                 crate::fmt::Sprintf!("attachment; filename=\"%s\"", self.0.clone()),
@@ -466,7 +463,10 @@ fn collectProfile(
     let mut buf = crate::bytes::Buffer::new();
     let werr = p.WriteTo(&mut buf, 0);
     if !werr.IsNil() {
-        return (crate::goslice::slice::__from_vec(alloc::vec::Vec::new()), werr);
+        return (
+            crate::goslice::slice::__from_vec(alloc::vec::Vec::new()),
+            werr,
+        );
     }
     return (buf.Bytes(), crate::errors::nil);
 }
@@ -528,8 +528,10 @@ pub fn Index(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
         return super::super::server::Handler::ServeHTTP(&h, w, r);
     }
 
-    w.Header().Set(string("X-Content-Type-Options"), string("nosniff"));
-    w.Header().Set(string("Content-Type"), string("text/html; charset=utf-8"));
+    w.Header()
+        .Set(string("X-Content-Type-Options"), string("nosniff"));
+    w.Header()
+        .Set(string("Content-Type"), string("text/html; charset=utf-8"));
 
     let mut profiles: alloc::vec::Vec<profileEntry> = alloc::vec::Vec::new();
     let ps = crate::runtime::pprof::Profiles();

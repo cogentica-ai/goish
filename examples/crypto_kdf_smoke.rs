@@ -8,9 +8,9 @@
 extern crate alloc;
 extern crate goish;
 
-use goish::fmt;
 use goish::crypto::{hkdf, pbkdf2, sha1, sha256};
 use goish::encoding::hex;
+use goish::fmt;
 use goish::goslice::slice;
 use goish::types::byte;
 use goish::{string, syscall};
@@ -58,7 +58,8 @@ fn main() {
         let info_real = from_hex("f0f1f2f3f4f5f6f7f8f9");
         let info_str = string::from_bytes(&info_real);
         let (okm, _) = hkdf::Expand(sha256::NewHash, prk.clone(), info_str.clone(), 42);
-        let want_okm = "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865";
+        let want_okm =
+            "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865";
         if to_hex(&okm) == string(want_okm) {
             fmt::Println!("[ 2] HKDF-SHA256 Expand A.1   PASS");
         } else {
@@ -71,7 +72,10 @@ fn main() {
         if to_hex(&okm_key) == string(want_okm) {
             fmt::Println!("[ 3] HKDF-SHA256 Key A.1      PASS");
         } else {
-            fmt::Println!("[ 3] HKDF-SHA256 Key A.1      FAIL got {}", to_hex(&okm_key));
+            fmt::Println!(
+                "[ 3] HKDF-SHA256 Key A.1      FAIL got {}",
+                to_hex(&okm_key)
+            );
             failed += 1;
         }
         let _ = info;
@@ -124,7 +128,8 @@ fn main() {
         }
 
         let (okm, _) = hkdf::Key(sha256::NewHash, ikm, salt, info, 42);
-        let want_okm = "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8";
+        let want_okm =
+            "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8";
         if to_hex(&okm) == string(want_okm) {
             fmt::Println!("[ 6] HKDF-SHA256 Key A.3      PASS");
         } else {
@@ -203,9 +208,8 @@ fn main() {
     //    DK = 3d2eec4fe41c849b80c8d83662c0e44a8b291a964cf2f07038
     {
         let pw = string("passwordPASSWORDpassword");
-        let salt = from_hex(
-            "73616c7453414c5473616c7453414c5473616c7453414c5473616c7453414c5473616c74",
-        );
+        let salt =
+            from_hex("73616c7453414c5473616c7453414c5473616c7453414c5473616c7453414c5473616c74");
         let (dk, _) = pbkdf2::Key(sha1::NewHash, pw, salt, 4096, 25);
         let want = "3d2eec4fe41c849b80c8d83662c0e44a8b291a964cf2f07038";
         if to_hex(&dk) == string(want) {

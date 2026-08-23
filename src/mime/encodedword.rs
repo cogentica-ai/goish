@@ -237,7 +237,8 @@ fn max_base64_len() -> usize {
 /// `io.Reader` factory. Default encodings (utf-8, iso-8859-1, us-ascii)
 /// are still handled internally without a CharsetReader.
 pub struct WordDecoder {
-    pub CharsetReader: Option<fn(charset: string, input: crate::goslice::slice<byte>) -> (string, error)>,
+    pub CharsetReader:
+        Option<fn(charset: string, input: crate::goslice::slice<byte>) -> (string, error)>,
 }
 
 impl WordDecoder {
