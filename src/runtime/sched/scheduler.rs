@@ -94,7 +94,37 @@ pub(crate) fn globrunqput_batch(batch: &[*mut G]) {
 /// Used by `findrunnable_local_then_global` as the second-tier
 /// fallback when the M's local P runq is empty.
 fn globrunqget_one() -> Option<NonNull<G>> {
-    SCHED.lock().runq.pop_front()
+    let owner = current_m_storage() as *const _ as usize;
+    let mut sched = SCHED.lock();
+    let count = sched.runq.len();
+    for _ in 0..count {
+        let g = sched.runq.pop_front()?;
+        let locked_m = unsafe { (*g.as_ptr()).locked_m.load(Ordering::Acquire) };
+        if locked_m == 0 || locked_m == owner {
+            return Some(g);
+        }
+        sched.runq.push_back(g);
+    }
+    return None;
+}
+
+/// Return runnable work pinned to this exact M before considering ordinary
+/// local work. A locked G that calls Gosched is published globally; leaving
+/// the normal local-first order in place lets an always-runnable local queue
+/// starve that G forever on its own OS thread.
+fn globrunqget_locked_for_owner() -> Option<NonNull<G>> {
+    let owner = current_m_storage() as *const _ as usize;
+    let mut sched = SCHED.lock();
+    let count = sched.runq.len();
+    for _ in 0..count {
+        let g = sched.runq.pop_front()?;
+        let locked_m = unsafe { (*g.as_ptr()).locked_m.load(Ordering::Acquire) };
+        if locked_m == owner {
+            return Some(g);
+        }
+        sched.runq.push_back(g);
+    }
+    None
 }
 
 /// Find the next runnable G for the calling M. Drain order
@@ -111,6 +141,9 @@ fn globrunqget_one() -> Option<NonNull<G>> {
 #[inline(never)]
 #[link_section = "goish_rt_text"]
 fn find_runnable() -> Option<NonNull<G>> {
+    if let Some(g) = globrunqget_locked_for_owner() {
+        return Some(g);
+    }
     if let Some(p) = current_p() {
         if let Some(g) = unsafe { p.runqget() } {
             return Some(g);
@@ -288,7 +321,11 @@ static LIVE_G_COUNT: AtomicUsize = AtomicUsize::new(0);
 #[link_section = "goish_rt_text"]
 fn enqueue_runnable(g_ptr: NonNull<G>, next: bool) {
     super::m::acquirem();
-    if let Some(p) = current_p() {
+    let locked_m = unsafe { (*g_ptr.as_ptr()).locked_m.load(Ordering::Acquire) };
+    if locked_m != 0 {
+        SCHED.lock().runq.push_back(g_ptr);
+        wake_locked_m(locked_m);
+    } else if let Some(p) = current_p() {
         unsafe { p.runqput(g_ptr, next) };
     } else {
         SCHED.lock().runq.push_back(g_ptr);
@@ -1394,6 +1431,24 @@ pub fn wake_idle_m() {
     storage.park.wakeup();
 }
 
+/// Wake the exact M that owns an OS-thread-locked G. A locked G cannot run on
+/// any other M, so waking every idle M creates an O(P²) steal storm while the
+/// useful owner competes with workers that must reject the G. Remove the owner
+/// from MIDLE before signaling its note to preserve the list/park invariant.
+fn wake_locked_m(owner: usize) {
+    let storage = unsafe { &*(owner as *const MStorage) };
+    let parked = {
+        let mut midle = MIDLE.lock();
+        midle
+            .iter()
+            .position(|candidate| core::ptr::eq(*candidate, storage))
+            .map(|index| midle.swap_remove(index))
+    };
+    if let Some(storage) = parked {
+        storage.park.wakeup();
+    }
+}
+
 /// Wake every idle M. Used at shutdown when the last live
 /// goroutine exits — parked Ms need a signal to observe
 /// `LIVE_G_COUNT == 0` and exit.
@@ -1664,6 +1719,61 @@ pub fn runq_len() -> usize {
 /// to identify which G to park or wake.
 pub fn current_g() -> Option<NonNull<G>> {
     current_m().lock().curg
+}
+
+/// `runtime.LockOSThread` scheduler half. Pin the running G to this
+/// exact M; subsequent runnable publication uses the global queue and
+/// only this M may remove it. Nested calls increment the lock count.
+pub fn lock_os_thread() {
+    // Keep the G/M pair stable while publishing the ownership edge. Without
+    // acquirem an asynchronous preemption can resume this goroutine on a new M
+    // between current_g() and current_m_storage(), pinning it to the wrong M.
+    super::m::acquirem();
+    let Some(g) = current_g() else {
+        super::m::releasem();
+        return;
+    };
+    let owner = current_m_storage() as *const _ as usize;
+    let locked_m = unsafe { &(*g.as_ptr()).locked_m };
+    let current = locked_m.load(Ordering::Acquire);
+    if current == 0 {
+        locked_m.store(owner, Ordering::Release);
+    } else if current != owner {
+        super::m::releasem();
+        return;
+    }
+    unsafe {
+        (*g.as_ptr()).locked_m_count.fetch_add(1, Ordering::AcqRel);
+    }
+    super::m::releasem();
+}
+
+/// `runtime.UnlockOSThread` scheduler half. Release one nested pin and
+/// make the G globally schedulable again after the final unlock.
+pub fn unlock_os_thread() {
+    // Match lock_os_thread's stable G/M snapshot. The final count-to-zero and
+    // owner clear must be observed as one non-preemptible scheduler action.
+    super::m::acquirem();
+    let Some(g) = current_g() else {
+        super::m::releasem();
+        return;
+    };
+    let owner = current_m_storage() as *const _ as usize;
+    let locked_m = unsafe { &(*g.as_ptr()).locked_m };
+    if locked_m.load(Ordering::Acquire) != owner {
+        super::m::releasem();
+        return;
+    }
+    let count = unsafe { &(*g.as_ptr()).locked_m_count };
+    let current = count.load(Ordering::Acquire);
+    if current == 0 {
+        super::m::releasem();
+        return;
+    }
+    if count.fetch_sub(1, Ordering::AcqRel) == 1 {
+        locked_m.store(0, Ordering::Release);
+    }
+    super::m::releasem();
 }
 
 /// Suspend the current goroutine in the `Waiting` state. The G will

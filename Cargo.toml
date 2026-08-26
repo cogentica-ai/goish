@@ -306,6 +306,10 @@ name = "tls_smoke"
 path = "examples/tls_smoke.rs"
 
 [[example]]
+name = "lock_os_thread_smoke"
+path = "examples/lock_os_thread_smoke.rs"
+
+[[example]]
 name = "chan_select_stress"
 path = "examples/chan_select_stress.rs"
 

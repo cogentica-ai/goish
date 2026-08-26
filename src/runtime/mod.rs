@@ -76,19 +76,16 @@ pub fn Version() -> crate::gostring::string {
 // All have line refs to the Go SDK so the contract is documented.
 
 /// `runtime.LockOSThread()` (proc.go:4172) — wire the calling
-/// goroutine to its current OS thread. Slim is a no-op: each M owns
-/// its own OS thread, and the scheduler doesn't migrate Gs across Ms
-/// in ways that would violate this contract for typical use cases
-/// (cgo callbacks, OpenGL, locale-sensitive C libs). If real
-/// thread-pinning becomes load-bearing, this fn is the hook.
+/// goroutine to its current OS thread. Nested calls retain the pin
+/// until balanced by the same number of `UnlockOSThread` calls.
 pub fn LockOSThread() {
-    // Slim: no-op.
+    sched::lock_os_thread();
 }
 
 /// `runtime.UnlockOSThread()` (proc.go:4196) — undo a prior
-/// `LockOSThread`. Slim is a no-op (mirroring `LockOSThread`).
+/// `LockOSThread` call.
 pub fn UnlockOSThread() {
-    // Slim: no-op.
+    sched::unlock_os_thread();
 }
 
 /// `runtime.NumCgoCall()` (extern.go:330) — number of cgo calls made

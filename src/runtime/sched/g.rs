@@ -16,7 +16,7 @@
 //     and drop the storage afterwards.
 
 use alloc::boxed::Box;
-use core::sync::atomic::{AtomicBool, AtomicUsize};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize};
 
 use super::gobuf::Gobuf;
 use super::stack::Stack;
@@ -84,6 +84,11 @@ pub struct G {
     /// (M18b-γ) clears it when calling `Gosched` post-unlock.
     /// Mirrors Go's `g.preempt` (runtime/runtime2.go).
     pub preempt: AtomicBool,
+    /// OS-thread owner selected by `runtime.LockOSThread`. Zero means
+    /// schedulable on any M; otherwise this is the stable `MStorage`
+    /// address. `locked_m_count` preserves Go's nested lock contract.
+    pub locked_m: AtomicUsize,
+    pub locked_m_count: AtomicU32,
     /// **Sema waiter intrusive link** (task #110). When this G is
     /// parked in `Sema::acquire`, this points at the next G in the
     /// FIFO waiter chain (or null if tail). Lets `Sema` keep its
@@ -201,6 +206,8 @@ impl G {
             select_wait: core::ptr::null(),
             select_wait_len: 0,
             preempt: AtomicBool::new(false),
+            locked_m: AtomicUsize::new(0),
+            locked_m_count: AtomicU32::new(0),
             sema_next: core::ptr::null_mut(),
             active_stack_lo: AtomicUsize::new(lo),
             active_stack_hi: AtomicUsize::new(hi),
@@ -265,6 +272,8 @@ impl G {
             select_wait: core::ptr::null(),
             select_wait_len: 0,
             preempt: AtomicBool::new(false),
+            locked_m: AtomicUsize::new(0),
+            locked_m_count: AtomicU32::new(0),
             sema_next: core::ptr::null_mut(),
             active_stack_lo: AtomicUsize::new(stack_base as usize),
             active_stack_hi: AtomicUsize::new(stack_base as usize + stack_size),

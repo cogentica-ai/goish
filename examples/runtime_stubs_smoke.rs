@@ -1,4 +1,4 @@
-// runtime_stubs_smoke — exercise runtime no-op stubs.
+// runtime_stubs_smoke — exercise the compact runtime compatibility surface.
 // (proc.go:4172, 4196; extern.go:285, 330; mgc.go:455)
 
 #![no_std]
@@ -18,7 +18,8 @@ use goish::syscall;
 fn main() {
     let mut failed = 0;
 
-    // 1. LockOSThread/UnlockOSThread — no-ops, just check they're callable.
+    // 1. Focused pinning semantics live in lock_os_thread_smoke; retain the
+    // public API call check here.
     {
         runtime::LockOSThread();
         runtime::UnlockOSThread();
