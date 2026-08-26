@@ -202,7 +202,7 @@ pub fn Parsed() -> bool {
     return CommandLine.Lock().Parsed();
 }
 
-// go: sdk 1.25.5 flag/flag.go:519-526 Set
+// go: sdk 1.25.5 flag/flag.go:532-534 Set
 /// Go: "Set sets the value of the named command-line flag."
 pub fn Set(name: string, value: string) -> error {
     return CommandLine.Lock().Set(name, value);
