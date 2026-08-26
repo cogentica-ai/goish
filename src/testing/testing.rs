@@ -2852,8 +2852,11 @@ pub struct InternalTest {
 /// subtest of it. That is what gives -run filtering, name
 /// deduplication and parallel gating to top-level tests for free,
 /// rather than needing a second implementation beside T.Run.
-#[allow(non_snake_case)]
-pub fn runTests(tests: &[InternalTest], deadline: crate::time::Time) -> (bool, bool) {
+fn runTestsWithMatch(
+    tests: &[InternalTest],
+    deadline: crate::time::Time,
+    matchString: Option<crate::testing::r#match::MatchStringFn>,
+) -> (bool, bool) {
     let mut ran = false;
     let mut ok = true;
 
@@ -2876,7 +2879,7 @@ pub fn runTests(tests: &[InternalTest], deadline: crate::time::Time) -> (bool, b
             let tstate = newTestState(parallelFlag());
             *tstate.deadline.Lock() = deadline;
             *tstate.matcher.Lock() = Some(crate::testing::r#match::newMatcher(
-                None,
+                matchString,
                 &patterns,
                 &string::from_static("-test.run"),
                 &skips,
@@ -2904,6 +2907,11 @@ pub fn runTests(tests: &[InternalTest], deadline: crate::time::Time) -> (bool, b
     return (ran, ok);
 }
 
+#[allow(non_snake_case)]
+pub fn runTests(tests: &[InternalTest], deadline: crate::time::Time) -> (bool, bool) {
+    return runTestsWithMatch(tests, deadline, None);
+}
+
 // go: sdk 1.25.5 testing/testing.go:2433-2443 RunTests
 // goishlint:ignore GOISH020 RunTests — same dropped matchString
 // parameter as runTests; see the note there.
@@ -2922,6 +2930,27 @@ pub fn RunTests(tests: &[InternalTest]) -> bool {
         // so the warning fires whenever nothing matched.
         let msg = b"testing: warning: no tests to run\n";
         crate::syscall::Write(crate::syscall::STDERR, msg.as_ptr(), msg.len());
+    }
+    return ok;
+}
+
+// go: none — goish-only: testing.Main has a real regexp matcher supplied by
+// its generated-style dependency object. Keep RunTests' Go-shaped surface and
+// use this entry only for that direct helper.
+#[allow(non_snake_case)]
+pub fn RunTestsMatch(
+    tests: &[InternalTest],
+    matchString: crate::testing::r#match::MatchStringFn,
+) -> bool {
+    let mut deadline = crate::time::Time::default();
+    let timeout = timeoutFlag();
+    if timeout > crate::time::Duration(0) {
+        deadline = crate::time::Now().Add(timeout);
+    }
+    let (ran, ok) = runTestsWithMatch(tests, deadline, Some(matchString));
+    if !ran {
+        let message = b"testing: warning: no tests to run\n";
+        crate::syscall::Write(crate::syscall::STDERR, message.as_ptr(), message.len());
     }
     return ok;
 }

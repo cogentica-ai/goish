@@ -202,6 +202,12 @@ pub fn Parsed() -> bool {
     return CommandLine.Lock().Parsed();
 }
 
+// go: sdk 1.25.5 flag/flag.go:519-526 Set
+/// Go: "Set sets the value of the named command-line flag."
+pub fn Set(name: string, value: string) -> error {
+    return CommandLine.Lock().Set(name, value);
+}
+
 // ─── The Value interface and the Flag struct ───────────────────────────
 
 // go: sdk 1.25.5 flag/flag.go:360-363 Value

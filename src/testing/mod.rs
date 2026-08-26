@@ -366,6 +366,10 @@ pub(crate) fn indent_for(depth: usize) -> string {
 /// any of the assertion / logging methods.
 pub type TestFn = fn(&mut T);
 
+fn matchString(pattern: &string, value: &string) -> (bool, crate::error) {
+    return crate::regexp::MatchString(pattern.clone(), value.clone());
+}
+
 /// `testing.Main(tests)` — run the given list of (name, fn) pairs
 /// in registration order, print PASS/FAIL/SKIP per test, and
 /// return an exit code (0 if all passed, 1 if any failed).
@@ -396,14 +400,24 @@ pub fn Main(tests: &[(&'static str, TestFn)]) -> int {
     // Go passes matchStringOnly(matchString) — the same regexp match
     // its generated main package supplies.
     let deps = alloc::boxed::Box::new(testing::matchStringOnly::new(
-        |pat: string, str_: string| {
-            return crate::regexp::MatchString(pat, str_);
-        },
+        |pattern: string, value: string| return crate::regexp::MatchString(pattern, value),
     ));
     let m = testing::MainStart(deps, internal, Vec::new());
 
+    // Go's deprecated testing.Main helper parses the testing flags before
+    // entering M.Run.  Goish exposes the same helper directly to programs,
+    // so honour -test.run, -test.skip, and the other registered flags here as
+    // well.  Without this, GPU tests cannot be isolated in fresh processes
+    // after a fatal device error poisons the current CUDA context.
+    if !crate::flag::Parsed() {
+        let err = crate::flag::Parse();
+        if err != crate::nil {
+            return 2;
+        }
+    }
+
     let _deadline = m.startAlarm();
-    let ok = testing::RunTests(&m.tests);
+    let ok = testing::RunTestsMatch(&m.tests, matchString);
     m.stopAlarm();
 
     let summary: &[u8] = if ok { b"\nPASS\n" } else { b"\nFAIL\n" };

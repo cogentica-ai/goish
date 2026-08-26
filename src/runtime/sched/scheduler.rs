@@ -1515,6 +1515,88 @@ pub fn num_cpus() -> usize {
     }
 }
 
+/// Read a small kernel pseudo-file without libc. `path` must be
+/// NUL-terminated. The files used here are one-line cgroup controls,
+/// so a single fixed buffer is sufficient.
+fn read_control_file(path: &[u8], buf: &mut [u8]) -> Option<usize> {
+    let fd = crate::syscall::Open(
+        path.as_ptr(),
+        crate::syscall::O_RDONLY | crate::syscall::O_CLOEXEC,
+        0,
+    );
+    if fd < 0 {
+        return None;
+    }
+    let n = crate::syscall::Read(fd, buf.as_mut_ptr(), buf.len());
+    crate::syscall::Close(fd);
+    if n <= 0 {
+        None
+    } else {
+        Some(n as usize)
+    }
+}
+
+fn parse_decimal(input: &[u8]) -> Option<usize> {
+    if input.is_empty() {
+        return None;
+    }
+    let mut value = 0usize;
+    for &byte in input {
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+        value = value.checked_mul(10)?.checked_add((byte - b'0') as usize)?;
+    }
+    Some(value)
+}
+
+/// Parse cgroup v2's `cpu.max`: either `max PERIOD` or `QUOTA PERIOD`.
+/// Fractional CPU quotas require one runnable P, so round up just as Go's
+/// container-aware default does.
+fn parse_cpu_max(input: &[u8]) -> Option<usize> {
+    let mut fields = input
+        .split(|byte| byte.is_ascii_whitespace())
+        .filter(|field| !field.is_empty());
+    let quota = fields.next()?;
+    if quota == b"max" {
+        return None;
+    }
+    let quota = parse_decimal(quota)?;
+    let period = parse_decimal(fields.next()?)?;
+    if quota == 0 || period == 0 {
+        return None;
+    }
+    Some((quota / period + usize::from(quota % period != 0)).max(1))
+}
+
+fn read_decimal_control(path: &[u8]) -> Option<usize> {
+    let mut buf = [0u8; 64];
+    let n = read_control_file(path, &mut buf)?;
+    let field = buf[..n]
+        .split(|byte| byte.is_ascii_whitespace())
+        .find(|field| !field.is_empty())?;
+    parse_decimal(field)
+}
+
+/// Effective CPU quota exposed through the process's cgroup namespace.
+/// Prefer cgroup v2 and retain the legacy v1 CPU controller fallback.
+fn cgroup_cpu_limit() -> Option<usize> {
+    const CPU_MAX: &[u8] = b"/sys/fs/cgroup/cpu.max\0";
+    let mut buf = [0u8; 64];
+    if let Some(n) = read_control_file(CPU_MAX, &mut buf) {
+        return parse_cpu_max(&buf[..n]);
+    }
+
+    const V1_QUOTA: &[u8] = b"/sys/fs/cgroup/cpu/cpu.cfs_quota_us\0";
+    const V1_PERIOD: &[u8] = b"/sys/fs/cgroup/cpu/cpu.cfs_period_us\0";
+    let quota = read_decimal_control(V1_QUOTA)?;
+    let period = read_decimal_control(V1_PERIOD)?;
+    if quota == 0 || period == 0 {
+        return None;
+    }
+    Some((quota / period + usize::from(quota % period != 0)).max(1))
+}
+
 /// Number of Ps and Ms to create during runtime bootstrap.
 ///
 /// Go reads `GOMAXPROCS` before starting the scheduler. Goish previously
@@ -1522,10 +1604,17 @@ pub fn num_cpus() -> usize {
 /// which left programs that must keep foreign calls on the loader-created
 /// thread dependent on an external `taskset`. Honor a positive decimal
 /// `GOMAXPROCS` from the initial environment and clamp it to the scheduler's
-/// fixed P table. Invalid or missing values retain the affinity-derived CPU
-/// count.
+/// fixed P table. When the variable is missing or invalid, the default is the
+/// smaller of the affinity-derived CPU count and the cgroup CPU quota. This
+/// prevents a container that can see the whole host from starting hundreds of
+/// idle work-stealing Ms against a much smaller CPU allowance.
 pub fn startup_procs() -> usize {
-    let fallback = num_cpus().min(super::p::MAX_PS).max(1);
+    let affinity = num_cpus();
+    let fallback = cgroup_cpu_limit()
+        .map(|quota| affinity.min(quota))
+        .unwrap_or(affinity)
+        .min(super::p::MAX_PS)
+        .max(1);
     let Some(value) = (unsafe { crate::runtime::args::envp_lookup(b"GOMAXPROCS") }) else {
         return fallback;
     };

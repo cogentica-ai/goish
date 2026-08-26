@@ -42,7 +42,9 @@
 #![allow(non_snake_case)]
 
 mod flag;
-pub use flag::{Bool, CommandLine, Duration, Flag, Int, Int64, Parse, Parsed, String, Uint, Value};
+pub use flag::{
+    Bool, CommandLine, Duration, Flag, Int, Int64, Parse, Parsed, Set, String, Uint, Value,
+};
 
 extern crate alloc;
 use alloc::sync::Arc;
@@ -200,6 +202,19 @@ impl FlagSet {
 
     pub fn NArg(&self) -> int {
         self.args.len() as int
+    }
+
+    /// Set assigns a named flag through the same conversion path used by
+    /// Parse. It matches Go's FlagSet.Set behavior and is useful when an
+    /// embedding command has already parsed its own flag set.
+    pub fn Set(&mut self, name: string, value: string) -> error {
+        let Some(index) = self.find_def(&name) else {
+            let mut message: Vec<byte> = Vec::new();
+            message.extend_from_slice(b"flag provided but not defined: -");
+            message.extend_from_slice(name.as_bytes());
+            return errors::New(string::__from_vec(message));
+        };
+        return self.apply_value(index, value.as_bytes());
     }
 
     /// Parse `args` as a command line. Skips arg[0] (program name)

@@ -40,7 +40,10 @@ use crate::types::{byte, int};
 use super::super::client::Body;
 use super::super::header::Header;
 use super::super::response::Response;
-use super::super::responsewriter::{Flusher, HeaderHandle, ResponseWriter};
+use super::super::responsewriter::{
+    __goish_register_Flusher_impl, __goish_register_ResponseWriter_impl, Flusher, HeaderHandle,
+    ResponseWriter,
+};
 
 // go: sdk 1.25.5 net/http/httptest/recorder.go:61-61 DefaultRemoteAddr
 /// Go: "DefaultRemoteAddr is the default remote address to return in
@@ -80,6 +83,7 @@ pub struct ResponseRecorder {
 // go: sdk 1.25.5 net/http/httptest/recorder.go:51-57 NewRecorder
 /// Go: "NewRecorder returns an initialized [ResponseRecorder]."
 pub fn NewRecorder() -> ResponseRecorder {
+    registerResponseRecorderImpls();
     return ResponseRecorder {
         st: Arc::new(Mutex::new(recState {
             // Go seeds Code with 200 so a handler that never calls
@@ -94,6 +98,15 @@ pub fn NewRecorder() -> ResponseRecorder {
         })),
         hdr: HeaderHandle::new(Header::new()),
     };
+}
+
+// go: none — goish-only interface-registry wiring for cast! support.
+fn registerResponseRecorderImpls() {
+    static register: crate::lazy::Lazy<()> = crate::lazy::Lazy::new(|| {
+        __goish_register_ResponseWriter_impl::<ResponseRecorder>();
+        __goish_register_Flusher_impl::<ResponseRecorder>();
+    });
+    let _ = register.get();
 }
 
 impl ResponseRecorder {
