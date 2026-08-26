@@ -147,13 +147,16 @@ pub(super) fn newHuffmanTree(lengths: &slice<uint8>) -> (huffmanTree, error) {
     }
 
     // Go: slices.SortFunc(pairs, func(a, b huffmanSymbolLengthPair) int { … })
-    slices::SortFunc!(pairs, |a: &huffmanSymbolLengthPair, b: &huffmanSymbolLengthPair| {
-        let c = cmp::Compare(&a.length, &b.length);
-        if c != 0 {
-            return c;
+    slices::SortFunc!(
+        pairs,
+        |a: &huffmanSymbolLengthPair, b: &huffmanSymbolLengthPair| {
+            let c = cmp::Compare(&a.length, &b.length);
+            if c != 0 {
+                return c;
+            }
+            return cmp::Compare(&a.value, &b.value);
         }
-        return cmp::Compare(&a.value, &b.value);
-    });
+    );
 
     // Now we assign codes to the symbols, starting with the longest code.
     // We keep the codes packed into a uint32, at the most-significant end.

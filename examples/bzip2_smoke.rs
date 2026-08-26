@@ -227,7 +227,11 @@ fn run() {
     wantBytes("1MiB zeros", zeros1MiB, goish::make!([]byte, 1 << 20));
 
     // 5. Go's random vector that exercises the RLE1 stage.
-    wantBytes("random data — RLE1 stage", rle1Stage, mustDecodeHex(rle1Output));
+    wantBytes(
+        "random data — RLE1 stage",
+        rle1Stage,
+        mustDecodeHex(rle1Output),
+    );
 
     // 6-8. three distinct rejections, checked by message.
     wantError(
@@ -305,7 +309,12 @@ fn test_bit_reader() {
         let failed = !br.Err().IsNil();
         if failed != wantFail {
             ok = false;
-            detail = fmt::Sprintf!("vector %d: failure = %v, want %v", i as i64, failed, wantFail);
+            detail = fmt::Sprintf!(
+                "vector %d: failure = %v, want %v",
+                i as i64,
+                failed,
+                wantFail
+            );
             break;
         }
         if !wantFail && got != want {

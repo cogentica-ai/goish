@@ -552,9 +552,7 @@ impl<R: io::Reader> reader<R> {
             // Go: if decoded == 50 { … }
             if decoded == 50 {
                 if selectorIndex >= numSelectors {
-                    return structuralError(
-                        "insufficient selector indices for number of symbols",
-                    );
+                    return structuralError("insufficient selector indices for number of symbols");
                 }
                 if toint(treeIndexes[selectorIndex]) >= huffmanTrees.Len() {
                     return structuralError("tree selector out of range");
