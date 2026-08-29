@@ -25,8 +25,10 @@
 //   - direct: `seq.run(&mut |v| { …; true })` — the same closure-call
 //     shape the transpiler lowers `for v := range seq { … }` to
 //     (RANGE_OVER_FUNC.md §3.4: range-over-func bypasses `range!`).
-//   - stored: `Arc<dyn iter::Seq<V> + Send + Sync>` for struct fields
-//     and interface returns (both traits are object-safe).
+//   - stored: `Arc<dyn iter::Seq<V> + Send + Sync>` when the Go value
+//     is known to cross goroutines. Ordinary Go func values carry no
+//     implicit thread-safety constraint, so Seq itself does not require
+//     Send or Sync.
 //
 // Sources shipped elsewhere: `slices::Values/All`, `maps::Keys/
 // Values`, `strings::SplitSeq/Lines`.
@@ -50,12 +52,12 @@ use alloc::sync::Arc;
 /// `iter.Seq[V]` (iter.go) — a push iterator over single values.
 /// `run` calls `yield_` once per element until exhaustion or until
 /// `yield_` returns `false`.
-pub trait Seq<V>: Send + Sync {
+pub trait Seq<V> {
     fn run(&self, yield_: &mut dyn FnMut(V) -> bool);
 }
 
 /// `iter.Seq2[K, V]` (iter.go) — a push iterator over pairs.
-pub trait Seq2<K, V>: Send + Sync {
+pub trait Seq2<K, V> {
     fn run(&self, yield_: &mut dyn FnMut(K, V) -> bool);
 }
 
@@ -63,7 +65,7 @@ pub trait Seq2<K, V>: Send + Sync {
 // spelling for user-defined iterators.
 impl<V, F> Seq<V> for F
 where
-    F: Fn(&mut dyn FnMut(V) -> bool) + Send + Sync,
+    F: Fn(&mut dyn FnMut(V) -> bool),
 {
     fn run(&self, yield_: &mut dyn FnMut(V) -> bool) {
         self(yield_)
@@ -72,7 +74,7 @@ where
 
 impl<K, V, F> Seq2<K, V> for F
 where
-    F: Fn(&mut dyn FnMut(K, V) -> bool) + Send + Sync,
+    F: Fn(&mut dyn FnMut(K, V) -> bool),
 {
     fn run(&self, yield_: &mut dyn FnMut(K, V) -> bool) {
         self(yield_)
