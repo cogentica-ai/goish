@@ -1,0 +1,107 @@
+# Publish goish-macros and goish to crates.io.
+#
+# The release ritual is: bump both versions, commit, tag `vX.Y.Z`, push the
+# tag. This workflow does the rest. `cargo publish --workspace` handles the
+# ordering — goish depends on goish-macros, so macros goes first and cargo
+# waits for the crates.io index to catch up before publishing goish. Doing it
+# by hand means racing that index yourself.
+#
+# The guards below exist because every version-skew bug in this project so far
+# has been silent. A tag that disagrees with Cargo.toml must fail loudly here
+# rather than publish something whose version does not match the source it was
+# cut from.
+#
+# REQUIRES the repository secret CARGO_REGISTRY_TOKEN — a crates.io API token
+# with publish-update scope for both `goish` and `goish-macros`.
+
+name: publish
+
+on:
+  push:
+    tags: ['v*']
+  # Rehearse without publishing. Defaults to a dry run so a mis-click cannot
+  # ship a release.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Package and verify without uploading'
+        type: boolean
+        default: true
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # `cargo publish --workspace` needs cargo 1.90+.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Versions agree with each other and with the tag
+        run: |
+          set -euo pipefail
+          ver() { sed -n '/^\[package\]/,/^\[/p' "$1" | sed -n 's/^version = "\(.*\)"/\1/p' | head -1; }
+          GOISH=$(ver Cargo.toml)
+          MACROS=$(ver goish-macros/Cargo.toml)
+          echo "goish        $GOISH"
+          echo "goish-macros $MACROS"
+
+          if [ "$GOISH" != "$MACROS" ]; then
+            echo "::error::goish ($GOISH) and goish-macros ($MACROS) must share a version — they are published as a pair."
+            exit 1
+          fi
+
+          # The published goish must pin the exact goish-macros going out with
+          # it. A caret range here would let a future macros release satisfy an
+          # old goish and break it at a distance.
+          PIN=$(grep -m1 '^goish-macros' Cargo.toml)
+          case "$PIN" in
+            *"=$GOISH"*) ;;
+            *) echo "::error::goish-macros dependency must be pinned '=$GOISH', found: $PIN"; exit 1 ;;
+          esac
+
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME#v}"
+            if [ "$TAG" != "$GOISH" ]; then
+              echo "::error::tag $GITHUB_REF_NAME implies version $TAG, but Cargo.toml says $GOISH."
+              exit 1
+            fi
+            echo "tag $GITHUB_REF_NAME matches Cargo.toml"
+          fi
+
+      - name: Dry run
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        run: cargo publish --workspace --dry-run
+
+      - name: Publish to crates.io
+        if: github.event_name == 'push' || !inputs.dry_run
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "::error::CARGO_REGISTRY_TOKEN is not set. Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          cargo publish --workspace
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Published"
+            echo
+            sed -n '/^\[package\]/,/^\[/p' Cargo.toml | sed -n 's/^version = "\(.*\)"/goish `\1`/p'
+            sed -n '/^\[package\]/,/^\[/p' goish-macros/Cargo.toml | sed -n 's/^version = "\(.*\)"/goish-macros `\1`/p'
+            echo
+            echo "<https://crates.io/crates/goish>"
+          } >> "$GITHUB_STEP_SUMMARY"

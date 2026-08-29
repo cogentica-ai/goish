@@ -1,9 +1,18 @@
 [package]
 name = "goish-macros"
-version = "0.1.0"
+# Released in lockstep with goish; the goish manifest pins this exactly.
+# See the version note there.
+version = "1.0.0-alpha.5"
 edition = "2021"
+rust-version = "1.86"
+authors = ["Chanwit Kaewkasi <chanwit@gmail.com>"]
 license = "MIT"
 description = "Proc-macros for goish v1 (#[goish::main] entry point)."
+homepage = "https://goish.cogentica.ai"
+repository = "https://github.com/cogentica-ai/goish"
+documentation = "https://docs.rs/goish-macros"
+keywords = ["go", "golang", "no-std", "macros", "goish"]
+categories = ["no-std", "development-tools"]
 
 [lib]
 proc-macro = true
