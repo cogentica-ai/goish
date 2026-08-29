@@ -174,7 +174,12 @@ fn main() {
         if deepRan && deepFailed {
             fmt::Println!("[ 5] three levels release      PASS");
         } else {
-            fmt::Println!("[ 5] three levels release      FAIL ran=", deepRan, " failed=", deepFailed);
+            fmt::Println!(
+                "[ 5] three levels release      FAIL ran=",
+                deepRan,
+                " failed=",
+                deepFailed
+            );
             failed += 1;
         }
     }

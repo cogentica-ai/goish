@@ -32,10 +32,8 @@ use crate::goslice::slice;
 use crate::gostring::string;
 use crate::types::{byte, int};
 
-const STD_ALPHABET: &[u8; 64] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-const URL_ALPHABET: &[u8; 64] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const STD_ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const URL_ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 const PAD_CHAR: u8 = b'=';
 
@@ -126,9 +124,7 @@ impl Encoding {
 
         // Process full 3-byte groups → 4 chars.
         while si + 3 <= src.len() {
-            let v = ((src[si] as u32) << 16)
-                | ((src[si + 1] as u32) << 8)
-                | (src[si + 2] as u32);
+            let v = ((src[si] as u32) << 16) | ((src[si + 1] as u32) << 8) | (src[si + 2] as u32);
             dst[di] = alpha[((v >> 18) & 0x3f) as usize];
             dst[di + 1] = alpha[((v >> 12) & 0x3f) as usize];
             dst[di + 2] = alpha[((v >> 6) & 0x3f) as usize];
@@ -303,11 +299,7 @@ impl Encoding {
 
     // Go: base64.go:413
     //   func (enc *Encoding) AppendDecode(dst, src []byte) ([]byte, error)
-    pub fn AppendDecode(
-        &self,
-        dst: slice<byte>,
-        src: slice<byte>,
-    ) -> (slice<byte>, error) {
+    pub fn AppendDecode(&self, dst: slice<byte>, src: slice<byte>) -> (slice<byte>, error) {
         let mut out: Vec<byte> = dst.__into_vec();
         let start = out.len();
         let max_len = self.DecodedLen(src.Len()) as usize + 3;
@@ -424,7 +416,8 @@ impl<W: crate::io::Writer> Encoder<W> {
             let elen = self.enc.EncodedLen(nbuf as int) as usize;
             // Stage src so we don't borrow self.buf and self.out together.
             let src_buf: [byte; 3] = self.buf;
-            self.enc.encode_into(&mut self.out[..elen], &src_buf[..nbuf]);
+            self.enc
+                .encode_into(&mut self.out[..elen], &src_buf[..nbuf]);
             let chunk = slice::__from_vec(self.out[..elen].to_vec());
             let (_, werr) = self.w.Write(chunk);
             if !werr.IsNil() {
@@ -529,8 +522,8 @@ pub struct Decoder<R: crate::io::Reader> {
     r: NewlineFilteringReader<R>,
     buf: [byte; 1024], // leftover input
     nbuf: usize,
-    out_start: usize, // current read offset within outbuf
-    out_end: usize,   // one past last valid byte in outbuf
+    out_start: usize,             // current read offset within outbuf
+    out_end: usize,               // one past last valid byte in outbuf
     outbuf: [byte; 1024 / 4 * 3], // decoded output staging (768 bytes)
 }
 
@@ -583,11 +576,9 @@ impl<R: crate::io::Reader> Decoder<R> {
             if !self.enc.padded && self.nbuf > 0 {
                 // Decode final fragment without padding.
                 let nbuf = self.nbuf;
-                let src_buf: alloc::vec::Vec<byte> =
-                    self.buf[..nbuf].to_vec();
+                let src_buf: alloc::vec::Vec<byte> = self.buf[..nbuf].to_vec();
                 let outbuf_len = self.outbuf.len();
-                let (nw, derr) =
-                    self.enc.decode_into(&mut self.outbuf[..], &src_buf);
+                let (nw, derr) = self.enc.decode_into(&mut self.outbuf[..], &src_buf);
                 let _ = outbuf_len;
                 self.err = derr;
                 self.nbuf = 0;
@@ -626,8 +617,7 @@ impl<R: crate::io::Reader> Decoder<R> {
         if nw > plen {
             // Decode into outbuf, then copy a prefix into p.
             let src_buf: alloc::vec::Vec<byte> = self.buf[..nr].to_vec();
-            let (nw_actual, derr) =
-                self.enc.decode_into(&mut self.outbuf[..], &src_buf);
+            let (nw_actual, derr) = self.enc.decode_into(&mut self.outbuf[..], &src_buf);
             self.err = derr;
             self.out_start = 0;
             self.out_end = nw_actual as usize;
@@ -642,8 +632,7 @@ impl<R: crate::io::Reader> Decoder<R> {
             // Decode into a scratch Vec sized to nw, then copy to p.
             let src_buf: alloc::vec::Vec<byte> = self.buf[..nr].to_vec();
             let mut tmp_dst: alloc::vec::Vec<byte> = vec![0u8; nw];
-            let (n_actual, derr) =
-                self.enc.decode_into(&mut tmp_dst, &src_buf);
+            let (n_actual, derr) = self.enc.decode_into(&mut tmp_dst, &src_buf);
             n = n_actual;
             self.err = derr;
             let nout = n_actual as usize;
