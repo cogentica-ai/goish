@@ -291,6 +291,10 @@ name = "iter_seq_smoke"
 path = "examples/iter_seq_smoke.rs"
 
 [[example]]
+name = "iter_seq_local_capture_smoke"
+path = "examples/iter_seq_local_capture_smoke.rs"
+
+[[example]]
 name = "sched_go"
 path = "examples/sched_go.rs"
 
