@@ -89,6 +89,15 @@ checked byte-for-byte against a running Go on either side of a line
 boundary, over the RFC 1421 §4.6.1.1 header ordering, and through
 `Decode` over leading junk, trailing junk and an unterminated BEGIN.
 
+`container/list` is the same story one size smaller: 20/23 with zero
+anchors, now 23/23 with 35. The three that were missing were `lazyInit`,
+`insertValue` and `move` — the whole of the link surgery every public
+method funnels through — and its element order is now replayed against
+a running Go step by step, including the no-ops Go documents for a
+foreign element and for moving an element relative to itself. The
+subtree reads 38/38 (100%), but `ring` (8) and `heap` (7) are still
+name-level only: 15 of those 38 names have no anchor behind them.
+
 `iter` (0/4) and `database` (0/130) have directories but no ported
 functions. `iter` is a squatter — goish fakes Go 1.23 iterator support
 with slices wherever it is needed.
