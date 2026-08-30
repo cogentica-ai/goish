@@ -28,7 +28,7 @@ goishlint diff the port against the Go file it came from.
 | `compress` | 150/150 | 100.0% | 303 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
-| `strings` | 76/101 | 75.2% | 1 |
+| `strings` | 83/101 | 82.2% | 36 |
 | `archive` | 71/182 | 39.0% | 0 |
 | `time` | 71/184 | 38.6% | 4 |
 | `sync` | 66/126 | 52.4% | 3 |
@@ -459,6 +459,41 @@ functions, then a checksum of `ToUpper`/`ToLower`/`ToTitle` over the same
 128k-rune sample the graphic smoke uses. All three checksums match Go
 exactly, which is the strongest statement available that 328
 transcribed ranges carry the same deltas Go's do.
+
+`strings/replace.go` and `strings/search.go` are ported whole, taking
+`strings` from 76/101 with **one** anchor to 83/101 with 36. The
+`Replacer` that was there described itself as a "slim port … linear
+scan-and-replace … sufficient for HTTP-style sanitization", and it was
+missing three things Go has: `WriteString`, any handling of an empty
+`old` string, and the algorithm selection.
+
+Go's `NewReplacer` does not replace anything — `build` picks one of
+four implementations from the shape of the arguments: Boyer-Moore
+(`search.go`, ported here too) for a single multi-byte pattern, a
+256-byte translation table when every old *and* new is one byte, a
+256-entry table of slices when only the olds are, and a trie otherwise.
+
+The trie is the part a linear scan cannot reproduce. Keys are matched
+neither shortest- nor longest-first: each carries a priority, higher
+for an earlier argument, and `lookup` walks the whole path taking the
+highest-priority complete key it passes. `("a","1","ab","2")` turns
+"ab" into "1b" while `("ab","2","a","1")` turns it into "2" — which a
+first-match scan also gets right — but
+`("abc","1","abd","2","ab","3")` turns "abc" into "1" and "abe" into
+"3e", which it does not. And `("", "X")` on "ab" is "XaXbX": the old
+code's `!ob.is_empty()` guard dropped empty patterns silently.
+
+`strings_replacer_smoke` runs 70 vectors from a running Go across all
+four algorithms, checking `Replace`, `WriteString`'s bytes and
+`WriteString`'s returned count, plus the priority rule, the empty
+pattern, the first-pair-wins rule for a repeated old, and the
+no-overlapping-matches rule.
+
+One Rust-specific bug turned up on the way: `byteStringReplacer.Replace`
+sizes its output with `newSize += len(rep) - 1`, which goes negative in
+Go's `int` when a replacement is shorter than the byte it replaces, and
+underflows a `usize`. Replacing `"b"` with `""` panicked before the
+`int` was restored.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the

@@ -43,6 +43,14 @@
 #![allow(non_snake_case)]
 
 extern crate alloc;
+
+#[path = "search.rs"]
+mod search;
+
+#[path = "replace.rs"]
+mod replace;
+pub use replace::{NewReplacer, Replacer};
+
 use alloc::vec::Vec;
 
 use crate::error;
@@ -1403,63 +1411,6 @@ pub fn NewReader<S: Into<string>>(s: S) -> Reader {
 }
 
 // ─── Replacer (slim port of strings/replace.go) ──────────────────────
-
-/// `strings.Replacer` (replace.go:14). Slim port: holds the
-/// (old, new) pairs and performs a linear scan-and-replace in
-/// `Replace`. Sufficient for HTTP-style sanitization where pair sets
-/// are small.
-#[derive(Clone)]
-pub struct Replacer {
-    pairs: alloc::vec::Vec<(string, string)>,
-}
-
-/// `strings.NewReplacer(oldnew...)` (replace.go:32). The variadic
-/// parameter list maps to a `slice<string>` in goish. Panics on odd
-/// argument count, matching Go.
-pub fn NewReplacer(oldnew: slice<string>) -> Replacer {
-    if oldnew.Len() % 2 != 0 {
-        panic!("strings.NewReplacer: odd argument count");
-    }
-    let mut pairs: alloc::vec::Vec<(string, string)> =
-        alloc::vec::Vec::with_capacity((oldnew.Len() / 2) as usize);
-    let mut i: int = 0;
-    while i < oldnew.Len() {
-        pairs.push((oldnew[i].clone(), oldnew[i + 1].clone()));
-        i += 2;
-    }
-    Replacer { pairs }
-}
-
-impl Replacer {
-    /// `(*Replacer).Replace(s)` (replace.go:95). Walk `s` byte-by-byte;
-    /// at each position try each (old, new) pair in argument order; on
-    /// the first match emit `new` and skip past `old`. Empty `old`
-    /// follows Go's behavior (insert `new` between every byte and at
-    /// the boundaries — matched on each non-match position).
-    pub fn Replace<S: Into<string>>(&self, s: S) -> string {
-        let s = s.into();
-        let bs = s.as_bytes();
-        let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(bs.len());
-        let mut i: usize = 0;
-        while i < bs.len() {
-            let mut matched = false;
-            for (old, new_) in self.pairs.iter() {
-                let ob = old.as_bytes();
-                if !ob.is_empty() && i + ob.len() <= bs.len() && &bs[i..i + ob.len()] == ob {
-                    out.extend_from_slice(new_.as_bytes());
-                    i += ob.len();
-                    matched = true;
-                    break;
-                }
-            }
-            if !matched {
-                out.push(bs[i]);
-                i += 1;
-            }
-        }
-        string::from_bytes(&out)
-    }
-}
 
 // ─── iter.Seq-returning functions (Go 1.24+, strings/iter.go) ────────
 
