@@ -1224,6 +1224,10 @@ name = "hmac_smoke"
 path = "examples/hmac_smoke.rs"
 
 [[example]]
+name = "pem_smoke"
+path = "examples/pem_smoke.rs"
+
+[[example]]
 name = "crc32_smoke"
 path = "examples/crc32_smoke.rs"
 

@@ -3,7 +3,8 @@
 Where the port actually stands, and how much of it is *proven* rather
 than merely counted. Numbers are regenerated with
 `scripts/port_coverage.py`; the last full refresh was 2026-08-15, with
-the `compress` row refreshed 2026-08-17 and the `hash` row 2026-08-30.
+the `compress` row refreshed 2026-08-17 and the `hash` and `encoding`
+rows 2026-08-30.
 
 ## The whole tree — 4452 / 11061 functions (40.3%)
 
@@ -23,7 +24,7 @@ goishlint diff the port against the Go file it came from.
 | `net` | 788/1413 | 55.8% | **1570** |
 | `math` | 307/661 | 46.4% | 5 |
 | `testing` | 217/247 | 87.9% | 402 |
-| `encoding` | 210/1018 | 20.6% | 125 |
+| `encoding` | 213/1018 | 20.9% | 143 |
 | `compress` | 142/151 | 94.0% | 42 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
@@ -76,6 +77,17 @@ crc32_otherarch.go — the `!amd64` half of Go's own build — instead, so
 "no hardware CRC-32" is a true statement about this runtime rather
 than a stub. `maphash` (20/32) is the one `hash` package still short,
 blocked on `internal/abi`.
+
+`encoding/pem` moved the same way, and is the clearest small case of
+why the anchor column is the one to read. It counted 5/8 and carried
+**zero** anchors: every name in it matched Go by name only, so a
+dropped argument or an invented body would have been invisible to
+GOISH018. It is now 8/8 with 18 anchors — the three that were missing
+are `lineBreaker`'s `Write` and `Close` and `writeHeader`, i.e. the
+whole of the 64-column line-breaking Encode does — and its output is
+checked byte-for-byte against a running Go on either side of a line
+boundary, over the RFC 1421 §4.6.1.1 header ordering, and through
+`Decode` over leading junk, trailing junk and an unterminated BEGIN.
 
 `iter` (0/4) and `database` (0/130) have directories but no ported
 functions. `iter` is a squatter — goish fakes Go 1.23 iterator support

@@ -1,5 +1,11 @@
 // pem_smoke — exercise encoding/pem.
 // (encoding/pem/pem.go)
+//
+// Checks 1-12 are hand-written. Checks 13-16 use output printed by a
+// running Go 1.25.5 (tools/gen_pem_ref.go, run through
+// scripts/goref.sh): the 64-column lineBreaker either side of a line
+// boundary, the RFC 1421 §4.6.1.1 header order, the colon rejection,
+// and Decode over leading/trailing junk and an unterminated BEGIN.
 
 #![no_std]
 #![no_main]
@@ -9,8 +15,10 @@ extern crate alloc;
 extern crate goish;
 
 use goish::bytes;
+use goish::convert::byte as tobyte;
 use goish::encoding::pem::{self, Block, Decode, Encode, EncodeToMemory};
 use goish::fmt;
+use goish::gomap::map;
 use goish::goslice::slice;
 use goish::types::byte;
 use goish::{convert, string, syscall};
@@ -262,13 +270,169 @@ fn main() {
         }
     }
 
+    // 13. Encode's 64-column line breaking, against Go. 36 raw bytes
+    //     make 48 base64 chars, so 47/48/49 land just under, on, and
+    //     just over a line boundary — the three branches of
+    //     lineBreaker.Write.
+    {
+        fn mk(n: usize) -> slice<byte> {
+            let mut v: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(n);
+            let mut i: usize = 0;
+            while i < n {
+                v.push(tobyte((i * 7 + 3) % 251));
+                i += 1;
+            }
+            slice::<byte>::__from_vec(v)
+        }
+        let cases: [(usize, &str); 7] = [
+            (0, "-----BEGIN TEST-----\n-----END TEST-----\n"),
+            (1, "-----BEGIN TEST-----\nAw==\n-----END TEST-----\n"),
+            (47, "-----BEGIN TEST-----\nAwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dzj6vH4BAsSGSAnLjU8Q0o=\n-----END TEST-----\n"),
+            (48, "-----BEGIN TEST-----\nAwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dzj6vH4BAsSGSAnLjU8Q0pR\n-----END TEST-----\n"),
+            (49, "-----BEGIN TEST-----\nAwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dzj6vH4BAsSGSAnLjU8Q0pR\nWA==\n-----END TEST-----\n"),
+            (96, "-----BEGIN TEST-----\nAwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dzj6vH4BAsSGSAnLjU8Q0pR\nWF9mbXR7gomQl56lrLO6wcjP1t3k6/L5BQwTGiEoLzY9REtSWWBnbnV8g4qRmJ+m\n-----END TEST-----\n"),
+            (100, "-----BEGIN TEST-----\nAwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dzj6vH4BAsSGSAnLjU8Q0pR\nWF9mbXR7gomQl56lrLO6wcjP1t3k6/L5BQwTGiEoLzY9REtSWWBnbnV8g4qRmJ+m\nrbS7wg==\n-----END TEST-----\n"),
+        ];
+        let mut bad = 0;
+        let mut k: usize = 0;
+        while k < cases.len() {
+            let (n, want) = cases[k];
+            let b = Block {
+                Type: string::from("TEST"),
+                Headers: map::<string, string>::new(),
+                Bytes: mk(n),
+            };
+            let got = EncodeToMemory(&b);
+            let gr: &[byte] = &got;
+            if gr != want.as_bytes() {
+                bad += 1;
+            }
+            k += 1;
+        }
+        if bad == 0 {
+            fmt::Println!("[13] lineBreaker vs Go        PASS");
+        } else {
+            fmt::Println!("[13] lineBreaker vs Go        FAIL");
+            failed += 1;
+        }
+    }
+
+    // 14. Header order: Proc-Type first (RFC 1421 §4.6.1.1), the rest
+    //     sorted, then a blank line before the body.
+    {
+        let mut h = map::<string, string>::new();
+        h.Set(string::from("Zeta"), string::from("z"));
+        h.Set(string::from("Alpha"), string::from("a"));
+        h.Set(string::from("Proc-Type"), string::from("4,ENCRYPTED"));
+        h.Set(string::from("DEK-Info"), string::from("DES-EDE3-CBC,0102"));
+        let mut v: alloc::vec::Vec<byte> = alloc::vec::Vec::new();
+        let mut i: usize = 0;
+        while i < 10 {
+            v.push(tobyte((i * 7 + 3) % 251));
+            i += 1;
+        }
+        let b = Block {
+            Type: string::from("RSA PRIVATE KEY"),
+            Headers: h,
+            Bytes: slice::<byte>::__from_vec(v),
+        };
+        let got = EncodeToMemory(&b);
+        let want = "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nAlpha: a\nDEK-Info: DES-EDE3-CBC,0102\nZeta: z\n\nAwoRGB8mLTQ7Qg==\n-----END RSA PRIVATE KEY-----\n";
+        let gr: &[byte] = &got;
+        if gr == want.as_bytes() {
+            fmt::Println!("[14] header order vs Go       PASS");
+        } else {
+            fmt::Println!("[14] header order vs Go       FAIL");
+            failed += 1;
+        }
+    }
+
+    // 15. A header key containing a colon is refused, and nothing is
+    //     written — Go checks before it emits any output.
+    {
+        let mut h = map::<string, string>::new();
+        h.Set(string::from("a:b"), string::from("c"));
+        let b = Block {
+            Type: string::from("X"),
+            Headers: h,
+            Bytes: slice::<byte>::__from_vec(alloc::vec::Vec::new()),
+        };
+        let got = EncodeToMemory(&b);
+        let mut buf = bytes::NewBuffer(slice::<byte>::__from_vec(alloc::vec::Vec::new()));
+        let e = Encode(&mut buf, &b);
+        let gr: &[byte] = &got;
+        if gr.is_empty()
+            && !e.IsNil()
+            && e.Error() == "pem: cannot encode a header key that contains a colon"
+        {
+            fmt::Println!("[15] colon key refused        PASS");
+        } else {
+            fmt::Println!("[15] colon key refused        FAIL");
+            failed += 1;
+        }
+    }
+
+    // 16. Decode skips leading junk and an unterminated BEGIN, and
+    //     hands back exactly the trailing bytes.
+    {
+        let mut v: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(50);
+        let mut i: usize = 0;
+        while i < 50 {
+            v.push(tobyte((i * 7 + 3) % 251));
+            i += 1;
+        }
+        let want_bytes = slice::<byte>::__from_vec(v);
+        let enc = EncodeToMemory(&Block {
+            Type: string::from("TEST"),
+            Headers: map::<string, string>::new(),
+            Bytes: want_bytes.clone(),
+        });
+        let er: &[byte] = &enc;
+
+        let mut junk: alloc::vec::Vec<byte> = alloc::vec::Vec::new();
+        junk.extend_from_slice(b"leading junk\n");
+        junk.extend_from_slice(er);
+        junk.extend_from_slice(b"trailing junk\n");
+        let (p, rest) = Decode(slice::<byte>::__from_vec(junk));
+
+        let mut bogus: alloc::vec::Vec<byte> = alloc::vec::Vec::new();
+        bogus.extend_from_slice(b"-----BEGIN BOGUS-----\n");
+        bogus.extend_from_slice(er);
+        let (p2, _) = Decode(slice::<byte>::__from_vec(bogus));
+
+        let (p3, rest3) = Decode(convert::bytes("no pem here\n"));
+
+        let mut ok = p3.is_none();
+        let r3: &[byte] = &rest3;
+        ok = ok && r3 == b"no pem here\n";
+        if let Some(pp) = p {
+            let got: &[byte] = &pp.Bytes;
+            let wr: &[byte] = &want_bytes;
+            let rr: &[byte] = &rest;
+            ok = ok && pp.Type == "TEST" && got == wr && rr == b"trailing junk\n";
+        } else {
+            ok = false;
+        }
+        if let Some(pp2) = p2 {
+            ok = ok && pp2.Type == "TEST" && pp2.Bytes.Len() == 50;
+        } else {
+            ok = false;
+        }
+        if ok {
+            fmt::Println!("[16] Decode junk/bogus vs Go  PASS");
+        } else {
+            fmt::Println!("[16] Decode junk/bogus vs Go  FAIL");
+            failed += 1;
+        }
+    }
+
     let _ = pem::EncodeToMemory; // ensure module re-exports compile
 
     if failed == 0 {
-        fmt::Println!("ok 12/12");
+        fmt::Println!("ok 16/16");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 12");
+        fmt::Println!("FAIL", failed, "of 16");
         syscall::Exit(1);
     }
 }
