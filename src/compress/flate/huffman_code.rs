@@ -82,7 +82,7 @@ impl hcode {
 
 /// `flate.literalNode` — a literal value and its frequency.
 #[derive(Clone, Copy, Debug)]
-struct literalNode {
+pub(super) struct literalNode {
     literal: u16,
     freq: i32,
 }

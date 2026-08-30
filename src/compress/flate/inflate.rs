@@ -441,9 +441,13 @@ impl<R: io::Reader + io::ByteReader> Decompressor<R> {
     }
 
     // go: sdk 1.25.5 compress/flate/inflate.go:335-353 Read
+    // goishlint:ignore GOISH023 - Go's `for { … return … }`. The Rust
+    //     `loop` below never breaks, so every exit is already an
+    //     explicit `return`; binding its value to a local would make
+    //     the binding unreachable.
     /// `(f *decompressor).Read(b)` — io.Reader.
     pub fn Read(&mut self, b: &mut slice<byte>) -> (int, error) {
-        return loop {
+        loop {
             if self.toRead.Len() > 0 {
                 let n = copy_into(b, &self.toRead);
                 self.toRead = self.toRead.slice(n, self.toRead.Len());
@@ -465,7 +469,7 @@ impl<R: io::Reader + io::ByteReader> Decompressor<R> {
                 // Flush what's left in case of error.
                 self.toRead = self.dict.readFlush();
             }
-        };
+        }
     }
 
     // go: sdk 1.25.5 compress/flate/inflate.go:355-360 Close
@@ -904,11 +908,12 @@ impl<R: io::Reader + io::ByteReader> Decompressor<R> {
     /// The bit-reading loop itself is hoisted into `huff_sym_step`,
     /// which borrows only the fields it needs.
     fn huffSym(&mut self, h: whichHuff) -> (int, error) {
-        return match h {
-            whichHuff::H1 => return self.huffSym_h1(),
-            whichHuff::HL => return self.huffSym_hl(),
-            whichHuff::HD => return self.huffSym_hd(),
+        let out = match h {
+            whichHuff::H1 => self.huffSym_h1(),
+            whichHuff::HL => self.huffSym_hl(),
+            whichHuff::HD => self.huffSym_hd(),
         };
+        return out;
     }
 
     // go: none — goish idiom: the `h1` arm of `huffSym`, split out so
@@ -1017,6 +1022,8 @@ struct HuffTables<'a> {
 // go: none — goish idiom: the table-lookup core of `huffSym`, lifted
 //     out of the impl so it borrows only the fields it needs instead of
 //     aliasing `&mut self` against one of the decoders.
+// goishlint:ignore GOISH023 - Go's `for { … return … }`; see
+//     `decompressor::Read`.
 //
 // Go: func (f *decompressor) huffSym(...)
 fn huff_sym_step<R: io::Reader + io::ByteReader>(
@@ -1030,7 +1037,7 @@ fn huff_sym_step<R: io::Reader + io::ByteReader>(
     let mut n: uint = touint(h.min);
     let mut nb: uint = *fnb;
     let mut b: u32 = *fb;
-    return loop {
+    loop {
         while nb < n {
             let (c, err) = r.ReadByte();
             if !err.IsNil() {
@@ -1060,7 +1067,7 @@ fn huff_sym_step<R: io::Reader + io::ByteReader>(
             *fnb = nb - n;
             return (toint(chunk >> huffmanValueShift), nil);
         }
-    };
+    }
 }
 
 // go: sdk 1.25.5 compress/flate/inflate.go:689-694 noEOF
