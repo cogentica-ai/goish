@@ -35,7 +35,7 @@ goishlint diff the port against the Go file it came from.
 | `hash` | 98/114 | 86.0% | 338 |
 | `mime` | 73/89 | 82.0% | 106 |
 | `bufio` | 48/48 | 100.0% | 81 |
-| `unicode` | 45/52 | 86.5% | 52 |
+| `unicode` | 48/52 | 92.3% | 111 |
 
 Within `net`, the entire jump since the last refresh is **`net/http`,
 now complete: 639/639 functions (100.0%) across all twelve of its
@@ -411,6 +411,39 @@ expression, where it is unambiguous.
 utf16 is now 8/8 with 16 anchors, checked against Go on 17 runes,
 9 surrogate pairs, 9 `Encode` round-trips and 8 raw `Decode` sequences
 the encoder would never emit.
+
+`unicode` itself is now **48/52 with 111 anchors**, split into
+`graphic.rs`, `letter.rs`, `digit.rs` and one merged `tables.rs`. It had
+been a documented approximation, and the documentation was honest about
+it — `IsTitle` was a stub returning `false` with a note that "multi-byte
+titlecase codepoints like U+01C5 require Unicode tables not yet
+shipped", `IsPunct` carried a caveat that it counted `^` and `` ` `` as
+punctuation "for the slim path", and `IsUpper`/`IsLower`/`IsDigit` were
+ASCII-only. `IsSymbol`, `IsOneOf` and `isExcludingLatin` did not exist.
+
+The fix is the data. Go's Latin-1 `properties` bit array — 256 entries —
+plus the `_P`, `_S`, `_Lt`, `_Lu`, `_Ll`, `_Nd` and `_White_Space` range
+tables were transcribed from Go's tables.go, and every predicate is now
+Go's own two-step: a bit test below U+0100, `isExcludingLatin` above it.
+That corrects, among others: `^` and `` ` `` are Symbol, not Punct;
+U+00A1 is Punct while U+00A2 is Symbol; U+00AA, U+00B5 and U+00BA are
+letters; U+00A0 is Graphic but not Print; U+0660 and U+0966 are digits;
+U+2160 and U+2070 are numbers but not digits; U+2028 is a space but
+U+200B is not; and the six title-case letters are title-case.
+
+`unicode_graphic_ref_smoke` checks all 256 Latin-1 code points against
+thirteen predicates at once as a bitmask, then the population count of
+each predicate over a fixed 128k-rune sample of the whole domain —
+every rune below U+10000 plus every 17th above it. A transcribed table
+that is short a range, or carries an extra one, moves exactly one of
+those thirteen numbers, and all thirteen match Go.
+
+Left unported: `To`, `to`, `convertCase` and `lookupCaseRange`. Go maps
+case through a `CaseRanges` table of `{Lo, Hi, Delta}` triples plus a
+`SpecialCase` slice for the Turkish and Azeri dotted I; goish ships a
+generated flat rune-to-rune table, which answers identically for the
+default case but has no `Delta` to hold and no `SpecialCase` to
+override. That is its own commit, and the waiver in `letter.rs` says so.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the
