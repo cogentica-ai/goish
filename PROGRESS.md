@@ -33,7 +33,7 @@ goishlint diff the port against the Go file it came from.
 | `time` | 71/184 | 38.6% | 4 |
 | `sync` | 66/126 | 52.4% | 3 |
 | `hash` | 98/114 | 86.0% | 338 |
-| `mime` | 43/89 | 48.3% | 37 |
+| `mime` | 49/89 | 55.1% | 58 |
 
 Within `net`, the entire jump since the last refresh is **`net/http`,
 now complete: 639/639 functions (100.0%) across all twelve of its
@@ -234,6 +234,35 @@ vectors run twice (once per `Write`, once per byte), the 76-column rule
 at four lengths, the whitespace-before-a-soft-break case, and the
 `checkLastByte` rule that re-encodes a trailing space or tab. `qp_smoke`
 is now declared in Cargo.toml — it never was, so e2e had never run it.
+
+`mime/multipart`'s writer half followed: 18/36 with 8 anchors is now
+24/36 with 29, and writer.go is complete. The six that were missing
+were `CreatePart` and everything that hangs off it — `CreateFormFile`,
+`CreateFormField`, `escapeQuotes`, `randomBoundary`, and the `part`
+type with its `Write` and `close`. goish had gone around the problem
+instead: `CreatePart` returns an `io.Writer` backed by a `*part` that
+holds a back-pointer to its `*Writer`, and a Rust struct cannot hold
+that, so the port had replaced the whole idea with a `WritePart(header,
+body)` that took the body up front.
+
+`part` is now a *borrow* of the Writer, and the two fields that have to
+outlive the handle — `closed` and the last write error — live in
+`Writer.lastpart`, which is the field Go reaches them through anyway.
+That turns Go's documented rule ("after calling CreatePart, any
+previous part may no longer be written to") from a runtime error into a
+borrow-checker error: the old handle cannot still be alive. The one Go
+behaviour that becomes untestable as a result is the
+"multipart: can't write to finished part" message, and the smoke says
+so where the check would have been.
+
+`WritePart` and `WriteFile` stay as goish-only conveniences, anchored
+`// go: none`, because `net/http/fs.rs` emits a headers-only part
+through the first one. The whole message is now compared byte-for-byte
+against a running Go — two fields, a file part and a raw part whose
+headers were set out of order, since Go emits header keys sorted and
+repeated values in insertion order — along with the twelve-case
+`SetBoundary` table (a space is legal anywhere but the last byte) and
+`FormDataContentType`'s tspecials quoting.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the
