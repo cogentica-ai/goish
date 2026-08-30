@@ -35,7 +35,7 @@ goishlint diff the port against the Go file it came from.
 | `hash` | 98/114 | 86.0% | 338 |
 | `mime` | 73/89 | 82.0% | 106 |
 | `bufio` | 48/48 | 100.0% | 81 |
-| `unicode` | 45/52 | 86.5% | 36 |
+| `unicode` | 45/52 | 86.5% | 52 |
 
 Within `net`, the entire jump since the last refresh is **`net/http`,
 now complete: 639/639 functions (100.0%) across all twelve of its
@@ -382,6 +382,35 @@ U+10FFFF.
 `tools/gen_utf8_ref.go` is `package utf8_test`, for the same reason
 `gen_bufio_ref.go` is: `testing` reaches `unicode/utf8`, so an
 in-package ref file is an import cycle.
+
+`unicode/utf16` was already 8/8 — and wrong. Anchoring it, splitting it
+into `utf16.rs` and diffing it against a running Go turned up a
+precedence bug that had silently broken every code point from **U+20000
+upward**.
+
+Go's `DecodeRune` ends with
+
+    return (r1-surr1)<<10 | (r2 - surr2) + surrSelf
+
+and in Go `|` and `+` share the additive precedence level and associate
+left to right, so that reads `(((r1-surr1)<<10) | (r2-surr2)) +
+surrSelf`. Rust binds `+` tighter than `|`, so the same characters mean
+`x | (y + surrSelf)` — which ORs the 0x10000 bit into a position the
+shifted high half already occupies, and loses it. Below U+20000 the
+high half is small enough that the bit survives, which is why every
+emoji (U+1F600 and friends) round-tripped and nothing noticed. `DecodeRune(0xDBFF,
+0xDFFF)` returned U+FFFFF instead of U+10FFFF.
+
+The same expression is the tail of `Decode`, so the whole
+supplementary-plane-2-and-up range was affected — including CJK
+Extension B, which `crypto/x509` and `encoding/asn1` can both carry in
+a BMPString. A grep for the same `A | B + C` shape across the tree found
+no other instance: every other `|`-with-`+` has the `+` inside an index
+expression, where it is unambiguous.
+
+utf16 is now 8/8 with 16 anchors, checked against Go on 17 runes,
+9 surrogate pairs, 9 `Encode` round-trips and 8 raw `Decode` sequences
+the encoder would never emit.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the
