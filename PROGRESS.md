@@ -33,6 +33,7 @@ goishlint diff the port against the Go file it came from.
 | `time` | 71/184 | 38.6% | 4 |
 | `sync` | 66/126 | 52.4% | 3 |
 | `hash` | 98/114 | 86.0% | 338 |
+| `mime` | 43/89 | 48.3% | 37 |
 
 Within `net`, the entire jump since the last refresh is **`net/http`,
 now complete: 639/639 functions (100.0%) across all twelve of its
@@ -207,6 +208,32 @@ formulas across a full quantum, a byte-at-a-time `NewEncoder` so every
 five-byte boundary falls inside a `Write`, a `NewDecoder` round-trip
 through `io::ReadAll`, CRLF interleaved every three characters, three
 truncated inputs, and four `CorruptInputError` offsets.
+
+`mime/quotedprintable` is the first of the `mime` subtree to be
+anchored: 7/15 with zero anchors, now **15/15 with 29**, split into a
+`reader.rs` and a `writer.rs` so each ports exactly one Go file. All
+eight missing declarations were the writer's internals — `write`,
+`encode`, `checkLastByte`, `insertSoftLineBreak`, `insertCRLF` — and the
+reader's `fromHex`, `readHexByte` and `isQPDiscardWhitespace`; the code
+existed under invented snake_case names, so a name-matching counter
+could not see it and goishlint could not diff it.
+
+What the anchoring caught was the error text, again. Both of the
+reader's errors had been flattened: `fmt.Errorf("quotedprintable:
+invalid hex byte 0x%02x", b)` had become a constant with no byte in it,
+and `"invalid bytes after =: %q"` had lost its `%q` payload. A caller
+matching on the message would have failed against both. All three texts
+are now produced by `fmt::Errorf!` with Go's verbs and checked
+character-for-character, which also confirms goish's `%02x` and `%q`
+agree with Go's on these inputs.
+
+The decoder is mostly a catalogue of what it tolerates — Go documents
+four deviations from RFC 2045, all leniency — so the smoke is 35 decode
+vectors from a running Go, most of them malformed, plus thirteen encode
+vectors run twice (once per `Write`, once per byte), the 76-column rule
+at four lengths, the whitespace-before-a-soft-break case, and the
+`checkLastByte` rule that re-encodes a trailing space or tab. `qp_smoke`
+is now declared in Cargo.toml — it never was, so e2e had never run it.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the
