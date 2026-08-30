@@ -15,19 +15,19 @@
 use crate::convert::{rune as torune, uint16 as touint16, uint32 as touint32};
 use crate::types::{int, rune};
 
-// go: sdk 1.25.5 unicode/letter.go:11-19 MaxRune
+// go: sdk 1.25.5 unicode/letter.go:9-14 MaxRune
 /// Maximum valid Unicode code point.
 pub const MaxRune: rune = 0x10FFFF;
 
-// go: sdk 1.25.5 unicode/letter.go:11-19 ReplacementChar
+// go: sdk 1.25.5 unicode/letter.go:9-14 ReplacementChar
 /// Represents invalid code points.
 pub const ReplacementChar: rune = 0xFFFD;
 
-// go: sdk 1.25.5 unicode/letter.go:11-19 MaxASCII
+// go: sdk 1.25.5 unicode/letter.go:9-14 MaxASCII
 /// Maximum ASCII value.
 pub const MaxASCII: rune = 0x007F;
 
-// go: sdk 1.25.5 unicode/letter.go:11-19 MaxLatin1
+// go: sdk 1.25.5 unicode/letter.go:9-14 MaxLatin1
 /// Maximum Latin-1 value.
 pub const MaxLatin1: rune = 0x00FF;
 
@@ -174,7 +174,7 @@ pub fn isExcludingLatin(rangeTab: &RangeTable, r: rune) -> bool {
     return false;
 }
 
-// go: sdk 1.25.5 unicode/letter.go:150-156 IsUpper
+// go: sdk 1.25.5 unicode/letter.go:184-190 IsUpper
 /// Whether the rune is an upper-case letter.
 ///
 /// Both halves are Go's: the Latin-1 test is `properties & pLmask ==
@@ -189,7 +189,7 @@ pub fn IsUpper(r: rune) -> bool {
     return isExcludingLatin(&super::tables::UPPER, r);
 }
 
-// go: sdk 1.25.5 unicode/letter.go:158-164 IsLower
+// go: sdk 1.25.5 unicode/letter.go:193-199 IsLower
 /// Whether the rune is a lower-case letter.
 pub fn IsLower(r: rune) -> bool {
     if crate::convert::uint32(r) <= crate::convert::uint32(MaxLatin1) {
@@ -200,7 +200,7 @@ pub fn IsLower(r: rune) -> bool {
     return isExcludingLatin(&super::tables::LOWER, r);
 }
 
-// go: sdk 1.25.5 unicode/letter.go:166-172 IsTitle
+// go: sdk 1.25.5 unicode/letter.go:202-207 IsTitle
 /// Whether the rune is a title-case letter.
 ///
 /// This had been a stub returning `false` for everything, with a note

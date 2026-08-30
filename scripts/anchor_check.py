@@ -186,7 +186,13 @@ def decl_hits(gofile, sym, free_only=False):
                 # Without this those names resolve nowhere and can never
                 # be anchored, though they are as much declarations as
                 # the first member of the block.
-                re.compile(r"^\s+" + re.escape(sym) + r"\s*$"),
+                #
+                # The trailing comment is part of it. Go's house style
+                # documents each member on its own line, so unicode's
+                # `pP // a punctuation character.` is the common shape,
+                # not the exception — without allowing it, seven of the
+                # eight `p*` masks resolved nowhere.
+                re.compile(r"^\s+" + re.escape(sym) + r"\s*(//.*)?$"),
                 ] + ([] if free_only else
                      [re.compile(r"^func\s*\([^)]*\)\s*" + re.escape(sym) + r"\b")])
         bare = True

@@ -41,7 +41,7 @@ use crate::string;
 use crate::strings;
 use crate::types::{byte, int};
 
-// go: sdk 1.25.5 mime/multipart/writer.go:170-174 part
+// go: sdk 1.25.5 mime/multipart/writer.go:182-186 part
 /// The state Go keeps in the `*part` its `CreatePart` hands back.
 ///
 /// goish's `part` handle is a borrow of the `Writer`, so it cannot
@@ -63,7 +63,7 @@ pub struct Writer<W: IoWriter> {
     lastpart: Option<lastPart>,
 }
 
-// go: sdk 1.25.5 mime/multipart/writer.go:26-31 NewWriter
+// go: sdk 1.25.5 mime/multipart/writer.go:28-33 NewWriter
 /// A new multipart [`Writer`] with a random boundary, writing to `w`.
 pub fn NewWriter<W: IoWriter>(w: W) -> Writer<W> {
     return Writer {
@@ -73,7 +73,7 @@ pub fn NewWriter<W: IoWriter>(w: W) -> Writer<W> {
     };
 }
 
-// go: sdk 1.25.5 mime/multipart/writer.go:80-87 randomBoundary
+// go: sdk 1.25.5 mime/multipart/writer.go:85-92 randomBoundary
 /// Thirty bytes from the CSPRNG, rendered as sixty lower-hex digits.
 fn randomBoundary() -> string {
     const N: usize = 30;
@@ -96,7 +96,7 @@ fn randomBoundary() -> string {
     return string::from_bytes(&out);
 }
 
-// go: sdk 1.25.5 mime/multipart/writer.go:125-127 escapeQuotes
+// go: sdk 1.25.5 mime/multipart/writer.go:130-132 escapeQuotes
 /// Go builds a `strings.Replacer` once and reuses it; goish walks the
 /// string, which is the same two substitutions: `\` for `\\` and `"`
 /// for `\"`.
@@ -120,7 +120,7 @@ fn escapeQuotes(s: string) -> string {
     return b.String();
 }
 
-// go: sdk 1.25.5 mime/multipart/writer.go:147-151 FileContentDisposition
+// go: sdk 1.25.5 mime/multipart/writer.go:154-157 FileContentDisposition
 /// The value of a `Content-Disposition` header with the given field
 /// name and file name.
 pub fn FileContentDisposition<F: Into<string>, F1: Into<string>>(
@@ -137,7 +137,7 @@ pub fn FileContentDisposition<F: Into<string>, F1: Into<string>>(
     return b.String();
 }
 
-// go: sdk 1.25.5 mime/multipart/writer.go:170-174 part
+// go: sdk 1.25.5 mime/multipart/writer.go:182-186 part
 /// The `io.Writer` Go's [`Writer::CreatePart`] returns.
 ///
 // goishlint:ignore GOISH019 part — Go's `part` is `{mw *Writer, closed
@@ -151,7 +151,7 @@ pub struct part<'a, W: IoWriter> {
 }
 
 impl<'a, W: IoWriter> part<'a, W> {
-    // go: sdk 1.25.5 mime/multipart/writer.go:181-190 part.Write
+    // go: sdk 1.25.5 mime/multipart/writer.go:193-202 part.Write
     pub fn Write(&mut self, d: slice<byte>) -> (int, error) {
         // Go: if p.closed { return 0, errors.New(…) }
         let closed = match self.mw.lastpart.as_ref() {
@@ -184,13 +184,13 @@ impl<'a, W: IoWriter> IoWriter for part<'a, W> {
 }
 
 impl<W: IoWriter> Writer<W> {
-    // go: sdk 1.25.5 mime/multipart/writer.go:34-36 Writer.Boundary
+    // go: sdk 1.25.5 mime/multipart/writer.go:36-38 Writer.Boundary
     /// The [`Writer`]'s boundary.
     pub fn Boundary(&self) -> string {
         return self.boundary.clone();
     }
 
-    // go: sdk 1.25.5 mime/multipart/writer.go:44-67 Writer.SetBoundary
+    // go: sdk 1.25.5 mime/multipart/writer.go:46-71 Writer.SetBoundary
     /// Overrides the randomly generated boundary separator with an
     /// explicit value.
     ///
@@ -233,7 +233,7 @@ impl<W: IoWriter> Writer<W> {
         return errors::nil;
     }
 
-    // go: sdk 1.25.5 mime/multipart/writer.go:71-78 Writer.FormDataContentType
+    // go: sdk 1.25.5 mime/multipart/writer.go:75-83 Writer.FormDataContentType
     /// The `Content-Type` for an HTTP `multipart/form-data` with this
     /// [`Writer`]'s boundary, quoting the boundary when it holds one of
     /// RFC 2045's tspecials, or a space.
@@ -252,7 +252,7 @@ impl<W: IoWriter> Writer<W> {
         return out.String();
     }
 
-    // go: sdk 1.25.5 mime/multipart/writer.go:176-179 part.close
+    // go: sdk 1.25.5 mime/multipart/writer.go:188-191 part.close
     // goishlint:ignore GOISH014 — the anchor names Go's `part.close`.
     //     Go calls it through the `lastpart` back-pointer; goish keeps
     //     `part`'s state in `Writer.lastpart`, so the method lives on
@@ -267,7 +267,7 @@ impl<W: IoWriter> Writer<W> {
         };
     }
 
-    // go: sdk 1.25.5 mime/multipart/writer.go:93-120 Writer.CreatePart
+    // go: sdk 1.25.5 mime/multipart/writer.go:98-126 Writer.CreatePart
     /// Creates a new multipart section with the provided header. The
     /// body of the part should be written to the returned writer.
     ///
@@ -327,7 +327,7 @@ impl<W: IoWriter> Writer<W> {
         return (part { mw: self }, errors::nil);
     }
 
-    // go: sdk 1.25.5 mime/multipart/writer.go:131-137 Writer.CreateFormFile
+    // go: sdk 1.25.5 mime/multipart/writer.go:136-141 Writer.CreateFormFile
     /// A convenience wrapper around [`Writer::CreatePart`]: a new
     /// form-data header with the given field name and file name.
     pub fn CreateFormFile<F: Into<string>, F1: Into<string>>(
@@ -344,7 +344,7 @@ impl<W: IoWriter> Writer<W> {
         return self.CreatePart(h);
     }
 
-    // go: sdk 1.25.5 mime/multipart/writer.go:141-145 Writer.CreateFormField
+    // go: sdk 1.25.5 mime/multipart/writer.go:145-150 Writer.CreateFormField
     /// Calls [`Writer::CreatePart`] with a header naming the field.
     pub fn CreateFormField<F: Into<string>>(&mut self, fieldname: F) -> (part<'_, W>, error) {
         let mut h = Header::new();
@@ -357,7 +357,7 @@ impl<W: IoWriter> Writer<W> {
         return self.CreatePart(h);
     }
 
-    // go: sdk 1.25.5 mime/multipart/writer.go:154-161 Writer.WriteField
+    // go: sdk 1.25.5 mime/multipart/writer.go:160-167 Writer.WriteField
     /// Calls [`Writer::CreateFormField`] and then writes the value.
     pub fn WriteField<F: Into<string>, V: Into<string>>(
         &mut self,
@@ -405,7 +405,7 @@ impl<W: IoWriter> Writer<W> {
         return werr;
     }
 
-    // go: sdk 1.25.5 mime/multipart/writer.go:165-168 Writer.Close
+    // go: sdk 1.25.5 mime/multipart/writer.go:171-180 Writer.Close
     /// Finishes the multipart message and writes the trailing boundary
     /// end line to the output.
     pub fn Close(&mut self) -> error {

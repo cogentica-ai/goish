@@ -33,7 +33,7 @@ use crate::types::{byte, int};
 // go: sdk 1.25.5 mime/quotedprintable/writer.go:9-9 lineMaxLen
 const lineMaxLen: usize = 76;
 
-// go: sdk 1.25.5 mime/quotedprintable/writer.go:112-112 upperhex
+// go: sdk 1.25.5 mime/quotedprintable/writer.go:127-127 upperhex
 const upperhex: &[byte] = b"0123456789ABCDEF";
 
 // go: sdk 1.25.5 mime/quotedprintable/writer.go:11-21 Writer
@@ -62,7 +62,7 @@ pub fn NewWriter<W: io::Writer>(w: W) -> Writer<W> {
     };
 }
 
-// go: sdk 1.25.5 mime/quotedprintable/writer.go:160-162 isWhitespace
+// go: sdk 1.25.5 mime/quotedprintable/writer.go:170-172 isWhitespace
 fn isWhitespace(b: byte) -> bool {
     return b == b' ' || b == b'\t';
 }
@@ -128,7 +128,7 @@ impl<W: io::Writer> Writer<W> {
         return self.flush();
     }
 
-    // go: sdk 1.25.5 mime/quotedprintable/writer.go:75-108 Writer.write
+    // go: sdk 1.25.5 mime/quotedprintable/writer.go:76-110 Writer.write
     /// Emits literal text, holding output to 76 characters per line.
     fn write(&mut self, p: &[byte]) -> error {
         let mut k = 0usize;
@@ -173,7 +173,7 @@ impl<W: io::Writer> Writer<W> {
         return errors::nil;
     }
 
-    // go: sdk 1.25.5 mime/quotedprintable/writer.go:110-110 Writer.encode
+    // go: sdk 1.25.5 mime/quotedprintable/writer.go:112-125 Writer.encode
     /// Writes one byte as "=XX", starting a new line first if three
     /// columns will not fit.
     fn encode(&mut self, b: byte) -> error {
@@ -192,7 +192,7 @@ impl<W: io::Writer> Writer<W> {
         return errors::nil;
     }
 
-    // go: sdk 1.25.5 mime/quotedprintable/writer.go:115-128 Writer.checkLastByte
+    // go: sdk 1.25.5 mime/quotedprintable/writer.go:130-144 Writer.checkLastByte
     /// Encodes the last buffered byte if it is a space or a tab, so a
     /// transport that strips trailing whitespace cannot eat it.
     fn checkLastByte(&mut self) -> error {
@@ -212,7 +212,7 @@ impl<W: io::Writer> Writer<W> {
         return errors::nil;
     }
 
-    // go: sdk 1.25.5 mime/quotedprintable/writer.go:130-135 Writer.insertSoftLineBreak
+    // go: sdk 1.25.5 mime/quotedprintable/writer.go:146-151 Writer.insertSoftLineBreak
     fn insertSoftLineBreak(&mut self) -> error {
         self.line[self.i] = b'=';
         self.i += 1;
@@ -220,7 +220,7 @@ impl<W: io::Writer> Writer<W> {
         return self.insertCRLF();
     }
 
-    // go: sdk 1.25.5 mime/quotedprintable/writer.go:137-143 Writer.insertCRLF
+    // go: sdk 1.25.5 mime/quotedprintable/writer.go:153-159 Writer.insertCRLF
     fn insertCRLF(&mut self) -> error {
         self.line[self.i] = b'\r';
         self.line[self.i + 1] = b'\n';
@@ -229,7 +229,7 @@ impl<W: io::Writer> Writer<W> {
         return self.flush();
     }
 
-    // go: sdk 1.25.5 mime/quotedprintable/writer.go:145-152 Writer.flush
+    // go: sdk 1.25.5 mime/quotedprintable/writer.go:161-168 Writer.flush
     fn flush(&mut self) -> error {
         let buf = slice::__from_vec(self.line[..self.i].to_vec());
         let (_, err) = self.w.Write(buf);

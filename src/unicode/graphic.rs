@@ -16,47 +16,47 @@ use super::{Is, MaxLatin1, RangeTable};
 use crate::convert::uint32 as touint32;
 use crate::types::rune;
 
-// go: sdk 1.25.5 unicode/graphic.go:7-20 pC
+// go: sdk 1.25.5 unicode/graphic.go:8-20 pC
 /// A control character.
 pub(super) const pC: u8 = 1 << 0;
 
-// go: sdk 1.25.5 unicode/graphic.go:7-20 pP
+// go: sdk 1.25.5 unicode/graphic.go:8-20 pP
 /// A punctuation character.
 pub(super) const pP: u8 = 1 << 1;
 
-// go: sdk 1.25.5 unicode/graphic.go:7-20 pN
+// go: sdk 1.25.5 unicode/graphic.go:8-20 pN
 /// A numeral.
 pub(super) const pN: u8 = 1 << 2;
 
-// go: sdk 1.25.5 unicode/graphic.go:7-20 pS
+// go: sdk 1.25.5 unicode/graphic.go:8-20 pS
 /// A symbolic character.
 pub(super) const pS: u8 = 1 << 3;
 
-// go: sdk 1.25.5 unicode/graphic.go:7-20 pZ
+// go: sdk 1.25.5 unicode/graphic.go:8-20 pZ
 /// A spacing character.
 pub(super) const pZ: u8 = 1 << 4;
 
-// go: sdk 1.25.5 unicode/graphic.go:7-20 pLu
+// go: sdk 1.25.5 unicode/graphic.go:8-20 pLu
 /// An upper-case letter.
 pub(super) const pLu: u8 = 1 << 5;
 
-// go: sdk 1.25.5 unicode/graphic.go:7-20 pLl
+// go: sdk 1.25.5 unicode/graphic.go:8-20 pLl
 /// A lower-case letter.
 pub(super) const pLl: u8 = 1 << 6;
 
-// go: sdk 1.25.5 unicode/graphic.go:7-20 pp
+// go: sdk 1.25.5 unicode/graphic.go:8-20 pp
 /// A printable character according to Go's definition.
 pub(super) const pp: u8 = 1 << 7;
 
-// go: sdk 1.25.5 unicode/graphic.go:7-20 pg
+// go: sdk 1.25.5 unicode/graphic.go:8-20 pg
 /// A graphical character according to the Unicode definition.
 pub(super) const pg: u8 = pp | pZ;
 
-// go: sdk 1.25.5 unicode/graphic.go:7-20 pLo
+// go: sdk 1.25.5 unicode/graphic.go:8-20 pLo
 /// A letter that is neither upper nor lower case.
 pub(super) const pLo: u8 = pLl | pLu;
 
-// go: sdk 1.25.5 unicode/graphic.go:7-20 pLmask
+// go: sdk 1.25.5 unicode/graphic.go:8-20 pLmask
 const pLmask: u8 = pLo;
 
 // go: sdk 1.25.5 unicode/graphic.go:22-25 GraphicRanges

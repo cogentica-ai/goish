@@ -16,7 +16,7 @@
 
 use super::letter::{CaseRange, SpecialCase};
 
-// go: sdk 1.25.5 unicode/casetables.go:12-18 _TurkishCase
+// go: sdk 1.25.5 unicode/casetables.go:13-18 _TurkishCase
 static _TurkishCase: &[CaseRange] = &[
     CaseRange {
         Lo: 0x0049,

@@ -83,7 +83,7 @@ const runeErrorByte0: byte = t3 | ((RuneError >> 12) as byte); // goishlint:igno
 // go: sdk 1.25.5 unicode/utf8/utf8.go:62-66 runeErrorByte1
 const runeErrorByte1: byte = tx | (((RuneError >> 6) as byte) & maskx); // goishlint:ignore GOISH005 - a `const` initialiser cannot call `byte(...)`.
 
-// go: sdk 1.25.5 unicode/utf8/utf8.go:62-66 runeErrorByte2
+// go: sdk 1.25.5 unicode/utf8/utf8.go:64-68 runeErrorByte2
 const runeErrorByte2: byte = tx | ((RuneError as byte) & maskx); // goishlint:ignore GOISH005 - a `const` initialiser cannot call `byte(...)`.
 
 // ─── Decode ────────────────────────────────────────────────────────────

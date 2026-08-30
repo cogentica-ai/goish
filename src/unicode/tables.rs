@@ -22,7 +22,7 @@ use super::graphic::{pC, pLl, pLo, pLu, pN, pP, pS, pZ, pp};
 use super::letter::{CaseRange, UpperLower};
 use super::{Range16, Range32, RangeTable};
 
-// go: sdk 1.25.5 unicode/tables.go:4148-4605 _P
+// go: sdk 1.25.5 unicode/tables.go:4148-4321 _P
 /// `unicode.Punct` / `unicode.P` — the Unicode punctuation category.
 pub(super) static PUNCT: RangeTable = RangeTable {
     R16: &[
@@ -867,7 +867,7 @@ pub(super) static PUNCT: RangeTable = RangeTable {
     LatinOffset: 11,
 };
 
-// go: sdk 1.25.5 unicode/tables.go:4606-4890 _S
+// go: sdk 1.25.5 unicode/tables.go:4606-4813 _S
 /// `unicode.Symbol` / `unicode.S` — the Unicode symbol category.
 pub(super) static SYMBOL: RangeTable = RangeTable {
     R16: &[
@@ -2233,7 +2233,7 @@ pub(super) static properties: [u8; 256] = [
     pLl | pp,
 ];
 
-// go: sdk 1.25.5 unicode/tables.go:3979-4060 _Nd
+// go: sdk 1.25.5 unicode/tables.go:3979-4049 _Nd
 /// `unicode.Nd` / `unicode.Digit` — Number, decimal digit.
 pub(super) static Nd: RangeTable = RangeTable {
     R16: &[
@@ -2563,7 +2563,7 @@ pub(super) static Nd: RangeTable = RangeTable {
     LatinOffset: 1,
 };
 
-// go: sdk 1.25.5 unicode/tables.go:2883-3100 _Lu
+// go: sdk 1.25.5 unicode/tables.go:2883-3038 _Lu
 /// `unicode.Upper` / `unicode.Lu` — Letter, uppercase.
 pub(super) static UPPER: RangeTable = RangeTable {
     R16: &[
@@ -3318,7 +3318,7 @@ pub(super) static UPPER: RangeTable = RangeTable {
     LatinOffset: 3,
 };
 
-// go: sdk 1.25.5 unicode/tables.go:2147-2400 _Ll
+// go: sdk 1.25.5 unicode/tables.go:2147-2316 _Ll
 /// `unicode.Lower` / `unicode.Ll` — Letter, lowercase.
 pub(super) static LOWER: RangeTable = RangeTable {
     R16: &[
@@ -4145,7 +4145,7 @@ pub(super) static LOWER: RangeTable = RangeTable {
 
 // ─── General-category tables (Go: tables.go `_L`, `_M`, `_N`) ────────
 
-// go: sdk 1.25.5 unicode/tables.go:2130-2870 _L
+// go: sdk 1.25.5 unicode/tables.go:1373-2002 _L
 /// `unicode.Letter` / `unicode.L` — the Unicode letter category.
 pub(super) static LETTER: RangeTable = RangeTable {
     R16: &[
@@ -7269,7 +7269,7 @@ pub(super) static LETTER: RangeTable = RangeTable {
     ],
     LatinOffset: 6,
 };
-// go: sdk 1.25.5 unicode/tables.go:2883-3400 _M
+// go: sdk 1.25.5 unicode/tables.go:3040-3344 _M
 /// `unicode.Mark` / `unicode.M` — the Unicode mark category.
 pub(super) static MARK: RangeTable = RangeTable {
     R16: &[
@@ -8773,7 +8773,7 @@ pub(super) static MARK: RangeTable = RangeTable {
     ],
     LatinOffset: 0,
 };
-// go: sdk 1.25.5 unicode/tables.go:3401-3560 _N
+// go: sdk 1.25.5 unicode/tables.go:3836-3977 _N
 /// `unicode.Number` / `unicode.N` — the Unicode number category.
 pub(super) static NUMBER: RangeTable = RangeTable {
     R16: &[
@@ -9460,7 +9460,7 @@ pub(super) static NUMBER: RangeTable = RangeTable {
 
 // ─── Mn and Zs ──────────────────────────────────────────────────────
 
-// go: sdk 1.25.5 unicode/tables.go:3168-3400 _Mn
+// go: sdk 1.25.5 unicode/tables.go:3521-3834 _Mn
 /// `unicode.Mn` — Mark, nonspacing.
 static _Mn: RangeTable = RangeTable {
     R16: &[
@@ -11010,7 +11010,7 @@ static _Mn: RangeTable = RangeTable {
     LatinOffset: 0,
 };
 
-// go: sdk 1.25.5 unicode/tables.go:4113-4126 _Zs
+// go: sdk 1.25.5 unicode/tables.go:5127-5136 _Zs
 /// `unicode.Zs` — Separator, space.
 static _Zs: RangeTable = RangeTable {
     R16: &[
@@ -11052,7 +11052,7 @@ pub static Mn: &RangeTable = &_Mn;
 /// category Zs (Separator, space).
 pub static Zs: &RangeTable = &_Zs;
 
-// go: sdk 1.25.5 unicode/tables.go:8624-9000 CaseRanges
+// go: sdk 1.25.5 unicode/tables.go:8624-8624 CaseRanges
 /// `unicode.CaseRanges` — the default case mappings, as ranges with
 /// an (upper, lower, title) delta triple each.
 pub static CaseRanges: &[CaseRange] = &[

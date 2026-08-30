@@ -37,7 +37,7 @@ use crate::runtime::spin::SpinLock;
 use crate::types::{byte, int, rune};
 use crate::unicode::utf8;
 
-use super::bufio::{cached_error, index_byte, ErrNoProgress};
+use super::bufio::{cached_error, index_byte, maxConsecutiveEmptyReads, ErrNoProgress};
 
 // ─── Constants ────────────────────────────────────────────────────────
 
@@ -46,12 +46,6 @@ use super::bufio::{cached_error, index_byte, ErrNoProgress};
 /// explicit buffer with [`Scanner::Buffer`]. The maximum token size is
 /// roughly `MaxScanTokenSize` unless the caller does so.
 pub const MaxScanTokenSize: int = 64 * 1024;
-
-// go: sdk 1.25.5 bufio/scan.go:82-84 maxConsecutiveEmptyReads
-/// How many successive empty reads the Scanner tolerates before giving
-/// up. Go declares this in bufio.go and both files read it; goish's
-/// scan.rs keeps its own copy so the two files stay independent.
-const maxConsecutiveEmptyReads: int = 100;
 
 // go: sdk 1.25.5 bufio/scan.go:77-85 startBufSize
 /// The size of the buffer the Scanner starts with.
@@ -379,7 +373,7 @@ pub fn ScanRunes(data: &[byte], at_eof: bool) -> (int, Option<slice<byte>>, erro
     return (1, Some(slice::__from_vec(tmp[..n as usize].to_vec())), nil);
 }
 
-// go: sdk 1.25.5 bufio/scan.go:399-424 ScanWords
+// go: sdk 1.25.5 bufio/scan.go:403-427 ScanWords
 /// A split function for a [`Scanner`] that returns each space-separated
 /// word of text, with surrounding spaces deleted. It never returns an
 /// empty token. The definition of space is [`isSpace`].

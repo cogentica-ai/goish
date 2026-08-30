@@ -34,7 +34,7 @@ use super::grammar::{isTSpecial, isToken, isTokenChar};
 //     rather than making one file reach into the other's private half.
 const upperhex: &[byte] = b"0123456789ABCDEF";
 
-// go: sdk 1.25.5 mime/mediatype.go:16-93 FormatMediaType
+// go: sdk 1.25.5 mime/mediatype.go:21-96 FormatMediaType
 /// Serialises media type `t` and the parameters `param` as a media type
 /// conforming to RFC 2045 and RFC 2616.
 ///
@@ -148,7 +148,7 @@ fn needsEncoding(s: &string) -> bool {
     return false;
 }
 
-// go: sdk 1.25.5 mime/mediatype.go:95-114 checkMediaTypeDisposition
+// go: sdk 1.25.5 mime/mediatype.go:98-117 checkMediaTypeDisposition
 fn checkMediaTypeDisposition(s: string) -> error {
     let (typ, rest) = consumeToken(s);
     if typ.Len() == 0 {
@@ -174,7 +174,7 @@ fn checkMediaTypeDisposition(s: string) -> error {
     return errors::nil;
 }
 
-// go: sdk 1.25.5 mime/mediatype.go:116-119 ErrInvalidMediaParameter
+// go: sdk 1.25.5 mime/mediatype.go:122-122 ErrInvalidMediaParameter
 /// Returned by [`ParseMediaType`] when the media type value was found
 /// but its optional parameters would not parse.
 ///
@@ -184,7 +184,7 @@ pub fn ErrInvalidMediaParameter() -> error {
     return errors::New(string::from_static("mime: invalid media parameter"));
 }
 
-// go: sdk 1.25.5 mime/mediatype.go:121-225 ParseMediaType
+// go: sdk 1.25.5 mime/mediatype.go:134-228 ParseMediaType
 /// Parses a media type value and any optional parameters, per RFC 1521.
 ///
 /// On success returns the media type lower-cased and trimmed of white
@@ -322,7 +322,7 @@ pub fn ParseMediaType<V: Into<string>>(v: V) -> (string, map<string, string>, er
     return (mediatype, params, errors::nil);
 }
 
-// go: sdk 1.25.5 mime/mediatype.go:227-248 decode2231Enc
+// go: sdk 1.25.5 mime/mediatype.go:230-251 decode2231Enc
 fn decode2231Enc(v: string) -> (string, bool) {
     let sv = strings::SplitN(v, "'", 3);
     if sv.Len() != 3 {
@@ -344,7 +344,7 @@ fn decode2231Enc(v: string) -> (string, bool) {
     return (encv, true);
 }
 
-// go: sdk 1.25.5 mime/mediatype.go:250-259 consumeToken
+// go: sdk 1.25.5 mime/mediatype.go:257-264 consumeToken
 /// Consumes a token from the front of `v`, per RFC 2045 §5.1
 /// (referenced from RFC 2183), returning the token and the rest.
 /// Returns `("", v)` when it cannot consume even one character.
@@ -360,7 +360,7 @@ fn consumeToken(v: string) -> (string, string) {
     return (v.clone(), string::new());
 }
 
-// go: sdk 1.25.5 mime/mediatype.go:261-299 consumeValue
+// go: sdk 1.25.5 mime/mediatype.go:271-308 consumeValue
 /// Consumes a "value" per RFC 2045 — either a token or a
 /// quoted-string — returning it de-quoted and unescaped along with the
 /// rest. Returns `("", v)` on failure.
@@ -401,7 +401,7 @@ fn consumeValue(v: string) -> (string, string) {
     return (string::new(), v.clone());
 }
 
-// go: sdk 1.25.5 mime/mediatype.go:301-324 consumeMediaParam
+// go: sdk 1.25.5 mime/mediatype.go:310-336 consumeMediaParam
 fn consumeMediaParam(v: string) -> (string, string, string) {
     let mut rest = strings::TrimLeftFunc(v.clone(), |r| {
         return crate::unicode::IsSpace(r);
@@ -440,7 +440,7 @@ fn consumeMediaParam(v: string) -> (string, string, string) {
     return (param, value, rest2);
 }
 
-// go: sdk 1.25.5 mime/mediatype.go:326-364 percentHexUnescape
+// go: sdk 1.25.5 mime/mediatype.go:338-375 percentHexUnescape
 fn percentHexUnescape(s: string) -> (string, error) {
     let raw = s.as_bytes();
     // Count %, and check that each is well formed.
@@ -488,7 +488,7 @@ fn percentHexUnescape(s: string) -> (string, error) {
     return (string::from_bytes(&t), errors::nil);
 }
 
-// go: sdk 1.25.5 mime/mediatype.go:366-376 ishex
+// go: sdk 1.25.5 mime/mediatype.go:377-387 ishex
 fn ishex(c: byte) -> bool {
     if b'0' <= c && c <= b'9' {
         return true;
@@ -502,7 +502,7 @@ fn ishex(c: byte) -> bool {
     return false;
 }
 
-// go: sdk 1.25.5 mime/mediatype.go:378-389 unhex
+// go: sdk 1.25.5 mime/mediatype.go:389-399 unhex
 fn unhex(c: byte) -> byte {
     if b'0' <= c && c <= b'9' {
         return c - b'0';

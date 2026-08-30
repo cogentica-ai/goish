@@ -71,7 +71,7 @@ impl WordEncoder {
         return self.encodeWord(charset, s);
     }
 
-    // go: sdk 1.25.5 mime/encodedword.go:52-66 WordEncoder.encodeWord
+    // go: sdk 1.25.5 mime/encodedword.go:52-68 WordEncoder.encodeWord
     /// `(WordEncoder).encodeWord` (encodedword.go:52).
     fn encodeWord(self, charset: string, s: string) -> string {
         let mut buf = strings::Builder::new();

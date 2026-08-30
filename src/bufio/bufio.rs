@@ -25,7 +25,7 @@ use crate::unicode::utf8;
 
 pub const defaultBufSize: int = 4096;
 const minReadBufferSize: usize = 16;
-const maxConsecutiveEmptyReads: int = 100;
+pub(super) const maxConsecutiveEmptyReads: int = 100;
 
 // go: none — goish idiom: Go's `errors.New` runs at package
 //     initialisation, in a `var` block. goish has no package init, so a
@@ -632,7 +632,7 @@ impl<R: io::Reader> Reader<R> {
         return (fullBuffers, frag, totalLen, err);
     }
 
-    // go: sdk 1.25.5 bufio/bufio.go:481-490 Reader.ReadBytes
+    // go: sdk 1.25.5 bufio/bufio.go:481-492 Reader.ReadBytes
     /// Reads until the first occurrence of `delim`, returning a slice
     /// containing the data up to and including the delimiter.
     ///
