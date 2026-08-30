@@ -1,3 +1,14 @@
+// go: file mime/encodedword.go decls: WordEncoder.Encode, needsEncoding, WordEncoder.encodeWord, maxBase64Len, WordEncoder.bEncode, WordEncoder.qEncode, writeQString, WordEncoder.openWord, closeWord, WordEncoder.splitWord, isUTF8, WordDecoder.Decode, WordDecoder.DecodeHeader, decode, WordDecoder.convert, hasNonWhitespace, qDecode, readHexByte, fromHex, errInvalidWord
+//
+// `errInvalidWord` is a package-level `var` in Go and `maxBase64Len`
+// is one too; both are listed in the manifest because goish spells
+// them as `fn`s — neither `errors::New` nor `base64::DecodedLen` is
+// `const` — and GOISH017 matches a manifest entry against Rust `fn`
+// items. The `WordEncoder`/`WordDecoder` types and the constants are
+// deliberately absent for the same reason, in reverse: naming a
+// non-`fn` there would report it as a dropped port. Each carries its
+// own `// go: sdk` anchor below.
+//
 // mime/encodedword — RFC 2047 encoded-word encoder/decoder.
 //
 // Reference: /share/go/src/mime/encodedword.go
@@ -16,6 +27,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
+use crate::convert::{int as toint, rune as torune};
 use crate::encoding::base64;
 use crate::errors::{self, error};
 use crate::gostring::string;
@@ -25,6 +37,7 @@ use crate::unicode::utf8;
 
 // ─── WordEncoder (encodedword.go:18) ─────────────────────────────────
 
+// go: sdk 1.25.5 mime/encodedword.go:19-19 WordEncoder
 /// `mime.WordEncoder` — RFC 2047 encoded-word encoder.
 ///
 /// Go: `type WordEncoder byte`. The byte is the encoding flag ('b' or
@@ -32,51 +45,57 @@ use crate::unicode::utf8;
 #[derive(Copy, Clone)]
 pub struct WordEncoder(pub byte);
 
+// go: sdk 1.25.5 mime/encodedword.go:21-26 BEncoding
 /// `mime.BEncoding` — base64 encoding (RFC 2045).
 pub const BEncoding: WordEncoder = WordEncoder(b'b');
 
+// go: sdk 1.25.5 mime/encodedword.go:21-26 QEncoding
 /// `mime.QEncoding` — Q encoding (RFC 2047).
 pub const QEncoding: WordEncoder = WordEncoder(b'q');
 
-fn err_invalid_word() -> error {
-    errors::New(string::from_static("mime: invalid RFC 2047 encoded-word"))
+// go: sdk 1.25.5 mime/encodedword.go:28-30 errInvalidWord
+fn errInvalidWord() -> error {
+    return errors::New(string::from_static("mime: invalid RFC 2047 encoded-word"));
 }
 
 impl WordEncoder {
+    // go: sdk 1.25.5 mime/encodedword.go:35-40 WordEncoder.Encode
     /// `(WordEncoder).Encode(charset, s)` (encodedword.go:35).
     pub fn Encode<C: Into<string>, S: Into<string>>(self, charset: C, s: S) -> string {
         let charset: string = charset.into();
         let s: string = s.into();
         // Go: if !needsEncoding(s) { return s }
-        if !needs_encoding(&s) {
+        if !needsEncoding(&s) {
             return s;
         }
-        self.encode_word(charset, s)
+        return self.encodeWord(charset, s);
     }
 
+    // go: sdk 1.25.5 mime/encodedword.go:52-66 WordEncoder.encodeWord
     /// `(WordEncoder).encodeWord` (encodedword.go:52).
-    fn encode_word(self, charset: string, s: string) -> string {
+    fn encodeWord(self, charset: string, s: string) -> string {
         let mut buf = strings::Builder::new();
         // Go: buf.Grow(48)
         buf.Grow(48);
 
-        self.open_word(&mut buf, &charset);
+        self.openWord(&mut buf, &charset);
         if self.0 == BEncoding.0 {
-            self.b_encode(&mut buf, &charset, &s);
+            self.bEncode(&mut buf, &charset, &s);
         } else {
-            self.q_encode(&mut buf, &charset, &s);
+            self.qEncode(&mut buf, &charset, &s);
         }
-        close_word(&mut buf);
+        closeWord(&mut buf);
 
-        buf.String()
+        return buf.String();
     }
 
+    // go: sdk 1.25.5 mime/encodedword.go:82-112 WordEncoder.bEncode
     /// `(WordEncoder).bEncode` (encodedword.go:82).
-    fn b_encode(self, buf: &mut strings::Builder, charset: &string, s: &string) {
+    fn bEncode(self, buf: &mut strings::Builder, charset: &string, s: &string) {
         let raw = s.as_bytes();
         // Go: if !isUTF8(charset) || base64.StdEncoding.EncodedLen(len(s)) <= maxContentLen {
-        let encoded_len = base64::StdEncoding.EncodedLen(raw.len() as int) as usize;
-        if !is_utf8(charset) || encoded_len <= MAX_CONTENT_LEN {
+        let encoded_len = base64::StdEncoding.EncodedLen(toint(raw.len())) as usize;
+        if !isUTF8(charset) || encoded_len <= maxContentLen {
             // Go: io.WriteString(w, s); w.Close()
             let enc = base64::StdEncoding.EncodeToString(raw);
             let _ = buf.WriteString(enc);
@@ -94,14 +113,14 @@ impl WordEncoder {
             let rune_len = rune_len as usize;
 
             // Go: if currentLen+runeLen <= maxBase64Len { currentLen += runeLen }
-            if current_len + rune_len <= max_base64_len() {
+            if current_len + rune_len <= maxBase64Len() {
                 current_len += rune_len;
             } else {
                 // Go: io.WriteString(w, s[last:i]); w.Close(); e.splitWord(buf, charset)
                 let chunk = &raw[last..i];
                 let enc = base64::StdEncoding.EncodeToString(chunk);
                 let _ = buf.WriteString(enc);
-                self.split_word(buf, charset);
+                self.splitWord(buf, charset);
                 last = i;
                 current_len = rune_len;
             }
@@ -113,11 +132,12 @@ impl WordEncoder {
         let _ = buf.WriteString(enc);
     }
 
+    // go: sdk 1.25.5 mime/encodedword.go:114-142 WordEncoder.qEncode
     /// `(WordEncoder).qEncode` (encodedword.go:114).
-    fn q_encode(self, buf: &mut strings::Builder, charset: &string, s: &string) {
+    fn qEncode(self, buf: &mut strings::Builder, charset: &string, s: &string) {
         // Go: if !isUTF8(charset) { writeQString(buf, s); return }
-        if !is_utf8(charset) {
-            write_q_string(buf, s.as_bytes());
+        if !isUTF8(charset) {
+            writeQString(buf, s.as_bytes());
             return;
         }
 
@@ -141,19 +161,20 @@ impl WordEncoder {
             }
 
             // Go: if currentLen+encLen > maxContentLen { e.splitWord(buf, charset); currentLen = 0 }
-            if current_len + enc_len > MAX_CONTENT_LEN {
-                self.split_word(buf, charset);
+            if current_len + enc_len > maxContentLen {
+                self.splitWord(buf, charset);
                 current_len = 0;
             }
             // Go: writeQString(buf, s[i:i+runeLen])
-            write_q_string(buf, &raw[i..i + rune_len]);
+            writeQString(buf, &raw[i..i + rune_len]);
             current_len += enc_len;
             i += rune_len;
         }
     }
 
+    // go: sdk 1.25.5 mime/encodedword.go:160-167 WordEncoder.openWord
     /// `(WordEncoder).openWord` (encodedword.go:160).
-    fn open_word(self, buf: &mut strings::Builder, charset: &string) {
+    fn openWord(self, buf: &mut strings::Builder, charset: &string) {
         let _ = buf.WriteString(string::from_static("=?"));
         let _ = buf.WriteString(charset.clone());
         let _ = buf.WriteByte(b'?');
@@ -161,21 +182,24 @@ impl WordEncoder {
         let _ = buf.WriteByte(b'?');
     }
 
+    // go: sdk 1.25.5 mime/encodedword.go:174-178 WordEncoder.splitWord
     /// `(WordEncoder).splitWord` (encodedword.go:174).
-    fn split_word(self, buf: &mut strings::Builder, charset: &string) {
-        close_word(buf);
+    fn splitWord(self, buf: &mut strings::Builder, charset: &string) {
+        closeWord(buf);
         let _ = buf.WriteByte(b' ');
-        self.open_word(buf, charset);
+        self.openWord(buf, charset);
     }
 }
 
+// go: sdk 1.25.5 mime/encodedword.go:169-172 closeWord
 /// `closeWord(buf)` (encodedword.go:169).
-fn close_word(buf: &mut strings::Builder) {
+fn closeWord(buf: &mut strings::Builder) {
     let _ = buf.WriteString(string::from_static("?="));
 }
 
+// go: sdk 1.25.5 mime/encodedword.go:42-49 needsEncoding
 /// `needsEncoding(s)` (encodedword.go:42).
-fn needs_encoding(s: &string) -> bool {
+fn needsEncoding(s: &string) -> bool {
     // Go: for _, b := range s {
     //         if (b < ' ' || b > '~') && b != '\t' { return true } }
     let raw = s.as_bytes();
@@ -183,16 +207,17 @@ fn needs_encoding(s: &string) -> bool {
     while i < raw.len() {
         let tail = string::from_bytes(&raw[i..]);
         let (r, sz) = utf8::DecodeRuneInString(&tail);
-        if (r < b' ' as rune || r > b'~' as rune) && r != b'\t' as rune {
+        if (r < torune(b' ') || r > torune(b'~')) && r != torune(b'\t') {
             return true;
         }
         i += sz as usize;
     }
-    false
+    return false;
 }
 
+// go: sdk 1.25.5 mime/encodedword.go:144-158 writeQString
 /// `writeQString(buf, s)` (encodedword.go:144).
-fn write_q_string(buf: &mut strings::Builder, s: &[byte]) {
+fn writeQString(buf: &mut strings::Builder, s: &[byte]) {
     // Go: for i := 0; i < len(s); i++ { switch b := s[i]; { ... } }
     let mut i = 0usize;
     while i < s.len() {
@@ -203,33 +228,39 @@ fn write_q_string(buf: &mut strings::Builder, s: &[byte]) {
             let _ = buf.WriteByte(b);
         } else {
             let _ = buf.WriteByte(b'=');
-            let _ = buf.WriteByte(UPPER_HEX[(b >> 4) as usize]);
-            let _ = buf.WriteByte(UPPER_HEX[(b & 0x0F) as usize]);
+            let _ = buf.WriteByte(upperhex[(b >> 4) as usize]);
+            let _ = buf.WriteByte(upperhex[(b & 0x0F) as usize]);
         }
         i += 1;
     }
 }
 
+// go: sdk 1.25.5 mime/encodedword.go:180-182 isUTF8
 /// `isUTF8(charset)` (encodedword.go:180).
-fn is_utf8(charset: &string) -> bool {
-    strings::EqualFold(charset.clone(), string::from_static("UTF-8"))
+fn isUTF8(charset: &string) -> bool {
+    return strings::EqualFold(charset.clone(), string::from_static("UTF-8"));
 }
 
-const UPPER_HEX: &[byte] = b"0123456789ABCDEF";
+// go: sdk 1.25.5 mime/encodedword.go:184-184 upperhex
+const upperhex: &[byte] = b"0123456789ABCDEF";
 
+// go: sdk 1.25.5 mime/encodedword.go:70-77 maxEncodedWordLen
 // Go: const maxEncodedWordLen = 75
-const MAX_ENCODED_WORD_LEN: usize = 75;
+const maxEncodedWordLen: usize = 75;
+// go: sdk 1.25.5 mime/encodedword.go:70-77 maxContentLen
 // Go: maxContentLen = maxEncodedWordLen - len("=?UTF-8?q?") - len("?=")
 //                  = 75 - 10 - 2 = 63
-const MAX_CONTENT_LEN: usize = MAX_ENCODED_WORD_LEN - 10 - 2;
+const maxContentLen: usize = maxEncodedWordLen - 10 - 2;
 
+// go: sdk 1.25.5 mime/encodedword.go:79-79 maxBase64Len
 /// Go: `var maxBase64Len = base64.StdEncoding.DecodedLen(maxContentLen)`.
-fn max_base64_len() -> usize {
-    base64::StdEncoding.DecodedLen(MAX_CONTENT_LEN as int) as usize
+fn maxBase64Len() -> usize {
+    return base64::StdEncoding.DecodedLen(toint(maxContentLen)) as usize;
 }
 
 // ─── WordDecoder (encodedword.go:187) ────────────────────────────────
 
+// go: sdk 1.25.5 mime/encodedword.go:187-196 WordDecoder
 /// `mime.WordDecoder` — RFC 2047 encoded-word decoder.
 ///
 /// Slim: CharsetReader receives the raw decoded bytes (a `slice<byte>`)
@@ -242,13 +273,18 @@ pub struct WordDecoder {
 }
 
 impl WordDecoder {
-    /// Construct an empty decoder. Equivalent to Go's `&mime.WordDecoder{}`.
+    // go: none — goish idiom: Go writes the zero value as
+    //     `&mime.WordDecoder{}` at each use site; Rust has no struct
+    //     literal shorthand for a private-field-free zero value across
+    //     crates, so the constructor is spelled once here.
+    /// An empty decoder — Go's `&mime.WordDecoder{}`.
     pub const fn new() -> Self {
-        WordDecoder {
+        return WordDecoder {
             CharsetReader: None,
-        }
+        };
     }
 
+    // go: sdk 1.25.5 mime/encodedword.go:198-226 WordDecoder.Decode
     /// `(*WordDecoder).Decode(word)` (encodedword.go:198).
     pub fn Decode<W: Into<string>>(&self, word: W) -> (string, error) {
         let word: string = word.into();
@@ -259,7 +295,7 @@ impl WordDecoder {
             || !strings::HasSuffix(word.clone(), string::from_static("?="))
             || strings::Count(word.clone(), string::from_static("?")) != 4
         {
-            return (string::new(), err_invalid_word());
+            return (string::new(), errInvalidWord());
         }
         // Go: word = word[2 : len(word)-2]
         let raw = word.as_bytes();
@@ -269,17 +305,17 @@ impl WordDecoder {
         // Go: charset, text, _ := strings.Cut(word, "?")
         let (charset, text, _) = strings::Cut(inner, string::from_static("?"));
         if charset.Len() == 0 {
-            return (string::new(), err_invalid_word());
+            return (string::new(), errInvalidWord());
         }
         // Go: encoding, text, _ := strings.Cut(text, "?")
         let (encoding, text, _) = strings::Cut(text, string::from_static("?"));
         if encoding.Len() != 1 {
-            return (string::new(), err_invalid_word());
+            return (string::new(), errInvalidWord());
         }
 
         // Go: content, err := decode(encoding[0], text)
         let enc_byte = encoding.as_bytes()[0];
-        let (content, err) = decode_word(enc_byte, &text);
+        let (content, err) = decode(enc_byte, &text);
         if !err.IsNil() {
             return (string::new(), err);
         }
@@ -289,9 +325,10 @@ impl WordDecoder {
         if !e.IsNil() {
             return (string::new(), e);
         }
-        (buf.String(), errors::nil)
+        return (buf.String(), errors::nil);
     }
 
+    // go: sdk 1.25.5 mime/encodedword.go:230-302 WordDecoder.DecodeHeader
     /// `(*WordDecoder).DecodeHeader(header)` (encodedword.go:230).
     pub fn DecodeHeader<H: Into<string>>(&self, header: H) -> (string, error) {
         let header: string = header.into();
@@ -358,7 +395,7 @@ impl WordDecoder {
             let end = cur + j + 2;
 
             // Go: content, err := decode(encoding, text)
-            let (content, err) = decode_word(encoding_byte, &text_str);
+            let (content, err) = decode(encoding_byte, &text_str);
             if !err.IsNil() {
                 between_words = false;
                 // Go: buf.WriteString(header[:start+2]); header = header[start+2:]
@@ -373,7 +410,7 @@ impl WordDecoder {
             if start > 0 {
                 let pre_bytes = &head[..start];
                 let pre_str = string::from_bytes(pre_bytes);
-                if !between_words || has_non_whitespace(&pre_str) {
+                if !between_words || hasNonWhitespace(&pre_str) {
                     let _ = buf.WriteString(pre_str);
                 }
             }
@@ -394,12 +431,13 @@ impl WordDecoder {
             let _ = buf.WriteString(string::from_bytes(&head));
         }
 
-        (buf.String(), errors::nil)
+        return (buf.String(), errors::nil);
     }
 
+    // go: sdk 1.25.5 mime/encodedword.go:315-346 WordDecoder.convert
     /// `(*WordDecoder).convert(buf, charset, content)` (encodedword.go:315).
     fn convert(&self, buf: &mut strings::Builder, charset: &string, content: &[byte]) -> error {
-        if strings::EqualFold(string::from_static("utf-8"), charset.clone()) {
+        return if strings::EqualFold(string::from_static("utf-8"), charset.clone()) {
             // Go: buf.Write(content)
             for &b in content {
                 let _ = buf.WriteByte(b);
@@ -408,7 +446,7 @@ impl WordDecoder {
         } else if strings::EqualFold(string::from_static("iso-8859-1"), charset.clone()) {
             // Go: for _, c := range content { buf.WriteRune(rune(c)) }
             for &c in content {
-                let _ = buf.WriteRune(c as rune);
+                let _ = buf.WriteRune(torune(c));
             }
             errors::nil
         } else if strings::EqualFold(string::from_static("us-ascii"), charset.clone()) {
@@ -444,13 +482,14 @@ impl WordDecoder {
                     errors::nil
                 }
             }
-        }
+        };
     }
 }
 
+// go: sdk 1.25.5 mime/encodedword.go:304-313 decode
 /// `decode(encoding, text)` (encodedword.go:304).
-fn decode_word(encoding: byte, text: &string) -> (Vec<byte>, error) {
-    match encoding {
+fn decode(encoding: byte, text: &string) -> (Vec<byte>, error) {
+    return match encoding {
         b'B' | b'b' => {
             // Go: return base64.StdEncoding.DecodeString(text)
             let raw = text.as_bytes();
@@ -458,13 +497,14 @@ fn decode_word(encoding: byte, text: &string) -> (Vec<byte>, error) {
             let (slc, err) = base64::StdEncoding.DecodeString(s);
             (slc.__into_vec(), err)
         }
-        b'Q' | b'q' => q_decode(text),
-        _ => (Vec::new(), err_invalid_word()),
-    }
+        b'Q' | b'q' => qDecode(text),
+        _ => (Vec::new(), errInvalidWord()),
+    };
 }
 
+// go: sdk 1.25.5 mime/encodedword.go:348-360 hasNonWhitespace
 /// `hasNonWhitespace(s)` (encodedword.go:348).
-fn has_non_whitespace(s: &string) -> bool {
+fn hasNonWhitespace(s: &string) -> bool {
     // Go: for _, b := range s {
     //         switch b { case ' ', '\t', '\n', '\r': default: return true } }
     let raw = s.as_bytes();
@@ -473,19 +513,20 @@ fn has_non_whitespace(s: &string) -> bool {
         let tail = string::from_bytes(&raw[i..]);
         let (r, sz) = utf8::DecodeRuneInString(&tail);
         match r {
-            r if r == b' ' as rune
-                || r == b'\t' as rune
-                || r == b'\n' as rune
-                || r == b'\r' as rune => {}
+            r if r == torune(b' ')
+                || r == torune(b'\t')
+                || r == torune(b'\n')
+                || r == torune(b'\r') => {}
             _ => return true,
         }
         i += sz as usize;
     }
-    false
+    return false;
 }
 
+// go: sdk 1.25.5 mime/encodedword.go:362-389 qDecode
 /// `qDecode(s)` (encodedword.go:362).
-fn q_decode(s: &string) -> (Vec<byte>, error) {
+fn qDecode(s: &string) -> (Vec<byte>, error) {
     let raw = s.as_bytes();
     // Go: dec := make([]byte, len(s))
     let mut dec: Vec<byte> = alloc::vec![0u8; raw.len()];
@@ -498,9 +539,9 @@ fn q_decode(s: &string) -> (Vec<byte>, error) {
         } else if c == b'=' {
             // Go: if i+2 >= len(s) { return nil, errInvalidWord }
             if i + 2 >= raw.len() {
-                return (Vec::new(), err_invalid_word());
+                return (Vec::new(), errInvalidWord());
             }
-            let (b, err) = read_hex_byte(raw[i + 1], raw[i + 2]);
+            let (b, err) = readHexByte(raw[i + 1], raw[i + 2]);
             if !err.IsNil() {
                 return (Vec::new(), err);
             }
@@ -509,30 +550,32 @@ fn q_decode(s: &string) -> (Vec<byte>, error) {
         } else if (c <= b'~' && c >= b' ') || c == b'\n' || c == b'\r' || c == b'\t' {
             dec[n] = c;
         } else {
-            return (Vec::new(), err_invalid_word());
+            return (Vec::new(), errInvalidWord());
         }
         n += 1;
         i += 1;
     }
     dec.truncate(n);
-    (dec, errors::nil)
+    return (dec, errors::nil);
 }
 
+// go: sdk 1.25.5 mime/encodedword.go:391-401 readHexByte
 /// `readHexByte(a, b)` (encodedword.go:391).
-fn read_hex_byte(a: byte, b: byte) -> (byte, error) {
-    let (hb, err1) = from_hex(a);
+fn readHexByte(a: byte, b: byte) -> (byte, error) {
+    let (hb, err1) = fromHex(a);
     if !err1.IsNil() {
         return (0, err1);
     }
-    let (lb, err2) = from_hex(b);
+    let (lb, err2) = fromHex(b);
     if !err2.IsNil() {
         return (0, err2);
     }
-    (hb << 4 | lb, errors::nil)
+    return (hb << 4 | lb, errors::nil);
 }
 
+// go: sdk 1.25.5 mime/encodedword.go:403-414 fromHex
 /// `fromHex(b)` (encodedword.go:403).
-fn from_hex(b: byte) -> (byte, error) {
+fn fromHex(b: byte) -> (byte, error) {
     if b >= b'0' && b <= b'9' {
         return (b - b'0', errors::nil);
     }
@@ -542,10 +585,8 @@ fn from_hex(b: byte) -> (byte, error) {
     if b >= b'a' && b <= b'f' {
         return (b - b'a' + 10, errors::nil);
     }
-    let mut msg: Vec<byte> = Vec::with_capacity(32);
-    msg.extend_from_slice(b"mime: invalid hex byte 0x");
-    let upper = b"0123456789ABCDEF";
-    msg.push(upper[((b >> 4) & 0xF) as usize]);
-    msg.push(upper[(b & 0xF) as usize]);
-    (0, errors::New(string::from_bytes(&msg)))
+    // Go: fmt.Errorf("mime: invalid hex byte %#02x", b) — LOWER-case
+    // hex. This had been hand-rolled against an upper-case table, so
+    // the message read "0x5A" where Go's reads "0x5a".
+    return (0, crate::fmt::Errorf!("mime: invalid hex byte 0x%02x", b));
 }

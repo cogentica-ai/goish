@@ -33,7 +33,7 @@ goishlint diff the port against the Go file it came from.
 | `time` | 71/184 | 38.6% | 4 |
 | `sync` | 66/126 | 52.4% | 3 |
 | `hash` | 98/114 | 86.0% | 338 |
-| `mime` | 61/89 | 68.5% | 77 |
+| `mime` | 73/89 | 82.0% | 106 |
 
 Within `net`, the entire jump since the last refresh is **`net/http`,
 now complete: 639/639 functions (100.0%) across all twelve of its
@@ -300,6 +300,31 @@ parameter map and error text each compared separately — and 14
 a non-ASCII value forces. `mime_parse_smoke`, `mime_extensions_smoke`
 and `mime_multipart_reader_smoke` are now declared in Cargo.toml; none
 of the three ever was.
+
+`mime/encodedword.go` followed, and it was pure anchoring: all twelve
+"missing" declarations already existed under invented snake_case names
+— `bEncode`, `qEncode`, `writeQString`, `openWord`, `closeWord`,
+`splitWord`, `qDecode`, `readHexByte`, `fromHex`, `hasNonWhitespace`,
+`isUTF8`, `needsEncoding` — so a name-matching counter read 12/38 for
+a file that was substantially complete. It is 34/38 with 47 anchors
+now, and only type.go's OS mime-database half is left.
+
+The diff against Go found the error text, for the third time this
+cycle. `fromHex` was hand-rolled against an upper-case hex table and
+said `mime: invalid hex byte 0x5A`, where Go's
+`fmt.Errorf("mime: invalid hex byte %#02x", b)` says `0x5a`. It now
+goes through `fmt::Errorf!`.
+
+RFC 2047 caps an encoded-word at 75 characters, so a long UTF-8 value
+is split across several and a multi-byte rune must never straddle the
+join — which is the entire reason `bEncode` and `qEncode` are separate
+from the one-word case, and is invisible to any test that encodes short
+ASCII. `encodedword_smoke` now carries Go's exact output for "é"×40,
+"a"×100+"é" and "日"×30 under both encoders, plus 17 `Decode` vectors
+with their error texts and 13 `DecodeHeader` vectors — including the
+rule that a word which fails to decode is copied through verbatim and
+is still not an error, and that only *white space* between two words is
+deleted. It is now declared in Cargo.toml; it never was.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the

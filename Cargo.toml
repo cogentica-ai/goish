@@ -1248,6 +1248,10 @@ name = "hex_stream_smoke"
 path = "examples/hex_stream_smoke.rs"
 
 [[example]]
+name = "encodedword_smoke"
+path = "examples/encodedword_smoke.rs"
+
+[[example]]
 name = "mime_parse_smoke"
 path = "examples/mime_parse_smoke.rs"
 
