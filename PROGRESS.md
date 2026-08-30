@@ -24,7 +24,7 @@ goishlint diff the port against the Go file it came from.
 | `net` | 788/1413 | 55.8% | **1570** |
 | `math` | 307/661 | 46.4% | 5 |
 | `testing` | 217/247 | 87.9% | 402 |
-| `encoding` | 216/1018 | 21.2% | 222 |
+| `encoding` | 222/1018 | 21.8% | 259 |
 | `compress` | 150/150 | 100.0% | 303 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
@@ -176,6 +176,16 @@ writer quotes a field whose first rune is white space but not one that
 ends in white space, which is asymmetric enough that a header comment
 claiming otherwise had to be rewritten twice before it matched what Go
 and the port both do.
+
+`encoding/base64` was 15/21 and is now **21/21 with 32 anchors**. The
+six that were missing were the whole configurable half of the package —
+`NewEncoding` for a runtime alphabet, `WithPadding`, `Strict` — plus
+the decoder internals `decodeQuantum`, `assemble32` and `assemble64`.
+The old decoder ignored the configured padding character entirely, did
+not enforce padding at all ("not strictly enforced in v1", said the
+comment) and had no strict mode; it now runs Go's three-loop `Decode`
+with the fast paths bailing to `decodeQuantum`, and its error offsets
+match Go's on fourteen malformed inputs.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the

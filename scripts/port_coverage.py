@@ -79,7 +79,11 @@ def decl_key(recv, name):
 # sniffSig.match methods, `fn r#loop` for testing's B.Loop. Without
 # it the name captured is the bare `r`, so those declarations were
 # invisible to coverage no matter how faithfully they were ported.
-RSFN = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?(?:extern\s+\"[^\"]*\"\s+)?fn\s+(?:r#)?([A-Za-z_]\w*)", re.M)
+RSFN = re.compile(
+    r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:default\s+)?(?:const\s+)?(?:async\s+)?"
+    r"(?:unsafe\s+)?(?:extern\s+\"[^\"]*\"\s+)?fn\s+(?:r#)?([A-Za-z_]\w*)",
+    re.M,
+)
 ANCHOR = re.compile(r"^\s*//\s*go:", re.M)
 # A declaration goishc translated but nobody has reviewed. goishc stamps
 # every declaration it emits with its anchor and, directly beneath it,
