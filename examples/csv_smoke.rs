@@ -248,11 +248,84 @@ fn main() {
         }
     }
 
+    // 15. ParseError's three message shapes, against a running Go. It
+    //     picks between them on `Err == ErrFieldCount` and on
+    //     `StartLine != Line`, so a multi-line quoted field reports the
+    //     record's start line *and* the line the error is on. Nothing
+    //     else in this file reaches the second shape.
+    {
+        let cases: [(&str, &str); 4] = [
+            ("a,b\nc\n", "record on line 2: wrong number of fields"),
+            (
+                "a,\"b\nc\"d,e\n",
+                "record on line 1; parse error on line 2, column 2: extraneous or missing \" in quoted-field",
+            ),
+            (
+                "a,b\"c,d\n",
+                "parse error on line 1, column 4: bare \" in non-quoted-field",
+            ),
+            (
+                "a,b\n\"unterminated\n",
+                "parse error on line 2, column 15: extraneous or missing \" in quoted-field",
+            ),
+        ];
+        let mut bad = 0;
+        let mut k: usize = 0;
+        while k < cases.len() {
+            let (input, want) = cases[k];
+            let mut cr = csv::NewReader(strings::NewReader(string(input)));
+            let (_recs, err) = cr.ReadAll();
+            if err.IsNil() || err.Error() != want {
+                bad += 1;
+            }
+            k += 1;
+        }
+        if bad == 0 {
+            fmt::Println!("[15] ParseError text vs Go    PASS");
+        } else {
+            fmt::Println!("[15] ParseError text vs Go    FAIL");
+            failed += 1;
+        }
+    }
+
+    // 16. The writer's quoting rules, byte for byte against Go. The
+    //     asymmetries are the point: a *leading* space is quoted and a
+    //     trailing one is not, the empty field is never quoted, and
+    //     `\.` is quoted because some readers treat it as end-of-data.
+    {
+        let mut buf = bytes::Buffer::new();
+        {
+            let mut w = csv::NewWriter(&mut buf);
+            let rows: [&[&str]; 3] = [
+                &["plain", "with,comma", "with\"quote", "with\nnewline"],
+                &[" leading", "trailing ", "\ttab", "", "\\."],
+                &["h\u{e9}llo", "a\rb"],
+            ];
+            let mut k: usize = 0;
+            while k < rows.len() {
+                let mut rec: goish::goslice::slice<goish::string> = goish::goslice::slice::new();
+                for f in rows[k] {
+                    rec = goish::append!(rec, string(*f));
+                }
+                let _ = w.Write(&rec);
+                k += 1;
+            }
+            w.Flush();
+        }
+        let want = "plain,\"with,comma\",\"with\"\"quote\",\"with\nnewline\"\n\" leading\",trailing ,\"\ttab\",,\"\\.\"\nh\u{e9}llo,\"a\rb\"\n";
+        if buf.String() == want {
+            fmt::Println!("[16] writer quoting vs Go     PASS");
+        } else {
+            fmt::Println!("[16] writer quoting vs Go     FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 14/14");
+        fmt::Println!("ok 16/16");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 14");
+        fmt::Println!("FAIL", failed, "of 16");
         syscall::Exit(1);
     }
 }

@@ -24,7 +24,7 @@ goishlint diff the port against the Go file it came from.
 | `net` | 788/1413 | 55.8% | **1570** |
 | `math` | 307/661 | 46.4% | 5 |
 | `testing` | 217/247 | 87.9% | 402 |
-| `encoding` | 216/1018 | 21.2% | 197 |
+| `encoding` | 216/1018 | 21.2% | 222 |
 | `compress` | 150/150 | 100.0% | 303 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
@@ -169,6 +169,13 @@ byte with `%#U`. A second helper produced a *third* spelling, in
 decimal. All three were plausible, none matched, and nothing could see
 it until the port was diffed against a running Go. The typed error now
 formats `%#U` and the helper routes through it.
+
+`encoding/csv` (17/17, 25 anchors) went the same way, and the
+comparison corrected the *documentation* rather than the code: its
+writer quotes a field whose first rune is white space but not one that
+ends in white space, which is asymmetric enough that a header comment
+claiming otherwise had to be rewritten twice before it matched what Go
+and the port both do.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the
