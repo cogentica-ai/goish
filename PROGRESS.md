@@ -25,7 +25,7 @@ goishlint diff the port against the Go file it came from.
 | `math` | 307/661 | 46.4% | 5 |
 | `testing` | 217/247 | 87.9% | 402 |
 | `encoding` | 215/1018 | 21.1% | 156 |
-| `compress` | 144/151 | 95.4% | 56 |
+| `compress` | 148/151 | 98.0% | 83 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
 | `strings` | 76/101 | 75.2% | 1 |
@@ -56,15 +56,26 @@ byte-identical to a running Go. `flate`, `gzip`, `lzw` and `zlib` carried
 percentage column, two different claims.
 
 `flate` has since been split the way `bzip2` already was, one Go file
-at a time: **`dict_decoder.go` is now its own anchored `dict_decoder.rs`
-at 10/10 with 14 anchors**, including the `writeSlice`/`writeMark` pair
-that had been inlined at the call site. The other six Go files of the
-package are still in `mod.rs` and still unanchored — 76 of `flate`'s 85
-counted names have nothing behind them. The window's copy paths are now
-checked against a running Go, though: six DEFLATE streams produced by
-Go's own compressor, chosen to drive `dist < length` run-length
-expansion, the 32 KiB window wrap, and the cursor reset in `readFlush`,
-inflating to 236 KB that matches byte for byte.
+at a time: **`dict_decoder.go` and `huffman_code.go` are now their own
+anchored files**, 10/10 and 18/18, with 41 anchors between them. The
+recovered declarations are the ones that had been inlined or replaced
+by a Rust idiom — `writeSlice`/`writeMark` at the decompressor's call
+site, and `byLiteral`/`byFreq`'s `sort`/`Len`/`Less`/`Swap`, which had
+been two `sort_by` closures. `flate` is 89/92 now, with only
+inflate.go's three left. The other five Go files are still in `mod.rs`
+and still unanchored: 66 of the 89 counted names have nothing behind
+them.
+
+Both halves are checked against a running Go rather than against
+themselves. Six DEFLATE streams from Go's own compressor — chosen to
+drive `dist < length` run-length expansion, the 32 KiB window wrap and
+`readFlush`'s cursor reset — inflate to 236 KB that matches byte for
+byte; and in the other direction goish's compressor at
+DefaultCompression emits **byte-identical output to Go's** for all six,
+which is the only check that reaches the Huffman generator's output
+rather than its round-trip. Nothing in the format requires two
+compressors to agree, so that is a statement about the port, not about
+DEFLATE.
 
 `hash` moved for the same reason and in the same shape. **`hash/crc64`
 (19/19, 49 `// go:` lines), `hash/adler32` (13/13, 34) and `hash/fnv`
