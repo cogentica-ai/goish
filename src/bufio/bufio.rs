@@ -10,7 +10,6 @@
 #![allow(non_snake_case, non_upper_case_globals)]
 
 extern crate alloc;
-use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::convert::{byte as tobyte, int as toint, rune as torune, uint32 as touint32};

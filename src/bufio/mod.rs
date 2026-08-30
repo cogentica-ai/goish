@@ -45,9 +45,6 @@
 
 extern crate alloc;
 
-use crate::errors::{self, error};
-use crate::runtime::spin::SpinLock;
-
 pub mod bufio;
 pub mod scan;
 

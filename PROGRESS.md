@@ -35,7 +35,7 @@ goishlint diff the port against the Go file it came from.
 | `hash` | 98/114 | 86.0% | 338 |
 | `mime` | 73/89 | 82.0% | 106 |
 | `bufio` | 48/48 | 100.0% | 81 |
-| `unicode` | 48/52 | 92.3% | 111 |
+| `unicode` | 52/52 | 100.0% | 131 |
 
 Within `net`, the entire jump since the last refresh is **`net/http`,
 now complete: 639/639 functions (100.0%) across all twelve of its
@@ -438,12 +438,27 @@ every rune below U+10000 plus every 17th above it. A transcribed table
 that is short a range, or carries an extra one, moves exactly one of
 those thirteen numbers, and all thirteen match Go.
 
-Left unported: `To`, `to`, `convertCase` and `lookupCaseRange`. Go maps
-case through a `CaseRanges` table of `{Lo, Hi, Delta}` triples plus a
-`SpecialCase` slice for the Turkish and Azeri dotted I; goish ships a
-generated flat rune-to-rune table, which answers identically for the
-default case but has no `Delta` to hold and no `SpecialCase` to
-override. That is its own commit, and the waiver in `letter.rs` says so.
+The case machinery followed in the same cycle, so **`unicode` is
+52/52 — the fifth package finished rather than merely covered.** Go's
+`CaseRanges` (328 ranges, each an upper/lower/title delta triple) is
+transcribed, and `To`, `to`, `convertCase` and `lookupCaseRange` are
+ported, along with `CaseRange`, `SpecialCase`, the four case indices and
+`casetables.go`'s `TurkishCase`/`AzeriCase`.
+
+`convertCase` is the part a flat rune-to-rune table hides. A range whose
+delta is `UpperLower` is an alternating `Upper Lower Upper Lower …`
+sequence, and the mapping comes from the *parity of the offset* within
+the range rather than a fixed shift — Go clears or sets the low bit of
+the offset, taking the bit from the case index, which works because
+`UpperCase` and `TitleCase` are even while `LowerCase` is odd.
+U+01C4..U+01C6 is one such range, and it is also a title-case triple:
+`ToTitle(0x01C4)` is 0x01C5, not 0x01C4.
+
+`unicode_case_ref_smoke` checks 46 spot mappings across all four
+functions, then a checksum of `ToUpper`/`ToLower`/`ToTitle` over the same
+128k-rune sample the graphic smoke uses. All three checksums match Go
+exactly, which is the strongest statement available that 328
+transcribed ranges carry the same deltas Go's do.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the

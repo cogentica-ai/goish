@@ -32,7 +32,7 @@ use crate::encoding::base64;
 use crate::errors::{self, error};
 use crate::gostring::string;
 use crate::strings;
-use crate::types::{byte, int, rune};
+use crate::types::byte;
 use crate::unicode::utf8;
 
 // ─── WordEncoder (encodedword.go:18) ─────────────────────────────────

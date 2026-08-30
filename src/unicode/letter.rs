@@ -1,18 +1,11 @@
-// go: file unicode/letter.go decls: is16, is32, Is, isExcludingLatin, IsUpper, IsLower, IsTitle, ToUpper, ToLower, ToTitle, SimpleFold
+// go: file unicode/letter.go decls: is16, is32, Is, isExcludingLatin, IsUpper, IsLower, IsTitle, lookupCaseRange, convertCase, to, To, ToUpper, ToLower, ToTitle, SpecialCase.ToUpper, SpecialCase.ToTitle, SpecialCase.ToLower, SimpleFold
 //
-// goishlint:ignore GOISH018 to, To, SpecialCase.ToUpper, SpecialCase.ToTitle, SpecialCase.ToLower, lookupCaseRange, convertCase, CaseRange.Delta — Go maps case
-//     through a `CaseRanges` table of `CaseRange{Lo, Hi, Delta}`
-//     triples and a `SpecialCase` slice for the Turkish/Azeri dotted
-//     I. goish ships a generated flat rune->rune table instead, so
-//     `ToUpper`/`ToLower`/`ToTitle` answer identically for the default
-//     case but there is no `CaseRange` to hold a `Delta` and no
-//     `SpecialCase` to override it. Porting the table shape is its own
-//     commit; the flat table is checked against Go over the whole
-//     0..0x10FFFF range by `unicode_case_smoke`.
-//
-// goishlint:ignore GOISH021 CaseRange, SpecialCase, d, UpperCase, LowerCase, TitleCase, MaxCase, UpperLower, CaseRanges, caseOrbit, foldPair, FoldCategory, FoldScript, Categories, Scripts, Properties — see the GOISH018 waiver above for the case
-//     machinery, and the module root for the category/script maps goish
-//     does not ship.
+// goishlint:ignore GOISH021 caseOrbit, foldPair, FoldCategory, FoldScript, Categories, Scripts, Properties, linearMax — `caseOrbit`
+//     and `foldPair` are what Go's `SimpleFold` walks; goish's
+//     `SimpleFold` reads a generated flat next-in-orbit table instead,
+//     which answers identically. The `FoldCategory`/`FoldScript`/
+//     `Categories`/`Scripts`/`Properties` maps index the ~250 range
+//     tables goish does not transcribe — see the module root.
 //
 // unicode/letter.go — the `RangeTable` machinery every predicate in the
 // package searches, plus the case mappings.
@@ -220,6 +213,147 @@ pub fn IsTitle(r: rune) -> bool {
     return isExcludingLatin(&super::tables::TITLE, r);
 }
 
+// go: sdk 1.25.5 unicode/letter.go:70-75 UpperCase
+/// Index into a [`CaseRange`]'s `Delta` array for the upper-case map.
+pub const UpperCase: int = 0;
+
+// go: sdk 1.25.5 unicode/letter.go:70-75 LowerCase
+/// Index into a [`CaseRange`]'s `Delta` array for the lower-case map.
+pub const LowerCase: int = 1;
+
+// go: sdk 1.25.5 unicode/letter.go:70-75 TitleCase
+/// Index into a [`CaseRange`]'s `Delta` array for the title-case map.
+pub const TitleCase: int = 2;
+
+// go: sdk 1.25.5 unicode/letter.go:70-75 MaxCase
+/// One past the last valid case index.
+pub const MaxCase: int = 3;
+
+// go: sdk 1.25.5 unicode/letter.go:79-84 UpperLower
+/// A `Delta` of `UpperLower` means the range is an alternating
+/// `Upper Lower Upper Lower …` sequence rather than a fixed offset.
+/// It cannot be a valid delta.
+pub const UpperLower: rune = MaxRune + 1;
+
+// go: sdk 1.25.5 unicode/letter.go:77-77 d
+/// Go's `type d [MaxCase]rune`, named only to keep the generated
+/// `CaseRanges` text short.
+pub type d = [rune; 3];
+
+// go: sdk 1.25.5 unicode/letter.go:53-60 CaseRange
+/// `unicode.CaseRange` — a range of code points sharing one case
+/// mapping, given as an (upper, lower, title) delta triple.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct CaseRange {
+    pub Lo: u32,
+    pub Hi: u32,
+    pub Delta: d,
+}
+
+// go: sdk 1.25.5 unicode/letter.go:62-64 SpecialCase
+/// `unicode.SpecialCase` — a language-specific case mapping, such as
+/// Turkish. Its methods override the standard mappings.
+///
+/// Go's is a `[]CaseRange` and its methods hang off the slice type;
+/// goish cannot add inherent methods to `&[CaseRange]`, so it is a
+/// newtype over the same `&'static [CaseRange]`.
+#[derive(Copy, Clone, Debug)]
+pub struct SpecialCase(pub &'static [CaseRange]);
+
+// go: sdk 1.25.5 unicode/letter.go:209-228 lookupCaseRange
+/// The [`CaseRange`] mapping for `r`, or `None` when there is none.
+fn lookupCaseRange(r: rune, caseRange: &'static [CaseRange]) -> Option<&'static CaseRange> {
+    // Binary search over ranges.
+    let mut lo = 0usize;
+    let mut hi = caseRange.len();
+    while lo < hi {
+        let m = (lo + hi) >> 1;
+        let cr = &caseRange[m];
+        if torune(cr.Lo) <= r && r <= torune(cr.Hi) {
+            return Some(cr);
+        }
+        if r < torune(cr.Lo) {
+            hi = m;
+        } else {
+            lo = m + 1;
+        }
+    }
+    return None;
+}
+
+// go: sdk 1.25.5 unicode/letter.go:230-249 convertCase
+/// Converts `r` to `_case` using the given [`CaseRange`].
+fn convertCase(_case: int, r: rune, cr: &CaseRange) -> rune {
+    let delta = cr.Delta[_case as usize];
+    if delta > MaxRune {
+        // In an Upper-Lower sequence, which always starts with an
+        // UpperCase letter, the real deltas always look like:
+        //      {0, 1, 0}    UpperCase (Lower is next)
+        //      {-1, 0, -1}  LowerCase (Upper, Title are previous)
+        // The characters at even offsets from the beginning of the
+        // sequence are upper case; the ones at odd offsets are lower.
+        // The correct mapping is done by clearing or setting the low
+        // bit in the sequence offset. UpperCase and TitleCase are even
+        // while LowerCase is odd, so the low bit comes from `_case`.
+        return torune(cr.Lo) + (((r - torune(cr.Lo)) & !1) | torune(_case & 1));
+    }
+    return r + delta;
+}
+
+// go: sdk 1.25.5 unicode/letter.go:251-260 to
+/// Maps `r` using the given case mapping, additionally reporting
+/// whether `caseRange` held a mapping for it.
+fn to(_case: int, r: rune, caseRange: &'static [CaseRange]) -> (rune, bool) {
+    if _case < 0 || MaxCase <= _case {
+        // As reasonable an error as any.
+        return (ReplacementChar, false);
+    }
+    return match lookupCaseRange(r, caseRange) {
+        Some(cr) => (convertCase(_case, r, cr), true),
+        None => (r, false),
+    };
+}
+
+// go: sdk 1.25.5 unicode/letter.go:262-266 To
+/// Maps `r` to the given case: [`UpperCase`], [`LowerCase`] or
+/// [`TitleCase`].
+pub fn To(_case: int, r: rune) -> rune {
+    let (r, _) = to(_case, r, super::tables::CaseRanges);
+    return r;
+}
+
+impl SpecialCase {
+    // go: sdk 1.25.5 unicode/letter.go:300-307 SpecialCase.ToUpper
+    /// Maps `r` to upper case, giving priority to the special mapping.
+    pub fn ToUpper(&self, r: rune) -> rune {
+        let (mut r1, hadMapping) = to(UpperCase, r, self.0);
+        if r1 == r && !hadMapping {
+            r1 = ToUpper(r);
+        }
+        return r1;
+    }
+
+    // go: sdk 1.25.5 unicode/letter.go:309-316 SpecialCase.ToTitle
+    /// Maps `r` to title case, giving priority to the special mapping.
+    pub fn ToTitle(&self, r: rune) -> rune {
+        let (mut r1, hadMapping) = to(TitleCase, r, self.0);
+        if r1 == r && !hadMapping {
+            r1 = ToTitle(r);
+        }
+        return r1;
+    }
+
+    // go: sdk 1.25.5 unicode/letter.go:318-325 SpecialCase.ToLower
+    /// Maps `r` to lower case, giving priority to the special mapping.
+    pub fn ToLower(&self, r: rune) -> rune {
+        let (mut r1, hadMapping) = to(LowerCase, r, self.0);
+        if r1 == r && !hadMapping {
+            r1 = ToLower(r);
+        }
+        return r1;
+    }
+}
+
 #[path = "case_tables.rs"]
 mod case_tables;
 
@@ -239,42 +373,44 @@ fn case_lookup(t: &[(u32, u32)], r: rune) -> rune {
     };
 }
 
-// go: sdk 1.25.5 unicode/letter.go:268-277 ToUpper
-/// `unicode.ToUpper(r)` — full Unicode mapping (generated table;
-/// letters.go SpecialCase excluded, matching Go's ToUpper).
+// go: sdk 1.25.5 unicode/letter.go:267-276 ToUpper
+/// Maps `r` to upper case.
 pub fn ToUpper(r: rune) -> rune {
-    if r < 0x80 {
-        // ASCII fast path, mirroring Go's.
-        if r >= torune(b'a') && r <= torune(b'z') {
-            return r - 32;
+    if r <= MaxASCII {
+        let mut r = r;
+        if torune(b'a') <= r && r <= torune(b'z') {
+            r -= torune(b'a') - torune(b'A');
         }
         return r;
     }
-    return case_lookup(case_tables::UPPER, r);
+    return To(UpperCase, r);
 }
 
-// go: sdk 1.25.5 unicode/letter.go:279-288 ToLower
-/// `unicode.ToLower(r)` — full Unicode mapping.
+// go: sdk 1.25.5 unicode/letter.go:278-287 ToLower
+/// Maps `r` to lower case.
 pub fn ToLower(r: rune) -> rune {
-    if r < 0x80 {
-        if r >= torune(b'A') && r <= torune(b'Z') {
-            return r + 32;
+    if r <= MaxASCII {
+        let mut r = r;
+        if torune(b'A') <= r && r <= torune(b'Z') {
+            r += torune(b'a') - torune(b'A');
         }
         return r;
     }
-    return case_lookup(case_tables::LOWER, r);
+    return To(LowerCase, r);
 }
 
-// go: sdk 1.25.5 unicode/letter.go:290-299 ToTitle
-/// `unicode.ToTitle(r)` — full Unicode mapping.
+// go: sdk 1.25.5 unicode/letter.go:289-298 ToTitle
+/// Maps `r` to title case.
 pub fn ToTitle(r: rune) -> rune {
-    if r < 0x80 {
-        if r >= torune(b'a') && r <= torune(b'z') {
-            return r - 32;
+    if r <= MaxASCII {
+        let mut r = r;
+        // Title case is upper case for ASCII.
+        if torune(b'a') <= r && r <= torune(b'z') {
+            r -= torune(b'a') - torune(b'A');
         }
         return r;
     }
-    return case_lookup(case_tables::TITLE, r);
+    return To(TitleCase, r);
 }
 
 // go: sdk 1.25.5 unicode/letter.go:354-388 SimpleFold

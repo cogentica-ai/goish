@@ -21,12 +21,11 @@
 //     builds it from `RangeTable` literals, which is the same shape
 //     the generated data has.
 //
-// casetables.go (TurkishCase, AzeriCase) is not ported: it is two
-// `SpecialCase` values, and goish has no `SpecialCase` type — see the
-// waiver in letter.rs.
+//   casetables.rs casetables.go — TurkishCase and AzeriCase
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
+pub mod casetables;
 pub mod digit;
 pub mod graphic;
 pub mod letter;
@@ -37,14 +36,16 @@ mod norm_tables;
 pub mod utf16;
 pub mod utf8;
 
+pub use casetables::{AzeriCase, TurkishCase};
 pub use digit::IsDigit;
 pub use graphic::{
     GraphicRanges, In, IsControl, IsGraphic, IsLetter, IsMark, IsNumber, IsOneOf, IsPrint, IsPunct,
     IsSpace, IsSymbol, PrintRanges,
 };
 pub use letter::{
-    is16, is32, isExcludingLatin, Is, IsLower, IsTitle, IsUpper, MaxASCII, MaxLatin1, MaxRune,
-    Range16, Range32, RangeTable, ReplacementChar, SimpleFold, ToLower, ToTitle, ToUpper,
+    is16, is32, isExcludingLatin, CaseRange, Is, IsLower, IsTitle, IsUpper, LowerCase, MaxASCII,
+    MaxCase, MaxLatin1, MaxRune, Range16, Range32, RangeTable, ReplacementChar, SimpleFold,
+    SpecialCase, TitleCase, To, ToLower, ToTitle, ToUpper, UpperCase, UpperLower,
 };
 
 /// `unicode.Mn` — Mark, nonspacing.
