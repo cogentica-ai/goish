@@ -31,7 +31,7 @@ goishlint diff the port against the Go file it came from.
 | `archive` | 71/182 | 39.0% | 0 |
 | `time` | 71/184 | 38.6% | 4 |
 | `sync` | 66/126 | 52.4% | 3 |
-| `hash` | 82/114 | 71.9% | 268 |
+| `hash` | 98/114 | 86.0% | 338 |
 
 Within `net`, the entire jump since the last refresh is **`net/http`,
 now complete: 639/639 functions (100.0%) across all twelve of its
@@ -56,18 +56,25 @@ percentage column, two different claims.
 
 `hash` moved for the same reason and in the same shape. **`hash/crc64`
 (19/19, 49 `// go:` lines), `hash/adler32` (13/13, 34) and `hash/fnv`
-(17/17, 162) are all complete and anchored**, ported 2026-08-30 — in
-each case the whole of the one Go file, including the fast paths, the
+(17/17, 162) are complete and anchored, and `hash/crc32` is 29/33
+(87.9%, 71)** — ported 2026-08-30. In each case that is the whole of
+every portable Go file in the package, including the fast paths, the
 128-bit FNV pair, and the marshal/unmarshal/Clone surface the earlier
-slim ports had skipped. None of the three is a name match: `crc64`'s
+slim ports had skipped. None of the four is a name match: `crc64`'s
 `Checksum` is checked byte-for-byte against a running Go at eight
 lengths straddling both of Go's path thresholds (64 bytes and 2048)
-for ISO, ECMA and a custom polynomial, `adler32`'s at ten straddling
-its `nmax`=5552 block boundary, `fnv`'s 128-bit digests over six
-inputs, and every marshaled state — crc64's table checksum included —
-matches Go's byte for byte. The two `hash` packages left hold 33
-name-level ports and 2 anchors between them; `crc32` in particular is
-still the simple-table-only port `crc64` used to be, and `maphash` is
+for ISO, ECMA and a custom polynomial, `crc32`'s at nine straddling
+its `slicing8Cutoff` of 16 for IEEE, Castagnoli and Koopman,
+`adler32`'s at ten straddling its `nmax`=5552 block boundary, `fnv`'s
+128-bit digests over six inputs, and every marshaled state — the crc32
+and crc64 table checksums included — matches Go's byte for byte.
+
+`crc32`'s remaining 4 are all of crc32_amd64.go: three assembly
+symbols (`castagnoliSSE42`, `castagnoliSSE42Triple`, `ieeeCLMUL`) and
+`castagnoliShift`, which exists only to feed them. goish ports
+crc32_otherarch.go — the `!amd64` half of Go's own build — instead, so
+"no hardware CRC-32" is a true statement about this runtime rather
+than a stub. `maphash` (20/32) is the one `hash` package still short,
 blocked on `internal/abi`.
 
 `iter` (0/4) and `database` (0/130) have directories but no ported

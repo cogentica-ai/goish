@@ -1,8 +1,11 @@
 // crc32_smoke — exercise hash/crc32 (IEEE + Castagnoli + Koopman).
 // (hash/crc32/crc32.go)
 //
-// Reference values verified against Go 1.25's crc32 (the canonical
-// CRC-32 of "" is 0; of "a" is 0xE8B7BE43 IEEE).
+// Checks 1-11 use canonical CRC-32 values (of "" is 0; of "a" is
+// 0xE8B7BE43 IEEE). Checks 12-16 use values printed by a running Go
+// 1.25.5 (tools/gen_crc32_ref.go, run through scripts/goref.sh): both
+// sides of the slicing8Cutoff=16 threshold for all three polynomials,
+// and the marshal/unmarshal/Clone surface.
 
 #![no_std]
 #![no_main]
@@ -12,14 +15,43 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::convert::byte as tobyte;
 use goish::convert::bytes as to_bytes;
 use goish::fmt;
 use goish::goslice::slice;
 use goish::hash::crc32;
 use goish::hash::{Hash, Hash32};
 use goish::io::Writer as _;
+use goish::nil;
 use goish::syscall;
-use goish::types::byte;
+use goish::types::{byte, uint32};
+
+// The Go reference corpus: byte i = (i*7+3)%251.
+fn mk(n: usize) -> slice<byte> {
+    let mut v: Vec<byte> = Vec::with_capacity(n);
+    let mut i: usize = 0;
+    while i < n {
+        v.push(tobyte((i * 7 + 3) % 251));
+        i += 1;
+    }
+    slice::<byte>::__from_vec(v)
+}
+
+fn from_hex(h: &[u8]) -> slice<byte> {
+    fn nib(c: u8) -> byte {
+        if c >= b'a' {
+            return c - b'a' + 10;
+        }
+        return c - b'0';
+    }
+    let mut v: Vec<byte> = Vec::with_capacity(h.len() / 2);
+    let mut i: usize = 0;
+    while i < h.len() {
+        v.push((nib(h[i]) << 4) | nib(h[i + 1]));
+        i += 2;
+    }
+    slice::<byte>::__from_vec(v)
+}
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -184,11 +216,142 @@ fn main() {
         }
     }
 
+    // 12. Go-checked corpus either side of slicing8Cutoff=16 and of the
+    //     eight-byte inner loop, for all three polynomials. IEEE and
+    //     Castagnoli route through slicing-by-8; Koopman has no
+    //     preinitialized table, so it takes the simple path — one
+    //     table exercises both branches of `update`.
+    {
+        let ieee = crc32::MakeTable(crc32::IEEE);
+        let cast = crc32::MakeTable(crc32::Castagnoli);
+        let koop = crc32::MakeTable(crc32::Koopman);
+        let golden: [(usize, uint32, uint32, uint32); 9] = [
+            (0, 0x00000000, 0x00000000, 0x00000000),
+            (1, 0x4b0bbe37, 0x412da0a5, 0x528fd171),
+            (8, 0xe2e35978, 0xd225c0e8, 0x7e5215b5),
+            (9, 0x3d351cfe, 0x922c64ce, 0x4e41dbd1),
+            (15, 0x7c619edc, 0x9028c025, 0xb5a905d2),
+            (16, 0x191f3d9f, 0x6b24bde1, 0x1cb881d8),
+            (17, 0x7ba75ee3, 0x2185fb0c, 0x29b89865),
+            (64, 0x4b082b09, 0x8f1ae5e8, 0x86b576fc),
+            (1000, 0xa2f92763, 0xa4c0fde8, 0xf6fe6181),
+        ];
+        let mut bad = 0;
+        let mut k: usize = 0;
+        while k < golden.len() {
+            let (n, wi, wc, wk) = golden[k];
+            let p = mk(n);
+            if crc32::Checksum(p.clone(), &ieee) != wi {
+                bad += 1;
+            }
+            if crc32::Checksum(p.clone(), &cast) != wc {
+                bad += 1;
+            }
+            if crc32::Checksum(p, &koop) != wk {
+                bad += 1;
+            }
+            k += 1;
+        }
+        if bad == 0 {
+            fmt::Println!("[12] slicing-by-8 vs Go        PASS");
+        } else {
+            fmt::Println!("[12] slicing-by-8 vs Go        FAIL");
+            failed += 1;
+        }
+    }
+
+    // 13. MarshalBinary emits the exact state Go emits, table checksum
+    //     and all — different for IEEE and Castagnoli, which is what
+    //     makes a cross-table restore detectable.
+    {
+        let mut h = crc32::New(crc32::MakeTable(crc32::IEEE));
+        let _ = h.Write(to_bytes("hello world"));
+        let (st, err) = h.MarshalBinary();
+        let mut hc = crc32::New(crc32::MakeTable(crc32::Castagnoli));
+        let _ = hc.Write(to_bytes("hello world"));
+        let (stc, _) = hc.MarshalBinary();
+        if err == nil
+            && equal_bytes(st, from_hex(b"63726301ca87914d0d4a1185"))
+            && equal_bytes(stc, from_hex(b"6372630177428481c99465aa"))
+            && h.Sum32() == 0x0d4a1185
+            && hc.Sum32() == 0xc99465aa
+        {
+            fmt::Println!("[13] MarshalBinary vs Go       PASS");
+        } else {
+            fmt::Println!("[13] MarshalBinary vs Go       FAIL");
+            failed += 1;
+        }
+    }
+
+    // 14. UnmarshalBinary resumes a digest mid-stream.
+    {
+        let mut h = crc32::New(crc32::MakeTable(crc32::IEEE));
+        let _ = h.Write(to_bytes("hello world"));
+        let (st, _) = h.MarshalBinary();
+        let mut h2 = crc32::New(crc32::MakeTable(crc32::IEEE));
+        let err = h2.UnmarshalBinary(st);
+        let _ = h2.Write(to_bytes("!!"));
+        let _ = h.Write(to_bytes("!!"));
+        if err == nil && h2.Sum32() == 0xad6b56f4 && h.Sum32() == h2.Sum32() {
+            fmt::Println!("[14] UnmarshalBinary resume    PASS");
+        } else {
+            fmt::Println!("[14] UnmarshalBinary resume    FAIL");
+            failed += 1;
+        }
+    }
+
+    // 15. An IEEE state is refused by a Castagnoli digest; a corrupt
+    //     header and a wrong length are refused too.
+    {
+        let mut h = crc32::New(crc32::MakeTable(crc32::IEEE));
+        let _ = h.Write(to_bytes("hello world"));
+        let (st, _) = h.MarshalBinary();
+        let raw: &[byte] = &st;
+        let mut h3 = crc32::New(crc32::MakeTable(crc32::Castagnoli));
+        let cross = h3.UnmarshalBinary(st.clone());
+
+        let mut badv: Vec<byte> = raw.to_vec();
+        badv[0] = b'x';
+        let bad_magic = h3.UnmarshalBinary(slice::<byte>::__from_vec(badv));
+        let short = slice::<byte>::__from_vec(raw[..11].to_vec());
+        let bad_size = h3.UnmarshalBinary(short);
+
+        if cross.Error() == "hash/crc32: tables do not match"
+            && bad_magic.Error() == "hash/crc32: invalid hash state identifier"
+            && bad_size.Error() == "hash/crc32: invalid hash state size"
+        {
+            fmt::Println!("[15] Unmarshal rejections      PASS");
+        } else {
+            fmt::Println!("[15] Unmarshal rejections      FAIL");
+            failed += 1;
+        }
+    }
+
+    // 16. Clone snapshots the state, and ChecksumIEEE agrees with a
+    //     digest built the long way.
+    {
+        let mut h4 = crc32::NewIEEE();
+        let _ = h4.Write(to_bytes("abc"));
+        let (c, err) = h4.Clone();
+        let _ = h4.Write(to_bytes("def"));
+        let got = c.Sum(empty_buf());
+        if err == nil
+            && equal_bytes(got, from_hex(b"352441c2"))
+            && h4.Sum32() == 0x4b8e39ef
+            && crc32::ChecksumIEEE(to_bytes("hello world")) == 0x0d4a1185
+        {
+            fmt::Println!("[16] Clone independence        PASS");
+        } else {
+            fmt::Println!("[16] Clone independence        FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 11/11");
+        fmt::Println!("ok 16/16");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 11");
+        fmt::Println!("FAIL", failed, "of 16");
         syscall::Exit(1);
     }
 }
