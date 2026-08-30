@@ -266,174 +266,16 @@ const codeOrder: [usize; 19] = [
     16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
 ];
 
-// ─── dictDecoder (dict_decoder.go:27) ──────────────────────────────────
+// ─── dict_decoder.go lives in its own file ───────────────────────────
+//
+// GOISH015 wants one Rust file per Go file so each can carry its own
+// provenance anchors. dict_decoder.go's half has moved to
+// `dict_decoder.rs` and is anchored; the other six Go files of this
+// package are still here and still unanchored.
 
-/// LZ77 sliding-window history buffer used by the decompressor.
-struct dictDecoder {
-    // Sliding window history (internal scratch buffer — stays Vec).
-    hist: Vec<byte>,
-    // Invariant: 0 <= rdPos <= wrPos <= len(hist)
-    wrPos: int,
-    rdPos: int,
-    full: bool,
-}
+mod dict_decoder;
 
-impl dictDecoder {
-    fn new() -> dictDecoder {
-        dictDecoder {
-            hist: Vec::new(),
-            wrPos: 0,
-            rdPos: 0,
-            full: false,
-        }
-    }
-
-    // Go: func (dd *dictDecoder) init(size int, dict []byte)  (dict_decoder.go:39)
-    fn init(&mut self, size: int, dict: &[byte]) {
-        // *dd = dictDecoder{hist: dd.hist}
-        self.wrPos = 0;
-        self.rdPos = 0;
-        self.full = false;
-
-        if (self.hist.capacity() as int) < size {
-            self.hist = Vec::with_capacity(size as usize);
-        }
-        self.hist.resize(size as usize, 0u8);
-
-        // if len(dict) > len(hist) { dict = dict[len(dict)-len(hist):] }
-        let mut d: &[byte] = dict;
-        if (d.len() as int) > (self.hist.len() as int) {
-            d = &d[d.len() - self.hist.len()..];
-        }
-        // dd.wrPos = copy(dd.hist, dict)
-        let n = d.len().min(self.hist.len());
-        self.hist[..n].copy_from_slice(&d[..n]);
-        self.wrPos = n as int;
-        if self.wrPos == self.hist.len() as int {
-            self.wrPos = 0;
-            self.full = true;
-        }
-        self.rdPos = self.wrPos;
-    }
-
-    // Go: histSize  (dict_decoder.go:59)
-    fn histSize(&self) -> int {
-        if self.full {
-            return self.hist.len() as int;
-        }
-        self.wrPos
-    }
-
-    // Go: availRead  (dict_decoder.go:67)
-    fn availRead(&self) -> int {
-        self.wrPos - self.rdPos
-    }
-
-    // Go: availWrite  (dict_decoder.go:72)
-    fn availWrite(&self) -> int {
-        (self.hist.len() as int) - self.wrPos
-    }
-
-    // Go: writeByte  (dict_decoder.go:93)
-    fn writeByte(&mut self, c: byte) {
-        self.hist[self.wrPos as usize] = c;
-        self.wrPos += 1;
-    }
-
-    // Go: writeCopy  (dict_decoder.go:103) — copy (dist,length) to output.
-    fn writeCopy(&mut self, dist: int, length: int) -> int {
-        let dstBase: int = self.wrPos;
-        let mut dstPos: int = dstBase;
-        let mut srcPos: int = dstPos - dist;
-        let mut endPos: int = dstPos + length;
-        if endPos > self.hist.len() as int {
-            endPos = self.hist.len() as int;
-        }
-
-        // Copy non-overlapping section after destination position.
-        if srcPos < 0 {
-            srcPos += self.hist.len() as int;
-            let hlen = self.hist.len();
-            let n = copy_within(
-                &mut self.hist,
-                dstPos as usize,
-                endPos as usize,
-                srcPos as usize,
-                hlen,
-            );
-            dstPos += n;
-            srcPos = 0;
-        }
-
-        // Copy possibly overlapping section before destination position.
-        while dstPos < endPos {
-            let n = copy_within(
-                &mut self.hist,
-                dstPos as usize,
-                endPos as usize,
-                srcPos as usize,
-                dstPos as usize,
-            );
-            dstPos += n;
-        }
-
-        self.wrPos = dstPos;
-        dstPos - dstBase
-    }
-
-    // Go: tryWriteCopy  (dict_decoder.go:153) — fast path for short dist.
-    fn tryWriteCopy(&mut self, dist: int, length: int) -> int {
-        let mut dstPos: int = self.wrPos;
-        let endPos: int = dstPos + length;
-        if dstPos < dist || endPos > self.hist.len() as int {
-            return 0;
-        }
-        let dstBase: int = dstPos;
-        let srcPos: int = dstPos - dist;
-
-        while dstPos < endPos {
-            let n = copy_within(
-                &mut self.hist,
-                dstPos as usize,
-                endPos as usize,
-                srcPos as usize,
-                dstPos as usize,
-            );
-            dstPos += n;
-        }
-
-        self.wrPos = dstPos;
-        dstPos - dstBase
-    }
-
-    // Go: readFlush  (dict_decoder.go:174) — slice ready to emit.
-    // Goish returns an owned `slice<byte>` copy (Go aliases the buffer;
-    // goish's slice cannot safely alias `hist` across mutation).
-    fn readFlush(&mut self) -> slice<byte> {
-        let lo = self.rdPos as usize;
-        let hi = self.wrPos as usize;
-        let mut v: Vec<byte> = Vec::with_capacity(hi - lo);
-        v.extend_from_slice(&self.hist[lo..hi]);
-        self.rdPos = self.wrPos;
-        if self.wrPos == self.hist.len() as int {
-            self.wrPos = 0;
-            self.rdPos = 0;
-            self.full = true;
-        }
-        slice::__from_vec(v)
-    }
-}
-
-// Go's `copy(dst, src)` on overlapping ranges of the SAME buffer.
-// `copy` is forward + clamps to min length; overlap with dst > src
-// performs the run-length-style forward propagation flate relies on.
-fn copy_within(buf: &mut [byte], dst: usize, dst_end: usize, src: usize, src_end: usize) -> int {
-    let n = (dst_end - dst).min(src_end - src);
-    for k in 0..n {
-        buf[dst + k] = buf[src + k];
-    }
-    n as int
-}
+use dict_decoder::dictDecoder;
 
 // ─── decompression step state ──────────────────────────────────────────
 
@@ -931,14 +773,23 @@ impl<R: io::Reader + io::ByteReader> Decompressor<R> {
         let (cnt, err) = io::ReadFull(&mut self.r, &mut tmp);
         self.roffset += cnt;
         self.copyLen -= cnt;
-        // writeSlice + writeMark: copy the bytes read into the window.
+        // Go: f.dict.writeMark(cnt)
+        //
+        // Go reads straight into `f.dict.writeSlice()`; goish's
+        // `io::ReadFull` needs an owned `slice<byte>` and cannot fill a
+        // borrowed window, so the bytes land in `tmp` first and are
+        // copied into the same view here. `writeSlice`/`writeMark` are
+        // still the only things that touch the cursor.
         {
-            let wr = self.dict.wrPos as usize;
-            for k in 0..(cnt as usize) {
-                self.dict.hist[wr + k] = tmp[k as int];
+            let buf = self.dict.writeSlice();
+            let n = usize::try_from(cnt).unwrap_or(0);
+            let mut k: usize = 0;
+            while k < n {
+                buf[k] = tmp[k as int];
+                k += 1;
             }
-            self.dict.wrPos += cnt;
         }
+        self.dict.writeMark(cnt);
         if !err.IsNil() {
             self.err = noEOF(err);
             return;

@@ -25,7 +25,7 @@ goishlint diff the port against the Go file it came from.
 | `math` | 307/661 | 46.4% | 5 |
 | `testing` | 217/247 | 87.9% | 402 |
 | `encoding` | 215/1018 | 21.1% | 156 |
-| `compress` | 142/151 | 94.0% | 42 |
+| `compress` | 144/151 | 95.4% | 56 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
 | `strings` | 76/101 | 75.2% | 1 |
@@ -51,9 +51,20 @@ are now visible inside one subtree. Its 42 `// go:` lines — 34 of them
 its Go file and line range, and checked against Go's own test vectors
 plus seven `testdata/` corpora — 567 KB of English text, 16 KB of
 random bytes, a 1 MiB sawtooth and the issue-5747 overrun case — all
-byte-identical to a running Go. `flate`, `gzip`, `lzw` and `zlib` carry
+byte-identical to a running Go. `flate`, `gzip`, `lzw` and `zlib` carried
 122 name-level ports and zero anchors between them. Same subtree, same
 percentage column, two different claims.
+
+`flate` has since been split the way `bzip2` already was, one Go file
+at a time: **`dict_decoder.go` is now its own anchored `dict_decoder.rs`
+at 10/10 with 14 anchors**, including the `writeSlice`/`writeMark` pair
+that had been inlined at the call site. The other six Go files of the
+package are still in `mod.rs` and still unanchored — 76 of `flate`'s 85
+counted names have nothing behind them. The window's copy paths are now
+checked against a running Go, though: six DEFLATE streams produced by
+Go's own compressor, chosen to drive `dist < length` run-length
+expansion, the 32 KiB window wrap, and the cursor reset in `readFlush`,
+inflating to 236 KB that matches byte for byte.
 
 `hash` moved for the same reason and in the same shape. **`hash/crc64`
 (19/19, 49 `// go:` lines), `hash/adler32` (13/13, 34) and `hash/fnv`
