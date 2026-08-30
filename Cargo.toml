@@ -1248,6 +1248,18 @@ name = "hex_stream_smoke"
 path = "examples/hex_stream_smoke.rs"
 
 [[example]]
+name = "bufio_ref_smoke"
+path = "examples/bufio_ref_smoke.rs"
+
+[[example]]
+name = "bufio_available_buffer_smoke"
+path = "examples/bufio_available_buffer_smoke.rs"
+
+[[example]]
+name = "bufio_writeto_readfrom_smoke"
+path = "examples/bufio_writeto_readfrom_smoke.rs"
+
+[[example]]
 name = "encodedword_smoke"
 path = "examples/encodedword_smoke.rs"
 

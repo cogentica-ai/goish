@@ -1367,18 +1367,21 @@ fn read_line_with<R: io::Reader, T>(
     max: usize,
     f: impl FnOnce(&[u8]) -> T,
 ) -> Result<T, error> {
-    match br.__read_line_view() {
-        Ok(Some(line)) => {
+    let (view, err) = br.__read_line_view();
+    if !err.IsNil() {
+        return Err(err);
+    }
+    match view {
+        Some(line) => {
             if line.len() > max {
                 return Err(errors::New(string("net/http: header line too long")));
             }
             Ok(f(line))
         }
-        Ok(None) => {
+        None => {
             let owned = read_line_owned(br, max)?;
             Ok(f(&owned))
         }
-        Err(e) => Err(e),
     }
 }
 

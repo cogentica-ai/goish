@@ -34,6 +34,7 @@ goishlint diff the port against the Go file it came from.
 | `sync` | 66/126 | 52.4% | 3 |
 | `hash` | 98/114 | 86.0% | 338 |
 | `mime` | 73/89 | 82.0% | 106 |
+| `bufio` | 48/48 | 100.0% | 81 |
 
 Within `net`, the entire jump since the last refresh is **`net/http`,
 now complete: 639/639 functions (100.0%) across all twelve of its
@@ -325,6 +326,35 @@ with their error texts and 13 `DecodeHeader` vectors — including the
 rule that a word which fails to decode is copied through verbatim and
 is still not an error, and that only *white space* between two words is
 deleted. It is now declared in Cargo.toml; it never was.
+
+`bufio` is now **48/48 with 81 anchors** and completely goishlint-clean
+— the fourth package after `compress`, `container` and
+`mime/quotedprintable` to be finished rather than merely covered. It had
+read 42/48 with 7 anchors from a single 1374-line `mod.rs`; it is now a
+module root plus `bufio.rs` and `scan.rs`, one per Go file, with Go's
+two `var` sentinel blocks living in the file that declares them.
+
+Six declarations were "missing" and five of those were renames —
+`readErr`, `setErr`, `writeBuf` — or code inlined at its one call site:
+`collectFragments` was spelled out inside `ReadBytes`, and `dropCR`
+inside `ScanLines`. The sixth was a real defect.
+
+`isSpace` was an ASCII-only `matches!` over six bytes, and `ScanWords`
+walked its input a **byte** at a time. Go's `isSpace` is a rune
+predicate with its own table — scan.go carries a copy rather than pull
+in the unicode tables — covering NBSP (U+00A0), NEL (U+0085), the whole
+U+2000..U+200A run, OGHAM SPACE MARK, LINE and PARAGRAPH SEPARATOR,
+NARROW NBSP, MEDIUM MATHEMATICAL SPACE and IDEOGRAPHIC SPACE. So goish's
+`ScanWords` did not split on any of them, and its advance was `i + 1`
+where Go's is `i + width`, which would have left the tail bytes of a
+multi-byte space in the next token. Both loops now step by rune width,
+and the smoke checks all ten separators against a running Go.
+
+Getting the reference needed one twist worth recording: `testing`
+imports `bufio`, so `scripts/goref.sh`'s in-package test file is an
+import cycle here. `tools/gen_bufio_ref.go` is `package bufio_test`
+instead, which is legal in the same directory and is how Go's own
+bufio tests are written.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the
