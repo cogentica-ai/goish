@@ -31,11 +31,11 @@ use crate::convert::{int as toint, int32 as toint32, uint32 as touint32, uint64 
 use crate::goslice::slice;
 use crate::types::{byte, int};
 
+use super::deflate::{baseMatchLength, baseMatchOffset, maxMatchLength};
 use super::huffman_bit_writer::maxStoreBlockSize;
 use super::huffman_code::math_MaxInt32;
 use super::inflate::maxMatchOffset;
 use super::token_go::{literalToken, matchToken, token};
-use super::{baseMatchLength, baseMatchOffset, maxMatchLength};
 
 // ─── deflateFast constants (deflatefast.go:12) ─────────────────────────
 
@@ -117,6 +117,9 @@ impl deflateFast {
     // go: none — goish idiom: the body of `encode`, over the unwrapped
     //     `Vec`. Splitting it keeps the conversion at the boundary
     //     instead of in the middle of the match loop.
+    // goishlint:ignore GOISH023 - Go's `for { … return … }`; the Rust
+    //     `loop` below never breaks, so every exit is already an
+    //     explicit `return`.
     fn encode_vec(&mut self, mut dst: Vec<token>, src: &[byte]) -> Vec<token> {
         // Ensure that e.cur doesn't wrap.
         if self.cur >= bufferReset {
@@ -137,7 +140,7 @@ impl deflateFast {
         let mut cv: u32 = load32(src, s);
         let mut nextHash: u32 = hash(cv);
 
-        return 'outer: loop {
+        'outer: loop {
             let mut skip: i32 = 32;
 
             let mut nextS: i32 = s;
@@ -223,7 +226,7 @@ impl deflateFast {
                     continue 'outer;
                 }
             }
-        };
+        }
     }
 
     // go: sdk 1.25.5 compress/flate/deflatefast.go:211-266 deflateFast.matchLen
