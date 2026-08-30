@@ -39,7 +39,7 @@ use goish::runtime::sched::schedule;
 use goish::types::{byte, int};
 use goish::{bytes, go, syscall};
 
-const TOTAL: usize = 12;
+const TOTAL: usize = 13;
 
 // Linux open(2) flags not exported by goish::syscall.
 const O_WRONLY: i32 = 0o1;
@@ -75,10 +75,10 @@ fn main() {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {
-            fmt::Println!("ok 12/12");
+            fmt::Println!("ok 13/13");
             syscall::Exit(0);
         } else {
-            fmt::Println!("FAIL", f as i64, "of 12");
+            fmt::Println!("FAIL", f as i64, "of 13");
             syscall::Exit(1);
         }
     });
@@ -98,6 +98,102 @@ fn run_tests() {
     test_10_bad_trailer();
     test_11_go_to_goish();
     test_12_goish_to_go();
+    test_13_header_bytes_vs_go();
+}
+
+static HDR_BAD: AtomicUsize = AtomicUsize::new(0);
+
+// The zlib header is two bytes — CMF and FLG — and the low five bits of
+// FLG are a check value chosen so the pair is a multiple of 31. The
+// high two bits encode a "compression level" derived from the flate
+// level, so a wrong mapping produces a header that is still *valid* and
+// still round-trips through goish's own reader. Only Go's bytes catch
+// it. With a preset dictionary there are four more header bytes, the
+// dictionary's Adler-32, and the FDICT bit set.
+const HDR_INPUT: &[u8] = b"hello, hello, hello, zlib world";
+const HDR_DICT: &[u8] = b"hello, zlib";
+
+fn check_bytes(level: int, want: &[u8]) {
+    let (got, ok) = compress(HDR_INPUT, level);
+    if !ok || !eq(&got, want) {
+        HDR_BAD.fetch_add(1, Ordering::AcqRel);
+    }
+}
+
+fn check_dict_bytes(level: int, want: &[u8]) {
+    let (mut w, err) =
+        zlib::NewWriterLevelDict(bytes::NewBuffer(slice::new()), level, from_bytes(HDR_DICT));
+    if !err.IsNil() {
+        HDR_BAD.fetch_add(1, Ordering::AcqRel);
+        return;
+    }
+    let (_, werr) = w.Write(from_bytes(HDR_INPUT));
+    if !werr.IsNil() || !w.Close().IsNil() {
+        HDR_BAD.fetch_add(1, Ordering::AcqRel);
+        return;
+    }
+    let got = drain(w.into_writer());
+    if !eq(&got, want) {
+        HDR_BAD.fetch_add(1, Ordering::AcqRel);
+    }
+}
+
+fn test_13_header_bytes_vs_go() {
+    check_bytes(
+        zlib::NoCompression,
+        b"\x78\x01\x00\x1f\x00\xe0\xff\x68\x65\x6c\x6c\x6f\x2c\x20\
+        \x68\x65\x6c\x6c\x6f\x2c\x20\x68\x65\x6c\x6c\x6f\x2c\x20\
+        \x7a\x6c\x69\x62\x20\x77\x6f\x72\x6c\x64\x01\x00\x00\xff\
+        \xff\xaf\x7b\x0b\x1a",
+    );
+    check_bytes(
+        zlib::BestSpeed,
+        b"\x78\x01\x00\x1f\x00\xe0\xff\x68\x65\x6c\x6c\x6f\x2c\x20\
+        \x68\x65\x6c\x6c\x6f\x2c\x20\x68\x65\x6c\x6c\x6f\x2c\x20\
+        \x7a\x6c\x69\x62\x20\x77\x6f\x72\x6c\x64\x01\x00\x00\xff\
+        \xff\xaf\x7b\x0b\x1a",
+    );
+    check_bytes(
+        zlib::DefaultCompression,
+        b"\x78\x9c\xca\x48\xcd\xc9\xc9\xd7\x51\x40\xa5\xaa\x72\x32\
+        \x93\x14\xca\xf3\x8b\x72\x52\x00\x01\x00\x00\xff\xff\xaf\
+        \x7b\x0b\x1a",
+    );
+    check_bytes(
+        zlib::BestCompression,
+        b"\x78\xda\xca\x48\xcd\xc9\xc9\xd7\x51\x40\xa5\xaa\x72\x32\
+        \x93\x14\xca\xf3\x8b\x72\x52\x00\x01\x00\x00\xff\xff\xaf\
+        \x7b\x0b\x1a",
+    );
+    check_bytes(
+        zlib::HuffmanOnly,
+        b"\x78\x01\x00\x1f\x00\xe0\xff\x68\x65\x6c\x6c\x6f\x2c\x20\
+        \x68\x65\x6c\x6c\x6f\x2c\x20\x68\x65\x6c\x6c\x6f\x2c\x20\
+        \x7a\x6c\x69\x62\x20\x77\x6f\x72\x6c\x64\x01\x00\x00\xff\
+        \xff\xaf\x7b\x0b\x1a",
+    );
+    check_dict_bytes(
+        zlib::BestSpeed,
+        b"\x78\x3f\x18\xb2\x04\x12\x00\x1f\x00\xe0\xff\x68\x65\x6c\
+        \x6c\x6f\x2c\x20\x68\x65\x6c\x6c\x6f\x2c\x20\x68\x65\x6c\
+        \x6c\x6f\x2c\x20\x7a\x6c\x69\x62\x20\x77\x6f\x72\x6c\x64\
+        \x01\x00\x00\xff\xff\xaf\x7b\x0b\x1a",
+    );
+    check_dict_bytes(
+        zlib::DefaultCompression,
+        b"\x78\xbb\x18\xb2\x04\x12\x82\x32\x51\x29\x90\x84\x42\x79\
+        \x7e\x51\x4e\x0a\x20\x00\x00\xff\xff\xaf\x7b\x0b\x1a",
+    );
+    check_dict_bytes(
+        zlib::BestCompression,
+        b"\x78\xf9\x18\xb2\x04\x12\x82\x32\x51\x29\x90\x84\x42\x79\
+        \x7e\x51\x4e\x0a\x20\x00\x00\xff\xff\xaf\x7b\x0b\x1a",
+    );
+    let bad = HDR_BAD.load(Ordering::Acquire);
+    write_result(13, b"zlib bytes == Go's        ", bad == 0);
+    if bad != 0 {
+        fail();
+    }
 }
 
 fn from_bytes(b: &[u8]) -> slice<byte> {

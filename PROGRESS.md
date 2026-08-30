@@ -25,7 +25,7 @@ goishlint diff the port against the Go file it came from.
 | `math` | 307/661 | 46.4% | 5 |
 | `testing` | 217/247 | 87.9% | 402 |
 | `encoding` | 215/1018 | 21.1% | 156 |
-| `compress` | 150/150 | 100.0% | 203 |
+| `compress` | 150/150 | 100.0% | 236 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
 | `strings` | 76/101 | 75.2% | 1 |
@@ -67,9 +67,9 @@ been two `sort_by` closures. `flate` is 91/91 now — complete, with
 `makeReader` waived: Go decides at run time whether its source already
 satisfies `flate.Reader` and wraps it in a `bufio.Reader` if not, while
 goish's `Decompressor<R>` is generic over that bound, so the choice is
-made at compile time by which constructor is called. `compress` as a subtree is 150/150 with
-203 anchors; the 39 names still unanchored are all in `gzip`, `lzw` and
-`zlib`, the three wrappers around it.
+made at compile time by which constructor is called. `compress/zlib` followed the same day — 11/11 with 33 anchors, split
+into reader.rs and writer.rs — so `compress` is 150/150 with 236
+anchors and only `gzip` (14) and `lzw` (14) still name-level.
 
 Both halves are checked against a running Go rather than against
 themselves. Six DEFLATE streams from Go's own compressor — chosen to
