@@ -1228,6 +1228,18 @@ name = "binary_varint_smoke"
 path = "examples/binary_varint_smoke.rs"
 
 [[example]]
+name = "scanner_smoke"
+path = "examples/scanner_smoke.rs"
+
+[[example]]
+name = "lzw_reader_smoke"
+path = "examples/lzw_reader_smoke.rs"
+
+[[example]]
+name = "lzw_writer_smoke"
+path = "examples/lzw_writer_smoke.rs"
+
+[[example]]
 name = "tabwriter_smoke"
 path = "examples/tabwriter_smoke.rs"
 
