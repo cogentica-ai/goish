@@ -60,95 +60,15 @@ use inflate::{endBlockMarker, internal, maxMatchOffset, maxNumLit};
 
 mod dict_decoder;
 
-// ─── token (token.go:7) ────────────────────────────────────────────────
+// ─── token.go lives in its own file ──────────────────────────────────
+//
+// GOISH015 wants one Rust file per Go file so each can carry its own
+// provenance anchors. token.go's half has moved to `token.rs`.
 
-// 2 bits:   type   0 = literal  1=EOF  2=Match   3=Unused
-// 8 bits:   xlength = length - MIN_MATCH_LENGTH
-// 22 bits   xoffset = offset - MIN_OFFSET_SIZE, or literal
-const lengthShift: u32 = 22;
-const offsetMask: u32 = (1 << lengthShift) - 1;
-#[allow(dead_code)]
-const typeMask: u32 = 3 << 30;
-const literalType: u32 = 0 << 30;
-const matchType: u32 = 1 << 30;
+#[path = "token.rs"]
+mod token_go;
 
-// The length code for length X (MIN_MATCH_LENGTH <= X <= MAX_MATCH_LENGTH)
-// is lengthCodes[length - MIN_MATCH_LENGTH].
-static lengthCodes: [u32; 256] = [
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 12, 12, 13, 13, 13, 13, 14, 14, 14,
-    14, 15, 15, 15, 15, 16, 16, 16, 16, 16, 16, 16, 16, 17, 17, 17, 17, 17, 17, 17, 17, 18, 18, 18,
-    18, 18, 18, 18, 18, 19, 19, 19, 19, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20,
-    20, 20, 20, 20, 20, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 22, 22, 22,
-    22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23,
-    23, 23, 23, 23, 23, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-    24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25,
-    25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 26, 26, 26,
-    26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26,
-    26, 26, 26, 26, 26, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27,
-    27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 28,
-];
-
-static offsetCodes: [u32; 256] = [
-    0, 1, 2, 3, 4, 4, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9,
-    10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 11, 11,
-    11, 11, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
-    12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13,
-    13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
-    14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
-    14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
-    14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 15, 15, 15, 15, 15, 15, 15, 15,
-    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
-    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
-    15, 15, 15, 15, 15, 15, 15, 15,
-];
-
-/// `flate.token` — a packed `uint32` encoding a literal or a
-/// length+offset match.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub(crate) struct token(pub u32);
-
-/// Convert a literal into a literal token.
-pub(crate) fn literalToken(literal: u32) -> token {
-    token(literalType + literal)
-}
-
-/// Convert a < xlength, xoffset > pair into a match token.
-pub(crate) fn matchToken(xlength: u32, xoffset: u32) -> token {
-    token(matchType + (xlength << lengthShift) + xoffset)
-}
-
-impl token {
-    /// Returns the literal of a literal token.
-    pub(crate) fn literal(self) -> u32 {
-        self.0.wrapping_sub(literalType)
-    }
-
-    /// Returns the extra offset of a match token.
-    pub(crate) fn offset(self) -> u32 {
-        self.0 & offsetMask
-    }
-
-    /// Returns the length of a match token.
-    pub(crate) fn length(self) -> u32 {
-        self.0.wrapping_sub(matchType) >> lengthShift
-    }
-}
-
-/// `lengthCode(len)` — length code for `len`.
-fn lengthCode(len: u32) -> u32 {
-    lengthCodes[len as usize]
-}
-
-/// `offsetCode(off)` — offset code corresponding to a specific offset.
-fn offsetCode(off: u32) -> u32 {
-    if off < (offsetCodes.len() as u32) {
-        return offsetCodes[off as usize];
-    }
-    if (off >> 7) < (offsetCodes.len() as u32) {
-        return offsetCodes[(off >> 7) as usize] + 14;
-    }
-    offsetCodes[(off >> 14) as usize] + 28
-}
+use token_go::{lengthCode, literalToken, matchToken, matchType, offsetCode, token};
 
 // ─── huffman_code.go lives in its own file ───────────────────────────
 //
