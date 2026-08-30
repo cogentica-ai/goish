@@ -107,7 +107,7 @@ pub struct Reader<FR: io::Reader + io::ByteReader> {
     // (io.Reader + io.ByteReader): for `NewReader` it is `bufio::Reader<R>`
     // (wrapped); for `NewReaderByte` it is the caller's source directly.
     decompressor: flate::Decompressor<FR>,
-    digest: adler32::Digest,
+    digest: adler32::digest,
     err: error,
     scratch: [byte; 4],
 }
@@ -355,7 +355,7 @@ pub struct Writer<W: io::Writer> {
     w: Option<W>,
     level: int,
     dict: Vec<byte>,
-    digest: adler32::Digest,
+    digest: adler32::digest,
     err: error,
     wroteHeader: bool,
 }

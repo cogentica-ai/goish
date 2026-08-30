@@ -31,7 +31,7 @@ goishlint diff the port against the Go file it came from.
 | `archive` | 71/182 | 39.0% | 0 |
 | `time` | 71/184 | 38.6% | 4 |
 | `sync` | 66/126 | 52.4% | 3 |
-| `hash` | 72/114 | 63.2% | 74 |
+| `hash` | 76/114 | 66.7% | 107 |
 
 Within `net`, the entire jump since the last refresh is **`net/http`,
 now complete: 639/639 functions (100.0%) across all twelve of its
@@ -55,15 +55,17 @@ byte-identical to a running Go. `flate`, `gzip`, `lzw` and `zlib` carry
 percentage column, two different claims.
 
 `hash` moved for the same reason and in the same shape. **`hash/crc64`
-is 19/19 functions (100.0%) with 49 `// go:` lines**, ported 2026-08-30
-— the whole of `crc64.go`, including the slicing-by-8 fast path, the
-`[8]Table` helper construction, and the marshal/unmarshal/Clone surface
-the earlier slim port had skipped. Its `Checksum` output is checked
-byte-for-byte against a running Go at eight lengths straddling both of
-Go's path thresholds (64 bytes and 2048), for ISO, ECMA and a custom
-polynomial, and its marshaled state — table checksum included — matches
-Go's byte for byte. The other four `hash` packages hold 53 name-level
-ports and 4 anchors between them; `crc32` in particular is still the
+(19/19, 49 `// go:` lines) and `hash/adler32` (13/13, 34) are both
+complete and anchored**, ported 2026-08-30 — in each case the whole of
+the one Go file, including the fast paths and the
+marshal/unmarshal/Clone surface the earlier slim ports had skipped.
+Neither is a name match: `crc64`'s `Checksum` is checked byte-for-byte
+against a running Go at eight lengths straddling both of Go's path
+thresholds (64 bytes and 2048) for ISO, ECMA and a custom polynomial,
+`adler32`'s at ten straddling its `nmax`=5552 block boundary, and both
+marshaled states — crc64's table checksum included — match Go's byte
+for byte. The other three `hash` packages hold 44 name-level ports and
+3 anchors between them; `crc32` in particular is still the
 simple-table-only port `crc64` used to be.
 
 `iter` (0/4) and `database` (0/130) have directories but no ported

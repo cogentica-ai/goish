@@ -1,8 +1,11 @@
 // adler32_smoke — exercise hash/adler32.
 // (hash/adler32/adler32.go)
 //
-// Reference values: RFC 1950 + Go 1.25's adler32. Adler-32 of "" = 1
-// (s1=1, s2=0). Of "Wikipedia" = 0x11E60398.
+// Checks 1-10 use RFC 1950's canonical values (Adler-32 of "" = 1,
+// of "Wikipedia" = 0x11E60398). Checks 11-15 use values printed by a
+// running Go 1.25.5 (tools/gen_adler32_ref.go, run through
+// scripts/goref.sh): the block boundary at nmax=5552 in both
+// directions, and the marshal/unmarshal/Clone surface.
 
 #![no_std]
 #![no_main]
@@ -12,14 +15,43 @@ extern crate alloc;
 extern crate goish;
 
 use alloc::vec::Vec;
+use goish::convert::byte as tobyte;
 use goish::convert::bytes as to_bytes;
 use goish::fmt;
 use goish::goslice::slice;
 use goish::hash::adler32;
 use goish::hash::{Hash, Hash32};
 use goish::io::Writer as _;
+use goish::nil;
 use goish::syscall;
-use goish::types::byte;
+use goish::types::{byte, uint32};
+
+// The Go reference corpus: byte i = (i*7+3)%251.
+fn mk(n: usize) -> slice<byte> {
+    let mut v: Vec<byte> = Vec::with_capacity(n);
+    let mut i: usize = 0;
+    while i < n {
+        v.push(tobyte((i * 7 + 3) % 251));
+        i += 1;
+    }
+    slice::<byte>::__from_vec(v)
+}
+
+fn from_hex(h: &[u8]) -> slice<byte> {
+    fn nib(c: u8) -> byte {
+        if c >= b'a' {
+            return c - b'a' + 10;
+        }
+        return c - b'0';
+    }
+    let mut v: Vec<byte> = Vec::with_capacity(h.len() / 2);
+    let mut i: usize = 0;
+    while i < h.len() {
+        v.push((nib(h[i]) << 4) | nib(h[i + 1]));
+        i += 2;
+    }
+    slice::<byte>::__from_vec(v)
+}
 
 fn empty_buf() -> slice<byte> {
     slice::<byte>::__from_vec(Vec::new())
@@ -184,11 +216,123 @@ fn main() {
         }
     }
 
+    // 11. Go-checked corpus either side of the nmax=5552 block boundary
+    //     and of the unrolled four-byte step.
+    {
+        let golden: [(usize, uint32); 10] = [
+            (0, 0x00000001),
+            (1, 0x00040004),
+            (3, 0x0031001f),
+            (4, 0x00680037),
+            (5, 0x00be0056),
+            (5551, 0xbae59452),
+            (5552, 0x50149520),
+            (5553, 0xe60995f5),
+            (11104, 0x9a1d2b62),
+            (11105, 0xc62b2c0e),
+        ];
+        let mut bad = 0;
+        let mut k: usize = 0;
+        while k < golden.len() {
+            let (n, want) = golden[k];
+            if adler32::Checksum(mk(n)) != want {
+                bad += 1;
+            }
+            k += 1;
+        }
+        if bad == 0 {
+            fmt::Println!("[11] nmax blocks vs Go         PASS");
+        } else {
+            fmt::Println!("[11] nmax blocks vs Go         FAIL");
+            failed += 1;
+        }
+    }
+
+    // 12. MarshalBinary emits the exact state Go emits.
+    {
+        let mut h = adler32::New();
+        let _ = h.Write(to_bytes("hello world"));
+        let (st, err) = h.MarshalBinary();
+        let want = from_hex(b"61646c011a0b045d");
+        if err == nil && equal_bytes(st, want) && h.Sum32() == 0x1a0b045d {
+            fmt::Println!("[12] MarshalBinary vs Go       PASS");
+        } else {
+            fmt::Println!("[12] MarshalBinary vs Go       FAIL");
+            failed += 1;
+        }
+    }
+
+    // 13. UnmarshalBinary resumes a digest mid-stream.
+    {
+        let mut h = adler32::New();
+        let _ = h.Write(to_bytes("hello world"));
+        let (st, _) = h.MarshalBinary();
+        let mut h2 = adler32::New();
+        let err = h2.UnmarshalBinary(st);
+        let _ = h2.Write(to_bytes("!!"));
+        let _ = h.Write(to_bytes("!!"));
+        if err == nil && h2.Sum32() == 0x2328049f && h.Sum32() == h2.Sum32() {
+            fmt::Println!("[13] UnmarshalBinary resume    PASS");
+        } else {
+            fmt::Println!("[13] UnmarshalBinary resume    FAIL");
+            failed += 1;
+        }
+    }
+
+    // 14. A corrupt header is refused; so is a state of the wrong
+    //     length. A state too short to hold the magic fails the
+    //     identifier check first — Go's order, reproduced.
+    {
+        let mut h = adler32::New();
+        let _ = h.Write(to_bytes("hello world"));
+        let (st, _) = h.MarshalBinary();
+        let raw: &[byte] = &st;
+
+        let mut badv: Vec<byte> = raw.to_vec();
+        badv[0] = b'x';
+        let mut h3 = adler32::New();
+        let bad_magic = h3.UnmarshalBinary(slice::<byte>::__from_vec(badv));
+
+        let short = slice::<byte>::__from_vec(raw[..3].to_vec());
+        let too_short = h3.UnmarshalBinary(short);
+
+        let mut longv: Vec<byte> = raw.to_vec();
+        longv.push(0);
+        let too_long = h3.UnmarshalBinary(slice::<byte>::__from_vec(longv));
+
+        if bad_magic.Error() == "hash/adler32: invalid hash state identifier"
+            && too_short.Error() == "hash/adler32: invalid hash state identifier"
+            && too_long.Error() == "hash/adler32: invalid hash state size"
+        {
+            fmt::Println!("[14] Unmarshal rejections      PASS");
+        } else {
+            fmt::Println!("[14] Unmarshal rejections      FAIL");
+            failed += 1;
+        }
+    }
+
+    // 15. Clone snapshots the state; writing on either side is
+    //     invisible to the other.
+    {
+        let mut h4 = adler32::New();
+        let _ = h4.Write(to_bytes("abc"));
+        let (c, err) = h4.Clone();
+        let _ = h4.Write(to_bytes("def"));
+        let got = c.Sum(empty_buf());
+        let want = from_hex(b"024d0127");
+        if err == nil && equal_bytes(got, want) && h4.Sum32() == 0x081e0256 {
+            fmt::Println!("[15] Clone independence        PASS");
+        } else {
+            fmt::Println!("[15] Clone independence        FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 10/10");
+        fmt::Println!("ok 15/15");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 15");
         syscall::Exit(1);
     }
 }

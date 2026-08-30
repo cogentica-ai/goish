@@ -1224,6 +1224,10 @@ name = "hmac_smoke"
 path = "examples/hmac_smoke.rs"
 
 [[example]]
+name = "adler32_smoke"
+path = "examples/adler32_smoke.rs"
+
+[[example]]
 name = "crc64_smoke"
 path = "examples/crc64_smoke.rs"
 
