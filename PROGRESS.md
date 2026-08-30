@@ -35,6 +35,7 @@ goishlint diff the port against the Go file it came from.
 | `hash` | 98/114 | 86.0% | 338 |
 | `mime` | 73/89 | 82.0% | 106 |
 | `bufio` | 48/48 | 100.0% | 81 |
+| `unicode` | 45/52 | 86.5% | 36 |
 
 Within `net`, the entire jump since the last refresh is **`net/http`,
 now complete: 639/639 functions (100.0%) across all twelve of its
@@ -355,6 +356,32 @@ imports `bufio`, so `scripts/goref.sh`'s in-package test file is an
 import cycle here. `tools/gen_bufio_ref.go` is `package bufio_test`
 instead, which is legal in the same directory and is how Go's own
 bufio tests are written.
+
+`unicode/utf8` is **17/17 with 36 anchors**, split out of a module root
+into `utf8.rs`. It had read 15/17 with zero anchors, and the two that
+were missing — `encodeRuneNonASCII` and `appendRuneNonASCII` — were the
+non-ASCII halves Go factors out so the ASCII path stays inlineable. The
+port had folded them into a validate-then-encode `EncodeRune`, which
+gets the same answer by a different route; both now follow Go's shape,
+where a negative rune is made unsigned so it falls into the same default
+arm as an out-of-range one. Go's whole constant set (`tx`, `t2`..`t4`,
+`maskx`, `rune1Max`..`rune3Max`, `runeErrorByte0`..`2`) came with them.
+
+The decoder needed no change, and proving that was the point. It is now
+checked against a running Go on 27 inputs, all but nine of them
+malformed: overlong encodings of NUL, U+007F, U+0800 and U+10000; both
+ends of the surrogate block; two values above U+10FFFF; the 0xFE and
+0xFF bytes that can never appear; and truncated two-, three- and
+four-byte sequences. Every one returns `(RuneError, 1)` — the size-1
+part being what stops a caller looping forever — and `FullRune`
+separates "truncated" from "invalid but complete" on the same table.
+`EncodeRune`, `AppendRune`, `RuneLen` and `ValidRune` are checked on 20
+runes covering every boundary of the surrogate block and both sides of
+U+10FFFF.
+
+`tools/gen_utf8_ref.go` is `package utf8_test`, for the same reason
+`gen_bufio_ref.go` is: `testing` reaches `unicode/utf8`, so an
+in-package ref file is an import cycle.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the

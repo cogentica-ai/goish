@@ -1248,6 +1248,10 @@ name = "hex_stream_smoke"
 path = "examples/hex_stream_smoke.rs"
 
 [[example]]
+name = "utf8_ref_smoke"
+path = "examples/utf8_ref_smoke.rs"
+
+[[example]]
 name = "bufio_ref_smoke"
 path = "examples/bufio_ref_smoke.rs"
 
