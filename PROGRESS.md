@@ -24,7 +24,7 @@ goishlint diff the port against the Go file it came from.
 | `net` | 788/1413 | 55.8% | **1570** |
 | `math` | 307/661 | 46.4% | 5 |
 | `testing` | 217/247 | 87.9% | 402 |
-| `encoding` | 222/1018 | 21.8% | 259 |
+| `encoding` | 230/1018 | 22.6% | 301 |
 | `compress` | 150/150 | 100.0% | 303 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
@@ -186,6 +186,27 @@ not enforce padding at all ("not strictly enforced in v1", said the
 comment) and had no strict mode; it now runs Go's three-loop `Decode`
 with the fast paths bailing to `decodeQuantum`, and its error offsets
 match Go's on fourteen malformed inputs.
+
+`encoding/base32` was 12/20 with zero anchors and is now **20/20 with
+42 anchors**, split into a module root and a `base32.rs` that ports
+base32.go whole. The eight missing declarations were the entire
+streaming half — `NewEncoder`/`Write`/`Close`, `NewDecoder`/`Read`,
+`readEncodedData`, `stripNewlines` — plus `WithPadding`, and every one
+of them was blocked until `io.WriteCloser` landed. `NewEncoding` is now
+a `const fn`, so `StdEncoding` and `HexEncoding` are `static`s rather
+than lock-guarded functions rebuilt on every call, which is what Go's
+package-level `var`s are.
+
+The streaming decoder is where the fidelity is. `readEncodedData`
+turns a short read at EOF into `io.ErrUnexpectedEOF`, but only for a
+padded encoding — an unpadded message may end on any byte — and the
+distinction is invisible from the one-shot API. All four encodings
+(std, hex, unpadded, and one with a `'.'` pad character) are now
+checked against a running Go: the one-shot vectors, both length
+formulas across a full quantum, a byte-at-a-time `NewEncoder` so every
+five-byte boundary falls inside a `Write`, a `NewDecoder` round-trip
+through `io::ReadAll`, CRLF interleaved every three characters, three
+truncated inputs, and four `CorruptInputError` offsets.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the
