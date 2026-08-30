@@ -52,7 +52,7 @@ use crate::types::{byte, int};
 extern crate alloc;
 use alloc::vec::Vec;
 
-use super::maxNumLit;
+use super::inflate::maxNumLit;
 
 // ─── huffmanEncoder (huffman_code.go) ──────────────────────────────────
 

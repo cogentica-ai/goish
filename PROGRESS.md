@@ -25,7 +25,7 @@ goishlint diff the port against the Go file it came from.
 | `math` | 307/661 | 46.4% | 5 |
 | `testing` | 217/247 | 87.9% | 402 |
 | `encoding` | 215/1018 | 21.1% | 156 |
-| `compress` | 150/150 | 100.0% | 92 |
+| `compress` | 150/150 | 100.0% | 121 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
 | `strings` | 76/101 | 75.2% | 1 |
@@ -56,8 +56,9 @@ byte-identical to a running Go. `flate`, `gzip`, `lzw` and `zlib` carried
 percentage column, two different claims.
 
 `flate` has since been split the way `bzip2` already was, one Go file
-at a time: **`dict_decoder.go` and `huffman_code.go` are now their own
-anchored files**, 10/10 and 18/18, with 41 anchors between them. The
+at a time: **`dict_decoder.go`, `huffman_code.go` and `inflate.go` are
+now their own anchored files**, with 79 anchors between them — the
+whole decompressor included. The
 recovered declarations are the ones that had been inlined or replaced
 by a Rust idiom — `writeSlice`/`writeMark` at the decompressor's call
 site, and `byLiteral`/`byFreq`'s `sort`/`Len`/`Less`/`Swap`, which had
@@ -65,9 +66,10 @@ been two `sort_by` closures. `flate` is 91/91 now — complete, with
 `makeReader` waived: Go decides at run time whether its source already
 satisfies `flate.Reader` and wraps it in a `bufio.Reader` if not, while
 goish's `Decompressor<R>` is generic over that bound, so the choice is
-made at compile time by which constructor is called. The other five Go
-files are still in `mod.rs` and still unanchored: 64 of the 91 counted
-names have nothing behind them.
+made at compile time by which constructor is called. The four Go files of the
+*compressor* are still in `mod.rs` and still unanchored: 54 of the 91
+counted names have nothing behind them, and they are all on the write
+side.
 
 Both halves are checked against a running Go rather than against
 themselves. Six DEFLATE streams from Go's own compressor — chosen to
