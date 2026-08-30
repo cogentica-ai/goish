@@ -1,6 +1,11 @@
 // tabwriter_smoke — exercise the text/tabwriter package.
-// Mirrors Go's example_test.go (Init, elastic, trailingTab) plus
-// edge cases.
+// (text/tabwriter/tabwriter.go)
+//
+// Checks 1-10 mirror Go's example_test.go (Init, elastic, trailingTab)
+// plus edge cases. Check 11 replays sixteen formatted outputs printed
+// by a running Go 1.25.5 (tools/gen_tabwriter_ref.go, run through
+// scripts/goref.sh) — every flag, both escape modes, a ragged table, a
+// form feed, and non-ASCII cells — comparing the bytes exactly.
 
 #![no_std]
 #![no_main]
@@ -34,6 +39,28 @@ fn run(
         let _ = w.Flush();
     }
     buf.String()
+}
+
+// Byte-level variant. Go string literals can hold a lone 0xFF (the
+// tabwriter Escape byte); a Rust `&str` cannot, so the escape cases
+// have to go in as bytes.
+fn run_bytes(
+    body: &[u8],
+    minwidth: goish::int,
+    tabwidth: goish::int,
+    padding: goish::int,
+    padchar: byte,
+    flags: goish::types::uint,
+) -> alloc::vec::Vec<byte> {
+    let mut buf = bytes::Buffer::new();
+    {
+        let mut w = tabwriter::NewWriter(&mut buf, minwidth, tabwidth, padding, padchar, flags);
+        let _ = w.Write(goish::goslice::slice::<byte>::__from_vec(body.to_vec()));
+        let _ = w.Flush();
+    }
+    let out = buf.Bytes();
+    let raw: &[byte] = &out;
+    raw.to_vec()
 }
 
 #[goish::main]
@@ -219,11 +246,177 @@ fn main() {
         }
     }
 
+    // 11. Sixteen Go-printed outputs, byte for byte. Column widths are
+    //     the whole product of this package, so a table that merely
+    //     "looks aligned" is not evidence; these are Go's bytes.
+    {
+        let cases: [(
+            &str,
+            goish::int,
+            goish::int,
+            goish::int,
+            byte,
+            goish::types::uint,
+            &str,
+            &str,
+        ); 14] = [
+            (
+                "default",
+                0,
+                8,
+                1,
+                b' ',
+                0,
+                "a\tbbb\tcc\nddddd\te\tfff\n",
+                "a     bbb cc\nddddd e   fff\n",
+            ),
+            (
+                "minwidth5",
+                5,
+                8,
+                1,
+                b' ',
+                0,
+                "a\tbbb\tcc\nddddd\te\tfff\n",
+                "a     bbb  cc\nddddd e    fff\n",
+            ),
+            (
+                "padding3",
+                0,
+                8,
+                3,
+                b' ',
+                0,
+                "a\tbbb\tcc\nddddd\te\tfff\n",
+                "a       bbb   cc\nddddd   e     fff\n",
+            ),
+            (
+                "alignright",
+                0,
+                8,
+                1,
+                b' ',
+                tabwriter::AlignRight,
+                "a\tbbb\tcc\nddddd\te\tfff\n",
+                "     a bbbcc\n ddddd   efff\n",
+            ),
+            (
+                "tabindent",
+                0,
+                8,
+                1,
+                b'\t',
+                tabwriter::TabIndent,
+                "a\tbbb\tcc\nddddd\te\tfff\n",
+                "a\tbbb\tcc\nddddd\te\tfff\n",
+            ),
+            (
+                "debug",
+                0,
+                8,
+                1,
+                b' ',
+                tabwriter::Debug,
+                "a\tbbb\tcc\nddddd\te\tfff\n",
+                "a     |bbb |cc\nddddd |e   |fff\n",
+            ),
+            (
+                "discardempty",
+                0,
+                8,
+                1,
+                b' ',
+                tabwriter::DiscardEmptyColumns,
+                "a\t\tb\nc\t\td\n",
+                "a  b\nc  d\n",
+            ),
+            (
+                "ragged",
+                0,
+                8,
+                1,
+                b' ',
+                0,
+                "a\tb\tc\nd\te\n f\n",
+                "a b c\nd e\n f\n",
+            ),
+            ("trailing-nonl", 0, 8, 1, b' ', 0, "a\tb\tc", "a b c"),
+            ("empty", 0, 8, 1, b' ', 0, "", ""),
+            ("vertical-tab", 0, 8, 1, b' ', 0, "a\x0bb\tc\n", "a b c\n"),
+            (
+                "formfeed",
+                0,
+                8,
+                1,
+                b' ',
+                0,
+                "a\tb\n\x0ccc\tdd\n",
+                "a b\n\ncc dd\n",
+            ),
+            (
+                "html",
+                0,
+                8,
+                1,
+                b' ',
+                tabwriter::FilterHTML,
+                "a\t<b>bb</b>\tc\nddd\te\tf\n",
+                "a   <b>bb</b> c\nddd e  f\n",
+            ),
+            (
+                "unicode",
+                0,
+                8,
+                1,
+                b' ',
+                0,
+                "é\tab\ncdé\tx\n",
+                "é   ab\ncdé x\n",
+            ),
+        ];
+        let mut bad = 0;
+        let mut k: usize = 0;
+        while k < cases.len() {
+            let (_name, mw, tw, pad, pc, fl, input, want) = cases[k];
+            let got = run(input, mw, tw, pad, pc, fl);
+            if got != want {
+                bad += 1;
+                fmt::Println!("     mismatch:", _name);
+            }
+            k += 1;
+        }
+        if bad == 0 {
+            fmt::Println!("[11] 14 layouts vs Go        PASS");
+        } else {
+            fmt::Println!("[11] 14 layouts vs Go        FAIL");
+            failed += 1;
+        }
+    }
+
+    // 12. The Escape byte (0xFF) brackets a segment so the tab inside
+    //     it does not terminate a cell. Go string literals can hold a
+    //     lone 0xFF; Rust `&str` cannot, so these go in as bytes —
+    //     which is also the only way to see that StripEscape removes
+    //     the brackets while keeping the segment one cell wide.
+    {
+        let input: &[u8] = b"a\t\xffb\tb\xff\tc\n1\t2\t3\n";
+        let got = run_bytes(input, 0, 8, 1, b' ', 0);
+        let want: &[u8] = b"a \xffb\tb\xff c\n1 2   3\n";
+        let got2 = run_bytes(input, 0, 8, 1, b' ', tabwriter::StripEscape);
+        let want2: &[u8] = b"a b\tb c\n1 2   3\n";
+        if got.as_slice() == want && got2.as_slice() == want2 {
+            fmt::Println!("[12] Escape/StripEscape vs Go PASS");
+        } else {
+            fmt::Println!("[12] Escape/StripEscape vs Go FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 10/10");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }

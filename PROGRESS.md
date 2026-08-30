@@ -100,6 +100,18 @@ anchors) and `heap` (15) followed the same day, so the subtree is
 subtree in the tree where every counted name is one goishlint can diff
 against Go.
 
+`text/tabwriter` is the fourth in the same sweep: 17/20 with zero
+anchors, now 19/19 with 26 and one declaration waived. The waived one
+is `handlePanic`, and it is the honest kind — Go's is a deferred
+`recover()` that turns a `panic(osError{err})` thrown deep inside
+`format` back into a returned error, and goish v1 aborts on panic
+rather than unwinding, so there is nothing to build it on. The error it
+carries travels in a latched field instead. Recovered along the way:
+`append`, `dump`, and the `vbar`/`hbar` package vars, which had been
+inlined as literals. Its output is now checked byte-for-byte against a
+running Go across sixteen layouts — every flag, both escape modes, a
+ragged table, a form feed and non-ASCII cells.
+
 `iter` (0/4) and `database` (0/130) have directories but no ported
 functions. `iter` is a squatter — goish fakes Go 1.23 iterator support
 with slices wherever it is needed.
