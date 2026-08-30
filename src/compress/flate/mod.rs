@@ -49,8 +49,6 @@ pub use inflate::{
     NewReaderDict,
 };
 
-use inflate::maxMatchOffset;
-
 // ─── dict_decoder.go lives in its own file ───────────────────────────
 //
 // GOISH015 wants one Rust file per Go file so each can carry its own
@@ -319,268 +317,15 @@ enum CStep {
     Deflate,   // deflate
 }
 
-// ─── deflateFast constants (deflatefast.go:12) ─────────────────────────
+// ─── deflatefast.go lives in its own file ────────────────────────────
+//
+// GOISH015 wants one Rust file per Go file so each can carry its own
+// provenance anchors. deflatefast.go's half has moved to
+// `deflatefast.rs`.
 
-const tableBits: int = 14;
-const tableSize: int = 1 << tableBits;
-const tableMask: u32 = (tableSize as u32) - 1;
-const tableShift: u32 = 32 - (tableBits as u32);
+mod deflatefast;
 
-// Reset the buffer offset when reaching this.
-const bufferReset: i32 = math_MaxInt32 - (maxStoreBlockSize as i32) * 2;
-
-const inputMargin: int = 16 - 1;
-const minNonLiteralBlockSize: int = 1 + 1 + inputMargin;
-
-fn load32(b: &[byte], i: i32) -> u32 {
-    let i = i as usize;
-    (b[i] as u32) | ((b[i + 1] as u32) << 8) | ((b[i + 2] as u32) << 16) | ((b[i + 3] as u32) << 24)
-}
-
-fn load64(b: &[byte], i: i32) -> u64 {
-    let i = i as usize;
-    (b[i] as u64)
-        | ((b[i + 1] as u64) << 8)
-        | ((b[i + 2] as u64) << 16)
-        | ((b[i + 3] as u64) << 24)
-        | ((b[i + 4] as u64) << 32)
-        | ((b[i + 5] as u64) << 40)
-        | ((b[i + 6] as u64) << 48)
-        | ((b[i + 7] as u64) << 56)
-}
-
-fn hash(u: u32) -> u32 {
-    u.wrapping_mul(0x1e35a7bd) >> tableShift
-}
-
-/// `flate.tableEntry` — a hash-table slot.
-#[derive(Clone, Copy, Default)]
-struct tableEntry {
-    val: u32,
-    offset: i32,
-}
-
-/// `flate.deflateFast` — the BestSpeed match table + previous block.
-pub(crate) struct deflateFast {
-    table: Vec<tableEntry>, // tableSize entries; internal scratch.
-    prev: Vec<byte>,        // previous block, empty if unknown.
-    cur: i32,               // current match offset.
-}
-
-/// `newDeflateFast()` (deflatefast.go:63).
-fn newDeflateFast() -> deflateFast {
-    deflateFast {
-        table: alloc::vec![tableEntry::default(); tableSize as usize],
-        prev: Vec::with_capacity(maxStoreBlockSize as usize),
-        cur: maxStoreBlockSize as i32,
-    }
-}
-
-impl deflateFast {
-    /// `(e *deflateFast).encode(dst, src)` (deflatefast.go:69) — encode a
-    /// block from `src`, appending tokens to `dst`.
-    fn encode(&mut self, mut dst: Vec<token>, src: &[byte]) -> Vec<token> {
-        // Ensure that e.cur doesn't wrap.
-        if self.cur >= bufferReset {
-            self.shiftOffsets();
-        }
-
-        // Fast path for very small inputs.
-        if (src.len() as int) < minNonLiteralBlockSize {
-            self.cur += maxStoreBlockSize as i32;
-            self.prev.clear();
-            return emitLiteral(dst, src);
-        }
-
-        let sLimit: i32 = (src.len() as i32) - (inputMargin as i32);
-
-        let mut nextEmit: i32 = 0;
-        let mut s: i32 = 0;
-        let mut cv: u32 = load32(src, s);
-        let mut nextHash: u32 = hash(cv);
-
-        'outer: loop {
-            let mut skip: i32 = 32;
-
-            let mut nextS: i32 = s;
-            let mut candidate: tableEntry;
-            loop {
-                s = nextS;
-                let bytesBetweenHashLookups = skip >> 5;
-                nextS = s + bytesBetweenHashLookups;
-                skip += bytesBetweenHashLookups;
-                if nextS > sLimit {
-                    // goto emitRemainder
-                    if (nextEmit as int) < (src.len() as int) {
-                        dst = emitLiteral(dst, &src[nextEmit as usize..]);
-                    }
-                    self.cur += src.len() as i32;
-                    let n = src.len();
-                    self.prev.clear();
-                    self.prev.extend_from_slice(&src[..n]);
-                    return dst;
-                }
-                candidate = self.table[(nextHash & tableMask) as usize];
-                let now = load32(src, nextS);
-                self.table[(nextHash & tableMask) as usize] = tableEntry {
-                    offset: s + self.cur,
-                    val: cv,
-                };
-                nextHash = hash(now);
-
-                let offset = s - (candidate.offset - self.cur);
-                if (offset as int) > maxMatchOffset || cv != candidate.val {
-                    cv = now;
-                    continue;
-                }
-                break;
-            }
-
-            // A 4-byte match has been found. src[nextEmit:s] are unmatched.
-            dst = emitLiteral(dst, &src[nextEmit as usize..s as usize]);
-
-            loop {
-                // Extend the 4-byte match as long as possible.
-                s += 4;
-                let t = candidate.offset - self.cur + 4;
-                let l = self.matchLen(s, t, src);
-
-                dst.push(matchToken(
-                    (l + 4 - (baseMatchLength as i32)) as u32,
-                    (s - t - (baseMatchOffset as i32)) as u32,
-                ));
-                s += l;
-                nextEmit = s;
-                if s >= sLimit {
-                    // goto emitRemainder
-                    if (nextEmit as int) < (src.len() as int) {
-                        dst = emitLiteral(dst, &src[nextEmit as usize..]);
-                    }
-                    self.cur += src.len() as i32;
-                    let n = src.len();
-                    self.prev.clear();
-                    self.prev.extend_from_slice(&src[..n]);
-                    return dst;
-                }
-
-                let x = load64(src, s - 1);
-                let prevHash = hash(x as u32);
-                self.table[(prevHash & tableMask) as usize] = tableEntry {
-                    offset: self.cur + s - 1,
-                    val: x as u32,
-                };
-                let x = x >> 8;
-                let currHash = hash(x as u32);
-                candidate = self.table[(currHash & tableMask) as usize];
-                self.table[(currHash & tableMask) as usize] = tableEntry {
-                    offset: self.cur + s,
-                    val: x as u32,
-                };
-
-                let offset = s - (candidate.offset - self.cur);
-                if (offset as int) > maxMatchOffset || (x as u32) != candidate.val {
-                    cv = (x >> 8) as u32;
-                    nextHash = hash(cv);
-                    s += 1;
-                    continue 'outer;
-                }
-            }
-        }
-    }
-
-    /// `(e *deflateFast).matchLen(s, t, src)` (deflatefast.go:211) — match
-    /// length between `src[s:]` and `src[t:]`; `t` may be negative to
-    /// indicate a match starting in `e.prev`.
-    fn matchLen(&self, s: i32, t: i32, src: &[byte]) -> i32 {
-        let mut s1 = (s as int) + maxMatchLength - 4;
-        if s1 > (src.len() as int) {
-            s1 = src.len() as int;
-        }
-        let s1 = s1 as usize;
-
-        // Inside the current block.
-        if t >= 0 {
-            let a = &src[s as usize..s1];
-            let b = &src[t as usize..t as usize + a.len()];
-            for i in 0..a.len() {
-                if a[i] != b[i] {
-                    return i as i32;
-                }
-            }
-            return a.len() as i32;
-        }
-
-        // A match in the previous block.
-        let tp = (self.prev.len() as i32) + t;
-        if tp < 0 {
-            return 0;
-        }
-        let tp = tp as usize;
-
-        let a = &src[s as usize..s1];
-        let mut b: &[byte] = &self.prev[tp..];
-        if b.len() > a.len() {
-            b = &b[..a.len()];
-        }
-        let a2 = &a[..b.len()];
-        for i in 0..b.len() {
-            if a2[i] != b[i] {
-                return i as i32;
-            }
-        }
-
-        let n = b.len() as i32;
-        if ((s + n) as usize) == s1 {
-            return n;
-        }
-
-        // Continue looking for more matches in the current block.
-        let a = &src[(s + n) as usize..s1];
-        let b = &src[..a.len()];
-        for i in 0..a.len() {
-            if a[i] != b[i] {
-                return (i as i32) + n;
-            }
-        }
-        (a.len() as i32) + n
-    }
-
-    /// `(e *deflateFast).reset()` (deflatefast.go:270).
-    fn reset(&mut self) {
-        self.prev.clear();
-        self.cur += maxMatchOffset as i32;
-        if self.cur >= bufferReset {
-            self.shiftOffsets();
-        }
-    }
-
-    /// `(e *deflateFast).shiftOffsets()` (deflatefast.go:286).
-    fn shiftOffsets(&mut self) {
-        if self.prev.is_empty() {
-            for e in self.table.iter_mut() {
-                *e = tableEntry::default();
-            }
-            self.cur = (maxMatchOffset as i32) + 1;
-            return;
-        }
-        for i in 0..self.table.len() {
-            let mut v = self.table[i].offset - self.cur + (maxMatchOffset as i32) + 1;
-            if v < 0 {
-                v = 0;
-            }
-            self.table[i].offset = v;
-        }
-        self.cur = (maxMatchOffset as i32) + 1;
-    }
-}
-
-/// `emitLiteral(dst, lit)` (deflatefast.go:201).
-fn emitLiteral(mut dst: Vec<token>, lit: &[byte]) -> Vec<token> {
-    for &v in lit {
-        dst.push(literalToken(v as u32));
-    }
-    dst
-}
+use deflatefast::{deflateFast, newDeflateFast};
 
 // ─── hash helpers (deflate.go:291) ─────────────────────────────────────
 
@@ -895,7 +640,10 @@ impl<W: io::Writer> compressor<W> {
         let input = self.window[..self.windowEnd as usize].to_vec();
         let mut toks = core::mem::take(&mut self.tokens);
         toks.clear(); // Go: d.tokens[:0] — keep capacity.
-        self.tokens = self.bestSpeed.encode(toks, &input);
+        self.tokens = self
+            .bestSpeed
+            .encode(slice::__from_vec(toks), &input)
+            .__into_vec();
 
         // If we removed less than 1/16th, Huffman-compress the block.
         if (self.tokens.len() as int) > self.windowEnd - (self.windowEnd >> 4) {
