@@ -74,6 +74,47 @@ pub trait ReadCloser: Reader + Closer {}
 /// automatically implements `ReadCloser`.
 impl<T: Reader + Closer> ReadCloser for T {}
 
+/// Go's `io.ReadWriter` — combines [`Reader`] and [`Writer`].
+pub trait ReadWriter: Reader + Writer {}
+
+/// Blanket impl. Go's interface satisfaction is structural, so a type
+/// with the right methods *is* an `io.ReadWriter`; goish's traits are
+/// nominal, so each grouping interface needs one of these.
+impl<T: Reader + Writer> ReadWriter for T {}
+
+/// Go's `io.WriteCloser` — combines [`Writer`] and [`Closer`].
+pub trait WriteCloser: Writer + Closer {}
+
+/// Blanket impl, as for [`ReadWriter`].
+impl<T: Writer + Closer> WriteCloser for T {}
+
+/// Go's `io.ReadWriteCloser` — combines [`Reader`], [`Writer`] and
+/// [`Closer`].
+pub trait ReadWriteCloser: Reader + Writer + Closer {}
+
+/// Blanket impl, as for [`ReadWriter`].
+impl<T: Reader + Writer + Closer> ReadWriteCloser for T {}
+
+/// Go's `io.ReadSeekCloser` — combines [`Reader`], [`Seeker`] and
+/// [`Closer`].
+pub trait ReadSeekCloser: Reader + Seeker + Closer {}
+
+/// Blanket impl, as for [`ReadWriter`].
+impl<T: Reader + Seeker + Closer> ReadSeekCloser for T {}
+
+/// Go's `io.WriteSeeker` — combines [`Writer`] and [`Seeker`].
+pub trait WriteSeeker: Writer + Seeker {}
+
+/// Blanket impl, as for [`ReadWriter`].
+impl<T: Writer + Seeker> WriteSeeker for T {}
+
+/// Go's `io.ReadWriteSeeker` — combines [`Reader`], [`Writer`] and
+/// [`Seeker`].
+pub trait ReadWriteSeeker: Reader + Writer + Seeker {}
+
+/// Blanket impl, as for [`ReadWriter`].
+impl<T: Reader + Writer + Seeker> ReadWriteSeeker for T {}
+
 /// Go's `io.ReadSeeker` (io.go:139) — combines [`Reader`] and
 /// [`Seeker`]. net/http's ServeContent takes one.
 pub trait ReadSeeker: Reader + Seeker {}
