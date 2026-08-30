@@ -43,7 +43,7 @@ use goish::time;
 use goish::types::{byte, int};
 use goish::{bytes, go, syscall};
 
-const TOTAL: usize = 12;
+const TOTAL: usize = 13;
 
 // Linux open(2) flags not exported by goish::syscall.
 const O_WRONLY: i32 = 0o1;
@@ -82,10 +82,10 @@ fn main() {
         run_tests();
         let f = FAILED.load(Ordering::Acquire);
         if f == 0 {
-            fmt::Println!("ok 12/12");
+            fmt::Println!("ok 13/13");
             syscall::Exit(0);
         } else {
-            fmt::Println!("FAIL", f as i64, "of 12");
+            fmt::Println!("FAIL", f as i64, "of 13");
             syscall::Exit(1);
         }
     });
@@ -105,6 +105,100 @@ fn run_tests() {
     test_10_bad_trailer();
     test_11_go_to_goish();
     test_12_goish_to_go();
+    test_13_header_bytes_vs_go();
+}
+
+static HDR_BAD: AtomicUsize = AtomicUsize::new(0);
+
+// The gzip header is ten fixed bytes — magic, method, flags, mtime, an
+// "extra flags" byte that encodes the compression level, and the OS —
+// followed by optional NUL-terminated name and comment and a
+// length-prefixed extra field, and the trailer is CRC-32 then length
+// mod 2^32. Every one of those round-trips through a reader that makes
+// the same mistake, so only Go's bytes pin them down. The XFL byte in
+// particular is 2 at BestCompression, 4 at BestSpeed and 0 otherwise —
+// a mapping nothing else in this file checks.
+const HDR_INPUT: &[u8] = b"hello, hello, hello, gzip world";
+
+fn check_bytes(level: int, want: &[u8]) {
+    let (got, ok) = compress(HDR_INPUT, level);
+    if !ok || !eq(&got, want) {
+        HDR_BAD.fetch_add(1, Ordering::AcqRel);
+    }
+}
+
+fn test_13_header_bytes_vs_go() {
+    check_bytes(
+        gzip::NoCompression,
+        b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\xff\x00\x1f\x00\xe0\
+        \xff\x68\x65\x6c\x6c\x6f\x2c\x20\x68\x65\x6c\x6c\x6f\x2c\
+        \x20\x68\x65\x6c\x6c\x6f\x2c\x20\x67\x7a\x69\x70\x20\x77\
+        \x6f\x72\x6c\x64\x01\x00\x00\xff\xff\x86\x51\x77\x83\x1f\
+        \x00\x00\x00",
+    );
+    check_bytes(
+        gzip::BestSpeed,
+        b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x04\xff\x00\x1f\x00\xe0\
+        \xff\x68\x65\x6c\x6c\x6f\x2c\x20\x68\x65\x6c\x6c\x6f\x2c\
+        \x20\x68\x65\x6c\x6c\x6f\x2c\x20\x67\x7a\x69\x70\x20\x77\
+        \x6f\x72\x6c\x64\x01\x00\x00\xff\xff\x86\x51\x77\x83\x1f\
+        \x00\x00\x00",
+    );
+    check_bytes(
+        gzip::DefaultCompression,
+        b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\xff\xca\x48\xcd\xc9\
+        \xc9\xd7\x51\x40\xa5\xd2\xab\x32\x0b\x14\xca\xf3\x8b\x72\
+        \x52\x00\x01\x00\x00\xff\xff\x86\x51\x77\x83\x1f\x00\x00\
+        \x00",
+    );
+    check_bytes(
+        gzip::BestCompression,
+        b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff\xca\x48\xcd\xc9\
+        \xc9\xd7\x51\x40\xa5\xd2\xab\x32\x0b\x14\xca\xf3\x8b\x72\
+        \x52\x00\x01\x00\x00\xff\xff\x86\x51\x77\x83\x1f\x00\x00\
+        \x00",
+    );
+    check_bytes(
+        gzip::HuffmanOnly,
+        b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\xff\x00\x1f\x00\xe0\
+        \xff\x68\x65\x6c\x6c\x6f\x2c\x20\x68\x65\x6c\x6c\x6f\x2c\
+        \x20\x68\x65\x6c\x6c\x6f\x2c\x20\x67\x7a\x69\x70\x20\x77\
+        \x6f\x72\x6c\x64\x01\x00\x00\xff\xff\x86\x51\x77\x83\x1f\
+        \x00\x00\x00",
+    );
+
+    // Every optional header field at once, against Go's bytes.
+    let (mut w, err) =
+        gzip::NewWriterLevel(bytes::NewBuffer(slice::new()), gzip::DefaultCompression);
+    let mut ok = err.IsNil();
+    if ok {
+        w.Header.Name = "file.txt".into();
+        w.Header.Comment = "a comment".into();
+        w.Header.Extra = from_bytes(&[1, 2, 3]);
+        w.Header.ModTime = time::Unix(1_234_567_890, 0);
+        w.Header.OS = 3;
+        ok = w.Write(from_bytes(HDR_INPUT)).1.IsNil() && w.Close().IsNil();
+    }
+    if ok {
+        let got = drain(w.into_writer());
+        ok = eq(
+            &got,
+            b"\x1f\x8b\x08\x1c\xd2\x02\x96\x49\x00\x03\x03\x00\x01\x02\
+            \x03\x66\x69\x6c\x65\x2e\x74\x78\x74\x00\x61\x20\x63\x6f\
+            \x6d\x6d\x65\x6e\x74\x00\xca\x48\xcd\xc9\xc9\xd7\x51\x40\
+            \xa5\xd2\xab\x32\x0b\x14\xca\xf3\x8b\x72\x52\x00\x01\x00\
+            \x00\xff\xff\x86\x51\x77\x83\x1f\x00\x00\x00",
+        );
+    }
+    if !ok {
+        HDR_BAD.fetch_add(1, Ordering::AcqRel);
+    }
+
+    let bad = HDR_BAD.load(Ordering::Acquire);
+    write_result(13, b"gzip bytes == Go's        ", bad == 0);
+    if bad != 0 {
+        fail();
+    }
 }
 
 fn from_bytes(b: &[u8]) -> slice<byte> {
