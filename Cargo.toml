@@ -1248,6 +1248,18 @@ name = "hex_stream_smoke"
 path = "examples/hex_stream_smoke.rs"
 
 [[example]]
+name = "mime_parse_smoke"
+path = "examples/mime_parse_smoke.rs"
+
+[[example]]
+name = "mime_extensions_smoke"
+path = "examples/mime_extensions_smoke.rs"
+
+[[example]]
+name = "mime_multipart_reader_smoke"
+path = "examples/mime_multipart_reader_smoke.rs"
+
+[[example]]
 name = "mime_multipart_writer_smoke"
 path = "examples/mime_multipart_writer_smoke.rs"
 

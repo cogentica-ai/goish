@@ -33,7 +33,7 @@ goishlint diff the port against the Go file it came from.
 | `time` | 71/184 | 38.6% | 4 |
 | `sync` | 66/126 | 52.4% | 3 |
 | `hash` | 98/114 | 86.0% | 338 |
-| `mime` | 49/89 | 55.1% | 58 |
+| `mime` | 61/89 | 68.5% | 77 |
 
 Within `net`, the entire jump since the last refresh is **`net/http`,
 now complete: 639/639 functions (100.0%) across all twelve of its
@@ -263,6 +263,43 @@ headers were set out of order, since Go emits header keys sorted and
 repeated values in insertion order — along with the twelve-case
 `SetBoundary` table (a space is legal anywhere but the last byte) and
 `FormDataContentType`'s tspecials quoting.
+
+`mime` itself came next — grammar.go and mediatype.go, split out of a
+512-line `mod.rs` into `grammar.rs` and `mediatype.rs`, taking the
+package from 12/38 with zero anchors to 22/38 with 19. The ten that
+were missing were all of RFC 2231: `decode2231Enc`,
+`percentHexUnescape`, `ishex`, `unhex`, `consumeValue`,
+`consumeMediaParam`, `checkMediaTypeDisposition`, `ishex`'s callers,
+and the two character-class predicates. The old `ParseMediaType` had
+no continuation handling at all and the old `FormatMediaType` said so
+in its own doc comment: "skips RFC 2231 percent-encoding for non-ASCII
+parameter values".
+
+That matters because none of RFC 2231 is reachable from an ordinary
+Content-Type. A parameter value may be split across `name*0`, `name*1`,
+… and any piece may be percent-encoded by a further `*` suffix, with
+the charset carried on the first piece only — so `title*0*=us-ascii'en'…;
+title*1=more%20; title*2*=…` stitches into one value in which `more%20`
+stays percent-encoded, because piece 1 has no trailing star. goish now
+does exactly that, and `attachment; filename*=UTF-8''foo-%c3%a4.html`
+decodes.
+
+grammar.go is the one place the port could not be literal. Go writes
+both character classes as 128-bit constant bitmaps and tests a byte
+with `(1<<c)&low | (1<<(c-64))&high`, relying on Go's rule that a shift
+of 64 or more is zero — which is how `c >= 128` falls out as false with
+no range check, and how `c-64` wrapping for small `c` does no harm.
+Rust panics on both, so the halves are selected by a comparison and the
+constants are kept verbatim. The smoke counts the whole 0..255 domain
+of each class (15 tspecials, 79 token characters) so a mistranscribed
+bit cannot hide.
+
+Checked against a running Go: 40 `ParseMediaType` vectors — type,
+parameter map and error text each compared separately — and 14
+`FormatMediaType` vectors, including the `charset*=utf-8''%C3%A4` form
+a non-ASCII value forces. `mime_parse_smoke`, `mime_extensions_smoke`
+and `mime_multipart_reader_smoke` are now declared in Cargo.toml; none
+of the three ever was.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the
