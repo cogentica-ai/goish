@@ -94,9 +94,11 @@ anchors, now 23/23 with 35. The three that were missing were `lazyInit`,
 `insertValue` and `move` — the whole of the link surgery every public
 method funnels through — and its element order is now replayed against
 a running Go step by step, including the no-ops Go documents for a
-foreign element and for moving an element relative to itself. The
-subtree reads 38/38 (100%), but `ring` (8) and `heap` (7) are still
-name-level only: 15 of those 38 names have no anchor behind them.
+foreign element and for moving an element relative to itself. `ring` (17
+anchors) and `heap` (15) followed the same day, so the subtree is
+38/38 with **67 anchors and zero unverified names** — the first whole
+subtree in the tree where every counted name is one goishlint can diff
+against Go.
 
 `iter` (0/4) and `database` (0/130) have directories but no ported
 functions. `iter` is a squatter — goish fakes Go 1.23 iterator support

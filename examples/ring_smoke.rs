@@ -1,6 +1,12 @@
 // ring_smoke — exercise the container/ring package.
-// Mirrors Go's example_test.go (Len, Next, Prev, Do, Move, Link,
-// Unlink) plus edge cases (n<=0, single element, empty Do).
+// (container/ring/ring.go)
+//
+// Checks 1-15 mirror Go's example_test.go (Len, Next, Prev, Do, Move,
+// Link, Unlink) plus edge cases (n<=0, single element, empty Do).
+// Checks 16-18 replay ring contents printed by a running Go 1.25.5
+// (tools/gen_ring_ref.go, run through scripts/goref.sh), so the four
+// pointer writes in `Link` — which `Unlink` is also defined in terms
+// of — are compared against Go's element by element.
 
 #![no_std]
 #![no_main]
@@ -297,11 +303,80 @@ fn main() {
         }
     }
 
+    // 16. Move against Go, including counts past a full revolution.
+    //     Go's Move does not take n modulo Len; it walks n steps, so
+    //     Move(7) on a 5-ring must land where Move(2) does.
+    {
+        let r0 = ring::New::<int>(5).expect("ring");
+        let r = fill(&r0, 5);
+        let mut ok = collect(&r) == alloc::vec![0, 1, 2, 3, 4] && r.Len() == 5;
+        ok = ok && collect(&r.Move(2)) == alloc::vec![2, 3, 4, 0, 1];
+        ok = ok && collect(&r.Move(-2)) == alloc::vec![3, 4, 0, 1, 2];
+        ok = ok && collect(&r.Move(0)) == alloc::vec![0, 1, 2, 3, 4];
+        ok = ok && collect(&r.Move(7)) == alloc::vec![2, 3, 4, 0, 1];
+        ok = ok && collect(&r.Move(-7)) == alloc::vec![3, 4, 0, 1, 2];
+        if ok {
+            fmt::Println!("[16] Move vs Go               PASS");
+        } else {
+            fmt::Println!("[16] Move vs Go               FAIL");
+            failed += 1;
+        }
+    }
+
+    // 17. Link of two distinct rings: s is spliced in after r, and the
+    //     return value is the element that followed r beforehand.
+    {
+        let a0 = ring::New::<int>(3).expect("a");
+        let a = fill(&a0, 3);
+        let b0 = ring::New::<int>(2).expect("b");
+        let mut cur = b0.clone();
+        let mut i: int = 0;
+        while i < 2 {
+            cur.SetValue(10 + i);
+            cur = cur.Next();
+            i += 1;
+        }
+        let n = a.Link(&cur);
+        if collect(&a) == alloc::vec![0, 10, 11, 1, 2]
+            && collect(&n) == alloc::vec![1, 2, 0, 10, 11]
+            && a.Len() == 5
+        {
+            fmt::Println!("[17] Link vs Go               PASS");
+        } else {
+            fmt::Println!("[17] Link vs Go               FAIL");
+            failed += 1;
+        }
+    }
+
+    // 18. Unlink cuts a subring out of one ring — the same four writes
+    //     as Link, since Go defines it as `r.Link(r.Move(n+1))`.
+    {
+        let c0 = ring::New::<int>(6).expect("c");
+        let c = fill(&c0, 6);
+        let sub = c.Unlink(2).expect("sub");
+        let mut ok = collect(&c) == alloc::vec![0, 3, 4, 5]
+            && collect(&sub) == alloc::vec![1, 2]
+            && c.Len() == 4
+            && sub.Len() == 2;
+        ok = ok && c.Unlink(0).is_none();
+        // A one-element ring is its own successor.
+        let one = ring::New::<int>(1).expect("one");
+        one.SetValue(42);
+        ok = ok && collect(&one) == alloc::vec![42] && one.Len() == 1;
+        ok = ok && collect(&one.Next()) == alloc::vec![42];
+        if ok {
+            fmt::Println!("[18] Unlink vs Go             PASS");
+        } else {
+            fmt::Println!("[18] Unlink vs Go             FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 15/15");
+        fmt::Println!("ok 18/18");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 15");
+        fmt::Println!("FAIL", failed, "of 18");
         syscall::Exit(1);
     }
 }

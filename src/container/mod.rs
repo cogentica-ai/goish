@@ -1,3 +1,5 @@
+// go: namespace container
+//
 // container — Go's `container` family.
 //
 // Goish v1 ports `container/heap`, `container/list`, and

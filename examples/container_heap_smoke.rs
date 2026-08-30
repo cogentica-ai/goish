@@ -1,5 +1,11 @@
 // container_heap_smoke — exercise container/heap.
 // (container/heap/heap.go)
+//
+// Checks 1-7 are hand-written. Checks 8-10 compare the backing array
+// after every operation against a running Go 1.25.5
+// (tools/gen_heap_ref.go, run through scripts/goref.sh). Checking the
+// exact array, not just the minimum, is the point: a heap with the
+// wrong sift order still answers Pop correctly for a while.
 
 #![no_std]
 #![no_main]
@@ -165,11 +171,74 @@ fn main() {
         }
     }
 
+    // 8. Init and Push against Go's exact backing array. A wrong sift
+    //    order still yields the right minimum, so only the full array
+    //    catches it.
+    {
+        let mut h = IntHeap(alloc::vec![5i64, 2, 9, 1, 7, 3, 8, 0, 4, 6]);
+        heap::Init(&mut h);
+        let mut ok = h.0 == alloc::vec![0i64, 1, 3, 2, 6, 9, 8, 5, 4, 7];
+        heap::Push(&mut h, -1i64);
+        ok = ok && h.0 == alloc::vec![-1i64, 0, 3, 2, 1, 9, 8, 5, 4, 7, 6];
+        heap::Push(&mut h, 10i64);
+        ok = ok && h.0 == alloc::vec![-1i64, 0, 3, 2, 1, 9, 8, 5, 4, 7, 6, 10];
+        let v = heap::Pop(&mut h);
+        ok = ok && v == -1 && h.0 == alloc::vec![0i64, 1, 3, 2, 6, 9, 8, 5, 4, 7, 10];
+        if ok {
+            fmt::Println!("[ 8] Init/Push/Pop vs Go     PASS");
+        } else {
+            fmt::Println!("[ 8] Init/Push/Pop vs Go     FAIL");
+            failed += 1;
+        }
+    }
+
+    // 9. Remove from the middle, then from the end. The middle case is
+    //    the one that needs `down` first and `up` only if `down` made
+    //    no progress — the replacement can belong either side of the
+    //    hole.
+    {
+        let mut h = IntHeap(alloc::vec![0i64, 1, 3, 2, 6, 9, 8, 5, 4, 7, 10]);
+        let r = heap::Remove(&mut h, 3);
+        let mut ok = r == 2 && h.0 == alloc::vec![0i64, 1, 3, 4, 6, 9, 8, 5, 10, 7];
+        let last = h.Len() - 1;
+        let r2 = heap::Remove(&mut h, last);
+        ok = ok && r2 == 7 && h.0 == alloc::vec![0i64, 1, 3, 4, 6, 9, 8, 5, 10];
+        if ok {
+            fmt::Println!("[ 9] Remove vs Go            PASS");
+        } else {
+            fmt::Println!("[ 9] Remove vs Go            FAIL");
+            failed += 1;
+        }
+    }
+
+    // 10. Fix after mutating an element in place, in both directions,
+    //     then drain in order.
+    {
+        let mut h = IntHeap(alloc::vec![0i64, 1, 3, 4, 6, 9, 8, 5, 10]);
+        h.0[2] = -5;
+        heap::Fix(&mut h, 2);
+        let mut ok = h.0 == alloc::vec![-5i64, 1, 0, 4, 6, 9, 8, 5, 10];
+        h.0[0] = 99;
+        heap::Fix(&mut h, 0);
+        ok = ok && h.0 == alloc::vec![0i64, 1, 8, 4, 6, 9, 99, 5, 10];
+        let mut out: alloc::vec::Vec<i64> = alloc::vec::Vec::new();
+        while h.Len() > 0 {
+            out.push(heap::Pop(&mut h));
+        }
+        ok = ok && out == alloc::vec![0i64, 1, 4, 5, 6, 8, 9, 10, 99];
+        if ok {
+            fmt::Println!("[10] Fix/drain vs Go         PASS");
+        } else {
+            fmt::Println!("[10] Fix/drain vs Go         FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 7/7");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 7");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }
