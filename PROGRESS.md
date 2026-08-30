@@ -133,6 +133,22 @@ anchors) and `heap` (15) followed the same day, so the subtree is
 subtree in the tree where every counted name is one goishlint can diff
 against Go.
 
+**`text/scanner` is a new package, ported from scratch on 2026-08-30:
+28/28 with 54 anchors and zero unverified names.** It is the first port
+in a while that was not a repair, and it is checked the way a repair
+would be: six sources are tokenised to EOF and every token is compared
+with a running Go as a `kind|text|line:column` triple — 69 tokens in
+all, plus the error counts, so a wrong token kind, a wrong token text
+and a wrong position each fail separately. The cases cover Go source
+with every literal form, ident-only and comment-keeping modes, fourteen
+numeric literals of which five are malformed, unterminated string, char
+and raw-string literals, and non-ASCII identifiers and comments.
+
+The one bug the comparison caught was Rust's, not the port's: Go's
+`for s.Whitespace&(1<<uint(ch)) != 0` shifts by `uint(-1)` at EOF, which
+Go defines as 0, and Rust panics on. The width test is now written out
+with the reason next to it.
+
 `text/tabwriter` is the fourth in the same sweep: 17/20 with zero
 anchors, now 19/19 with 26 and one declaration waived. The waived one
 is `handlePanic`, and it is the honest kind — Go's is a deferred
