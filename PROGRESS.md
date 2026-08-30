@@ -25,7 +25,7 @@ goishlint diff the port against the Go file it came from.
 | `math` | 307/661 | 46.4% | 5 |
 | `testing` | 217/247 | 87.9% | 402 |
 | `encoding` | 215/1018 | 21.1% | 156 |
-| `compress` | 150/150 | 100.0% | 271 |
+| `compress` | 150/150 | 100.0% | 303 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
 | `strings` | 76/101 | 75.2% | 1 |
@@ -44,8 +44,11 @@ means 158 functions were each diffed against the Go source and their
 outputs checked byte-for-byte against a running Go. Treat unanchored
 subtrees as working code, not as verified ports.
 
-`compress` is the clearest illustration of the gap, because both halves
-are now visible inside one subtree. Its 42 `// go:` lines — 34 of them
+`compress` used to be the clearest illustration of the gap, because
+both halves were visible inside one subtree. It no longer is: as of
+2026-08-30 the whole subtree is anchored. The paragraph below is kept
+because the *shape* of the problem it describes is still what the rest
+of the tree looks like. Its 42 `// go:` lines — 34 of them
 `sdk` anchors — are **all** in `compress/bzip2`, ported 2026-08-17:
 20/20 functions by name and by declaration, every one citing
 its Go file and line range, and checked against Go's own test vectors
@@ -67,10 +70,12 @@ been two `sort_by` closures. `flate` is 91/91 now — complete, with
 `makeReader` waived: Go decides at run time whether its source already
 satisfies `flate.Reader` and wraps it in a `bufio.Reader` if not, while
 goish's `Decompressor<R>` is generic over that bound, so the choice is
-made at compile time by which constructor is called. `compress/zlib` and `compress/gzip` followed the same day — 11/11 with
-33 anchors and 14/14 with 35, each split into its two Go files — so
-`compress` is 150/150 with 271 anchors and only `lzw` (14) still
-name-level.
+made at compile time by which constructor is called. `compress/zlib`, `compress/gzip` and `compress/lzw` followed the same
+day, each split into its two Go files and anchored. **`compress` is now
+150/150 with 303 anchors and zero unverified names** — the first
+multi-package subtree in the tree where every counted name is one
+goishlint can diff against Go, and where every `.rs` file ports exactly
+one `.go` file.
 
 Both halves are checked against a running Go rather than against
 themselves. Six DEFLATE streams from Go's own compressor — chosen to

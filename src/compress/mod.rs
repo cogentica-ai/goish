@@ -1,3 +1,5 @@
+// go: namespace compress
+//
 // compress — Go's `compress` parent package.
 //
 // Submodules:

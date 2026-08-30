@@ -229,6 +229,9 @@ impl<R: io::Reader> Reader<R> {
     }
 
     // go: sdk 1.25.5 compress/gzip/gunzip.go:141-170 Reader.readString
+    // goishlint:ignore GOISH023 - Go's `for { … return … }`; the Rust
+    //     `loop` below never breaks, so every exit is already an
+    //     explicit `return`.
     /// `(z *Reader).readString()` (gunzip.go:141) — reads a
     /// NUL-terminated string from the source. The bytes are treated as
     /// ISO 8859-1 (Latin-1) and the result is UTF-8. Always updates
@@ -236,7 +239,7 @@ impl<R: io::Reader> Reader<R> {
     fn readString(&mut self) -> (crate::string, error) {
         let mut needConv = false;
         let mut i: usize = 0;
-        return loop {
+        loop {
             if i >= self.buf.len() {
                 return (crate::string::new(), ErrHeader.into());
             }
@@ -264,7 +267,7 @@ impl<R: io::Reader> Reader<R> {
                 return (crate::string::from_bytes(&self.buf[..i]), nil);
             }
             i += 1;
-        };
+        }
     }
 
     // go: sdk 1.25.5 compress/gzip/gunzip.go:174-243 Reader.readHeader
