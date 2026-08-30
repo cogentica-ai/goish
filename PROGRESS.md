@@ -3,7 +3,7 @@
 Where the port actually stands, and how much of it is *proven* rather
 than merely counted. Numbers are regenerated with
 `scripts/port_coverage.py`; the last full refresh was 2026-08-15, with
-the `compress` row refreshed 2026-08-17.
+the `compress` row refreshed 2026-08-17 and the `hash` row 2026-08-30.
 
 ## The whole tree — 4452 / 11061 functions (40.3%)
 
@@ -31,7 +31,7 @@ goishlint diff the port against the Go file it came from.
 | `archive` | 71/182 | 39.0% | 0 |
 | `time` | 71/184 | 38.6% | 4 |
 | `sync` | 66/126 | 52.4% | 3 |
-| `hash` | 65/114 | 57.0% | 26 |
+| `hash` | 72/114 | 63.2% | 74 |
 
 Within `net`, the entire jump since the last refresh is **`net/http`,
 now complete: 639/639 functions (100.0%) across all twelve of its
@@ -53,6 +53,18 @@ random bytes, a 1 MiB sawtooth and the issue-5747 overrun case — all
 byte-identical to a running Go. `flate`, `gzip`, `lzw` and `zlib` carry
 122 name-level ports and zero anchors between them. Same subtree, same
 percentage column, two different claims.
+
+`hash` moved for the same reason and in the same shape. **`hash/crc64`
+is 19/19 functions (100.0%) with 49 `// go:` lines**, ported 2026-08-30
+— the whole of `crc64.go`, including the slicing-by-8 fast path, the
+`[8]Table` helper construction, and the marshal/unmarshal/Clone surface
+the earlier slim port had skipped. Its `Checksum` output is checked
+byte-for-byte against a running Go at eight lengths straddling both of
+Go's path thresholds (64 bytes and 2048), for ISO, ECMA and a custom
+polynomial, and its marshaled state — table checksum included — matches
+Go's byte for byte. The other four `hash` packages hold 53 name-level
+ports and 4 anchors between them; `crc32` in particular is still the
+simple-table-only port `crc64` used to be.
 
 `iter` (0/4) and `database` (0/130) have directories but no ported
 functions. `iter` is a squatter — goish fakes Go 1.23 iterator support

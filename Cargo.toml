@@ -1224,6 +1224,10 @@ name = "hmac_smoke"
 path = "examples/hmac_smoke.rs"
 
 [[example]]
+name = "crc64_smoke"
+path = "examples/crc64_smoke.rs"
+
+[[example]]
 name = "maphash_smoke"
 path = "examples/maphash_smoke.rs"
 
