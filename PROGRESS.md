@@ -24,7 +24,7 @@ goishlint diff the port against the Go file it came from.
 | `net` | 788/1413 | 55.8% | **1570** |
 | `math` | 307/661 | 46.4% | 5 |
 | `testing` | 217/247 | 87.9% | 402 |
-| `encoding` | 213/1018 | 20.9% | 143 |
+| `encoding` | 215/1018 | 21.1% | 156 |
 | `compress` | 142/151 | 94.0% | 42 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
@@ -111,6 +111,16 @@ carries travels in a latched field instead. Recovered along the way:
 inlined as literals. Its output is now checked byte-for-byte against a
 running Go across sixteen layouts — every flag, both escape modes, a
 ragged table, a form feed and non-ASCII cells.
+
+`encoding/binary` is split rather than finished: varint.go is now its
+own anchored `varint.rs` at 8/8 with 13 anchors, including the
+`ReadUvarint`/`ReadVarint` pair that was missing, while binary.go's
+half stays in `mod.rs`, still 15 unanchored names and still short the
+reflection-driven `Encode`/`Decode`/`Size` surface. Both varint
+overflow rules are now checked against a running Go, including the one
+that refuses to read an eleventh byte at all
+(golang.org/issue/41185) — a guard whose absence would be invisible
+until it read past a buffer.
 
 `iter` (0/4) and `database` (0/130) have directories but no ported
 functions. `iter` is a squatter — goish fakes Go 1.23 iterator support

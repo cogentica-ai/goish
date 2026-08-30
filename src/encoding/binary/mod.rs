@@ -303,132 +303,15 @@ impl LittleEndian {
     }
 }
 
-// ─── Varint encoding (varint.go) ────────────────────────────────────
+// ─── varint.go lives in its own file ─────────────────────────────────
+//
+// GOISH015 wants one Rust file per Go file so each can carry its own
+// provenance anchors. varint.go's half has moved to `varint.rs` and is
+// anchored; binary.go's half is still here and still unanchored.
 
-/// `MaxVarintLen16` (varint.go:34) — max bytes for a varint-16.
-pub const MaxVarintLen16: crate::types::int = 3;
-/// `MaxVarintLen32` (varint.go:35) — max bytes for a varint-32.
-pub const MaxVarintLen32: crate::types::int = 5;
-/// `MaxVarintLen64` (varint.go:36) — max bytes for a varint-64.
-pub const MaxVarintLen64: crate::types::int = 10;
+pub mod varint;
 
-/// `binary.PutUvarint(buf, x)` (varint.go:23) — encode `x` into `buf`
-/// in-place, returning the number of bytes written. Caller must ensure
-/// `buf` is large enough (`MaxVarintLen64` is the worst case for u64).
-/// Panics if `buf` is too small.
-///
-/// Takes `&mut slice<byte>` so the caller's buffer is mutated. Go's
-/// slice header carries a pointer to a shared backing array, so a
-/// by-value `[]byte` parameter still mutates the caller's data; goish's
-/// `slice<byte>` owns its `Vec<u8>` and a by-value parameter would
-/// only mutate a discarded copy.
-pub fn PutUvarint(
-    buf: &mut crate::goslice::slice<crate::types::byte>,
-    mut x: crate::types::uint,
-) -> crate::types::int {
-    let mut i: crate::types::int = 0;
-    while x >= 0x80 {
-        buf[i] = ((x as u8) | 0x80) as crate::types::byte;
-        x >>= 7;
-        i += 1;
-    }
-    buf[i] = (x as u8) as crate::types::byte;
-    i + 1
-}
-
-/// `binary.PutVarint(buf, x)` (varint.go:54) — zig-zag encode signed
-/// `x` into `buf` in-place. Returns the number of bytes written.
-pub fn PutVarint(
-    buf: &mut crate::goslice::slice<crate::types::byte>,
-    x: crate::types::int,
-) -> crate::types::int {
-    let mut ux = (x as u64).wrapping_shl(1);
-    if x < 0 {
-        ux = !ux;
-    }
-    PutUvarint(buf, ux as crate::types::uint)
-}
-
-/// `binary.AppendUvarint(buf, x)` (varint.go:41) — append the LEB128
-/// varint encoding of `x` to `buf`. Each byte holds 7 bits; MSB=1 in
-/// all but the last byte to mark continuation.
-pub fn AppendUvarint(
-    buf: crate::goslice::slice<crate::types::byte>,
-    mut x: crate::types::uint,
-) -> crate::goslice::slice<crate::types::byte> {
-    let mut v_buf: alloc::vec::Vec<u8> = buf.__into_vec();
-    // Go: for x >= 0x80 { buf = append(buf, byte(x)|0x80); x >>= 7 }
-    while x >= 0x80 {
-        v_buf.push((x as u8) | 0x80);
-        x >>= 7;
-    }
-    // Go: return append(buf, byte(x))
-    v_buf.push(x as u8);
-    crate::goslice::slice::__from_vec(v_buf)
-}
-
-/// `binary.Uvarint(buf)` (varint.go:68) — decode a varint from `buf`.
-/// Returns `(value, n)`:
-///   * `n > 0` — number of bytes consumed.
-///   * `n == 0` — buf too short.
-///   * `n < 0`  — overflow; `-n` is the byte count read.
-pub fn Uvarint(
-    buf: crate::goslice::slice<crate::types::byte>,
-) -> (crate::types::uint, crate::types::int) {
-    let mut x: crate::types::uint = 0;
-    let mut s: u32 = 0;
-    let len = buf.Len();
-    let mut i: crate::types::int = 0;
-    // Go: for i, b := range buf { ... }
-    while i < len {
-        // Go: if i == MaxVarintLen64 { return 0, -(i+1) }
-        if i == MaxVarintLen64 {
-            return (0, -(i + 1));
-        }
-        let b = buf[i];
-        // Go: if b < 0x80 { ... return x | uint64(b)<<s, i+1 }
-        if b < 0x80 {
-            // Overflow guard: at MaxVarintLen64-1, the top bits of
-            // `b` would shift past bit 63.
-            if i == MaxVarintLen64 - 1 && b > 1 {
-                return (0, -(i + 1));
-            }
-            return (x | (b as crate::types::uint) << s, i + 1);
-        }
-        // Go: x |= uint64(b&0x7f) << s; s += 7
-        x |= ((b & 0x7f) as crate::types::uint) << s;
-        s += 7;
-        i += 1;
-    }
-    // Go: return 0, 0  — buf too small.
-    (0, 0)
-}
-
-/// `binary.AppendVarint(buf, x)` (varint.go:91) — append zig-zag
-/// encoded varint of signed `x`.
-pub fn AppendVarint(
-    buf: crate::goslice::slice<crate::types::byte>,
-    x: crate::types::int,
-) -> crate::goslice::slice<crate::types::byte> {
-    // Go: ux := uint64(x) << 1; if x < 0 { ux = ^ux }
-    let mut ux = (x as u64).wrapping_shl(1);
-    if x < 0 {
-        ux = !ux;
-    }
-    AppendUvarint(buf, ux as crate::types::uint)
-}
-
-/// `binary.Varint(buf)` (varint.go:115) — decode zig-zag signed varint.
-/// Returns `(value, n)` with the same conventions as `Uvarint`.
-pub fn Varint(
-    buf: crate::goslice::slice<crate::types::byte>,
-) -> (crate::types::int, crate::types::int) {
-    // Go: ux, n := Uvarint(buf)
-    let (ux, n) = Uvarint(buf);
-    // Go: x := int64(ux >> 1); if ux&1 != 0 { x = ^x }
-    let mut x = (ux >> 1) as crate::types::int;
-    if (ux & 1) != 0 {
-        x = !x;
-    }
-    (x, n)
-}
+pub use varint::{
+    AppendUvarint, AppendVarint, MaxVarintLen16, MaxVarintLen32, MaxVarintLen64, PutUvarint,
+    PutVarint, ReadUvarint, ReadVarint, Uvarint, Varint,
+};

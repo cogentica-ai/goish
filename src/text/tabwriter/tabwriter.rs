@@ -275,7 +275,7 @@ impl<W: io::Writer> Writer<W> {
             i += 1;
         }
         out.extend_from_slice(b"\n");
-        let mut e = crate::os::Stderr();
+        let e = crate::os::Stderr();
         // Best-effort, as Go's `print` is.
         let _ = e.Write(slice::__from_vec(out));
     }

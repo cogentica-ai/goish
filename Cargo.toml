@@ -1224,6 +1224,10 @@ name = "hmac_smoke"
 path = "examples/hmac_smoke.rs"
 
 [[example]]
+name = "binary_varint_smoke"
+path = "examples/binary_varint_smoke.rs"
+
+[[example]]
 name = "tabwriter_smoke"
 path = "examples/tabwriter_smoke.rs"
 
