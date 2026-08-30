@@ -24,7 +24,7 @@ goishlint diff the port against the Go file it came from.
 | `net` | 788/1413 | 55.8% | **1570** |
 | `math` | 307/661 | 46.4% | 5 |
 | `testing` | 217/247 | 87.9% | 402 |
-| `encoding` | 215/1018 | 21.1% | 156 |
+| `encoding` | 216/1018 | 21.2% | 197 |
 | `compress` | 150/150 | 100.0% | 303 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
@@ -160,6 +160,15 @@ carries travels in a latched field instead. Recovered along the way:
 inlined as literals. Its output is now checked byte-for-byte against a
 running Go across sixteen layouts — every flag, both escape modes, a
 ragged table, a form feed and non-ASCII cells.
+
+`encoding/hex` (17/17, 25 anchors) and `encoding/ascii85` (9/9, 15)
+followed, and hex is the one that repaid the anchoring immediately.
+Its `InvalidByteError` message was `encoding/hex: invalid byte: 0x67`
+where Go's is `encoding/hex: invalid byte: U+0067 'g'` — Go formats the
+byte with `%#U`. A second helper produced a *third* spelling, in
+decimal. All three were plausible, none matched, and nothing could see
+it until the port was diffed against a running Go. The typed error now
+formats `%#U` and the helper routes through it.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the

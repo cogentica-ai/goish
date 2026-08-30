@@ -1228,6 +1228,26 @@ name = "binary_varint_smoke"
 path = "examples/binary_varint_smoke.rs"
 
 [[example]]
+name = "ascii85_smoke"
+path = "examples/ascii85_smoke.rs"
+
+[[example]]
+name = "ascii85_stream_smoke"
+path = "examples/ascii85_stream_smoke.rs"
+
+[[example]]
+name = "hex_append_smoke"
+path = "examples/hex_append_smoke.rs"
+
+[[example]]
+name = "hex_dump_smoke"
+path = "examples/hex_dump_smoke.rs"
+
+[[example]]
+name = "hex_stream_smoke"
+path = "examples/hex_stream_smoke.rs"
+
+[[example]]
 name = "scanner_smoke"
 path = "examples/scanner_smoke.rs"
 

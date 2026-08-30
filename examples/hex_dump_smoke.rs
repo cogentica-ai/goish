@@ -174,11 +174,93 @@ fn main() {
         }
     }
 
+    // 11. Dump's exact layout against a running Go, at every length
+    //     that changes it: empty, a single byte, the 8-byte column gap,
+    //     a full 16-byte line, and the 17/31/32/33 boundaries where a
+    //     second line starts, fills and overflows.
+    {
+        fn mk(n: usize) -> slice<byte> {
+            let mut v: alloc::vec::Vec<byte> = alloc::vec::Vec::with_capacity(n);
+            let mut i: usize = 0;
+            while i < n {
+                v.push(((i * 7 + 3) % 256) as byte);
+                i += 1;
+            }
+            slice::<byte>::__from_vec(v)
+        }
+        let cases: [(usize, &str); 9] = [
+        (0, ""),
+        (1, "00000000  03                                                |.|\n"),
+        (7, "00000000  03 0a 11 18 1f 26 2d                              |.....&-|\n"),
+        (15, "00000000  03 0a 11 18 1f 26 2d 34  3b 42 49 50 57 5e 65     |.....&-4;BIPW^e|\n"),
+        (16, "00000000  03 0a 11 18 1f 26 2d 34  3b 42 49 50 57 5e 65 6c  |.....&-4;BIPW^el|\n"),
+        (17, "00000000  03 0a 11 18 1f 26 2d 34  3b 42 49 50 57 5e 65 6c  |.....&-4;BIPW^el|\n00000010  73                                                |s|\n"),
+        (31, "00000000  03 0a 11 18 1f 26 2d 34  3b 42 49 50 57 5e 65 6c  |.....&-4;BIPW^el|\n00000010  73 7a 81 88 8f 96 9d a4  ab b2 b9 c0 c7 ce d5     |sz.............|\n"),
+        (32, "00000000  03 0a 11 18 1f 26 2d 34  3b 42 49 50 57 5e 65 6c  |.....&-4;BIPW^el|\n00000010  73 7a 81 88 8f 96 9d a4  ab b2 b9 c0 c7 ce d5 dc  |sz..............|\n"),
+        (33, "00000000  03 0a 11 18 1f 26 2d 34  3b 42 49 50 57 5e 65 6c  |.....&-4;BIPW^el|\n00000010  73 7a 81 88 8f 96 9d a4  ab b2 b9 c0 c7 ce d5 dc  |sz..............|\n00000020  e3                                                |.|\n"),
+        ];
+        let mut bad = 0;
+        let mut k: usize = 0;
+        while k < cases.len() {
+            let (n, want) = cases[k];
+            if Dump(mk(n)) != want {
+                bad += 1;
+            }
+            k += 1;
+        }
+        // The printable column maps anything outside 32..126 to '.'.
+        if Dump(convert::bytes("Hello, world! ~\u{7f}\u{0}\u{1f}")) != "00000000  48 65 6c 6c 6f 2c 20 77  6f 72 6c 64 21 20 7e 7f  |Hello, world! ~.|\n00000010  00 1f                                             |..|\n" {
+            bad += 1;
+        }
+        if bad == 0 {
+            fmt::Println!("[11] Dump layout vs Go       PASS");
+        } else {
+            fmt::Println!("[11] Dump layout vs Go       FAIL");
+            failed += 1;
+        }
+    }
+
+    // 12. DecodeString's error contract: complete pairs are decoded
+    //     before ErrLength is reported, and an invalid byte is named
+    //     the way Go names it (%#U), not by position.
+    {
+        let cases: [(&str, usize, &str); 7] = [
+            ("", 0, "<nil>"),
+            ("0", 0, "encoding/hex: odd length hex string"),
+            ("00", 1, "<nil>"),
+            ("0g", 0, "encoding/hex: invalid byte: U+0067 'g'"),
+            ("g0", 0, "encoding/hex: invalid byte: U+0067 'g'"),
+            ("0011", 2, "<nil>"),
+            ("001", 1, "encoding/hex: odd length hex string"),
+        ];
+        let mut bad = 0;
+        let mut k: usize = 0;
+        while k < cases.len() {
+            let (input, wlen, werr) = cases[k];
+            let (b, err) = goish::encoding::hex::DecodeString(input);
+            let got = if err == goish::nil {
+                string("<nil>")
+            } else {
+                err.Error()
+            };
+            if b.Len() != wlen as goish::int || got != werr {
+                bad += 1;
+            }
+            k += 1;
+        }
+        if bad == 0 {
+            fmt::Println!("[12] Decode errors vs Go     PASS");
+        } else {
+            fmt::Println!("[12] Decode errors vs Go     FAIL");
+            failed += 1;
+        }
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 10/10");
+        fmt::Println!("ok 12/12");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 12");
         syscall::Exit(1);
     }
 }
