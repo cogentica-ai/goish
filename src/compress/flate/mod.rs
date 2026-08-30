@@ -229,6 +229,22 @@ impl huffmanDecoder {
 // and clones the Arc-shared chunks/links on demand. The table is small
 // and immutable after init, so a per-decompressor clone is cheap.
 
+// go: sdk 1.25.5 compress/flate/inflate.go:766-784 fixedHuffmanDecoderInit
+/// `flate.fixedHuffmanDecoderInit()` — build the fixed Huffman decoder
+/// once, from the code lengths in RFC 1951 section 3.2.6.
+///
+/// Go fills the package-level `fixedHuffmanDecoder` var behind a
+/// `sync.Once`; goish has no package-level mutable statics under
+/// `no_std`, so the table lives in the `SpinLock` slot that
+/// [`fixedHuffmanDecoder`] reads. This forces that slot to be filled,
+/// which is the whole of what Go's function does.
+fn fixedHuffmanDecoderInit() {
+    let _ = fixedHuffmanDecoder();
+}
+
+// go: none — goish idiom: Go's package-level `fixedHuffmanDecoder` var,
+//     read directly once `fixedHuffmanDecoderInit` has run. goish hands
+//     back an independent decoder sharing the same immutable table.
 fn fixedHuffmanDecoder() -> huffmanDecoder {
     use crate::runtime::spin::SpinLock;
     static SLOT: SpinLock<Option<(Box<[u32; huffmanNumChunks]>, int)>> = SpinLock::new(None);
@@ -259,6 +275,17 @@ fn fixedHuffmanDecoder() -> huffmanDecoder {
         links: Vec::new(),
         linkMask: 0,
     }
+}
+
+// go: none — goish idiom: Go's `huffSym` takes the decoder as a
+//     `*huffmanDecoder` argument; goish names it, because a `&mut self`
+//     and a `&self.h1` cannot both be live. The three variants are
+//     exactly Go's three call sites.
+#[derive(Clone, Copy)]
+enum whichHuff {
+    H1,
+    HL,
+    HD,
 }
 
 // RFC 1951 section 3.2.7 — code-length code order.
@@ -497,7 +524,7 @@ impl<R: io::Reader + io::ByteReader> Decompressor<R> {
             let n: int = nlit + ndist;
             let mut i: int = 0;
             while i < n {
-                let (x, err) = self.huffSym_h1();
+                let (x, err) = self.huffSym(whichHuff::H1);
                 if !err.IsNil() {
                     return err;
                 }
@@ -589,7 +616,7 @@ impl<R: io::Reader + io::ByteReader> Decompressor<R> {
         loop {
             if !copying {
                 // ── readLiteral ──────────────────────────────────────
-                let (v, err) = self.huffSym_hl();
+                let (v, err) = self.huffSym(whichHuff::HL);
                 if !err.IsNil() {
                     self.err = err;
                     return;
@@ -660,7 +687,7 @@ impl<R: io::Reader + io::ByteReader> Decompressor<R> {
                     self.b >>= 5;
                     self.nb -= 5;
                 } else {
-                    let (d, e) = self.huffSym_hd();
+                    let (d, e) = self.huffSym(whichHuff::HD);
                     if !e.IsNil() {
                         self.err = e;
                         return;
@@ -826,11 +853,26 @@ impl<R: io::Reader + io::ByteReader> Decompressor<R> {
         nil
     }
 
-    // Go: func (f *decompressor) huffSym(h *huffmanDecoder) (int, error)
-    // (inflate.go:708). The borrow checker forbids `&mut self` + `&h`
-    // aliasing, so the table lookup is hoisted into a free function and
-    // three thin wrappers select the decoder.
+    // go: sdk 1.25.5 compress/flate/inflate.go:708-747 decompressor.huffSym
+    /// `(f *decompressor).huffSym(h)` — read the next Huffman-encoded
+    /// symbol from `f` according to `h`.
+    ///
+    /// Go passes the decoder by pointer: `f.huffSym(&f.h1)`. That is a
+    /// `&mut self` and a `&self.h1` alive at once, which the borrow
+    /// checker refuses, so goish names the decoder instead of passing
+    /// it — same arity, and the three call sites read the same way.
+    /// The bit-reading loop itself is hoisted into `huff_sym_step`,
+    /// which borrows only the fields it needs.
+    fn huffSym(&mut self, h: whichHuff) -> (int, error) {
+        match h {
+            whichHuff::H1 => return self.huffSym_h1(),
+            whichHuff::HL => return self.huffSym_hl(),
+            whichHuff::HD => return self.huffSym_hd(),
+        }
+    }
 
+    // go: none — goish idiom: the `h1` arm of `huffSym`, split out so
+    //     each borrows exactly one decoder's fields.
     fn huffSym_h1(&mut self) -> (int, error) {
         huff_sym_step(
             &mut self.r,
@@ -847,6 +889,8 @@ impl<R: io::Reader + io::ByteReader> Decompressor<R> {
         )
     }
 
+    // go: none — goish idiom: the `hl` arm of `huffSym`; see `huffSym_h1`.
+    //     Go reaches the fixed table through the same pointer parameter.
     fn huffSym_hl(&mut self) -> (int, error) {
         if self.hlFixed {
             let tables = HuffTables {
@@ -868,6 +912,7 @@ impl<R: io::Reader + io::ByteReader> Decompressor<R> {
         }
     }
 
+    // go: none — goish idiom: the `hd` arm of `huffSym`; see `huffSym_h1`.
     fn huffSym_hd(&mut self) -> (int, error) {
         huff_sym_step(
             &mut self.r,
@@ -1015,7 +1060,22 @@ fn slice_bytes(s: &slice<byte>) -> Vec<byte> {
 
 // ─── constructors (inflate.go:807) ─────────────────────────────────────
 
+// go: waived makeReader — Go's decides at *run time* whether the source
+//     already satisfies `flate.Reader` (io.Reader + io.ByteReader) and
+//     wraps it in a `bufio.Reader` only when it does not. goish's
+//     `Decompressor<R>` is generic over that bound, so the decision is
+//     made at compile time by which constructor is called: `NewReader`
+//     wraps a plain `io::Reader` in `bufio::Reader` — Go's else branch
+//     — and `NewReaderByte` takes a source that already implements
+//     `io::ByteReader` — Go's `r.(Reader)` branch. There is no run-time
+//     assertion left to port, and no place to put one.
+//
+// go: none — goish idiom: the shared body of `NewReader`/`NewReaderDict`.
 fn new_decompressor<R: io::Reader + io::ByteReader>(r: R, dict: &[byte]) -> Decompressor<R> {
+    // Go: fixedHuffmanDecoderInit() runs inside huffmanBlock's first
+    // fixed-Huffman block; goish forces it here, since the decoder is
+    // a field rather than a package var.
+    fixedHuffmanDecoderInit();
     let mut f = Decompressor {
         r,
         roffset: 0,

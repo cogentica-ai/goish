@@ -25,7 +25,7 @@ goishlint diff the port against the Go file it came from.
 | `math` | 307/661 | 46.4% | 5 |
 | `testing` | 217/247 | 87.9% | 402 |
 | `encoding` | 215/1018 | 21.1% | 156 |
-| `compress` | 148/151 | 98.0% | 83 |
+| `compress` | 150/150 | 100.0% | 92 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
 | `strings` | 76/101 | 75.2% | 1 |
@@ -61,10 +61,13 @@ anchored files**, 10/10 and 18/18, with 41 anchors between them. The
 recovered declarations are the ones that had been inlined or replaced
 by a Rust idiom — `writeSlice`/`writeMark` at the decompressor's call
 site, and `byLiteral`/`byFreq`'s `sort`/`Len`/`Less`/`Swap`, which had
-been two `sort_by` closures. `flate` is 89/92 now, with only
-inflate.go's three left. The other five Go files are still in `mod.rs`
-and still unanchored: 66 of the 89 counted names have nothing behind
-them.
+been two `sort_by` closures. `flate` is 91/91 now — complete, with
+`makeReader` waived: Go decides at run time whether its source already
+satisfies `flate.Reader` and wraps it in a `bufio.Reader` if not, while
+goish's `Decompressor<R>` is generic over that bound, so the choice is
+made at compile time by which constructor is called. The other five Go
+files are still in `mod.rs` and still unanchored: 64 of the 91 counted
+names have nothing behind them.
 
 Both halves are checked against a running Go rather than against
 themselves. Six DEFLATE streams from Go's own compressor — chosen to
