@@ -27,7 +27,7 @@ goishlint diff the port against the Go file it came from.
 | `encoding` | 230/1018 | 22.6% | 301 |
 | `compress` | 150/150 | 100.0% | 303 |
 | `os` | 112/366 | 30.6% | 3 |
-| `bytes` | 104/107 | 97.2% | 73 |
+| `bytes` | 107/107 | 100.0% | 91 |
 | `strings` | 98/98 | 100.0% | 153 |
 | `archive` | 71/182 | 39.0% | 0 |
 | `time` | 71/184 | 38.6% | 4 |
@@ -712,6 +712,22 @@ a port reading the wrong index: it counts from the start of the
 
 `bytes_buffer_io_smoke` turned out never to have been declared in
 Cargo.toml, so e2e had never run it. It is now.
+
+**`bytes` is 107/107 with 91 anchors** — the seventh package finished
+this cycle. `reader.go` came out of the module root, and the last three
+declarations were renames of functions that had been there all along
+under invented names: `genSplit`, `isSeparator` and `indexBytePortable`,
+the last being Go's own portable `IndexByte` and exactly what goish had
+written as `index_byte`.
+
+`bytes.Reader` needed no change, and proving that was the point — the
+rest of the tree only ever reads one to exhaustion. Its edges now match
+a running Go: `UnreadByte`/`UnreadRune` refusing unless they directly
+follow the matching read, `prevRune` invalidated by every other
+operation, `Seek` taking a position past the end but not a negative one,
+`ReadAt` never moving the cursor, and all six exact refusal messages —
+which say "at beginning of slice" where the `strings` version says
+"string".
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the

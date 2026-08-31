@@ -41,15 +41,13 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::errors::{error, nil};
 use crate::goslice::slice;
-use crate::io;
 use crate::types::{byte, int, rune};
 use crate::unicode::utf8;
 
 // ─── Private byte helpers (no allocation) ─────────────────────────────
 
-pub(super) fn index_byte(s: &[u8], c: byte) -> int {
+pub(super) fn indexBytePortable(s: &[u8], c: byte) -> int {
     let mut i = 0usize;
     while i < s.len() {
         if s[i] == c {
@@ -66,7 +64,7 @@ pub(super) fn index_bytes(s: &[u8], substr: &[u8]) -> int {
         return 0;
     }
     if n == 1 {
-        return index_byte(s, substr[0]);
+        return indexBytePortable(s, substr[0]);
     }
     if n > s.len() {
         return -1;
@@ -143,6 +141,10 @@ pub(super) fn is_ascii_space(c: byte) -> bool {
     matches!(c, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
 }
 
+#[path = "reader.rs"]
+mod reader;
+pub use reader::{NewReader, Reader};
+
 #[path = "buffer.rs"]
 mod buffer;
 pub use buffer::{Buffer, MinRead, NewBuffer, NewBufferString};
@@ -209,13 +211,13 @@ pub fn Index<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(s: S1, sub: S2) -> in
 
 pub fn IndexByte<S: Into<slice<byte>>>(s: S, c: byte) -> int {
     let s = s.into();
-    index_byte(&s, c)
+    indexBytePortable(&s, c)
 }
 
 pub fn IndexRune<S: Into<slice<byte>>>(s: S, r: rune) -> int {
     let s = s.into();
     if r >= 0 && (r as u32) < utf8::RuneSelf as u32 {
-        return index_byte(&s, r as byte);
+        return indexBytePortable(&s, r as byte);
     }
     if !utf8::ValidRune(r) {
         return -1;
@@ -369,7 +371,7 @@ pub fn Repeat<S: Into<slice<byte>>>(b: S, count: int) -> slice<byte> {
 // ─── Split / Join ─────────────────────────────────────────────────────
 
 pub fn Split<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(s: S1, sep: S2) -> slice<slice<byte>> {
-    gen_split(s.into(), sep.into(), 0, -1)
+    genSplit(s.into(), sep.into(), 0, -1)
 }
 
 pub fn SplitN<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(
@@ -377,10 +379,10 @@ pub fn SplitN<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(
     sep: S2,
     n: int,
 ) -> slice<slice<byte>> {
-    gen_split(s.into(), sep.into(), 0, n)
+    genSplit(s.into(), sep.into(), 0, n)
 }
 
-fn gen_split(s: slice<byte>, sep: slice<byte>, sep_save: int, mut n: int) -> slice<slice<byte>> {
+fn genSplit(s: slice<byte>, sep: slice<byte>, sep_save: int, mut n: int) -> slice<slice<byte>> {
     if n == 0 {
         return slice::new();
     }
@@ -473,237 +475,6 @@ pub fn Clone<S: Into<slice<byte>>>(b: S) -> slice<byte> {
     // fresh copy from a literal). Either way, .clone() of a slice<byte>
     // is independent storage.
     b.into().clone()
-}
-
-// ─── Reader (in-memory io::Reader) ────────────────────────────────────
-
-/// `bytes.Reader` — read-only `io.Reader` over a byte slice.
-pub struct Reader {
-    s: Vec<byte>,
-    i: usize,
-    /// Mirrors Go's `prevRune`: index of previous rune, or `-1` if
-    /// the most recent op was not a successful ReadRune. Used only
-    /// by UnreadRune.
-    prev_rune: i64,
-}
-
-impl Reader {
-    pub fn Len(&self) -> int {
-        if self.i >= self.s.len() {
-            return 0;
-        }
-        (self.s.len() - self.i) as int
-    }
-
-    pub fn Size(&self) -> int {
-        self.s.len() as int
-    }
-
-    pub fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
-        self.prev_rune = -1;
-        if self.i >= self.s.len() {
-            return (0, io::EOF.into());
-        }
-        let want = (p.Len() as usize).min(self.s.len() - self.i);
-        for k in 0..want {
-            p[k as int] = self.s[self.i + k];
-        }
-        self.i += want;
-        (want as int, nil)
-    }
-
-    pub fn Reset(&mut self, b: slice<byte>) {
-        self.s = b.__into_vec();
-        self.i = 0;
-        self.prev_rune = -1;
-    }
-
-    /// `(r *Reader).ReadByte()` (bytes/reader.go:66) — implements
-    /// io.ByteReader. Invalidates prevRune.
-    pub fn ReadByte(&mut self) -> (byte, error) {
-        // Go: r.prevRune = -1
-        self.prev_rune = -1;
-        // Go: if r.i >= int64(len(r.s)) { return 0, io.EOF }
-        if self.i >= self.s.len() {
-            return (0, io::EOF.into());
-        }
-        // Go: b := r.s[r.i]; r.i++; return b, nil
-        let b = self.s[self.i];
-        self.i += 1;
-        (b, nil)
-    }
-
-    /// `(r *Reader).UnreadByte()` (bytes/reader.go:77) — implements
-    /// io.ByteScanner. Returns error if at the start.
-    pub fn UnreadByte(&mut self) -> error {
-        // Go: if r.i <= 0 { return errors.New("...: at beginning of slice") }
-        if self.i == 0 {
-            return crate::errors::New("bytes.Reader.UnreadByte: at beginning of slice");
-        }
-        // Go: r.prevRune = -1; r.i--; return nil
-        self.prev_rune = -1;
-        self.i -= 1;
-        nil
-    }
-
-    /// `(r *Reader).ReadRune()` (bytes/reader.go:87) — implements
-    /// io.RuneReader. ASCII fast-path; non-ASCII via DecodeRune.
-    pub fn ReadRune(&mut self) -> (rune, int, error) {
-        // Go: if r.i >= int64(len(r.s)) { r.prevRune = -1; return 0, 0, io.EOF }
-        if self.i >= self.s.len() {
-            self.prev_rune = -1;
-            return (0, 0, io::EOF.into());
-        }
-        // Go: r.prevRune = int(r.i)
-        self.prev_rune = self.i as i64;
-        // Go: if c := r.s[r.i]; c < utf8.RuneSelf { r.i++; return rune(c), 1, nil }
-        let c = self.s[self.i];
-        if c < utf8::RuneSelf {
-            self.i += 1;
-            return (c as rune, 1, nil);
-        }
-        // Go: ch, size = utf8.DecodeRune(r.s[r.i:])
-        let (ch, size) = utf8::DecodeRune(&self.s[self.i..]);
-        // Go: r.i += int64(size)
-        self.i += size as usize;
-        (ch, size, nil)
-    }
-
-    /// `(r *Reader).UnreadRune()` (bytes/reader.go:103) — implements
-    /// io.RuneScanner. Restores cursor to the start of the most-recent
-    /// ReadRune.
-    pub fn UnreadRune(&mut self) -> error {
-        // Go: if r.i <= 0 { return errors.New("...: at beginning of slice") }
-        if self.i == 0 {
-            return crate::errors::New("bytes.Reader.UnreadRune: at beginning of slice");
-        }
-        // Go: if r.prevRune < 0 { return errors.New("...: previous operation was not ReadRune") }
-        if self.prev_rune < 0 {
-            return crate::errors::New(
-                "bytes.Reader.UnreadRune: previous operation was not ReadRune",
-            );
-        }
-        // Go: r.i = int64(r.prevRune); r.prevRune = -1; return nil
-        self.i = self.prev_rune as usize;
-        self.prev_rune = -1;
-        nil
-    }
-
-    /// `(r *Reader).Seek(offset, whence)` (bytes/reader.go:127) — slim port.
-    pub fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
-        // Go: r.prevRune = -1
-        self.prev_rune = -1;
-        // Go: switch whence { case SeekStart: ... }
-        let abs: i64 = match whence {
-            x if x == io::SeekStart => offset,
-            x if x == io::SeekCurrent => (self.i as i64).wrapping_add(offset),
-            x if x == io::SeekEnd => (self.s.len() as i64).wrapping_add(offset),
-            _ => {
-                return (0, crate::errors::New("bytes.Reader.Seek: invalid whence"));
-            }
-        };
-        // Go: if abs < 0 { return 0, error }
-        if abs < 0 {
-            return (
-                0,
-                crate::errors::New("bytes.Reader.Seek: negative position"),
-            );
-        }
-        self.i = abs as usize;
-        (abs, nil)
-    }
-
-    /// `(r *Reader).WriteTo(w)` (bytes/reader.go:137) — drain unread
-    /// tail to `w` via Write. Returns bytes written.
-    pub fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
-        // Go: r.prevRune = -1
-        self.prev_rune = -1;
-        // Go: if r.i >= int64(len(r.s)) { return 0, nil }
-        if self.i >= self.s.len() {
-            return (0, nil);
-        }
-        // b := r.s[r.i:]
-        let b = slice::__from_vec(self.s[self.i..].to_vec());
-        let blen = b.Len();
-        // m, err := w.Write(b)
-        let (m, err) = w.Write(b);
-        if m > blen {
-            panic!("bytes.Reader.WriteTo: invalid Write count");
-        }
-        // r.i += int64(m); n = int64(m)
-        self.i += m as usize;
-        let n = m as i64;
-        // if m != len(b) && err == nil { err = io.ErrShortWrite }
-        if m != blen && err.IsNil() {
-            return (n, io::ErrShortWrite.into());
-        }
-        (n, err)
-    }
-
-    /// `(r *Reader).ReadAt(p, off)` (bytes/reader.go:88) — slim port.
-    pub fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
-        // Go: if off < 0 { return 0, errors.New("bytes.Reader.ReadAt: negative offset") }
-        if off < 0 {
-            return (
-                0,
-                crate::errors::New("bytes.Reader.ReadAt: negative offset"),
-            );
-        }
-        if off >= self.s.len() as i64 {
-            return (0, io::EOF.into());
-        }
-        let start = off as usize;
-        let want = (p.Len() as usize).min(self.s.len() - start);
-        for k in 0..want {
-            p[k as int] = self.s[start + k];
-        }
-        // Go: if n < len(p) { err = io.EOF }
-        if want < p.Len() as usize {
-            return (want as int, io::EOF.into());
-        }
-        (want as int, nil)
-    }
-}
-
-impl io::Seeker for Reader {
-    fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
-        Reader::Seek(self, offset, whence)
-    }
-}
-
-impl io::ReaderAt for Reader {
-    fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
-        Reader::ReadAt(self, p, off)
-    }
-}
-
-impl io::Reader for Reader {
-    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
-        Reader::Read(self, p)
-    }
-}
-
-impl io::ByteReader for Reader {
-    fn ReadByte(&mut self) -> (byte, error) {
-        Reader::ReadByte(self)
-    }
-}
-
-impl io::WriterTo for Reader {
-    fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
-        Reader::WriteTo(self, w)
-    }
-}
-
-/// `NewReader(b)` — `Reader` over `b`. Go: `*Reader`; Goish runtime
-/// returns owned `Reader` (see `NewBuffer` for the rationale).
-pub fn NewReader<B: Into<slice<byte>>>(b: B) -> Reader {
-    let b = b.into();
-    Reader {
-        s: b.__into_vec(),
-        i: 0,
-        prev_rune: -1,
-    }
 }
 
 // ─── M15: completeness pass ───────────────────────────────────────────
@@ -1009,7 +780,7 @@ pub fn Runes<S: Into<slice<byte>>>(s: S) -> slice<rune> {
 
 /// Line-by-line port of `bytes.isSeparator` (bytes/bytes.go:808) — used
 /// by `Title` to detect word boundaries.
-fn is_separator(r: rune) -> bool {
+fn isSeparator(r: rune) -> bool {
     // Go: if r <= 0x7F { ... }
     if r <= 0x7F {
         // Go: 0..9 / a..z / A..Z / '_' are not separators.
@@ -1052,7 +823,7 @@ pub fn Title<S: Into<slice<byte>>>(s: S) -> slice<byte> {
     while i < bytes.len() {
         let (r, w) = utf8::DecodeRune(&bytes[i..]);
         // Go: if isSeparator(prev) { return unicode.ToTitle(r) }
-        let nr = if is_separator(prev) {
+        let nr = if isSeparator(prev) {
             // Slim ToTitle: ASCII a..z → A..Z; everything else unchanged.
             if r >= b'a' as rune && r <= b'z' as rune {
                 r - 32

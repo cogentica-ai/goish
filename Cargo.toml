@@ -1248,6 +1248,10 @@ name = "hex_stream_smoke"
 path = "examples/hex_stream_smoke.rs"
 
 [[example]]
+name = "bytes_reader_smoke"
+path = "examples/bytes_reader_smoke.rs"
+
+[[example]]
 name = "bytes_buffer_io_smoke"
 path = "examples/bytes_buffer_io_smoke.rs"
 

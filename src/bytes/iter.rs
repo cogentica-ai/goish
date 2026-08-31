@@ -31,7 +31,7 @@ pub fn Lines<S: Into<slice<byte>>>(s: S) -> impl crate::iter::Seq<slice<byte>> {
         let b: &[byte] = &s;
         let mut pos = 0usize;
         while pos < b.len() {
-            let i = super::index_byte(&b[pos..], b'\n');
+            let i = super::indexBytePortable(&b[pos..], b'\n');
             let end = if i >= 0 {
                 pos + (i as usize) + 1
             } else {
