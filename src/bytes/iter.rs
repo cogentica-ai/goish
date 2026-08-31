@@ -31,7 +31,7 @@ pub fn Lines<S: Into<slice<byte>>>(s: S) -> impl crate::iter::Seq<slice<byte>> {
         let b: &[byte] = &s;
         let mut pos = 0usize;
         while pos < b.len() {
-            let i = super::indexBytePortable(&b[pos..], b'\n');
+            let i = super::bytes_go::indexBytePortable(&b[pos..], b'\n');
             let end = if i >= 0 {
                 pos + (i as usize) + 1
             } else {
@@ -75,7 +75,7 @@ fn split_seq(
         }
         let mut pos = 0usize;
         loop {
-            let i = super::index_bytes(&b[pos..], sepb);
+            let i = super::bytes_go::index_bytes(&b[pos..], sepb);
             if i < 0 {
                 break;
             }
@@ -127,7 +127,7 @@ pub fn FieldsSeq<S: Into<slice<byte>>>(s: S) -> impl crate::iter::Seq<slice<byte
         while i < b.len() {
             let mut size = 1usize;
             let mut r = crate::convert::rune(b[i]);
-            let mut isSpace = super::is_ascii_space(b[i]);
+            let mut isSpace = super::bytes_go::is_ascii_space(b[i]);
             if r >= crate::convert::rune(utf8::RuneSelf) {
                 let (r2, s2) = utf8::DecodeRune(&b[i..]);
                 r = r2;
