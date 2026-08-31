@@ -586,32 +586,29 @@ impl Format for error {
 
 fn write_string_with_verb(bytes: &[byte], verb: byte, f: &mut FmtBuf) {
     match verb {
-        b'q' => write_quoted(bytes, f),
+        b'q' => write_quoted(bytes, false, f),
+        // `%+q` arrives as the synthetic verb 'Q'; see the scanner.
+        b'Q' => write_quoted(bytes, true, f),
         b'x' => write_hex(bytes, false, f),
         b'X' => write_hex(bytes, true, f),
         _ => f.extend(bytes), // %s, %v, default
     }
 }
 
-fn write_quoted(bytes: &[byte], f: &mut FmtBuf) {
-    f.push(b'"');
-    for &b in bytes {
-        match b {
-            b'"' => f.extend(b"\\\""),
-            b'\\' => f.extend(b"\\\\"),
-            b'\n' => f.extend(b"\\n"),
-            b'\r' => f.extend(b"\\r"),
-            b'\t' => f.extend(b"\\t"),
-            b' '..=b'~' => f.push(b),
-            _ => {
-                // Escape as \xHH for non-printable bytes.
-                f.extend(b"\\x");
-                f.push(hex_digit(b >> 4, false));
-                f.push(hex_digit(b & 0xF, false));
-            }
-        }
-    }
-    f.push(b'"');
+// Go's fmt does not quote for itself: format.go's `fmtQ` hands the
+// value to `strconv.AppendQuote`, and `%+q` to
+// `strconv.AppendQuoteToASCII`. Doing it here instead meant a second
+// quoter with its own idea of what is printable — one that escaped
+// every byte >= 0x80 as `\xHH`, so `%q` of any non-ASCII string came
+// out as hex.
+fn write_quoted(bytes: &[byte], ascii_only: bool, f: &mut FmtBuf) {
+    let s = string::from_bytes(bytes);
+    let q = if ascii_only {
+        crate::strconv::QuoteToASCII(s)
+    } else {
+        crate::strconv::Quote(s)
+    };
+    f.extend(q.as_bytes());
 }
 
 fn write_hex(bytes: &[byte], upper: bool, f: &mut FmtBuf) {
@@ -638,8 +635,7 @@ fn format_signed(n: i64, verb: byte, f: &mut FmtBuf) {
         b'X' => format_uint(n as u64, 16, true, f),
         b'b' => format_uint(n as u64, 2, false, f),
         b'o' => format_uint(n as u64, 8, false, f),
-        b'c' => format_rune_or_int(n as rune, b'c', f),
-        b'q' => format_rune_or_int(n as rune, b'q', f),
+        b'c' | b'q' | b'Q' => format_rune_or_int(n as rune, verb, f),
         _ => format_decimal_signed(n, f),
     }
 }
@@ -651,7 +647,7 @@ fn format_unsigned(n: u64, verb: byte, f: &mut FmtBuf) {
         b'X' => format_uint(n, 16, true, f),
         b'b' => format_uint(n, 2, false, f),
         b'o' => format_uint(n, 8, false, f),
-        b'c' => format_rune_or_int(n as rune, b'c', f),
+        b'c' | b'q' | b'Q' => format_rune_or_int(n as rune, verb, f),
         _ => format_uint(n, 10, false, f),
     }
 }
@@ -694,12 +690,17 @@ fn format_rune_or_int(r: rune, verb: byte, f: &mut FmtBuf) {
             let n = utf8::EncodeRune(&mut buf, r);
             f.extend(&buf[..n as usize]);
         }
+        // Go's `fmtQc` hands the rune to `strconv.AppendQuoteRune`,
+        // which escapes it. goish emitted the raw rune between two
+        // quotes instead, so `%q` of '\n' was a literal newline inside
+        // single quotes and every control character printed itself.
         b'q' => {
-            f.push(b'\'');
-            let mut buf = [0u8; 4];
-            let n = utf8::EncodeRune(&mut buf, r);
-            f.extend(&buf[..n as usize]);
-            f.push(b'\'');
+            let q = crate::strconv::QuoteRune(r);
+            f.extend(q.as_bytes());
+        }
+        b'Q' => {
+            let q = crate::strconv::QuoteRuneToASCII(r);
+            f.extend(q.as_bytes());
         }
         _ => format_decimal_signed(r as i64, f),
     }
@@ -797,6 +798,10 @@ fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Option<error> 
         // dispatches on 'v' vs 'V'.
         if plus_flag && verb == b'v' {
             verb = b'V';
+        }
+        // ...and `%+q` as 'Q', which is Go's ASCIIonly quoting.
+        if plus_flag && verb == b'q' {
+            verb = b'Q';
         }
         // %w handling — substitute the wrapped error's text and capture
         // the first %w as the wrap target (Go's fmt.Errorf semantics).
