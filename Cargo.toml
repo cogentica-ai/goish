@@ -171,6 +171,10 @@ name = "stopwatch"
 path = "examples/stopwatch.rs"
 
 [[example]]
+name = "time_string_ref_smoke"
+path = "examples/time_string_ref_smoke.rs"
+
+[[example]]
 name = "time_smoke"
 path = "examples/time_smoke.rs"
 
