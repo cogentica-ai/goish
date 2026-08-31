@@ -1950,3 +1950,7 @@ path = "examples/bytes_core_smoke.rs"
 [[example]]
 name = "io_core_smoke"
 path = "examples/io_core_smoke.rs"
+
+[[example]]
+name = "io_fs_sub_smoke"
+path = "examples/io_fs_sub_smoke.rs"
