@@ -1946,3 +1946,7 @@ path = "examples/hello_query.rs"
 [[example]]
 name = "bytes_core_smoke"
 path = "examples/bytes_core_smoke.rs"
+
+[[example]]
+name = "io_core_smoke"
+path = "examples/io_core_smoke.rs"
