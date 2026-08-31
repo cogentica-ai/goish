@@ -28,7 +28,7 @@ goishlint diff the port against the Go file it came from.
 | `compress` | 150/150 | 100.0% | 303 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
-| `strings` | 83/101 | 82.2% | 36 |
+| `strings` | 96/98 | 98.0% | 59 |
 | `archive` | 71/182 | 39.0% | 0 |
 | `time` | 71/184 | 38.6% | 4 |
 | `sync` | 66/126 | 52.4% | 3 |
@@ -523,6 +523,43 @@ the connection end.
 `http_closenotify_smoke` is the eighth and is a different defect —
 CloseNotify does not fire when the client goes away mid-handler, and
 the request context is not cancelled by that event either.
+
+`strings/strings.go`'s cutset trim family followed, taking `strings`
+from 83/101 to **96/98 with 59 anchors** — 98%, with three declarations
+waived out of the denominator. `strings.rs` is the first slice of
+strings.go to move out of the module root.
+
+`Trim`, `TrimLeft` and `TrimRight` had been a single rune-decoding
+scan. Go dispatches three ways on the shape of the cutset, and the
+dispatch is the point: a one-byte ASCII cutset is a byte comparison, an
+all-ASCII cutset becomes a 128-bit bitmap (`asciiSet`) tested with a
+shift and an and, and only a cutset holding a non-ASCII rune pays for
+decoding. All six helpers — `trimLeftByte`/`ASCII`/`Unicode` and their
+right-hand twins — plus `makeASCIISet` and `asciiSet.contains` are
+ported, and the three paths are checked to agree on 168 vectors: twelve
+cutsets crossed with fourteen inputs, including a cutset byte that is
+also a UTF-8 continuation byte, a multi-byte cutset rune, an input that
+is entirely cutset, and invalid UTF-8.
+
+`ToUpperSpecial`, `ToLowerSpecial` and `ToTitleSpecial` are new, and
+were unportable until `unicode::SpecialCase` landed an hour earlier.
+They are checked against Go on the runes Turkish moves: `'i'`
+upper-cases to the dotted U+0130 and `'I'` lower-cases to the dotless
+U+0131, while the plain mappings do neither.
+
+Two stale section headers went with them. `ToUpper`/`ToLower` were
+labelled "ASCII-only for v1" and `EqualFold` the same; both had in fact
+routed through `unicode` for some time, and both are now *correct* as
+well as routed, since `unicode` reached 52/52. `ToTitle`'s doc claimed
+non-ASCII runes "pass through unchanged until the SpecialCasing tables
+ship" — they have, so U+01C4 maps to U+01C5. The smoke pins all of it,
+including `EqualFold` walking the fold orbit so `'K'` equals U+212A
+KELVIN SIGN and the two sigmas equal each other.
+
+Waived, with reasons: `copyCheck` (Go's `Builder` holds an `addr
+*Builder` self pointer and panics when it finds itself copied; a goish
+`Builder` owns its `Vec` and a copy is a deep copy, so there is no
+aliasing to detect), `buildOnce` and `getStringWriter`.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the

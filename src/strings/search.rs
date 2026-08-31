@@ -90,7 +90,7 @@ pub(crate) fn makeStringFinder<S: Into<string>>(pattern: S) -> stringFinder {
     // the front.
     let mut i: int = 0;
     while i < last {
-        let lenSuffix = longestCommonSuffixBytes(&pat, &pat[1..(i + 1) as usize]);
+        let lenSuffix = longestCommonSuffix(&pat, &pat[1..(i + 1) as usize]);
         if pat[(i - lenSuffix) as usize] != pat[(last - lenSuffix) as usize] {
             // (last-i) is the shift, and lenSuffix is len(suffix).
             f.goodSuffixSkip[(last - lenSuffix) as usize] = lenSuffix + last - i;
@@ -114,7 +114,7 @@ fn hasPrefixBytes(s: &[u8], prefix: &[u8]) -> bool {
 //     `longestCommonSuffix`; the Rust fn takes byte slices, because
 //     both of its callers pass subslices of one pattern. The loop is
 //     Go's, byte for byte.
-fn longestCommonSuffixBytes(a: &[u8], b: &[u8]) -> int {
+fn longestCommonSuffix(a: &[u8], b: &[u8]) -> int {
     let mut i: usize = 0;
     while i < a.len() && i < b.len() {
         if a[a.len() - 1 - i] != b[b.len() - 1 - i] {

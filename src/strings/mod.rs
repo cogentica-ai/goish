@@ -47,6 +47,13 @@ extern crate alloc;
 #[path = "search.rs"]
 mod search;
 
+#[path = "strings.rs"]
+mod strings;
+pub use strings::{
+    ToLowerSpecial, ToTitleSpecial, ToUpperSpecial, Trim, TrimLeft, TrimPrefix, TrimRight,
+    TrimSpace, TrimSuffix,
+};
+
 #[path = "replace.rs"]
 mod replace;
 pub use replace::{NewReplacer, Replacer};
@@ -133,16 +140,16 @@ fn count_bytes(s: &[u8], substr: &[u8]) -> int {
     n
 }
 
-fn has_prefix_bytes(s: &[u8], prefix: &[u8]) -> bool {
+pub(super) fn has_prefix_bytes(s: &[u8], prefix: &[u8]) -> bool {
     s.len() >= prefix.len() && &s[..prefix.len()] == prefix
 }
 
-fn has_suffix_bytes(s: &[u8], suffix: &[u8]) -> bool {
+pub(super) fn has_suffix_bytes(s: &[u8], suffix: &[u8]) -> bool {
     s.len() >= suffix.len() && &s[s.len() - suffix.len()..] == suffix
 }
 
 #[inline]
-fn is_ascii_space(c: byte) -> bool {
+pub(super) fn is_ascii_space(c: byte) -> bool {
     matches!(c, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
 }
 
@@ -152,7 +159,7 @@ fn is_ascii_space(c: byte) -> bool {
 ///
 /// If sep is empty, splits after each UTF-8 sequence (Go-faithful).
 pub fn Split<S1: Into<string>, S2: Into<string>>(s: S1, sep: S2) -> slice<string> {
-    gen_split(s.into(), sep.into(), 0, -1)
+    genSplit(s.into(), sep.into(), 0, -1)
 }
 
 /// `strings.SplitN(s, sep, n)` — at most n substrings.
@@ -161,10 +168,10 @@ pub fn Split<S1: Into<string>, S2: Into<string>>(s: S1, sep: S2) -> slice<string
 ///   n == 0 → empty result.
 ///   n < 0  → no limit (same as Split).
 pub fn SplitN<S1: Into<string>, S2: Into<string>>(s: S1, sep: S2, n: int) -> slice<string> {
-    gen_split(s.into(), sep.into(), 0, n)
+    genSplit(s.into(), sep.into(), 0, n)
 }
 
-fn gen_split(s: string, sep: string, sep_save: int, mut n: int) -> slice<string> {
+fn genSplit(s: string, sep: string, sep_save: int, mut n: int) -> slice<string> {
     if n == 0 {
         return slice::new();
     }
@@ -308,106 +315,7 @@ pub fn Count<S1: Into<string>, S2: Into<string>>(s: S1, substr: S2) -> int {
     count_bytes(s.as_bytes(), substr.as_bytes())
 }
 
-// ─── Trim family ──────────────────────────────────────────────────────
-
-pub fn TrimSpace<S: Into<string>>(s: S) -> string {
-    let s = s.into();
-    let bytes = s.as_bytes();
-    let mut start = 0usize;
-    while start < bytes.len() && bytes[start] < utf8::RuneSelf && is_ascii_space(bytes[start]) {
-        start += 1;
-    }
-    let mut stop = bytes.len();
-    while stop > start && bytes[stop - 1] < utf8::RuneSelf && is_ascii_space(bytes[stop - 1]) {
-        stop -= 1;
-    }
-    if start == 0 && stop == bytes.len() {
-        return s;
-    }
-    string::from_bytes(&bytes[start..stop])
-}
-
-pub fn Trim<S1: Into<string>, S2: Into<string>>(s: S1, cutset: S2) -> string {
-    let s = s.into();
-    let cutset = cutset.into();
-    let bytes = s.as_bytes();
-    let cs = cutset.as_bytes();
-    if bytes.is_empty() || cs.is_empty() {
-        return s;
-    }
-    let mut start = 0usize;
-    while start < bytes.len() && cs.contains(&bytes[start]) {
-        start += 1;
-    }
-    let mut stop = bytes.len();
-    while stop > start && cs.contains(&bytes[stop - 1]) {
-        stop -= 1;
-    }
-    if start == 0 && stop == bytes.len() {
-        return s;
-    }
-    string::from_bytes(&bytes[start..stop])
-}
-
-pub fn TrimLeft<S1: Into<string>, S2: Into<string>>(s: S1, cutset: S2) -> string {
-    let s = s.into();
-    let cutset = cutset.into();
-    let bytes = s.as_bytes();
-    let cs = cutset.as_bytes();
-    if bytes.is_empty() || cs.is_empty() {
-        return s;
-    }
-    let mut start = 0usize;
-    while start < bytes.len() && cs.contains(&bytes[start]) {
-        start += 1;
-    }
-    if start == 0 {
-        return s;
-    }
-    string::from_bytes(&bytes[start..])
-}
-
-pub fn TrimRight<S1: Into<string>, S2: Into<string>>(s: S1, cutset: S2) -> string {
-    let s = s.into();
-    let cutset = cutset.into();
-    let bytes = s.as_bytes();
-    let cs = cutset.as_bytes();
-    if bytes.is_empty() || cs.is_empty() {
-        return s;
-    }
-    let mut stop = bytes.len();
-    while stop > 0 && cs.contains(&bytes[stop - 1]) {
-        stop -= 1;
-    }
-    if stop == bytes.len() {
-        return s;
-    }
-    string::from_bytes(&bytes[..stop])
-}
-
-pub fn TrimPrefix<S1: Into<string>, S2: Into<string>>(s: S1, prefix: S2) -> string {
-    let s = s.into();
-    let prefix = prefix.into();
-    let bytes = s.as_bytes();
-    let pb = prefix.as_bytes();
-    if has_prefix_bytes(bytes, pb) {
-        return string::from_bytes(&bytes[pb.len()..]);
-    }
-    s
-}
-
-pub fn TrimSuffix<S1: Into<string>, S2: Into<string>>(s: S1, suffix: S2) -> string {
-    let s = s.into();
-    let suffix = suffix.into();
-    let bytes = s.as_bytes();
-    let sb = suffix.as_bytes();
-    if has_suffix_bytes(bytes, sb) {
-        return string::from_bytes(&bytes[..bytes.len() - sb.len()]);
-    }
-    s
-}
-
-// ─── ToUpper / ToLower (ASCII-only for v1) ────────────────────────────
+// ─── ToUpper / ToLower / ToTitle ──────────────────────────────────────
 
 pub fn ToUpper<S: Into<string>>(s: S) -> string {
     let s = s.into();
@@ -483,13 +391,12 @@ pub fn ToLower<S: Into<string>>(s: S) -> string {
     map_runes(bytes, crate::unicode::ToLower)
 }
 
-/// `strings.ToTitle(s)` (strings.go:768) — title-case mapping over `s`.
-/// Go: `func ToTitle(s string) string { return Map(unicode.ToTitle, s) }`.
+/// `strings.ToTitle(s)` — every rune mapped to its Unicode title case.
 ///
-/// Slim: ASCII title-case is identical to upper-case (Go's
-/// `unicode.ToTitle` for ASCII delegates to ToUpper). For non-ASCII the
-/// slim path passes runes through unchanged — full Unicode title-case
-/// requires the SpecialCasing tables not yet shipped.
+/// The note that used to sit here said non-ASCII runes passed through
+/// unchanged "until the SpecialCasing tables ship". They have:
+/// `unicode::ToTitle` runs on Go's `CaseRanges` now, so U+01C4 maps to
+/// U+01C5 rather than to itself.
 pub fn ToTitle<S: Into<string>>(s: S) -> string {
     // Go: return Map(unicode.ToTitle, s)
     Map(crate::unicode::ToTitle, s)
@@ -589,7 +496,7 @@ pub fn Repeat<S: Into<string>>(s: S, count: int) -> string {
     string::__from_vec(v)
 }
 
-// ─── EqualFold (ASCII-only for v1) ────────────────────────────────────
+// ─── EqualFold ────────────────────────────────────────────────────────
 
 pub fn EqualFold<S1: Into<string>, S2: Into<string>>(s: S1, t: S2) -> bool {
     let s = s.into();
@@ -640,6 +547,12 @@ pub fn EqualFold<S1: Into<string>, S2: Into<string>>(s: S1, t: S2) -> bool {
     sb.is_empty() && tb.is_empty()
 }
 
+// go: waived copyCheck — Go's Builder holds a `addr *Builder` self
+//     pointer and copyCheck panics when it finds the Builder has been
+//     copied, using `noescape` to keep that pointer off the heap. A
+//     goish Builder owns its Vec and a copy is a deep copy, so there
+//     is no aliasing bug to detect and no self pointer to compare.
+//
 // ─── Builder ──────────────────────────────────────────────────────────
 //
 // Append-only buffer. Single-shot `String(self)` consumes the builder
@@ -986,7 +899,7 @@ pub fn Map<S: Into<string>, F: Fn(rune) -> rune>(mapping: F, s: S) -> string {
 }
 
 /// Line-by-line port of `strings.isSeparator` (strings/strings.go:840).
-fn is_separator(r: rune) -> bool {
+fn isSeparator(r: rune) -> bool {
     // Go: if r <= 0x7F { ... } else { …unicode.IsLetter / IsDigit / IsSpace }
     if r <= 0x7F {
         if r >= b'0' as rune && r <= b'9' as rune {
@@ -1023,7 +936,7 @@ pub fn Title<S: Into<string>>(s: S) -> string {
     let mut i: usize = 0;
     while i < bytes.len() {
         let (r, w) = utf8::DecodeRune(&bytes[i..]);
-        let nr = if is_separator(prev) {
+        let nr = if isSeparator(prev) {
             // Slim ToTitle: ASCII a..z → A..Z; everything else unchanged.
             if r >= b'a' as rune && r <= b'z' as rune {
                 r - 32

@@ -1,5 +1,15 @@
 // go: file strings/replace.go decls: NewReplacer, Replacer.build, trieNode.add, genericReplacer.lookup, makeGenericReplacer, genericReplacer.Replace, genericReplacer.WriteString, makeSingleStringReplacer, singleStringReplacer.Replace, singleStringReplacer.WriteString, byteReplacer.Replace, byteReplacer.WriteString, byteStringReplacer.Replace, byteStringReplacer.WriteString, Replacer.Replace, Replacer.WriteString
 //
+// go: waived buildOnce — Go defers the trie build to the first
+//     Replace behind a sync.Once so NewReplacer stays allocation-free.
+//     A goish `&self` method cannot lazily initialise without interior
+//     mutability, which would cost Replacer the Clone its callers use,
+//     so NewReplacer builds eagerly and `build` is a free function.
+// go: waived getStringWriter — exists only to reach io.StringWriter
+//     when the caller's io.Writer also implements it, saving one
+//     string->[]byte copy. goish's io::Writer already takes
+//     slice<byte> and there is no io::StringWriter to assert for.
+//
 // goishlint:ignore GOISH018 Replacer.buildOnce, appendSliceWriter.Write, appendSliceWriter.WriteString, stringWriter.WriteString, getStringWriter — two Go
 //     shapes with no goish counterpart. `buildOnce` exists so Go's
 //     `NewReplacer` can stay allocation-free and defer the trie build
