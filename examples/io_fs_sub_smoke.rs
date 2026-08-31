@@ -72,6 +72,25 @@ fn newfs() -> Arc<MapFS> {
     return Arc::new(MapFS(m));
 }
 
+// go: none — goish idiom: the Go reference's `plainFS` — a wrapper
+//     that hides MapFS's ReadLinkFS, GlobFS and the rest behind a bare
+//     `fs.FS`, so `ReadLink` and `Lstat` take their fallback arms. Go
+//     writes it as a struct embedding only `fs.FS`; the same statement
+//     here is a struct that implements only that one trait.
+struct PlainFS(Arc<MapFS>);
+
+impl fs::FS for PlainFS {
+    fn Open(&self, name: string) -> (Arc<dyn fs::File + Send + Sync>, error) {
+        return self.0.Open(name);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides. Deliberately
+    //     the only interface `PlainFS` answers to.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
 fn errText(e: &error) -> string {
     if e.IsNil() {
         return s("<nil>");
@@ -321,41 +340,95 @@ fn main() {
         report(&mut failed, ok, " 6", "nested Sub collapses");
     }
 
-    // 7. ReadLink and Lstat. A filesystem that does not implement
-    //    ReadLinkFS cannot answer ReadLink at all — that is an
-    //    ErrInvalid PathError — but Lstat falls back to Stat, because a
-    //    filesystem with no links has nothing to not-follow.
+    // 7. ReadLink and Lstat.
+    //
+    //    MapFS implements ReadLinkFS, so both reach it. A plain file is
+    //    not a symlink — that is ErrInvalid, not "not found" — and a
+    //    name that is not there is ErrNotExist under the op that asked.
     {
         let mut ok = true;
         let me: Arc<dyn fs::FS + Send + Sync> = m.clone();
-        let (target, err) = fs::ReadLink(&*me, s("a.txt"));
+        // (name, want_readlink_err, want_lstat_name_or_"", want_lstat_err)
+        let cases: [(&str, &str, &str, &str); 4] = [
+            (
+                "a.txt",
+                "readlink a.txt: invalid argument",
+                "a.txt",
+                "<nil>",
+            ),
+            ("sub", "readlink sub: invalid argument", "sub", "<nil>"),
+            (
+                "nope",
+                "readlink nope: file does not exist",
+                "",
+                "lstat nope: file does not exist",
+            ),
+            (
+                "other/f.txt",
+                "readlink other/f.txt: invalid argument",
+                "f.txt",
+                "<nil>",
+            ),
+        ];
+        let mut i = 0;
+        while i < cases.len() {
+            let (name, want_rl, want_name, want_ls) = cases[i];
+            let (target, err) = fs::ReadLink(&*me, s(name));
+            if target.Len() != 0 || errText(&err) != s(want_rl) {
+                ok = false;
+            }
+            let (info, err2) = fs::Lstat(&*me, s(name));
+            if errText(&err2) != s(want_ls) {
+                ok = false;
+            }
+            if err2.IsNil() && info.Name() != s(want_name) {
+                ok = false;
+            }
+            i += 1;
+        }
+        // ErrInvalid, not a fresh error — the whole point of a sentinel.
+        let (_, e) = fs::ReadLink(&*me, s("a.txt"));
+        if !errors::Is(e, fs::ErrInvalid) {
+            ok = false;
+        }
+        report(&mut failed, ok, " 7", "ReadLink/Lstat via ReadLinkFS");
+    }
+
+    // 8. A filesystem that does NOT implement ReadLinkFS. ReadLink
+    //    cannot answer at all — an ErrInvalid PathError — but Lstat
+    //    falls back to Stat, because a filesystem with no links has
+    //    nothing to not-follow. Getting that asymmetry backwards is the
+    //    easy mistake, so both halves are pinned.
+    {
+        let mut ok = true;
+        let plain: Arc<dyn fs::FS + Send + Sync> = Arc::new(PlainFS(m.clone()));
+        let (target, err) = fs::ReadLink(&*plain, s("a.txt"));
         if target.Len() != 0 || errText(&err) != s("readlink a.txt: invalid argument") {
             ok = false;
         }
         if !errors::Is(err, fs::ErrInvalid) {
             ok = false;
         }
-        let (info, err2) = fs::Lstat(&*me, s("a.txt"));
+        let (info, err2) = fs::Lstat(&*plain, s("a.txt"));
         if !err2.IsNil() || info.Name() != s("a.txt") || info.IsDir() {
             ok = false;
         }
-        let (_, err3) = fs::Lstat(&*me, s("nope"));
+        // The fallback is Stat, so the error is Stat's — `open`, not
+        // `lstat`.
+        let (_, err3) = fs::Lstat(&*plain, s("nope"));
         if errText(&err3) != s("open nope: file does not exist") {
             ok = false;
         }
-        // Through the sub, the ErrInvalid still names the caller's path.
+        // And through the sub, the ErrInvalid still names the caller's
+        // path, not the parent's.
         let (_, err4) = fs::ReadLink(&*sub, s("b.txt"));
         if errText(&err4) != s("readlink b.txt: invalid argument") {
             ok = false;
         }
-        let (info5, err5) = fs::Lstat(&*sub, s("b.txt"));
-        if !err5.IsNil() || info5.Name() != s("b.txt") {
-            ok = false;
-        }
-        report(&mut failed, ok, " 7", "ReadLink/Lstat (+ Stat fallback)");
+        report(&mut failed, ok, " 8", "Lstat falls back to Stat");
     }
 
-    // 8. PathError: the text Go prints, Unwrap, and Timeout — which
+    // 9. PathError: the text Go prints, Unwrap, and Timeout — which
     //    asserts `interface{ Timeout() bool }` on the wrapped error.
     {
         let mut ok = true;
@@ -373,10 +446,10 @@ fn main() {
         if pe.Timeout() {
             ok = false;
         }
-        report(&mut failed, ok, " 8", "PathError (text, Unwrap, Timeout)");
+        report(&mut failed, ok, " 9", "PathError (text, Unwrap, Timeout)");
     }
 
-    // 9. ValidPath. Every path above rests on it, and the rejections
+    // 10. ValidPath. Every path above rests on it, and the rejections
     //    are the interesting half.
     {
         let mut ok = true;
@@ -409,10 +482,10 @@ fn main() {
         if fs::ValidPath(string::from_bytes(b"\xff")) {
             ok = false;
         }
-        report(&mut failed, ok, " 9", "ValidPath");
+        report(&mut failed, ok, "10", "ValidPath");
     }
 
-    // 10. FormatFileInfo / FormatDirEntry, including the trailing slash
+    // 11. FormatFileInfo / FormatDirEntry, including the trailing slash
     //     a directory gets and the mode letters.
     //
     //     ONE STATED DEVIATION, and it is not io/fs's: Go prints a zero
@@ -442,14 +515,14 @@ fn main() {
         if fs::FormatDirEntry(&*ddi) != s("d sub/") {
             ok = false;
         }
-        report(&mut failed, ok, "10", "FormatFileInfo/FormatDirEntry");
+        report(&mut failed, ok, "11", "FormatFileInfo/FormatDirEntry");
     }
 
     if failed == 0 {
-        fmt::Println!("ok 10/10");
+        fmt::Println!("ok 11/11");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 10");
+        fmt::Println!("FAIL", failed, "of 11");
         syscall::Exit(1);
     }
 }

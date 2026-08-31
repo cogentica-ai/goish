@@ -325,6 +325,10 @@ pub fn init() {
         math::big::register_big_impls();
         encoding::json::register_json_impls();
         crypto::elliptic::register_elliptic_impls();
+        // MapFS answers to six fs interfaces. Registering lazily — on
+        // the first Open — meant a `cast!` before any Open was a silent
+        // miss, and the fs helpers quietly took their slow paths.
+        testing::fstest::register_fstest_impls();
 
         // hash.Hash / io.Writer for every digest in the tree.
         hash::adler32::register_adler32_impls();

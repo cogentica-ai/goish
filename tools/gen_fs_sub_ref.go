@@ -114,6 +114,17 @@ func TestGoishRef(t *testing.T) {
 
 	// ReadLink and Lstat: MapFS implements ReadLinkFS, so both reach it
 	// through the sub. A plain file is not a link.
+	for _, name := range []string{"a.txt", "sub", "nope", "other/f.txt"} {
+		target, err := fs.ReadLink(m, name)
+		fmt.Printf("m-readlink %-12q target=%q err=%v invalid=%v\n",
+			name, target, err, errors.Is(err, fs.ErrInvalid))
+		info, err := fs.Lstat(m, name)
+		if err != nil {
+			fmt.Printf("m-lstat %-12q err=%v\n", name, err)
+			continue
+		}
+		fmt.Printf("m-lstat %-12q name=%q dir=%v\n", name, info.Name(), info.IsDir())
+	}
 	for _, name := range []string{"b.txt", "link", "nope", "deep"} {
 		target, err := fs.ReadLink(sub, name)
 		fmt.Printf("readlink %-8q target=%q err=%v\n", name, target, err)
