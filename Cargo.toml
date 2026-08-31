@@ -1958,3 +1958,7 @@ path = "examples/io_fs_sub_smoke.rs"
 [[example]]
 name = "testing_fstest_iface_smoke"
 path = "examples/testing_fstest_iface_smoke.rs"
+
+[[example]]
+name = "tar_fileinfo_smoke"
+path = "examples/tar_fileinfo_smoke.rs"

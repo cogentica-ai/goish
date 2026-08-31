@@ -5,16 +5,10 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 10200,
+ "total": 9892,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
-  },
-  "src/archive/tar/mod.rs": {
-   "GOISH005": 52,
-   "GOISH014": 133,
-   "GOISH016": 1,
-   "GOISH023": 122
   },
   "src/builtin.rs": {
    "GOISH005": 3,
