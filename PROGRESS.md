@@ -27,7 +27,7 @@ goishlint diff the port against the Go file it came from.
 | `encoding` | 230/1018 | 22.6% | 301 |
 | `compress` | 150/150 | 100.0% | 303 |
 | `os` | 112/366 | 30.6% | 3 |
-| `bytes` | 100/107 | 93.5% | 31 |
+| `bytes` | 104/107 | 97.2% | 73 |
 | `strings` | 98/98 | 100.0% | 153 |
 | `archive` | 71/182 | 39.0% | 0 |
 | `time` | 71/184 | 38.6% | 4 |
@@ -679,6 +679,39 @@ caller may write into the result. The copy is back.
 sixteen inputs, hitting all three dispatch paths — plus 80
 TrimPrefix/TrimSuffix vectors, TrimSpace, and the Turkish special
 cases.
+
+`bytes/buffer.go` came out of the module root next — **104/107 with 73
+anchors** — and with it the growth machinery that had been missing
+entirely. `tryGrowByReslice`, `grow`, `growSlice` and `readSlice` are
+all new, and `empty()` with them; Go's `Read`, `Next` and `ReadByte`
+each branch on `empty()`, and goish had spelled that condition three
+times instead.
+
+The growth policy is three steps and only the last allocates: reset
+when the buffer is logically empty but `off` has walked forward, try a
+reslice into capacity already owned, then either slide the live bytes
+down over the consumed prefix — worth it only when that alone buys
+enough room — or double through `growSlice`. goish had `Grow` reserve
+directly on the Vec and nothing else, so a Buffer written and drained
+repeatedly never recovered the consumed prefix.
+
+`bytes_buffer_smoke` pins the observable half against a running Go:
+Len/Cap/Available across a write-drain-write cycle, `Grow(n)` leaving
+Len alone while guaranteeing n bytes of headroom, `Next` past the end,
+`WriteTo` from the read cursor, `ReadFrom`, and both exact refusal
+messages —
+
+    bytes.Buffer: UnreadByte: previous operation was not a successful read
+    bytes.Buffer: UnreadRune: previous operation was not a successful ReadRune
+
+— including the rule that a `ReadByte` between a `ReadRune` and an
+`UnreadRune` invalidates the unread. `Truncate` is the one that catches
+a port reading the wrong index: it counts from the start of the
+*unread* portion, so on "abcdef" with two bytes already read,
+`Truncate(1)` leaves "c".
+
+`bytes_buffer_io_smoke` turned out never to have been declared in
+Cargo.toml, so e2e had never run it. It is now.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the
