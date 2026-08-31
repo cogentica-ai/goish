@@ -459,8 +459,8 @@ name = "preempt_sysmon"
 path = "examples/preempt_sysmon.rs"
 
 [[example]]
-name = "path_smoke"
-path = "examples/path_smoke.rs"
+name = "path_lexical_smoke"
+path = "examples/path_lexical_smoke.rs"
 
 [[example]]
 name = "sched_p_alpha"
@@ -1966,3 +1966,7 @@ path = "examples/tar_fileinfo_smoke.rs"
 [[example]]
 name = "errors_tree_smoke"
 path = "examples/errors_tree_smoke.rs"
+
+[[example]]
+name = "path_smoke"
+path = "examples/path_smoke.rs"

@@ -119,10 +119,7 @@ impl ErrorTrait for Leaf {
 }
 
 fn one(msg: &str, inner: error) -> error {
-    return errors::Wrap(WrapOne {
-        msg: s(msg),
-        inner,
-    });
+    return errors::Wrap(WrapOne { msg: s(msg), inner });
 }
 
 fn many(msg: &str, errs: Vec<error>) -> error {
@@ -353,7 +350,10 @@ fn main() {
             ok = false;
         }
         // Nested joins still walk.
-        let jn = joinOf(alloc::vec![a.clone(), joinOf(alloc::vec![b.clone(), c.clone()])]);
+        let jn = joinOf(alloc::vec![
+            a.clone(),
+            joinOf(alloc::vec![b.clone(), c.clone()])
+        ]);
         if jn.Error() != s("a\nb\nc") {
             ok = false;
         }
