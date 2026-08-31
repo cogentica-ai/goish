@@ -495,6 +495,35 @@ Go's `int` when a replacement is shorter than the byte it replaces, and
 underflows a `usize`. Replacing `"b"` with `""` panicked before the
 `int` was restored.
 
+**Seven of the eight long-standing `net/http` e2e failures were one
+bug**, and it was in `httptest.Server.Close`. Every one of them ended
+the same way — `httptest.Server blocked in Close after 5 seconds,
+waiting for connections: fd N in state idle` — after all of the
+example's own assertions had passed.
+
+Go's `Close` force-closes every StateIdle and StateNew conn, and its
+netpoller wakes whichever goroutine is parked reading them. goish's
+`closeConn` called `shutdown(2)` on the fd instead, on the reasoning
+that shutdown wakes a blocked reader. It does — a reader blocked in the
+*syscall*. A goish keep-alive conn between requests is parked in the
+**netpoller**, which `shutdown` does not notify, so the conn stayed
+idle and `Close` waited forever.
+
+The http server already had the right mechanism for this and had
+written down why: `closeIdleConns` slams the read deadline into the past
+(goish's `aLongTimeAgo`), the parked read returns a timeout, and the
+*serve loop* closes its own fd — so an fd always has exactly one
+closer. `httptest` now asks for the same kick through
+`Server.__kick_conn_fd`, and keeps the `shutdown` so the peer still sees
+the connection end.
+
+`http_client_reuse`, `http_connstate`, `http_expect_continue`,
+`http_httptest_server`, `http_pprof`, `http_transferwriter` and
+`http_url_userinfo` all pass now; the `[h-n]` slice is 186/187.
+`http_closenotify_smoke` is the eighth and is a different defect —
+CloseNotify does not fire when the client goes away mid-handler, and
+the request context is not cancelled by that event either.
+
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the
 `ReadUvarint`/`ReadVarint` pair that was missing, while binary.go's

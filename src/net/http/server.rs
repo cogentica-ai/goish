@@ -3667,6 +3667,30 @@ impl Server {
         return err;
     }
 
+    // go: none — goish idiom: Go's `httptest.Server.closeConn` closes
+    //     the `net.Conn` it holds, and the netpoller wakes whichever
+    //     goroutine is parked reading it. goish's serve goroutine owns
+    //     the fd and must be the one to close it, so httptest asks the
+    //     server to kick it the same way `closeIdleConns` does — slam
+    //     the read deadline into the past, let the parked read return
+    //     a timeout, and let the serve loop close the fd. Returns
+    //     whether a tracked conn with that fd was found.
+    pub(crate) fn __kick_conn_fd(&self, fd: i32) -> bool {
+        let conns: Vec<Arc<ConnTrack>> = self.__state.tracked_conns.Lock().clone();
+        for t in conns.iter() {
+            if t.fd != fd {
+                continue;
+            }
+            let pd_addr = t.pd_addr.load(Ordering::Acquire);
+            if pd_addr != 0 {
+                let pd = unsafe { &*(pd_addr as *const crate::runtime::netpoll::PollDesc) };
+                crate::runtime::netpoll::set_deadline(pd, -1, b'r');
+            }
+            return true;
+        }
+        return false;
+    }
+
     // go: sdk 1.25.5 net/http/server.go:3230-3252 Server.closeIdleConns
     /// Go: "closeIdleConns closes all idle connections and reports
     /// whether the server is quiescent."

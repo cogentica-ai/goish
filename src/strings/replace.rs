@@ -170,7 +170,7 @@ fn build(oldnew: &slice<string>) -> replacer {
     }
 
     let mut r = byteStringReplacer {
-        replacements: core::array::from_fn(|_| None),
+        replacements: (0..256).map(|_| None).collect(),
         toReplace: Vec::with_capacity((n / 2) as usize),
     };
     // Same precedence rule, same backwards walk.
@@ -583,7 +583,19 @@ impl byteReplacer {
 /// "do not replace".
 #[derive(Clone)]
 struct byteStringReplacer {
-    replacements: [Option<Vec<u8>>; 256],
+    // Go: replacements [256][]byte — a fixed array, since a Go slice
+    // header is two words and the whole thing is 4 KiB it happily puts
+    // on a stack that grows.
+    //
+    // goish heaps it. An `[Option<Vec<u8>>; 256]` is 6 KiB, and every
+    // way of building one in place — `array::from_fn`, an inline-const
+    // repeat — materialises it in a stack slot, then the enum below
+    // copies it again on the way out of `build`. A goroutine stack
+    // starts at 64 KiB, and `html::EscapeString` calls `NewReplacer`
+    // inside the serve goroutine, so that overflowed and took the
+    // connection's goroutine with it. Length is still exactly 256 and
+    // every index is a byte, so nothing else changes.
+    replacements: Vec<Option<Vec<u8>>>,
     // Go: toReplace []string — the bytes that get replaced, each held
     // as a one-byte string because Go's `Count` takes a string.
     toReplace: Vec<string>,

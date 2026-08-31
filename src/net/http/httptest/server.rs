@@ -279,15 +279,20 @@ impl Server {
     /// value when the goroutine closing c is done."
     fn closeConnChan(&self, fd: crate::types::int, done: Option<crate::gochan::chan<()>>) {
         // Go closes the conn, and its netpoller wakes the goroutine
-        // parked reading it. goish's does not — closing an fd drops
-        // queued epoll events but fires no EPOLLHUP at an existing
-        // parker, the same wall `Listener.Close` hits above. shutdown(2)
-        // DOES wake a blocked reader (it returns EOF), and leaves the
-        // fd's single owner — the serve loop — to do the close, so
-        // there is no double-close race.
+        // parked reading it. goish's serve goroutine owns the fd and
+        // has to be the one to close it, so this asks the server for
+        // the same kick `(*http.Server).closeIdleConns` uses: slam the
+        // read deadline into the past, let the parked read return a
+        // timeout, and let the serve loop close the fd. That keeps the
+        // fd's single closer and, unlike shutdown(2), actually wakes a
+        // goroutine parked in the NETPOLLER rather than in a blocking
+        // read — which is where a keep-alive conn between requests is,
+        // and why `Close` used to hang here with "fd N in state idle".
         //
-        // SHUT_RDWR
+        // shutdown(2) still goes out first so the peer sees the
+        // connection end even if the serve loop is between parks.
         let _ = crate::syscall::Shutdown(crate::int32(fd), 2);
+        self.Config.__kick_conn_fd(crate::int32(fd));
         if let Some(ch) = done {
             let _ = ch.__try_send(());
         }
