@@ -28,7 +28,7 @@ goishlint diff the port against the Go file it came from.
 | `compress` | 150/150 | 100.0% | 303 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
-| `strings` | 96/98 | 98.0% | 59 |
+| `strings` | 98/98 | 100.0% | 67 |
 | `archive` | 71/182 | 39.0% | 0 |
 | `time` | 71/184 | 38.6% | 4 |
 | `sync` | 66/126 | 52.4% | 3 |
@@ -560,6 +560,26 @@ Waived, with reasons: `copyCheck` (Go's `Builder` holds an `addr
 *Builder` self pointer and panics when it finds itself copied; a goish
 `Builder` owns its `Vec` and a copy is a deep copy, so there is no
 aliasing to detect), `buildOnce` and `getStringWriter`.
+
+`strings/iter.go` closed the package: **`strings` is 98/98 with 67
+anchors**, three declarations waived, and `iter.rs` is its second file
+out of the module root.
+
+`FieldsSeq` and `FieldsFuncSeq` were the last two missing. Each yields
+exactly what its slice-building twin returns without building the
+slice, so every vector is checked twice — against Go, and against
+`Fields`/`FieldsFunc`/`Split`/`SplitAfter` on the same input. Three of
+the field cases split on a non-ASCII space (NBSP, LINE SEPARATOR,
+IDEOGRAPHIC SPACE), which reaches `unicode::IsSpace` rather than an
+ASCII table — the same distinction that was wrong in `bufio`'s
+`ScanWords`.
+
+The check that matters most is the last one: a `yield` returning
+`false` has to stop the walk. That is the entire reason these return an
+iterator rather than a slice, and a port that eagerly collected and
+then replayed would pass every other vector and fail only this one.
+Both `SplitSeq` and `FieldsSeq` are stopped after two elements and
+compared against what Go's `break` inside a `range` produces.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the
