@@ -11,21 +11,23 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
+use crate::convert::{int32 as toint32, int64 as toint64, uint8 as touint8};
 use crate::gostring::string;
 use crate::types::{byte, int};
 
 use super::atof::{floatInfo, FLOAT32_INFO, FLOAT64_INFO};
 use super::decimal::decimal;
-use super::format_int_into_lib;
 
+// go: sdk 1.25.5 strconv/ftoa.go:49-51 FormatFloat
 /// `strconv.FormatFloat`.
 pub fn FormatFloat(f: f64, fmt_b: byte, prec: int, bit_size: int) -> string {
     let cap = core::cmp::max(prec + 4, 24) as usize;
     let dst: Vec<byte> = Vec::with_capacity(cap);
-    let bytes = generic_ftoa(dst, f, fmt_b, prec as i32, bit_size as i32);
-    string::__from_vec(bytes)
+    let bytes = generic_ftoa(dst, f, fmt_b, toint32(prec), toint32(bit_size));
+    return string::__from_vec(bytes);
 }
 
+// go: sdk 1.25.5 strconv/ftoa.go:55-57 AppendFloat
 /// `strconv.AppendFloat`.
 pub fn AppendFloat(
     dst: crate::goslice::slice<byte>,
@@ -35,8 +37,8 @@ pub fn AppendFloat(
     bit_size: int,
 ) -> crate::goslice::slice<byte> {
     let v = dst.__into_vec();
-    let v = generic_ftoa(v, f, fmt_b, prec as i32, bit_size as i32);
-    crate::goslice::slice::__from_vec(v)
+    let v = generic_ftoa(v, f, fmt_b, toint32(prec), toint32(bit_size));
+    return crate::goslice::slice::__from_vec(v);
 }
 
 fn generic_ftoa(mut dst: Vec<byte>, val: f64, fmt_b: byte, prec: i32, bit_size: i32) -> Vec<byte> {
@@ -78,7 +80,7 @@ fn generic_ftoa(mut dst: Vec<byte>, val: f64, fmt_b: byte, prec: i32, bit_size: 
     }
 
     // Skip Ryu optimizations — slow path always.
-    big_ftoa(dst, prec, fmt_b, neg, mant, exp, flt)
+    return big_ftoa(dst, prec, fmt_b, neg, mant, exp, flt);
 }
 
 fn big_ftoa(
@@ -92,7 +94,7 @@ fn big_ftoa(
 ) -> Vec<byte> {
     let mut d = decimal::new();
     d.Assign(mant);
-    d.Shift(exp - flt.mantbits as i32);
+    d.Shift(exp - toint32(flt.mantbits));
     let shortest = prec < 0;
     if shortest {
         round_shortest(&mut d, mant, exp, flt);
@@ -118,7 +120,7 @@ fn big_ftoa(
     let digs_d = d.d;
     let digs_nd = d.nd;
     let digs_dp = d.dp;
-    format_digits(dst, shortest, neg, &digs_d, digs_nd, digs_dp, prec, fmt_b)
+    return format_digits(dst, shortest, neg, &digs_d, digs_nd, digs_dp, prec, fmt_b);
 }
 
 fn format_digits(
@@ -131,7 +133,7 @@ fn format_digits(
     mut prec: i32,
     fmt_b: byte,
 ) -> Vec<byte> {
-    match fmt_b {
+    return match fmt_b {
         b'e' | b'E' => fmt_E(dst, neg, d, nd, dp, prec, fmt_b),
         b'f' => fmt_F(dst, neg, d, nd, dp, prec),
         b'g' | b'G' => {
@@ -152,7 +154,7 @@ fn format_digits(
                     p = nd;
                 }
                 // 'g' → 'e', 'G' → 'E'. Subtraction in i32 to avoid u8 underflow.
-                let next_fmt = (fmt_b as i32 + (b'e' as i32 - b'g' as i32)) as u8;
+                let next_fmt = (toint32(fmt_b) + (b'e' as i32 - b'g' as i32)) as u8;
                 return fmt_E(dst, neg, d, nd, dp, p - 1, next_fmt);
             }
             if prec > dp {
@@ -167,7 +169,7 @@ fn format_digits(
             dst.push(fmt_b);
             dst
         }
-    }
+    };
 }
 
 /// `roundShortest` — round d (= mant * 2^exp) to the shortest number
@@ -178,14 +180,14 @@ fn round_shortest(d: &mut decimal, mant: u64, exp: i32, flt: &floatInfo) {
         return;
     }
     let minexp = flt.bias + 1;
-    if exp > minexp && 332 * (d.dp - d.nd) >= 100 * (exp - flt.mantbits as i32) {
+    if exp > minexp && 332 * (d.dp - d.nd) >= 100 * (exp - toint32(flt.mantbits)) {
         return;
     }
 
     // upper / lower decimal bounds
     let mut upper = decimal::new();
     upper.Assign(mant * 2 + 1);
-    upper.Shift(exp - flt.mantbits as i32 - 1);
+    upper.Shift(exp - toint32(flt.mantbits) - 1);
 
     let (mantlo, explo) = if mant > (1u64 << flt.mantbits) || exp == minexp {
         (mant - 1, exp)
@@ -194,7 +196,7 @@ fn round_shortest(d: &mut decimal, mant: u64, exp: i32, flt: &floatInfo) {
     };
     let mut lower = decimal::new();
     lower.Assign(mantlo * 2 + 1);
-    lower.Shift(explo - flt.mantbits as i32 - 1);
+    lower.Shift(explo - toint32(flt.mantbits) - 1);
 
     let inclusive = mant % 2 == 0;
 
@@ -293,7 +295,7 @@ fn fmt_E(
 
     if exp < 10 {
         dst.push(b'0');
-        dst.push(b'0' + exp as u8);
+        dst.push(b'0' + touint8(exp));
     } else if exp < 100 {
         dst.push(b'0' + (exp / 10) as u8);
         dst.push(b'0' + (exp % 10) as u8);
@@ -302,7 +304,7 @@ fn fmt_E(
         dst.push(b'0' + ((exp / 10) % 10) as u8);
         dst.push(b'0' + (exp % 10) as u8);
     }
-    dst
+    return dst;
 }
 
 /// %f: -ddddddd.ddddd
@@ -334,7 +336,7 @@ fn fmt_F(mut dst: Vec<byte>, neg: bool, d: &[byte; 800], nd: i32, dp: i32, prec:
             dst.push(ch);
         }
     }
-    dst
+    return dst;
 }
 
 /// %b: -ddddddddp±ddd
@@ -342,19 +344,19 @@ fn fmt_B(mut dst: Vec<byte>, neg: bool, mant: u64, exp: i32, flt: &floatInfo) ->
     if neg {
         dst.push(b'-');
     }
-    let mut tmp = [0u8; 24];
-    let n = format_int_into_lib(&mut tmp, mant as i64);
-    dst.extend_from_slice(&tmp[24 - n..]);
+    // mantissa
+    dst.extend_from_slice(super::FormatUint(mant, 10).as_bytes());
+
+    // p
     dst.push(b'p');
-    let exp_adj = exp - flt.mantbits as i32;
-    if exp_adj >= 0 {
+
+    // ±exponent
+    let exp = exp - toint32(flt.mantbits);
+    if exp >= 0 {
         dst.push(b'+');
-    } else {
-        dst.push(b'-');
     }
-    let n = format_int_into_lib(&mut tmp, (exp_adj as i64).abs());
-    dst.extend_from_slice(&tmp[24 - n..]);
-    dst
+    dst.extend_from_slice(super::FormatInt(toint64(exp), 10).as_bytes());
+    return dst;
 }
 
 const LOWER_HEX: &[u8] = b"0123456789abcdef";
@@ -438,5 +440,5 @@ fn fmt_X(
         dst.push(b'0' + ((exp / 10) % 10) as u8);
         dst.push(b'0' + (exp % 10) as u8);
     }
-    dst
+    return dst;
 }

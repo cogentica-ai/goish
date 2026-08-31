@@ -12,6 +12,7 @@
 
 #![allow(non_snake_case, non_camel_case_types)]
 
+use crate::convert::{int32 as toint32, uint32 as touint32};
 use crate::errors::{error, nil};
 use crate::gostring::string;
 use crate::types::int;
@@ -41,7 +42,7 @@ pub(crate) const FLOAT64_INFO: floatInfo = floatInfo {
 
 #[inline]
 fn lower(c: u8) -> u8 {
-    c | (b'x' - b'X')
+    return c | (b'x' - b'X');
 }
 
 fn common_prefix_len_ignore_case(s: &[u8], prefix: &[u8]) -> usize {
@@ -55,9 +56,10 @@ fn common_prefix_len_ignore_case(s: &[u8], prefix: &[u8]) -> usize {
             return i;
         }
     }
-    n
+    return n;
 }
 
+// go: sdk 1.25.5 strconv/atof.go:39-69 special
 fn special(s: &[u8]) -> (f64, usize, bool) {
     if s.is_empty() {
         return (0.0, 0, false);
@@ -91,7 +93,7 @@ fn special(s: &[u8]) -> (f64, usize, bool) {
             return (f64::NAN, 3, true);
         }
     }
-    (0.0, 0, false)
+    return (0.0, 0, false);
 }
 
 /// readFloat — parses a decimal/hex mantissa+exponent prefix of `s`.
@@ -236,7 +238,7 @@ fn read_float(s: &[u8]) -> (u64, i32, bool, bool, bool, usize, bool) {
         return (0, 0, neg, false, false, i, false);
     }
 
-    (mantissa, exp, neg, trunc, hex, i, true)
+    return (mantissa, exp, neg, trunc, hex, i, true);
 }
 
 // Decimal → multiprecision-decimal `set`. Mirrors `(b *decimal) set(s)`.
@@ -334,7 +336,7 @@ fn decimal_set(b: &mut decimal, s: &[u8]) -> bool {
     if i != s.len() {
         return false;
     }
-    true
+    return true;
 }
 
 const POWTAB: &[i32] = &[1, 3, 6, 9, 13, 16, 19, 23, 26];
@@ -362,7 +364,7 @@ fn decimal_float_bits(d: &mut decimal, flt: &floatInfo) -> (u64, bool) {
         // Scale by powers of two until in range [0.5, 1.0).
         exp = 0;
         while d.dp > 0 {
-            let n: i32 = if d.dp >= POWTAB.len() as i32 {
+            let n: i32 = if d.dp >= toint32(POWTAB.len()) {
                 27
             } else {
                 POWTAB[d.dp as usize]
@@ -371,7 +373,7 @@ fn decimal_float_bits(d: &mut decimal, flt: &floatInfo) -> (u64, bool) {
             exp += n;
         }
         while d.dp < 0 || (d.dp == 0 && d.d[0] < b'5') {
-            let n: i32 = if -d.dp >= POWTAB.len() as i32 {
+            let n: i32 = if -d.dp >= toint32(POWTAB.len()) {
                 27
             } else {
                 POWTAB[(-d.dp) as usize]
@@ -419,7 +421,7 @@ fn decimal_float_bits(d: &mut decimal, flt: &floatInfo) -> (u64, bool) {
         }
     }
 
-    assemble(d.neg, mant, exp, flt, overflow)
+    return assemble(d.neg, mant, exp, flt, overflow);
 }
 
 fn assemble(neg: bool, mant: u64, exp: i32, flt: &floatInfo, overflow: bool) -> (u64, bool) {
@@ -428,7 +430,7 @@ fn assemble(neg: bool, mant: u64, exp: i32, flt: &floatInfo, overflow: bool) -> 
     if neg {
         bits |= 1u64 << flt.mantbits << flt.expbits;
     }
-    (bits, overflow)
+    return (bits, overflow);
 }
 
 /// Exact powers of 10 (f64).
@@ -467,7 +469,7 @@ fn atof64_exact(mantissa: u64, exp: i32, neg: bool) -> (f64, bool) {
     if exp < 0 && exp >= -22 {
         return (f / FLOAT64_POW10[(-exp) as usize], true);
     }
-    (0.0, false)
+    return (0.0, false);
 }
 
 fn atof32_exact(mantissa: u64, exp: i32, neg: bool) -> (f32, bool) {
@@ -495,7 +497,7 @@ fn atof32_exact(mantissa: u64, exp: i32, neg: bool) -> (f32, bool) {
     if exp < 0 && exp >= -10 {
         return (f / FLOAT32_POW10[(-exp) as usize], true);
     }
-    (0.0, false)
+    return (0.0, false);
 }
 
 fn atof_hex(
@@ -508,7 +510,7 @@ fn atof_hex(
 ) -> (f64, error) {
     let max_exp = (1i32 << flt.expbits) + flt.bias - 2;
     let min_exp = flt.bias + 1;
-    exp += flt.mantbits as i32;
+    exp += toint32(flt.mantbits);
 
     while mantissa != 0 && (mantissa >> (flt.mantbits + 2)) == 0 {
         mantissa <<= 1;
@@ -557,13 +559,14 @@ fn atof_hex(
         bits |= 1u64 << flt.mantbits << flt.expbits;
     }
     let f = if flt.expbits == 8 {
-        f32::from_bits(bits as u32) as f64
+        f32::from_bits(touint32(bits)) as f64
     } else {
         f64::from_bits(bits)
     };
-    (f, err)
+    return (f, err);
 }
 
+// go: sdk 1.25.5 strconv/atof.go:616-665 atof64
 pub(crate) fn atof64(s: &[u8], orig: &string) -> (f64, usize, error) {
     let (val, n, ok) = special(s);
     if ok {
@@ -599,9 +602,10 @@ pub(crate) fn atof64(s: &[u8], orig: &string) -> (f64, usize, error) {
     } else {
         nil
     };
-    (f, n, err)
+    return (f, n, err);
 }
 
+// go: sdk 1.25.5 strconv/atof.go:565-614 atof32
 pub(crate) fn atof32(s: &[u8], orig: &string) -> (f32, usize, error) {
     let (val, n, ok) = special(s);
     if ok {
@@ -629,15 +633,16 @@ pub(crate) fn atof32(s: &[u8], orig: &string) -> (f32, usize, error) {
         return (0.0, n, syntaxError(FN_PARSE_FLOAT, orig.clone()));
     }
     let (b, ovf) = decimal_float_bits(&mut d, &FLOAT32_INFO);
-    let f = f32::from_bits(b as u32);
+    let f = f32::from_bits(touint32(b));
     let err = if ovf {
         rangeError(FN_PARSE_FLOAT, orig.clone())
     } else {
         nil
     };
-    (f, n, err)
+    return (f, n, err);
 }
 
+// go: sdk 1.25.5 strconv/atof.go:694-700 ParseFloat
 /// `strconv.ParseFloat(s, bitSize)` — full-string float parse.
 pub fn ParseFloat<S: Into<string>>(s: S, bit_size: int) -> (f64, error) {
     let s = s.into();
@@ -657,5 +662,5 @@ pub fn ParseFloat<S: Into<string>>(s: S, bit_size: int) -> (f64, error) {
             return (0.0, syntaxError(FN_PARSE_FLOAT, s));
         }
     }
-    (f, err)
+    return (f, err);
 }

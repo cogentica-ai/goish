@@ -127,6 +127,10 @@ name = "strconv_smoke"
 path = "examples/strconv_smoke.rs"
 
 [[example]]
+name = "strconv_itoa_ref_smoke"
+path = "examples/strconv_itoa_ref_smoke.rs"
+
+[[example]]
 name = "defer_smoke"
 path = "examples/defer_smoke.rs"
 

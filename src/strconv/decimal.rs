@@ -11,6 +11,7 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
+use crate::convert::{int32 as toint32, uint32 as touint32, uint64 as touint64};
 use crate::gostring::string;
 use crate::types::byte;
 
@@ -25,15 +26,16 @@ pub(crate) struct decimal {
 
 impl decimal {
     pub fn new() -> Self {
-        Self {
+        return Self {
             d: [0u8; 800],
             nd: 0,
             dp: 0,
             neg: false,
             trunc: false,
-        }
+        };
     }
 
+    // go: sdk 1.25.5 strconv/decimal.go:22-59 decimal.String
     #[allow(non_snake_case)]
     pub fn String(&self) -> string {
         let mut n = (10 + self.nd) as usize;
@@ -75,9 +77,10 @@ impl decimal {
             w += digit_zero(&mut buf[w..w + (self.dp - self.nd) as usize]);
         }
         buf.truncate(w);
-        string::__from_vec(buf)
+        return string::__from_vec(buf);
     }
 
+    // go: sdk 1.25.5 strconv/decimal.go:81-102 decimal.Assign
     /// Assign v to a.
     #[allow(non_snake_case)]
     pub fn Assign(&mut self, mut v: u64) {
@@ -105,6 +108,7 @@ impl decimal {
         trim(self);
     }
 
+    // go: sdk 1.25.5 strconv/decimal.go:315-332 decimal.Shift
     /// Binary shift left (k > 0) or right (k < 0).
     #[allow(non_snake_case)]
     pub fn Shift(&mut self, mut k: i32) {
@@ -113,20 +117,21 @@ impl decimal {
             return;
         }
         if k > 0 {
-            while k > MAX_SHIFT as i32 {
+            while k > toint32(MAX_SHIFT) {
                 left_shift(self, MAX_SHIFT);
-                k -= MAX_SHIFT as i32;
+                k -= toint32(MAX_SHIFT);
             }
-            left_shift(self, k as u32);
+            left_shift(self, touint32(k));
         } else if k < 0 {
-            while k < -(MAX_SHIFT as i32) {
+            while k < -(toint32(MAX_SHIFT)) {
                 right_shift(self, MAX_SHIFT);
-                k += MAX_SHIFT as i32;
+                k += toint32(MAX_SHIFT);
             }
             right_shift(self, (-k) as u32);
         }
     }
 
+    // go: sdk 1.25.5 strconv/decimal.go:354-363 decimal.Round
     /// Round a to nd digits (or fewer).
     #[allow(non_snake_case)]
     pub fn Round(&mut self, nd: i32) {
@@ -140,6 +145,7 @@ impl decimal {
         }
     }
 
+    // go: sdk 1.25.5 strconv/decimal.go:366-372 decimal.RoundDown
     /// Round a down to nd digits (or fewer).
     #[allow(non_snake_case)]
     pub fn RoundDown(&mut self, nd: i32) {
@@ -150,6 +156,7 @@ impl decimal {
         trim(self);
     }
 
+    // go: sdk 1.25.5 strconv/decimal.go:375-395 decimal.RoundUp
     /// Round a up to nd digits (or fewer).
     #[allow(non_snake_case)]
     pub fn RoundUp(&mut self, nd: i32) {
@@ -175,6 +182,7 @@ impl decimal {
         self.dp += 1;
     }
 
+    // go: sdk 1.25.5 strconv/decimal.go:399-415 decimal.RoundedInteger
     /// Extract integer part, rounded appropriately.
     /// No guarantees about overflow.
     #[allow(non_snake_case)]
@@ -195,7 +203,7 @@ impl decimal {
         if should_round_up(self, self.dp) {
             n += 1;
         }
-        n
+        return n;
     }
 }
 
@@ -203,9 +211,10 @@ fn digit_zero(dst: &mut [byte]) -> usize {
     for b in dst.iter_mut() {
         *b = b'0';
     }
-    dst.len()
+    return dst.len();
 }
 
+// go: sdk 1.25.5 strconv/decimal.go:71-78 trim
 /// Trim trailing zeros from number.
 pub(crate) fn trim(a: &mut decimal) {
     while a.nd > 0 && a.d[(a.nd - 1) as usize] == b'0' {
@@ -243,7 +252,7 @@ fn right_shift(a: &mut decimal, k: u32) {
             }
             break;
         }
-        let c = a.d[r as usize] as u64;
+        let c = touint64(a.d[r as usize]);
         n = n * 10 + c - ('0' as u64);
         r += 1;
     }
@@ -253,7 +262,7 @@ fn right_shift(a: &mut decimal, k: u32) {
 
     // Pick up a digit, put down a digit.
     while r < a.nd {
-        let c = a.d[r as usize] as u64;
+        let c = touint64(a.d[r as usize]);
         let dig = n >> k;
         n &= mask;
         a.d[w as usize] = (dig + ('0' as u64)) as u8;
@@ -545,7 +554,7 @@ fn prefix_is_less_than(b: &[byte], s: &[byte]) -> bool {
             return b[i] < s[i];
         }
     }
-    false
+    return false;
 }
 
 /// Binary shift left (* 2) by k bits. k <= MAX_SHIFT to avoid overflow.
@@ -590,7 +599,7 @@ fn left_shift(a: &mut decimal, k: u32) {
 
     a.nd += delta;
     if (a.nd as usize) >= a.d.len() {
-        a.nd = a.d.len() as i32;
+        a.nd = toint32(a.d.len());
     }
     a.dp += delta;
     trim(a);
@@ -609,5 +618,5 @@ fn should_round_up(a: &decimal, nd: i32) -> bool {
         }
         return nd > 0 && (a.d[nd_u - 1] - b'0') % 2 != 0;
     }
-    a.d[nd_u] >= b'5'
+    return a.d[nd_u] >= b'5';
 }
