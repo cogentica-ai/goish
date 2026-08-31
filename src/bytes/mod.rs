@@ -50,7 +50,7 @@ use crate::unicode::utf8;
 
 // ─── Private byte helpers (no allocation) ─────────────────────────────
 
-fn index_byte(s: &[u8], c: byte) -> int {
+pub(super) fn index_byte(s: &[u8], c: byte) -> int {
     let mut i = 0usize;
     while i < s.len() {
         if s[i] == c {
@@ -61,7 +61,7 @@ fn index_byte(s: &[u8], c: byte) -> int {
     -1
 }
 
-fn index_bytes(s: &[u8], substr: &[u8]) -> int {
+pub(super) fn index_bytes(s: &[u8], substr: &[u8]) -> int {
     let n = substr.len();
     if n == 0 {
         return 0;
@@ -140,9 +140,13 @@ fn has_suffix(s: &[u8], suffix: &[u8]) -> bool {
 }
 
 #[inline]
-fn is_ascii_space(c: byte) -> bool {
+pub(super) fn is_ascii_space(c: byte) -> bool {
     matches!(c, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
 }
+
+#[path = "iter.rs"]
+mod iter_go;
+pub use iter_go::{FieldsFuncSeq, FieldsSeq, Lines, SplitAfterSeq, SplitSeq};
 
 // ─── Search / equality / compare ──────────────────────────────────────
 

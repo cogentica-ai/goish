@@ -27,7 +27,7 @@ goishlint diff the port against the Go file it came from.
 | `encoding` | 230/1018 | 22.6% | 301 |
 | `compress` | 150/150 | 100.0% | 303 |
 | `os` | 112/366 | 30.6% | 3 |
-| `bytes` | 84/107 | 78.5% | 1 |
+| `bytes` | 90/107 | 84.1% | 8 |
 | `strings` | 98/98 | 100.0% | 153 |
 | `archive` | 71/182 | 39.0% | 0 |
 | `time` | 71/184 | 38.6% | 4 |
@@ -629,6 +629,26 @@ for `s[low:high]` — free in Go, an allocation here.
 A 42-line header claiming the package was a "subset for M10 launch —
 the most-used operations" went with it. It has not been a subset for
 some time.
+
+`bytes` is the same shape `strings` was in when this cycle started —
+84/107 with **one** anchor — and it is being taken the same way. Its
+`iter.go` was absent entirely: `Lines`, `SplitSeq`, `SplitAfterSeq`,
+`FieldsSeq`, `FieldsFuncSeq` and the shared `splitSeq` are all new, in
+their own `iter.rs`. 90/107 with 8 anchors now.
+
+Go full-slices every fragment these yield — `s[:i:i]`, capping capacity
+at length — so a caller who appends to a yielded line cannot write into
+the bytes of the next one. A goish `slice<byte>` handed out of an
+iterator already owns its bytes, so the aliasing that three-index
+slicing defends against cannot arise; the values yielded are identical,
+and the file says so rather than dropping the `:i` silently.
+
+Checked against Go the same way `strings/iter.go` was: every vector
+twice, once against the Seq and once against `Split`/`SplitAfter`/
+`Fields`/`FieldsFunc`, plus the early-stop rule for all three of
+`SplitSeq`, `FieldsSeq` and `Lines`. `Lines` is the one that separates
+the two packages' empty cases — it yields nothing for an empty slice
+where `SplitSeq` yields one empty fragment.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the
