@@ -168,7 +168,12 @@ fn main() {
         }
     }
 
-    // 11. V2 input (16 bytes, version=2) is accepted; sec/nsec unchanged.
+    // 11. V2 input (16 bytes, version=2) is accepted, and the eight
+    //     second-bytes are Go's INTERNAL count — seconds from year 1,
+    //     not from the epoch. So a buffer reading 42 decodes to year 1
+    //     plus 42 seconds, which is Unix -62135596758. This check used
+    //     to expect Unix 42, which is what a Time anchored at the epoch
+    //     produces; Go says otherwise.
     {
         let mut buf = make!([]goish::byte, 16);
         buf[0] = 2; // V2
@@ -177,7 +182,7 @@ fn main() {
         // nsec = 0; offset bytes = 0; offsetSec = 0.
         let mut t = time::Unix(0, 0);
         let err = t.UnmarshalBinary(buf);
-        if err.IsNil() && t.Unix() == 42 {
+        if err.IsNil() && t.Unix() == -62_135_596_758 {
             fmt::Println!("[11] V2 accepted                PASS");
         } else {
             fmt::Println!("[11] V2 accepted                FAIL");

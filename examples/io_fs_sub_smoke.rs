@@ -488,19 +488,16 @@ fn main() {
     // 11. FormatFileInfo / FormatDirEntry, including the trailing slash
     //     a directory gets and the mode letters.
     //
-    //     ONE STATED DEVIATION, and it is not io/fs's: Go prints a zero
-    //     `time.Time` as `0001-01-01 00:00:00`, because Go's Time counts
-    //     from the absolute zero year. goish's `Time` holds Unix seconds,
-    //     so its zero value is the epoch and it prints
-    //     `1970-01-01 00:00:00`. Everything else — the mode letters, the
-    //     size, the column order, the trailing slash on a directory — is
-    //     byte-for-byte Go's. Fixing the epoch means changing `Time`'s
-    //     representation, which is a `time` change, not this one.
+    //     This used to carry a stated deviation: goish's zero `Time` was
+    //     the Unix epoch, so the column read `1970-01-01` where Go reads
+    //     `0001-01-01`. `time` now counts from the absolute zero year as
+    //     Go's does, so the line is byte-for-byte Go's and the deviation
+    //     is gone.
     {
         let mut ok = true;
         let me: Arc<dyn fs::FS + Send + Sync> = m.clone();
         let (fi, _) = fs::Stat(&*me, s("a.txt"));
-        if fs::FormatFileInfo(&*fi) != s("---------- 1 1970-01-01 00:00:00 a.txt") {
+        if fs::FormatFileInfo(&*fi) != s("---------- 1 0001-01-01 00:00:00 a.txt") {
             ok = false;
         }
         let di = fs::FileInfoToDirEntry(fi);
@@ -508,7 +505,7 @@ fn main() {
             ok = false;
         }
         let (dfi, _) = fs::Stat(&*me, s("sub"));
-        if fs::FormatFileInfo(&*dfi) != s("dr-xr-xr-x 0 1970-01-01 00:00:00 sub/") {
+        if fs::FormatFileInfo(&*dfi) != s("dr-xr-xr-x 0 0001-01-01 00:00:00 sub/") {
             ok = false;
         }
         let ddi = fs::FileInfoToDirEntry(dfi);

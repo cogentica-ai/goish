@@ -143,8 +143,15 @@ fn main() {
     let t = goish::time::Date(2024, 3, 7, 9, 5, 1, 0, goish::time::UTC);
     match t.__reflect_value() {
         Value::Struct { fields, .. } => {
+            // The field carries the INTERNAL second count — seconds
+            // from year 1, the frame `Time.sec` uses — not the Unix
+            // one. That is what makes a reflected zero Time equal
+            // `reflect::Zero(Time)`, which is how `encoding/asn1` omits
+            // an OPTIONAL field; reflecting `Unix()` made the zero
+            // unmatchable the moment `Time` stopped being anchored at
+            // the epoch.
             check(
-                fields.len() == 2 && fields[0] == Value::Int(t.Unix()),
+                fields.len() == 2 && fields[0] == Value::Int(t.Unix() + 62_135_596_800),
                 "time::Time reflect value carries its instant",
             );
         }

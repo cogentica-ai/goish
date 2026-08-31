@@ -7,14 +7,11 @@
 //     FormatDirEntry(hello.go) = "- hello.go"
 //     FormatDirEntry(subdir)   = "d subdir/"
 //
-// KNOWN DIVERGENCE, and the reason the timestamps below read 1970 and
-// not 0001. Go's zero time.Time is 0001-01-01T00:00:00Z; goish's Time
-// stores `sec` as UNIX seconds, so its zero is 1970-01-01T00:00:00Z and
-// IsZero() means the epoch rather than year 1. Mode, size, name and the
-// trailing slash all match Go byte for byte — only the zero-time
-// rendering differs, and it differs for every goish caller that formats
-// an unset Time, not just this one. Fixing it means re-basing
-// time::Time's epoch, which is a time-package decision.
+// This file used to carry a KNOWN DIVERGENCE: the timestamps read 1970
+// rather than 0001, because goish's `Time` stored `sec` as UNIX seconds
+// and its zero was the epoch. `time` now counts from the absolute zero
+// year as Go's does, so these lines are byte-for-byte Go's and the
+// divergence is gone.
 //
 // The detail worth pinning is FormatDirEntry's nine-character
 // truncation. Type() returns only the type bits, but its String() still
@@ -67,7 +64,7 @@ fn main() {
             failed += 1;
         } else {
             let got = fs::FormatFileInfo(st.as_ref());
-            if got == s("-rw-r--r-- 100 1970-01-01 00:00:00 hello.go") {
+            if got == s("-rw-r--r-- 100 0001-01-01 00:00:00 hello.go") {
                 fmt::Println!("[ 1] FormatFileInfo file       PASS");
             } else {
                 fmt::Println!("[ 1] FormatFileInfo file       FAIL [", got, "]");
@@ -85,7 +82,7 @@ fn main() {
             failed += 1;
         } else {
             let got = fs::FormatFileInfo(st.as_ref());
-            if got == s("dr-xr-xr-x 0 1970-01-01 00:00:00 subdir/") {
+            if got == s("dr-xr-xr-x 0 0001-01-01 00:00:00 subdir/") {
                 fmt::Println!("[ 2] FormatFileInfo dir        PASS");
             } else {
                 fmt::Println!("[ 2] FormatFileInfo dir        FAIL [", got, "]");
@@ -131,7 +128,7 @@ fn main() {
     // 4. mapFileInfo.String is FormatFileInfo of itself.
     {
         let (got, ok) = __shim_map_file_info_string(&fsys, s("hello.go"));
-        if ok && got == s("-rw-r--r-- 100 1970-01-01 00:00:00 hello.go") {
+        if ok && got == s("-rw-r--r-- 100 0001-01-01 00:00:00 hello.go") {
             fmt::Println!("[ 4] mapFileInfo.String        PASS");
         } else {
             fmt::Println!("[ 4] mapFileInfo.String        FAIL [", got, "]");

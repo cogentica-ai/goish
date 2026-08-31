@@ -143,9 +143,13 @@ impl Header {
             Gid: 0,
             Uname: string::new(),
             Gname: string::new(),
-            ModTime: crate::time::Unix(0, 0),
-            AccessTime: crate::time::Unix(0, 0),
-            ChangeTime: crate::time::Unix(0, 0),
+            // Go's `Header{}` leaves these as `time.Time{}`, the ZERO
+            // Time — year 1, not the epoch. `Header.allowedFormats`
+            // asks `!ModTime.IsZero()` to decide whether a PAX record
+            // is needed, so the two are not interchangeable.
+            ModTime: crate::time::Time::default(),
+            AccessTime: crate::time::Time::default(),
+            ChangeTime: crate::time::Time::default(),
             Devmajor: 0,
             Devminor: 0,
             Xattrs: map::new(),

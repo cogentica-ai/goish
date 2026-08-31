@@ -829,9 +829,12 @@ fn field(v: &crate::reflect::Value, i: int) -> crate::reflect::Value {
 // form `time::Time::__reflect_value` produces — `[Int(Unix),
 // Int(Nanosecond)]`. See the banner above.
 fn timeFromValue(v: &crate::reflect::Value) -> crate::time::Time {
+    // The reflected fields are INTERNAL seconds — from year 1, the frame
+    // `Time.sec` uses — so this cannot go through `time::Unix`, which
+    // would shift them a second time and land the value in year 3993.
     let sec = field(v, 0).Int();
     let nsec = field(v, 1).Int();
-    return crate::time::Unix(sec, nsec).UTC();
+    return crate::time::Time::__from_internal(sec, nsec).UTC();
 }
 
 // go: none — goish idiom: rebuild a `BitString` from `[Bytes,

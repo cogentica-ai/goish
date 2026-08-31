@@ -125,8 +125,15 @@ fn main() {
 
     // ─── IsZero ───────────────────────────────────────────────────────
 
-    let zero = time::Unix(0, 0);
+    // Go's zero Time is January 1 of YEAR 1, not the Unix epoch, so
+    // `Unix(0, 0)` — 1970-01-01 — is NOT zero. This check used to
+    // assert that it was, which is what a Time anchored at the epoch
+    // answers. Go: `epoch iszero=false`, `zero iszero=true`.
+    let epoch = time::Unix(0, 0);
+    check(!epoch.IsZero(), b"time: IsZero(epoch) wrong\n");
+    let zero = time::Unix(-62_135_596_800, 0);
     check(zero.IsZero(), b"time: IsZero(zero) wrong\n");
+    check(zero.Year() == 1, b"time: zero Year wrong\n");
     check(!t.IsZero(), b"time: IsZero(non-zero) wrong\n");
 
     // ─── Before / After / Equal ───────────────────────────────────────

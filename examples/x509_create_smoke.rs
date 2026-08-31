@@ -809,26 +809,20 @@ fn main() {
     // -- An OPTIONAL time::Time at its zero value ---------------------
     //
     // `tbsCertificateList.NextUpdate` is `asn1:"optional"`, so its zero
-    // is omitted. Which value *is* the zero differs between the two
-    // languages, and the difference belongs to `time`, not to x509:
+    // is omitted — and which value IS the zero used to differ between
+    // the two languages:
     //
     //   Go     `time.Time{}` is year 1. Go omits NextUpdate at year 1
-    //          and EMITS it at the Unix epoch — goref CRL_EXPIRY_EPOCH
-    //          carries `170d3730303130313030303030305a`, which is
-    //          "700101000000Z".
-    //   goish  `time::Time` has no year-1 value at all.
-    //          `Time::default()` and `time::Unix(0, 0)` are the same
-    //          value: both `IsZero()`, both `Unix() == 0`, both
-    //          `Year() == 1970`. So goish omits at the epoch.
+    //          and EMITS it at the Unix epoch, as
+    //          `170d3730303130313030303030305a` — "700101000000Z".
+    //   goish  `Time` was anchored at the EPOCH, so `Time::default()`
+    //          and `time::Unix(0, 0)` were the same value and it omitted
+    //          at both. A caller who deliberately meant 1970 got the
+    //          field dropped where Go writes it.
     //
-    // The assertion is therefore the semantic one — goish's zero time
-    // produces exactly the CRL Go's zero time produces (goref
-    // CRL_EXPIRY_GOZERO, byte-identical because every other field
-    // agrees). The residue is only that goish cannot say "the epoch,
-    // deliberately"; a caller who means 1970 gets the field dropped
-    // where Go would write it. Should `time::Time` ever grow Go's
-    // year-1 zero, this case splits in two and the explicit
-    // `Unix(0, 0)` half expects CRL_EXPIRY_EPOCH instead.
+    // `time` now counts from the absolute zero year as Go's does, so
+    // the case splits in two exactly as the note here predicted: the
+    // zero is omitted, and the epoch is emitted.
     //
     // goref: CRL_EXPIRY_GOZERO
     {
@@ -865,6 +859,23 @@ fn main() {
             &der,
             CRL_EXPIRY_GOZERO,
             "a zero NextUpdate is omitted, as Go omits its own zero",
+        );
+
+        // The other half: an EXPLICIT Unix epoch is a real instant, and
+        // Go writes it. The DER must differ from the omitted one and
+        // carry Go's UTCTime for it.
+        let mut r2 = fixedReader { n: 0 };
+        let (derEpoch, errEpoch) =
+            ca3.CreateCRL(&mut r2, &privAny, &revoked, notBefore(), time::Unix(0, 0));
+        checkErr(errEpoch, "<nil>", "CreateCRL epoch-expiry err");
+        let hexEpoch = hex::EncodeToString(&derEpoch);
+        check(
+            hexEpoch != string::from(CRL_EXPIRY_GOZERO),
+            "an explicit epoch NextUpdate is NOT omitted",
+        );
+        check(
+            goish::strings::Contains(hexEpoch, string::from("170d373030313031303030303030")),
+            "an explicit epoch NextUpdate encodes as Go's 700101000000Z",
         );
     }
 

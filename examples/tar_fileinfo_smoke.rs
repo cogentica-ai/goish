@@ -335,13 +335,7 @@ fn main() {
             h.Typeflag = tar::TypeReg;
             h.Size = 3;
             let got = fs::FormatFileInfo(&*h.FileInfo());
-            let want_goish = goish::strings::Replace(
-                s(want),
-                s("0001-01-01 00:00:00"),
-                s("1970-01-01 00:00:00"),
-                -1,
-            );
-            if got != want_goish {
+            if got != s(want) {
                 ok = false;
             }
             i += 1;

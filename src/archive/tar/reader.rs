@@ -342,8 +342,9 @@ impl Reader {
                     hdr.ChangeTime = crate::time::Unix(p2.parseNumeric(ct), 0);
                 }
                 if !p2.err.IsNil() {
-                    hdr.AccessTime = crate::time::Unix(0, 0);
-                    hdr.ChangeTime = crate::time::Unix(0, 0);
+                    // Go: hdr.AccessTime, hdr.ChangeTime = time.Time{}, time.Time{}
+                    hdr.AccessTime = crate::time::Time::default();
+                    hdr.ChangeTime = crate::time::Time::default();
                     let ps = p.parseString(self.blk.ustar_prefix());
                     if isASCII(&ps) {
                         prefix = ps;

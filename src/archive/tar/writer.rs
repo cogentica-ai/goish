@@ -165,8 +165,10 @@ impl<W: crate::io::Writer> Writer<W> {
         // Round ModTime and drop sub-second times when format is unset.
         if self.hdr.Format == FormatUnknown {
             self.hdr.ModTime = roundToSecond(self.hdr.ModTime);
-            self.hdr.AccessTime = crate::time::Unix(0, 0);
-            self.hdr.ChangeTime = crate::time::Unix(0, 0);
+            // Go writes `tw.hdr.AccessTime = time.Time{}` here — the ZERO Time,
+            // year 1, not the epoch.
+            self.hdr.AccessTime = crate::time::Time::default();
+            self.hdr.ChangeTime = crate::time::Time::default();
         }
 
         let (allowed_formats, pax_hdrs, err) = self.hdr.allowedFormats();

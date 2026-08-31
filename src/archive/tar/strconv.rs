@@ -103,7 +103,7 @@ pub(crate) fn parsePAXTime(s: string) -> (Time, error) {
     let ss_bytes = ss.as_bytes();
     let (secs, err) = strconv::ParseInt(&ss, 10, 64);
     if !err.IsNil() {
-        return (crate::time::Unix(0, 0), ErrHeader.into());
+        return (crate::time::Time::default(), ErrHeader.into());
     }
     if !has_dot {
         return (crate::time::Unix(secs, 0), nil);
@@ -112,7 +112,7 @@ pub(crate) fn parsePAXTime(s: string) -> (Time, error) {
     let sn_bytes = sn.as_bytes();
     for &c in sn_bytes {
         if c < b'0' || c > b'9' {
-            return (crate::time::Unix(0, 0), ErrHeader.into());
+            return (crate::time::Time::default(), ErrHeader.into());
         }
     }
 

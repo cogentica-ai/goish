@@ -33,6 +33,7 @@ use alloc::vec::Vec;
 
 use core::ops::{Add, Div, Mul, Sub};
 
+use crate::convert::uint64 as touint64;
 use crate::fmt::{self, FmtBuf};
 use crate::gostring::string;
 use crate::syscall::{self, Timespec};
@@ -43,6 +44,28 @@ use crate::types::int;
 /// `time.Duration` — int64 count of nanoseconds.
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Duration(pub int);
+
+// go: sdk 1.25.5 time/time.go:913-916 minDuration
+/// Go: `minDuration Duration = -1 << 63` — the value `Sub` saturates to
+/// when the gap is negative and does not fit.
+pub const minDuration: Duration = Duration(int::MIN);
+
+// go: sdk 1.25.5 time/time.go:913-916 maxDuration
+/// Go: `maxDuration Duration = 1<<63 - 1` — the positive saturation.
+pub const maxDuration: Duration = Duration(int::MAX);
+
+// go: sdk 1.25.5 time/time.go:1210-1219 subMono
+/// The monotonic-clock arm of [`Time::Sub`], with the same saturation.
+fn subMono(t: int, u: int) -> Duration {
+    let d = Duration(t.wrapping_sub(u));
+    if d.0 < 0 && t > u {
+        return maxDuration;
+    }
+    if d.0 > 0 && t < u {
+        return minDuration;
+    }
+    return d;
+}
 
 pub const Nanosecond: Duration = Duration(1);
 pub const Microsecond: Duration = Duration(1_000);
@@ -322,8 +345,8 @@ impl Duration {
 /// inputs as positive uint64 to avoid signed overflow.
 #[inline]
 fn less_than_half(x: int, y: int) -> bool {
-    let xu = x as u64;
-    let yu = y as u64;
+    let xu = touint64(x);
+    let yu = touint64(y);
     xu.wrapping_add(xu) < yu
 }
 
@@ -450,27 +473,79 @@ pub struct Time {
     mono: int, // 0 = absent
 }
 
+// go: sdk 1.25.5 time/time.go:531-563 unixToInternal
+/// Seconds from January 1, year 1 to January 1, 1970 — the offset
+/// between Go's internal epoch and the Unix one.
+///
+/// `Time.sec` counts from the ABSOLUTE ZERO YEAR, as Go's does, so the
+/// zero `Time` is January 1 of year 1 and not the Unix epoch. It used
+/// to count Unix seconds, which made `Time{}` read as 1970-01-01 — a
+/// divergence visible wherever a zero time is formatted, and one this
+/// tree had already recorded twice, in `io/fs.FormatFileInfo` and in
+/// `archive/tar`'s FileInfo rendering. Both of those notes are now
+/// stale in the good direction.
+///
+/// The binary encoding gets fixed with it: Go's `AppendBinary` writes
+/// `t.sec()`, the internal count, and goish was writing Unix seconds —
+/// so a `MarshalBinary` here and an `UnmarshalBinary` in Go disagreed
+/// by 62135596800 seconds.
+const unixToInternal: int = (1969 * 365 + 1969 / 4 - 1969 / 100 + 1969 / 400) * 86400;
+
+// go: sdk 1.25.5 time/time.go:531-563 internalToUnix
+const internalToUnix: int = -unixToInternal;
+
 impl Time {
+    // go: sdk 1.25.5 time/time.go:262-264 Time.IsZero
+    /// Whether `t` is the zero instant — January 1, year 1, 00:00:00
+    /// UTC.
     pub fn IsZero(self) -> bool {
-        self.sec == 0 && self.nsec == 0
+        return self.sec == 0 && self.nsec == 0;
     }
+
+    #[doc(hidden)]
+    // go: none — goish idiom: the read-back half of `__reflect_value`,
+    //     which emits the internal second count. `encoding/asn1` is the
+    //     only caller.
+    pub fn __from_internal(sec: int, nsec: int) -> Time {
+        return Time {
+            sec,
+            nsec: nsec as i32,
+            mono: 0,
+        };
+    }
+
+    // go: none — goish idiom: Go's `unixSec` is a method on the packed
+    //     wall/ext representation. goish stores the internal second
+    //     count in a plain field, so this is the one place the epoch
+    //     shift is spelled and everything Unix-shaped goes through it.
+    fn unixSec(self) -> int {
+        return self.sec + internalToUnix;
+    }
+
+    // go: sdk 1.25.5 time/time.go:1428-1430 Time.Unix
     pub fn Unix(self) -> int {
-        self.sec
+        return self.unixSec();
     }
+    // go: sdk 1.25.5 time/time.go:1437-1439 Time.UnixMilli
     pub fn UnixMilli(self) -> int {
-        self.sec
+        return self
+            .unixSec()
             .wrapping_mul(1_000)
-            .wrapping_add((self.nsec as int) / 1_000_000)
+            .wrapping_add((self.nsec as int) / 1_000_000);
     }
+    // go: sdk 1.25.5 time/time.go:1446-1448 Time.UnixMicro
     pub fn UnixMicro(self) -> int {
-        self.sec
+        return self
+            .unixSec()
             .wrapping_mul(1_000_000)
-            .wrapping_add((self.nsec as int) / 1_000)
+            .wrapping_add((self.nsec as int) / 1_000);
     }
+    // go: sdk 1.25.5 time/time.go:1456-1458 Time.UnixNano
     pub fn UnixNano(self) -> int {
-        self.sec
+        return self
+            .unixSec()
             .wrapping_mul(1_000_000_000)
-            .wrapping_add(self.nsec as int)
+            .wrapping_add(self.nsec as int);
     }
     pub fn After(self, u: Time) -> bool {
         self.sec > u.sec || (self.sec == u.sec && self.nsec > u.nsec)
@@ -513,15 +588,34 @@ impl Time {
         }
         0
     }
+    // go: sdk 1.25.5 time/time.go:1194-1208 Time.Sub
+    /// The duration `t - u`.
+    ///
+    /// A `Duration` is an int64 of NANOSECONDS, so it spans about 292
+    /// years and a wider gap does not fit. Go SATURATES — maxDuration
+    /// or minDuration by direction — rather than wrapping. This used to
+    /// wrap, which reports a negative gap between two correctly ordered
+    /// instants; the zero `Time` is nineteen centuries from the epoch,
+    /// so every uninitialised Time is on the wrong side of that.
     pub fn Sub(self, u: Time) -> Duration {
-        // Prefer monotonic when both have it.
+        // Go: if t.wall&u.wall&hasMonotonic != 0 { return subMono(...) }
         if self.mono != 0 && u.mono != 0 {
-            return Duration(self.mono.wrapping_sub(u.mono));
+            return subMono(self.mono, u.mono);
         }
         let sec_diff = self.sec.wrapping_sub(u.sec);
         let nsec_diff = (self.nsec as int).wrapping_sub(u.nsec as int);
-        Duration(sec_diff.wrapping_mul(1_000_000_000).wrapping_add(nsec_diff))
+        let d = Duration(sec_diff.wrapping_mul(1_000_000_000).wrapping_add(nsec_diff));
+        // Go: switch { case u.Add(d).Equal(t): return d; case t.Before(u):
+        //     return minDuration; default: return maxDuration }
+        if u.Add(d).Equal(self) {
+            return d;
+        }
+        if self.Before(u) {
+            return minDuration;
+        }
+        return maxDuration;
     }
+    // go: sdk 1.25.5 time/time.go:1166-1188 Time.Add
     pub fn Add(self, d: Duration) -> Time {
         let total_nsec = (self.nsec as int).wrapping_add(d.0);
         let extra_sec = total_nsec.div_euclid(1_000_000_000);
@@ -548,7 +642,7 @@ impl Time {
 
     /// `t.Date()` — `(year, month, day)`. Month is 1..=12.
     pub fn Date(self) -> (int, int, int) {
-        let (y, m, d, _, _, _) = civil_from_unix(self.sec);
+        let (y, m, d, _, _, _) = civil_from_unix(self.unixSec());
         (y, m, d)
     }
 
@@ -566,7 +660,7 @@ impl Time {
 
     /// `t.Clock()` — `(hour, minute, second)` within the day, UTC.
     pub fn Clock(self) -> (int, int, int) {
-        let (_, _, _, hh, mm, ss) = civil_from_unix(self.sec);
+        let (_, _, _, hh, mm, ss) = civil_from_unix(self.unixSec());
         (hh, mm, ss)
     }
     pub fn Hour(self) -> int {
@@ -587,7 +681,7 @@ impl Time {
     /// [`Weekday`]. Use `.Int()` for the underlying 0..=6 number
     /// (0=Sunday .. 6=Saturday).
     pub fn Weekday(self) -> Weekday {
-        let days = self.sec.div_euclid(86_400);
+        let days = self.unixSec().div_euclid(86_400);
         // 1970-01-01 was a Thursday (=4 in Sun..Sat = 0..6).
         Weekday((days + 4).rem_euclid(7) as int)
     }
@@ -598,7 +692,7 @@ impl Time {
         // Go: time.go:904 — `_, yday := t.absSec().days().yearYday()`.
         // Slim: derive from current Date() vs Jan 1 of the same year.
         let (y, _, _) = self.Date();
-        let unix_days_now = self.sec.div_euclid(86_400);
+        let unix_days_now = self.unixSec().div_euclid(86_400);
         let unix_days_jan1 = days_from_civil(y, 1, 1);
         // Go: yday is 1-based.
         (unix_days_now - unix_days_jan1 + 1) as int
@@ -610,7 +704,7 @@ impl Time {
     /// likewise December 31 can fall in week 1 of the next ISO year.
     pub fn ISOWeek(self) -> (int, int) {
         // Go: time.go:859 — `days := t.absSec().days()`.
-        let days = self.sec.div_euclid(86_400);
+        let days = self.unixSec().div_euclid(86_400);
         // Go: time.go:860 — `thu := days + absDays(Thursday - ((days-1).weekday()+1))`.
         // `weekday()` on absDays returns Sun=0..Sat=6 (Go's standard
         // `Weekday`). We derive the same numbering from Unix days:
@@ -704,7 +798,7 @@ impl Time {
     /// Pass the constant via `string(time::RFC3339)`.
     pub fn Format<S: Into<crate::gostring::string>>(self, layout: S) -> crate::gostring::string {
         let layout = layout.into();
-        let (y, m, d, hh, mm, ss) = civil_from_unix(self.sec);
+        let (y, m, d, hh, mm, ss) = civil_from_unix(self.unixSec());
         let wd = self.Weekday().Int();
         let nano = self.nsec;
         format_layout(&layout, y, m, d, hh, mm, ss, wd, nano as int)
@@ -1465,11 +1559,12 @@ pub fn Now() -> Time {
     // case that monotonic time read exactly zero (kernel boot in some
     // virtualization scenarios).
     let mono_safe = if mono_ns == 0 { 1 } else { mono_ns };
-    Time {
-        sec: wall.tv_sec,
+    return Time {
+        // The clock reports Unix seconds; `Time.sec` counts from year 1.
+        sec: wall.tv_sec.wrapping_add(unixToInternal),
         nsec: wall.tv_nsec as i32,
         mono: mono_safe,
-    }
+    };
 }
 
 /// `time.Sleep(d)` — pause the current goroutine for at least `d`.
@@ -1732,11 +1827,13 @@ pub fn NewTicker(d: Duration) -> Ticker {
 pub fn Unix(sec: int, nsec: int) -> Time {
     let extra_sec = nsec.div_euclid(1_000_000_000);
     let final_nsec = nsec.rem_euclid(1_000_000_000) as i32;
-    Time {
-        sec: sec.wrapping_add(extra_sec),
+    // `Time.sec` counts from year 1, not from the epoch — see the note
+    // on `unixToInternal`. This is where a Unix second becomes one.
+    return Time {
+        sec: sec.wrapping_add(extra_sec).wrapping_add(unixToInternal),
         nsec: final_nsec,
         mono: 0,
-    }
+    };
 }
 
 /// `time.UnixMilli(msec)` (time.go:1666) — return the Time
@@ -2764,31 +2861,20 @@ fn month_short(bs: &[u8]) -> Option<int> {
 // `time.Time` was *encoded* where Go omits it. Pinned by
 // examples/x509_keys_smoke.rs against `scripts/goref.sh encoding/asn1`.
 //
-// KNOWN DIVERGENCE, recorded here rather than in asn1 because the cause
-// is this struct: **goish's zero Time is the Unix epoch; Go's is year
-// 1.** `Time::default()` and `time::Unix(0, 0)` are literally the same
-// value — `{sec: 0, nsec: 0, mono: 0}` — so `IsZero()` is true for both
-// and `Year()` is 1970 for both. Go's `time.Time{}` is 0001-01-01 and is
-// distinct from `time.Unix(0, 0)`.
+// The two fields carry the INTERNAL second count — seconds from year
+// 1, the same frame `Time.sec` uses — and not the Unix one. That is
+// what makes a reflected zero Time equal `reflect::Zero(Time)`, which
+// is the test `encoding/asn1`'s `makeField` uses to omit an OPTIONAL
+// field.
 //
-// So the two OPTIONAL-omission *predicates* differ even though both are
-// spelled "the zero". Measured on `tbsCertificateList.NextUpdate`
-// (`asn1:"optional"`), both strings goref output:
+// This carried a KNOWN DIVERGENCE while `Time` was anchored at the
+// epoch: `Time::default()` and `time::Unix(0, 0)` were the same value,
+// so goish omitted an OPTIONAL time at BOTH where Go omits only its own
+// year-1 zero and emits `170d3730303130313030303030305a` for the epoch.
+// A caller who deliberately meant 1970 got the field dropped. Both
+// halves are now Go's, and the case in
+// examples/x509_create_smoke.rs splits in two as that file predicted.
 //
-//   Go     omits at time.Time{} (year 1);
-//          EMITS at time.Unix(0,0) — 170d3730303130313030303030305a
-//   goish  omits at both, because it cannot tell them apart
-//
-// A caller who deliberately means 1970 therefore gets the field dropped
-// where Go writes it. Same family as `big::Int`'s divergence — a goish
-// value type collapsing two Go states into one — and the trade is the
-// same: the case that actually occurs is an *unset* OPTIONAL time, and
-// omitting it is right. Emitting a spurious "700101000000Z" for every
-// unset one, which is what this code did before the field list existed,
-// was the worse error.
-//
-// If `Time` ever grows a real year-1 zero, this splits in two and the
-// explicit-`Unix(0, 0)` half must start emitting those bytes again.
 // Found by the crypto/x509 CRL port.
 static TIME_FIELDS: [crate::reflect::StructField; 2] = [
     crate::reflect::StructField {
@@ -2814,16 +2900,11 @@ impl crate::reflect::Reflect for Time {
     }
     #[inline]
     fn __reflect_value(&self) -> crate::reflect::Value {
-        // The two fields carry enough to rebuild the Time: seconds since
-        // the Unix epoch and the nanosecond remainder. A reflected Time
-        // that discarded its value would be useless to any port that has
-        // to read it back, which is what encoding/asn1's makeBody does
-        // before encoding a UTCTime. See TIME_FIELDS above for why the
-        // declared list must agree with this one.
+        // Internal seconds, not Unix ones — see TIME_FIELDS above.
         crate::reflect::Value::Struct {
             ty: <Self as crate::reflect::Reflect>::__reflect_type(),
             fields: alloc::vec![
-                crate::reflect::Value::Int(self.Unix()),
+                crate::reflect::Value::Int(self.sec),
                 crate::reflect::Value::Int(self.Nanosecond()),
             ],
         }

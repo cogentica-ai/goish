@@ -1084,8 +1084,11 @@ impl FromReflectValue for time::Time {
                 crate::errors::New("asn1: expected time.Time"),
             );
         }
+        // The reflected fields are INTERNAL seconds — from year 1, the
+        // frame `Time.sec` uses — so this cannot go through
+        // `time::Unix`, which would shift them a second time.
         let sec = v.Field(0).Int();
         let nsec = v.Field(1).Int();
-        return (time::Unix(sec, nsec).UTC(), nil);
+        return (time::Time::__from_internal(sec, nsec).UTC(), nil);
     }
 }
