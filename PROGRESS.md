@@ -27,7 +27,7 @@ goishlint diff the port against the Go file it came from.
 | `encoding` | 230/1018 | 22.6% | 301 |
 | `compress` | 150/150 | 100.0% | 303 |
 | `os` | 112/366 | 30.6% | 3 |
-| `bytes` | 90/107 | 84.1% | 8 |
+| `bytes` | 100/107 | 93.5% | 31 |
 | `strings` | 98/98 | 100.0% | 153 |
 | `archive` | 71/182 | 39.0% | 0 |
 | `time` | 71/184 | 38.6% | 4 |
@@ -649,6 +649,36 @@ twice, once against the Seq and once against `Split`/`SplitAfter`/
 `SplitSeq`, `FieldsSeq` and `Lines`. `Lines` is the one that separates
 the two packages' empty cases — it yields nothing for an empty slice
 where `SplitSeq` yields one empty fragment.
+
+`bytes/bytes.go`'s trim family and case mappings followed, taking
+`bytes` to **100/107 with 31 anchors**, and turning up two defects.
+
+**The cutset was matched byte-wise, not rune-wise.** Go's cutset is a
+`string` decoded as runes: `Trim(s, "é")` strips the two-byte é, not
+the bytes 0xC3 and 0xA9 wherever they turn up. goish's loop asked
+`cutset.contains(&byte)`, so a lone 0xC3 at the head of a slice — a
+continuation byte belonging to no complete rune — was stripped under
+cutset "é", and so was a pair of bare 0xA9s. Go leaves all of them
+alone. The three-way dispatch is ported now: one ASCII byte is a byte
+comparison, an all-ASCII cutset a 128-bit bitmap, and only a cutset
+holding a non-ASCII rune pays for decoding.
+
+**`ToUpper` and `ToLower` were ASCII-only.** The loop upper-cased
+'a'..'z' and passed every byte at or above 0x80 through untouched, so
+`ToUpper([]byte("café"))` came back "CAFé". Go takes the ASCII fast
+path only when the *whole* slice is ASCII and otherwise maps rune-wise
+through `unicode.ToUpper`. Both now do, and `ToTitle`'s claim that
+non-ASCII bytes "pass through unchanged" is retired with them.
+
+Go also returns a *copy* from the ASCII path even when nothing changes
+— `append([]byte(""), s...)` — where goish returned the input handle.
+That matters for a `[]byte` in a way it does not for a string: the
+caller may write into the result. The copy is back.
+
+192 trim vectors from a running Go — twelve cutsets crossed with
+sixteen inputs, hitting all three dispatch paths — plus 80
+TrimPrefix/TrimSuffix vectors, TrimSpace, and the Turkish special
+cases.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the

@@ -144,6 +144,13 @@ pub(super) fn is_ascii_space(c: byte) -> bool {
     matches!(c, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
 }
 
+#[path = "bytes.rs"]
+mod bytes_go;
+pub use bytes_go::{
+    ToLower, ToLowerSpecial, ToTitle, ToTitleSpecial, ToUpper, ToUpperSpecial, Trim, TrimLeft,
+    TrimPrefix, TrimRight, TrimSpace, TrimSuffix,
+};
+
 #[path = "iter.rs"]
 mod iter_go;
 pub use iter_go::{FieldsFuncSeq, FieldsSeq, Lines, SplitAfterSeq, SplitSeq};
@@ -234,162 +241,7 @@ pub fn Count<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(s: S1, sep: S2) -> in
 
 // ─── Trim family ──────────────────────────────────────────────────────
 
-pub fn TrimSpace<S: Into<slice<byte>>>(s: S) -> slice<byte> {
-    let s = s.into();
-    let raw: &[byte] = &s;
-    let mut start = 0usize;
-    while start < raw.len() && raw[start] < utf8::RuneSelf && is_ascii_space(raw[start]) {
-        start += 1;
-    }
-    let mut stop = raw.len();
-    while stop > start && raw[stop - 1] < utf8::RuneSelf && is_ascii_space(raw[stop - 1]) {
-        stop -= 1;
-    }
-    if start == 0 && stop == raw.len() {
-        return s;
-    }
-    slice::__from_vec(raw[start..stop].to_vec())
-}
-
-pub fn Trim<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(s: S1, cutset: S2) -> slice<byte> {
-    let s = s.into();
-    let cutset = cutset.into();
-    let raw: &[byte] = &s;
-    let cs: &[byte] = &cutset;
-    if raw.is_empty() || cs.is_empty() {
-        return s;
-    }
-    let mut start = 0usize;
-    while start < raw.len() && cs.contains(&raw[start]) {
-        start += 1;
-    }
-    let mut stop = raw.len();
-    while stop > start && cs.contains(&raw[stop - 1]) {
-        stop -= 1;
-    }
-    if start == 0 && stop == raw.len() {
-        return s;
-    }
-    slice::__from_vec(raw[start..stop].to_vec())
-}
-
-pub fn TrimLeft<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(s: S1, cutset: S2) -> slice<byte> {
-    let s = s.into();
-    let cutset = cutset.into();
-    let raw: &[byte] = &s;
-    let cs: &[byte] = &cutset;
-    if raw.is_empty() || cs.is_empty() {
-        return s;
-    }
-    let mut start = 0usize;
-    while start < raw.len() && cs.contains(&raw[start]) {
-        start += 1;
-    }
-    if start == 0 {
-        return s;
-    }
-    slice::__from_vec(raw[start..].to_vec())
-}
-
-pub fn TrimRight<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(s: S1, cutset: S2) -> slice<byte> {
-    let s = s.into();
-    let cutset = cutset.into();
-    let raw: &[byte] = &s;
-    let cs: &[byte] = &cutset;
-    if raw.is_empty() || cs.is_empty() {
-        return s;
-    }
-    let mut stop = raw.len();
-    while stop > 0 && cs.contains(&raw[stop - 1]) {
-        stop -= 1;
-    }
-    if stop == raw.len() {
-        return s;
-    }
-    slice::__from_vec(raw[..stop].to_vec())
-}
-
-pub fn TrimPrefix<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(s: S1, prefix: S2) -> slice<byte> {
-    let s = s.into();
-    let prefix = prefix.into();
-    let raw: &[byte] = &s;
-    let pb: &[byte] = &prefix;
-    if has_prefix(raw, pb) {
-        return slice::__from_vec(raw[pb.len()..].to_vec());
-    }
-    s
-}
-
-pub fn TrimSuffix<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(s: S1, suffix: S2) -> slice<byte> {
-    let s = s.into();
-    let suffix = suffix.into();
-    let raw: &[byte] = &s;
-    let sb: &[byte] = &suffix;
-    if has_suffix(raw, sb) {
-        return slice::__from_vec(raw[..raw.len() - sb.len()].to_vec());
-    }
-    s
-}
-
 // ─── Case (ASCII-only) / EqualFold ────────────────────────────────────
-
-pub fn ToUpper<S: Into<slice<byte>>>(s: S) -> slice<byte> {
-    let s = s.into();
-    let raw: &[byte] = &s;
-    let mut has_lower = false;
-    for &c in raw {
-        if c >= b'a' && c <= b'z' {
-            has_lower = true;
-            break;
-        }
-    }
-    if !has_lower {
-        return s;
-    }
-    let mut v: Vec<byte> = Vec::with_capacity(raw.len());
-    for &c in raw {
-        if c >= b'a' && c <= b'z' {
-            v.push(c - (b'a' - b'A'));
-        } else {
-            v.push(c);
-        }
-    }
-    slice::__from_vec(v)
-}
-
-pub fn ToLower<S: Into<slice<byte>>>(s: S) -> slice<byte> {
-    let s = s.into();
-    let raw: &[byte] = &s;
-    let mut has_upper = false;
-    for &c in raw {
-        if c >= b'A' && c <= b'Z' {
-            has_upper = true;
-            break;
-        }
-    }
-    if !has_upper {
-        return s;
-    }
-    let mut v: Vec<byte> = Vec::with_capacity(raw.len());
-    for &c in raw {
-        if c >= b'A' && c <= b'Z' {
-            v.push(c + (b'a' - b'A'));
-        } else {
-            v.push(c);
-        }
-    }
-    slice::__from_vec(v)
-}
-
-/// `bytes.ToTitle(s)` (bytes.go:757) — title-case mapping over `s`.
-/// Go: `func ToTitle(s []byte) []byte { return Map(unicode.ToTitle, s) }`.
-///
-/// Slim: ASCII title-case is identical to upper-case (mirrors
-/// `strings.ToTitle`); non-ASCII bytes pass through unchanged.
-pub fn ToTitle<S: Into<slice<byte>>>(s: S) -> slice<byte> {
-    // Go: return Map(unicode.ToTitle, s)
-    Map(crate::unicode::ToTitle, s)
-}
 
 pub fn EqualFold<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(s: S1, t: S2) -> bool {
     let s = s.into();
