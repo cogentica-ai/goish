@@ -1,3 +1,5 @@
+// go: file strconv/decimal.go decls: decimal.String, digitZero, trim, decimal.Assign, rightShift, prefixIsLessThan, leftShift, decimal.Shift, shouldRoundUp, decimal.Round, decimal.RoundDown, decimal.RoundUp, decimal.RoundedInteger
+//
 // Multiprecision decimal numbers — port of Go 1.25 src/strconv/decimal.go.
 //
 // For floating-point formatting only; not general purpose.
@@ -11,7 +13,7 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::convert::{int32 as toint32, uint32 as touint32, uint64 as touint64};
+use crate::convert::{byte as tobyte, int32 as toint32, uint32 as touint32, uint64 as touint64};
 use crate::gostring::string;
 use crate::types::byte;
 
@@ -25,6 +27,10 @@ pub(crate) struct decimal {
 }
 
 impl decimal {
+    // go: none — goish idiom: Go's `decimal` is used as a zero value
+    //     (`var d decimal`), which fills the 800-byte digit array for
+    //     free. Rust has no implicit zero value for a struct with an
+    //     array field, so the zero has to be spelled out once here.
     pub fn new() -> Self {
         return Self {
             d: [0u8; 800],
@@ -55,7 +61,7 @@ impl decimal {
             w += 1;
             buf[w] = b'.';
             w += 1;
-            w += digit_zero(&mut buf[w..w + (-self.dp) as usize]);
+            w += digitZero(&mut buf[w..w + (-self.dp) as usize]);
             let nd = self.nd as usize;
             buf[w..w + nd].copy_from_slice(&self.d[0..nd]);
             w += nd;
@@ -74,7 +80,7 @@ impl decimal {
             let nd = self.nd as usize;
             buf[w..w + nd].copy_from_slice(&self.d[0..nd]);
             w += nd;
-            w += digit_zero(&mut buf[w..w + (self.dp - self.nd) as usize]);
+            w += digitZero(&mut buf[w..w + (self.dp - self.nd) as usize]);
         }
         buf.truncate(w);
         return string::__from_vec(buf);
@@ -91,7 +97,7 @@ impl decimal {
         while v > 0 {
             let v1 = v / 10;
             v -= 10 * v1;
-            buf[n] = (v + ('0' as u64)) as u8;
+            buf[n] = tobyte(v + touint64(b'0'));
             n += 1;
             v = v1;
         }
@@ -117,17 +123,17 @@ impl decimal {
             return;
         }
         if k > 0 {
-            while k > toint32(MAX_SHIFT) {
-                left_shift(self, MAX_SHIFT);
-                k -= toint32(MAX_SHIFT);
+            while k > toint32(maxShift) {
+                leftShift(self, maxShift);
+                k -= toint32(maxShift);
             }
-            left_shift(self, touint32(k));
+            leftShift(self, touint32(k));
         } else if k < 0 {
-            while k < -(toint32(MAX_SHIFT)) {
-                right_shift(self, MAX_SHIFT);
-                k += toint32(MAX_SHIFT);
+            while k < -(toint32(maxShift)) {
+                rightShift(self, maxShift);
+                k += toint32(maxShift);
             }
-            right_shift(self, (-k) as u32);
+            rightShift(self, touint32(-k));
         }
     }
 
@@ -138,7 +144,7 @@ impl decimal {
         if nd < 0 || nd >= self.nd {
             return;
         }
-        if should_round_up(self, nd) {
+        if shouldRoundUp(self, nd) {
             self.RoundUp(nd);
         } else {
             self.RoundDown(nd);
@@ -193,21 +199,22 @@ impl decimal {
         let mut i: i32 = 0;
         let mut n: u64 = 0;
         while i < self.dp && i < self.nd {
-            n = n * 10 + (self.d[i as usize] - b'0') as u64;
+            n = n * 10 + touint64(self.d[i as usize] - b'0');
             i += 1;
         }
         while i < self.dp {
             n *= 10;
             i += 1;
         }
-        if should_round_up(self, self.dp) {
+        if shouldRoundUp(self, self.dp) {
             n += 1;
         }
         return n;
     }
 }
 
-fn digit_zero(dst: &mut [byte]) -> usize {
+// go: sdk 1.25.5 strconv/decimal.go:60-65 digitZero
+fn digitZero(dst: &mut [byte]) -> usize {
     for b in dst.iter_mut() {
         *b = b'0';
     }
@@ -225,13 +232,19 @@ pub(crate) fn trim(a: &mut decimal) {
     }
 }
 
-// Maximum shift that we can do in one pass without overflow.
-// uint has 64 bits on amd64 (our target); we have to accommodate 9<<k.
-const UINT_SIZE: u32 = 64;
-const MAX_SHIFT: u32 = UINT_SIZE - 4;
+// go: sdk 1.25.5 strconv/decimal.go:106-106 uintSize
+/// Go computes this as `32 << (^uint(0) >> 63)`; goish's `uint` is
+/// 64-bit.
+const uintSize: u32 = 64;
 
-/// Binary shift right (/ 2) by k bits. k <= MAX_SHIFT to avoid overflow.
-fn right_shift(a: &mut decimal, k: u32) {
+// go: sdk 1.25.5 strconv/decimal.go:107-107 maxShift
+/// Maximum shift that we can do in one pass without overflow: we have
+/// to accommodate 9<<k.
+const maxShift: u32 = uintSize - 4;
+
+// go: sdk 1.25.5 strconv/decimal.go:109-160 rightShift
+/// Binary shift right (/ 2) by k bits. k <= maxShift to avoid overflow.
+fn rightShift(a: &mut decimal, k: u32) {
     let mut r: i32 = 0; // read pointer
     let mut w: i32 = 0; // write pointer
 
@@ -253,7 +266,7 @@ fn right_shift(a: &mut decimal, k: u32) {
             break;
         }
         let c = touint64(a.d[r as usize]);
-        n = n * 10 + c - ('0' as u64);
+        n = n * 10 + c - touint64(b'0');
         r += 1;
     }
     a.dp -= r - 1;
@@ -265,9 +278,9 @@ fn right_shift(a: &mut decimal, k: u32) {
         let c = touint64(a.d[r as usize]);
         let dig = n >> k;
         n &= mask;
-        a.d[w as usize] = (dig + ('0' as u64)) as u8;
+        a.d[w as usize] = tobyte(dig + touint64(b'0'));
         w += 1;
-        n = n * 10 + c - ('0' as u64);
+        n = n * 10 + c - touint64(b'0');
         r += 1;
     }
 
@@ -276,7 +289,7 @@ fn right_shift(a: &mut decimal, k: u32) {
         let dig = n >> k;
         n &= mask;
         if (w as usize) < a.d.len() {
-            a.d[w as usize] = (dig + ('0' as u64)) as u8;
+            a.d[w as usize] = tobyte(dig + touint64(b'0'));
             w += 1;
         } else if dig > 0 {
             a.trunc = true;
@@ -292,260 +305,263 @@ fn right_shift(a: &mut decimal, k: u32) {
 // new digits introduced by that shift. Each entry is `(delta, cutoff)`.
 // `cutoff` is the leading-digits string; if a's prefix is < cutoff,
 // `delta - 1` new digits are introduced instead of `delta`.
-struct LeftCheat {
+// go: sdk 1.25.5 strconv/decimal.go:172-176 leftCheat
+struct leftCheat {
     delta: i32,
     cutoff: &'static [u8],
 }
 
-const LEFT_CHEATS: &[LeftCheat] = &[
-    LeftCheat {
+// go: sdk 1.25.5 strconv/decimal.go:178-253 leftcheats
+const leftcheats: &[leftCheat] = &[
+    leftCheat {
         delta: 0,
         cutoff: b"",
     },
-    LeftCheat {
+    leftCheat {
         delta: 1,
         cutoff: b"5",
     },
-    LeftCheat {
+    leftCheat {
         delta: 1,
         cutoff: b"25",
     },
-    LeftCheat {
+    leftCheat {
         delta: 1,
         cutoff: b"125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 2,
         cutoff: b"625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 2,
         cutoff: b"3125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 2,
         cutoff: b"15625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 3,
         cutoff: b"78125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 3,
         cutoff: b"390625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 3,
         cutoff: b"1953125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 4,
         cutoff: b"9765625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 4,
         cutoff: b"48828125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 4,
         cutoff: b"244140625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 4,
         cutoff: b"1220703125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 5,
         cutoff: b"6103515625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 5,
         cutoff: b"30517578125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 5,
         cutoff: b"152587890625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 6,
         cutoff: b"762939453125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 6,
         cutoff: b"3814697265625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 6,
         cutoff: b"19073486328125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 7,
         cutoff: b"95367431640625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 7,
         cutoff: b"476837158203125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 7,
         cutoff: b"2384185791015625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 7,
         cutoff: b"11920928955078125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 8,
         cutoff: b"59604644775390625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 8,
         cutoff: b"298023223876953125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 8,
         cutoff: b"1490116119384765625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 9,
         cutoff: b"7450580596923828125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 9,
         cutoff: b"37252902984619140625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 9,
         cutoff: b"186264514923095703125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 10,
         cutoff: b"931322574615478515625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 10,
         cutoff: b"4656612873077392578125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 10,
         cutoff: b"23283064365386962890625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 10,
         cutoff: b"116415321826934814453125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 11,
         cutoff: b"582076609134674072265625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 11,
         cutoff: b"2910383045673370361328125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 11,
         cutoff: b"14551915228366851806640625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 12,
         cutoff: b"72759576141834259033203125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 12,
         cutoff: b"363797880709171295166015625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 12,
         cutoff: b"1818989403545856475830078125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 13,
         cutoff: b"9094947017729282379150390625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 13,
         cutoff: b"45474735088646411895751953125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 13,
         cutoff: b"227373675443232059478759765625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 13,
         cutoff: b"1136868377216160297393798828125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 14,
         cutoff: b"5684341886080801486968994140625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 14,
         cutoff: b"28421709430404007434844970703125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 14,
         cutoff: b"142108547152020037174224853515625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 15,
         cutoff: b"710542735760100185871124267578125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 15,
         cutoff: b"3552713678800500929355621337890625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 15,
         cutoff: b"17763568394002504646778106689453125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 16,
         cutoff: b"88817841970012523233890533447265625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 16,
         cutoff: b"444089209850062616169452667236328125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 16,
         cutoff: b"2220446049250313080847263336181640625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 16,
         cutoff: b"11102230246251565404236316680908203125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 17,
         cutoff: b"55511151231257827021181583404541015625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 17,
         cutoff: b"277555756156289135105907917022705078125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 17,
         cutoff: b"1387778780781445675529539585113525390625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 18,
         cutoff: b"6938893903907228377647697925567626953125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 18,
         cutoff: b"34694469519536141888238489627838134765625",
     },
-    LeftCheat {
+    leftCheat {
         delta: 18,
         cutoff: b"173472347597680709441192448139190673828125",
     },
-    LeftCheat {
+    leftCheat {
         delta: 19,
         cutoff: b"867361737988403547205962240695953369140625",
     },
 ];
 
+// go: sdk 1.25.5 strconv/decimal.go:255-265 prefixIsLessThan
 /// Is the leading prefix of b lexicographically less than s?
-fn prefix_is_less_than(b: &[byte], s: &[byte]) -> bool {
+fn prefixIsLessThan(b: &[byte], s: &[byte]) -> bool {
     for i in 0..s.len() {
         if i >= b.len() {
             return true;
@@ -557,10 +573,11 @@ fn prefix_is_less_than(b: &[byte], s: &[byte]) -> bool {
     return false;
 }
 
-/// Binary shift left (* 2) by k bits. k <= MAX_SHIFT to avoid overflow.
-fn left_shift(a: &mut decimal, k: u32) {
-    let mut delta = LEFT_CHEATS[k as usize].delta;
-    if prefix_is_less_than(&a.d[0..a.nd as usize], LEFT_CHEATS[k as usize].cutoff) {
+// go: sdk 1.25.5 strconv/decimal.go:268-311 leftShift
+/// Binary shift left (* 2) by k bits. k <= maxShift to avoid overflow.
+fn leftShift(a: &mut decimal, k: u32) {
+    let mut delta = leftcheats[k as usize].delta;
+    if prefixIsLessThan(&a.d[0..a.nd as usize], leftcheats[k as usize].cutoff) {
         delta -= 1;
     }
 
@@ -571,12 +588,12 @@ fn left_shift(a: &mut decimal, k: u32) {
     let mut n: u64 = 0;
     r -= 1;
     while r >= 0 {
-        n += ((a.d[r as usize] - b'0') as u64) << k;
+        n += touint64(a.d[r as usize] - b'0') << k;
         let quo = n / 10;
         let rem = n - 10 * quo;
         w -= 1;
         if (w as usize) < a.d.len() {
-            a.d[w as usize] = (rem + ('0' as u64)) as u8;
+            a.d[w as usize] = tobyte(rem + touint64(b'0'));
         } else if rem != 0 {
             a.trunc = true;
         }
@@ -590,7 +607,7 @@ fn left_shift(a: &mut decimal, k: u32) {
         let rem = n - 10 * quo;
         w -= 1;
         if (w as usize) < a.d.len() {
-            a.d[w as usize] = (rem + ('0' as u64)) as u8;
+            a.d[w as usize] = tobyte(rem + touint64(b'0'));
         } else if rem != 0 {
             a.trunc = true;
         }
@@ -605,8 +622,9 @@ fn left_shift(a: &mut decimal, k: u32) {
     trim(a);
 }
 
+// go: sdk 1.25.5 strconv/decimal.go:334-347 shouldRoundUp
 /// If we chop a at nd digits, should we round up?
-fn should_round_up(a: &decimal, nd: i32) -> bool {
+fn shouldRoundUp(a: &decimal, nd: i32) -> bool {
     if nd < 0 || nd >= a.nd {
         return false;
     }

@@ -1,3 +1,5 @@
+// go: file strconv/ftoa.go decls: FormatFloat, AppendFloat, genericFtoa, bigFtoa, formatDigits, roundShortest, fmtE, fmtF, fmtB, fmtX
+//
 // Binary-to-decimal floating-point conversion — port of Go 1.25
 // src/strconv/ftoa.go (slow path).
 //
@@ -11,19 +13,43 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::convert::{int32 as toint32, int64 as toint64, uint8 as touint8};
+use crate::convert::{
+    float32 as tofloat32, int32 as toint32, int64 as toint64, uint32 as touint32,
+    uint64 as touint64, uint8 as touint8,
+};
 use crate::gostring::string;
 use crate::types::{byte, int};
 
-use super::atof::{floatInfo, FLOAT32_INFO, FLOAT64_INFO};
 use super::decimal::decimal;
+
+// go: sdk 1.25.5 strconv/ftoa.go:15-20 floatInfo
+/// TODO: move elsewhere?
+pub(crate) struct floatInfo {
+    pub mantbits: u32,
+    pub expbits: u32,
+    pub bias: i32,
+}
+
+// go: sdk 1.25.5 strconv/ftoa.go:22-22 float32info
+pub(crate) const float32info: floatInfo = floatInfo {
+    mantbits: 23,
+    expbits: 8,
+    bias: -127,
+};
+
+// go: sdk 1.25.5 strconv/ftoa.go:23-23 float64info
+pub(crate) const float64info: floatInfo = floatInfo {
+    mantbits: 52,
+    expbits: 11,
+    bias: -1023,
+};
 
 // go: sdk 1.25.5 strconv/ftoa.go:49-51 FormatFloat
 /// `strconv.FormatFloat`.
 pub fn FormatFloat(f: f64, fmt_b: byte, prec: int, bit_size: int) -> string {
     let cap = core::cmp::max(prec + 4, 24) as usize;
     let dst: Vec<byte> = Vec::with_capacity(cap);
-    let bytes = generic_ftoa(dst, f, fmt_b, toint32(prec), toint32(bit_size));
+    let bytes = genericFtoa(dst, f, fmt_b, toint32(prec), toint32(bit_size));
     return string::__from_vec(bytes);
 }
 
@@ -37,19 +63,20 @@ pub fn AppendFloat(
     bit_size: int,
 ) -> crate::goslice::slice<byte> {
     let v = dst.__into_vec();
-    let v = generic_ftoa(v, f, fmt_b, toint32(prec), toint32(bit_size));
+    let v = genericFtoa(v, f, fmt_b, toint32(prec), toint32(bit_size));
     return crate::goslice::slice::__from_vec(v);
 }
 
-fn generic_ftoa(mut dst: Vec<byte>, val: f64, fmt_b: byte, prec: i32, bit_size: i32) -> Vec<byte> {
+// go: sdk 1.25.5 strconv/ftoa.go:58-163 genericFtoa
+fn genericFtoa(mut dst: Vec<byte>, val: f64, fmt_b: byte, prec: i32, bit_size: i32) -> Vec<byte> {
     let (bits, flt) = match bit_size {
-        32 => ((val as f32).to_bits() as u64, &FLOAT32_INFO),
-        64 => (val.to_bits(), &FLOAT64_INFO),
+        32 => (touint64(tofloat32(val).to_bits()), &float32info),
+        64 => (val.to_bits(), &float64info),
         _ => panic!("strconv: illegal AppendFloat/FormatFloat bitSize"),
     };
 
     let neg = (bits >> (flt.expbits + flt.mantbits)) != 0;
-    let mut exp = ((bits >> flt.mantbits) & ((1u64 << flt.expbits) - 1)) as i32;
+    let mut exp = toint32((bits >> flt.mantbits) & ((1u64 << flt.expbits) - 1));
     let mut mant = bits & ((1u64 << flt.mantbits) - 1);
 
     if exp == (1i32 << flt.expbits) - 1 {
@@ -73,17 +100,18 @@ fn generic_ftoa(mut dst: Vec<byte>, val: f64, fmt_b: byte, prec: i32, bit_size: 
     exp += flt.bias;
 
     if fmt_b == b'b' {
-        return fmt_B(dst, neg, mant, exp, flt);
+        return fmtB(dst, neg, mant, exp, flt);
     }
     if fmt_b == b'x' || fmt_b == b'X' {
-        return fmt_X(dst, prec, fmt_b, neg, mant, exp, flt);
+        return fmtX(dst, prec, fmt_b, neg, mant, exp, flt);
     }
 
     // Skip Ryu optimizations — slow path always.
-    return big_ftoa(dst, prec, fmt_b, neg, mant, exp, flt);
+    return bigFtoa(dst, prec, fmt_b, neg, mant, exp, flt);
 }
 
-fn big_ftoa(
+// go: sdk 1.25.5 strconv/ftoa.go:164-199 bigFtoa
+fn bigFtoa(
     dst: Vec<byte>,
     mut prec: i32,
     fmt_b: byte,
@@ -97,7 +125,7 @@ fn big_ftoa(
     d.Shift(exp - toint32(flt.mantbits));
     let shortest = prec < 0;
     if shortest {
-        round_shortest(&mut d, mant, exp, flt);
+        roundShortest(&mut d, mant, exp, flt);
         match fmt_b {
             b'e' | b'E' => prec = core::cmp::max(d.nd - 1, 0),
             b'f' => prec = core::cmp::max(d.nd - d.dp, 0),
@@ -117,25 +145,27 @@ fn big_ftoa(
             _ => {}
         }
     }
-    let digs_d = d.d;
-    let digs_nd = d.nd;
-    let digs_dp = d.dp;
-    return format_digits(dst, shortest, neg, &digs_d, digs_nd, digs_dp, prec, fmt_b);
+    let digs = decimalSlice {
+        d: &d.d[..],
+        nd: d.nd,
+        dp: d.dp,
+    };
+    return formatDigits(dst, shortest, neg, digs, prec, fmt_b);
 }
 
-fn format_digits(
+// go: sdk 1.25.5 strconv/ftoa.go:200-236 formatDigits
+fn formatDigits(
     dst: Vec<byte>,
     shortest: bool,
     neg: bool,
-    d: &[byte; 800],
-    nd: i32,
-    dp: i32,
+    digs: decimalSlice,
     mut prec: i32,
     fmt_b: byte,
 ) -> Vec<byte> {
+    let (nd, dp) = (digs.nd, digs.dp);
     return match fmt_b {
-        b'e' | b'E' => fmt_E(dst, neg, d, nd, dp, prec, fmt_b),
-        b'f' => fmt_F(dst, neg, d, nd, dp, prec),
+        b'e' | b'E' => fmtE(dst, neg, digs, prec, fmt_b),
+        b'f' => fmtF(dst, neg, digs, prec),
         b'g' | b'G' => {
             // trailing fractional zeros in 'e' form will be trimmed.
             let mut eprec = prec;
@@ -154,13 +184,13 @@ fn format_digits(
                     p = nd;
                 }
                 // 'g' → 'e', 'G' → 'E'. Subtraction in i32 to avoid u8 underflow.
-                let next_fmt = (toint32(fmt_b) + (b'e' as i32 - b'g' as i32)) as u8;
-                return fmt_E(dst, neg, d, nd, dp, p - 1, next_fmt);
+                let next_fmt = touint8(toint32(fmt_b) + (toint32(b'e') - toint32(b'g')));
+                return fmtE(dst, neg, digs, p - 1, next_fmt);
             }
             if prec > dp {
                 prec = nd;
             }
-            fmt_F(dst, neg, d, nd, dp, core::cmp::max(prec - dp, 0))
+            fmtF(dst, neg, digs, core::cmp::max(prec - dp, 0))
         }
         _ => {
             // unknown format
@@ -172,9 +202,10 @@ fn format_digits(
     };
 }
 
-/// `roundShortest` — round d (= mant * 2^exp) to the shortest number
-/// of digits that lets the original float be reconstructed.
-fn round_shortest(d: &mut decimal, mant: u64, exp: i32, flt: &floatInfo) {
+// go: sdk 1.25.5 strconv/ftoa.go:234-372 roundShortest
+/// Round d (= mant * 2^exp) to the shortest number of digits that will
+/// let the original floating point value be precisely reconstructed.
+fn roundShortest(d: &mut decimal, mant: u64, exp: i32, flt: &floatInfo) {
     if mant == 0 {
         d.nd = 0;
         return;
@@ -250,16 +281,21 @@ fn round_shortest(d: &mut decimal, mant: u64, exp: i32, flt: &floatInfo) {
     }
 }
 
+// go: sdk 1.25.5 strconv/ftoa.go:374-378 decimalSlice
+/// Go's `decimalSlice` is `{ d []byte; nd, dp int }` — the rounded
+/// digits `bigFtoa` hands to the formatters. goish carried the three
+/// fields as three separate parameters, which is why every formatter
+/// below had two more arguments than the function it ports.
+pub(crate) struct decimalSlice<'a> {
+    pub d: &'a [byte],
+    pub nd: i32,
+    pub dp: i32,
+}
+
+// go: sdk 1.25.5 strconv/ftoa.go:380-434 fmtE
 /// %e: -d.ddddde±dd
-fn fmt_E(
-    mut dst: Vec<byte>,
-    neg: bool,
-    d: &[byte; 800],
-    nd: i32,
-    dp: i32,
-    prec: i32,
-    fmt_b: byte,
-) -> Vec<byte> {
+fn fmtE(mut dst: Vec<byte>, neg: bool, ds: decimalSlice, prec: i32, fmt_b: byte) -> Vec<byte> {
+    let (d, nd, dp) = (ds.d, ds.nd, ds.dp);
     if neg {
         dst.push(b'-');
     }
@@ -297,18 +333,20 @@ fn fmt_E(
         dst.push(b'0');
         dst.push(b'0' + touint8(exp));
     } else if exp < 100 {
-        dst.push(b'0' + (exp / 10) as u8);
-        dst.push(b'0' + (exp % 10) as u8);
+        dst.push(b'0' + touint8(exp / 10));
+        dst.push(b'0' + touint8(exp % 10));
     } else {
-        dst.push(b'0' + (exp / 100) as u8);
-        dst.push(b'0' + ((exp / 10) % 10) as u8);
-        dst.push(b'0' + (exp % 10) as u8);
+        dst.push(b'0' + touint8(exp / 100));
+        dst.push(b'0' + touint8((exp / 10) % 10));
+        dst.push(b'0' + touint8(exp % 10));
     }
     return dst;
 }
 
+// go: sdk 1.25.5 strconv/ftoa.go:435-467 fmtF
 /// %f: -ddddddd.ddddd
-fn fmt_F(mut dst: Vec<byte>, neg: bool, d: &[byte; 800], nd: i32, dp: i32, prec: i32) -> Vec<byte> {
+fn fmtF(mut dst: Vec<byte>, neg: bool, ds: decimalSlice, prec: i32) -> Vec<byte> {
+    let (d, nd, dp) = (ds.d, ds.nd, ds.dp);
     if neg {
         dst.push(b'-');
     }
@@ -339,8 +377,9 @@ fn fmt_F(mut dst: Vec<byte>, neg: bool, d: &[byte; 800], nd: i32, dp: i32, prec:
     return dst;
 }
 
+// go: sdk 1.25.5 strconv/ftoa.go:468-490 fmtB
 /// %b: -ddddddddp±ddd
-fn fmt_B(mut dst: Vec<byte>, neg: bool, mant: u64, exp: i32, flt: &floatInfo) -> Vec<byte> {
+fn fmtB(mut dst: Vec<byte>, neg: bool, mant: u64, exp: i32, flt: &floatInfo) -> Vec<byte> {
     if neg {
         dst.push(b'-');
     }
@@ -359,7 +398,8 @@ fn fmt_B(mut dst: Vec<byte>, neg: bool, mant: u64, exp: i32, flt: &floatInfo) ->
     return dst;
 }
 
-fn fmt_X(
+// go: sdk 1.25.5 strconv/ftoa.go:491-571 fmtX
+fn fmtX(
     mut dst: Vec<byte>,
     prec: i32,
     fmt_b: byte,
@@ -380,7 +420,7 @@ fn fmt_X(
     }
 
     if prec >= 0 && prec < 15 {
-        let shift = (prec * 4) as u32;
+        let shift = touint32(prec * 4);
         let extra = (mant << shift) & ((1u64 << 60) - 1);
         mant >>= 60 - shift;
         if extra | (mant & 1) > (1u64 << 59) {
@@ -402,7 +442,7 @@ fn fmt_X(
     if neg {
         dst.push(b'-');
     }
-    dst.extend_from_slice(&[b'0', fmt_b, b'0' + ((mant >> 60) & 1) as u8]);
+    dst.extend_from_slice(&[b'0', fmt_b, b'0' + touint8((mant >> 60) & 1)]);
 
     mant <<= 4;
     if prec < 0 && mant != 0 {
@@ -429,17 +469,17 @@ fn fmt_X(
     }
 
     if exp < 100 {
-        dst.push(b'0' + (exp / 10) as u8);
-        dst.push(b'0' + (exp % 10) as u8);
+        dst.push(b'0' + touint8(exp / 10));
+        dst.push(b'0' + touint8(exp % 10));
     } else if exp < 1000 {
-        dst.push(b'0' + (exp / 100) as u8);
-        dst.push(b'0' + ((exp / 10) % 10) as u8);
-        dst.push(b'0' + (exp % 10) as u8);
+        dst.push(b'0' + touint8(exp / 100));
+        dst.push(b'0' + touint8((exp / 10) % 10));
+        dst.push(b'0' + touint8(exp % 10));
     } else {
-        dst.push(b'0' + (exp / 1000) as u8);
-        dst.push(b'0' + ((exp / 100) % 10) as u8);
-        dst.push(b'0' + ((exp / 10) % 10) as u8);
-        dst.push(b'0' + (exp % 10) as u8);
+        dst.push(b'0' + touint8(exp / 1000));
+        dst.push(b'0' + touint8((exp / 100) % 10));
+        dst.push(b'0' + touint8((exp / 10) % 10));
+        dst.push(b'0' + touint8(exp % 10));
     }
     return dst;
 }

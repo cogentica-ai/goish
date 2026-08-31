@@ -31,7 +31,7 @@ const maxUint64: uint = u64::MAX;
 
 // go: sdk 1.25.5 strconv/atoi.go:16-18 lower
 #[inline]
-fn lower(c: byte) -> byte {
+pub(crate) fn lower(c: byte) -> byte {
     return c | (b'x' - b'X'); // == 0x20: ASCII letter to lower-case;
 }
 
