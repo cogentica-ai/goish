@@ -301,7 +301,11 @@ impl<R: io::Reader> Reader<R> {
             let mut tmp: slice<byte> = slice::__from_vec(sv);
             let (n, err) = self.rd.Read(&mut tmp);
             if n < 0 {
-                panic!("bufio: reader returned negative count from Read");
+                // Go: panic(errNegativeRead) — it panics with the error
+                // VALUE. goish's panic takes a message, so it panics
+                // with that error's text; routing through the sentinel
+                // keeps the two from drifting apart.
+                panic!("{}", errNegativeRead().Error());
             }
             let src = tmp.__into_vec();
             if n > 0 {
@@ -361,6 +365,10 @@ impl<R: io::Reader> Reader<R> {
     }
 
     // go: sdk 1.25.5 bufio/bufio.go:177-207 Reader.Discard
+    // goishlint:ignore GOISH023 — the body ends in an infinite
+    //     `loop` whose every exit is a `return` from inside it, so
+    //     there is no tail expression to make explicit. Go writes the
+    //     same shape: `for { … }` with returns in the body.
     /// `Discard(n)` — skip n bytes. Returns (skipped, err).
     pub fn Discard(&mut self, n: int) -> (int, error) {
         if n < 0 {
@@ -372,7 +380,7 @@ impl<R: io::Reader> Reader<R> {
         self.lastByte = -1;
         self.lastRuneSize = -1;
         let mut remain = n as usize;
-        return loop {
+        loop {
             let mut skip = self.w - self.r;
             if skip == 0 {
                 self.fill();
@@ -389,7 +397,7 @@ impl<R: io::Reader> Reader<R> {
             if self.err != nil {
                 return (toint(n as usize - remain), self.readErr());
             }
-        };
+        }
     }
 
     // go: sdk 1.25.5 bufio/bufio.go:216-263 Reader.Read
@@ -430,7 +438,11 @@ impl<R: io::Reader> Reader<R> {
             });
             let (n, err) = self.rd.Read(&mut tmp);
             if n < 0 {
-                panic!("bufio: reader returned negative count from Read");
+                // Go: panic(errNegativeRead) — it panics with the error
+                // VALUE. goish's panic takes a message, so it panics
+                // with that error's text; routing through the sentinel
+                // keeps the two from drifting apart.
+                panic!("{}", errNegativeRead().Error());
             }
             self.err = err;
             if n == 0 {
@@ -526,11 +538,15 @@ impl<R: io::Reader> Reader<R> {
     }
 
     // go: sdk 1.25.5 bufio/bufio.go:351-390 Reader.ReadSlice
+    // goishlint:ignore GOISH023 — the body ends in an infinite
+    //     `loop` whose every exit is a `return` from inside it, so
+    //     there is no tail expression to make explicit. Go writes the
+    //     same shape: `for { … }` with returns in the body.
     /// `ReadSlice(delim)` — bytes up to and including the delimiter.
     /// Goish: returns a fresh `slice<byte>` (not a view into buf).
     pub fn ReadSlice(&mut self, delim: byte) -> (slice<byte>, error) {
         let mut s: usize = 0; // search start within buf[r..w]
-        return loop {
+        loop {
             if let Some(i) = index_byte(&self.buf[self.r + s..self.w], delim) {
                 let i = i + s;
                 let line = self.buf[self.r..self.r + i + 1].to_vec();
@@ -559,7 +575,7 @@ impl<R: io::Reader> Reader<R> {
             }
             s = self.w - self.r;
             self.fill();
-        };
+        }
     }
 
     // go: sdk 1.25.5 bufio/bufio.go:408-441 Reader.ReadLine

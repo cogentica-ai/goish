@@ -195,13 +195,17 @@ impl<R: io::Reader> Scanner<R> {
     }
 
     // go: sdk 1.25.5 bufio/scan.go:139-240 Scanner.Scan
+    // goishlint:ignore GOISH023 — the body ends in an infinite
+    //     `loop` whose every exit is a `return` from inside it, so
+    //     there is no tail expression to make explicit. Go writes the
+    //     same shape: `for { … }` with returns in the body.
     /// Advance to the next token. Returns false at EOF or on error.
     pub fn Scan(&mut self) -> bool {
         if self.done {
             return false;
         }
         self.scanCalled = true;
-        return loop {
+        loop {
             // Try to extract a token from what we have.
             if self.end > self.start || self.err != nil {
                 let at_eof = self.err != nil;
@@ -290,7 +294,7 @@ impl<R: io::Reader> Scanner<R> {
                     break;
                 }
             }
-        };
+        }
     }
 }
 

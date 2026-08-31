@@ -203,10 +203,14 @@ impl<R: io::Reader> Reader<R> {
     }
 
     // go: sdk 1.25.5 encoding/csv/reader.go:238-249 Reader.ReadAll
+    // goishlint:ignore GOISH023 — the body ends in an infinite
+    //     `loop` whose every exit is a `return` from inside it, so
+    //     there is no tail expression to make explicit. Go writes the
+    //     same shape: `for { … }` with returns in the body.
     /// `(*Reader).ReadAll()` (reader.go:238).
     pub fn ReadAll(&mut self) -> (slice<slice<string>>, error) {
         let mut records: Vec<slice<string>> = Vec::new();
-        return loop {
+        loop {
             let (record, err) = self.readRecord();
             if crate::errors::Is(err.clone(), io::EOF) {
                 return (slice::__from_vec(records), nil);
@@ -215,7 +219,7 @@ impl<R: io::Reader> Reader<R> {
                 return (slice::__from_vec(Vec::new()), err);
             }
             records.push(record);
-        };
+        }
     }
 
     // go: sdk 1.25.5 encoding/csv/reader.go:255-281 Reader.readLine

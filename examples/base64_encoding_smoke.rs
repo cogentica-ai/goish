@@ -25,10 +25,6 @@ use goish::goslice::slice;
 use goish::types::byte;
 use goish::{string, syscall};
 
-fn sl(b: &[u8]) -> slice<byte> {
-    slice::<byte>::__from_vec(b.to_vec())
-}
-
 fn eq(a: &slice<byte>, b: &[u8]) -> bool {
     let raw: &[byte] = a;
     raw == b

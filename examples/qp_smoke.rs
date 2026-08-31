@@ -23,7 +23,7 @@ use goish::bytes;
 use goish::fmt;
 use goish::goslice::slice;
 use goish::gostring::string;
-use goish::io::{Closer, Reader, Writer};
+use goish::io::Reader;
 use goish::mime::quotedprintable::{NewReader, NewWriter};
 use goish::syscall;
 use goish::types::byte;

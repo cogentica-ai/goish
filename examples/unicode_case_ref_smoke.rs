@@ -140,7 +140,7 @@ fn main() {
         let mut su: i64 = 0;
         let mut sl: i64 = 0;
         let mut st: i64 = 0;
-        let mut acc = |r: rune, su: &mut i64, sl: &mut i64, st: &mut i64| {
+        let acc = |r: rune, su: &mut i64, sl: &mut i64, st: &mut i64| {
             *su = su.wrapping_mul(31).wrapping_add(unicode::ToUpper(r) as i64);
             *sl = sl.wrapping_mul(31).wrapping_add(unicode::ToLower(r) as i64);
             *st = st.wrapping_mul(31).wrapping_add(unicode::ToTitle(r) as i64);

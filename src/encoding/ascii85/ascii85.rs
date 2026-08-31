@@ -422,6 +422,10 @@ pub struct Decoder<R: crate::io::Reader> {
 
 impl<R: crate::io::Reader> Decoder<R> {
     // go: sdk 1.25.5 encoding/ascii85/ascii85.go:255-307 Read
+    // goishlint:ignore GOISH023 — the body ends in an infinite
+    //     `loop` whose every exit is a `return` from inside it, so
+    //     there is no tail expression to make explicit. Go writes the
+    //     same shape: `for { … }` with returns in the body.
     // Go: ascii85.go:255
     //   func (d *decoder) Read(p []byte) (n int, err error)
     pub fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
@@ -434,7 +438,7 @@ impl<R: crate::io::Reader> Decoder<R> {
             return (0, self.err.clone());
         }
 
-        return loop {
+        loop {
             // Go: copy leftover output from last decode.
             if self.out_end > self.out_start {
                 let avail = self.out_end - self.out_start;
@@ -503,7 +507,7 @@ impl<R: crate::io::Reader> Decoder<R> {
                 self.buf[self.nbuf + i] = tmp_raw[i];
             }
             self.nbuf += nn_u;
-        };
+        }
     }
 }
 

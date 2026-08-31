@@ -32,7 +32,6 @@ pub mod letter;
 mod tables;
 
 pub mod norm;
-mod norm_tables;
 pub mod utf16;
 pub mod utf8;
 

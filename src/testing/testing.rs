@@ -2907,7 +2907,10 @@ fn runTestsWithMatch(
     return (ran, ok);
 }
 
-#[allow(non_snake_case)]
+// Go exports both of these for the main package `go test` generates;
+// goish's `M.Run` calls `RunTestsMatch` directly, so nothing in-tree
+// calls either — hence `dead_code`.
+#[allow(non_snake_case, dead_code)]
 pub fn runTests(tests: &[InternalTest], deadline: crate::time::Time) -> (bool, bool) {
     return runTestsWithMatch(tests, deadline, None);
 }
@@ -2917,7 +2920,7 @@ pub fn runTests(tests: &[InternalTest], deadline: crate::time::Time) -> (bool, b
 // parameter as runTests; see the note there.
 /// Go: "An internal function but exported because it is cross-package;
 /// part of the implementation of the 'go test' command."
-#[allow(non_snake_case)]
+#[allow(non_snake_case, dead_code)]
 pub fn RunTests(tests: &[InternalTest]) -> bool {
     let mut deadline = crate::time::Time::default();
     let t = timeoutFlag();
