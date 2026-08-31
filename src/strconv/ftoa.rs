@@ -359,9 +359,6 @@ fn fmt_B(mut dst: Vec<byte>, neg: bool, mant: u64, exp: i32, flt: &floatInfo) ->
     return dst;
 }
 
-const LOWER_HEX: &[u8] = b"0123456789abcdef";
-const UPPER_HEX: &[u8] = b"0123456789ABCDEF";
-
 fn fmt_X(
     mut dst: Vec<byte>,
     prec: i32,
@@ -396,7 +393,11 @@ fn fmt_X(
         }
     }
 
-    let hex = if fmt_b == b'X' { UPPER_HEX } else { LOWER_HEX };
+    let hex = if fmt_b == b'X' {
+        super::quote::upperhex
+    } else {
+        super::quote::lowerhex
+    };
 
     if neg {
         dst.push(b'-');

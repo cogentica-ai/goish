@@ -1,46 +1,39 @@
 // go: package strconv
 //
-// strconv — Go's strconv package, ported. M11a + M11b-A.
-//
-// Includes (M11a — integers / bool):
-//   Atoi, Itoa, ParseInt, ParseUint, FormatInt, FormatUint, AppendInt,
-//   AppendUint, ParseBool, FormatBool, AppendBool, NumError (public
-//   fields), sentinels ErrSyntax / ErrRange.
-//
-// Includes (M11b-A — floats, slow-path port of Go's atof.go / ftoa.go /
-// decimal.go, no Eisel-Lemire / Ryu yet):
-//   ParseFloat, FormatFloat, AppendFloat. Verbs: 'b', 'e', 'E', 'f',
-//   'g', 'G', 'x', 'X' — same as Go.
-//
-// Deferred:
-//   * M11b-B — Ryu fast-path for FormatFloat shortest round-trip.
-//   * M11b-C — Eisel-Lemire fast-path for ParseFloat.
-//   * Quote / Unquote / IsPrint / IsGraphic — M11c (unicode print tables).
-//   * ParseComplex / FormatComplex — no `complex` type yet.
-//
-// v1 differences from Go semantics:
-//
-//   * goish `int` is i64 always (amd64-pinned). `IntSize = 64`. ParseInt
-//     with bit_size=0 is identical to bit_size=64.
-//   * `NumError.Error()` text uses plain double-quotes around `Num`
-//     instead of `strconv.Quote`. Identical for ASCII inputs without
-//     escape chars; upgrades when M11c lands.
-//
-// String inputs are generic over `S: Into<string>` so call sites stay
-// tight: `strconv::Atoi("42")` works without `string("42")` wrapping.
-
-#![allow(non_snake_case, non_upper_case_globals)]
+// strconv — conversions to and from string representations of basic
+// data types.
 //
 // Module root only: one `.rs` per Go `.go`, and the `pub use` surface.
 //
 //   atoi.rs     strconv/atoi.go    — ParseUint, ParseInt, Atoi, NumError
-//   itoa.rs     strconv/itoa.go    — Itoa, FormatInt, FormatUint
-//   atob.rs     strconv/atob.go    — ParseBool, FormatBool
-//   quote.rs    strconv/quote.go   — Quote and its family, Unquote
+//   itoa.rs     strconv/itoa.go    — FormatInt/Uint, AppendInt/Uint,
+//                                    Itoa and the shared formatBits
+//   atob.rs     strconv/atob.go    — ParseBool, FormatBool, AppendBool
+//   quote.rs    strconv/quote.go   — Quote and its family, Unquote,
+//                                    IsPrint, IsGraphic
+//   isprint.rs  strconv/isprint.go — the generated range tables
+//                                    IsPrint and IsGraphic search
 //   atof.rs     strconv/atof.go    — ParseFloat
 //   ftoa.rs     strconv/ftoa.go    — FormatFloat, AppendFloat
 //   decimal.rs  strconv/decimal.go — the multiprecision decimal both
-//                                     float paths share
+//                                    float paths share
+//
+// Not yet ported:
+//
+//   * The Eisel-Lemire fast path in atof.go and the Ryū shortest-form
+//     path in ftoa.go. Both files carry the slow path only, which is
+//     correct but not fast; the fast paths are recorded as open
+//     findings in scripts/lint_baseline.json.
+//   * ParseComplex / FormatComplex — no `complex` type yet.
+//
+// v1 differences from Go semantics:
+//
+//   * goish `int` is i64 always (amd64-pinned), so `IntSize` is 64 and
+//     ParseInt with bit_size=0 is identical to bit_size=64.
+//
+// String inputs are generic over `S: Into<string>` so call sites stay
+// tight: `strconv::Atoi("42")` works without `string("42")` wrapping.
+
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 
@@ -49,6 +42,9 @@ extern crate alloc;
 mod atof;
 mod decimal;
 mod ftoa;
+
+#[path = "isprint.rs"]
+mod isprint;
 
 pub use atof::ParseFloat;
 pub use ftoa::{AppendFloat, FormatFloat};

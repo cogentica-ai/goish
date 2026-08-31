@@ -1,11 +1,11 @@
-// go: file strconv/quote.go decls: Quote, AppendQuote, QuoteToASCII, AppendQuoteToASCII, QuoteToGraphic, AppendQuoteToGraphic, QuoteRune, AppendQuoteRune, QuoteRuneToASCII, AppendQuoteRuneToASCII, QuoteRuneToGraphic, AppendQuoteRuneToGraphic, IsPrint, IsGraphic, CanBackquote, unhex, UnquoteChar, QuotedPrefix, Unquote
+// go: file strconv/quote.go decls: contains, quoteWith, quoteRuneWith, appendQuotedWith, appendQuotedRuneWith, appendEscapedRune, Quote, AppendQuote, QuoteToASCII, AppendQuoteToASCII, QuoteToGraphic, AppendQuoteToGraphic, QuoteRune, AppendQuoteRune, QuoteRuneToASCII, AppendQuoteRuneToASCII, QuoteRuneToGraphic, AppendQuoteRuneToGraphic, CanBackquote, unhex, UnquoteChar, QuotedPrefix, Unquote, unquote, bsearch, IsPrint, IsGraphic, isInGraphicList
 //
 // quote.go — Quote and its family, and Unquote.
 
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::convert::{byte as tobyte, rune as torune, uint8 as touint8};
+use crate::convert::{byte as tobyte, rune as torune, uint16 as touint16, uint32 as touint32};
 use crate::errors::{error, nil};
 use crate::goslice::slice;
 use crate::gostring::string;
@@ -15,302 +15,349 @@ use super::*;
 
 // ─── Quote / Unquote (slim ASCII port of strconv/quote.go) ───────────
 
-// go: sdk 1.25.5 strconv/quote.go:125-127 Quote
-/// `strconv.Quote(s)` (quote.go:125) — return a double-quoted Go
-/// string literal of `s`. Slim port: ASCII-only.
-///
-/// - `\\`, `"` always escaped.
-/// - Tab/newline/CR/etc. use the canonical `\t`/`\n`/`\r` short forms.
-/// - Other bytes < 0x20 or = 0x7F render as `\xHH` (lower-hex).
-/// - Bytes >= 0x80 render as `\xHH` (no full UTF-8 IsPrint check).
-pub fn Quote<S: Into<string>>(s: S) -> string {
-    let s = s.into();
-    let bs = s.as_bytes();
-    let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(bs.len() + 2);
-    out.push(b'"');
-    let lowerhex = b"0123456789abcdef";
-    for &c in bs.iter() {
-        match c {
-            b'\\' => {
-                out.push(b'\\');
-                out.push(b'\\');
+// go: sdk 1.25.5 strconv/quote.go:13-16 lowerhex
+pub(crate) const lowerhex: &[byte] = b"0123456789abcdef";
+
+// go: sdk 1.25.5 strconv/quote.go:13-16 upperhex
+pub(crate) const upperhex: &[byte] = b"0123456789ABCDEF";
+
+// go: sdk 1.25.5 strconv/quote.go:18-21 contains
+/// Reports whether the string contains the byte `c`.
+fn contains(s: &[byte], c: byte) -> bool {
+    return s.contains(&c);
+}
+
+// go: sdk 1.25.5 strconv/quote.go:23-25 quoteWith
+fn quoteWith(s: &[byte], quote: byte, ASCIIonly: bool, graphicOnly: bool) -> string {
+    let mut buf: Vec<byte> = Vec::with_capacity(3 * s.len() / 2);
+    appendQuotedWith(&mut buf, s, quote, ASCIIonly, graphicOnly);
+    return string::from_bytes(&buf);
+}
+
+// go: sdk 1.25.5 strconv/quote.go:27-29 quoteRuneWith
+fn quoteRuneWith(r: rune, quote: byte, ASCIIonly: bool, graphicOnly: bool) -> string {
+    let mut buf: Vec<byte> = Vec::new();
+    appendQuotedRuneWith(&mut buf, r, quote, ASCIIonly, graphicOnly);
+    return string::from_bytes(&buf);
+}
+
+// go: sdk 1.25.5 strconv/quote.go:31-55 appendQuotedWith
+/// Go grows `buf` up front and returns it; goish appends in place, so
+/// the preallocation Go does by hand is `reserve`.
+fn appendQuotedWith(
+    buf: &mut Vec<byte>,
+    s: &[byte],
+    quote: byte,
+    ASCIIonly: bool,
+    graphicOnly: bool,
+) {
+    // Often called with big strings, so preallocate. If there's quoting,
+    // this is conservative but still helps a lot.
+    buf.reserve(1 + s.len() + 1);
+    buf.push(quote);
+    let mut i: usize = 0;
+    while i < s.len() {
+        let mut r: rune = torune(s[i]);
+        let mut width: usize = 1;
+        if s[i] >= crate::unicode::utf8::RuneSelf {
+            let (dr, dw) = crate::unicode::utf8::DecodeRune(&s[i..]);
+            r = dr;
+            width = dw as usize;
+        }
+        if width == 1 && r == crate::unicode::utf8::RuneError {
+            buf.extend_from_slice(b"\\x");
+            buf.push(lowerhex[(s[i] >> 4) as usize]);
+            buf.push(lowerhex[(s[i] & 0xF) as usize]);
+            i += width;
+            continue;
+        }
+        appendEscapedRune(buf, r, quote, ASCIIonly, graphicOnly);
+        i += width;
+    }
+    buf.push(quote);
+}
+
+// go: sdk 1.25.5 strconv/quote.go:58-66 appendQuotedRuneWith
+fn appendQuotedRuneWith(
+    buf: &mut Vec<byte>,
+    r: rune,
+    quote: byte,
+    ASCIIonly: bool,
+    graphicOnly: bool,
+) {
+    buf.push(quote);
+    let mut r = r;
+    if !crate::unicode::utf8::ValidRune(r) {
+        r = crate::unicode::utf8::RuneError;
+    }
+    appendEscapedRune(buf, r, quote, ASCIIonly, graphicOnly);
+    buf.push(quote);
+}
+
+// go: sdk 1.25.5 strconv/quote.go:68-119 appendEscapedRune
+fn appendEscapedRune(
+    buf: &mut Vec<byte>,
+    r: rune,
+    quote: byte,
+    ASCIIonly: bool,
+    graphicOnly: bool,
+) {
+    if r == torune(quote) || r == torune(b'\\') {
+        // always backslashed
+        buf.push(b'\\');
+        buf.push(tobyte(r));
+        return;
+    }
+    let mut r = r;
+    if ASCIIonly {
+        if r < torune(crate::unicode::utf8::RuneSelf) && IsPrint(r) {
+            buf.push(tobyte(r));
+            return;
+        }
+    } else if IsPrint(r) || (graphicOnly && isInGraphicList(r)) {
+        let mut tmp = [0u8; 4];
+        let n = crate::unicode::utf8::EncodeRune(&mut tmp, r) as usize;
+        buf.extend_from_slice(&tmp[..n]);
+        return;
+    }
+    match r {
+        0x07 => buf.extend_from_slice(b"\\a"),
+        0x08 => buf.extend_from_slice(b"\\b"),
+        0x0C => buf.extend_from_slice(b"\\f"),
+        0x0A => buf.extend_from_slice(b"\\n"),
+        0x0D => buf.extend_from_slice(b"\\r"),
+        0x09 => buf.extend_from_slice(b"\\t"),
+        0x0B => buf.extend_from_slice(b"\\v"),
+        _ => {
+            if r < torune(b' ') || r == 0x7F {
+                buf.extend_from_slice(b"\\x");
+                buf.push(lowerhex[(tobyte(r) >> 4) as usize]);
+                buf.push(lowerhex[(tobyte(r) & 0xF) as usize]);
+            } else {
+                // Go writes this as a `case !utf8.ValidRune(r)` that
+                // falls through into the `r < 0x10000` case.
+                if !crate::unicode::utf8::ValidRune(r) {
+                    r = 0xFFFD;
+                }
+                if r < 0x10000 {
+                    buf.extend_from_slice(b"\\u");
+                    let mut sh: i32 = 12;
+                    while sh >= 0 {
+                        buf.push(lowerhex[((r >> sh) & 0xF) as usize]);
+                        sh -= 4;
+                    }
+                } else {
+                    buf.extend_from_slice(b"\\U");
+                    let mut sh: i32 = 28;
+                    while sh >= 0 {
+                        buf.push(lowerhex[((r >> sh) & 0xF) as usize]);
+                        sh -= 4;
+                    }
+                }
             }
-            b'"' => {
-                out.push(b'\\');
-                out.push(b'"');
-            }
-            b'\n' => out.extend_from_slice(b"\\n"),
-            b'\r' => out.extend_from_slice(b"\\r"),
-            b'\t' => out.extend_from_slice(b"\\t"),
-            0x07 => out.extend_from_slice(b"\\a"),
-            0x08 => out.extend_from_slice(b"\\b"),
-            0x0c => out.extend_from_slice(b"\\f"),
-            0x0b => out.extend_from_slice(b"\\v"),
-            c if c < 0x20 || c == 0x7f || c >= 0x80 => {
-                out.extend_from_slice(b"\\x");
-                out.push(lowerhex[(c >> 4) as usize]);
-                out.push(lowerhex[(c & 0x0f) as usize]);
-            }
-            c => out.push(c),
         }
     }
-    out.push(b'"');
-    return string::from_bytes(&out);
+}
+
+// ─── Quote and its family ─────────────────────────────────────────────
+
+// go: sdk 1.25.5 strconv/quote.go:125-127 Quote
+/// `strconv.Quote(s)` — a double-quoted Go string literal representing
+/// `s`, using Go escape sequences (`\t`, `\n`, `\xFF`, `Ā`) for
+/// control and non-printable characters as defined by [`IsPrint`].
+pub fn Quote<S: Into<string>>(s: S) -> string {
+    let s = s.into();
+    return quoteWith(s.as_bytes(), b'"', false, false);
 }
 
 // go: sdk 1.25.5 strconv/quote.go:131-133 AppendQuote
-/// `strconv.AppendQuote(dst, s)` (quote.go:131) — append the
-/// quoted-string form of `s` to `dst` and return the extended buffer.
+/// `strconv.AppendQuote(dst, s)` — append the quoted-string form of
+/// `s` to `dst` and return the extended buffer.
 pub fn AppendQuote<S: Into<string>>(dst: slice<byte>, s: S) -> slice<byte> {
-    // Go: return appendQuotedWith(dst, s, '"', false, false)
-    // Slim: just delegate to Quote() and append the bytes.
-    let q = Quote(s);
+    let s = s.into();
     let mut v = dst.__into_vec();
-    v.extend_from_slice(q.as_bytes());
+    appendQuotedWith(&mut v, s.as_bytes(), b'"', false, false);
     return slice::__from_vec(v);
 }
 
 // go: sdk 1.25.5 strconv/quote.go:138-140 QuoteToASCII
-/// `strconv.QuoteToASCII(s)` (quote.go:138) — return a double-quoted
-/// Go string literal representing `s`, escaping every non-ASCII byte
-/// using `\xHH`. Slim port: the existing `Quote` already emits
-/// ASCII-only output for bytes ≥ 0x80, so this delegates directly.
+/// `strconv.QuoteToASCII(s)` — like [`Quote`], but escaping every
+/// non-ASCII character.
 pub fn QuoteToASCII<S: Into<string>>(s: S) -> string {
-    // Go: return quoteWith(s, '"', true, false)
-    return Quote(s);
+    let s = s.into();
+    return quoteWith(s.as_bytes(), b'"', true, false);
 }
 
 // go: sdk 1.25.5 strconv/quote.go:144-146 AppendQuoteToASCII
-/// `strconv.AppendQuoteToASCII(dst, s)` (quote.go:144) — append the
-/// ASCII-quoted form of `s` to `dst` and return the extended buffer.
+/// `strconv.AppendQuoteToASCII(dst, s)` — append the ASCII-quoted form
+/// of `s` to `dst` and return the extended buffer.
 pub fn AppendQuoteToASCII<S: Into<string>>(dst: slice<byte>, s: S) -> slice<byte> {
-    // Go: return appendQuotedWith(dst, s, '"', true, false)
-    return AppendQuote(dst, s);
+    let s = s.into();
+    let mut v = dst.__into_vec();
+    appendQuotedWith(&mut v, s.as_bytes(), b'"', true, false);
+    return slice::__from_vec(v);
 }
 
 // go: sdk 1.25.5 strconv/quote.go:152-154 QuoteToGraphic
-/// `strconv.QuoteToGraphic(s)` (quote.go:152) — return a double-quoted
-/// Go string literal that leaves Unicode graphic characters unchanged
-/// and uses Go escape sequences for non-graphic characters.
-///
-/// Slim: in goish v1, [`IsGraphic`] defers to [`IsPrint`] (no Unicode
-/// graphic-list table), and [`Quote`] already escapes every byte that
-/// fails the slim printable test, so this is a thin alias over
-/// [`Quote`]. The output for the common ASCII subset matches Go's.
+/// `strconv.QuoteToGraphic(s)` — like [`Quote`], but leaving Unicode
+/// graphic characters (as defined by [`IsGraphic`]) unescaped.
 pub fn QuoteToGraphic<S: Into<string>>(s: S) -> string {
-    // Go: return quoteWith(s, '"', false, true)
-    return Quote(s);
+    let s = s.into();
+    return quoteWith(s.as_bytes(), b'"', false, true);
 }
 
 // go: sdk 1.25.5 strconv/quote.go:158-160 AppendQuoteToGraphic
-/// `strconv.AppendQuoteToGraphic(dst, s)` (quote.go:158) — append the
-/// graphic-quoted form of `s` to `dst` and return the extended buffer.
+/// `strconv.AppendQuoteToGraphic(dst, s)` — append the graphic-quoted
+/// form of `s` to `dst` and return the extended buffer.
 pub fn AppendQuoteToGraphic<S: Into<string>>(dst: slice<byte>, s: S) -> slice<byte> {
-    // Go: return appendQuotedWith(dst, s, '"', false, true)
-    return AppendQuote(dst, s);
-}
-
-// Internal helper: append the Go-escape form of a single rune with
-// the given quote-byte (either `'` for QuoteRune, `"` for Quote).
-// Slim: ASCII printable bytes pass through; control chars use `\x`;
-// runes ≥ 0x80 always escape (`\u` < 0x10000, else `\U`).
-fn append_escaped_rune(out: &mut alloc::vec::Vec<u8>, r: rune, quote: u8) {
-    let lowerhex = b"0123456789abcdef";
-    // Go: if r == rune(quote) || r == '\\' { ... }
-    if r == torune(quote) {
-        out.push(b'\\');
-        out.push(quote);
-        return;
-    }
-    if r == torune(b'\\') {
-        out.push(b'\\');
-        out.push(b'\\');
-        return;
-    }
-    // Go: short-form escapes for the named control chars.
-    match r {
-        0x07 => {
-            out.extend_from_slice(b"\\a");
-            return;
-        }
-        0x08 => {
-            out.extend_from_slice(b"\\b");
-            return;
-        }
-        0x0C => {
-            out.extend_from_slice(b"\\f");
-            return;
-        }
-        0x0A => {
-            out.extend_from_slice(b"\\n");
-            return;
-        }
-        0x0D => {
-            out.extend_from_slice(b"\\r");
-            return;
-        }
-        0x09 => {
-            out.extend_from_slice(b"\\t");
-            return;
-        }
-        0x0B => {
-            out.extend_from_slice(b"\\v");
-            return;
-        }
-        _ => {}
-    }
-    // Other control chars / DEL → \xHH.
-    if r >= 0 && r < 0x20 {
-        out.extend_from_slice(b"\\x");
-        out.push(lowerhex[((r >> 4) & 0xF) as usize]);
-        out.push(lowerhex[(r & 0xF) as usize]);
-        return;
-    }
-    if r == 0x7F {
-        out.extend_from_slice(b"\\x7f");
-        return;
-    }
-    // ASCII printable: emit raw byte.
-    if r >= 0x20 && r < 0x7F {
-        out.push(touint8(r));
-        return;
-    }
-    // Non-ASCII / invalid: \u or \U escape.
-    if r < 0 || r > 0x10FFFF {
-        // Invalid code point → render replacement char as �.
-        out.extend_from_slice(b"\\ufffd");
-        return;
-    }
-    if r < 0x10000 {
-        out.extend_from_slice(b"\\u");
-        let mut shift: i32 = 12;
-        while shift >= 0 {
-            let nib = ((r >> shift) & 0xF) as usize;
-            out.push(lowerhex[nib]);
-            shift -= 4;
-        }
-        return;
-    }
-    out.extend_from_slice(b"\\U");
-    let mut shift: i32 = 28;
-    while shift >= 0 {
-        let nib = ((r >> shift) & 0xF) as usize;
-        out.push(lowerhex[nib]);
-        shift -= 4;
-    }
+    let s = s.into();
+    let mut v = dst.__into_vec();
+    appendQuotedWith(&mut v, s.as_bytes(), b'"', false, true);
+    return slice::__from_vec(v);
 }
 
 // go: sdk 1.25.5 strconv/quote.go:167-169 QuoteRune
-/// `strconv.QuoteRune(r)` (quote.go:167) — return a single-quoted
-/// Go character literal for `r`. Control chars and non-ASCII use
-/// Go escape sequences (`\t`, `\n`, `\xFF`, `Ā`, `\U00100000`).
+/// `strconv.QuoteRune(r)` — a single-quoted Go character literal
+/// representing `r`.
 pub fn QuoteRune(r: rune) -> string {
-    // Go: return quoteRuneWith(r, '\'', false, false)
-    let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(8);
-    out.push(b'\'');
-    append_escaped_rune(&mut out, r, b'\'');
-    out.push(b'\'');
-    return string::from_bytes(&out);
+    return quoteRuneWith(r, b'\'', false, false);
 }
 
 // go: sdk 1.25.5 strconv/quote.go:173-175 AppendQuoteRune
-/// `strconv.AppendQuoteRune(dst, r)` (quote.go:173) — append the
-/// QuoteRune form of `r` to `dst` and return the extended buffer.
+/// `strconv.AppendQuoteRune(dst, r)` — append the QuoteRune form of
+/// `r` to `dst` and return the extended buffer.
 pub fn AppendQuoteRune(dst: slice<byte>, r: rune) -> slice<byte> {
-    // Go: return appendQuotedRuneWith(dst, r, '\'', false, false)
-    let q = QuoteRune(r);
     let mut v = dst.__into_vec();
-    v.extend_from_slice(q.as_bytes());
+    appendQuotedRuneWith(&mut v, r, b'\'', false, false);
     return slice::__from_vec(v);
 }
 
 // go: sdk 1.25.5 strconv/quote.go:183-185 QuoteRuneToASCII
-/// `strconv.QuoteRuneToASCII(r)` (quote.go:183) — slim port: same
-/// as `QuoteRune` because our slim implementation already escapes
-/// non-ASCII runes.
+/// `strconv.QuoteRuneToASCII(r)` — like [`QuoteRune`], but escaping
+/// every non-ASCII character.
 pub fn QuoteRuneToASCII(r: rune) -> string {
-    // Go: return quoteRuneWith(r, '\'', true, false)
-    return QuoteRune(r);
+    return quoteRuneWith(r, b'\'', true, false);
 }
 
 // go: sdk 1.25.5 strconv/quote.go:189-191 AppendQuoteRuneToASCII
-/// `strconv.AppendQuoteRuneToASCII(dst, r)` (quote.go:189) — append
-/// the QuoteRuneToASCII form to `dst`.
+/// `strconv.AppendQuoteRuneToASCII(dst, r)` — append the
+/// QuoteRuneToASCII form of `r` to `dst`.
 pub fn AppendQuoteRuneToASCII(dst: slice<byte>, r: rune) -> slice<byte> {
-    // Go: return appendQuotedRuneWith(dst, r, '\'', true, false)
-    return AppendQuoteRune(dst, r);
+    let mut v = dst.__into_vec();
+    appendQuotedRuneWith(&mut v, r, b'\'', true, false);
+    return slice::__from_vec(v);
 }
 
 // go: sdk 1.25.5 strconv/quote.go:199-201 QuoteRuneToGraphic
-/// `strconv.QuoteRuneToGraphic(r)` (quote.go:199) — return a single-
-/// quoted Go character literal. If `r` is not a Unicode graphic
-/// character (per [`IsGraphic`]), the returned string uses a Go escape
-/// sequence (`\t`, `\n`, `\xFF`, `Ā`).
-///
-/// Slim: aliases [`QuoteRune`] for the same reason that
-/// [`QuoteToGraphic`] aliases [`Quote`].
+/// `strconv.QuoteRuneToGraphic(r)` — like [`QuoteRune`], but leaving
+/// Unicode graphic characters (as defined by [`IsGraphic`]) unescaped.
 pub fn QuoteRuneToGraphic(r: rune) -> string {
-    // Go: return quoteRuneWith(r, '\'', false, true)
-    return QuoteRune(r);
+    return quoteRuneWith(r, b'\'', false, true);
 }
 
 // go: sdk 1.25.5 strconv/quote.go:205-207 AppendQuoteRuneToGraphic
-/// `strconv.AppendQuoteRuneToGraphic(dst, r)` (quote.go:205) — append
-/// the QuoteRuneToGraphic form to `dst`.
+/// `strconv.AppendQuoteRuneToGraphic(dst, r)` — append the
+/// QuoteRuneToGraphic form of `r` to `dst`.
 pub fn AppendQuoteRuneToGraphic(dst: slice<byte>, r: rune) -> slice<byte> {
-    // Go: return appendQuotedRuneWith(dst, r, '\'', false, true)
-    return AppendQuoteRune(dst, r);
+    let mut v = dst.__into_vec();
+    appendQuotedRuneWith(&mut v, r, b'\'', false, true);
+    return slice::__from_vec(v);
+}
+
+// go: sdk 1.25.5 strconv/quote.go:499-511 bsearch
+/// Go's is generic over `~[]E` with `E` a `~uint16 | ~uint32`; goish
+/// takes the two element types through one `PartialOrd` bound.
+fn bsearch<E: PartialOrd + Copy>(s: &[E], v: E) -> (usize, bool) {
+    let n = s.len();
+    let mut i: usize = 0;
+    let mut j: usize = n;
+    while i < j {
+        let h = i + (j - i) / 2;
+        if s[h] < v {
+            i = h + 1;
+        } else {
+            j = h;
+        }
+    }
+    return (i, i < n && s[i] == v);
 }
 
 // go: sdk 1.25.5 strconv/quote.go:522-563 IsPrint
-/// `strconv.CanBackquote(s)` (quote.go:212) — report whether `s` can
-/// be rendered unchanged inside backticks (no control chars except
-/// '\t', no backquote, no DEL, no BOM).
+/// `strconv.IsPrint(r)` — reports whether the rune is defined as
+/// printable by Go, with the same definition as `unicode.IsPrint`:
+/// letters, numbers, punctuation, symbols and ASCII space.
 ///
-/// Slim: ASCII fast-path identical to Go for that subset; multi-byte
-/// runes other than the BOM (U+FEFF) are assumed printable per Go's
-/// comment on quote.go:220.
-pub fn IsPrint(r: crate::types::rune) -> bool {
-    // Go: if r <= 0xFF { ... fast Latin-1 path ... }
+/// The four range tables this binary-searches live in `isprint.rs`,
+/// transcribed from Go's generated `isprint.go`.
+pub fn IsPrint(r: rune) -> bool {
+    // Fast check for Latin-1
     if r <= 0xFF {
-        // Go: if 0x20 <= r && r <= 0x7E { return true }
-        if r >= 0x20 && r <= 0x7E {
+        if 0x20 <= r && r <= 0x7E {
+            // All the ASCII is printable from space through DEL-1.
             return true;
         }
-        // Go: if 0xA1 <= r && r <= 0xFF { return r != 0xAD }
-        if r >= 0xA1 && r <= 0xFF {
-            return r != 0xAD;
+        if 0xA1 <= r && r <= 0xFF {
+            // Similarly for ¡ through ÿ...
+            return r != 0xAD; // ...except for the bizarre soft hyphen.
         }
         return false;
     }
-    // Slim deviation: the upstream non-Latin-1 path consults the
-    // isPrint16 / isPrint32 / isNotPrint16 / isNotPrint32 Unicode tables
-    // (~32 KiB static). Goish v1 doesn't ship those, so codepoints with
-    // r > 0xFF that are valid Unicode (excluding surrogates and the
-    // > 0x10FFFF out-of-range region) are accepted as printable. This
-    // errs toward "show the rune" — callers needing strict Unicode-table
-    // conformance should not rely on this for security-sensitive
-    // filtering.
-    if r < 0 || r > 0x10_FFFF {
+
+    // Same algorithm, either on uint16 or uint32 value.
+    // First, find first i such that isPrint[i] >= x.
+    // This is the index of either the start or end of a pair that might span x.
+    // The start is even (isPrint[i&^1]) and the end is odd (isPrint[i|1]).
+    // If we find x in a range, make sure x is not in isNotPrint list.
+
+    if 0 <= r && r < 1 << 16 {
+        let rr = touint16(r);
+        let isPrint = super::isprint::isPrint16;
+        let isNotPrint = super::isprint::isNotPrint16;
+        let (i, _) = bsearch(isPrint, rr);
+        if i >= isPrint.len() || rr < isPrint[i & !1] || isPrint[i | 1] < rr {
+            return false;
+        }
+        let (_, found) = bsearch(isNotPrint, rr);
+        return !found;
+    }
+
+    let rr = touint32(r);
+    let isPrint = super::isprint::isPrint32;
+    let isNotPrint = super::isprint::isNotPrint32;
+    let (i, _) = bsearch(isPrint, rr);
+    if i >= isPrint.len() || rr < isPrint[i & !1] || isPrint[i | 1] < rr {
         return false;
     }
-    if r >= 0xD800 && r <= 0xDFFF {
-        return false;
+    if r >= 0x20000 {
+        return true;
     }
-    return true;
+    let r = r - 0x10000;
+    let (_, found) = bsearch(isNotPrint, touint16(r));
+    return !found;
 }
 
 // go: sdk 1.25.5 strconv/quote.go:568-573 IsGraphic
-/// Line-by-line port of `strconv.IsGraphic(r)` (quote.go:568) — reports
-/// whether `r` is defined as a Graphic by Unicode (categories L, M, N,
-/// P, S, and Zs).
-///
-/// Slim: defers to IsPrint; upstream's `isInGraphicList` extension for
-/// the U+0000..U+FFFF range needs the `isGraphic` table that goish v1
-/// doesn't ship.
-pub fn IsGraphic(r: crate::types::rune) -> bool {
-    // Go: if IsPrint(r) { return true }; return isInGraphicList(r)
-    return IsPrint(r);
+/// `strconv.IsGraphic(r)` — reports whether the rune is defined as a
+/// Graphic by Unicode: letters, marks, numbers, punctuation, symbols
+/// and spaces, from categories L, M, N, P, S and Zs.
+pub fn IsGraphic(r: rune) -> bool {
+    if IsPrint(r) {
+        return true;
+    }
+    return isInGraphicList(r);
+}
+
+// go: sdk 1.25.5 strconv/quote.go:578-585 isInGraphicList
+/// Reports whether the rune is in the `isGraphic` list. This separation
+/// from `IsGraphic` lets `quoteWith` avoid two calls to `IsPrint`.
+/// Should be called only if `IsPrint` fails.
+fn isInGraphicList(r: rune) -> bool {
+    // We know r must fit in 16 bits - see makeisprint.go.
+    if r > 0xFFFF {
+        return false;
+    }
+    let (_, found) = bsearch(super::isprint::isGraphic, touint16(r));
+    return found;
 }
 
 // go: sdk 1.25.5 strconv/quote.go:212-230 CanBackquote
@@ -490,11 +537,12 @@ pub fn UnquoteChar<S: Into<string>>(s: S, quote: byte) -> (rune, bool, string, e
     return (value, multibyte, tail, nil);
 }
 
-// Go: quote.go:391
-//   func unquote(in string, unescape bool) (out, rem string, err error)
-//
-// Internal helper shared by Unquote and QuotedPrefix.
-fn unquote_impl(in_s: string, unescape: bool) -> (string, string, error) {
+// go: sdk 1.25.5 strconv/quote.go:390-494 unquote
+/// `unquote` decodes the quoted string or character literal prefixed
+/// at the start of `in`, returning the decoded value, the remainder of
+/// `in` after the literal, and any error. `unescape` selects whether
+/// the returned value is the decoded text or the literal itself.
+fn unquote(in_s: string, unescape: bool) -> (string, string, error) {
     let in_bs = in_s.as_bytes();
     // Go: if len(in) < 2 { return "", in, ErrSyntax }
     if in_bs.len() < 2 {
@@ -516,7 +564,7 @@ fn unquote_impl(in_s: string, unescape: bool) -> (string, string, error) {
             let out: string;
             if !unescape {
                 out = string::from_bytes(&in_bs[..end]);
-            } else if !in_bs[..end].contains(&b'\r') {
+            } else if !contains(&in_bs[..end], b'\r') {
                 out = string::from_bytes(&in_bs[1..end - 1]);
             } else {
                 // Carriage returns inside raw strings are dropped from the value.
@@ -536,8 +584,8 @@ fn unquote_impl(in_s: string, unescape: bool) -> (string, string, error) {
         b'"' | b'\'' => {
             // Go: if !contains(in[:end], '\\') && !contains(in[:end], '\n') { ... fast path ... }
             let head = &in_bs[..end];
-            let has_bs = head.contains(&b'\\');
-            let has_nl = head.contains(&b'\n');
+            let has_bs = contains(head, b'\\');
+            let has_nl = contains(head, b'\n');
             if !has_bs && !has_nl {
                 let valid: bool = match quote {
                     b'"' => {
@@ -635,7 +683,7 @@ fn unquote_impl(in_s: string, unescape: bool) -> (string, string, error) {
 /// `ErrSyntax` error.
 pub fn QuotedPrefix<S: Into<string>>(s: S) -> (string, error) {
     // Go: out, _, err := unquote(s, false); return out, err
-    let (out, _rem, err) = unquote_impl(s.into(), false);
+    let (out, _rem, err) = unquote(s.into(), false);
     return (out, err);
 }
 
@@ -648,7 +696,7 @@ pub fn Unquote<S: Into<string>>(s: S) -> (string, error) {
     // Go: out, rem, err := unquote(s, true)
     //     if len(rem) > 0 { return "", ErrSyntax }
     //     return out, err
-    let (out, rem, err) = unquote_impl(s.into(), true);
+    let (out, rem, err) = unquote(s.into(), true);
     if rem.as_bytes().len() > 0 {
         return (string::new(), ErrSyntax.into());
     }

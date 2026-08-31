@@ -58,25 +58,29 @@ pub struct NumError {
 impl ErrorTrait for NumError {
     // go: sdk 1.25.5 strconv/atoi.go:33-35 NumError.Error
     fn Error(&self) -> string {
+        // Go: "strconv." + e.Func + ": " + "parsing " + Quote(e.Num) +
+        //     ": " + e.Err.Error()
         let func = self.Func.as_bytes();
-        let num = self.Num.as_bytes();
+        let num = super::Quote(self.Num.clone());
+        let num_b = num.as_bytes();
         let inner = self.Err.Error();
         let inner_b = inner.as_bytes();
         let total = b"strconv.".len()
             + func.len()
-            + b": parsing \"".len()
-            + num.len()
-            + b"\": ".len()
+            + b": parsing ".len()
+            + num_b.len()
+            + b": ".len()
             + inner_b.len();
         let mut buf: Vec<byte> = Vec::with_capacity(total);
         buf.extend_from_slice(b"strconv.");
         buf.extend_from_slice(func);
-        buf.extend_from_slice(b": parsing \"");
-        buf.extend_from_slice(num);
-        buf.extend_from_slice(b"\": ");
+        buf.extend_from_slice(b": parsing ");
+        buf.extend_from_slice(num_b);
+        buf.extend_from_slice(b": ");
         buf.extend_from_slice(inner_b);
         return string::__from_vec(buf);
     }
+
     // go: sdk 1.25.5 strconv/atoi.go:37-37 NumError.Unwrap
     fn Unwrap(&self) -> error {
         return self.Err.clone();
