@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 9641,
+ "total": 9597,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -931,13 +931,6 @@
   },
   "src/select_macro.rs": {
    "GOISH005": 3
-  },
-  "src/sort/mod.rs": {
-   "GOISH005": 11,
-   "GOISH014": 18,
-   "GOISH016": 1,
-   "GOISH022": 1,
-   "GOISH023": 13
   },
   "src/strconv/atof.rs": {
    "GOISH005": 12,

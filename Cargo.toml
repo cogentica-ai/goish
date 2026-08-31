@@ -1978,3 +1978,7 @@ path = "examples/filepath_lexical_smoke.rs"
 [[example]]
 name = "slices_ref_smoke"
 path = "examples/slices_ref_smoke.rs"
+
+[[example]]
+name = "sort_ref_smoke"
+path = "examples/sort_ref_smoke.rs"
