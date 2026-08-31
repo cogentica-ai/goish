@@ -1974,4 +1974,5 @@ pub fn register_net_impls() {
     __goish_register_Writer_impl::<TCPConn>();
     __goish_register_Closer_impl::<TCPConn>();
     __goish_register_Conn_impl::<TCPConn>();
+    net::register_net_error_impls();
 }

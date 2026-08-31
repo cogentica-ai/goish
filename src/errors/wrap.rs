@@ -201,3 +201,46 @@ fn as_<T: ErrorTrait>(err: error) -> Option<Arc<T>> {
         cur = next;
     }
 }
+
+// ─── AsIface ────────────────────────────────────────────────────────
+
+// go: none — goish idiom: Go writes an interface assertion on an error
+//     directly — `if t, ok := err.(interface{ Timeout() bool }); ok` —
+//     because a Go `error` IS the interface value and asserting on it
+//     reaches the concrete type underneath.
+//
+//     goish's `error` is a HANDLE around `Arc<dyn ErrorTrait>`, and
+//     `cast!` downcasts whatever it is handed. Handed an `error` it
+//     asks the registry for `TypeId::of::<error>()`, which nothing ever
+//     registers, so the assertion MISSES — silently, and for every
+//     error. `net::OpError::Timeout` was written that way and had never
+//     once returned true.
+//
+//     This is that assertion, spelled so it reaches through the handle.
+//     Like Go's, it looks at the error ITSELF and does not walk the
+//     chain: `errors::As` and `errors::Is` are the walking ones.
+/// Go's `v, ok := err.(SomeInterface)` — assert an interface on the
+/// concrete error behind the handle.
+///
+/// Returns `(&T, true)` on a hit. On a miss the first element is the
+/// process-wide nil sentinel for `T`, and calling a method on it panics
+/// exactly as a method call on Go's nil interface does — so a guarded
+/// `if ok { … }` is the safe, Go-faithful use, the same contract
+/// [`crate::cast!`] has.
+///
+/// The concrete type must be registered for `T` —
+/// `__goish_register_<T>_impl::<Concrete>()` — or this misses. That is
+/// the same requirement `cast!` carries.
+pub fn AsIface<T>(err: &error) -> (&T, bool)
+where
+    T: ?Sized + crate::goany::DowncastableFromAny + crate::goany::NilDyn,
+{
+    if let Some(arc) = err.0.as_ref() {
+        let dyn_err: &dyn ErrorTrait = arc.as_ref();
+        let any_ref: &(dyn Any + Send + Sync) = dyn_err;
+        if let Some(v) = T::from_any(any_ref) {
+            return (v, true);
+        }
+    }
+    return (T::__goish_nil_ref(), false);
+}

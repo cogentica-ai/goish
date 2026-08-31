@@ -1986,3 +1986,7 @@ path = "examples/sort_ref_smoke.rs"
 [[example]]
 name = "context_ref_smoke"
 path = "examples/context_ref_smoke.rs"
+
+[[example]]
+name = "net_error_iface_smoke"
+path = "examples/net_error_iface_smoke.rs"

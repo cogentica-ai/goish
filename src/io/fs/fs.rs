@@ -401,7 +401,10 @@ impl PathError {
     /// wrapped error; goish's named equivalent is `net::timeout`, which
     /// is the same one-method interface with a name attached.
     pub fn Timeout(&self) -> bool {
-        let (t, ok) = goish::cast!(&self.Err, crate::net::net::timeout);
+        // `cast!` on an `error` downcasts the HANDLE, not what it
+        // wraps, so it never hits. `errors::AsIface` is the assertion
+        // Go writes.
+        let (t, ok) = crate::errors::AsIface::<crate::d!(crate::net::net::timeout)>(&self.Err);
         return ok && t.Timeout();
     }
 }

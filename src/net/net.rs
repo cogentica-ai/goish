@@ -250,7 +250,11 @@ impl OpError {
     /// through an `*os.SyscallError` if that is what it holds. goish
     /// has no os.SyscallError, so only the direct probe applies.
     pub fn Timeout(&self) -> bool {
-        let (t, ok) = crate::cast!(&self.Err, timeout);
+        // `cast!` on an `error` downcasts the HANDLE, not what it
+        // wraps, so it can never hit — this line used to be that, and
+        // had never once returned true. `errors::AsIface` is the
+        // assertion Go writes: `err.(interface{ Timeout() bool })`.
+        let (t, ok) = crate::errors::AsIface::<crate::d!(timeout)>(&self.Err);
         return ok && t.Timeout();
     }
 
@@ -261,7 +265,7 @@ impl OpError {
         if self.Op == "accept" && isConnError(&self.Err) {
             return true;
         }
-        let (t, ok) = crate::cast!(&self.Err, temporary);
+        let (t, ok) = crate::errors::AsIface::<crate::d!(temporary)>(&self.Err);
         return ok && t.Temporary();
     }
 }
@@ -516,7 +520,11 @@ pub(crate) fn newDNSError(err: error, name: string, server: string) -> DNSError 
     let mut isTemporary = false;
     let mut unwrapErr: error = errors::nil;
 
-    let (e, ok) = crate::cast!(&err, Error);
+    // Go: `if err, ok := err.(Error); ok { ... }`. Same handle problem
+    // as OpError::Timeout above — this used to be a `cast!` and never
+    // hit, so newDNSError produced a DNSError with IsTimeout and
+    // IsTemporary always false.
+    let (e, ok) = crate::errors::AsIface::<crate::d!(Error)>(&err);
     if ok {
         isTimeout = e.Timeout();
         isTemporary = e.Temporary();
@@ -602,4 +610,387 @@ impl Addr for crate::net::TCPAddr {
     fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
         return Some(self);
     }
+}
+
+// ─── net.Error, and the two one-method probes ───────────────────────
+//
+// go: none — goish idiom: Go's error types satisfy `net.Error`,
+//     `interface{ Timeout() bool }` and `interface{ Temporary() bool }`
+//     STRUCTURALLY, by having the methods. goish needs each impl
+//     written out and the concrete type registered, or an assertion
+//     against them is a silent miss — which is what `OpError::Timeout`
+//     was: it asserts `timeout` on the error it wraps, nothing
+//     implemented `timeout`, and it had never once returned true.
+//
+//     The bodies forward to the inherent methods above; those are the
+//     anchored ports, and these are the interface views of them.
+
+impl Error for OpError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Error(&self) -> string {
+        return <OpError as crate::errors::ErrorTrait>::Error(self);
+    }
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Timeout(&self) -> bool {
+        return OpError::Timeout(self);
+    }
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Temporary(&self) -> bool {
+        return OpError::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl timeout for OpError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Timeout(&self) -> bool {
+        return OpError::Timeout(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl temporary for OpError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Temporary(&self) -> bool {
+        return OpError::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl Error for ParseError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Error(&self) -> string {
+        return <ParseError as crate::errors::ErrorTrait>::Error(self);
+    }
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Timeout(&self) -> bool {
+        return ParseError::Timeout(self);
+    }
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Temporary(&self) -> bool {
+        return ParseError::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl timeout for ParseError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Timeout(&self) -> bool {
+        return ParseError::Timeout(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl temporary for ParseError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Temporary(&self) -> bool {
+        return ParseError::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl Error for AddrError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Error(&self) -> string {
+        return <AddrError as crate::errors::ErrorTrait>::Error(self);
+    }
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Timeout(&self) -> bool {
+        return AddrError::Timeout(self);
+    }
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Temporary(&self) -> bool {
+        return AddrError::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl timeout for AddrError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Timeout(&self) -> bool {
+        return AddrError::Timeout(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl temporary for AddrError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Temporary(&self) -> bool {
+        return AddrError::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl Error for UnknownNetworkError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Error(&self) -> string {
+        return <UnknownNetworkError as crate::errors::ErrorTrait>::Error(self);
+    }
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Timeout(&self) -> bool {
+        return UnknownNetworkError::Timeout(self);
+    }
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Temporary(&self) -> bool {
+        return UnknownNetworkError::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl timeout for UnknownNetworkError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Timeout(&self) -> bool {
+        return UnknownNetworkError::Timeout(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl temporary for UnknownNetworkError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Temporary(&self) -> bool {
+        return UnknownNetworkError::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl Error for InvalidAddrError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Error(&self) -> string {
+        return <InvalidAddrError as crate::errors::ErrorTrait>::Error(self);
+    }
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Timeout(&self) -> bool {
+        return InvalidAddrError::Timeout(self);
+    }
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Temporary(&self) -> bool {
+        return InvalidAddrError::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl timeout for InvalidAddrError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Timeout(&self) -> bool {
+        return InvalidAddrError::Timeout(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl temporary for InvalidAddrError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Temporary(&self) -> bool {
+        return InvalidAddrError::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl Error for DNSConfigError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Error(&self) -> string {
+        return <DNSConfigError as crate::errors::ErrorTrait>::Error(self);
+    }
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Timeout(&self) -> bool {
+        return DNSConfigError::Timeout(self);
+    }
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Temporary(&self) -> bool {
+        return DNSConfigError::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl timeout for DNSConfigError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Timeout(&self) -> bool {
+        return DNSConfigError::Timeout(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl temporary for DNSConfigError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Temporary(&self) -> bool {
+        return DNSConfigError::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl Error for DNSError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Error(&self) -> string {
+        return <DNSError as crate::errors::ErrorTrait>::Error(self);
+    }
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Timeout(&self) -> bool {
+        return DNSError::Timeout(self);
+    }
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Temporary(&self) -> bool {
+        return DNSError::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl timeout for DNSError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Timeout(&self) -> bool {
+        return DNSError::Timeout(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl temporary for DNSError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above; see the banner on this section.
+    fn Temporary(&self) -> bool {
+        return DNSError::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: none — goish idiom: Go's linker builds the equivalent itabs; see
+//     AGENTS.md §9b. Without these, every `net.Error` assertion in the
+//     tree is a silent miss.
+pub fn register_net_error_impls() {
+    __goish_register_Error_impl::<OpError>();
+    __goish_register_timeout_impl::<OpError>();
+    __goish_register_temporary_impl::<OpError>();
+    __goish_register_Error_impl::<ParseError>();
+    __goish_register_timeout_impl::<ParseError>();
+    __goish_register_temporary_impl::<ParseError>();
+    __goish_register_Error_impl::<AddrError>();
+    __goish_register_timeout_impl::<AddrError>();
+    __goish_register_temporary_impl::<AddrError>();
+    __goish_register_Error_impl::<UnknownNetworkError>();
+    __goish_register_timeout_impl::<UnknownNetworkError>();
+    __goish_register_temporary_impl::<UnknownNetworkError>();
+    __goish_register_Error_impl::<InvalidAddrError>();
+    __goish_register_timeout_impl::<InvalidAddrError>();
+    __goish_register_temporary_impl::<InvalidAddrError>();
+    __goish_register_Error_impl::<DNSConfigError>();
+    __goish_register_timeout_impl::<DNSConfigError>();
+    __goish_register_temporary_impl::<DNSConfigError>();
+    __goish_register_Error_impl::<DNSError>();
+    __goish_register_timeout_impl::<DNSError>();
+    __goish_register_temporary_impl::<DNSError>();
 }
