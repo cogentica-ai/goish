@@ -28,7 +28,7 @@ goishlint diff the port against the Go file it came from.
 | `compress` | 150/150 | 100.0% | 303 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
-| `strings` | 98/98 | 100.0% | 67 |
+| `strings` | 98/98 | 100.0% | 101 |
 | `archive` | 71/182 | 39.0% | 0 |
 | `time` | 71/184 | 38.6% | 4 |
 | `sync` | 66/126 | 52.4% | 3 |
@@ -580,6 +580,36 @@ iterator rather than a slice, and a port that eagerly collected and
 then replayed would pass every other vector and fail only this one.
 Both `SplitSeq` and `FieldsSeq` are stopped after two elements and
 compared against what Go's `break` inside a `range` produces.
+
+`strings`' four remaining single-file units — builder.go, reader.go,
+clone.go and compare.go — came out of the module root next, taking the
+package from 67 anchors to **101** with no change in coverage: every
+one of those declarations was already there, matched by name and proven
+by nothing.
+
+Diffing them against Go found the defect that pattern keeps finding.
+`Builder::Grow(n)` computed the headroom it already had and reserved
+only the difference:
+
+    let avail = capacity - len;
+    if extra > avail { buf.reserve(extra - avail) }
+
+But Rust's `Vec::reserve(additional)` already means "room for
+`additional` more past the current length" — it is the whole of Go's
+`Grow`, and subtracting `avail` first under-reserves by exactly that
+amount. `Grow(64)` on a Builder holding "abc" with capacity 8 reserved
+56 and left `Cap()` at 56, so a caller who grew specifically to avoid a
+reallocation still got one. Go's contract is "after Grow(n), at least n
+bytes can be written without another allocation".
+
+`Reader` needed no change, and the point of the exercise was proving
+that. Its behaviour is all in the edges — `UnreadByte` and `UnreadRune`
+are errors unless they directly follow the matching read, `prevRune` is
+invalidated by every other operation so an `UnreadRune` after a
+`ReadByte` fails, `Seek` accepts a position past the end but not a
+negative one, and `ReadAt` never moves the cursor — and the rest of the
+tree only ever reads it to exhaustion. All of it, including the six
+exact error strings, now matches a running Go.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the

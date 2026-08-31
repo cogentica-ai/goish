@@ -47,6 +47,22 @@ extern crate alloc;
 #[path = "search.rs"]
 mod search;
 
+#[path = "builder.rs"]
+mod builder;
+pub use builder::Builder;
+
+#[path = "reader.rs"]
+mod reader;
+pub use reader::{NewReader, Reader};
+
+#[path = "clone.rs"]
+mod clone;
+pub use clone::Clone;
+
+#[path = "compare.rs"]
+mod compare;
+pub use compare::Compare;
+
 #[path = "iter.rs"]
 mod iter_go;
 pub use iter_go::{FieldsFuncSeq, FieldsSeq, Lines, SplitAfterSeq, SplitSeq};
@@ -64,11 +80,8 @@ pub use replace::{NewReplacer, Replacer};
 
 use alloc::vec::Vec;
 
-use crate::error;
-use crate::errors::nil;
 use crate::goslice::slice;
 use crate::gostring::string;
-use crate::io;
 use crate::types::{byte, int, rune};
 use crate::unicode::utf8;
 
@@ -557,92 +570,6 @@ pub fn EqualFold<S1: Into<string>, S2: Into<string>>(s: S1, t: S2) -> bool {
 //     goish Builder owns its Vec and a copy is a deep copy, so there
 //     is no aliasing bug to detect and no self pointer to compare.
 //
-// ─── Builder ──────────────────────────────────────────────────────────
-//
-// Append-only buffer. Single-shot `String(self)` consumes the builder
-// and yields a `string` backed by the same bytes (zero-copy internally).
-//
-// Differences from Go's strings.Builder:
-//
-//   * `String` consumes (Q1 = A in wip_strings.md). Calling String twice
-//     is a compile error rather than a runtime alias hazard.
-//   * No `addr` self-pointer / copyCheck — Rust's ownership rules already
-//     prevent accidental copy-then-mutate via the same code paths.
-
-pub struct Builder {
-    buf: Vec<byte>,
-}
-
-impl Builder {
-    pub fn new() -> Self {
-        Self { buf: Vec::new() }
-    }
-
-    pub fn Len(&self) -> int {
-        self.buf.len() as int
-    }
-
-    pub fn Cap(&self) -> int {
-        self.buf.capacity() as int
-    }
-
-    pub fn Reset(&mut self) {
-        self.buf.clear();
-    }
-
-    pub fn Grow(&mut self, n: int) {
-        if n < 0 {
-            panic!("strings.Builder.Grow: negative count");
-        }
-        let extra = n as usize;
-        let avail = self.buf.capacity() - self.buf.len();
-        if extra > avail {
-            self.buf.reserve(extra - avail);
-        }
-    }
-
-    /// Consume the builder and return the accumulated bytes as a `string`.
-    /// **v1**: this consumes — see module-level docs.
-    pub fn String(self) -> string {
-        string::__from_vec(self.buf)
-    }
-
-    pub fn WriteString<S: Into<string>>(&mut self, s: S) -> (int, error) {
-        let s = s.into();
-        let bytes = s.as_bytes();
-        self.buf.extend_from_slice(bytes);
-        (bytes.len() as int, nil)
-    }
-
-    pub fn WriteByte(&mut self, c: byte) -> error {
-        self.buf.push(c);
-        nil
-    }
-
-    pub fn WriteRune(&mut self, r: rune) -> (int, error) {
-        let mut tmp = [0u8; 4];
-        let n = utf8::EncodeRune(&mut tmp, r);
-        self.buf.extend_from_slice(&tmp[..n as usize]);
-        (n, nil)
-    }
-}
-
-impl Default for Builder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// `io.Writer` impl — consumes the slice, writes its bytes, returns
-// `(len(p), nil)`. Lets `Fprintf!(b, ...)` target a Builder.
-impl io::Writer for Builder {
-    fn Write(&mut self, p: slice<byte>) -> (int, error) {
-        let n = p.Len();
-        self.buf.extend_from_slice(&p);
-        (n, nil)
-    }
-}
-
 // ─── M15: completeness pass ───────────────────────────────────────────
 
 /// `strings.Cut(s, sep)` — split on first `sep`. Returns
@@ -678,29 +605,6 @@ pub fn CutSuffix<S1: Into<string>, S2: Into<string>>(s: S1, suffix: S2) -> (stri
         return (sub(&s, 0, s.Len() - suffix.Len()), true);
     }
     (s, false)
-}
-
-/// `strings.Compare(a, b)` — `-1`/`0`/`+1`. Goish provides `==` and
-/// `<`/`>` on `string` directly; this exists for API parity with Go.
-pub fn Compare<S1: Into<string>, S2: Into<string>>(a: S1, b: S2) -> int {
-    let a = a.into();
-    let b = b.into();
-    let ab = a.as_bytes();
-    let bb = b.as_bytes();
-    if ab < bb {
-        -1
-    } else if ab > bb {
-        1
-    } else {
-        0
-    }
-}
-
-/// `strings.Clone(s)` — fresh, independent copy. For our `Arc<[u8]>`
-/// backing this forces a non-shared allocation.
-pub fn Clone<S: Into<string>>(s: S) -> string {
-    let s = s.into();
-    string::from_bytes(s.as_bytes())
 }
 
 /// `strings.ContainsAny(s, chars)` — true if any byte of `chars`
@@ -1097,234 +1001,6 @@ pub fn SplitAfterN<S1: Into<string>, S2: Into<string>>(s: S1, sep: S2, n: int) -
 fn sub(s: &string, low: int, high: int) -> string {
     let bytes = s.as_bytes();
     string::from_bytes(&bytes[low as usize..high as usize])
-}
-
-// ─── strings.Reader ───────────────────────────────────────────────────
-
-/// `strings.Reader` — `io.Reader` over an immutable string. Mirrors
-/// Go's `strings.Reader` (read-only).
-pub struct Reader {
-    s: string,
-    i: int,
-    /// Mirrors Go's `prevRune`: index of previous rune, or `-1` if
-    /// the most recent op was not a successful ReadRune. Used only
-    /// by UnreadRune.
-    prev_rune: int,
-}
-
-impl Reader {
-    pub fn Len(&self) -> int {
-        if self.i >= self.s.Len() {
-            return 0;
-        }
-        self.s.Len() - self.i
-    }
-
-    pub fn Size(&self) -> int {
-        self.s.Len()
-    }
-
-    pub fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
-        if self.i >= self.s.Len() {
-            return (0, io::EOF.into());
-        }
-        // Go: r.prevRune = -1
-        self.prev_rune = -1;
-        let want = (p.Len() as usize).min((self.s.Len() - self.i) as usize);
-        let bytes = self.s.as_bytes();
-        for k in 0..want {
-            p[k as int] = bytes[self.i as usize + k];
-        }
-        self.i += want as int;
-        (want as int, nil)
-    }
-
-    pub fn Reset<S: Into<string>>(&mut self, s: S) {
-        // Go: *r = Reader{s, 0, -1}
-        self.s = s.into();
-        self.i = 0;
-        self.prev_rune = -1;
-    }
-
-    /// `(r *Reader).ReadByte()` (strings/reader.go:66) — implements
-    /// io.ByteReader.
-    pub fn ReadByte(&mut self) -> (byte, error) {
-        // Go: r.prevRune = -1
-        self.prev_rune = -1;
-        // Go: if r.i >= int64(len(r.s)) { return 0, io.EOF }
-        if self.i >= self.s.Len() {
-            return (0, io::EOF.into());
-        }
-        // Go: b := r.s[r.i]; r.i++; return b, nil
-        let b = self.s.as_bytes()[self.i as usize];
-        self.i += 1;
-        (b, nil)
-    }
-
-    /// `(r *Reader).UnreadByte()` (strings/reader.go:77) — implements
-    /// io.ByteScanner.
-    pub fn UnreadByte(&mut self) -> error {
-        // Go: if r.i <= 0 { return errors.New("...: at beginning of string") }
-        if self.i == 0 {
-            return crate::errors::New("strings.Reader.UnreadByte: at beginning of string");
-        }
-        // Go: r.prevRune = -1; r.i--; return nil
-        self.prev_rune = -1;
-        self.i -= 1;
-        nil
-    }
-
-    /// `(r *Reader).ReadRune()` (strings/reader.go:87) — implements
-    /// io.RuneReader. ASCII fast-path; non-ASCII via DecodeRuneInString.
-    pub fn ReadRune(&mut self) -> (rune, int, error) {
-        // Go: if r.i >= int64(len(r.s)) { r.prevRune = -1; return 0, 0, io.EOF }
-        if self.i >= self.s.Len() {
-            self.prev_rune = -1;
-            return (0, 0, io::EOF.into());
-        }
-        // Go: r.prevRune = int(r.i)
-        self.prev_rune = self.i;
-        // Go: if c := r.s[r.i]; c < utf8.RuneSelf { r.i++; return rune(c), 1, nil }
-        let c = self.s.as_bytes()[self.i as usize];
-        if c < utf8::RuneSelf {
-            self.i += 1;
-            return (c as rune, 1, nil);
-        }
-        // Go: ch, size = utf8.DecodeRuneInString(r.s[r.i:])
-        let tail = string::from_bytes(&self.s.as_bytes()[self.i as usize..]);
-        let (ch, size) = utf8::DecodeRuneInString(&tail);
-        // Go: r.i += int64(size)
-        self.i += size;
-        (ch, size, nil)
-    }
-
-    /// `(r *Reader).UnreadRune()` (strings/reader.go:103) — implements
-    /// io.RuneScanner. Restores cursor to the start of the most-recent
-    /// ReadRune.
-    pub fn UnreadRune(&mut self) -> error {
-        // Go: if r.i <= 0 { return errors.New("...: at beginning of string") }
-        if self.i == 0 {
-            return crate::errors::New("strings.Reader.UnreadRune: at beginning of string");
-        }
-        // Go: if r.prevRune < 0 { return errors.New("...: previous operation was not ReadRune") }
-        if self.prev_rune < 0 {
-            return crate::errors::New(
-                "strings.Reader.UnreadRune: previous operation was not ReadRune",
-            );
-        }
-        // Go: r.i = int64(r.prevRune); r.prevRune = -1; return nil
-        self.i = self.prev_rune;
-        self.prev_rune = -1;
-        nil
-    }
-
-    /// `(r *Reader).Seek(offset, whence)` (strings/reader.go:99) — slim port.
-    pub fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
-        // Go: r.prevRune = -1
-        self.prev_rune = -1;
-        let abs: i64 = if whence == io::SeekStart {
-            offset
-        } else if whence == io::SeekCurrent {
-            (self.i as i64).wrapping_add(offset)
-        } else if whence == io::SeekEnd {
-            (self.s.Len() as i64).wrapping_add(offset)
-        } else {
-            return (0, crate::errors::New("strings.Reader.Seek: invalid whence"));
-        };
-        if abs < 0 {
-            return (
-                0,
-                crate::errors::New("strings.Reader.Seek: negative position"),
-            );
-        }
-        self.i = abs as int;
-        (abs, nil)
-    }
-
-    /// `(r *Reader).ReadAt(p, off)` (strings/reader.go:62) — slim port.
-    pub fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
-        if off < 0 {
-            return (
-                0,
-                crate::errors::New("strings.Reader.ReadAt: negative offset"),
-            );
-        }
-        if off >= self.s.Len() as i64 {
-            return (0, io::EOF.into());
-        }
-        let bytes = self.s.as_bytes();
-        let start = off as usize;
-        let want = (p.Len() as usize).min(bytes.len() - start);
-        for k in 0..want {
-            p[k as int] = bytes[start + k];
-        }
-        if want < p.Len() as usize {
-            return (want as int, io::EOF.into());
-        }
-        (want as int, nil)
-    }
-}
-
-impl io::Reader for Reader {
-    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
-        Reader::Read(self, p)
-    }
-}
-
-impl io::Seeker for Reader {
-    fn Seek(&mut self, offset: i64, whence: int) -> (i64, error) {
-        Reader::Seek(self, offset, whence)
-    }
-}
-
-impl io::ReaderAt for Reader {
-    fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
-        Reader::ReadAt(self, p, off)
-    }
-}
-
-impl Reader {
-    /// `(r *Reader).WriteTo(w)` (strings/reader.go:137) — drain the
-    /// unread tail to `w` via WriteString. Returns bytes written.
-    pub fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
-        // Go: r.prevRune = -1
-        self.prev_rune = -1;
-        // Go: if r.i >= int64(len(r.s)) { return 0, nil }
-        if self.i as usize >= self.s.as_bytes().len() {
-            return (0, nil);
-        }
-        // s := r.s[r.i:]
-        let tail = &self.s.as_bytes()[self.i as usize..];
-        let s_tail = string::from_bytes(tail);
-        // m, err := io.WriteString(w, s)
-        let (m, err) = io::WriteString(w, s_tail);
-        if (m as usize) > tail.len() {
-            panic!("strings.Reader.WriteTo: invalid WriteString count");
-        }
-        // r.i += int64(m); n = int64(m)
-        self.i += m as i64;
-        let n = m as i64;
-        // if m != len(s) && err == nil { err = io.ErrShortWrite }
-        if (m as usize) != tail.len() && err.IsNil() {
-            return (n, io::ErrShortWrite.into());
-        }
-        (n, err)
-    }
-}
-
-impl io::WriterTo for Reader {
-    fn WriteTo(&mut self, w: &mut dyn io::Writer) -> (i64, error) {
-        Reader::WriteTo(self, w)
-    }
-}
-
-/// `strings.NewReader(s)` — `Reader` over `s`.
-pub fn NewReader<S: Into<string>>(s: S) -> Reader {
-    Reader {
-        s: s.into(),
-        i: 0,
-        prev_rune: -1,
-    }
 }
 
 // ─── Replacer (slim port of strings/replace.go) ──────────────────────
