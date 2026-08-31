@@ -140,7 +140,7 @@ pub fn FieldsSeq<S: Into<string>>(s: S) -> impl crate::iter::Seq<string> {
         while i < b.len() {
             let mut size = 1usize;
             let mut r = crate::convert::rune(b[i]);
-            let mut isSpace = super::is_ascii_space(b[i]);
+            let mut isSpace = super::strings::is_ascii_space(b[i]);
             if r >= crate::convert::rune(utf8::RuneSelf) {
                 let (r2, s2) = utf8::DecodeRune(&b[i..]);
                 r = r2;

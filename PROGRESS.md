@@ -28,7 +28,7 @@ goishlint diff the port against the Go file it came from.
 | `compress` | 150/150 | 100.0% | 303 |
 | `os` | 112/366 | 30.6% | 3 |
 | `bytes` | 84/107 | 78.5% | 1 |
-| `strings` | 98/98 | 100.0% | 101 |
+| `strings` | 98/98 | 100.0% | 153 |
 | `archive` | 71/182 | 39.0% | 0 |
 | `time` | 71/184 | 38.6% | 4 |
 | `sync` | 66/126 | 52.4% | 3 |
@@ -610,6 +610,25 @@ invalidated by every other operation so an `UnreadRune` after a
 negative one, and `ReadAt` never moves the cursor — and the rest of the
 tree only ever reads it to exhaustion. All of it, including the six
 exact error strings, now matches a running Go.
+
+The rest of strings.go followed, and **`strings` is now split one Rust
+file per Go file end to end** — 153 anchors, and a `mod.rs` that is 81
+lines of `mod`, `pub use` and one registration hook. Every one of its
+98 declarations is anchored to the Go lines it came from; none is a
+name match any more.
+
+The move carried 42 more functions into `strings.rs` and forced the
+nine goish-only helpers underneath them to say what they are: four
+borrowed-bytes scanners standing in for `bytealg`'s assembly
+(`index_byte`, `index_bytes`, `last_index_bytes`, `count_bytes`), two
+byte-level prefix/suffix tests the trim helpers and the Boyer-Moore
+finder share, `is_ascii_space` for the `asciiSpace` array Go indexes,
+`map_runes` for the non-ASCII tail of `ToUpper`/`ToLower`, and `sub`
+for `s[low:high]` — free in Go, an allocation here.
+
+A 42-line header claiming the package was a "subset for M10 launch —
+the most-used operations" went with it. It has not been a subset for
+some time.
 
 `encoding/binary` is split rather than finished: varint.go is now its
 own anchored `varint.rs` at 8/8 with 13 anchors, including the
