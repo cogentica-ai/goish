@@ -2130,3 +2130,7 @@ path = "examples/strconv_ftoa_atof_ref_smoke.rs"
 [[example]]
 name = "csv_ref_smoke"
 path = "examples/csv_ref_smoke.rs"
+
+[[example]]
+name = "time_zone_ref_smoke"
+path = "examples/time_zone_ref_smoke.rs"

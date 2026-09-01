@@ -581,15 +581,19 @@ impl Time {
     }
 
     // go: sdk 1.25.5 time/format.go:667-836 Time.appendFormat
-    /// The layout walk itself. Go's version reads the zone name and
-    /// offset from `t.locabs()`; goish has no zone database, so the
-    /// zone is always ("UTC", 0) and the offset arithmetic below still
-    /// runs — that is what makes `-0700` render as "+0000" and the
-    /// `Z…` forms render as "Z", exactly as Go does for a UTC time.
+    /// The layout walk itself. Go reads the zone name and offset from
+    /// `t.locabs()`; goish reads them from the Time's own `Location`,
+    /// which is what makes `-0700` render the real offset and the `Z…`
+    /// forms render "Z" only when that offset is zero.
+    ///
+    /// Both were hardcoded to ("UTC", 0) before, so a Time carrying an
+    /// offset — one parsed out of an RFC 3339 string, say — rendered as
+    /// if it were UTC.
     fn appendFormat(self, b: &mut Vec<crate::types::byte>, layout: &[u8]) {
         // Go: name, offset, abs := t.locabs()
-        let name: &[u8] = b"UTC";
-        let offset: int = 0;
+        let loc = self.Location();
+        let name: &[u8] = loc.__abbrev();
+        let offset: int = loc.__offset();
 
         let mut year: int = -1;
         let mut month: int = 0;
@@ -613,7 +617,7 @@ impl Time {
 
             // Compute year, month, day if needed.
             if year < 0 && std & stdNeedDate != 0 {
-                let (y, m, d, _, _, _) = civil_from_unix(self.unixSec());
+                let (y, m, d, _, _, _) = civil_from_unix(self.locSec());
                 year = y;
                 month = m;
                 day = d;
@@ -623,7 +627,7 @@ impl Time {
             }
             // Compute hour, minute, second if needed.
             if hour < 0 && std & stdNeedClock != 0 {
-                let (_, _, _, hh, mm, ss) = civil_from_unix(self.unixSec());
+                let (_, _, _, hh, mm, ss) = civil_from_unix(self.locSec());
                 hour = hh;
                 min = mm;
                 sec = ss;
@@ -1084,7 +1088,10 @@ pub fn Parse<L: Into<crate::gostring::string>, V: Into<crate::gostring::string>>
 ) -> (Time, crate::error) {
     let layout: crate::gostring::string = layout.into();
     let value: crate::gostring::string = value.into();
-    return parse(layout.as_bytes(), value.as_bytes());
+    // Go: `parse(layout, value, UTC, Local)` — the third argument is
+    // the location a zone-less value lands in, and for `Parse` it is
+    // UTC.
+    return parse(layout.as_bytes(), value.as_bytes(), UTC);
 }
 
 // go: sdk 1.25.5 time/format.go:1032-1046 ParseInLocation
@@ -1094,13 +1101,23 @@ pub fn Parse<L: Into<crate::gostring::string>, V: Into<crate::gostring::string>>
 pub fn ParseInLocation<L: Into<crate::gostring::string>, V: Into<crate::gostring::string>>(
     layout: L,
     value: V,
-    _loc: Location,
+    loc: Location,
 ) -> (Time, crate::error) {
-    return Parse(layout, value);
+    // Go: "ParseInLocation is like Parse but differs in two important
+    // ways. First, in the absence of time zone information, Parse
+    // interprets a time as UTC; ParseInLocation interprets the time as
+    // in the given location."
+    //
+    // goish forwarded to `Parse` and ignored the location entirely, so
+    // a zone-less value read in a +02:00 zone named an instant two
+    // hours later than Go's.
+    let layout: crate::gostring::string = layout.into();
+    let value: crate::gostring::string = value.into();
+    return parse(layout.as_bytes(), value.as_bytes(), loc);
 }
 
 // go: sdk 1.25.5 time/format.go:1048-1431 parse
-fn parse(layout0: &[u8], value0: &[u8]) -> (Time, crate::error) {
+fn parse(layout0: &[u8], value0: &[u8], defaultLocation: Location) -> (Time, crate::error) {
     let alayout = layout0;
     let avalue = value0;
     let mut layout = layout0;
@@ -1586,28 +1603,46 @@ fn parse(layout0: &[u8], value0: &[u8]) -> (Time, crate::error) {
     if zoneOffset != -1 {
         let mut t = Date(year, month, day, hour, min, sec, nsec, UTC);
         t.addSec(-zoneOffset);
-        // Go now looks for a local zone with this offset and falls back
-        // to a fabricated FixedZone. goish has no zone database, so the
-        // instant is already correct and the location stays UTC.
-        return (t, crate::errors::nil);
-    }
-
-    if !zoneName.is_empty() {
-        // Go looks the abbreviation up in the local zone and, failing
-        // that, fabricates a FixedZone to record it. Either way it only
-        // sets the LOCATION — the instant computed in UTC above is what
-        // the Time keeps, so `Unix()` is the same with or without the
-        // zone name. goish has no Location to attach, so the whole
-        // branch is that instant; what is lost is the ability to read
-        // the abbreviation back out of `Zone()`.
+        // Go: "Look for local zone with the given offset. If that zone
+        // was in effect at the given time, use it." With no zone
+        // database there is nothing to look up, so this is Go's
+        // fall-back: `t.setLoc(FixedZone(zoneName, zoneOffset))`, and
+        // the zone has no NAME unless the layout carried one.
+        //
+        // goish used to stop at the instant and leave the location UTC,
+        // so `Parse` of "2024-01-02T03:04:05+02:00" followed by
+        // `Format` gave back "2024-01-02T01:04:05Z" — the right instant
+        // rendered as the wrong wall clock, which is the difference
+        // every RFC 3339 round trip through a JSON API would show.
         return (
-            Date(year, month, day, hour, min, sec, nsec, UTC),
+            t.In(crate::time::FixedZone(
+                crate::gostring::string::from_bytes(zoneName),
+                zoneOffset,
+            )),
             crate::errors::nil,
         );
     }
 
+    if !zoneName.is_empty() {
+        // Go looks the abbreviation up in the local zone and, failing
+        // that, "Otherwise create fake zone to record offset."
+        // goish has no database, so the abbreviation is recorded with a
+        // zero offset — the instant computed above is already correct,
+        // and this is what lets `Zone()` read the name back.
+        return (
+            Date(year, month, day, hour, min, sec, nsec, UTC).In(crate::time::FixedZone(
+                crate::gostring::string::from_bytes(zoneName),
+                0,
+            )),
+            crate::errors::nil,
+        );
+    }
+
+    // Go: `Date(…, defaultLocation)` — for `Parse` that is UTC, and for
+    // `ParseInLocation` the caller's zone, which is why the two differ
+    // only for a layout that carries no zone at all.
     return (
-        Date(year, month, day, hour, min, sec, nsec, UTC),
+        Date(year, month, day, hour, min, sec, nsec, defaultLocation),
         crate::errors::nil,
     );
 }

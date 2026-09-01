@@ -68,19 +68,18 @@
 //     side — the seven identities are matched by reflected type *name*.
 //     Each is a distinct named type, so the test is the same one.
 //
-//   * KNOWN DIVERGENCE — `parseUTCTime` and `parseGeneralizedTime`
-//     reject a *numeric* zone offset (`910506234540-0700`,
-//     `20100102030405+0607`) where Go accepts it. Both bodies are
-//     verbatim; the difference is under them, in `time`: goish's `Time`
-//     carries no Location (`Zone()` is hard-wired to `("UTC", 0)`), so
-//     an offset cannot be retained, and Go's own re-`Format`-and-compare
-//     guard — which both functions run — could never pass for one. The
-//     `Z` forms, the minute-precision UTCTime fallback, the >= 2050
-//     century rollback and fractional seconds all match Go exactly.
-//     RFC 5280 §4.1.2.5.1/2 requires `Z` in certificates, so no
-//     conforming certificate reaches it. Pinned by two explicit
-//     assertions in examples/x509_keys_smoke.rs rather than left
-//     untested.
+//   * CLOSED DIVERGENCE — `parseUTCTime` and `parseGeneralizedTime`
+//     used to REJECT a *numeric* zone offset (`910506234540-0700`,
+//     `20100102030405+0607`) that Go accepts. Both bodies were always
+//     verbatim; the cause was under them, in `time`. goish's `Time`
+//     carried no Location (`Zone()` was hard-wired to `("UTC", 0)`), so
+//     an offset could not be retained: Go's own re-`Format`-and-compare
+//     guard — which both functions run — re-rendered the input as the
+//     `Z` form, saw the mismatch and returned an error. Giving
+//     `time::Location` a name and a fixed offset closed it. The whole
+//     offset matrix now matches Go, negative and minute-precision
+//     offsets included; see examples/x509_keys_smoke.rs and
+//     examples/time_zone_ref_smoke.rs.
 //
 //   * The ANY arm (`fieldType.Kind() == Interface`) is ported as written
 //     and is reachable — goish's `Any` reflects as `Kind::Interface`. It
