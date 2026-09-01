@@ -612,6 +612,15 @@ pub const S_IFMT: u32 = 0o170000;
 pub const S_IFDIR: u32 = 0o040000;
 pub const S_IFREG: u32 = 0o100000;
 pub const S_IFLNK: u32 = 0o120000;
+pub const S_IFBLK: u32 = 0o060000;
+pub const S_IFCHR: u32 = 0o020000;
+pub const S_IFIFO_M: u32 = 0o010000;
+pub const S_IFSOCK_M: u32 = 0o140000;
+/// setuid / setgid / sticky, the three bits above the permission
+/// triplets that `FileMode` carries as u / g / t.
+pub const S_ISUID: u32 = 0o4000;
+pub const S_ISGID: u32 = 0o2000;
+pub const S_ISVTX: u32 = 0o1000;
 
 /// `seek(2)` whence values.
 pub const SEEK_SET: i32 = 0;
@@ -755,6 +764,7 @@ pub const SYS_UNLINK: usize = 87;
 pub const SYS_RMDIR: usize = 84;
 pub const SYS_CHMOD: usize = 90;
 pub const SYS_FCHMOD: usize = 91;
+pub const SYS_MKNOD: usize = 133;
 pub const SYS_SYMLINK: usize = 88;
 pub const SYS_READLINK: usize = 89;
 pub const SYS_RENAME: usize = 82;
@@ -824,6 +834,22 @@ pub fn Fchmod(fd: i32, mode: u32) -> i32 {
 #[allow(non_snake_case)]
 pub fn Symlink(oldname: *const u8, newname: *const u8) -> i32 {
     unsafe { syscall2(SYS_SYMLINK, oldname as usize, newname as usize) as i32 }
+}
+
+/// File-type bits for `mknod(2)`'s mode argument (`<sys/stat.h>`).
+/// Only the two a process can create without CAP_MKNOD are listed;
+/// S_IFCHR and S_IFBLK need privilege.
+pub const S_IFIFO: i32 = 0o010000;
+pub const S_IFSOCK: i32 = 0o140000;
+
+// go: sdk 1.25.5 syscall/syscall_linux.go:275-277 Mknod
+/// `mknod(path, mode, dev)`. With `S_IFIFO` in `mode` this is `mkfifo`,
+/// which is the one node type an unprivileged process may create.
+/// Returns 0 or a negative errno.
+#[allow(non_snake_case)]
+pub fn Mknod(path: *const u8, mode: i32, dev: u64) -> i32 {
+    let rc = unsafe { syscall3(SYS_MKNOD, path as usize, mode as usize, dev as usize) };
+    return rc as i32; // goishlint:ignore GOISH005 - a raw kernel return code, not a Go value.
 }
 
 /// `readlink(path, buf, bufsiz)`. Returns the number of bytes placed in

@@ -55,7 +55,14 @@ use alloc::vec::Vec;
 /// FileMode methods (`IsDir`, `IsRegular`, `Perm`, `Type`, `String`)
 /// resolve identically regardless of import path.
 pub use crate::io::fs::FileMode;
-pub use crate::io::fs::{ModeDir, ModePerm, ModeSocket, ModeSymlink};
+// Go: os/types.go:35-53 re-declares ALL of io/fs's mode bits as
+// `os.ModeX = fs.ModeX`. goish re-exported four of the fifteen, so
+// `os::ModeNamedPipe` and `os::ModeCharDevice` — among others — did not
+// exist under the name Go gives them.
+pub use crate::io::fs::{
+    ModeAppend, ModeCharDevice, ModeDevice, ModeDir, ModeExclusive, ModeIrregular, ModeNamedPipe,
+    ModePerm, ModeSetgid, ModeSetuid, ModeSocket, ModeSticky, ModeSymlink, ModeTemporary, ModeType,
+};
 
 // Go: os/types.go declares these as untyped int. Goish ships them
 // as `int` (= i64) so port-side `var flag int = os.O_RDWR | os.O_TRUNC`
@@ -295,11 +302,39 @@ fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfoData {
     let kind = st.st_mode & syscall::S_IFMT;
     let is_dir = kind == syscall::S_IFDIR;
     let mut mode: FileMode = FileMode((st.st_mode & 0o777) as u32);
+    // Go: switch fs.sys.Mode & syscall.S_IFMT { … } — all seven arms.
+    // goish had two, so `Stat` on a fifo, a socket or a device
+    // reported a regular file: `prw-r--r--` came back as `-rw-r--r--`.
+    // This is the same gap `direntType` had, in the other of the two
+    // places a mode is built.
+    if kind == syscall::S_IFBLK {
+        mode |= ModeDevice;
+    }
+    if kind == syscall::S_IFCHR {
+        mode |= ModeDevice;
+        mode |= ModeCharDevice;
+    }
     if is_dir {
         mode |= ModeDir;
     }
+    if kind == syscall::S_IFIFO_M {
+        mode |= ModeNamedPipe;
+    }
     if kind == syscall::S_IFLNK {
         mode |= ModeSymlink;
+    }
+    if kind == syscall::S_IFSOCK_M {
+        mode |= ModeSocket;
+    }
+    // Go: the three bits above the permission triplets.
+    if st.st_mode & syscall::S_ISGID != 0 {
+        mode |= ModeSetgid;
+    }
+    if st.st_mode & syscall::S_ISUID != 0 {
+        mode |= ModeSetuid;
+    }
+    if st.st_mode & syscall::S_ISVTX != 0 {
+        mode |= ModeSticky;
     }
     FileInfoData {
         name,
@@ -375,6 +410,7 @@ pub fn OpenFile<N: Into<string>, M: Into<FileMode>>(
         nilable::new(File {
             fd,
             name: name.clone(),
+            dirinfo: None,
         }),
         nil,
     )
@@ -509,47 +545,97 @@ impl File {
     /// contract).
     pub fn Readdirnames(&mut self, n: int) -> (slice<string>, error) {
         let mut names: Vec<string> = Vec::new();
-        let mut buf: alloc::vec::Vec<u8> = alloc::vec![0u8; 4096];
-        let want_all = n <= 0;
-        let want = if want_all { usize::MAX } else { n as usize };
-        loop {
-            if names.len() >= want {
-                break;
-            }
-            let got = syscall::Getdents64(self.fd, buf.as_mut_ptr(), buf.len());
-            if got < 0 {
-                return (
-                    slice::<string>::__from_vec(names),
-                    self.fdErr("readdirent", got),
-                );
-            }
-            if got == 0 {
-                break;
-            }
-            let total = got as usize;
-            let mut pos: usize = 0;
-            while pos < total && names.len() < want {
-                // linux_dirent64 layout:
-                //   0  d_ino     u64
-                //   8  d_off     i64
-                //  16  d_reclen  u16
-                //  18  d_type    u8
-                //  19  d_name…   NUL-terminated
-                let reclen = u16::from_ne_bytes([buf[pos + 16], buf[pos + 17]]) as usize;
-                let name_start = pos + 19;
-                let mut name_end = name_start;
-                while name_end < pos + reclen && buf[name_end] != 0 {
-                    name_end += 1;
-                }
-                let raw = &buf[name_start..name_end];
-                // Filter `.` and `..` to match Go's Readdirnames.
-                if !(raw == b"." || raw == b"..") {
-                    names.push(string::from_bytes(raw));
-                }
-                pos += reclen;
-            }
+        // Go's readdirent path builds its `*PathError` directly rather
+        // than through `wrapErr`, so the `poll.ErrFileClosing →
+        // ErrClosed` remap does NOT happen here: a closed directory
+        // reads "use of closed file", not "file already closed". That
+        // is a real difference in Go and it is reproduced, not tidied.
+        if self.fd < 0 {
+            return (
+                slice::<string>::new(),
+                self.wrapErr("readdirent", crate::internal::poll::ErrFileClosing.into()),
+            );
         }
-        (slice::<string>::__from_vec(names), nil.into())
+        // Go: "if this file has no dirInfo, create one."
+        if self.dirinfo.is_none() {
+            self.dirinfo = Some(dirInfo {
+                buf: alloc::vec![0u8; 8192],
+                nbuf: 0,
+                bufp: 0,
+            });
+        }
+        // Go: "Change the meaning of n for the implementation below …
+        // we use only negative to mean looping until the end and
+        // positive to mean bounded, with positive terminating at 0."
+        let mut left: int = if n == 0 { -1 } else { n };
+        let mut errored = nil;
+        loop {
+            if left == 0 {
+                break;
+            }
+            let d = match self.dirinfo.as_mut() {
+                Some(d) => d,
+                None => break,
+            };
+            // Go: refill the buffer if necessary.
+            if d.bufp >= d.nbuf {
+                d.bufp = 0;
+                let got = syscall::Getdents64(self.fd, d.buf.as_mut_ptr(), d.buf.len());
+                if got < 0 {
+                    // Go: &PathError{Op: "readdirent", Path: f.name, Err: errno}
+                    errored = self.fdErr("readdirent", got);
+                    break;
+                }
+                // Go: `d.nbuf, errno = f.pfd.ReadDirent(*d.buf)` assigns
+                // FIRST and tests `d.nbuf <= 0` after. Assigning only on
+                // a non-empty read leaves `nbuf` at the previous length
+                // while `bufp` has just been reset to 0, so the next
+                // call re-drains the buffer it already returned.
+                d.nbuf = got as usize;
+                if d.nbuf == 0 {
+                    // Go: break // EOF
+                    break;
+                }
+            }
+            // Go: drain the buffer, one linux_dirent64 at a time.
+            //   0  d_ino     u64
+            //   8  d_off     i64
+            //  16  d_reclen  u16
+            //  18  d_type    u8
+            //  19  d_name…   NUL-terminated
+            let pos = d.bufp;
+            let reclen = u16::from_ne_bytes([d.buf[pos + 16], d.buf[pos + 17]]) as usize;
+            if reclen == 0 || pos + reclen > d.nbuf {
+                break;
+            }
+            d.bufp += reclen;
+            let name_start = pos + 19;
+            let mut name_end = name_start;
+            while name_end < pos + reclen && d.buf[name_end] != 0 {
+                name_end += 1;
+            }
+            let raw = &d.buf[name_start..name_end];
+            // Go: if string(name) == "." || string(name) == ".." { continue }
+            // — and note the `continue` does NOT spend one of the n.
+            if raw == b"." || raw == b".." {
+                continue;
+            }
+            names.push(string::from_bytes(raw));
+            left -= 1;
+        }
+        if !errored.IsNil() {
+            return (slice::<string>::__from_vec(names), errored);
+        }
+        // Go: if n > 0 && len(names)+len(dirents)+len(infos) == 0 {
+        //         return nil, nil, nil, io.EOF }
+        //
+        // goish returned nil here, so a caller draining a directory in
+        // fixed-size batches — the reason the bounded form exists — had
+        // no way to tell "no more entries" from "none this time".
+        if n > 0 && names.is_empty() {
+            return (slice::<string>::new(), io::EOF.into());
+        }
+        (slice::<string>::__from_vec(names), nil)
     }
 
     /// `(*File).Seek(offset, whence)` (os/file.go:286).
@@ -1199,6 +1285,9 @@ struct unixDirent {
     name: string,
     /// Type bits from the directory's `d_type`.
     typ: FileMode,
+    /// Go: `info FileInfo` — set only when the entry had to be lstat'd
+    /// because `d_type` was `DT_UNKNOWN`, so `Info()` reuses it.
+    info: Option<alloc::sync::Arc<FileInfoData>>,
 }
 
 // `io/fs::DirEntry` is a `#[goish::interface]` trait — the concrete
@@ -1221,6 +1310,10 @@ impl DirEntry for unixDirent {
     //         return lstat(d.parent + "/" + d.name)
     //     }
     fn Info(&self) -> (alloc::sync::Arc<dyn FileInfo + Send + Sync>, error) {
+        // Go: if d.info != nil { return d.info, nil }
+        if let Some(i) = self.info.as_ref() {
+            return (i.clone(), nil);
+        }
         let mut full = self.parent.clone();
         full = full + string::from_static("/");
         full = full + self.name.clone();
@@ -1265,10 +1358,8 @@ pub fn ReadDir<N: Into<string>>(
         let n = syscall::Getdents64(f.fd, buf.as_mut_ptr(), buf.len());
         if n < 0 {
             let _ = f.Close();
-            return (
-                slice::__from_vec(entries),
-                errors::New(string("readdir failed")),
-            );
+            // Go: &PathError{Op: "readdirent", Path: f.name, Err: errno}
+            return (slice::__from_vec(entries), f.fdErr("readdirent", n));
         }
         if n == 0 {
             // EOD
@@ -1296,13 +1387,24 @@ pub fn ReadDir<N: Into<string>>(
             let name_bytes = &buf[name_start..name_end];
             // Skip "." and ".." per Go's behavior.
             if name_bytes != b"." && name_bytes != b".." {
-                let mode = mode_from_dtype(dtype);
-                let ent: alloc::sync::Arc<dyn DirEntry + Send + Sync> =
-                    alloc::sync::Arc::new(unixDirent {
-                        parent: name.clone(),
-                        name: string::from_bytes(name_bytes),
-                        typ: mode,
-                    });
+                // Go: de, err := newUnixDirent(dirname, string(name), direntType(rec))
+                let (de, derr) = newUnixDirent(
+                    name.clone(),
+                    string::from_bytes(name_bytes),
+                    direntType(dtype),
+                );
+                // Go: if IsNotExist(err) { continue } — an entry that
+                // vanished between the getdents and the lstat is not an
+                // error, it is a directory that changed underneath.
+                if !derr.IsNil() {
+                    if IsNotExist(derr.clone()) {
+                        pos += reclen;
+                        continue;
+                    }
+                    let _ = f.Close();
+                    return (slice::__from_vec(entries), derr);
+                }
+                let ent: alloc::sync::Arc<dyn DirEntry + Send + Sync> = alloc::sync::Arc::new(de);
                 entries.push(ent);
             }
             if reclen == 0 {
@@ -1317,13 +1419,72 @@ pub fn ReadDir<N: Into<string>>(
     (slice::__from_vec(entries), nil)
 }
 
-/// Map a `getdents64` `d_type` byte into the goish FileMode bits.
-fn mode_from_dtype(dt: u8) -> FileMode {
-    match dt {
-        x if x == syscall::DT_DIR => ModeDir,
-        x if x == syscall::DT_LNK => ModeSymlink,
-        _ => FileMode(0),
+// go: sdk 1.25.5 os/dirent_linux.go:28-51 direntType
+/// Map a `getdents64` `d_type` byte onto FileMode type bits.
+///
+/// goish mapped two of the seven and returned `FileMode(0)` for the
+/// rest, so a fifo, a socket and a device all read as regular files.
+/// Worse, `DT_UNKNOWN` — which is not a type at all but the kernel
+/// saying "stat it yourself" — also read as a regular file, and it is
+/// what several filesystems return for EVERY entry. On one of those,
+/// `IsDir()` was false for every directory.
+///
+/// Go's sentinel for unknown is `^FileMode(0)`, an all-ones value that
+/// is not a valid mode; [`newUnixDirent`] is where it turns into an
+/// lstat.
+fn direntType(dt: u8) -> FileMode {
+    // Go: switch typ { case syscall.DT_BLK: return ModeDevice; … }
+    if dt == syscall::DT_BLK {
+        return ModeDevice;
     }
+    if dt == syscall::DT_CHR {
+        return FileMode(ModeDevice.0 | ModeCharDevice.0);
+    }
+    if dt == syscall::DT_DIR {
+        return ModeDir;
+    }
+    if dt == syscall::DT_FIFO {
+        return ModeNamedPipe;
+    }
+    if dt == syscall::DT_LNK {
+        return ModeSymlink;
+    }
+    if dt == syscall::DT_REG {
+        return FileMode(0);
+    }
+    if dt == syscall::DT_SOCK {
+        return ModeSocket;
+    }
+    // Go: return ^FileMode(0) // unknown
+    return FileMode(!0);
+}
+
+// go: sdk 1.25.5 os/file_unix.go:468-486 newUnixDirent
+/// Go: build a `unixDirent`, and when `d_type` was `DT_UNKNOWN`, lstat
+/// the entry to find out what it really is — caching the result so
+/// `Info()` does not stat it a second time.
+///
+/// goish had no counterpart at all: it built the entry inline from the
+/// unmapped type byte and never looked further.
+fn newUnixDirent(parent: string, name: string, typ: FileMode) -> (unixDirent, error) {
+    let mut ude = unixDirent {
+        parent: parent.clone(),
+        name: name.clone(),
+        typ,
+        info: None,
+    };
+    // Go: if typ != ^FileMode(0) { return ude, nil }
+    if typ.0 != !0 {
+        return (ude, nil);
+    }
+    let (info, err) = Lstat(parent + string::from_static("/") + name);
+    if !err.IsNil() {
+        return (ude, err);
+    }
+    // Go: ude.typ = info.Mode().Type(); ude.info = info
+    ude.typ = info.Mode().Type();
+    ude.info = Some(alloc::sync::Arc::new(info));
+    return (ude, nil);
 }
 
 /// `os.WriteFile(name, data, perm)` (os/file.go:763) — write `data`
@@ -1387,6 +1548,31 @@ fn base_name(p: &string) -> string {
 pub struct File {
     fd: i32,
     name: string,
+    /// Go: `dirinfo atomic.Pointer[dirInfo]` — the partially-drained
+    /// getdents buffer that makes a bounded `Readdirnames(n)` resumable.
+    /// Go guards it with a mutex because a `*File` is shared; goish's
+    /// `File` is a value and `Readdirnames` takes `&mut self`, so the
+    /// borrow checker is the guard.
+    dirinfo: Option<dirInfo>,
+}
+
+// go: sdk 1.25.5 os/dir_unix.go:20-25 dirInfo
+/// Go: "buffer for directory I/O", the count returned by the last
+/// getdents, and the offset of the next record in it.
+///
+/// goish had none: `Readdirnames(n)` asked the kernel for a fresh 4 KiB
+/// of entries on every call and kept only the first `n` it wanted,
+/// DISCARDING the rest of the batch. A directory of four entries read
+/// three at a time gave 3, then 0 — the fourth was gone, silently, and
+/// the caller saw a short directory rather than an error.
+#[derive(Clone, Default)]
+struct dirInfo {
+    /// Go: `buf *[]byte`.
+    buf: alloc::vec::Vec<u8>,
+    /// Go: `nbuf int` — bytes the last getdents actually returned.
+    nbuf: usize,
+    /// Go: `bufp int` — offset of the next record in `buf`.
+    bufp: usize,
 }
 
 impl Default for File {
@@ -1394,6 +1580,7 @@ impl Default for File {
         File {
             fd: -1,
             name: string::from_static(""),
+            dirinfo: None,
         }
     }
 }
@@ -1407,6 +1594,7 @@ impl File {
         File {
             fd: fd as i32,
             name,
+            dirinfo: None,
         }
     }
 

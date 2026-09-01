@@ -8,4 +8,6 @@
 
 mod fd;
 
-pub use fd::{DeadlineExceededError, ErrDeadlineExceeded, ErrNoDeadline, ErrNotPollable};
+pub use fd::{
+    DeadlineExceededError, ErrDeadlineExceeded, ErrFileClosing, ErrNoDeadline, ErrNotPollable,
+};

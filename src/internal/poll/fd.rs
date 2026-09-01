@@ -1,5 +1,5 @@
 // go: file internal/poll/fd.go decls: DeadlineExceededError.Error, DeadlineExceededError.Timeout, DeadlineExceededError.Temporary
-// goishlint:ignore GOISH021 String, errNetClosing, ErrFileClosing, ErrNetClosing, TestHookDidWritev — the same reason as the line below: these belong to the FD type and its closing protocol, which goish does not have.
+// goishlint:ignore GOISH021 String, errNetClosing, ErrNetClosing, TestHookDidWritev — the same reason as the line below: these belong to the FD type and its closing protocol, which goish does not have.
 // goishlint:ignore GOISH018 errClosing, FD.eofError, FD.Shutdown, FD.Fchown, FD.Ftruncate, FD.Fsync, FD.RawControl, consume, ignoringEINTRIO — fd.go is mostly the FD type and its methods, and goish's descriptor runtime is not this one: sockets go through `net`, files through `os`, and both call the kernel directly rather than through a shared poller. What the rest of the tree DOES need from this file is the pair of deadline sentinels `os` re-exports, and they cannot be declared anywhere else without giving `os.ErrDeadlineExceeded` and `net`'s deadline error two different identities — which is exactly the bug Go's comment on `errDeadlineExceeded` warns about.
 
 use crate::errors::ErrorTrait;
@@ -38,6 +38,7 @@ impl DeadlineExceededError {
 // Go: fd.go:37-51
 //
 //   var ErrNoDeadline = errors.New("file type does not support deadline")
+//   var ErrFileClosing = errors.New("use of closed file")
 //   var ErrDeadlineExceeded error = &DeadlineExceededError{}
 //   var ErrNotPollable = errors.New("not pollable")
 //
@@ -53,6 +54,7 @@ impl DeadlineExceededError {
 // would be circular)."
 crate::var! {
     pub ErrNoDeadline: error = "file type does not support deadline";
+    pub ErrFileClosing: error = "use of closed file";
     pub ErrDeadlineExceeded: error = { DeadlineExceededError };
     pub ErrNotPollable: error = "not pollable";
 }
