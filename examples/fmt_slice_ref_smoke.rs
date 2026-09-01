@@ -330,23 +330,49 @@ fn main() {
         report(&mut failed, ok, " 6", "composites compose with the rest");
     }
 
-    // 7. Two divergences from Go that are recorded here rather than
-    //    hidden, because both are in the printer's flag plumbing rather
-    //    than in the composite rendering:
+    // 7. The bad-verb marker reaches each element, which is where a
+    //    wrong verb over a composite shows up. Go: comp
+    //    a="[%!d(string=a) %!d(string=b)]" b="[%!s(int=1) %!s(int=2)]"
+    //    c="map[%!d(string=a):1]".
     //
-    //    * a WIDTH is applied to the bracketed whole, where Go applies
-    //      it per element: Go's `%3d` of []int{1,2,30} is
-    //      "[  1   2  30]" and goish's is "[1 2 30]". goish's `Format`
-    //      trait carries the verb and the precision but not the width,
-    //      which `do_format` applies over the finished bytes.
-    //    * a verb the element type does not take renders the element
-    //      instead of Go's `%!verb(type=value)`: Go's `%d` of
-    //      []string{"a"} is "[%!d(string=a)]" and goish's is "[a]".
-    //      The bad-verb machinery does not exist anywhere in goish's
-    //      printer yet, for slices or for scalars.
+    //    This check was written when the marker did not exist, pinning
+    //    goish's "[a]" as a known divergence so that the day it was
+    //    fixed the assertion would fail and point here. It did.
+    {
+        let mut ok = true;
+        let two: slice<string> = goish::slice!([]string{string::from("a"), string::from("b")});
+        eq(
+            &mut ok,
+            "%d over []string",
+            fmt::Sprintf!("%d", two),
+            "[%!d(string=a) %!d(string=b)]",
+        );
+        let ii2: slice<int> = goish::slice!([]int{1, 2});
+        eq(
+            &mut ok,
+            "%s over []int",
+            fmt::Sprintf!("%s", ii2),
+            "[%!s(int=1) %!s(int=2)]",
+        );
+        let mut m2: goish::map<string, int> = goish::make!(map[string]int);
+        m2.Set(s("a"), 1);
+        eq(
+            &mut ok,
+            "%d over map",
+            fmt::Sprintf!("%d", m2),
+            "map[%!d(string=a):1]",
+        );
+        report(&mut failed, ok, " 7", "the marker reaches each element");
+    }
+
+    // 8. The one gap that remains, recorded rather than hidden: a WIDTH
+    //    is applied to the bracketed whole, where Go applies it per
+    //    element. Go's `%3d` of []int{1,2,30} is "[  1   2  30]" and
+    //    goish's is "[1 2 30]" — goish's `Format` trait carries the verb
+    //    and the precision but not the width, which `do_format` applies
+    //    over the finished bytes.
     //
-    //    This check asserts what goish DOES, so that the day either is
-    //    fixed the assertion fails and points here.
+    //    Asserted as it IS, so that fixing it fails here.
     {
         let mut ok = true;
         let ii: slice<int> = goish::slice!([]int{1, 2, 30});
@@ -356,26 +382,19 @@ fn main() {
             fmt::Sprintf!("%3d", ii),
             "[1 2 30]",
         );
-        let one: slice<string> = goish::slice!([]string{string::from("a")});
-        eq(
-            &mut ok,
-            "badverb (diverges)",
-            fmt::Sprintf!("%d", one),
-            "[a]",
-        );
         report(
             &mut failed,
             ok,
-            " 7",
-            "the two known gaps, pinned as they are",
+            " 8",
+            "width over a composite still diverges",
         );
     }
 
     if failed == 0 {
-        fmt::Println!("ok 7/7");
+        fmt::Println!("ok 8/8");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 7");
+        fmt::Println!("FAIL", failed, "of 8");
         syscall::Exit(1);
     }
 }
