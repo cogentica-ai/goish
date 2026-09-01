@@ -1,4 +1,6 @@
 // net/textproto/reader.rs — slim line-by-line port of Go 1.25 net/textproto/reader.go.
+// goishlint:ignore GOISH018 Cmd, Dial, Close, Error, DotReader, ReadCodeLine, ReadResponse, ReadDotBytes, ReadDotLines, NewConn, Read, readCodeLine, parseCodeLine, mustHaveFieldNameColon, trim, TrimString, TrimBytes, isASCIISpace, closeDot, initCommonHeader, skipSpace, upcomingHeaderKeys, readLineSlice, readContinuedLineSlice, noValidation — the anchors in this file reach two Go files: reader.go, which it ports, and textproto.go for `isASCIILetter`. Everything listed is the `Conn` CLIENT surface — Dial, Cmd, the numeric-response readers and the dot-encoding reader — which goish does not port; `Error` and `ProtocolError` DO exist, in mod.rs, and `mustHaveFieldNameColon`/`trim` are the `ValidatorKind` enum and `trim_slice` here. `TrimString`, `TrimBytes` and `isASCIISpace` are in mod.rs, `closeDot` belongs to the dot reader, and `initCommonHeader` builds Go's lookup table. `noValidation` is `ValidatorKind::None`.
+// goishlint:ignore GOISH021 Conn, Error, ProtocolError, dotReader, toLower, commonHeader, commonHeaderOnce, dotReaderState, nl — the same split: `Error` and `ProtocolError` are in mod.rs, `Conn`/`dotReader` belong to the unported client surface, and `toLower`/`commonHeader` are Go's lookup tables for a canonicaliser goish computes directly; `nl` is a one-byte literal at its use site.
 //
 // Source: go1.25.5/src/net/textproto/reader.go
 //
@@ -18,7 +20,6 @@
 #![allow(non_snake_case)]
 
 extern crate alloc;
-use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::bufio;
@@ -48,6 +49,7 @@ pub struct Reader<R: io::Reader> {
     buf: Vec<byte>,
 }
 
+// go: sdk 1.25.5 net/textproto/reader.go:37-39 NewReader
 // Go: reader.go:37-39
 //   func NewReader(r *bufio.Reader) *Reader { return &Reader{R: r} }
 pub fn NewReader<R: io::Reader>(r: bufio::Reader<R>) -> Reader<R> {
@@ -98,6 +100,7 @@ impl<R: io::Reader> Reader<R> {
 }
 
 impl<R: io::Reader> Reader<R> {
+    // go: sdk 1.25.5 net/textproto/reader.go:43-46 Reader.ReadLine
     // Go: reader.go:43-46
     //   func (r *Reader) ReadLine() (string, error) {
     //       line, err := r.readLineSlice(-1)
@@ -108,6 +111,7 @@ impl<R: io::Reader> Reader<R> {
         (string::from_bytes(line.as_ref()), err)
     }
 
+    // go: sdk 1.25.5 net/textproto/reader.go:49-55 Reader.ReadLineBytes
     // Go: reader.go:49-55
     //   func (r *Reader) ReadLineBytes() ([]byte, error) { ... }
     pub fn ReadLineBytes(&mut self) -> (slice<byte>, error) {
@@ -118,6 +122,7 @@ impl<R: io::Reader> Reader<R> {
         (line, err)
     }
 
+    // go: sdk 1.25.5 net/textproto/reader.go:60-81 Reader.readLineSlice
     // Go: reader.go:60-81
     //   func (r *Reader) readLineSlice(lim int64) ([]byte, error) { ... }
     fn readLineSlice(&mut self, lim: int) -> (slice<byte>, error) {
@@ -147,6 +152,7 @@ impl<R: io::Reader> Reader<R> {
         (slice::__from_vec(line), nil)
     }
 
+    // go: sdk 1.25.5 net/textproto/reader.go:101-104 Reader.ReadContinuedLine
     // Go: reader.go:101-104
     //   func (r *Reader) ReadContinuedLine() (string, error) { ... }
     pub fn ReadContinuedLine(&mut self) -> (string, error) {
@@ -154,6 +160,7 @@ impl<R: io::Reader> Reader<R> {
         (string::from_bytes(line.as_ref()), err)
     }
 
+    // go: sdk 1.25.5 net/textproto/reader.go:122-128 Reader.ReadContinuedLineBytes
     // Go: reader.go:122-128
     //   func (r *Reader) ReadContinuedLineBytes() ([]byte, error) { ... }
     pub fn ReadContinuedLineBytes(&mut self) -> (slice<byte>, error) {
@@ -162,6 +169,7 @@ impl<R: io::Reader> Reader<R> {
         (line, err)
     }
 
+    // go: sdk 1.25.5 net/textproto/reader.go:135-187 Reader.readContinuedLineSlice
     // Go: reader.go:135-187
     //   func (r *Reader) readContinuedLineSlice(lim int64,
     //                                            validateFirstLine func([]byte) error) ([]byte, error)
@@ -244,6 +252,7 @@ impl<R: io::Reader> Reader<R> {
         (slice::__from_vec(buf_copy), nil)
     }
 
+    // go: sdk 1.25.5 net/textproto/reader.go:190-205 Reader.skipSpace
     // Go: reader.go:190-205
     //   func (r *Reader) skipSpace() int { ... }
     fn skipSpace(&mut self) -> int {
@@ -262,6 +271,7 @@ impl<R: io::Reader> Reader<R> {
         n
     }
 
+    // go: sdk 1.25.5 net/textproto/reader.go:506-508 Reader.ReadMIMEHeader
     // Go: reader.go:506-508
     //   func (r *Reader) ReadMIMEHeader() (MIMEHeader, error) {
     //       return readMIMEHeader(r, math.MaxInt64, math.MaxInt64)
@@ -270,6 +280,7 @@ impl<R: io::Reader> Reader<R> {
         readMIMEHeader(self, i64::MAX, i64::MAX)
     }
 
+    // go: sdk 1.25.5 net/textproto/reader.go:620-642 Reader.upcomingHeaderKeys
     // Go: reader.go:620-642
     //   func (r *Reader) upcomingHeaderKeys() (n int)
     fn upcomingHeaderKeys(&mut self) -> int {
@@ -340,9 +351,20 @@ fn run_validator(kind: ValidatorKind, line: &slice<byte>) -> Result<(), error> {
         ValidatorKind::None => Ok(()),
         ValidatorKind::MustHaveFieldNameColon => {
             if bytes::IndexByte(line.clone(), b':') < 0 {
+                // Go: ProtocolError(fmt.Sprintf("malformed MIME header:
+                // missing colon: %q", line)).
+                //
+                // The format string here was `"{}"` — a RUST placeholder
+                // in a Go format string, which `Sprintf` copies out
+                // literally and then reports the unused argument after.
+                // The message read `missing colon: {}%!(EXTRA
+                // string="A 1")`. It was invisible until `%!(EXTRA …)`
+                // existed to say an argument had gone nowhere.
                 let raw: &[byte] = line.as_ref();
-                let qs = quote_byteslice(raw);
-                let msg = crate::Sprintf!("malformed MIME header: missing colon: {}", qs);
+                let msg = crate::Sprintf!(
+                    "malformed MIME header: missing colon: %q",
+                    string::from_bytes(raw)
+                );
                 return Err(errors::Wrap(ProtocolError(msg)));
             }
             Ok(())
@@ -369,30 +391,7 @@ fn cut_bytes<'a>(s: &'a [byte], sep: &[byte]) -> Option<(&'a [byte], &'a [byte])
     None
 }
 
-// Helper: Go-style %q quoting for a byte slice (used in error messages).
-// Slim: only handles printable ASCII + standard escapes.
-fn quote_byteslice(b: &[byte]) -> string {
-    let mut s = String::with_capacity(b.len() + 2);
-    s.push('"');
-    for &c in b {
-        match c {
-            b'\\' => s.push_str("\\\\"),
-            b'"' => s.push_str("\\\""),
-            b'\n' => s.push_str("\\n"),
-            b'\r' => s.push_str("\\r"),
-            b'\t' => s.push_str("\\t"),
-            0x20..=0x7e => s.push(c as char),
-            _ => {
-                // Octal-style fallback (Go uses \xHH); we use \xHH too.
-                use core::fmt::Write;
-                let _ = write!(s, "\\x{:02x}", c);
-            }
-        }
-    }
-    s.push('"');
-    string::from_bytes(s.as_bytes())
-}
-
+// go: sdk 1.25.5 net/textproto/textproto.go:152-155 isASCIILetter
 // Go: textproto.go:152-155
 //   func isASCIILetter(b byte) bool {
 //       b |= 0x20
@@ -407,6 +406,7 @@ fn isASCIILetter(b: byte) -> bool {
 //   var colon = []byte(":")
 const COLON: byte = b':';
 
+// go: sdk 1.25.5 net/textproto/reader.go:515-600 readMIMEHeader
 // Go: reader.go:515-600
 //   func readMIMEHeader(r *Reader, maxMemory, maxHeaders int64) (MIMEHeader, error)
 fn readMIMEHeader<R: io::Reader>(
@@ -438,8 +438,10 @@ fn readMIMEHeader<R: io::Reader>(
                 return (m, err);
             }
             let raw: &[byte] = line.as_ref();
+            // Go: ProtocolError("malformed MIME header initial line: " +
+            // string(line)) — a concatenation, not a format.
             let lstr = string::from_bytes(raw);
-            let msg = crate::Sprintf!("malformed MIME header initial line: {}", lstr);
+            let msg = string::from_static("malformed MIME header initial line: ") + lstr;
             return (m, errors::Wrap(ProtocolError(msg)));
         }
     }
@@ -457,7 +459,7 @@ fn readMIMEHeader<R: io::Reader>(
         let (k, v, ok) = bytes::Cut(kv.clone(), slice::__from_vec(alloc::vec![COLON]));
         if !ok {
             let kvstr = string::from_bytes(kv.as_ref());
-            let msg = crate::Sprintf!("malformed MIME header line: {}", kvstr);
+            let msg = string::from_static("malformed MIME header line: ") + kvstr;
             return (m, errors::Wrap(ProtocolError(msg)));
         }
 
@@ -465,7 +467,7 @@ fn readMIMEHeader<R: io::Reader>(
         let (key, ok2) = canonicalMIMEHeaderKey(k);
         if !ok2 {
             let kvstr = string::from_bytes(kv.as_ref());
-            let msg = crate::Sprintf!("malformed MIME header line: {}", kvstr);
+            let msg = string::from_static("malformed MIME header line: ") + kvstr;
             return (m, errors::Wrap(ProtocolError(msg)));
         }
 
@@ -474,7 +476,7 @@ fn readMIMEHeader<R: io::Reader>(
         for &c in vraw {
             if !validHeaderValueByte(c) {
                 let kvstr = string::from_bytes(kv.as_ref());
-                let msg = crate::Sprintf!("malformed MIME header line: {}", kvstr);
+                let msg = string::from_static("malformed MIME header line: ") + kvstr;
                 return (m, errors::Wrap(ProtocolError(msg)));
             }
         }
@@ -514,6 +516,7 @@ fn readMIMEHeader<R: io::Reader>(
     }
 }
 
+// go: sdk 1.25.5 net/textproto/reader.go:683-709 validHeaderFieldByte
 // Go: reader.go:683-709
 //   func validHeaderFieldByte(c byte) bool
 //
@@ -542,6 +545,7 @@ pub fn validHeaderFieldByte(c: byte) -> bool {
     }
 }
 
+// go: sdk 1.25.5 net/textproto/reader.go:723-735 validHeaderValueByte
 // Go: reader.go:723-735
 //   func validHeaderValueByte(c byte) bool
 //
@@ -550,6 +554,7 @@ pub fn validHeaderValueByte(c: byte) -> bool {
     c == b'\t' || (c >= 0x20 && c <= 0x7e)
 }
 
+// go: sdk 1.25.5 net/textproto/reader.go:747-794 canonicalMIMEHeaderKey
 // Go: reader.go:747-794
 //   func canonicalMIMEHeaderKey(a []byte) (_ string, ok bool)
 //

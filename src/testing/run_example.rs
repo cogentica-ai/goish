@@ -26,7 +26,9 @@ use crate::testing::example::InternalExample;
 #[allow(non_snake_case)]
 pub fn runExample(eg: &InternalExample) -> bool {
     if crate::testing::testing::__chatty_on() {
-        crate::fmt::Print!(crate::fmt::Sprintf!("=== RUN   {}\n", eg.Name.clone()));
+        // Go: fmt.Printf("%s=== RUN   %s\n", chatty.prefix(), eg.Name).
+        // The `{}` was a Rust placeholder.
+        crate::fmt::Print!(crate::fmt::Sprintf!("=== RUN   %s\n", eg.Name.clone()));
     }
 
     let mut fds: [i32; 2] = [0, 0];

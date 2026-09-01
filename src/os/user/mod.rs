@@ -276,7 +276,9 @@ fn lookup_user_id(uid: string) -> (User, error) {
     if !e.IsNil() {
         return (
             User::default(),
-            errors::New(crate::Sprintf!("user: invalid userid {}", uid.clone())),
+            // Go: errors.New("user: invalid userid " + uid). The `{}`
+            // was a Rust placeholder; see net/mail.
+            errors::New(string::from_static("user: invalid userid ") + uid.clone()),
         );
     }
     find_user_by(data, uid, 2i64, false)

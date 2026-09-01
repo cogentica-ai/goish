@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 8648,
+ "total": 8608,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -630,20 +630,20 @@
   "src/net/textproto/mod.rs": {
    "GOISH005": 10,
    "GOISH010": 1,
-   "GOISH014": 18,
+   "GOISH014": 2,
    "GOISH015": 1,
    "GOISH016": 1,
    "GOISH023": 13
   },
   "src/net/textproto/pipeline.rs": {
-   "GOISH014": 10,
+   "GOISH014": 3,
    "GOISH023": 4
   },
   "src/net/textproto/reader.rs": {
    "GOISH005": 4,
-   "GOISH014": 20,
+   "GOISH014": 4,
    "GOISH015": 1,
-   "GOISH023": 20
+   "GOISH023": 19
   },
   "src/nilval.rs": {
    "GOISH014": 8,
