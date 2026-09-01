@@ -2034,3 +2034,7 @@ path = "examples/regexp_ref_smoke.rs"
 [[example]]
 name = "sched_gosched_fairness_smoke"
 path = "examples/sched_gosched_fairness_smoke.rs"
+
+[[example]]
+name = "flag_ref_smoke"
+path = "examples/flag_ref_smoke.rs"

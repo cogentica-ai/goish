@@ -42,20 +42,20 @@
 #![allow(non_snake_case)]
 
 mod flag;
+pub(crate) use flag::__defstr;
 pub use flag::{
-    Bool, CommandLine, Duration, Flag, Int, Int64, Parse, Parsed, Set, String, Uint, Value,
+    Bool, CommandLine, Duration, ErrHelp, Flag, Int, Int64, Parse, Parsed, Set, String, Uint,
+    UnquoteUsage, Value,
 };
 
 extern crate alloc;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use crate::errors::{self, error, nil};
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::runtime::spin::SpinLock;
-use crate::strconv;
-use crate::types::{byte, float64, int};
+use crate::types::{float64, int};
 
 // ─── FlagHandle<T> handle ────────────────────────────────────────────────────
 
@@ -79,7 +79,7 @@ impl<T: Clone> Clone for FlagHandle<T> {
 
 // ─── Internal flag entry ───────────────────────────────────────────────
 
-pub(crate) enum FlagKind {
+pub enum FlagKind {
     Bool(Arc<SpinLock<bool>>),
     Int(Arc<SpinLock<int>>),
     Int64(Arc<SpinLock<crate::types::int64>>),
@@ -108,17 +108,35 @@ impl Clone for FlagKind {
 }
 
 pub(crate) struct FlagDef {
-    name: string,
-    usage: string,
-    kind: FlagKind,
+    pub(crate) name: string,
+    pub(crate) usage: string,
+    pub(crate) kind: FlagKind,
+    /// The value the flag was defined with, rendered as Go renders it.
+    /// `PrintDefaults` shows it and `isZeroValue` suppresses it. Go
+    /// captures this as `Flag.DefValue` at definition time; goish's
+    /// typed cells are mutated in place by the parser, so the
+    /// definition-time rendering has to be taken before the parse can
+    /// change it.
+    pub(crate) defvalue: string,
+    /// Go keeps a separate `actual` map of the flags that were Set;
+    /// `Visit` walks it and `NFlag` counts it.
+    pub(crate) actual: bool,
 }
 
 // ─── FlagSet ───────────────────────────────────────────────────────────
 
 pub struct FlagSet {
-    defs: Vec<FlagDef>,
-    args: Vec<string>, // positional, after parse
-    parsed: bool,
+    pub(crate) defs: Vec<FlagDef>,
+    pub(crate) args: Vec<string>, // positional, after parse
+    pub(crate) parsed: bool,
+    /// Go's `output io.Writer`, nil meaning os.Stderr.
+    pub(crate) output: Option<
+        Arc<
+            crate::sync::Mutex<
+                core::cell::UnsafeCell<alloc::boxed::Box<dyn crate::io::Writer + Send>>,
+            >,
+        >,
+    >,
 }
 
 pub const fn NewFlagSet() -> FlagSet {
@@ -126,6 +144,7 @@ pub const fn NewFlagSet() -> FlagSet {
         defs: Vec::new(),
         args: Vec::new(),
         parsed: false,
+        output: None,
     }
 }
 
@@ -147,6 +166,8 @@ impl FlagSet {
             name: name.into(),
             usage: usage.into(),
             kind: FlagKind::String(cell.clone()),
+            defvalue: __defstr(&FlagKind::String(cell.clone())),
+            actual: false,
         });
         FlagHandle { cell }
     }
@@ -162,6 +183,8 @@ impl FlagSet {
             name: name.into(),
             usage: usage.into(),
             kind: FlagKind::Int(cell.clone()),
+            defvalue: __defstr(&FlagKind::Int(cell.clone())),
+            actual: false,
         });
         FlagHandle { cell }
     }
@@ -177,6 +200,8 @@ impl FlagSet {
             name: name.into(),
             usage: usage.into(),
             kind: FlagKind::Bool(cell.clone()),
+            defvalue: __defstr(&FlagKind::Bool(cell.clone())),
+            actual: false,
         });
         FlagHandle { cell }
     }
@@ -192,6 +217,8 @@ impl FlagSet {
             name: name.into(),
             usage: usage.into(),
             kind: FlagKind::Float64(cell.clone()),
+            defvalue: __defstr(&FlagKind::Float64(cell.clone())),
+            actual: false,
         });
         FlagHandle { cell }
     }
@@ -204,209 +231,12 @@ impl FlagSet {
         self.args.len() as int
     }
 
-    /// Set assigns a named flag through the same conversion path used by
-    /// Parse. It matches Go's FlagSet.Set behavior and is useful when an
-    /// embedding command has already parsed its own flag set.
-    pub fn Set(&mut self, name: string, value: string) -> error {
-        let Some(index) = self.find_def(&name) else {
-            let mut message: Vec<byte> = Vec::new();
-            message.extend_from_slice(b"flag provided but not defined: -");
-            message.extend_from_slice(name.as_bytes());
-            return errors::New(string::__from_vec(message));
-        };
-        return self.apply_value(index, value.as_bytes());
-    }
-
-    /// Parse `args` as a command line. Skips arg[0] (program name)
-    /// only if you want — typically pass `os::Args().slice(1, len)`.
-    pub fn Parse(&mut self, args: &slice<string>) -> error {
-        let raw: &[string] = args;
-        let mut i = 0usize;
-        let n = raw.len();
-        while i < n {
-            let cur = raw[i].clone();
-            let bytes = cur.as_bytes();
-            // Stop conditions: no `--` prefix, or bare `--`, or single `-`.
-            if bytes.is_empty() || bytes[0] != b'-' {
-                break;
-            }
-            if bytes.len() == 1 {
-                break; // bare `-` is a positional
-            }
-            if bytes == b"--" {
-                i += 1; // everything after is positional
-                break;
-            }
-            // Strip leading `-` or `--`.
-            let strip = if bytes.len() >= 2 && bytes[1] == b'-' {
-                2
-            } else {
-                1
-            };
-            let body = &bytes[strip..];
-            // Look for `=value`.
-            let mut eq_pos: Option<usize> = None;
-            for (k, &c) in body.iter().enumerate() {
-                if c == b'=' {
-                    eq_pos = Some(k);
-                    break;
-                }
-            }
-            let (name_b, attached_val): (&[byte], Option<&[byte]>) = match eq_pos {
-                Some(k) => (&body[..k], Some(&body[k + 1..])),
-                None => (body, None),
-            };
-            let name = string::from_bytes(name_b);
-            // Find matching def.
-            let def_idx = match self.find_def(&name) {
-                Some(k) => k,
-                None => {
-                    let mut msg: Vec<byte> = Vec::new();
-                    msg.extend_from_slice(b"flag provided but not defined: -");
-                    msg.extend_from_slice(name_b);
-                    return errors::New(string::__from_vec(msg));
-                }
-            };
-            // Determine the value bytes.
-            let val_bytes: Vec<byte> = if let Some(av) = attached_val {
-                av.to_vec()
-            } else {
-                // Consume next arg unless it looks like a flag.
-                if i + 1 < n {
-                    let nxt = raw[i + 1].clone();
-                    let nb = nxt.as_bytes();
-                    if !nb.is_empty() && nb[0] == b'-' {
-                        // No value; for Bool default to "true".
-                        if matches!(self.defs[def_idx].kind, FlagKind::Bool(_)) {
-                            b"true".to_vec()
-                        } else {
-                            let mut msg: Vec<byte> = Vec::new();
-                            msg.extend_from_slice(b"flag needs an argument: -");
-                            msg.extend_from_slice(name_b);
-                            return errors::New(string::__from_vec(msg));
-                        }
-                    } else {
-                        i += 1;
-                        nb.to_vec()
-                    }
-                } else {
-                    // No more args.
-                    if matches!(self.defs[def_idx].kind, FlagKind::Bool(_)) {
-                        b"true".to_vec()
-                    } else {
-                        let mut msg: Vec<byte> = Vec::new();
-                        msg.extend_from_slice(b"flag needs an argument: -");
-                        msg.extend_from_slice(name_b);
-                        return errors::New(string::__from_vec(msg));
-                    }
-                }
-            };
-            // Apply value to the slot.
-            let err = self.apply_value(def_idx, &val_bytes);
-            if err != nil {
-                return err;
-            }
-            i += 1;
-        }
-        // Remaining args are positional.
-        while i < n {
-            self.args.push(raw[i].clone());
-            i += 1;
-        }
-        self.parsed = true;
-        nil
-    }
-
-    fn find_def(&self, name: &string) -> Option<usize> {
+    pub(crate) fn find_def(&self, name: &string) -> Option<usize> {
         for (i, d) in self.defs.iter().enumerate() {
             if d.name == *name {
                 return Some(i);
             }
         }
         None
-    }
-
-    fn apply_value(&mut self, idx: usize, val: &[byte]) -> error {
-        match &self.defs[idx].kind {
-            FlagKind::String(cell) => {
-                *cell.lock() = string::from_bytes(val);
-                nil
-            }
-            FlagKind::Int(cell) => {
-                let s = string::from_bytes(val);
-                let (n, err) = strconv::Atoi(s);
-                if err != nil {
-                    return err;
-                }
-                *cell.lock() = n;
-                nil
-            }
-            FlagKind::Bool(cell) => {
-                let s = string::from_bytes(val);
-                let (b, err) = strconv::ParseBool(s);
-                if err != nil {
-                    return err;
-                }
-                *cell.lock() = b;
-                nil
-            }
-            FlagKind::Float64(cell) => {
-                let s = string::from_bytes(val);
-                let (f, err) = strconv::ParseFloat(s, 64);
-                if err != nil {
-                    return err;
-                }
-                *cell.lock() = f;
-                nil
-            }
-            FlagKind::Int64(cell) => {
-                let s = string::from_bytes(val);
-                // Go: strconv.ParseInt(value, 0, 64) — base 0, so
-                // "0x10" and "0b1010" parse as Go's flag package
-                // accepts them, not just decimal.
-                let (n, err) = strconv::ParseInt(s, 0, 64);
-                if err != nil {
-                    return err;
-                }
-                *cell.lock() = n;
-                nil
-            }
-            FlagKind::Uint(cell) => {
-                let s = string::from_bytes(val);
-                // Go: strconv.ParseUint(value, 0, strconv.IntSize)
-                let (n, err) = strconv::ParseUint(s, 0, 64);
-                if err != nil {
-                    return err;
-                }
-                *cell.lock() = n as crate::types::uint;
-                nil
-            }
-            FlagKind::Duration(cell) => {
-                let s = string::from_bytes(val);
-                // Go: time.ParseDuration(value) — so "-test.timeout=30s"
-                // takes a unit suffix, not a bare number.
-                let (d, err) = crate::time::ParseDuration(s);
-                if err != nil {
-                    return err;
-                }
-                *cell.lock() = d;
-                nil
-            }
-        }
-    }
-
-    /// Print one line per registered flag: `  -name  usage` to Stderr.
-    /// Minimal — no type/default columns yet.
-    pub fn PrintDefaults(&self) {
-        let e = crate::os::Stderr();
-        for d in &self.defs {
-            let mut buf: Vec<byte> = Vec::new();
-            buf.extend_from_slice(b"  -");
-            buf.extend_from_slice(d.name.as_bytes());
-            buf.extend_from_slice(b"  ");
-            buf.extend_from_slice(d.usage.as_bytes());
-            buf.push(b'\n');
-            let _ = e.Write(slice::__from_vec(buf));
-        }
     }
 }
