@@ -2134,3 +2134,7 @@ path = "examples/csv_ref_smoke.rs"
 [[example]]
 name = "time_zone_ref_smoke"
 path = "examples/time_zone_ref_smoke.rs"
+
+[[example]]
+name = "fmt_star_ref_smoke"
+path = "examples/fmt_star_ref_smoke.rs"

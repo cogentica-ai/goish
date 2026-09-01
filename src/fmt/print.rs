@@ -1,4 +1,4 @@
-// go: file fmt/print.go decls: Sprint, Sprintln, Fprint, Fprintln, Print, Println, pp.doPrint, pp.badVerb
+// go: file fmt/print.go decls: Sprint, Sprintln, Fprint, Fprintln, Print, Println, pp.doPrint, pp.badVerb, intFromArg
 //
 // print.go — the Stringer/Formatter/State interfaces, the output
 // buffer, the printer itself, and every Print/Sprint/Fprint entry
@@ -193,6 +193,22 @@ pub trait Format {
     fn __accepts(&self, _verb: byte) -> bool {
         return true;
     }
+
+    // go: none — goish idiom: Go's `intFromArg` (print.go:294) type-
+    //     asserts the operand to `int` and, failing that, reflects over
+    //     it for any integer Kind. goish's printer has no reflect at
+    //     that point, so the question is a trait method with a `None`
+    //     default — "this type is not an integer", which is Go's
+    //     `default:` arm.
+    /// The operand as an integer, for `%*d` and `%.*f`, where the width
+    /// or the precision comes from an ARGUMENT rather than from the
+    /// format string.
+    ///
+    /// `None` means the operand is not an integer, which is Go's
+    /// `%!(BADWIDTH)` / `%!(BADPREC)`.
+    fn __as_fmt_int(&self) -> Option<i64> {
+        return None;
+    }
 }
 
 // go: sdk 1.25.5 fmt/print.go:381-400 pp.badVerb
@@ -352,6 +368,16 @@ impl<'a> FmtArg<'a> {
     // trick; no Go counterpart.
     fn write(&self, verb: byte, f: &mut FmtBuf) {
         self.write_prec(verb, -1, f);
+    }
+
+    // go: none — goish idiom: the operand half of Go's `intFromArg`
+    //     (print.go:294). Go asks the `any` for an `int`; goish asks
+    //     the `Format` impl, and an `error` operand is never one.
+    fn as_fmt_int(&self) -> Option<i64> {
+        if let FmtArg::Val(v) = self {
+            return v.__as_fmt_int();
+        }
+        return None;
     }
 
     // go: none — goish idiom: as `write`, threading the verb's
@@ -976,6 +1002,10 @@ macro_rules! impl_format_for_signed {
         fn fmt(&self, verb: byte, f: &mut FmtBuf) {
             format_signed(toint64(*self), verb, f);
         }
+        // go: none — goish idiom: see `Format::__as_fmt_int`.
+        fn __as_fmt_int(&self) -> Option<i64> {
+            return Some(toint64(*self));
+        }
     } )* };
 }
 macro_rules! impl_format_for_unsigned {
@@ -993,6 +1023,12 @@ macro_rules! impl_format_for_unsigned {
         //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
         fn fmt(&self, verb: byte, f: &mut FmtBuf) {
             format_unsigned(touint64(*self), verb, f);
+        }
+        // go: none — goish idiom: see `Format::__as_fmt_int`. Go's
+        //     `intFromArg` takes an unsigned operand only when it fits
+        //     an `int`, which is what the `try_into` says here.
+        fn __as_fmt_int(&self) -> Option<i64> {
+            return i64::try_from(touint64(*self)).ok();
         }
     } )* };
 }
@@ -1152,6 +1188,10 @@ impl Format for u8 {
             _ => format_unsigned(touint64(*self), verb, f),
         }
     }
+    // go: none — goish idiom: see `Format::__as_fmt_int`.
+    fn __as_fmt_int(&self) -> Option<i64> {
+        return Some(toint64(*self));
+    }
 }
 
 // error itself impls Format — %s / %v render `.Error()` text. (FmtArg
@@ -1172,6 +1212,31 @@ impl Format for error {
 }
 
 // ─── Format-string scanner ────────────────────────────────────────────
+
+// go: sdk 1.25.5 fmt/print.go:934-964 intFromArg
+/// Go: "intFromArg gets the argNumth element of a. On return, isInt
+/// reports whether the argument has integer type."
+///
+/// This is what `%*d` reads its WIDTH from. Two details of Go's that
+/// are easy to drop: the operand is consumed whether or not it turns
+/// out to be an integer — a `%!(BADWIDTH)` still moves on to the next
+/// argument — and a magnitude past a million is refused outright, so a
+/// bad value cannot ask the printer for a gigabyte of padding.
+fn int_from_arg(args: &[FmtArg], arg_num: &mut usize) -> Option<i64> {
+    if *arg_num >= args.len() {
+        return None;
+    }
+    let num = args[*arg_num].as_fmt_int();
+    *arg_num += 1;
+    // Go: "func tooLarge(x int) bool { const max int = 1e6; return x >
+    // max || x < -max }".
+    if let Some(n) = num {
+        if n > 1_000_000 || n < -1_000_000 {
+            return None;
+        }
+    }
+    return num;
+}
 
 // go: none — goish idiom: Go's `(*pp).doPrintf` (print.go:1019) walks the
 //     format string against a `[]any`; goish walks it against the
@@ -1236,15 +1301,52 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
                 _ => break,
             }
         }
-        // Parse optional width digits.
         let mut width: usize = 0;
         let mut has_width = false;
-        while i < format.len() && format[i] >= b'1' && format[i] <= b'9'
-            || (i < format.len() && has_width && format[i] >= b'0' && format[i] <= b'9')
-        {
-            width = width * 10 + (format[i] - b'0') as usize;
-            has_width = true;
+        // Go: "if i < end && format[i] == '*' { … p.fmt.wid,
+        // p.fmt.widPresent, argNum = intFromArg(a, argNum) … }" — the
+        // width comes from an ARGUMENT.
+        //
+        // goish did not know `*` at all. It was not a flag, not a
+        // width, not a precision, so it fell through to the VERB slot:
+        // `%*d` of (6, 42) consumed the 6 as the operand, rendered it
+        // under the meaningless verb `*`, and copied the `d` out as a
+        // literal — printing "6d". The value it was asked to pad never
+        // appeared, and neither did any padding.
+        if i < format.len() && format[i] == b'*' {
             i += 1;
+            match int_from_arg(args, &mut arg_idx) {
+                Some(n) => {
+                    has_width = true;
+                    // Go: "We have a negative width, so take its value
+                    // and ensure that the minus flag is set." The zero
+                    // flag is dropped with it — "Do not pad with zeros
+                    // to the right."
+                    if n < 0 {
+                        left_align = true;
+                        zero_pad = false;
+                        width = usize::try_from(-n).unwrap_or(0);
+                    } else {
+                        width = usize::try_from(n).unwrap_or(0);
+                    }
+                }
+                None => {
+                    f.extend(b"%!(BADWIDTH)");
+                }
+            }
+        }
+        // Parse optional width digits. Go's is the `else` arm of the
+        // `*` test above, not a second chance after it, so `%*5d` reads
+        // its width from the argument and leaves the `5` to be the
+        // verb — the guard here is that `else`.
+        if !has_width {
+            while i < format.len() && format[i] >= b'1' && format[i] <= b'9'
+                || (i < format.len() && has_width && format[i] >= b'0' && format[i] <= b'9')
+            {
+                width = width * 10 + (format[i] - b'0') as usize;
+                has_width = true;
+                i += 1;
+            }
         }
         // Parse optional `.precision`. Go: "For floating-point values,
         // width sets the minimum width of the field and precision sets
@@ -1260,11 +1362,33 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
         let mut precision: usize = 0;
         let mut has_precision = false;
         if i < format.len() && format[i] == b'.' {
-            i += 1;
-            has_precision = true;
-            while i < format.len() && format[i] >= b'0' && format[i] <= b'9' {
-                precision = precision * 10 + (format[i] - b'0') as usize;
+            // Go: "if i+1 < end && format[i+1] == '*'" — the precision
+            // comes from an argument too.
+            if i + 1 < format.len() && format[i + 1] == b'*' {
+                i += 2;
+                // Go: "if p.fmt.prec < 0 { p.fmt.prec = 0;
+                // p.fmt.precPresent = false }", and an absent precision
+                // then writes the BADPREC marker. So a NEGATIVE `*`
+                // precision is not "no precision given" — the verb
+                // falls back to its OWN default, which for `%f` is six
+                // places: `%.*f` of (-1, 3.14159) is
+                // "%!(BADPREC)3.141590", not "3.14159".
+                match int_from_arg(args, &mut arg_idx) {
+                    Some(n) if n >= 0 => {
+                        has_precision = true;
+                        precision = usize::try_from(n).unwrap_or(0);
+                    }
+                    _ => {
+                        f.extend(b"%!(BADPREC)");
+                    }
+                }
+            } else {
                 i += 1;
+                has_precision = true;
+                while i < format.len() && format[i] >= b'0' && format[i] <= b'9' {
+                    precision = precision * 10 + (format[i] - b'0') as usize;
+                    i += 1;
+                }
             }
         }
         if i >= format.len() {
