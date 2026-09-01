@@ -408,13 +408,47 @@ impl Format for &str {
     }
 }
 
+// go: none — goish idiom: Go's printer reflects over the value and
+//     reaches `fmtBytes`, which switches on the verb. goish dispatches
+//     on the `Format` trait, so the same switch lives here.
+//
+//     `%v` and `%d` of a `[]byte` print the NUMBERS — Go's `printValue`
+//     falls through to the integer case for both — and only `%s`, `%q`,
+//     `%x` and `%X` treat the bytes as text. goish sent every verb to
+//     the text path, so `fmt.Println(b)` on `[]byte("abc")` printed
+//     "abc" where Go prints "[97 98 99]", and a byte slice that is not
+//     valid UTF-8 printed replacement characters where Go prints a list
+//     of numbers.
+fn write_bytes_with_verb(b: &[byte], verb: byte, f: &mut FmtBuf) {
+    match verb & !SHARP {
+        b'v' | b'd' => write_byte_list(b, verb, f),
+        _ => write_string_with_verb(b, verb, f),
+    }
+}
+
+// go: none — goish idiom: the `[e e e]` rendering Go's `printValue`
+//     produces for a slice or an array, with the verb applied to each
+//     ELEMENT. An empty or nil slice is "[]" in Go, not "".
+fn write_byte_list(b: &[byte], verb: byte, f: &mut FmtBuf) {
+    f.push(b'[');
+    let mut i = 0usize;
+    while i < b.len() {
+        if i > 0 {
+            f.push(b' ');
+        }
+        b[i].fmt(verb, f);
+        i += 1;
+    }
+    f.push(b']');
+}
+
 impl Format for slice<byte> {
     // go: none — goish idiom: goish's printer dispatches on the `Format` trait
     //     where Go's reflects over `any`, so the per-type rendering lives in
     //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
         // self: &slice<byte>; Deref<Target=[byte]> auto-coerces to &[byte].
-        write_string_with_verb(self, verb, f);
+        write_bytes_with_verb(self, verb, f);
     }
 }
 
@@ -426,7 +460,116 @@ impl Format for &slice<byte> {
     //     where Go's reflects over `any`, so the per-type rendering lives in
     //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
-        write_string_with_verb(self, verb, f);
+        write_bytes_with_verb(self, verb, f);
+    }
+}
+
+// go: none — goish idiom: Go's printer reflects over any value, so a
+//     `[]string` or a `[][]int` needs no per-type support; goish's
+//     dispatches on a trait, and `slice<T>` had an impl for exactly one
+//     T — `byte`. Every other slice failed to compile at the CALL:
+//     `fmt.Println(names)` on a `[]string`, which is about as ordinary
+//     as Go gets, was a type error.
+//
+//     `ListElem` is what makes the generic impl possible at all.
+//     `impl<T: Format> Format for slice<T>` would overlap the
+//     `slice<byte>` impl above, and `[]byte` is genuinely special in
+//     Go — `%s` renders it as text — so the two cannot be merged.
+//     A type opts in by implementing this marker; `slice<byte>` opts in
+//     too, which is what makes `[][]byte` render as `[[97 98]]` the way
+//     Go does.
+pub trait ListElem: Format {}
+
+macro_rules! impl_list_elem {
+    ($($t:ty),*) => { $( impl ListElem for $t {} )* };
+}
+impl_list_elem!(
+    bool,
+    string,
+    &string,
+    &str,
+    char,
+    i8,
+    i16,
+    i32,
+    i64,
+    isize,
+    u16,
+    u32,
+    u64,
+    usize,
+    f32,
+    f64,
+    error,
+    crate::goany::Any,
+    slice<byte>,
+    &slice<byte>
+);
+impl<T: ListElem> ListElem for slice<T> {}
+impl<T: ListElem> ListElem for Option<T> {}
+
+// go: none — goish idiom: Go's printer reflects over a map, sorts the
+//     keys with `internal/fmtsort` and renders `map[k:v k:v]`. goish had
+//     no impl at all, so `fmt.Println(m)` on any map was a type error.
+//
+//     Go sorts so that the output is deterministic — a map's iteration
+//     order is randomised, and a printer that followed it would produce
+//     a different string on every run. `K: Ord` is what makes that
+//     possible here; a map whose key type has no ordering simply is not
+//     printable, which is the same restriction goish already had (only
+//     more of it).
+impl<K, V> Format for crate::gomap::map<K, V>
+where
+    K: crate::gomap::GoHash + PartialEq + Ord + Clone + ListElem,
+    V: Clone + ListElem,
+{
+    // go: none — goish idiom: see above.
+    fn fmt(&self, verb: byte, f: &mut FmtBuf) {
+        self.fmt_prec(verb, -1, f);
+    }
+
+    // go: none — goish idiom: see above.
+    fn fmt_prec(&self, verb: byte, prec: i64, f: &mut FmtBuf) {
+        let mut pairs: Vec<(K, V)> = Vec::with_capacity(self.Len() as usize);
+        for (k, v) in self.__iter() {
+            pairs.push((k.clone(), v.clone()));
+        }
+        pairs.sort_by(|a, b| a.0.cmp(&b.0));
+        f.extend(b"map[");
+        let mut i = 0usize;
+        while i < pairs.len() {
+            if i > 0 {
+                f.push(b' ');
+            }
+            pairs[i].0.fmt_prec(verb, prec, f);
+            f.push(b':');
+            pairs[i].1.fmt_prec(verb, prec, f);
+            i += 1;
+        }
+        f.push(b']');
+    }
+}
+
+impl<T: ListElem> Format for slice<T> {
+    // go: none — goish idiom: see `ListElem` above.
+    fn fmt(&self, verb: byte, f: &mut FmtBuf) {
+        self.fmt_prec(verb, -1, f);
+    }
+
+    // go: none — goish idiom: Go's printer passes its flags down to
+    //     each element, so `%.2f` over a `[]float64` applies the
+    //     precision per element and not to the bracketed whole.
+    fn fmt_prec(&self, verb: byte, prec: i64, f: &mut FmtBuf) {
+        f.push(b'[');
+        let mut i = 0usize;
+        while i < self.len() {
+            if i > 0 {
+                f.push(b' ');
+            }
+            self[i].fmt_prec(verb, prec, f);
+            i += 1;
+        }
+        f.push(b']');
     }
 }
 

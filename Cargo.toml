@@ -2078,3 +2078,7 @@ path = "examples/fmt_float_prec_ref_smoke.rs"
 [[example]]
 name = "regexp_replace_ref_smoke"
 path = "examples/regexp_replace_ref_smoke.rs"
+
+[[example]]
+name = "fmt_slice_ref_smoke"
+path = "examples/fmt_slice_ref_smoke.rs"
