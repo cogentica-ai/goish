@@ -2090,3 +2090,7 @@ path = "examples/fmt_badverb_ref_smoke.rs"
 [[example]]
 name = "sort_nan_ref_smoke"
 path = "examples/sort_nan_ref_smoke.rs"
+
+[[example]]
+name = "binary_readwrite_ref_smoke"
+path = "examples/binary_readwrite_ref_smoke.rs"
