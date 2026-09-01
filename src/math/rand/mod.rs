@@ -18,6 +18,12 @@
 // `Int63n`, `Int31n`, `Intn`, `Perm`, `Shuffle`, `Read`, `NormFloat64`,
 // `ExpFloat64`. This is a test-enforced invariant.
 
+// goishlint:ignore GOISH015 — `Rand`'s methods come from four Go files at once — rand.go for the
+//     bounded and float forms, normal.go for NormFloat64, exp.go for ExpFloat64, rng.go for the
+//     ALFG behind them — so a per-Go-file split would have to split one `impl Rand` block across
+//     four modules and widen every private field to `pub(crate)` to do it. The anchors below
+//     already carry the per-function provenance that the split exists to provide, and
+//     rand_ref_smoke pins the whole generated sequence against Go.
 #![allow(non_snake_case)]
 
 pub mod v2;
@@ -86,6 +92,7 @@ impl Default for rngSource {
     }
 }
 
+// go: sdk 1.25.5 math/rand/rng.go:187-201 seedrand
 /// `seedrand x[n+1] = 48271 * x[n] mod (2^31 - 1)` — rng.go:187.
 ///
 /// Park-Miller LCG written in branch-free split form to avoid
@@ -105,11 +112,13 @@ fn seedrand(x: i32) -> i32 {
 }
 
 impl Source for rngSource {
+    // go: sdk 1.25.5 math/rand/rng.go:233-235 rngSource.Int63
     /// Int63 — rng.go:233.
     fn Int63(&mut self) -> int64 {
         (self.Uint64() & RNG_MASK) as int64
     }
 
+    // go: sdk 1.25.5 math/rand/rng.go:204-230 rngSource.Seed
     /// Seed — rng.go:204. Initializes the 607-cell ring using the
     /// Park-Miller LCG warmed up for 20 cycles, then XOR-folds three
     /// LCG draws into each cell and XORs with the cooked seed table.
@@ -145,6 +154,7 @@ impl Source for rngSource {
 }
 
 impl Source64 for rngSource {
+    // go: sdk 1.25.5 math/rand/rng.go:238-252 rngSource.Uint64
     /// Uint64 — rng.go:238. The ring-buffer feedback step:
     /// `vec[feed] = vec[feed] + vec[tap]`, with both indices decremented
     /// modulo 607.
@@ -164,6 +174,7 @@ impl Source64 for rngSource {
     }
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:51-53 NewSource
 /// NewSource returns a new pseudo-random Source seeded with `seed`.
 /// The returned Source implements Source64.
 pub fn NewSource(seed: int64) -> Box<dyn Source64 + Send + Sync> {
@@ -186,6 +197,7 @@ pub struct Rand {
     read_pos: i8,
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:78-81 New
 /// New returns a new Rand that uses random values from `src`.
 ///
 /// In Go, `New` accepts `Source` and stashes a `Source64` if the
@@ -200,16 +212,19 @@ pub fn New(src: Box<dyn Source64 + Send + Sync>) -> Rand {
 }
 
 impl Rand {
+    // go: sdk 1.25.5 math/rand/rand.go:96-96 Rand.Int63
     /// `Int63` — rand.go:96.
     pub fn Int63(&mut self) -> int64 {
         self.src.Int63()
     }
 
+    // go: sdk 1.25.5 math/rand/rand.go:99-99 Rand.Uint32
     /// `Uint32` — rand.go:99.
     pub fn Uint32(&mut self) -> u32 {
         (self.src.Int63() >> 31) as u32
     }
 
+    // go: sdk 1.25.5 math/rand/rand.go:102-107 Rand.Uint64
     /// `Uint64` — rand.go:102. When the underlying source is a Source64
     /// (always the case in goish), delegate; otherwise fall through to
     /// the two-Int63 composition. We keep both paths even though only
@@ -218,11 +233,13 @@ impl Rand {
         self.src.Uint64()
     }
 
+    // go: sdk 1.25.5 math/rand/rand.go:110-110 Rand.Int31
     /// `Int31` — rand.go:110.
     pub fn Int31(&mut self) -> int32 {
         (self.src.Int63() >> 32) as int32
     }
 
+    // go: sdk 1.25.5 math/rand/rand.go:113-116 Rand.Int
     /// `Int` — rand.go:113. Clears the sign bit; on 64-bit Go `int` is
     /// `int64`, matching goish's `int = i64`.
     pub fn Int(&mut self) -> int {
@@ -230,12 +247,14 @@ impl Rand {
         ((u << 1) >> 1) as int
     }
 
+    // go: sdk 1.25.5 math/rand/rand.go:85-93 Rand.Seed
     /// `Seed` — rand.go:85. Resets the sub-byte read buffer too.
     pub fn Seed(&mut self, seed: int64) {
         self.src.Seed(seed);
         self.read_pos = 0;
     }
 
+    // go: sdk 1.25.5 math/rand/rand.go:120-133 Rand.Int63n
     /// `Int63n` — rand.go:120. Rejection sampling; panics on n<=0.
     pub fn Int63n(&mut self, n: int64) -> int64 {
         if n <= 0 {
@@ -253,6 +272,7 @@ impl Rand {
         v % n
     }
 
+    // go: sdk 1.25.5 math/rand/rand.go:137-150 Rand.Int31n
     /// `Int31n` — rand.go:137. Rejection sampling; panics on n<=0.
     pub fn Int31n(&mut self, n: int32) -> int32 {
         if n <= 0 {
@@ -288,6 +308,7 @@ impl Rand {
         (prod >> 32) as i32
     }
 
+    // go: sdk 1.25.5 math/rand/rand.go:178-186 Rand.Intn
     /// `Intn` — rand.go:178.
     pub fn Intn(&mut self, n: int) -> int {
         if n <= 0 {
@@ -300,6 +321,7 @@ impl Rand {
         }
     }
 
+    // go: sdk 1.25.5 math/rand/rand.go:189-212 Rand.Float64
     /// `Float64` — rand.go:189. Uses Go 1's exact divisor (1<<63) and
     /// resamples on the 1/2^53 chance of rounding up to 1.0, preserving
     /// the canonical value stream.
@@ -313,6 +335,7 @@ impl Rand {
         }
     }
 
+    // go: sdk 1.25.5 math/rand/rand.go:215-225 Rand.Float32
     /// `Float32` — rand.go:215.
     pub fn Float32(&mut self) -> f32 {
         loop {
@@ -323,6 +346,7 @@ impl Rand {
         }
     }
 
+    // go: sdk 1.25.5 math/rand/rand.go:229-242 Rand.Perm
     /// `Perm` — rand.go:229. Returns a permutation of `[0,n)`.
     pub fn Perm(&mut self, n: int) -> slice<int> {
         let mut m: slice<int> = crate::make!([]int, n);
@@ -336,6 +360,7 @@ impl Rand {
         m
     }
 
+    // go: sdk 1.25.5 math/rand/rand.go:247-267 Rand.Shuffle
     /// `Shuffle` — rand.go:247. Fisher-Yates; uses Int63n for the very
     /// large head, then int31n_fast for the tail (matches Go's split).
     pub fn Shuffle<F>(&mut self, n: int, mut swap: F)
@@ -358,6 +383,7 @@ impl Rand {
         }
     }
 
+    // go: sdk 1.25.5 math/rand/rand.go:272-280 Rand.Read
     /// `Read` — rand.go:272. Always returns (len(p), nil). Pulls 8
     /// random bytes per Int63() call; preserves leftover bytes in
     /// `read_val`/`read_pos` across calls.
@@ -379,6 +405,7 @@ impl Rand {
         (n as int, Nil.into())
     }
 
+    // go: sdk 1.25.5 math/rand/normal.go:37-65 Rand.NormFloat64
     /// `NormFloat64` — normal.go:37. Ziggurat (Marsaglia & Tsang 2000).
     pub fn NormFloat64(&mut self) -> f64 {
         const RN: f64 = 3.442619855899;
@@ -421,6 +448,7 @@ impl Rand {
         }
     }
 
+    // go: sdk 1.25.5 math/rand/exp.go:30-45 Rand.ExpFloat64
     /// `ExpFloat64` — exp.go:30. Ziggurat (Marsaglia & Tsang 2000).
     pub fn ExpFloat64(&mut self) -> f64 {
         const RE: f64 = 7.69711747013104972;
@@ -445,6 +473,7 @@ impl Rand {
 }
 
 impl io::Reader for Rand {
+    // go: sdk 1.25.5 math/rand/rand.go:272-280 Rand.Read
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         Rand::Read(self, p)
     }
@@ -491,22 +520,27 @@ pub fn Seed(seed: int64) {
     });
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:434-434 Int63
 pub fn Int63() -> int64 {
     with_global(|g| g.src.Int63())
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:438-438 Uint32
 pub fn Uint32() -> u32 {
     with_global(|g| (g.src.Int63() >> 31) as u32)
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:442-442 Uint64
 pub fn Uint64() -> u64 {
     with_global(|g| g.src.Uint64())
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:446-446 Int31
 pub fn Int31() -> int32 {
     with_global(|g| (g.src.Int63() >> 32) as int32)
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:449-449 Int
 pub fn Int() -> int {
     with_global(|g| {
         let u = g.src.Int63() as u64;
@@ -514,6 +548,7 @@ pub fn Int() -> int {
     })
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:454-454 Int63n
 pub fn Int63n(n: int64) -> int64 {
     // Build a transient Rand over a borrow-shaped wrapper so the
     // rejection-sampling loop reuses the same locked source.
@@ -533,6 +568,7 @@ pub fn Int63n(n: int64) -> int64 {
     })
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:459-459 Int31n
 pub fn Int31n(n: int32) -> int32 {
     if n <= 0 {
         panic!("invalid argument to Int31n");
@@ -550,6 +586,7 @@ pub fn Int31n(n: int32) -> int32 {
     })
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:464-464 Intn
 pub fn Intn(n: int) -> int {
     if n <= 0 {
         panic!("invalid argument to Intn");
@@ -561,6 +598,7 @@ pub fn Intn(n: int) -> int {
     }
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:468-468 Float64
 pub fn Float64() -> f64 {
     with_global(|g| loop {
         let f = (g.src.Int63() as f64) / ((1u64 << 63) as f64);
@@ -570,6 +608,7 @@ pub fn Float64() -> f64 {
     })
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:472-472 Float32
 pub fn Float32() -> f32 {
     loop {
         let f = Float64() as f32;
@@ -579,6 +618,7 @@ pub fn Float32() -> f32 {
     }
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:476-476 Perm
 pub fn Perm(n: int) -> slice<int> {
     let mut m: slice<int> = crate::make!([]int, n);
     for i in 0..n {
@@ -589,6 +629,7 @@ pub fn Perm(n: int) -> slice<int> {
     m
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:481-481 Shuffle
 pub fn Shuffle<F>(n: int, mut swap: F)
 where
     F: FnMut(int, int),
@@ -626,6 +667,7 @@ where
     }
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:489-489 Read
 pub fn Read(p: &mut slice<byte>) -> (int, error) {
     let n = crate::builtin::len(&*p) as usize;
     with_global(|g| {
@@ -646,6 +688,7 @@ pub fn Read(p: &mut slice<byte>) -> (int, error) {
     (n as int, Nil.into())
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:499-499 NormFloat64
 pub fn NormFloat64() -> f64 {
     // Construct a transient borrow-Rand-like view over the global. The
     // Ziggurat loop is identical to Rand::NormFloat64 — we just inline
@@ -689,6 +732,7 @@ pub fn NormFloat64() -> f64 {
     }
 }
 
+// go: sdk 1.25.5 math/rand/rand.go:508-508 ExpFloat64
 pub fn ExpFloat64() -> f64 {
     const RE: f64 = 7.69711747013104972;
     loop {
