@@ -2126,3 +2126,7 @@ path = "examples/filepath_ref_smoke.rs"
 [[example]]
 name = "strconv_ftoa_atof_ref_smoke"
 path = "examples/strconv_ftoa_atof_ref_smoke.rs"
+
+[[example]]
+name = "csv_ref_smoke"
+path = "examples/csv_ref_smoke.rs"

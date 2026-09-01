@@ -812,11 +812,94 @@ fn main() {
         report(&mut failed, ok, " 9", "Userinfo escapes ':' and '@'");
     }
 
+    // 10. `Query()` and the binary marshalling, which were not ported
+    //     when the parser was rewritten and are the last of Go's URL
+    //     surface to land. `Query` discards a malformed pair silently —
+    //     `?a=%zz` and `?a=1;b=2` both give an EMPTY map, not a partial
+    //     one — which is why Go's doc points a caller who cares at
+    //     ParseQuery instead.
+    {
+        let mut ok = true;
+        // (raw, Encode() of u.Query())
+        let qcases: [(&str, &str); 8] = [
+            ("http://h/p?a=1&b=2", "a=1&b=2"),
+            ("http://h/p?a=1&a=2", "a=1&a=2"),
+            ("http://h/p", ""),
+            ("http://h/p?", ""),
+            ("http://h/p?a", "a="),
+            ("http://h/p?a=%zz", ""),
+            ("http://h/p?a=1;b=2", ""),
+            ("http://h/p?a=%20&b=+", "a=+&b=+"),
+        ];
+        let mut i = 0usize;
+        while i < qcases.len() {
+            let (raw, want) = qcases[i];
+            let (u, _) = url::Parse(raw);
+            eq(
+                &mut ok,
+                raw,
+                "Query().Encode()",
+                url::ValuesEncode(&u.Query()),
+                want,
+            );
+            i += 1;
+        }
+        // A URL marshals as the text String() produces and unmarshals by
+        // parsing it back, so the round trip is exact for every shape —
+        // opaque, rootless, protocol-relative and empty alike.
+        for raw in [
+            "http://h/p?a=1#f",
+            "/just/a/path",
+            "mailto:m@e",
+            "",
+            "//host/x",
+        ] {
+            let (u, _) = url::Parse(raw);
+            let (b, err) = u.MarshalBinary();
+            if !err.IsNil() {
+                ok = false;
+            }
+            eq(
+                &mut ok,
+                raw,
+                "MarshalBinary",
+                string::from_bytes(b.as_ref()),
+                raw,
+            );
+            let mut back = url::URL::default();
+            if !back.UnmarshalBinary(b).IsNil() {
+                ok = false;
+            }
+            eq(
+                &mut ok,
+                raw,
+                "round trip",
+                back.String(),
+                u.String().as_ref(),
+            );
+            let (ap, _) = u.AppendBinary(goish::bytes("X"));
+            eq(
+                &mut ok,
+                raw,
+                "AppendBinary",
+                string::from_bytes(ap.as_ref()),
+                &(alloc::string::String::from("X") + raw),
+            );
+        }
+        // Go: an unparseable text is the parse error, not a partial URL.
+        let mut bad = url::URL::default();
+        let e = bad.UnmarshalBinary(goish::bytes("http://h/%zz"));
+        if e.IsNil() || !goish::strings::Contains(e.Error(), "invalid URL escape") {
+            ok = false;
+        }
+        report(&mut failed, ok, "10", "Query, and the binary round trip");
+    }
+
     if failed == 0 {
-        fmt::Println!("ok 9/9");
+        fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 9");
+        fmt::Println!("FAIL", failed, "of 10");
         syscall::Exit(1);
     }
 }

@@ -1,5 +1,5 @@
-// go: file net/url/url.go decls: Error.Error, Error.Unwrap, EscapeError.Error, InvalidHostError.Error, escape, unescape, shouldEscape, QueryUnescape, PathUnescape, QueryEscape, PathEscape, User, UserPassword, Userinfo.Username, Userinfo.Password, Userinfo.String, getScheme, Parse, ParseRequestURI, parse, parseAuthority, parseHost, URL.setPath, URL.EscapedPath, validEncoded, URL.setFragment, URL.EscapedFragment, URL.String, validOptionalPort, ParseQuery, parseQuery, resolvePath, URL.IsAbs, URL.Parse, URL.ResolveReference, URL.RequestURI, URL.Hostname, URL.Port, splitHostPort, URL.Redacted, validUserinfo, stringContainsCTLByte, URL.JoinPath, ParseQueryValues, ValuesGet, ValuesSet, ValuesAdd, ValuesDel, ValuesHas, SetPassword
-// goishlint:ignore GOISH018 Add, Del, Get, Has, Set, Encode, MarshalBinary, UnmarshalBinary, AppendBinary, Query, Timeout, Temporary, ishex, unhex, badSetPath, shouldEscape, Encode — Go's `Values` is a NAMED map type carrying methods; goish's is a type alias for `map<string, slice<string>>`, which Rust cannot hang methods on, so the same six are free functions `ValuesAdd`/`ValuesDel`/`ValuesGet`/`ValuesHas`/`ValuesSet`/`ValuesEncode`. `URL.Query`, the three binary-marshal methods and `Error`'s net.Error pair are not ported yet; the smoke says so. `ishex`/`unhex` are ported under Rust casing as `is_hex`/`un_hex`, and `badSetPath` is a test-only helper, and `shouldEscape` is `should_escape`. `Encode` is `ValuesEncode`, for the same reason as the other five.
+// go: file net/url/url.go decls: Error.Error, Error.Unwrap, EscapeError.Error, InvalidHostError.Error, escape, unescape, shouldEscape, QueryUnescape, PathUnescape, QueryEscape, PathEscape, User, UserPassword, Userinfo.Username, Userinfo.Password, Userinfo.String, getScheme, Parse, ParseRequestURI, parse, parseAuthority, parseHost, URL.setPath, URL.EscapedPath, validEncoded, URL.setFragment, URL.EscapedFragment, URL.String, validOptionalPort, ParseQuery, parseQuery, resolvePath, URL.IsAbs, URL.Parse, URL.ResolveReference, URL.RequestURI, URL.Hostname, URL.Port, splitHostPort, URL.Redacted, validUserinfo, stringContainsCTLByte, URL.JoinPath, ParseQueryValues, ValuesGet, ValuesSet, ValuesAdd, ValuesDel, ValuesHas, SetPassword, URL.Query, URL.MarshalBinary, URL.AppendBinary, URL.UnmarshalBinary
+// goishlint:ignore GOISH018 Add, Del, Get, Has, Set, Encode, MarshalBinary, UnmarshalBinary, Timeout, Temporary, ishex, unhex, badSetPath, shouldEscape, Encode — Go's `Values` is a NAMED map type carrying methods; goish's is a type alias for `map<string, slice<string>>`, which Rust cannot hang methods on, so the same six are free functions `ValuesAdd`/`ValuesDel`/`ValuesGet`/`ValuesHas`/`ValuesSet`/`ValuesEncode`. `Error`'s net.Error pair is not ported yet; the smoke says so. `ishex`/`unhex` are ported under Rust casing as `is_hex`/`un_hex`, and `badSetPath` is a test-only helper, and `shouldEscape` is `should_escape`. `Encode` is `ValuesEncode`, for the same reason as the other five.
 // goishlint:ignore GOISH021 encoding, encodePath, encodePathSegment, encodeHost, encodeZone, encodeUserPassword, encodeQueryComponent, encodeFragment — Go's `encoding` is an untyped int const set; goish's is the `Encoding` enum below, whose variants carry the same seven names in Rust casing.
 //
 // url.go — the whole package: parsing, escaping, the URL type and
@@ -658,6 +658,48 @@ impl URL {
             u.User.SetPassword("xxxxx");
         }
         return u.String();
+    }
+
+    // go: sdk 1.25.5 net/url/url.go:1179-1182 URL.Query
+    /// Go: "Query parses RawQuery and returns the corresponding values.
+    /// It silently discards malformed value pairs. To check errors use
+    /// ParseQuery."
+    ///
+    /// This is the most-used method on a URL after `String()`, and it
+    /// was not ported: a caller had to reach for `ParseQuery` and pass
+    /// `RawQuery` by hand, which is also the only way they would have
+    /// noticed it was missing.
+    pub fn Query(&self) -> Values {
+        // Go: v, _ := ParseQuery(u.RawQuery); return v
+        let (v, _) = ParseQuery(self.RawQuery.clone());
+        return v;
+    }
+
+    // go: sdk 1.25.5 net/url/url.go:1242-1244 URL.MarshalBinary
+    /// Go: the `encoding.BinaryMarshaler` half — a URL marshals as the
+    /// text `String()` produces, and unmarshals by parsing it back.
+    pub fn MarshalBinary(&self) -> (slice<byte>, error) {
+        return self.AppendBinary(slice::new());
+    }
+
+    // go: sdk 1.25.5 net/url/url.go:1246-1248 URL.AppendBinary
+    pub fn AppendBinary(&self, b: slice<byte>) -> (slice<byte>, error) {
+        // Go: return append(b, u.String()...), nil
+        let mut v: Vec<byte> = b.__into_vec();
+        v.extend_from_slice(self.String().as_bytes());
+        return (slice::__from_vec(v), nil.into());
+    }
+
+    // go: sdk 1.25.5 net/url/url.go:1250-1257 URL.UnmarshalBinary
+    pub fn UnmarshalBinary(&mut self, text: slice<byte>) -> error {
+        // Go: u1, err := Parse(string(text)); if err != nil { return err }
+        //     *u = *u1
+        let (u1, err) = Parse(string::from_bytes(text.as_ref()));
+        if !err.IsNil() {
+            return err;
+        }
+        *self = u1;
+        return nil.into();
     }
 
     // go: sdk 1.25.5 net/url/url.go:1262-1281 URL.JoinPath
