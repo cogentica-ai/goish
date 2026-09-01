@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 9078,
+ "total": 9111,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -313,12 +313,21 @@
    "GOISH016": 1,
    "GOISH023": 13
   },
-  "src/fmt/mod.rs": {
-   "GOISH005": 17,
-   "GOISH014": 71,
-   "GOISH016": 1,
-   "GOISH022": 4,
-   "GOISH023": 41
+  "src/fmt/errors.rs": {
+   "GOISH021": 1
+  },
+  "src/fmt/format.rs": {
+   "GOISH018": 18,
+   "GOISH021": 6
+  },
+  "src/fmt/print.rs": {
+   "GOISH018": 42,
+   "GOISH021": 18,
+   "GOISH022": 4
+  },
+  "src/fmt/scan.rs": {
+   "GOISH018": 55,
+   "GOISH021": 23
   },
   "src/go/ast/mod.rs": {
    "GOISH014": 3,

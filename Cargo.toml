@@ -1612,6 +1612,10 @@ name = "testing_failnow_smoke"
 path = "examples/testing_failnow_smoke.rs"
 
 [[example]]
+name = "fmt_printer_ref_smoke"
+path = "examples/fmt_printer_ref_smoke.rs"
+
+[[example]]
 name = "fmt_quote_ref_smoke"
 path = "examples/fmt_quote_ref_smoke.rs"
 
