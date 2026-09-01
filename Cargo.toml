@@ -2046,3 +2046,7 @@ path = "examples/log_ref_smoke.rs"
 [[example]]
 name = "os_env_ref_smoke"
 path = "examples/os_env_ref_smoke.rs"
+
+[[example]]
+name = "os_tempfile_ref_smoke"
+path = "examples/os_tempfile_ref_smoke.rs"
