@@ -74,10 +74,14 @@ fn main() {
     check(fmt::Sprintf!("%.2e", 1234.5f64), "1.23e+03", "N %.2e");
     check(fmt::Sprintf!("%.3g", 1234.5f64), "1.23e+03", "O %.3g");
 
-    // A verb with no precision must keep the shortest-round-trip
-    // default — the whole point of threading -1 through rather than
-    // defaulting to some fixed number of places.
-    check(fmt::Sprintf!("%f", 0.1f64), "0.1", "P %f default");
+    // The DEFAULT precision depends on the verb, and this assertion had
+    // it backwards. Go: "For %v the default is the smallest number of
+    // digits necessary to represent the value uniquely … %e, %E, %f, %F
+    // default to a precision of 6." So `%f` of 0.1 is "0.100000" and
+    // only `%v` (and `%g`) is the shortest round-trip. goish passed -1
+    // for every verb, and this line asserted that. Go 1.25.5 vectors
+    // are in fmt_float_prec_ref_smoke.
+    check(fmt::Sprintf!("%f", 0.1f64), "0.100000", "P %f default");
     check(fmt::Sprintf!("%v", 0.1f64), "0.1", "Q %v default");
 
     drop(check);

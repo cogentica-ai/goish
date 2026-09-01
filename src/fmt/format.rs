@@ -33,14 +33,40 @@ use super::*;
 
 // ─── Verb formatters ──────────────────────────────────────────────────
 
+// go: none — goish idiom: Go's printer carries the parsed flags in a
+//     `fmt` struct that every `fmt*` method can read. goish's `Format`
+//     trait passes the verb byte alone, so a flag that CHANGES a verb's
+//     rendering has to travel with it. `%+v` and `%+q` already did this
+//     with the synthetic verbs 'V' and 'Q'; '#' needs eight of them, so
+//     it rides in the high bit instead — no ASCII verb can collide.
+//
+//     Only the verbs whose OUTPUT differs read it: `%#q` backquotes and
+//     `%#U` appends the character. The integer prefixes (0b, 0, 0o, 0x,
+//     0X) are applied by `do_format` over the rendered digits, because
+//     Go inserts them between the sign and the ZERO PADDING — `%#08x`
+//     of 255 is "0x000000ff", ten characters, not eight — and the
+//     formatters here never see the width.
+pub(crate) const SHARP: byte = 0x80;
+
 // go: none — goish idiom: Go keeps the per-verb formatters as methods on a
 //     `fmt` struct that also carries the parsed flags; goish passes the
 //     verb and the buffer as arguments instead, so none of these match a
 //     Go signature. See the file header for which Go method each stands
 //     in for.
 pub(crate) fn write_string_with_verb(bytes: &[byte], verb: byte, f: &mut FmtBuf) {
-    match verb {
-        b'q' => write_quoted(bytes, false, f),
+    let sharp = verb & SHARP != 0;
+    match verb & !SHARP {
+        // Go: `%#q` uses a back-quoted string if strconv.CanBackquote
+        // allows it, and falls back to `%q` if it does not.
+        b'q' => {
+            if sharp && crate::strconv::CanBackquote(string::from_bytes(bytes)) {
+                f.push(b'`');
+                f.extend(bytes);
+                f.push(b'`');
+            } else {
+                write_quoted(bytes, false, f)
+            }
+        }
         // `%+q` arrives as the synthetic verb 'Q'; see the scanner.
         b'Q' => write_quoted(bytes, true, f),
         b'x' => write_hex(bytes, false, f),
@@ -103,6 +129,12 @@ pub(crate) fn hex_digit(n: byte, upper: bool) -> byte {
 //     Go signature. See the file header for which Go method each stands
 //     in for.
 pub(crate) fn format_signed(n: i64, verb: byte, f: &mut FmtBuf) {
+    // The '#' bit changes only the PREFIX for the BASE verbs, and
+    // `do_format` adds that; the digits are the same either way. The
+    // rune verbs below do read it — `%#U` appends the character — so
+    // the original is kept for them.
+    let full = verb;
+    let verb = verb & !SHARP;
     // Go prints a NEGATIVE integer in any base as a sign followed by
     // the magnitude — `%x` of -255 is "-ff". goish handed the value
     // straight to the unsigned path, so -255 came out as the two's
@@ -110,7 +142,9 @@ pub(crate) fn format_signed(n: i64, verb: byte, f: &mut FmtBuf) {
     let base: u64 = match verb {
         b'x' | b'X' => 16,
         b'b' => 2,
-        b'o' => 8,
+        // Go: `%O` is base 8 with a "0o" prefix, which `do_format`
+        // adds. goish had no 'O' at all, so `%O` printed the decimal.
+        b'o' | b'O' => 8,
         _ => 0,
     };
     if base != 0 {
@@ -124,7 +158,7 @@ pub(crate) fn format_signed(n: i64, verb: byte, f: &mut FmtBuf) {
     }
     match verb {
         b'd' | b'v' => format_decimal_signed(n, f),
-        b'c' | b'q' | b'Q' => format_rune_or_int(torune(n), verb, f),
+        b'c' | b'q' | b'Q' | b'U' => format_rune_or_int(torune(n), full, f),
         _ => format_decimal_signed(n, f),
     }
 }
@@ -135,13 +169,15 @@ pub(crate) fn format_signed(n: i64, verb: byte, f: &mut FmtBuf) {
 //     Go signature. See the file header for which Go method each stands
 //     in for.
 pub(crate) fn format_unsigned(n: u64, verb: byte, f: &mut FmtBuf) {
+    let full = verb;
+    let verb = verb & !SHARP;
     match verb {
         b'd' | b'v' => format_uint(n, 10, false, f),
         b'x' => format_uint(n, 16, false, f),
         b'X' => format_uint(n, 16, true, f),
         b'b' => format_uint(n, 2, false, f),
-        b'o' => format_uint(n, 8, false, f),
-        b'c' | b'q' | b'Q' => format_rune_or_int(torune(n), verb, f),
+        b'o' | b'O' => format_uint(n, 8, false, f),
+        b'c' | b'q' | b'Q' | b'U' => format_rune_or_int(torune(n), full, f),
         _ => format_uint(n, 10, false, f),
     }
 }
@@ -193,7 +229,8 @@ pub(crate) fn format_uint(mut n: u64, base: u64, upper: bool, f: &mut FmtBuf) {
 //     Go signature. See the file header for which Go method each stands
 //     in for.
 pub(crate) fn format_rune_or_int(r: rune, verb: byte, f: &mut FmtBuf) {
-    match verb {
+    let sharp = verb & SHARP != 0;
+    match verb & !SHARP {
         b'c' => {
             let mut buf = [0u8; 4];
             let n = utf8::EncodeRune(&mut buf, r);
@@ -210,6 +247,35 @@ pub(crate) fn format_rune_or_int(r: rune, verb: byte, f: &mut FmtBuf) {
         b'Q' => {
             let q = crate::strconv::QuoteRuneToASCII(r);
             f.extend(q.as_bytes());
+        }
+        // Go's `fmtUnicode`: "U+" then at least four upper-case hex
+        // digits, and with '#' the character itself in single quotes —
+        // but only when it is a printable rune. goish had no 'U' verb
+        // at all, so `%U` printed the code point in decimal.
+        b'U' => {
+            f.extend(b"U+");
+            let mut digits: [byte; 16] = [b'0'; 16];
+            let mut n = touint64(r);
+            let mut i = digits.len();
+            while n > 0 {
+                i -= 1;
+                digits[i] = hex_digit(tobyte(n & 0xf), true);
+                n >>= 4;
+            }
+            // Go: at least four digits, more only if the value needs them.
+            let start = if digits.len() - i < 4 {
+                digits.len() - 4
+            } else {
+                i
+            };
+            f.extend(&digits[start..]);
+            if sharp && r <= 0x0010_FFFF && crate::strconv::IsPrint(r) {
+                f.extend(b" '");
+                let mut buf = [0u8; 4];
+                let w = utf8::EncodeRune(&mut buf, r);
+                f.extend(&buf[..w as usize]);
+                f.push(b'\'');
+            }
         }
         _ => format_decimal_signed(toint64(r), f),
     }

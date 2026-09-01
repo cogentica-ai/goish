@@ -2066,3 +2066,11 @@ path = "examples/os_link_ref_smoke.rs"
 [[example]]
 name = "os_dirent_ref_smoke"
 path = "examples/os_dirent_ref_smoke.rs"
+
+[[example]]
+name = "fmt_sharp_ref_smoke"
+path = "examples/fmt_sharp_ref_smoke.rs"
+
+[[example]]
+name = "fmt_float_prec_ref_smoke"
+path = "examples/fmt_float_prec_ref_smoke.rs"

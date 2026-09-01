@@ -33,7 +33,7 @@ use crate::unicode::utf8;
 #[allow(unused_imports)]
 use super::format::{
     format_decimal_signed, format_rune_or_int, format_signed, format_uint, format_unsigned,
-    hex_digit, truncate_string, write_hex, write_quoted, write_string_with_verb,
+    hex_digit, truncate_string, write_hex, write_quoted, write_string_with_verb, SHARP,
 };
 #[allow(unused_imports)]
 use super::*;
@@ -655,20 +655,43 @@ impl Format for f64 {
     //     where Go's reflects over `any`, so the per-type rendering lives in
     //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
     fn fmt_prec(&self, verb: byte, prec: i64, f: &mut FmtBuf) {
-        let fmt = match verb {
-            b'f' | b'F' => b'f',
-            b'e' => b'e',
-            b'E' => b'E',
-            b'g' | b'v' => b'g',
-            b'G' => b'G',
-            b'x' => b'x',
-            b'X' => b'X',
-            b'b' => b'b',
-            _ => b'g',
-        };
+        let (fmt, prec) = float_verb(verb, prec);
         let s = crate::strconv::FormatFloat(*self, fmt, prec, 64);
         f.extend(s.as_bytes());
     }
+}
+
+// go: none — goish idiom: Go's `(*pp).fmtFloat` reads the default
+//     precision off the verb — "prec := -1; switch verb { case 'v':
+//     … case 'e','E','f','F': prec = 6 …" — before handing the value to
+//     `strconv.AppendFloat`. goish passed -1 for every verb, so `%f` of
+//     1.5 printed "1.5" where Go prints "1.500000" and `%e` of 0
+//     printed "0e+00" where Go prints "0.000000e+00". Every
+//     column-aligned numeric report a port produced was misaligned, and
+//     nothing about the output looked wrong on its own.
+//
+//     `%v`, `%g` and `%G` keep -1: their default IS the shortest
+//     round-trip. An explicit precision always wins.
+fn float_verb(verb: byte, prec: i64) -> (byte, i64) {
+    let fmt = match verb & !SHARP {
+        b'f' | b'F' => b'f',
+        b'e' => b'e',
+        b'E' => b'E',
+        b'g' | b'v' => b'g',
+        b'G' => b'G',
+        b'x' => b'x',
+        b'X' => b'X',
+        b'b' => b'b',
+        _ => b'g',
+    };
+    if prec >= 0 {
+        return (fmt, prec);
+    }
+    // Go: "%e, %E, %f, %F default to a precision of 6."
+    return match verb & !SHARP {
+        b'e' | b'E' | b'f' | b'F' => (fmt, 6),
+        _ => (fmt, -1),
+    };
 }
 
 impl Format for f32 {
@@ -681,17 +704,7 @@ impl Format for f32 {
     //     where Go's reflects over `any`, so the per-type rendering lives in
     //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
     fn fmt_prec(&self, verb: byte, prec: i64, f: &mut FmtBuf) {
-        let fmt = match verb {
-            b'f' | b'F' => b'f',
-            b'e' => b'e',
-            b'E' => b'E',
-            b'g' | b'v' => b'g',
-            b'G' => b'G',
-            b'x' => b'x',
-            b'X' => b'X',
-            b'b' => b'b',
-            _ => b'g',
-        };
+        let (fmt, prec) = float_verb(verb, prec);
         let s = crate::strconv::FormatFloat(*self as f64, fmt, prec, 32);
         f.extend(s.as_bytes());
     }
@@ -797,6 +810,7 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
         let mut zero_pad = false;
         let mut plus_flag = false;
         let mut space_flag = false;
+        let mut sharp_flag = false;
         loop {
             if i >= format.len() {
                 break;
@@ -816,6 +830,15 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
                 }
                 b' ' => {
                     space_flag = true;
+                    i += 1;
+                }
+                // Go's "alternate format" flag. goish did not know it
+                // was a flag at all, so `%#x` parsed '#' as the VERB:
+                // the argument was consumed by a verb that means
+                // nothing, and the real 'x' was copied out as a literal.
+                // Every `%#x` in a port printed garbage.
+                b'#' => {
+                    sharp_flag = true;
                     i += 1;
                 }
                 _ => break,
@@ -873,6 +896,12 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
         if plus_flag && verb == b'q' {
             verb = b'Q';
         }
+        // `#` rides in the high bit — see the note on `format::SHARP`.
+        // Only `%#q` and `%#U` read it in the formatters; the integer
+        // prefixes are applied below, where the width is known.
+        if sharp_flag {
+            verb |= SHARP;
+        }
         // %w handling — substitute the wrapped error's text and capture
         // the first %w as the wrap target (Go's fmt.Errorf semantics).
         if verb == b'w' {
@@ -912,7 +941,12 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
             // `Format` impls take only the verb, so the sign and the
             // padding are applied here, over the rendered bytes.
             let numeric = is_numeric_verb(verb);
+            // A '#' on an integer verb also needs the temp buffer: the
+            // prefix goes between the sign and the digits, so the
+            // rendered bytes have to be split apart first.
+            let prefixed = is_integer_verb(verb) && !alt_prefix(verb, b"1").is_empty();
             if has_width
+                || prefixed
                 || ((plus_flag || space_flag) && numeric)
                 || (has_precision && is_integer_verb(verb))
             {
@@ -924,22 +958,52 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
                 // number of digits — "%.5d" of 42 is "00042" — where
                 // for the float verbs it is the number of places after
                 // the point, which the value itself already applied.
-                if has_precision && is_integer_verb(verb) {
-                    let sign = if !bytes.is_empty() && (bytes[0] == b'-' || bytes[0] == b'+') {
-                        1usize
-                    } else {
-                        0usize
-                    };
+                //
+                // Go's `fmtInteger` also turns a zero-padding WIDTH into
+                // exactly this digit precision — "else if f.zero &&
+                // !f.minus && f.widPresent { prec = f.wid; if negative
+                // || f.plus || f.space { prec-- } }" — which is why the
+                // base prefix does not count toward it: `%#08x` of 255
+                // is "0x000000ff", ten characters wide, not eight.
+                let sign = if !bytes.is_empty() && (bytes[0] == b'-' || bytes[0] == b'+') {
+                    1usize
+                } else {
+                    0usize
+                };
+                let int_verb = is_integer_verb(verb);
+                let mut digit_prec = 0usize;
+                if has_precision && int_verb {
+                    digit_prec = precision;
+                } else if int_verb && zero_pad && !left_align && has_width {
+                    digit_prec = width;
+                    if sign == 1 || plus_flag || space_flag {
+                        digit_prec = digit_prec.saturating_sub(1);
+                    }
+                }
+                if digit_prec > 0 {
                     let digits = bytes.len() - sign;
-                    if digits < precision {
-                        let mut padded: Vec<byte> = Vec::with_capacity(sign + precision);
+                    if digits < digit_prec {
+                        let mut padded: Vec<byte> = Vec::with_capacity(sign + digit_prec);
                         padded.extend_from_slice(&bytes[..sign]);
-                        for _ in 0..(precision - digits) {
+                        for _ in 0..(digit_prec - digits) {
                             padded.push(b'0');
                         }
                         padded.extend_from_slice(&bytes[sign..]);
                         bytes = padded;
                     }
+                }
+
+                // The base prefix: after the sign, before the digits.
+                // For a string or byte slice rendered by `%#x` the
+                // "digits" are the hex pairs and an EMPTY value takes no
+                // prefix — Go prints "" for `%#x` of "", not "0x".
+                let pfx = alt_prefix(verb, &bytes[sign..]);
+                if !pfx.is_empty() && bytes.len() > sign {
+                    let mut withpfx: Vec<byte> = Vec::with_capacity(bytes.len() + pfx.len());
+                    withpfx.extend_from_slice(&bytes[..sign]);
+                    withpfx.extend_from_slice(pfx);
+                    withpfx.extend_from_slice(&bytes[sign..]);
+                    bytes = withpfx;
                 }
 
                 // Go: the '+' flag always prints a sign for a numeric
@@ -956,8 +1020,10 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
                 let pad_count = width.saturating_sub(bytes.len());
                 // Go zero-pads only for numeric verbs, and the zeros go
                 // AFTER the sign — "%05d" of -42 is "-0042", not
-                // "00-42".
-                let zero = zero_pad && !left_align && numeric;
+                // "00-42". For the INTEGER verbs the padding was just
+                // done as a digit precision above, so this is the float
+                // path only.
+                let zero = zero_pad && !left_align && numeric && !is_integer_verb(verb);
                 if zero {
                     let mut k = 0usize;
                     if !bytes.is_empty()
@@ -1001,8 +1067,8 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
 //     apply to; goish has no such struct, so the verb set is spelled
 //     out.
 fn is_numeric_verb(verb: byte) -> bool {
-    return match verb {
-        b'd' | b'b' | b'o' | b'x' | b'X' | b'e' | b'E' | b'f' | b'F' | b'g' | b'G' => true,
+    return match verb & !SHARP {
+        b'd' | b'b' | b'o' | b'O' | b'x' | b'X' | b'e' | b'E' | b'f' | b'F' | b'g' | b'G' => true,
         _ => false,
     };
 }
@@ -1011,9 +1077,44 @@ fn is_numeric_verb(verb: byte) -> bool {
 //     precision means "minimum digits" rather than "places after the
 //     point".
 fn is_integer_verb(verb: byte) -> bool {
-    return match verb {
-        b'd' | b'b' | b'o' | b'x' | b'X' => true,
+    return match verb & !SHARP {
+        b'd' | b'b' | b'o' | b'O' | b'x' | b'X' => true,
         _ => false,
+    };
+}
+
+// go: none — goish idiom: Go's `fmtInteger` writes the base prefix into
+//     its own buffer between the zero padding and the sign. goish's
+//     `Format` impls render the digits and never see the width, so the
+//     prefix is spliced in here instead. The bytes are Go's, from
+//     format.go's `if f.sharp { switch base { … } }` plus the
+//     unconditional "0o" the 'O' verb carries.
+//
+//     `%#o` is the odd one: its prefix is a single '0', and Go adds it
+//     only when the first digit is not already a zero — which is why
+//     `%#o` of 0 is "0" and not "00".
+fn alt_prefix(verb: byte, digits: &[byte]) -> &'static [byte] {
+    let sharp = verb & SHARP != 0;
+    return match verb & !SHARP {
+        b'b' if sharp => b"0b",
+        b'x' if sharp => b"0x",
+        b'X' if sharp => b"0X",
+        b'o' if sharp => {
+            if digits.first() == Some(&b'0') {
+                b""
+            } else {
+                b"0"
+            }
+        }
+        b'O' if sharp => {
+            if digits.first() == Some(&b'0') {
+                b"0o"
+            } else {
+                b"0o0"
+            }
+        }
+        b'O' => b"0o",
+        _ => b"",
     };
 }
 
