@@ -2114,3 +2114,7 @@ path = "examples/url_ref_smoke.rs"
 [[example]]
 name = "textproto_ref_smoke"
 path = "examples/textproto_ref_smoke.rs"
+
+[[example]]
+name = "mime_ref_smoke"
+path = "examples/mime_ref_smoke.rs"
