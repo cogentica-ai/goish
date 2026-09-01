@@ -244,3 +244,29 @@ where
     }
     return (T::__goish_nil_ref(), false);
 }
+
+// go: none — goish idiom: Go writes `switch err := err.(type) { case
+//     *PathError: … }` — a SHALLOW type switch on the concrete type,
+//     which does not walk the chain. `errors::As` walks; `AsIface`
+//     asserts an interface. Neither is that switch, so a port of one
+//     had to either reach into `error`'s private Arc or settle for a
+//     walking `As` — which finds a `*PathError` nested three errors
+//     deep and answers about the wrong one.
+//
+//     `os.underlyingError` is the standard library's own example, and
+//     Go's comment there is explicit that the shallowness is the point:
+//     "underlyingError only unwraps the specific error-wrapping types
+//     that it historically did, not all errors implementing Unwrap()."
+/// Go's `v, ok := err.(*T)` — assert a CONCRETE type on the error
+/// itself, without walking what it wraps.
+///
+/// Returns `None` on a miss and for the nil error. Use
+/// [`As`](crate::errors::As) when the chain should be searched.
+pub fn AsConcrete<T: ErrorTrait>(err: &error) -> Option<&T> {
+    if let Some(arc) = err.0.as_ref() {
+        let dyn_err: &dyn ErrorTrait = arc.as_ref();
+        let any_ref: &(dyn Any + Send + Sync) = dyn_err;
+        return any_ref.downcast_ref::<T>();
+    }
+    return None;
+}

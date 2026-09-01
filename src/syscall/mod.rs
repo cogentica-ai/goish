@@ -398,30 +398,81 @@ impl Errno {
             1 => "operation not permitted",
             2 => "no such file or directory",
             4 => "interrupted system call",
+            11 => "resource temporarily unavailable",
             13 => "permission denied",
             17 => "file exists",
             20 => "not a directory",
             21 => "is a directory",
             22 => "invalid argument",
+            23 => "too many open files in system",
+            24 => "too many open files",
             38 => "function not implemented",
             39 => "directory not empty",
             95 => "operation not supported",
+            110 => "connection timed out",
             _ => "errno",
         })
     }
 
-    /// `Is(target)` mirrors Go 1.13+ errno comparison helpers — e.g.
-    /// `errors.Is(err, syscall.EINTR)` walks the unwrap chain. We
-    /// expose value-equality as a fast path.
+    // go: sdk 1.25.5 syscall/syscall_unix.go:138-140 Errno.Timeout
+    /// Go: `func (e Errno) Timeout() bool`. This is what makes a
+    /// blocking read that hit its deadline read as a timeout to every
+    /// caller that asks the `net.Error` question, EAGAIN included.
     #[allow(non_snake_case)]
-    pub fn Is(&self, target: Errno) -> bool {
-        *self == target
+    pub fn Timeout(&self) -> bool {
+        return *self == EAGAIN || *self == EWOULDBLOCK || *self == ETIMEDOUT;
+    }
+
+    // go: sdk 1.25.5 syscall/syscall_unix.go:134-136 Errno.Temporary
+    /// Go: `func (e Errno) Temporary() bool`. Every timeout is
+    /// temporary, and so are the three "come back later" errnos: an
+    /// interrupted call and the two fd-table exhaustions.
+    #[allow(non_snake_case)]
+    pub fn Temporary(&self) -> bool {
+        return *self == EINTR || *self == EMFILE || *self == ENFILE || self.Timeout();
+    }
+}
+
+// go: sdk 1.25.5 syscall/syscall_unix.go:120-132 Errno.Is
+// `func (e Errno) Is(target error) bool` — the hook that makes
+// `errors.Is(syscall.ENOENT, fs.ErrNotExist)` true. Without it, every
+// portable check against a raw errno is false: the two values are
+// unrelated, and `errors.Is` has nothing else to go on.
+//
+// goish had no such hook at all, so `os.IsNotExist` could only ever be
+// an equality test against the sentinel, and an errno arriving from a
+// real system call answered false. Go's `switch target` is a shallow
+// comparison, and so is this one.
+//
+// The inherent `Errno::Is(Errno)` this replaces was value-equality
+// under a doc comment claiming it mirrored `errors.Is`. It had no
+// callers.
+impl Errno {
+    // go: sdk 1.25.5 syscall/syscall_unix.go:120-132 Errno.Is
+    #[allow(non_snake_case)]
+    fn __is(&self, target: &crate::errors::error) -> bool {
+        if *target == crate::io::fs::ErrPermission {
+            return *self == EACCES || *self == EPERM;
+        }
+        if *target == crate::io::fs::ErrExist {
+            return *self == EEXIST || *self == ENOTEMPTY;
+        }
+        if *target == crate::io::fs::ErrNotExist {
+            return *self == ENOENT;
+        }
+        if *target == crate::errors::ErrUnsupported {
+            return *self == ENOSYS || *self == ENOTSUP || *self == EOPNOTSUPP;
+        }
+        return false;
     }
 }
 
 impl crate::errors::ErrorTrait for Errno {
     fn Error(&self) -> crate::gostring::string {
         Self::Error(self)
+    }
+    fn Is(&self, target: &crate::errors::error) -> bool {
+        return self.__is(target);
     }
 }
 
@@ -472,6 +523,13 @@ pub const EISDIR: Errno = Errno(21);
 pub const EINVAL: Errno = Errno(22);
 pub const ENOTEMPTY: Errno = Errno(39);
 pub const EINTR: Errno = Errno(4);
+pub const EAGAIN: Errno = Errno(11);
+/// Linux gives EAGAIN and EWOULDBLOCK the same value, as Go's
+/// `zerrors_linux_amd64.go` does.
+pub const EWOULDBLOCK: Errno = Errno(11);
+pub const ENFILE: Errno = Errno(23);
+pub const EMFILE: Errno = Errno(24);
+pub const ETIMEDOUT: Errno = Errno(110);
 pub const ENOSYS: Errno = Errno(38);
 pub const ENOTSUP: Errno = Errno(95);
 pub const EOPNOTSUPP: Errno = Errno(95);

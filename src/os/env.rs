@@ -45,19 +45,24 @@ pub fn Setenv<K: Into<string>, V: Into<string>>(key: K, value: V) -> error {
     let key: string = key.into();
     let value: string = value.into();
     // Go: err := syscall.Setenv(key, value); ... return NewSyscallError("setenv", err)
+    // Go: syscall.Setenv returns EINVAL for all three of these, and
+    // os.Setenv wraps it — so the message is "setenv: invalid
+    // argument" in every case and the error unwraps to the errno.
+    // goish built three bare errors.New instead, one of which
+    // ("setenv: key is empty") is not a string Go ever produces.
     let kb = bytes_of(&key);
     if kb.is_empty() {
-        return errors::New("setenv: key is empty");
+        return crate::os::NewSyscallError("setenv", crate::syscall::EINVAL.into());
     }
     for &c in kb {
         if c == b'=' || c == 0 {
-            return errors::New("setenv: invalid argument");
+            return crate::os::NewSyscallError("setenv", crate::syscall::EINVAL.into());
         }
     }
     let vb = bytes_of(&value);
     for &c in vb {
         if c == 0 {
-            return errors::New("setenv: invalid argument");
+            return crate::os::NewSyscallError("setenv", crate::syscall::EINVAL.into());
         }
     }
     runtime::args::envp_set(kb, vb);

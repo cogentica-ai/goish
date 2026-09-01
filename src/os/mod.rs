@@ -79,51 +79,11 @@ pub fn IsPathSeparator(c: u8) -> bool {
     c == PathSeparator
 }
 
-// os sentinels — defined in `io/fs` and aliased here, matching Go's
-// layering (os/error.go:19-24 aliases fs.ErrInvalid etc., which live
-// in io/fs/fs.go via internal/oserror). One shared identity, so
-// `errors::Is(err, os::ErrNotExist)` and `errors::Is(err,
-// fs::ErrNotExist)` are the same check, exactly as in Go.
-pub use crate::io::fs::{ErrClosed, ErrExist, ErrInvalid, ErrNotExist, ErrPermission};
-
-/// `os.IsNotExist(err)` (os/error.go:91) — reports whether `err` is known
-/// to report that a file or directory does not exist.
-pub fn IsNotExist(err: error) -> bool {
-    err == ErrNotExist
-}
-
-/// `os.IsExist(err)` (os/error.go:80) — reports whether `err` is known to
-/// report that a file or directory already exists.
-pub fn IsExist(err: error) -> bool {
-    err == ErrExist
-}
-
-/// `os.IsPermission(err)` (os/error.go:100) — reports whether `err` is
-/// known to report that permission is denied.
-pub fn IsPermission(err: error) -> bool {
-    err == ErrPermission
-}
-
-/// `os.PathError` (os/error.go:46) — records an error and the operation
-/// and file path that caused it.
-#[derive(Clone)]
-pub struct PathError {
-    pub Op: string,
-    pub Path: string,
-    pub Err: error,
-}
-
-impl crate::errors::ErrorTrait for PathError {
-    fn Error(&self) -> string {
-        self.Op.clone() + " " + self.Path.clone() + ": " + self.Err.Error()
-    }
-    fn Unwrap(&self) -> error {
-        self.Err.clone()
-    }
-}
-
-// `PathError → error` via `.into()` now provided by the blanket
-// `impl<E: ErrorTrait> From<E> for error` in errors/mod.rs.
+// os/error.go — the error sentinels, the PathError alias, SyscallError
+// and the historical Is* predicates.
+#[path = "error.rs"]
+mod error_go;
+pub use error_go::*;
 
 // ─── FileInfo (alias + concrete) ──────────────────────────────────────
 //
@@ -302,15 +262,23 @@ pub fn OpenFile<N: Into<string>, M: Into<FileMode>>(
         perm.0 as i32,
     );
     if fd < 0 {
-        let err: error = if -fd == syscall::ENOENT {
-            ErrNotExist.into()
-        } else if -fd == syscall::EEXIST {
-            ErrExist.into()
-        } else {
-            errors::New(string("open failed"))
-        };
-        // Failure path mirrors Go: returns `nil, err`.
-        return (crate::nilval::nil.into(), err);
+        // Go: return nil, &PathError{Op: "open", Path: name, Err: e}.
+        //
+        // goish translated two errnos into the portable sentinels and
+        // called everything else "open failed", so the message named
+        // neither the file nor the reason — `open /etc/shadow:
+        // permission denied` came back as "open failed" — and the two
+        // it did translate lost the errno. The sentinels are reachable
+        // from the PathError through `IsNotExist`/`errors::Is`, which
+        // is how Go makes both answers available at once.
+        return (
+            crate::nilval::nil.into(),
+            errors::Wrap(PathError {
+                Op: string::from("open"),
+                Path: name,
+                Err: syscall::Errno(-fd).into(),
+            }),
+        );
     }
     (
         nilable::new(File {
@@ -331,11 +299,12 @@ pub fn Stat<N: Into<string>>(name: N) -> (FileInfoData, error) {
     let mut st = syscall::Stat_t::default();
     let rc = syscall::Stat(buf.as_ptr(), &mut st);
     if rc < 0 {
-        let err: error = if -rc == syscall::ENOENT {
-            ErrNotExist.into()
-        } else {
-            errors::New(string("stat failed"))
-        };
+        // Go: return nil, &PathError{Op: "stat", Path: name, Err: e}.
+        let err: error = errors::Wrap(PathError {
+            Op: string::from("stat"),
+            Path: name.clone(),
+            Err: syscall::Errno(-rc).into(),
+        });
         return (
             FileInfoData {
                 name: name.clone(),
@@ -372,7 +341,15 @@ pub fn Lstat<N: Into<string>>(name: N) -> (FileInfoData, error) {
                 mod_time: crate::time::Time::default(),
                 is_dir: false,
             },
-            errors::New(string("lstat failed")),
+            // Go: &PathError{Op: "lstat", Path: name, Err: e}. goish
+            // returned one flat "lstat failed" for every errno, so
+            // `IsNotExist` on a missing path was false here even
+            // though it was true for the same path through `Stat`.
+            errors::Wrap(PathError {
+                Op: string::from("lstat"),
+                Path: name.clone(),
+                Err: syscall::Errno(-rc).into(),
+            }),
         );
     }
     let base = base_name(&name);
@@ -977,11 +954,14 @@ pub fn Pipe() -> (File, File, error) {
     let mut p: [i32; 2] = [-1, -1];
     let rc = syscall::Pipe2(&mut p, syscall::O_CLOEXEC);
     // Go: if e != nil { return nil, nil, NewSyscallError("pipe2", e) }
+    // goish returned `errors.New("pipe2 failed")`, which named the call
+    // but threw the errno away — so a caller could not tell EMFILE
+    // (back off and retry) from ENFILE (the machine is out).
     if rc < 0 {
         return (
             File::NewFile(-1, string::new()),
             File::NewFile(-1, string::new()),
-            errors::New(string("pipe2 failed")),
+            NewSyscallError("pipe2", syscall::Errno(-rc).into()),
         );
     }
     // Go: return newFile(p[0], "|0", kindPipe, false), newFile(p[1], "|1", kindPipe, false), nil
