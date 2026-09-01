@@ -2042,3 +2042,7 @@ path = "examples/flag_ref_smoke.rs"
 [[example]]
 name = "log_ref_smoke"
 path = "examples/log_ref_smoke.rs"
+
+[[example]]
+name = "os_env_ref_smoke"
+path = "examples/os_env_ref_smoke.rs"
