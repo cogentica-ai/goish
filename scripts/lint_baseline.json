@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 9152,
+ "total": 9078,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -1019,8 +1019,8 @@
    "GOISH016": 1
   },
   "src/time/format.rs": {
-   "GOISH018": 24,
-   "GOISH021": 53
+   "GOISH018": 2,
+   "GOISH021": 5
   },
   "src/time/sleep.rs": {
    "GOISH018": 7,
@@ -1030,7 +1030,7 @@
    "GOISH018": 1
   },
   "src/time/time.rs": {
-   "GOISH018": 35,
+   "GOISH018": 31,
    "GOISH021": 29
   },
   "src/time/zoneinfo.rs": {

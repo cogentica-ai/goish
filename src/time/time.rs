@@ -1,4 +1,4 @@
-// go: file time/time.go decls: subMono, Month.String, Weekday.String, Duration.Nanoseconds, Duration.Microseconds, Duration.Milliseconds, Duration.Seconds, Duration.Minutes, Duration.Hours, Duration.Truncate, Duration.Round, Duration.Abs, Duration.String, fmtFrac, fmtInt, lessThanHalf, div, Time.IsZero, Time.Unix, Time.UnixMilli, Time.UnixMicro, Time.UnixNano, Time.After, Time.Before, Time.Equal, Time.Compare, Time.Sub, Time.Add, Time.Date, Time.Year, Time.Month, Time.Day, Time.Clock, Time.Hour, Time.Minute, Time.Second, Time.Nanosecond, Time.Weekday, Time.YearDay, Time.ISOWeek, Time.AddDate, Time.UTC, Time.Local, Time.Truncate, Time.Round, Time.Zone, Time.IsDST, Time.MarshalText, Time.UnmarshalText, Time.MarshalJSON, Time.UnmarshalJSON, Time.AppendBinary, Time.MarshalBinary, Time.UnmarshalBinary, Time.GobEncode, Time.GobDecode, Now, Since, Until, Unix, UnixMilli, UnixMicro, Date
+// go: file time/time.go decls: Time.addSec, daysBefore, daysIn, isLeap, subMono, Month.String, Weekday.String, Duration.Nanoseconds, Duration.Microseconds, Duration.Milliseconds, Duration.Seconds, Duration.Minutes, Duration.Hours, Duration.Truncate, Duration.Round, Duration.Abs, Duration.String, fmtFrac, fmtInt, lessThanHalf, div, Time.IsZero, Time.Unix, Time.UnixMilli, Time.UnixMicro, Time.UnixNano, Time.After, Time.Before, Time.Equal, Time.Compare, Time.Sub, Time.Add, Time.Date, Time.Year, Time.Month, Time.Day, Time.Clock, Time.Hour, Time.Minute, Time.Second, Time.Nanosecond, Time.Weekday, Time.YearDay, Time.ISOWeek, Time.AddDate, Time.UTC, Time.Local, Time.Truncate, Time.Round, Time.Zone, Time.IsDST, Time.MarshalText, Time.UnmarshalText, Time.MarshalJSON, Time.UnmarshalJSON, Time.AppendBinary, Time.MarshalBinary, Time.UnmarshalBinary, Time.GobEncode, Time.GobDecode, Now, Since, Until, Unix, UnixMilli, UnixMicro, Date
 //
 // time.go — Time and Duration themselves, Month and Weekday, the
 // constructors (Now, Unix, Date) and the calendar arithmetic they all
@@ -25,7 +25,7 @@ use crate::syscall::{self, Timespec};
 use crate::types::int;
 
 #[allow(unused_imports)]
-use super::format::{DAY_LONG, MONTH_LONG};
+use super::format::{longDayNames, longMonthNames};
 #[allow(unused_imports)]
 use super::*;
 
@@ -121,7 +121,7 @@ impl Month {
     /// render as "%!Month(N)".
     pub fn String(self) -> string {
         if self.0 >= 1 && self.0 <= 12 {
-            return string::from_static(MONTH_LONG[self.0 as usize - 1]);
+            return string::from_static(longMonthNames[self.0 as usize - 1]);
         }
         // Go: "%!Month(" + fmtInt(buf, uint64(m)) + ")"
         return crate::Sprintf!("%%!Month(%d)", self.0);
@@ -162,7 +162,7 @@ impl Weekday {
     /// render as "%!Weekday(N)".
     pub fn String(self) -> string {
         if self.0 >= 0 && self.0 <= 6 {
-            return string::from_static(DAY_LONG[self.0 as usize]);
+            return string::from_static(longDayNames[self.0 as usize]);
         }
         return crate::Sprintf!("%%!Weekday(%d)", self.0);
     }
@@ -663,6 +663,21 @@ impl Time {
             nsec: toint32(nsec),
             mono: 0,
         };
+    }
+
+    // go: sdk 1.25.5 time/time.go:190-214 Time.addSec
+    /// Add `d` seconds to the time. Go's has to unpack a monotonic
+    /// reading out of the wall field first; goish stores the two
+    /// separately, so the whole body is the saturating add.
+    pub(crate) fn addSec(&mut self, d: int) {
+        let sum = self.sec.wrapping_add(d);
+        if (sum > self.sec) == (d > 0) {
+            self.sec = sum;
+        } else if d > 0 {
+            self.sec = int::MAX;
+        } else {
+            self.sec = int::MIN;
+        }
     }
 
     // go: none — goish idiom: the monotonic reading, which Go keeps
@@ -1340,6 +1355,49 @@ impl __MonthArg for Month {
     fn __as_int(self) -> int {
         return self.0;
     }
+}
+
+// go: sdk 1.25.5 time/time.go:1263-1282 daysBefore
+/// The number of days in a non-leap year before month `m`.
+/// `daysBefore(December+1)` returns 365.
+pub(crate) fn daysBefore(m: int) -> int {
+    let mut adj = 0;
+    if m >= 3 {
+        adj = -2;
+    }
+    // With the -2 adjustment after February, we need the running sum of
+    //     0  31  30  31  30  31  30  31  31  30  31  30  31
+    // which is
+    //     0  31  61  92 122 153 183 214 245 275 306 336 367
+    // and (214*m - 211) / 7 computes it exactly.
+    return (214 * m - 211) / 7 + adj;
+}
+
+// go: sdk 1.25.5 time/time.go:1284-1296 daysIn
+pub(crate) fn daysIn(m: int, year: int) -> int {
+    if m == 2 {
+        if isLeap(year) {
+            return 29;
+        }
+        return 28;
+    }
+    // With February eliminated the pattern is
+    //     31 30 31 30 31 30 31 31 30 31 30 31
+    // Adding m&1 produces the basic alternation; adding (m>>3)&1
+    // inverts it starting in August.
+    return 30 + ((m + (m >> 3)) & 1);
+}
+
+// go: sdk 1.25.5 time/time.go:1682-1692 isLeap
+pub(crate) fn isLeap(year: int) -> bool {
+    // year%4 == 0 && (year%100 != 0 || year%400 == 0)
+    // Bottom 2 bits must be clear; for multiples of 25, bottom 4 bits
+    // must be clear. Thanks to Cassio Neri for this trick.
+    let mut mask: int = 0xf;
+    if year % 25 != 0 {
+        mask = 3;
+    }
+    return year & mask == 0;
 }
 
 // go: none — goish idiom: the inverse of `civil_from_unix`, which Go
