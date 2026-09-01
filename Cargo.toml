@@ -2118,3 +2118,11 @@ path = "examples/textproto_ref_smoke.rs"
 [[example]]
 name = "mime_ref_smoke"
 path = "examples/mime_ref_smoke.rs"
+
+[[example]]
+name = "filepath_ref_smoke"
+path = "examples/filepath_ref_smoke.rs"
+
+[[example]]
+name = "strconv_ftoa_atof_ref_smoke"
+path = "examples/strconv_ftoa_atof_ref_smoke.rs"
