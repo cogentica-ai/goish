@@ -202,7 +202,11 @@ fn serve_regular_file(
         if !perr.IsNil() || ranges.Len() == 0 {
             // Malformed → 416 Requested Range Not Satisfiable.
             w.Header()
-                .Set(string("Content-Range"), crate::Sprintf!("bytes */{}", size));
+                // Go: fmt.Sprintf("bytes */%d", size). The `{}` was a
+                // Rust placeholder, so the header read "bytes
+                // */{}%!(EXTRA int=…)" — a Content-Range no client can
+                // parse.
+                .Set(string("Content-Range"), crate::Sprintf!("bytes */%d", size));
             w.WriteHeader(super::status::StatusRequestedRangeNotSatisfiable);
             return;
         }

@@ -1,4 +1,4 @@
-// go: file sort/sort.go decls: Sort, IsSorted, reverse.Less, Reverse, IntsAreSorted, StringsAreSorted, Float64sAreSorted, Stable, IntSlice.Len, IntSlice.Less, IntSlice.Swap, IntSlice.Sort, isNaN, Float64Slice.Len, Float64Slice.Less, Float64Slice.Swap, Float64Slice.Sort, StringSlice.Len, StringSlice.Less, StringSlice.Swap, StringSlice.Sort
+// go: file sort/sort.go decls: Sort, IsSorted, reverse.Less, Reverse, IntsAreSorted, StringsAreSorted, Float64sAreSorted, Stable, IntSlice.Len, IntSlice.Less, IntSlice.Swap, IntSlice.Sort, isNaN, Float64Slice.Len, Float64Slice.Less, Float64Slice.Swap, Float64Slice.Sort, StringSlice.Len, StringSlice.Less, StringSlice.Swap, StringSlice.Sort, Ints, Float64s, Strings
 //
 // sort.go — Interface, Sort, Stable, IsSorted, Reverse, the
 // three convenience Slice types, and the *AreSorted predicates.
@@ -136,6 +136,35 @@ impl<I: Interface> Interface for Reverse<I> {
 /// descending order.
 pub fn Reverse<I: Interface>(data: I) -> Reverse<I> {
     return Reverse { inner: data };
+}
+
+// ─── Ints / Float64s / Strings (sort.go:170, :176, :181) ────────────
+//
+// Go: "as of Go 1.22, this function simply calls slices.Sort." goish
+// had the three AreSorted predicates below but not one of the three
+// sorts they are about — so `sort.Ints(x)`, which is in more Go code
+// than any other call in this package, did not exist.
+
+// go: sdk 1.25.5 sort/sort.go:170-170 Ints
+/// `sort.Ints(x)` — sort a slice of ints in increasing order.
+pub fn Ints(x: &mut slice<int>) {
+    // Go: slices.Sort(x)
+    crate::slices::Sort!(*x);
+}
+
+// go: sdk 1.25.5 sort/sort.go:176-176 Float64s
+/// `sort.Float64s(x)` — Go: "sorts a slice of float64s in increasing
+/// order. Not-a-number (NaN) values are ordered before other values."
+pub fn Float64s(x: &mut slice<float64>) {
+    // Go: slices.Sort(x)
+    crate::slices::Sort!(*x);
+}
+
+// go: sdk 1.25.5 sort/sort.go:181-181 Strings
+/// `sort.Strings(x)` — sort a slice of strings in increasing order.
+pub fn Strings(x: &mut slice<string>) {
+    // Go: slices.Sort(x)
+    crate::slices::Sort!(*x);
 }
 
 // ─── *AreSorted predicates (sort.go:186, :192, :197) ────────────────

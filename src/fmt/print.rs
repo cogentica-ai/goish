@@ -1,4 +1,4 @@
-// go: file fmt/print.go decls: Sprint, Sprintln, Fprint, Fprintln, Print, Println, pp.doPrint
+// go: file fmt/print.go decls: Sprint, Sprintln, Fprint, Fprintln, Print, Println, pp.doPrint, pp.badVerb, intFromArg
 //
 // print.go — the Stringer/Formatter/State interfaces, the output
 // buffer, the printer itself, and every Print/Sprint/Fprint entry
@@ -33,7 +33,7 @@ use crate::unicode::utf8;
 #[allow(unused_imports)]
 use super::format::{
     format_decimal_signed, format_rune_or_int, format_signed, format_uint, format_unsigned,
-    hex_digit, truncate_string, write_hex, write_quoted, write_string_with_verb,
+    hex_digit, truncate_string, write_hex, write_quoted, write_string_with_verb, SHARP,
 };
 #[allow(unused_imports)]
 use super::*;
@@ -167,6 +167,144 @@ pub trait Format {
     fn fmt_prec(&self, verb: byte, _prec: i64, f: &mut FmtBuf) {
         self.fmt(verb, f);
     }
+
+    // go: none — goish idiom: Go's printer reflects over the operand,
+    //     so `%T` and the `%!verb(type=value)` marker both read the
+    //     type's name straight off the value. goish's printer has no
+    //     reflect at that point, so the name is a trait method.
+    /// Go's `%T` — the type's Go name, e.g. "string", "int", "[]uint8".
+    ///
+    /// The empty string means "this type does not know its Go name",
+    /// which switches BOTH `%T` and the bad-verb marker off for it:
+    /// a wrong marker is worse than none.
+    fn __go_type(&self) -> string {
+        return string::from_static("");
+    }
+
+    // go: none — goish idiom: Go's `(*pp).badVerb` is reached from each
+    //     `fmt*` method's `default:` arm — the verb table is spelled out
+    //     once per kind there. goish's is spelled out once per kind
+    //     here, for the same reason and with the same contents.
+    /// Whether this type renders under `verb`. `false` produces Go's
+    /// `%!verb(type=value)` marker instead of a rendering.
+    ///
+    /// The default is `true`, so a type that has not declared its verbs
+    /// keeps rendering exactly as it did.
+    fn __accepts(&self, _verb: byte) -> bool {
+        return true;
+    }
+
+    // go: none — goish idiom: Go's `intFromArg` (print.go:294) type-
+    //     asserts the operand to `int` and, failing that, reflects over
+    //     it for any integer Kind. goish's printer has no reflect at
+    //     that point, so the question is a trait method with a `None`
+    //     default — "this type is not an integer", which is Go's
+    //     `default:` arm.
+    /// The operand as an integer, for `%*d` and `%.*f`, where the width
+    /// or the precision comes from an ARGUMENT rather than from the
+    /// format string.
+    ///
+    /// `None` means the operand is not an integer, which is Go's
+    /// `%!(BADWIDTH)` / `%!(BADPREC)`.
+    fn __as_fmt_int(&self) -> Option<i64> {
+        return None;
+    }
+}
+
+// go: sdk 1.25.5 fmt/print.go:381-400 pp.badVerb
+// goishlint:ignore GOISH020 badVerb — Go's is a method on `*pp`, which
+//     carries the verb, the writer and the argument in its own state;
+//     goish has no `pp`, so the three arrive as parameters.
+/// Go: "%!verb(type=value)" — what Go prints instead of a value when
+/// the verb is one the type does not take.
+///
+/// goish had no such machinery anywhere in its printer. `%d` of a
+/// string printed the string; `%s` of an int printed the int; `%z` of
+/// anything printed the value. Every one of those is a bug in the
+/// caller that Go makes visible in the output and goish made invisible.
+fn bad_verb(v: &dyn Format, verb: byte, ty: &string, f: &mut FmtBuf) {
+    f.extend(b"%!");
+    // The marker names the verb the CALLER wrote, so the synthetic
+    // stand-ins for `%+v` and `%+q` map back to their real letters.
+    f.push(match verb {
+        b'V' => b'v',
+        b'Q' => b'q',
+        other => other,
+    });
+    f.push(b'(');
+    f.extend(ty.as_bytes());
+    f.push(b'=');
+    // Go: "p.printArg(arg, 'v')" — the marker carries the value's
+    // ordinary rendering.
+    v.fmt_prec(b'v', -1, f);
+    f.push(b')');
+}
+
+// go: none — goish idiom: the three questions Go's `printArg` asks
+//     before it renders anything — is the verb 'T', does the type take
+//     this verb, and only then render. It lives in a free function
+//     because the composite impls have to ask them too: Go's marker
+//     appears per ELEMENT inside a slice or a map, which is where a
+//     wrong verb over a `[]string` shows up.
+// go: none — goish idiom: the verb sets Go spells out in each `fmt*`
+//     method's switch, collected. `%T` is handled before the check, so
+//     it is not in any of them; `%v` is in all of them.
+//
+//   string / []byte     v s q x X            (fmtString)
+//   integers            v d b o O x X c q U  (fmtInteger)
+//   floats              v b e E f F g G x X  (fmtFloat)
+//   bool                v t                  (fmtBool)
+//
+// 'V' and 'Q' are goish's synthetic verbs for `%+v` and `%+q` — see the
+// scanner — so wherever Go accepts 'v' or 'q', the synthetic stands in
+// for it. Leaving them out marked every `%+v` of an int as a bad verb,
+// which is how they came to be listed.
+// go: none — goish idiom: see the table above.
+fn verb_ok_string(verb: byte) -> bool {
+    return matches!(verb, b'v' | b'V' | b's' | b'q' | b'Q' | b'x' | b'X');
+}
+
+// go: none — goish idiom: see the table above.
+fn verb_ok_int(verb: byte) -> bool {
+    return matches!(
+        verb,
+        b'v' | b'V' | b'd' | b'b' | b'o' | b'O' | b'x' | b'X' | b'c' | b'q' | b'Q' | b'U'
+    );
+}
+
+// go: none — goish idiom: see the table above.
+fn verb_ok_float(verb: byte) -> bool {
+    return matches!(
+        verb,
+        b'v' | b'V' | b'b' | b'e' | b'E' | b'f' | b'F' | b'g' | b'G' | b'x' | b'X'
+    );
+}
+
+// go: none — goish idiom: see the table above.
+fn verb_ok_bool(verb: byte) -> bool {
+    return matches!(verb, b'v' | b'V' | b't');
+}
+
+// go: none — goish idiom: the three questions Go's `printArg` asks
+//     before it renders anything — is the verb 'T', does the type take
+//     this verb, and only then render. It lives in a free function
+//     because the composite impls have to ask them too: Go's marker
+//     appears per ELEMENT inside a slice or a map, which is where a
+//     wrong verb over a `[]string` shows up.
+pub(crate) fn fmt_one(v: &dyn Format, verb: byte, prec: i64, f: &mut FmtBuf) {
+    let ty = v.__go_type();
+    if ty.Len() > 0 {
+        // Go: "case 'T': p.fmt.fmtS(reflect.TypeOf(arg).String())".
+        if verb & !SHARP == b'T' {
+            f.extend(ty.as_bytes());
+            return;
+        }
+        if !v.__accepts(verb & !SHARP) {
+            bad_verb(v, verb & !SHARP, &ty, f);
+            return;
+        }
+    }
+    v.fmt_prec(verb, prec, f);
 }
 
 // Blanket so any user type that impls Stringer is automatically
@@ -232,11 +370,21 @@ impl<'a> FmtArg<'a> {
         self.write_prec(verb, -1, f);
     }
 
+    // go: none — goish idiom: the operand half of Go's `intFromArg`
+    //     (print.go:294). Go asks the `any` for an `int`; goish asks
+    //     the `Format` impl, and an `error` operand is never one.
+    fn as_fmt_int(&self) -> Option<i64> {
+        if let FmtArg::Val(v) = self {
+            return v.__as_fmt_int();
+        }
+        return None;
+    }
+
     // go: none — goish idiom: as `write`, threading the verb's
     // precision to the value.
     fn write_prec(&self, verb: byte, prec: i64, f: &mut FmtBuf) {
         match self {
-            FmtArg::Val(v) => v.fmt_prec(verb, prec, f),
+            FmtArg::Val(v) => fmt_one(*v, verb, prec, f),
             FmtArg::Err(e) => {
                 // %s / %v / default for an error → Error() text.
                 // Go: nil error formats as "<nil>".
@@ -256,6 +404,30 @@ impl<'a> FmtArg<'a> {
             FmtArg::Val(v) => v.__is_string(),
             FmtArg::Err(_) => false,
         };
+    }
+
+    // go: none — goish idiom: whether the argument's type takes this
+    //     verb, so the caller can skip the flag decorations it would
+    //     otherwise wrap around a bad-verb marker.
+    fn __accepts_verb(&self, verb: byte) -> bool {
+        return match self {
+            FmtArg::Val(v) => v.__go_type().Len() == 0 || v.__accepts(verb),
+            FmtArg::Err(_) => true,
+        };
+    }
+
+    // go: none — goish idiom: one entry of Go's `%!(EXTRA …)` list,
+    //     which is `type=value` — or the value alone when the type is
+    //     one goish cannot name.
+    fn write_extra(&self, f: &mut FmtBuf) {
+        if let FmtArg::Val(v) = self {
+            let ty = v.__go_type();
+            if ty.Len() > 0 {
+                f.extend(ty.as_bytes());
+                f.push(b'=');
+            }
+        }
+        self.write_prec(b'v', -1, f);
     }
 
     // go: none — goish idiom: goish's printer dispatches on the `Format` trait
@@ -321,6 +493,14 @@ pub mod __fmt_arg {
 // ─── Format impls for builtins ────────────────────────────────────────
 
 impl Format for bool {
+    // go: none — goish idiom: see `Format::__go_type`.
+    fn __go_type(&self) -> string {
+        return string::from_static("bool");
+    }
+    // go: none — goish idiom: see `Format::__accepts`.
+    fn __accepts(&self, verb: byte) -> bool {
+        return verb_ok_bool(verb);
+    }
     // go: none — goish idiom: goish's printer dispatches on the `Format` trait
     //     where Go's reflects over `any`, so the per-type rendering lives in
     //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
@@ -331,6 +511,14 @@ impl Format for bool {
 }
 
 impl Format for string {
+    // go: none — goish idiom: see `Format::__go_type`.
+    fn __go_type(&self) -> string {
+        return string::from_static("string");
+    }
+    // go: none — goish idiom: see `Format::__accepts`.
+    fn __accepts(&self, verb: byte) -> bool {
+        return verb_ok_string(verb);
+    }
     // go: none — goish idiom: goish's printer dispatches on the `Format` trait
     //     where Go's reflects over `any`, so the per-type rendering lives in
     //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
@@ -362,6 +550,14 @@ impl Format for string {
 // explicit forwarder so the borrowed iteration value formats directly
 // without a `.clone()` at the call site.
 impl Format for &string {
+    // go: none — goish idiom: see `Format::__go_type`.
+    fn __go_type(&self) -> string {
+        return string::from_static("string");
+    }
+    // go: none — goish idiom: see `Format::__accepts`.
+    fn __accepts(&self, verb: byte) -> bool {
+        return verb_ok_string(verb);
+    }
     // go: none — goish idiom: goish's printer dispatches on the `Format` trait
     //     where Go's reflects over `any`, so the per-type rendering lives in
     //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
@@ -386,6 +582,14 @@ impl Format for &string {
 }
 
 impl Format for &str {
+    // go: none — goish idiom: see `Format::__go_type`.
+    fn __go_type(&self) -> string {
+        return string::from_static("string");
+    }
+    // go: none — goish idiom: see `Format::__accepts`.
+    fn __accepts(&self, verb: byte) -> bool {
+        return verb_ok_string(verb);
+    }
     // go: none — goish idiom: goish's printer dispatches on the `Format` trait
     //     where Go's reflects over `any`, so the per-type rendering lives in
     //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
@@ -408,13 +612,63 @@ impl Format for &str {
     }
 }
 
+// go: none — goish idiom: Go's printer reflects over the value and
+//     reaches `fmtBytes`, which switches on the verb. goish dispatches
+//     on the `Format` trait, so the same switch lives here.
+//
+//     `%v` and `%d` of a `[]byte` print the NUMBERS — Go's `printValue`
+//     falls through to the integer case for both — and only `%s`, `%q`,
+//     `%x` and `%X` treat the bytes as text. goish sent every verb to
+//     the text path, so `fmt.Println(b)` on `[]byte("abc")` printed
+//     "abc" where Go prints "[97 98 99]", and a byte slice that is not
+//     valid UTF-8 printed replacement characters where Go prints a list
+//     of numbers.
+fn write_bytes_with_verb(b: &[byte], verb: byte, f: &mut FmtBuf) {
+    // Go: `%s`, `%q`, `%x` and `%X` treat the bytes as text; EVERY
+    // other verb — `%v` and `%d` included, but also `%b`, `%o`, `%c`,
+    // `%U` and the float verbs — goes through `printValue`, which walks
+    // the slice and lets each element's own table answer. That is why
+    // `%e` of a []byte is "[%!e(uint8=97) …]" and not one marker.
+    match verb & !SHARP {
+        b's' | b'q' | b'Q' | b'x' | b'X' => write_string_with_verb(b, verb, f),
+        _ => write_byte_list(b, verb, f),
+    }
+}
+
+// go: none — goish idiom: the `[e e e]` rendering Go's `printValue`
+//     produces for a slice or an array, with the verb applied to each
+//     ELEMENT. An empty or nil slice is "[]" in Go, not "".
+fn write_byte_list(b: &[byte], verb: byte, f: &mut FmtBuf) {
+    f.push(b'[');
+    let mut i = 0usize;
+    while i < b.len() {
+        if i > 0 {
+            f.push(b' ');
+        }
+        fmt_one(&b[i], verb, -1, f);
+        i += 1;
+    }
+    f.push(b']');
+}
+
 impl Format for slice<byte> {
+    // go: none — goish idiom: see `Format::__go_type`. Go's name for a
+    //     byte slice is `[]uint8`, not `[]byte` — `byte` is an alias.
+    fn __go_type(&self) -> string {
+        return string::from_static("[]uint8");
+    }
+    // go: none — goish idiom: a byte slice takes every verb: the four
+    //     text ones directly, and the rest per element, where the
+    //     element's own table decides.
+    fn __accepts(&self, _verb: byte) -> bool {
+        return true;
+    }
     // go: none — goish idiom: goish's printer dispatches on the `Format` trait
     //     where Go's reflects over `any`, so the per-type rendering lives in
     //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
         // self: &slice<byte>; Deref<Target=[byte]> auto-coerces to &[byte].
-        write_string_with_verb(self, verb, f);
+        write_bytes_with_verb(self, verb, f);
     }
 }
 
@@ -426,11 +680,129 @@ impl Format for &slice<byte> {
     //     where Go's reflects over `any`, so the per-type rendering lives in
     //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
-        write_string_with_verb(self, verb, f);
+        write_bytes_with_verb(self, verb, f);
+    }
+}
+
+// go: none — goish idiom: Go's printer reflects over any value, so a
+//     `[]string` or a `[][]int` needs no per-type support; goish's
+//     dispatches on a trait, and `slice<T>` had an impl for exactly one
+//     T — `byte`. Every other slice failed to compile at the CALL:
+//     `fmt.Println(names)` on a `[]string`, which is about as ordinary
+//     as Go gets, was a type error.
+//
+//     `ListElem` is what makes the generic impl possible at all.
+//     `impl<T: Format> Format for slice<T>` would overlap the
+//     `slice<byte>` impl above, and `[]byte` is genuinely special in
+//     Go — `%s` renders it as text — so the two cannot be merged.
+//     A type opts in by implementing this marker; `slice<byte>` opts in
+//     too, which is what makes `[][]byte` render as `[[97 98]]` the way
+//     Go does.
+pub trait ListElem: Format {}
+
+macro_rules! impl_list_elem {
+    ($($t:ty),*) => { $( impl ListElem for $t {} )* };
+}
+impl_list_elem!(
+    bool,
+    string,
+    &string,
+    &str,
+    char,
+    i8,
+    i16,
+    i32,
+    i64,
+    isize,
+    u16,
+    u32,
+    u64,
+    usize,
+    f32,
+    f64,
+    error,
+    crate::goany::Any,
+    slice<byte>,
+    &slice<byte>
+);
+impl<T: ListElem> ListElem for slice<T> {}
+impl<T: ListElem> ListElem for Option<T> {}
+
+// go: none — goish idiom: Go's printer reflects over a map, sorts the
+//     keys with `internal/fmtsort` and renders `map[k:v k:v]`. goish had
+//     no impl at all, so `fmt.Println(m)` on any map was a type error.
+//
+//     Go sorts so that the output is deterministic — a map's iteration
+//     order is randomised, and a printer that followed it would produce
+//     a different string on every run. `K: Ord` is what makes that
+//     possible here; a map whose key type has no ordering simply is not
+//     printable, which is the same restriction goish already had (only
+//     more of it).
+impl<K, V> Format for crate::gomap::map<K, V>
+where
+    K: crate::gomap::GoHash + PartialEq + Ord + Clone + ListElem,
+    V: Clone + ListElem,
+{
+    // go: none — goish idiom: see above.
+    fn fmt(&self, verb: byte, f: &mut FmtBuf) {
+        self.fmt_prec(verb, -1, f);
+    }
+
+    // go: none — goish idiom: see above.
+    fn fmt_prec(&self, verb: byte, prec: i64, f: &mut FmtBuf) {
+        let mut pairs: Vec<(K, V)> = Vec::with_capacity(self.Len() as usize);
+        for (k, v) in self.__iter() {
+            pairs.push((k.clone(), v.clone()));
+        }
+        pairs.sort_by(|a, b| a.0.cmp(&b.0));
+        f.extend(b"map[");
+        let mut i = 0usize;
+        while i < pairs.len() {
+            if i > 0 {
+                f.push(b' ');
+            }
+            fmt_one(&pairs[i].0, verb, prec, f);
+            f.push(b':');
+            fmt_one(&pairs[i].1, verb, prec, f);
+            i += 1;
+        }
+        f.push(b']');
+    }
+}
+
+impl<T: ListElem> Format for slice<T> {
+    // go: none — goish idiom: see `ListElem` above.
+    fn fmt(&self, verb: byte, f: &mut FmtBuf) {
+        self.fmt_prec(verb, -1, f);
+    }
+
+    // go: none — goish idiom: Go's printer passes its flags down to
+    //     each element, so `%.2f` over a `[]float64` applies the
+    //     precision per element and not to the bracketed whole.
+    fn fmt_prec(&self, verb: byte, prec: i64, f: &mut FmtBuf) {
+        f.push(b'[');
+        let mut i = 0usize;
+        while i < self.len() {
+            if i > 0 {
+                f.push(b' ');
+            }
+            fmt_one(&self[i], verb, prec, f);
+            i += 1;
+        }
+        f.push(b']');
     }
 }
 
 impl Format for char {
+    // go: none — goish idiom: goish's Rust `char` stands in for a Go
+    //     `rune`, which is an int32 — hence the name and the verb set.
+    fn __go_type(&self) -> string {
+        return string::from_static("int32");
+    }
+    // go: none — goish idiom: see `Format::__accepts`.
+    fn __accepts(&self, verb: byte) -> bool {
+        return verb_ok_int(verb);
+    }
     // go: none — goish idiom: goish's printer dispatches on the `Format` trait
     //     where Go's reflects over `any`, so the per-type rendering lives in
     //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
@@ -615,27 +987,59 @@ impl<'a, T: ?Sized + Stringer> Stringer for crate::gonilable_ref::nilable_refmut
 
 // All integer widths route through one helper.
 macro_rules! impl_format_for_signed {
-    ($($t:ty),*) => { $( impl Format for $t {
+    ($($t:ty : $n:literal),*) => { $( impl Format for $t {
+        // go: none — goish idiom: see `Format::__go_type`.
+        fn __go_type(&self) -> string {
+            return string::from_static($n);
+        }
+        // go: none — goish idiom: see `Format::__accepts`.
+        fn __accepts(&self, verb: byte) -> bool {
+            return verb_ok_int(verb);
+        }
         // go: none — goish idiom: goish's printer dispatches on the `Format` trait
         //     where Go's reflects over `any`, so the per-type rendering lives in
         //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
         fn fmt(&self, verb: byte, f: &mut FmtBuf) {
             format_signed(toint64(*self), verb, f);
         }
+        // go: none — goish idiom: see `Format::__as_fmt_int`.
+        fn __as_fmt_int(&self) -> Option<i64> {
+            return Some(toint64(*self));
+        }
     } )* };
 }
 macro_rules! impl_format_for_unsigned {
-    ($($t:ty),*) => { $( impl Format for $t {
+    ($($t:ty : $n:literal),*) => { $( impl Format for $t {
+        // go: none — goish idiom: see `Format::__go_type`.
+        fn __go_type(&self) -> string {
+            return string::from_static($n);
+        }
+        // go: none — goish idiom: see `Format::__accepts`.
+        fn __accepts(&self, verb: byte) -> bool {
+            return verb_ok_int(verb);
+        }
         // go: none — goish idiom: goish's printer dispatches on the `Format` trait
         //     where Go's reflects over `any`, so the per-type rendering lives in
         //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
         fn fmt(&self, verb: byte, f: &mut FmtBuf) {
             format_unsigned(touint64(*self), verb, f);
         }
+        // go: none — goish idiom: see `Format::__as_fmt_int`. Go's
+        //     `intFromArg` takes an unsigned operand only when it fits
+        //     an `int`, which is what the `try_into` says here.
+        fn __as_fmt_int(&self) -> Option<i64> {
+            return i64::try_from(touint64(*self)).ok();
+        }
     } )* };
 }
-impl_format_for_signed!(i8, i16, i32, i64, isize);
-impl_format_for_unsigned!(u16, u32, u64, usize);
+// The names are Go's. Note that several Go types share one Rust type —
+// goish's `int` and `int64` are both `i64`, and `uint`, `uint64` and
+// `uintptr` are all `u64` — so `%T` cannot tell them apart and prints
+// the unqualified name, the one goish's own `int`/`uint` resolve to.
+// A Go `int64` therefore reports "int". There is no information left in
+// the value to do better with.
+impl_format_for_signed!(i8: "int8", i16: "int16", i32: "int32", i64: "int", isize: "int");
+impl_format_for_unsigned!(u16: "uint16", u32: "uint32", u64: "uint", usize: "uint");
 
 // Floats — route through strconv::FormatFloat.
 //
@@ -646,6 +1050,14 @@ impl_format_for_unsigned!(u16, u32, u64, usize);
 // value uniquely" — i.e. FormatFloat's prec = -1. A verb that gives a
 // precision passes it straight through.
 impl Format for f64 {
+    // go: none — goish idiom: see `Format::__go_type`.
+    fn __go_type(&self) -> string {
+        return string::from_static("float64");
+    }
+    // go: none — goish idiom: see `Format::__accepts`.
+    fn __accepts(&self, verb: byte) -> bool {
+        return verb_ok_float(verb);
+    }
     // go: none — goish idiom: no-precision form defers to fmt_prec.
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
         self.fmt_prec(verb, -1, f);
@@ -655,23 +1067,54 @@ impl Format for f64 {
     //     where Go's reflects over `any`, so the per-type rendering lives in
     //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
     fn fmt_prec(&self, verb: byte, prec: i64, f: &mut FmtBuf) {
-        let fmt = match verb {
-            b'f' | b'F' => b'f',
-            b'e' => b'e',
-            b'E' => b'E',
-            b'g' | b'v' => b'g',
-            b'G' => b'G',
-            b'x' => b'x',
-            b'X' => b'X',
-            b'b' => b'b',
-            _ => b'g',
-        };
+        let (fmt, prec) = float_verb(verb, prec);
         let s = crate::strconv::FormatFloat(*self, fmt, prec, 64);
         f.extend(s.as_bytes());
     }
 }
 
+// go: none — goish idiom: Go's `(*pp).fmtFloat` reads the default
+//     precision off the verb — "prec := -1; switch verb { case 'v':
+//     … case 'e','E','f','F': prec = 6 …" — before handing the value to
+//     `strconv.AppendFloat`. goish passed -1 for every verb, so `%f` of
+//     1.5 printed "1.5" where Go prints "1.500000" and `%e` of 0
+//     printed "0e+00" where Go prints "0.000000e+00". Every
+//     column-aligned numeric report a port produced was misaligned, and
+//     nothing about the output looked wrong on its own.
+//
+//     `%v`, `%g` and `%G` keep -1: their default IS the shortest
+//     round-trip. An explicit precision always wins.
+fn float_verb(verb: byte, prec: i64) -> (byte, i64) {
+    let fmt = match verb & !SHARP {
+        b'f' | b'F' => b'f',
+        b'e' => b'e',
+        b'E' => b'E',
+        b'g' | b'v' => b'g',
+        b'G' => b'G',
+        b'x' => b'x',
+        b'X' => b'X',
+        b'b' => b'b',
+        _ => b'g',
+    };
+    if prec >= 0 {
+        return (fmt, prec);
+    }
+    // Go: "%e, %E, %f, %F default to a precision of 6."
+    return match verb & !SHARP {
+        b'e' | b'E' | b'f' | b'F' => (fmt, 6),
+        _ => (fmt, -1),
+    };
+}
+
 impl Format for f32 {
+    // go: none — goish idiom: see `Format::__go_type`.
+    fn __go_type(&self) -> string {
+        return string::from_static("float32");
+    }
+    // go: none — goish idiom: see `Format::__accepts`.
+    fn __accepts(&self, verb: byte) -> bool {
+        return verb_ok_float(verb);
+    }
     // go: none — goish idiom: no-precision form defers to fmt_prec.
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
         self.fmt_prec(verb, -1, f);
@@ -681,17 +1124,7 @@ impl Format for f32 {
     //     where Go's reflects over `any`, so the per-type rendering lives in
     //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
     fn fmt_prec(&self, verb: byte, prec: i64, f: &mut FmtBuf) {
-        let fmt = match verb {
-            b'f' | b'F' => b'f',
-            b'e' => b'e',
-            b'E' => b'E',
-            b'g' | b'v' => b'g',
-            b'G' => b'G',
-            b'x' => b'x',
-            b'X' => b'X',
-            b'b' => b'b',
-            _ => b'g',
-        };
+        let (fmt, prec) = float_verb(verb, prec);
         let s = crate::strconv::FormatFloat(*self as f64, fmt, prec, 32);
         f.extend(s.as_bytes());
     }
@@ -738,6 +1171,14 @@ impl Format for (f32, f32) {
 
 // byte = u8 — special-case so %c renders ASCII char, %d the number.
 impl Format for u8 {
+    // go: none — goish idiom: see `Format::__go_type`.
+    fn __go_type(&self) -> string {
+        return string::from_static("uint8");
+    }
+    // go: none — goish idiom: see `Format::__accepts`.
+    fn __accepts(&self, verb: byte) -> bool {
+        return verb_ok_int(verb);
+    }
     // go: none — goish idiom: goish's printer dispatches on the `Format` trait
     //     where Go's reflects over `any`, so the per-type rendering lives in
     //     a trait impl rather than in one of `(*pp)`'s `fmt*` methods.
@@ -746,6 +1187,10 @@ impl Format for u8 {
             b'c' => f.push(*self),
             _ => format_unsigned(touint64(*self), verb, f),
         }
+    }
+    // go: none — goish idiom: see `Format::__as_fmt_int`.
+    fn __as_fmt_int(&self) -> Option<i64> {
+        return Some(toint64(*self));
     }
 }
 
@@ -767,6 +1212,31 @@ impl Format for error {
 }
 
 // ─── Format-string scanner ────────────────────────────────────────────
+
+// go: sdk 1.25.5 fmt/print.go:934-964 intFromArg
+/// Go: "intFromArg gets the argNumth element of a. On return, isInt
+/// reports whether the argument has integer type."
+///
+/// This is what `%*d` reads its WIDTH from. Two details of Go's that
+/// are easy to drop: the operand is consumed whether or not it turns
+/// out to be an integer — a `%!(BADWIDTH)` still moves on to the next
+/// argument — and a magnitude past a million is refused outright, so a
+/// bad value cannot ask the printer for a gigabyte of padding.
+fn int_from_arg(args: &[FmtArg], arg_num: &mut usize) -> Option<i64> {
+    if *arg_num >= args.len() {
+        return None;
+    }
+    let num = args[*arg_num].as_fmt_int();
+    *arg_num += 1;
+    // Go: "func tooLarge(x int) bool { const max int = 1e6; return x >
+    // max || x < -max }".
+    if let Some(n) = num {
+        if n > 1_000_000 || n < -1_000_000 {
+            return None;
+        }
+    }
+    return num;
+}
 
 // go: none — goish idiom: Go's `(*pp).doPrintf` (print.go:1019) walks the
 //     format string against a `[]any`; goish walks it against the
@@ -797,6 +1267,7 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
         let mut zero_pad = false;
         let mut plus_flag = false;
         let mut space_flag = false;
+        let mut sharp_flag = false;
         loop {
             if i >= format.len() {
                 break;
@@ -818,18 +1289,64 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
                     space_flag = true;
                     i += 1;
                 }
+                // Go's "alternate format" flag. goish did not know it
+                // was a flag at all, so `%#x` parsed '#' as the VERB:
+                // the argument was consumed by a verb that means
+                // nothing, and the real 'x' was copied out as a literal.
+                // Every `%#x` in a port printed garbage.
+                b'#' => {
+                    sharp_flag = true;
+                    i += 1;
+                }
                 _ => break,
             }
         }
-        // Parse optional width digits.
         let mut width: usize = 0;
         let mut has_width = false;
-        while i < format.len() && format[i] >= b'1' && format[i] <= b'9'
-            || (i < format.len() && has_width && format[i] >= b'0' && format[i] <= b'9')
-        {
-            width = width * 10 + (format[i] - b'0') as usize;
-            has_width = true;
+        // Go: "if i < end && format[i] == '*' { … p.fmt.wid,
+        // p.fmt.widPresent, argNum = intFromArg(a, argNum) … }" — the
+        // width comes from an ARGUMENT.
+        //
+        // goish did not know `*` at all. It was not a flag, not a
+        // width, not a precision, so it fell through to the VERB slot:
+        // `%*d` of (6, 42) consumed the 6 as the operand, rendered it
+        // under the meaningless verb `*`, and copied the `d` out as a
+        // literal — printing "6d". The value it was asked to pad never
+        // appeared, and neither did any padding.
+        if i < format.len() && format[i] == b'*' {
             i += 1;
+            match int_from_arg(args, &mut arg_idx) {
+                Some(n) => {
+                    has_width = true;
+                    // Go: "We have a negative width, so take its value
+                    // and ensure that the minus flag is set." The zero
+                    // flag is dropped with it — "Do not pad with zeros
+                    // to the right."
+                    if n < 0 {
+                        left_align = true;
+                        zero_pad = false;
+                        width = usize::try_from(-n).unwrap_or(0);
+                    } else {
+                        width = usize::try_from(n).unwrap_or(0);
+                    }
+                }
+                None => {
+                    f.extend(b"%!(BADWIDTH)");
+                }
+            }
+        }
+        // Parse optional width digits. Go's is the `else` arm of the
+        // `*` test above, not a second chance after it, so `%*5d` reads
+        // its width from the argument and leaves the `5` to be the
+        // verb — the guard here is that `else`.
+        if !has_width {
+            while i < format.len() && format[i] >= b'1' && format[i] <= b'9'
+                || (i < format.len() && has_width && format[i] >= b'0' && format[i] <= b'9')
+            {
+                width = width * 10 + (format[i] - b'0') as usize;
+                has_width = true;
+                i += 1;
+            }
         }
         // Parse optional `.precision`. Go: "For floating-point values,
         // width sets the minimum width of the field and precision sets
@@ -845,11 +1362,33 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
         let mut precision: usize = 0;
         let mut has_precision = false;
         if i < format.len() && format[i] == b'.' {
-            i += 1;
-            has_precision = true;
-            while i < format.len() && format[i] >= b'0' && format[i] <= b'9' {
-                precision = precision * 10 + (format[i] - b'0') as usize;
+            // Go: "if i+1 < end && format[i+1] == '*'" — the precision
+            // comes from an argument too.
+            if i + 1 < format.len() && format[i + 1] == b'*' {
+                i += 2;
+                // Go: "if p.fmt.prec < 0 { p.fmt.prec = 0;
+                // p.fmt.precPresent = false }", and an absent precision
+                // then writes the BADPREC marker. So a NEGATIVE `*`
+                // precision is not "no precision given" — the verb
+                // falls back to its OWN default, which for `%f` is six
+                // places: `%.*f` of (-1, 3.14159) is
+                // "%!(BADPREC)3.141590", not "3.14159".
+                match int_from_arg(args, &mut arg_idx) {
+                    Some(n) if n >= 0 => {
+                        has_precision = true;
+                        precision = usize::try_from(n).unwrap_or(0);
+                    }
+                    _ => {
+                        f.extend(b"%!(BADPREC)");
+                    }
+                }
+            } else {
                 i += 1;
+                has_precision = true;
+                while i < format.len() && format[i] >= b'0' && format[i] <= b'9' {
+                    precision = precision * 10 + (format[i] - b'0') as usize;
+                    i += 1;
+                }
             }
         }
         if i >= format.len() {
@@ -872,6 +1411,12 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
         // ...and `%+q` as 'Q', which is Go's ASCIIonly quoting.
         if plus_flag && verb == b'q' {
             verb = b'Q';
+        }
+        // `#` rides in the high bit — see the note on `format::SHARP`.
+        // Only `%#q` and `%#U` read it in the formatters; the integer
+        // prefixes are applied below, where the width is known.
+        if sharp_flag {
+            verb |= SHARP;
         }
         // %w handling — substitute the wrapped error's text and capture
         // the first %w as the wrap target (Go's fmt.Errorf semantics).
@@ -912,7 +1457,12 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
             // `Format` impls take only the verb, so the sign and the
             // padding are applied here, over the rendered bytes.
             let numeric = is_numeric_verb(verb);
+            // A '#' on an integer verb also needs the temp buffer: the
+            // prefix goes between the sign and the digits, so the
+            // rendered bytes have to be split apart first.
+            let prefixed = is_integer_verb(verb) && !alt_prefix(verb, b"1").is_empty();
             if has_width
+                || prefixed
                 || ((plus_flag || space_flag) && numeric)
                 || (has_precision && is_integer_verb(verb))
             {
@@ -924,22 +1474,60 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
                 // number of digits — "%.5d" of 42 is "00042" — where
                 // for the float verbs it is the number of places after
                 // the point, which the value itself already applied.
-                if has_precision && is_integer_verb(verb) {
-                    let sign = if !bytes.is_empty() && (bytes[0] == b'-' || bytes[0] == b'+') {
-                        1usize
-                    } else {
-                        0usize
-                    };
+                //
+                // Go's `fmtInteger` also turns a zero-padding WIDTH into
+                // exactly this digit precision — "else if f.zero &&
+                // !f.minus && f.widPresent { prec = f.wid; if negative
+                // || f.plus || f.space { prec-- } }" — which is why the
+                // base prefix does not count toward it: `%#08x` of 255
+                // is "0x000000ff", ten characters wide, not eight.
+                let sign = if !bytes.is_empty() && (bytes[0] == b'-' || bytes[0] == b'+') {
+                    1usize
+                } else {
+                    0usize
+                };
+                let int_verb = is_integer_verb(verb);
+                let mut digit_prec = 0usize;
+                if has_precision && int_verb {
+                    digit_prec = precision;
+                } else if int_verb && zero_pad && !left_align && has_width {
+                    digit_prec = width;
+                    if sign == 1 || plus_flag || space_flag {
+                        digit_prec = digit_prec.saturating_sub(1);
+                    }
+                }
+                if digit_prec > 0 {
                     let digits = bytes.len() - sign;
-                    if digits < precision {
-                        let mut padded: Vec<byte> = Vec::with_capacity(sign + precision);
+                    if digits < digit_prec {
+                        let mut padded: Vec<byte> = Vec::with_capacity(sign + digit_prec);
                         padded.extend_from_slice(&bytes[..sign]);
-                        for _ in 0..(precision - digits) {
+                        for _ in 0..(digit_prec - digits) {
                             padded.push(b'0');
                         }
                         padded.extend_from_slice(&bytes[sign..]);
                         bytes = padded;
                     }
+                }
+
+                // The base prefix: after the sign, before the digits.
+                // For a string or byte slice rendered by `%#x` the
+                // "digits" are the hex pairs and an EMPTY value takes no
+                // prefix — Go prints "" for `%#x` of "", not "0x".
+                // A bad-verb marker is not a number: Go's `%O` of a
+                // string is "%!O(string=ab)", with no "0o" in front of
+                // it, because `badVerb` writes the marker instead of
+                // ever reaching `fmtInteger`.
+                let pfx = if args[arg_idx].__accepts_verb(verb & !SHARP) {
+                    alt_prefix(verb, &bytes[sign..])
+                } else {
+                    b""
+                };
+                if !pfx.is_empty() && bytes.len() > sign {
+                    let mut withpfx: Vec<byte> = Vec::with_capacity(bytes.len() + pfx.len());
+                    withpfx.extend_from_slice(&bytes[..sign]);
+                    withpfx.extend_from_slice(pfx);
+                    withpfx.extend_from_slice(&bytes[sign..]);
+                    bytes = withpfx;
                 }
 
                 // Go: the '+' flag always prints a sign for a numeric
@@ -956,8 +1544,10 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
                 let pad_count = width.saturating_sub(bytes.len());
                 // Go zero-pads only for numeric verbs, and the zeros go
                 // AFTER the sign — "%05d" of -42 is "-0042", not
-                // "00-42".
-                let zero = zero_pad && !left_align && numeric;
+                // "00-42". For the INTEGER verbs the padding was just
+                // done as a digit precision above, so this is the float
+                // path only.
+                let zero = zero_pad && !left_align && numeric && !is_integer_verb(verb);
                 if zero {
                     let mut k = 0usize;
                     if !bytes.is_empty()
@@ -989,9 +1579,30 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
             arg_idx += 1;
         } else {
             f.extend(b"%!");
-            f.push(verb);
+            f.push(verb & !SHARP);
             f.extend(b"(MISSING)");
         }
+    }
+    // Go: doPrintf's tail, print.go:1185-1201 — "Check for extra
+    // arguments unless the call accessed the arguments out of order,
+    // in which case it's too expensive to detect if they've all been
+    // used."
+    //
+    // goish dropped them silently, so `Sprintf("%d", 1, 2)` gave "1"
+    // where Go gives "1%!(EXTRA int=2)" — the marker being the only
+    // sign that an argument went nowhere.
+    if arg_idx < args.len() {
+        f.extend(b"%!(EXTRA ");
+        let mut first = true;
+        while arg_idx < args.len() {
+            if !first {
+                f.extend(b", ");
+            }
+            first = false;
+            args[arg_idx].write_extra(f);
+            arg_idx += 1;
+        }
+        f.push(b')');
     }
     return wrap_target;
 }
@@ -1001,8 +1612,8 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
 //     apply to; goish has no such struct, so the verb set is spelled
 //     out.
 fn is_numeric_verb(verb: byte) -> bool {
-    return match verb {
-        b'd' | b'b' | b'o' | b'x' | b'X' | b'e' | b'E' | b'f' | b'F' | b'g' | b'G' => true,
+    return match verb & !SHARP {
+        b'd' | b'b' | b'o' | b'O' | b'x' | b'X' | b'e' | b'E' | b'f' | b'F' | b'g' | b'G' => true,
         _ => false,
     };
 }
@@ -1011,9 +1622,44 @@ fn is_numeric_verb(verb: byte) -> bool {
 //     precision means "minimum digits" rather than "places after the
 //     point".
 fn is_integer_verb(verb: byte) -> bool {
-    return match verb {
-        b'd' | b'b' | b'o' | b'x' | b'X' => true,
+    return match verb & !SHARP {
+        b'd' | b'b' | b'o' | b'O' | b'x' | b'X' => true,
         _ => false,
+    };
+}
+
+// go: none — goish idiom: Go's `fmtInteger` writes the base prefix into
+//     its own buffer between the zero padding and the sign. goish's
+//     `Format` impls render the digits and never see the width, so the
+//     prefix is spliced in here instead. The bytes are Go's, from
+//     format.go's `if f.sharp { switch base { … } }` plus the
+//     unconditional "0o" the 'O' verb carries.
+//
+//     `%#o` is the odd one: its prefix is a single '0', and Go adds it
+//     only when the first digit is not already a zero — which is why
+//     `%#o` of 0 is "0" and not "00".
+fn alt_prefix(verb: byte, digits: &[byte]) -> &'static [byte] {
+    let sharp = verb & SHARP != 0;
+    return match verb & !SHARP {
+        b'b' if sharp => b"0b",
+        b'x' if sharp => b"0x",
+        b'X' if sharp => b"0X",
+        b'o' if sharp => {
+            if digits.first() == Some(&b'0') {
+                b""
+            } else {
+                b"0"
+            }
+        }
+        b'O' if sharp => {
+            if digits.first() == Some(&b'0') {
+                b"0o"
+            } else {
+                b"0o0"
+            }
+        }
+        b'O' => b"0o",
+        _ => b"",
     };
 }
 

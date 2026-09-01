@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 9069,
+ "total": 8596,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -17,11 +17,6 @@
   },
   "src/builtin_macros.rs": {
    "GOISH014": 3,
-   "GOISH023": 3
-  },
-  "src/cmp/mod.rs": {
-   "GOISH014": 3,
-   "GOISH016": 1,
    "GOISH023": 3
   },
   "src/compress/bzip2/bit_reader.rs": {
@@ -261,11 +256,8 @@
    "GOISH015": 1,
    "GOISH023": 27
   },
-  "src/encoding/binary/mod.rs": {
-   "GOISH005": 76,
-   "GOISH014": 24,
-   "GOISH016": 1,
-   "GOISH023": 18
+  "src/encoding/binary/binary.rs": {
+   "GOISH005": 82
   },
   "src/encoding/json/jsontext/mod.rs": {
    "GOISH005": 8,
@@ -304,14 +296,11 @@
    "GOISH022": 1,
    "GOISH023": 27
   },
-  "src/flag/flag.rs": {
-   "GOISH017": 1
-  },
   "src/flag/mod.rs": {
    "GOISH005": 1,
-   "GOISH014": 15,
+   "GOISH014": 11,
    "GOISH016": 1,
-   "GOISH023": 13
+   "GOISH023": 11
   },
   "src/fmt/errors.rs": {
    "GOISH021": 1
@@ -321,7 +310,7 @@
    "GOISH021": 6
   },
   "src/fmt/print.rs": {
-   "GOISH018": 42,
+   "GOISH018": 41,
    "GOISH021": 18,
    "GOISH022": 4
   },
@@ -430,14 +419,6 @@
    "GOISH014": 5,
    "GOISH023": 5
   },
-  "src/log/mod.rs": {
-   "GOISH005": 4,
-   "GOISH008": 1,
-   "GOISH014": 20,
-   "GOISH015": 1,
-   "GOISH016": 1,
-   "GOISH023": 4
-  },
   "src/log/slog/mod.rs": {
    "GOISH014": 18,
    "GOISH016": 1,
@@ -454,37 +435,31 @@
    "GOISH016": 1,
    "GOISH023": 267
   },
-  "src/math/bits/mod.rs": {
-   "GOISH005": 40,
-   "GOISH014": 49,
-   "GOISH016": 1,
-   "GOISH023": 49
+  "src/math/bits/bits.rs": {
+   "GOISH005": 28
   },
   "src/math/mod.rs": {
    "GOISH005": 4,
    "GOISH014": 47,
    "GOISH015": 1,
    "GOISH016": 1,
-   "GOISH023": 47
+   "GOISH023": 43
   },
   "src/math/rand/mod.rs": {
    "GOISH005": 71,
-   "GOISH014": 42,
+   "GOISH014": 4,
    "GOISH016": 1,
    "GOISH022": 1,
    "GOISH023": 37
   },
   "src/math/rand/v2/mod.rs": {
    "GOISH005": 18,
-   "GOISH014": 35,
    "GOISH016": 1,
    "GOISH022": 1,
    "GOISH023": 32
   },
   "src/mime/mod.rs": {
-   "GOISH014": 6,
-   "GOISH016": 1,
-   "GOISH023": 6
+   "GOISH016": 1
   },
   "src/mime/multipart/formdata.rs": {
    "GOISH018": 3,
@@ -653,25 +628,20 @@
   "src/net/textproto/mod.rs": {
    "GOISH005": 10,
    "GOISH010": 1,
-   "GOISH014": 18,
+   "GOISH014": 2,
    "GOISH015": 1,
    "GOISH016": 1,
    "GOISH023": 13
   },
   "src/net/textproto/pipeline.rs": {
-   "GOISH014": 10,
+   "GOISH014": 3,
    "GOISH023": 4
   },
   "src/net/textproto/reader.rs": {
    "GOISH005": 4,
-   "GOISH014": 20,
+   "GOISH014": 4,
    "GOISH015": 1,
-   "GOISH023": 20
-  },
-  "src/net/url/mod.rs": {
-   "GOISH014": 56,
-   "GOISH016": 1,
-   "GOISH023": 51
+   "GOISH023": 19
   },
   "src/nilval.rs": {
    "GOISH014": 8,
@@ -684,11 +654,11 @@
    "GOISH023": 19
   },
   "src/os/mod.rs": {
-   "GOISH005": 35,
-   "GOISH014": 125,
+   "GOISH005": 32,
+   "GOISH014": 105,
    "GOISH015": 1,
    "GOISH016": 1,
-   "GOISH023": 120
+   "GOISH023": 102
   },
   "src/os/signal/mod.rs": {
    "GOISH014": 3,
@@ -994,7 +964,7 @@
    "GOISH014": 116,
    "GOISH015": 1,
    "GOISH016": 1,
-   "GOISH023": 113
+   "GOISH023": 112
   },
   "src/term/mod.rs": {
    "GOISH005": 7,

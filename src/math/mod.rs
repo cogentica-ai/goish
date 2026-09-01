@@ -387,8 +387,14 @@ pub fn Modf(f: f64) -> (f64, f64) {
         return (f, f64::NAN);
     }
     let i = libm::trunc(f);
-    let frac = f - i;
-    (i, frac)
+    // Go computes the negative case as `int, frac = Modf(-f); return
+    // -int, -frac`, so the fractional part carries the sign of the
+    // INPUT: Modf(-1) is (-1, -0) and Modf(-0) is (-0, -0). `f - i` is
+    // +0 for both, which is what goish returned — a signed zero that
+    // survives into Copysign, Signbit and the wire format of any
+    // encoder that stores the bit pattern.
+    let frac = Copysign(f - i, f);
+    return (i, frac);
 }
 
 /// `math.Copysign(magnitude, sign) float64` — returns a value with the
@@ -403,38 +409,93 @@ pub fn Remainder(x: f64, y: f64) -> f64 {
     libm::remainder(x, y)
 }
 
-/// `math.Dim(x, y) float64` — max(x-y, 0).
+/// `math.Dim(x, y) float64` — Go: "the maximum of x-y or 0."
+///
+/// Go's special cases are:
+///
+///     Dim(+Inf, +Inf) = NaN
+///     Dim(-Inf, -Inf) = NaN
+///     Dim(x, NaN) = Dim(NaN, y) = NaN
+///
+/// and it reaches all four with ONE test. Go's comment: "The special
+/// cases result in NaN after the subtraction … v := x - y; if v <= 0 {
+/// return 0 }; return v" — `v <= 0` is false for a NaN, so the NaN
+/// falls through and is returned.
+///
+/// goish tested `d > 0.0` instead, which is ALSO false for a NaN, so
+/// every one of those four cases returned 0. `Dim(+Inf, +Inf)` is the
+/// one a caller is most likely to hit, and 0 is a plausible-looking
+/// answer for it.
 pub fn Dim(x: f64, y: f64) -> f64 {
-    let d = x - y;
-    if d > 0.0 {
-        d
-    } else {
-        0.0
+    // Go: v := x - y; if v <= 0 { return 0 }; return v
+    let v = x - y;
+    if v <= 0.0 {
+        return 0.0;
     }
+    return v;
 }
 
-/// `math.Max(x, y) float64` — Go semantics: NaN propagates, +0 > -0.
+/// `math.Max(x, y) float64` — Go: "the larger of x or y."
+///
+/// The order of Go's switch is the whole content of this function:
+///
+///     Max(x, +Inf) = Max(+Inf, y) = +Inf
+///     Max(x, NaN)  = Max(NaN, y)  = NaN
+///     Max(+0, ±0)  = Max(±0, +0)  = +0
+///     Max(-0, -0)  = -0
+///
+/// +Inf is tested FIRST, so `Max(+Inf, NaN)` is +Inf and not NaN.
+/// goish tested NaN first and answered NaN, and had no zero case at all
+/// — its doc comment claimed "+0 > -0" while `x > y` is false for that
+/// pair, so `Max(+0, -0)` returned -0.
 pub fn Max(x: f64, y: f64) -> f64 {
+    // Go: case IsInf(x, 1) || IsInf(y, 1): return Inf(1)
+    if IsInf(x, 1) || IsInf(y, 1) {
+        return Inf(1);
+    }
+    // Go: case IsNaN(x) || IsNaN(y): return NaN()
     if x.is_nan() || y.is_nan() {
         return f64::NAN;
+    }
+    // Go: case x == 0 && x == y: if Signbit(x) { return y }; return x
+    if x == 0.0 && x == y {
+        if Signbit(x) {
+            return y;
+        }
+        return x;
     }
     if x > y {
-        x
-    } else {
-        y
+        return x;
     }
+    return y;
 }
 
-/// `math.Min(x, y) float64` — Go semantics: NaN propagates, -0 < +0.
+/// `math.Min(x, y) float64` — Go: "the smaller of x or y."
+///
+///     Min(x, -Inf) = Min(-Inf, y) = -Inf
+///     Min(x, NaN)  = Min(NaN, y)  = NaN
+///     Min(-0, ±0)  = Min(±0, -0)  = -0
+///
+/// The mirror of [`Max`]; see the note there for what goish had.
 pub fn Min(x: f64, y: f64) -> f64 {
+    // Go: case IsInf(x, -1) || IsInf(y, -1): return Inf(-1)
+    if IsInf(x, -1) || IsInf(y, -1) {
+        return Inf(-1);
+    }
     if x.is_nan() || y.is_nan() {
         return f64::NAN;
     }
-    if x < y {
-        x
-    } else {
-        y
+    // Go: case x == 0 && x == y: if Signbit(x) { return x }; return y
+    if x == 0.0 && x == y {
+        if Signbit(x) {
+            return x;
+        }
+        return y;
     }
+    if x < y {
+        return x;
+    }
+    return y;
 }
 
 /// `math.Hypot(p, q) float64` — sqrt(p²+q²) without overflow.

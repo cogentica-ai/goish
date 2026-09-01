@@ -94,7 +94,11 @@ fn readHeader<R: io::Reader>(r: &mut textproto::Reader<R>) -> (map<string, slice
                 return (m, err);
             }
             // Go: return m, errors.New("malformed initial line: " + line)
-            let msg = crate::Sprintf!("malformed initial line: {}", line);
+            // Go: errors.New("malformed initial line: " + line) — a
+            // concatenation. The `{}` here was a RUST placeholder in a
+            // Go format string: `Sprintf` copies it out literally and
+            // reports the unused argument after it.
+            let msg = string::from_static("malformed initial line: ") + line;
             return (m, errors::New(msg));
         }
     }
@@ -110,7 +114,8 @@ fn readHeader<R: io::Reader>(r: &mut textproto::Reader<R>) -> (map<string, slice
         // Go: k, v, ok := strings.Cut(kv, ":")
         let (k, v, ok) = strings::Cut(kv.clone(), string::from_static(":"));
         if !ok {
-            let msg = crate::Sprintf!("malformed header line: {}", kv);
+            // Go: errors.New("malformed header line: " + kv). See above.
+            let msg = string::from_static("malformed header line: ") + kv;
             return (m, errors::New(msg));
         }
 

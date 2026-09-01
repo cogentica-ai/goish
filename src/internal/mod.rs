@@ -7,4 +7,5 @@
 #![allow(non_snake_case)]
 
 pub mod byteorder;
+pub mod poll;
 pub mod syscall;

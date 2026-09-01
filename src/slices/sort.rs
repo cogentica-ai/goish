@@ -14,10 +14,15 @@ use crate::goslice::slice;
 use crate::types::int;
 
 // go: sdk 1.25.5 slices/sort.go:42-49 IsSorted
-pub fn IsSorted<T: Ord>(s: &slice<T>) -> bool {
+/// Go: `if cmp.Less(x[i], x[i-1]) { return false }` — so a NaN counts
+/// as sorted only where `cmp.Less` puts it, at the front. The bound was
+/// `T: Ord`, which no float satisfies, so this could not be asked about
+/// a `[]float64` at all.
+pub fn IsSorted<T: PartialOrd>(s: &slice<T>) -> bool {
     let raw: &[T] = s;
     for i in 1..raw.len() {
-        if raw[i] < raw[i - 1] {
+        // Go: if cmp.Less(x[i], x[i-1]) { return false }
+        if crate::cmp::Less(&raw[i], &raw[i - 1]) {
             return false;
         }
     }
@@ -25,14 +30,23 @@ pub fn IsSorted<T: Ord>(s: &slice<T>) -> bool {
 }
 
 // go: sdk 1.25.5 slices/sort.go:65-74 Min
-pub fn Min<T: Ord + Clone>(s: &slice<T>) -> T {
+/// Go: `m = min(m, x[i])` — the BUILTIN `min`, whose rule for floats is
+/// "if any argument is a NaN, the result is a NaN". That is not
+/// `cmp.Less`'s rule and not `<`'s either, so it is spelled out.
+///
+/// The bound was `T: Ord`, which no float satisfies.
+pub fn Min<T: PartialOrd + Clone>(s: &slice<T>) -> T {
     let raw: &[T] = s;
     if raw.is_empty() {
         panic!("slices.Min: empty list");
     }
     let mut best = &raw[0];
     for v in &raw[1..] {
-        if v < best {
+        // Go's builtin: a NaN anywhere makes the whole result a NaN.
+        if crate::cmp::isNaN(best) {
+            return best.clone();
+        }
+        if crate::cmp::isNaN(v) || v < best {
             best = v;
         }
     }
@@ -40,14 +54,19 @@ pub fn Min<T: Ord + Clone>(s: &slice<T>) -> T {
 }
 
 // go: sdk 1.25.5 slices/sort.go:95-104 Max
-pub fn Max<T: Ord + Clone>(s: &slice<T>) -> T {
+/// Go: `m = max(m, x[i])` — see the note on [`Min`]; a NaN anywhere
+/// makes the result a NaN here too.
+pub fn Max<T: PartialOrd + Clone>(s: &slice<T>) -> T {
     let raw: &[T] = s;
     if raw.is_empty() {
         panic!("slices.Max: empty list");
     }
     let mut best = &raw[0];
     for v in &raw[1..] {
-        if v > best {
+        if crate::cmp::isNaN(best) {
+            return best.clone();
+        }
+        if crate::cmp::isNaN(v) || v > best {
             best = v;
         }
     }
@@ -58,9 +77,12 @@ pub fn Max<T: Ord + Clone>(s: &slice<T>) -> T {
 /// `BinarySearch(s, &target)` — assumes `s` is sorted ascending. Returns
 /// `(index, found)`. When not found, `index` is the insertion point
 /// (Go-faithful).
-pub fn BinarySearch<T: Ord>(s: &slice<T>, target: &T) -> (int, bool) {
+pub fn BinarySearch<T: PartialOrd>(s: &slice<T>, target: &T) -> (int, bool) {
     let raw: &[T] = s;
-    return match raw.binary_search(target) {
+    // Go: `BinarySearchFunc(x, target, cmp.Compare)` — so a NaN is
+    // findable at the front of a `slices.Sort`ed float slice, which
+    // Rust's `binary_search` (needing `T: Ord`) could not express.
+    return match raw.binary_search_by(|p| crate::slices::__go_ordering(p, target)) {
         Ok(i) => (toint(i), true),
         Err(i) => (toint(i), false),
     };

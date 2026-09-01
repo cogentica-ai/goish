@@ -140,9 +140,10 @@ pub const TIME_SET_DER: &str = "170d3130303130323033303430355a";
 pub const BIG_SEVEN_DER: &str = "020107";
 
 // asn1's own parseUTCTime / parseGeneralizedTime. "910506234540+0000"
-// and a zone-less GeneralizedTime are the two Go *rejects*.
-// Go's values for the two numeric-offset inputs goish rejects; kept so
-// the divergence is recorded next to the behaviour that replaces it.
+// and a zone-less GeneralizedTime are the two Go *rejects*: the first
+// parses but does not serialize back ("+0000" round-trips as "Z"), the
+// second has no zone at all. The two numeric-offset values are the ones
+// goish used to reject and now returns.
 pub const UTC_910506234540M0700: int = 673598740;
 pub const UTC_9105062345Z: int = 673573500;
 pub const UTC_500506234540Z: int = -620266460;
@@ -151,6 +152,9 @@ pub const GEN_Z_SEC: int = 1262401445;
 pub const GEN_OFFSET_SEC: int = 1262379425;
 pub const GEN_FRAC_SEC: int = 1262401445;
 pub const GEN_FRAC_NSEC: int = 123456789;
+pub const UTC_9105062345M0700: int = 673598700;
+pub const GEN_NEG_OFFSET_SEC: int = 1262423465;
+pub const GEN_MILLI_NSEC: int = 123000000;
 
 // ─── end goref.sh output ──────────────────────────────────────────────
 
@@ -390,17 +394,18 @@ fn testOptionalZeroOmission() {
 }
 
 fn testTimeParsers() {
-    // KNOWN DIVERGENCE, pinned rather than hidden: Go parses a numeric
-    // zone offset and returns Unix UTC_910506234540M0700 (673598740);
-    // goish rejects it. `time::Time` has no Location — `Zone()` is
-    // hard-wired to ("UTC", 0) — so an offset cannot be retained, and
-    // asn1's own re-Format-and-compare check could never pass. RFC 5280
-    //4.1.2.5.1 requires `Z` in certificates, so no conforming
-    // certificate reaches this path. See parse_asn1_utc in src/time.
-    let (_, err) = asn1::ParseUTCTime(bytes("910506234540-0700"));
+    // This pair was a pinned DIVERGENCE until the zone work landed:
+    // goish REJECTED a numeric offset that Go accepts. The body here was
+    // always verbatim — the cause was under it, in `time`. A `Time` that
+    // carried no Location could not retain the offset, so asn1's own
+    // re-Format-and-compare guard re-rendered "910506234540-0700" as
+    // "910506234540Z", saw the mismatch and returned an error. Giving
+    // `Location` a name and an offset closed it. See time_zone_ref_smoke.
+    let (t, err) = asn1::ParseUTCTime(bytes("910506234540-0700"));
+    check(err == goish::nil, "parseUTCTime: numeric offset no error");
     check(
-        err != goish::nil,
-        "parseUTCTime: numeric offset rejected (KNOWN DIVERGENCE from Go)",
+        t.Unix() == UTC_910506234540M0700,
+        "parseUTCTime: numeric offset is retained",
     );
 
     let (t, err) = asn1::ParseUTCTime(bytes("9105062345Z"));
@@ -430,12 +435,17 @@ fn testTimeParsers() {
     check(err == goish::nil, "parseGeneralizedTime: Z no error");
     check(t.UTC().Unix() == GEN_Z_SEC, "parseGeneralizedTime: Z");
 
-    // KNOWN DIVERGENCE, same cause and same shape as the UTCTime one
-    // above: Go returns Unix GEN_OFFSET_SEC (1262379425) here.
-    let (_, err) = asn1::ParseGeneralizedTime(bytes("20100102030405+0607"));
+    // The same divergence, the same cause, closed the same way. Note
+    // the offset has a minute part: 6h07m, which a port that keeps only
+    // whole hours would round away.
+    let (t, err) = asn1::ParseGeneralizedTime(bytes("20100102030405+0607"));
     check(
-        err != goish::nil,
-        "parseGeneralizedTime: numeric offset rejected (KNOWN DIVERGENCE from Go)",
+        err == goish::nil,
+        "parseGeneralizedTime: numeric offset no error",
+    );
+    check(
+        t.Unix() == GEN_OFFSET_SEC,
+        "parseGeneralizedTime: numeric offset is retained",
     );
 
     let (t, err) = asn1::ParseGeneralizedTime(bytes("20100102030405.123456789Z"));
@@ -454,6 +464,63 @@ fn testTimeParsers() {
     check(
         err != goish::nil,
         "parseGeneralizedTime: no-zone rejected like Go",
+    );
+
+    // The rest of the offset matrix, newly reachable. The minute-
+    // precision UTCTime form carries an offset too, and a GeneralizedTime
+    // offset can be negative and can carry a fraction alongside it.
+    let (t, err) = asn1::ParseUTCTime(bytes("9105062345-0700"));
+    check(
+        err == goish::nil,
+        "parseUTCTime: short form + offset no error",
+    );
+    check(
+        t.Unix() == UTC_9105062345M0700,
+        "parseUTCTime: short form + offset",
+    );
+    let (_, zo) = t.Zone();
+    check(zo == -25200, "parseUTCTime: short form offset is -7h");
+
+    let (t, err) = asn1::ParseGeneralizedTime(bytes("20100102030405-0607"));
+    check(
+        err == goish::nil,
+        "parseGeneralizedTime: negative offset no error",
+    );
+    check(
+        t.Unix() == GEN_NEG_OFFSET_SEC,
+        "parseGeneralizedTime: negative offset",
+    );
+    let (_, zo) = t.Zone();
+    check(
+        zo == -22020,
+        "parseGeneralizedTime: negative offset is -6h07m",
+    );
+
+    let (t, err) = asn1::ParseGeneralizedTime(bytes("20100102030405.123+0607"));
+    check(
+        err == goish::nil,
+        "parseGeneralizedTime: fraction + offset no error",
+    );
+    check(
+        t.Unix() == GEN_OFFSET_SEC,
+        "parseGeneralizedTime: fraction + offset sec",
+    );
+    check(
+        t.Nanosecond() == GEN_MILLI_NSEC,
+        "parseGeneralizedTime: fraction + offset nsec",
+    );
+
+    // An offset must be four digits: "-07" is not a zone, and the layout
+    // requires one, so both of these are parse errors rather than
+    // silently-UTC times.
+    let (_, err) = asn1::ParseUTCTime(bytes("910506234540"));
+    check(err != goish::nil, "parseUTCTime: no-zone rejected like Go");
+    let (_, err) = asn1::ParseUTCTime(bytes("910506234540-07"));
+    check(err != goish::nil, "parseUTCTime: two-digit offset rejected");
+    let (_, err) = asn1::ParseGeneralizedTime(bytes("20100102030405+06"));
+    check(
+        err != goish::nil,
+        "parseGeneralizedTime: two-digit offset rejected",
     );
 }
 

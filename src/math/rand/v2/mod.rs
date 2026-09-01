@@ -18,6 +18,9 @@
 //     permutation directly: `for i in (1..n).rev() { let j = r.IntN(i+1); … }`.
 //   * `is32bit` constant elided — goish-v1 is 64-bit only.
 
+// goishlint:ignore GOISH015 — as in the v1 package above: `Rand`'s methods come from rand.go and
+//     the generator from pcg.go, and one `impl Rand` block cannot live in two modules without
+//     widening its private state. Every function carries its own anchor.
 #![allow(non_snake_case)]
 
 extern crate alloc;
@@ -48,6 +51,7 @@ pub struct PCG {
     lo: u64,
 }
 
+// go: sdk 1.25.5 math/rand/v2/pcg.go:24-26 NewPCG
 /// `rand.NewPCG(seed1, seed2)` — pcg.go:24.
 pub fn NewPCG(seed1: u64, seed2: u64) -> PCG {
     PCG {
@@ -57,12 +61,14 @@ pub fn NewPCG(seed1: u64, seed2: u64) -> PCG {
 }
 
 impl PCG {
+    // go: sdk 1.25.5 math/rand/v2/pcg.go:29-32 PCG.Seed
     /// `Seed` — pcg.go:29.
     pub fn Seed(&mut self, seed1: u64, seed2: u64) {
         self.hi = seed1;
         self.lo = seed2;
     }
 
+    // go: sdk 1.25.5 math/rand/v2/pcg.go:35-40 PCG.AppendBinary
     /// `AppendBinary` — pcg.go:35.
     pub fn AppendBinary(&self, mut b: slice<byte>) -> (slice<byte>, error) {
         // Go: b = append(b, "pcg:"...)
@@ -75,12 +81,14 @@ impl PCG {
         (b, errors::nil)
     }
 
+    // go: sdk 1.25.5 math/rand/v2/pcg.go:43-45 PCG.MarshalBinary
     /// `MarshalBinary` — pcg.go:43.
     pub fn MarshalBinary(&self) -> (slice<byte>, error) {
         let buf: slice<byte> = slice::__from_vec(Vec::with_capacity(20));
         self.AppendBinary(buf)
     }
 
+    // go: sdk 1.25.5 math/rand/v2/pcg.go:50-57 PCG.UnmarshalBinary
     /// `UnmarshalBinary` — pcg.go:50.
     pub fn UnmarshalBinary(&mut self, data: &slice<byte>) -> error {
         let raw: &[byte] = data;
@@ -96,6 +104,7 @@ impl PCG {
         errors::nil
     }
 
+    // go: sdk 1.25.5 math/rand/v2/pcg.go:59-83 PCG.next
     /// `next` — pcg.go:59. Returns (hi, lo) of the new state.
     fn next(&mut self) -> (u64, u64) {
         // Go: const (mulHi = …; mulLo = …; incHi = …; incLo = …)
@@ -123,6 +132,7 @@ impl PCG {
 }
 
 impl Source for PCG {
+    // go: sdk 1.25.5 math/rand/v2/pcg.go:86-106 PCG.Uint64
     /// `Uint64` — pcg.go:86. DXSM output.
     fn Uint64(&mut self) -> u64 {
         let (mut hi, lo) = self.next();
@@ -140,6 +150,8 @@ impl Source for PCG {
 
 struct ErrUnmarshalPCGImpl;
 impl errors::ErrorTrait for ErrUnmarshalPCGImpl {
+    // go: none — goish idiom: the `ErrorTrait` method behind the
+    //     package's unmarshal errors, which Go builds with errors.New.
     fn Error(&self) -> string {
         string::from_static("invalid PCG encoding")
     }
@@ -152,44 +164,52 @@ pub struct Rand<S: Source> {
     src: S,
 }
 
+// go: sdk 1.25.5 math/rand/v2/rand.go:40-42 New
 /// `rand.New(src)` — rand.go:40.
 pub fn New<S: Source>(src: S) -> Rand<S> {
     Rand { src }
 }
 
 impl<S: Source> Rand<S> {
+    // go: sdk 1.25.5 math/rand/v2/rand.go:45-45 Rand.Int64
     /// `Int64` — rand.go:45 — non-negative 63-bit integer.
     pub fn Int64(&mut self) -> i64 {
         // Go: int64(r.src.Uint64() &^ (1 << 63))
         (self.src.Uint64() & !(1u64 << 63)) as i64
     }
 
+    // go: sdk 1.25.5 math/rand/v2/rand.go:48-48 Rand.Uint32
     /// `Uint32` — rand.go:48.
     pub fn Uint32(&mut self) -> u32 {
         (self.src.Uint64() >> 32) as u32
     }
 
+    // go: sdk 1.25.5 math/rand/v2/rand.go:51-51 Rand.Uint64
     /// `Uint64` — rand.go:51.
     pub fn Uint64(&mut self) -> u64 {
         self.src.Uint64()
     }
 
+    // go: sdk 1.25.5 math/rand/v2/rand.go:54-54 Rand.Int32
     /// `Int32` — rand.go:54.
     pub fn Int32(&mut self) -> i32 {
         (self.src.Uint64() >> 33) as i32
     }
 
+    // go: sdk 1.25.5 math/rand/v2/rand.go:57-57 Rand.Int
     /// `Int` — rand.go:57.
     pub fn Int(&mut self) -> int {
         // Go: int(uint(r.src.Uint64()) << 1 >> 1)
         ((self.src.Uint64() << 1) >> 1) as int
     }
 
+    // go: sdk 1.25.5 math/rand/v2/rand.go:60-60 Rand.Uint
     /// `Uint` — rand.go:60.
     pub fn Uint(&mut self) -> u64 {
         self.src.Uint64()
     }
 
+    // go: sdk 1.25.5 math/rand/v2/rand.go:64-69 Rand.Int64N
     /// `Int64N(n)` — rand.go:64.
     pub fn Int64N(&mut self, n: i64) -> i64 {
         if n <= 0 {
@@ -198,6 +218,7 @@ impl<S: Source> Rand<S> {
         self.uint64n(n as u64) as i64
     }
 
+    // go: sdk 1.25.5 math/rand/v2/rand.go:73-78 Rand.Uint64N
     /// `Uint64N(n)` — rand.go:73.
     pub fn Uint64N(&mut self, n: u64) -> u64 {
         if n == 0 {
@@ -206,6 +227,7 @@ impl<S: Source> Rand<S> {
         self.uint64n(n)
     }
 
+    // go: sdk 1.25.5 math/rand/v2/rand.go:81-127 Rand.uint64n
     /// `uint64n` — rand.go:81. (No 32-bit fallback — goish is 64-bit-only.)
     fn uint64n(&mut self, n: u64) -> u64 {
         // Go: if n&(n-1) == 0 { return r.Uint64() & (n - 1) }
@@ -227,6 +249,7 @@ impl<S: Source> Rand<S> {
         hi
     }
 
+    // go: sdk 1.25.5 math/rand/v2/rand.go:171-176 Rand.Int32N
     /// `Int32N(n)` — rand.go:171.
     pub fn Int32N(&mut self, n: i32) -> i32 {
         if n <= 0 {
@@ -235,6 +258,7 @@ impl<S: Source> Rand<S> {
         self.uint64n(n as u64) as i32
     }
 
+    // go: sdk 1.25.5 math/rand/v2/rand.go:180-185 Rand.Uint32N
     /// `Uint32N(n)` — rand.go:180.
     pub fn Uint32N(&mut self, n: u32) -> u32 {
         if n == 0 {
@@ -243,6 +267,7 @@ impl<S: Source> Rand<S> {
         self.uint64n(n as u64) as u32
     }
 
+    // go: sdk 1.25.5 math/rand/v2/rand.go:191-196 Rand.IntN
     /// `IntN(n)` — rand.go:191.
     pub fn IntN(&mut self, n: int) -> int {
         if n <= 0 {
@@ -251,6 +276,7 @@ impl<S: Source> Rand<S> {
         self.uint64n(n as u64) as int
     }
 
+    // go: sdk 1.25.5 math/rand/v2/rand.go:200-205 Rand.UintN
     /// `UintN(n)` — rand.go:200.
     pub fn UintN(&mut self, n: u64) -> u64 {
         if n == 0 {
@@ -259,17 +285,20 @@ impl<S: Source> Rand<S> {
         self.uint64n(n)
     }
 
+    // go: sdk 1.25.5 math/rand/v2/rand.go:208-211 Rand.Float64
     /// `Float64` — rand.go:208 — half-open [0.0, 1.0).
     pub fn Float64(&mut self) -> f64 {
         // Go: float64(r.Uint64()<<11>>11) / (1 << 53)
         ((self.Uint64() << 11) >> 11) as f64 / (1u64 << 53) as f64
     }
 
+    // go: sdk 1.25.5 math/rand/v2/rand.go:214-217 Rand.Float32
     /// `Float32` — rand.go:214 — half-open [0.0, 1.0).
     pub fn Float32(&mut self) -> f32 {
         ((self.Uint32() << 8) >> 8) as f32 / (1u32 << 24) as f32
     }
 
+    // go: sdk 1.25.5 math/rand/v2/rand.go:233-248 Rand.Shuffle
     /// `Shuffle(n, swap)` — rand.go:233. Fisher-Yates.
     pub fn Shuffle<F: FnMut(int, int)>(&mut self, n: int, mut swap: F) {
         if n < 0 {
@@ -297,6 +326,9 @@ static GLOBAL_INIT: AtomicBool = AtomicBool::new(false);
 static GLOBAL_HI: AtomicU64 = AtomicU64::new(0);
 static GLOBAL_LO: AtomicU64 = AtomicU64::new(0);
 
+// go: none — goish idiom: Go reaches its global source through
+//     `runtime_rand`, a runtime hook goish does not have; this is the
+//     lazily-seeded package generator behind the package-level fns.
 fn global_next_u64() -> u64 {
     if !GLOBAL_INIT.swap(true, Ordering::AcqRel) {
         let seed = crate::time::Now().UnixNano() as u64;
@@ -312,33 +344,39 @@ fn global_next_u64() -> u64 {
     val
 }
 
+// go: sdk 1.25.5 math/rand/v2/rand.go:337-337 Float64
 /// `rand.Float64()` — [0.0, 1.0) from the global source.
 pub fn Float64() -> f64 {
     let v = global_next_u64();
     ((v << 11) >> 11) as f64 / (1u64 << 53) as f64
 }
 
+// go: sdk 1.25.5 math/rand/v2/rand.go:341-341 Float32
 /// `rand.Float32()` — [0.0, 1.0) from the global source.
 pub fn Float32() -> f32 {
     let v = (global_next_u64() >> 32) as u32;
     ((v << 8) >> 8) as f32 / (1u32 << 24) as f32
 }
 
+// go: sdk 1.25.5 math/rand/v2/rand.go:270-270 Int64
 /// `rand.Int64()` — non-negative 63-bit integer from the global source.
 pub fn Int64() -> i64 {
     (global_next_u64() & !(1u64 << 63)) as i64
 }
 
+// go: sdk 1.25.5 math/rand/v2/rand.go:288-288 Uint64
 /// `rand.Uint64()` — random uint64 from the global source.
 pub fn Uint64() -> u64 {
     global_next_u64()
 }
 
+// go: sdk 1.25.5 math/rand/v2/rand.go:295-295 Int
 /// `rand.Int()` — non-negative int from the global source.
 pub fn Int() -> int {
     ((global_next_u64() << 1) >> 1) as int
 }
 
+// go: sdk 1.25.5 math/rand/v2/rand.go:303-303 Int64N
 /// `rand.Int64N(n)` — random int64 in [0, n) from the global source.
 pub fn Int64N(n: i64) -> i64 {
     if n <= 0 {
@@ -353,6 +391,7 @@ pub fn Int64N(n: i64) -> i64 {
     r.Int64N(n)
 }
 
+// go: sdk 1.25.5 math/rand/v2/rand.go:313-313 IntN
 /// `rand.IntN(n)` — random int in [0, n) from the global source.
 pub fn IntN(n: int) -> int {
     if n <= 0 {
@@ -367,6 +406,7 @@ pub fn IntN(n: int) -> int {
     r.IntN(n)
 }
 
+// go: sdk 1.25.5 math/rand/v2/rand.go:279-279 Uint64N
 /// `rand.Uint64N(n)` — random uint64 in [0, n) from the global source.
 pub fn Uint64N(n: u64) -> u64 {
     if n == 0 {
@@ -381,6 +421,7 @@ pub fn Uint64N(n: u64) -> u64 {
     r.Uint64N(n)
 }
 
+// go: sdk 1.25.5 math/rand/v2/rand.go:350-350 Shuffle
 /// `rand.Shuffle(n, swap)` — Fisher-Yates using global source.
 pub fn Shuffle<F: FnMut(int, int)>(n: int, mut swap: F) {
     let mut r = Rand {

@@ -42,6 +42,7 @@ pub struct Error {
 }
 
 impl ErrorTrait for Error {
+    // go: sdk 1.25.5 net/textproto/textproto.go:43-45 Error.Error
     fn Error(&self) -> string {
         // Go: fmt.Sprintf("%03d %s", e.Code, e.Msg)
         let mut out = alloc::string::String::new();
@@ -88,6 +89,7 @@ fn push_dec(out: &mut alloc::string::String, mut n: int) {
 pub struct ProtocolError(pub string);
 
 impl ErrorTrait for ProtocolError {
+    // go: sdk 1.25.5 net/textproto/textproto.go:51-53 ProtocolError.Error
     fn Error(&self) -> string {
         self.0.clone()
     }
@@ -95,6 +97,7 @@ impl ErrorTrait for ProtocolError {
 
 // ─── TrimString / TrimBytes (textproto.go:127, :138) ────────────────
 
+// go: sdk 1.25.5 net/textproto/textproto.go:127-135 TrimString
 /// `textproto.TrimString(s)` (textproto.go:127) — strip leading/trailing
 /// ASCII space (' ', '\t', '\n', '\r').
 pub fn TrimString<S: Into<string>>(s: S) -> string {
@@ -111,6 +114,7 @@ pub fn TrimString<S: Into<string>>(s: S) -> string {
     string::from_bytes(&b[lo..hi])
 }
 
+// go: sdk 1.25.5 net/textproto/textproto.go:138-146 TrimBytes
 /// `textproto.TrimBytes(b)` (textproto.go:138) — slice variant of TrimString.
 pub fn TrimBytes(b: slice<byte>) -> slice<byte> {
     let raw: &[byte] = &b;
@@ -125,6 +129,7 @@ pub fn TrimBytes(b: slice<byte>) -> slice<byte> {
     slice::__from_vec(raw[lo..hi].to_vec())
 }
 
+// go: sdk 1.25.5 net/textproto/textproto.go:148-150 isASCIISpace
 // Go: textproto.go:148
 fn isASCIISpace(b: byte) -> bool {
     b == b' ' || b == b'\t' || b == b'\n' || b == b'\r'
@@ -138,6 +143,7 @@ fn isASCIISpace(b: byte) -> bool {
 /// To use non-canonical keys, access the underlying map directly.
 pub type MIMEHeader = map<string, slice<string>>;
 
+// go: sdk 1.25.5 net/textproto/reader.go:652-671 CanonicalMIMEHeaderKey
 /// `textproto.CanonicalMIMEHeaderKey(s)` (reader.go:651). Re-exported
 /// from the http header implementation since both produce the same
 /// RFC 9112 canonical form (`content-type` → `Content-Type`).
@@ -146,6 +152,7 @@ pub fn CanonicalMIMEHeaderKey<S: Into<string>>(s: S) -> string {
     crate::net::http::CanonicalHeaderKey(s)
 }
 
+// go: sdk 1.25.5 net/textproto/header.go:13-16 MIMEHeader.Add
 /// `(MIMEHeader).Add(key, value)` (header.go:13).
 pub fn Add<K: Into<string>, V: Into<string>>(h: &mut MIMEHeader, key: K, value: V) {
     let key: string = key.into();
@@ -161,6 +168,7 @@ pub fn Add<K: Into<string>, V: Into<string>>(h: &mut MIMEHeader, key: K, value: 
     h[k] = slice::__from_vec(v);
 }
 
+// go: sdk 1.25.5 net/textproto/header.go:21-23 MIMEHeader.Set
 /// `(MIMEHeader).Set(key, value)` (header.go:21).
 pub fn Set<K: Into<string>, V: Into<string>>(h: &mut MIMEHeader, key: K, value: V) {
     let key: string = key.into();
@@ -169,6 +177,7 @@ pub fn Set<K: Into<string>, V: Into<string>>(h: &mut MIMEHeader, key: K, value: 
     h[k] = slice::__from_vec(alloc::vec![value]);
 }
 
+// go: sdk 1.25.5 net/textproto/header.go:30-39 MIMEHeader.Get
 /// `(MIMEHeader).Get(key)` (header.go:30).
 pub fn Get<K: Into<string>>(h: &MIMEHeader, key: K) -> string {
     let key: string = key.into();
@@ -183,6 +192,7 @@ pub fn Get<K: Into<string>>(h: &MIMEHeader, key: K) -> string {
     v[0].clone()
 }
 
+// go: sdk 1.25.5 net/textproto/header.go:46-51 MIMEHeader.Values
 /// `(MIMEHeader).Values(key)` (header.go:46).
 pub fn Values<K: Into<string>>(h: &MIMEHeader, key: K) -> slice<string> {
     let key: string = key.into();
@@ -193,6 +203,7 @@ pub fn Values<K: Into<string>>(h: &MIMEHeader, key: K) -> slice<string> {
     h[k].clone()
 }
 
+// go: sdk 1.25.5 net/textproto/header.go:54-56 MIMEHeader.Del
 /// `(MIMEHeader).Del(key)` (header.go:54).
 pub fn Del<K: Into<string>>(h: &mut MIMEHeader, key: K) {
     let key: string = key.into();
@@ -212,6 +223,7 @@ pub struct Writer<W: io::Writer> {
     in_dot: bool,
 }
 
+// go: sdk 1.25.5 net/textproto/writer.go:21-23 NewWriter
 /// `textproto.NewWriter(w)` (writer.go:21).
 pub fn NewWriter<W: io::Writer>(w: bufio::Writer<W>) -> Writer<W> {
     Writer {
@@ -224,6 +236,7 @@ const CRNL: &[byte] = &[b'\r', b'\n'];
 const DOTCRNL: &[byte] = &[b'.', b'\r', b'\n'];
 
 impl<W: io::Writer> Writer<W> {
+    // go: sdk 1.25.5 net/textproto/writer.go:29-34 Writer.PrintfLine
     /// `(*Writer).PrintfLine(format, args...)` (writer.go:29).
     ///
     /// Slim form: takes a pre-formatted string (callers run
@@ -245,6 +258,7 @@ impl<W: io::Writer> Writer<W> {
         self.W.Flush()
     }
 
+    // go: sdk 1.25.5 net/textproto/writer.go:43-47 Writer.DotWriter
     /// `(*Writer).DotWriter()` (writer.go:43) — returns a writer that
     /// applies dot-encoding (escapes leading dots, normalizes \n → \r\n,
     /// emits final ".\r\n" on Close).
@@ -260,6 +274,7 @@ impl<W: io::Writer> Writer<W> {
         }
     }
 
+    // go: sdk 1.25.5 net/textproto/writer.go:49-53 Writer.closeDot
     fn closeDot(&mut self) {
         // No-op when in_dot was already cleared by an explicit Close.
         // (Go's pattern relies on dotWriter setting w.dot = nil; here
@@ -282,6 +297,7 @@ pub struct DotWriter<'a, W: io::Writer> {
 }
 
 impl<'a, W: io::Writer> DotWriter<'a, W> {
+    // go: sdk 1.25.5 net/textproto/writer.go:67-101 Write
     /// `(*dotWriter).Write(b)` (writer.go:67).
     pub fn Write(&mut self, b: slice<byte>) -> (int, error) {
         let raw: &[byte] = &b;

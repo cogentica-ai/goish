@@ -48,6 +48,7 @@ impl Pipeline {
         }
     }
 
+    // go: sdk 1.25.5 net/textproto/pipeline.go:36-42 Pipeline.Next
     // Go: pipeline.go:36-42
     //   func (p *Pipeline) Next() uint {
     //       p.mu.Lock()
@@ -65,24 +66,28 @@ impl Pipeline {
         id
     }
 
+    // go: sdk 1.25.5 net/textproto/pipeline.go:46-48 Pipeline.StartRequest
     // Go: pipeline.go:45-47
     //   func (p *Pipeline) StartRequest(id uint) { p.request.Start(id) }
     pub fn StartRequest(&self, id: u64) {
         self.request.Start(id);
     }
 
+    // go: sdk 1.25.5 net/textproto/pipeline.go:52-54 Pipeline.EndRequest
     // Go: pipeline.go:50-52
     //   func (p *Pipeline) EndRequest(id uint) { p.request.End(id) }
     pub fn EndRequest(&self, id: u64) {
         self.request.End(id);
     }
 
+    // go: sdk 1.25.5 net/textproto/pipeline.go:58-60 Pipeline.StartResponse
     // Go: pipeline.go:55-57
     //   func (p *Pipeline) StartResponse(id uint) { p.response.Start(id) }
     pub fn StartResponse(&self, id: u64) {
         self.response.Start(id);
     }
 
+    // go: sdk 1.25.5 net/textproto/pipeline.go:64-66 Pipeline.EndResponse
     // Go: pipeline.go:60-62
     //   func (p *Pipeline) EndResponse(id uint) { p.response.End(id) }
     pub fn EndResponse(&self, id: u64) {
@@ -128,6 +133,7 @@ impl sequencer {
         }
     }
 
+    // go: sdk 1.25.5 net/textproto/pipeline.go:81-94 sequencer.Start
     // Go: pipeline.go:81-94
     //   func (s *sequencer) Start(id uint) {
     //       s.mu.Lock()
@@ -161,6 +167,7 @@ impl sequencer {
         let (_, _) = c.Recv();
     }
 
+    // go: sdk 1.25.5 net/textproto/pipeline.go:99-118 sequencer.End
     // Go: pipeline.go:99-118
     //   func (s *sequencer) End(id uint) {
     //       s.mu.Lock()

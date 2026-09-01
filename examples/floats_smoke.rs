@@ -161,11 +161,17 @@ fn main() {
     let s = fmt::Sprintf!("%g", 0.001_f64);
     check(s == "0.001", b"floats: Sprintf %g wrong\n");
 
+    // `%f` and `%e` default to a precision of SIX, not to the shortest
+    // round-trip — see the fmt documentation, and
+    // fmt_float_prec_ref_smoke for the vectors. These two assertions
+    // were written against goish's old behaviour, which passed -1 for
+    // every verb; they asserted the bug. Go 1.25.5 prints "3.140000"
+    // and "1.234500e+03".
     let s = fmt::Sprintf!("%f", 3.14_f64);
-    check(s == "3.14", b"floats: Sprintf %f wrong\n");
+    check(s == "3.140000", b"floats: Sprintf %f wrong\n");
 
     let s = fmt::Sprintf!("%e", 1234.5_f64);
-    check(s == "1.2345e+03", b"floats: Sprintf %e wrong\n");
+    check(s == "1.234500e+03", b"floats: Sprintf %e wrong\n");
 
     const OK: &[u8] = b"floats: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

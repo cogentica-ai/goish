@@ -60,7 +60,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::convert::int32 as toint32;
+use crate::convert::{int as toint, int32 as toint32, int64 as toint64};
 use crate::errors::{self, error};
 use crate::goslice::slice;
 use crate::gostring::string;
@@ -206,6 +206,14 @@ struct Parser<'a> {
     pos: usize,
     /// Next 1-based capture index to assign.
     next_cap: usize,
+    /// Go's `re.subexpNames`, built as the groups are parsed: index 0
+    /// is the whole match and is always "", then one entry per
+    /// capturing group, "" for an unnamed one.
+    ///
+    /// goish parsed `(?P<name>…)` and threw the name away, so
+    /// `SubexpNames`, `SubexpIndex` and `$name` in a replacement
+    /// template had nothing to look at.
+    names: Vec<string>,
     /// `i` flag state. Go's `(?i)` sets it for the remainder of the
     /// ENCLOSING GROUP (parse.go `parsePerlFlags`), so it is parser
     /// state saved and restored around every group body, not a
@@ -223,6 +231,7 @@ impl<'a> Parser<'a> {
             src,
             pos: 0,
             next_cap: 1,
+            names: alloc::vec![string::from_static("")],
             fold: false,
             dot_nl: false,
             multi: false,
@@ -328,6 +337,21 @@ impl<'a> Parser<'a> {
                 self.bump();
                 match self.parse_brace_count() {
                     Ok((min, max)) => {
+                        // Go: "if min < 0 || min > 1000 || max == -2 ||
+                        // max > 1000 || max >= 0 && min > max { …
+                        // ErrInvalidRepeatSize }". A WELL-FORMED brace
+                        // with impossible counts is a hard error, not a
+                        // literal `{` — the fall-back above is only for
+                        // a brace that does not parse as a repetition at
+                        // all, like `a{,3}`.
+                        //
+                        // goish had no check, so `a{2,1}` compiled to a
+                        // repetition that can never be satisfied and
+                        // matched nothing, and `a{99999}` built a
+                        // 99999-deep matcher.
+                        if min > 1000 || (max != usize::MAX && (max > 1000 || min > max)) {
+                            return Err("invalid repeat count");
+                        }
                         let greedy = self.take_greedy();
                         Ok(Node::Repeat {
                             node: Box::new(atom),
@@ -431,6 +455,7 @@ impl<'a> Parser<'a> {
                 }
                 let idx = self.next_cap;
                 self.next_cap += 1;
+                self.names.push(string::from_static(""));
                 let saved = self.flags();
                 let inner = self.parse_alt()?;
                 if self.peek() != Some(b')') {
@@ -531,6 +556,7 @@ impl<'a> Parser<'a> {
                 self.bump();
             }
             self.bump(); // '<'
+            let name_start = self.pos;
             while let Some(c) = self.peek() {
                 if c == b'>' {
                     break;
@@ -543,9 +569,25 @@ impl<'a> Parser<'a> {
             if self.peek() != Some(b'>') {
                 return Err("invalid named capture");
             }
+            // Go: "if name == \"\" { return … ErrInvalidNamedCapture }".
+            // goish accepted `(?P<>a)` and gave the group no name.
+            if self.pos == name_start {
+                return Err("invalid named capture");
+            }
+            let name = string::from_bytes(&self.src[name_start..self.pos]);
+            // Go: "Like ordinary capture, but named."  Duplicate names
+            // are rejected there too.
+            let mut k = 1usize;
+            while k < self.names.len() {
+                if self.names[k] == name {
+                    return Err("duplicate capture group name");
+                }
+                k += 1;
+            }
             self.bump();
             let idx = self.next_cap;
             self.next_cap += 1;
+            self.names.push(name);
             let saved = self.flags();
             let inner = self.parse_alt()?;
             if self.peek() != Some(b')') {
@@ -1165,6 +1207,8 @@ fn space_ranges() -> Vec<(rune, rune)> {
 pub struct Regexp {
     root: Arc<Node>,
     n_caps: usize,
+    /// Go's `subexpNames`; see the field of the same name on `Parser`.
+    names: Vec<string>,
     /// Original source pattern. Returned by `String()` (Go's
     /// `regexp.Regexp.String() string`, regexp.go:142).
     pattern: string,
@@ -1194,6 +1238,7 @@ pub fn Compile<S: Into<string>>(expr: S) -> (Regexp, error) {
             Regexp {
                 root: Arc::new(Node::Concat(Vec::new())),
                 n_caps: 0,
+                names: alloc::vec![string::from_static("")],
                 pattern: expr_s.clone(),
             },
             compile_err(&expr_s, "invalid UTF-8"),
@@ -1207,6 +1252,7 @@ pub fn Compile<S: Into<string>>(expr: S) -> (Regexp, error) {
                     Regexp {
                         root: Arc::new(Node::Concat(Vec::new())),
                         n_caps: 0,
+                        names: alloc::vec![string::from_static("")],
                         pattern: expr_s.clone(),
                     },
                     compile_err(&expr_s, "trailing junk in pattern"),
@@ -1216,6 +1262,7 @@ pub fn Compile<S: Into<string>>(expr: S) -> (Regexp, error) {
                 Regexp {
                     root: Arc::new(node),
                     n_caps: p.next_cap - 1,
+                    names: p.names,
                     pattern: expr_s,
                 },
                 crate::nilval::nil.into(),
@@ -1225,6 +1272,7 @@ pub fn Compile<S: Into<string>>(expr: S) -> (Regexp, error) {
             Regexp {
                 root: Arc::new(Node::Concat(Vec::new())),
                 n_caps: 0,
+                names: alloc::vec![string::from_static("")],
                 pattern: expr_s.clone(),
             },
             compile_err(&expr_s, why),
@@ -1777,39 +1825,197 @@ impl Regexp {
     /// Go: `func (re *Regexp) ReplaceAllString(src, repl string) string`
     /// (regexp.go:822). Replacement is treated as literal text — `$1`
     /// group expansion isn't supported in the v1 subset (extend when a
-    /// port surfaces the need).
+    // go: sdk 1.25.5 regexp/regexp.go:337-339 Regexp.NumSubexp
+    /// Go: "NumSubexp returns the number of parenthesized subexpressions
+    /// in this Regexp."
+    pub fn NumSubexp(&self) -> int {
+        return toint(self.names.len() - 1);
+    }
+
+    // go: sdk 1.25.5 regexp/regexp.go:346-348 Regexp.SubexpNames
+    /// Go: "SubexpNames returns the names of the parenthesized
+    /// subexpressions in this Regexp. The name for the first sub-
+    /// expression is names[1] … the slice should not be modified."
+    pub fn SubexpNames(&self) -> slice<string> {
+        return slice::__from_vec(self.names.clone());
+    }
+
+    // go: sdk 1.25.5 regexp/regexp.go:357-366 Regexp.SubexpIndex
+    /// Go: "SubexpIndex returns the index of the first subexpression
+    /// with the given name, or -1 if there is no subexpression with
+    /// that name. Note that multiple subexpressions can be written
+    /// using the same name … so this will return the index of the
+    /// first one."
+    pub fn SubexpIndex<S: Into<string>>(&self, name: S) -> int {
+        let name = name.into();
+        if name.Len() == 0 {
+            return -1;
+        }
+        let mut i = 0usize;
+        while i < self.names.len() {
+            if self.names[i] == name {
+                return toint(i);
+            }
+            i += 1;
+        }
+        return -1;
+    }
+
+    // go: sdk 1.25.5 regexp/regexp.go:1058-1060 Regexp.FindStringSubmatchIndex
+    /// Go: "a slice holding the index pairs identifying the leftmost
+    /// match … and the matches, if any, of its subexpressions".
+    pub fn FindStringSubmatchIndex<S: Into<string>>(&self, s: S) -> slice<int> {
+        let s = s.into();
+        return match self.find_first(s.as_bytes()) {
+            None => slice::new(),
+            Some((_, _, caps)) => {
+                let mut out: Vec<int> = Vec::with_capacity(caps.len() * 2);
+                for &(lo, hi) in &caps {
+                    out.push(toint(lo));
+                    out.push(toint(hi));
+                }
+                slice::__from_vec(out)
+            }
+        };
+    }
+
+    // go: sdk 1.25.5 regexp/regexp.go:926-970 Regexp.expand
+    /// Go: "In the template, a variable is denoted by a substring of the
+    /// form $name or ${name}, where name is a non-empty sequence of
+    /// letters, digits, and underscores … A reference to an out of range
+    /// or unmatched index or a name that is not present in the regular
+    /// expression is replaced with an empty slice."
+    ///
+    /// goish's `ReplaceAllString` did NO expansion: it copied the
+    /// template through byte for byte, which is exactly Go's
+    /// `ReplaceAllLiteralString`. So `re.ReplaceAllString(s, "$1")`
+    /// emitted the two characters `$1` where Go substitutes the first
+    /// capture — silently, with no error and plausible-looking output.
+    fn expand_into(&self, out: &mut Vec<u8>, template: &[u8], text: &[u8], m: &[Capture]) {
+        let mut i = 0usize;
+        while i < template.len() {
+            // Go: `before, after, ok := strings.Cut(template, "$")`.
+            let dollar = match template[i..].iter().position(|&c| c == b'$') {
+                None => break,
+                Some(k) => i + k,
+            };
+            out.extend_from_slice(&template[i..dollar]);
+            i = dollar + 1;
+            // Go: "Treat $$ as $."
+            if i < template.len() && template[i] == b'$' {
+                out.push(b'$');
+                i += 1;
+                continue;
+            }
+            let (name, num, rest, ok) = extract(&template[i..]);
+            if !ok {
+                // Go: "Malformed; treat $ as raw text."
+                out.push(b'$');
+                continue;
+            }
+            i += rest;
+            if num >= 0 {
+                let g = num as usize;
+                if g < m.len() && m[g].0 >= 0 {
+                    out.extend_from_slice(&text[m[g].0 as usize..m[g].1 as usize]);
+                }
+                continue;
+            }
+            let mut g = 0usize;
+            while g < self.names.len() {
+                if self.names[g].as_bytes() == name && g < m.len() && m[g].0 >= 0 {
+                    out.extend_from_slice(&text[m[g].0 as usize..m[g].1 as usize]);
+                    break;
+                }
+                g += 1;
+            }
+        }
+        out.extend_from_slice(&template[i..]);
+    }
+
+    // go: sdk 1.25.5 regexp/regexp.go:603-666 Regexp.replaceAll
+    /// The shared skeleton behind every Replace method. Go's, exactly —
+    /// including the two rules a hand-rolled loop gets wrong:
+    ///
+    ///   * the unmatched run copied before a match is measured from
+    ///     `lastMatchEnd`, not from the search position; and
+    ///   * "insert a copy of the replacement string, but not for a
+    ///     match of the empty string immediately after another match.
+    ///     (Otherwise, we get double replacement for patterns that match
+    ///     both empty and nonempty strings.)"
+    ///
+    /// goish had its own loop with neither, so `a*` over "bab" replaced
+    /// four times where Go replaces three: "-b--b-" against "-b-b-".
+    fn replace_all(&self, text: &[u8], repl: &mut dyn FnMut(&mut Vec<u8>, &[Capture])) -> string {
+        let mut out: Vec<u8> = Vec::with_capacity(text.len());
+        let mut last_match_end = 0usize;
+        let mut search_pos = 0usize;
+        let end_pos = text.len();
+        while search_pos <= end_pos {
+            let (lo, hi, caps) = match self.find_from(text, search_pos) {
+                None => break,
+                Some(t) => t,
+            };
+            // Go: copy the unmatched characters before this match.
+            out.extend_from_slice(&text[last_match_end..lo]);
+            // Go: `if a[1] > lastMatchEnd || a[0] == 0`.
+            if hi > last_match_end || lo == 0 {
+                repl(&mut out, &caps);
+            }
+            last_match_end = hi;
+            // Go: "Advance past this match; always advance at least one
+            // character."
+            let width = rune_width(text, search_pos);
+            if search_pos + width > hi {
+                search_pos += width;
+            } else if search_pos + 1 > hi {
+                search_pos += 1;
+            } else {
+                search_pos = hi;
+            }
+            if width == 0 && search_pos <= hi {
+                break;
+            }
+        }
+        out.extend_from_slice(&text[last_match_end..]);
+        return string::__from_vec(out);
+    }
+
+    // go: sdk 1.25.5 regexp/regexp.go:572-581 Regexp.ReplaceAllString
+    /// Go: "ReplaceAllString returns a copy of src, replacing matches of
+    /// the Regexp with the replacement text repl. Inside repl, $ signs
+    /// are interpreted as in Expand."
     pub fn ReplaceAllString<S: Into<string>, R: Into<string>>(&self, src: S, repl: R) -> string {
         let src = src.into();
         let repl = repl.into();
         let text = src.as_bytes();
-        let repl_bytes = repl.as_bytes();
-        let mut out: Vec<u8> = Vec::with_capacity(text.len());
-        let mut i = 0usize;
-        while i <= text.len() {
-            if let Some((end, _)) = self.match_at(text, i) {
-                out.extend_from_slice(repl_bytes);
-                if end > i {
-                    i = end;
-                } else {
-                    if i < text.len() {
-                        out.push(text[i]);
-                    }
-                    i += 1;
-                }
-            } else if i < text.len() {
-                out.push(text[i]);
-                i += 1;
-            } else {
-                break;
-            }
-        }
-        return string::__from_vec(out);
+        let rb = repl.as_bytes();
+        return self.replace_all(text, &mut |out, caps| {
+            self.expand_into(out, rb, text, caps);
+        });
     }
 
-    /// `re.ReplaceAllStringFunc(src, repl)` (regexp.go:988) — returns a
-    /// copy of src in which all matches have been replaced by the
-    /// return value of `repl` applied to the matched string. No
-    /// Expand-style $-substitution is performed on the output.
+    // go: sdk 1.25.5 regexp/regexp.go:586-590 Regexp.ReplaceAllLiteralString
+    /// Go: "the replacement text repl is substituted directly, without
+    /// using Expand." This is what goish's `ReplaceAllString` was
+    /// already doing; now it is the method that says so.
+    pub fn ReplaceAllLiteralString<S: Into<string>, R: Into<string>>(
+        &self,
+        src: S,
+        repl: R,
+    ) -> string {
+        let src = src.into();
+        let repl = repl.into();
+        let text = src.as_bytes();
+        let rb = repl.as_bytes();
+        return self.replace_all(text, &mut |out, _| {
+            out.extend_from_slice(rb);
+        });
+    }
+
+    // go: sdk 1.25.5 regexp/regexp.go:596-601 Regexp.ReplaceAllStringFunc
+    /// Go: "the replacement returned by repl is substituted directly,
+    /// without using Expand."
     pub fn ReplaceAllStringFunc<S: Into<string>, F: Fn(string) -> string>(
         &self,
         src: S,
@@ -1817,27 +2023,69 @@ impl Regexp {
     ) -> string {
         let src = src.into();
         let text = src.as_bytes();
-        let mut out: Vec<u8> = Vec::with_capacity(text.len());
-        let mut i = 0usize;
-        while i <= text.len() {
-            if let Some((end, _)) = self.match_at(text, i) {
-                let replaced = repl(string::from_bytes(&text[i..end]));
-                out.extend_from_slice(replaced.as_bytes());
-                if end > i {
-                    i = end;
-                } else {
-                    if i < text.len() {
-                        out.push(text[i]);
-                    }
-                    i += 1;
-                }
-            } else if i < text.len() {
-                out.push(text[i]);
-                i += 1;
-            } else {
-                break;
-            }
-        }
-        return string::__from_vec(out);
+        return self.replace_all(text, &mut |out, caps| {
+            let (lo, hi) = (caps[0].0 as usize, caps[0].1 as usize);
+            let r = repl(string::from_bytes(&text[lo..hi]));
+            out.extend_from_slice(r.as_bytes());
+        });
     }
+}
+
+// go: sdk 1.25.5 regexp/regexp.go:975-1022 extract
+/// Go: "extract returns the name from a leading "name" or "{name}" in
+/// str. (The $ has already been removed by the caller.) If it is a
+/// number, extract returns num set to that number; otherwise num = -1."
+///
+/// Returns `(name, num, consumed, ok)`. The subtlety worth keeping is
+/// that a name is letters, digits and underscores — so `$1c` is the
+/// NAME "1c", not group 1 followed by a 'c', and since no group is
+/// called "1c" Go expands it to nothing at all.
+fn extract(str_: &[u8]) -> (&[u8], i64, usize, bool) {
+    /// Go writes `rune != '_'`; a Rust char literal would need a cast.
+    const UNDERSCORE: rune = 0x5F;
+    if str_.is_empty() {
+        return (b"", 0, 0, false);
+    }
+    let mut s = str_;
+    let mut brace = false;
+    if s[0] == b'{' {
+        brace = true;
+        s = &s[1..];
+    }
+    let mut i = 0usize;
+    while i < s.len() {
+        let (r, size) = crate::unicode::utf8::DecodeRune(&s[i..]);
+        if !crate::unicode::IsLetter(r) && !crate::unicode::IsDigit(r) && r != UNDERSCORE {
+            break;
+        }
+        i += size as usize;
+    }
+    // Go: "empty name is not okay".
+    if i == 0 {
+        return (b"", 0, 0, false);
+    }
+    let name = &s[..i];
+    if brace {
+        if i >= s.len() || s[i] != b'}' {
+            return (b"", 0, 0, false);
+        }
+        i += 1;
+    }
+    // Go: parse number.
+    let mut num: i64 = 0;
+    let mut k = 0usize;
+    while k < name.len() {
+        if name[k] < b'0' || name[k] > b'9' || num >= 100_000_000 {
+            num = -1;
+            break;
+        }
+        num = num * 10 + toint64(name[k] - b'0');
+        k += 1;
+    }
+    // Go: "Disallow leading zeros."
+    if name[0] == b'0' && name.len() > 1 {
+        num = -1;
+    }
+    let consumed = (str_.len() - s.len()) + i;
+    return (name, num, consumed, true);
 }

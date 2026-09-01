@@ -2030,3 +2030,111 @@ path = "examples/time_zero_smoke.rs"
 [[example]]
 name = "regexp_ref_smoke"
 path = "examples/regexp_ref_smoke.rs"
+
+[[example]]
+name = "sched_gosched_fairness_smoke"
+path = "examples/sched_gosched_fairness_smoke.rs"
+
+[[example]]
+name = "flag_ref_smoke"
+path = "examples/flag_ref_smoke.rs"
+
+[[example]]
+name = "log_ref_smoke"
+path = "examples/log_ref_smoke.rs"
+
+[[example]]
+name = "os_env_ref_smoke"
+path = "examples/os_env_ref_smoke.rs"
+
+[[example]]
+name = "os_tempfile_ref_smoke"
+path = "examples/os_tempfile_ref_smoke.rs"
+
+[[example]]
+name = "os_path_ref_smoke"
+path = "examples/os_path_ref_smoke.rs"
+
+[[example]]
+name = "os_error_ref_smoke"
+path = "examples/os_error_ref_smoke.rs"
+
+[[example]]
+name = "os_link_ref_smoke"
+path = "examples/os_link_ref_smoke.rs"
+
+[[example]]
+name = "os_dirent_ref_smoke"
+path = "examples/os_dirent_ref_smoke.rs"
+
+[[example]]
+name = "fmt_sharp_ref_smoke"
+path = "examples/fmt_sharp_ref_smoke.rs"
+
+[[example]]
+name = "fmt_float_prec_ref_smoke"
+path = "examples/fmt_float_prec_ref_smoke.rs"
+
+[[example]]
+name = "regexp_replace_ref_smoke"
+path = "examples/regexp_replace_ref_smoke.rs"
+
+[[example]]
+name = "fmt_slice_ref_smoke"
+path = "examples/fmt_slice_ref_smoke.rs"
+
+[[example]]
+name = "fmt_badverb_ref_smoke"
+path = "examples/fmt_badverb_ref_smoke.rs"
+
+[[example]]
+name = "sort_nan_ref_smoke"
+path = "examples/sort_nan_ref_smoke.rs"
+
+[[example]]
+name = "binary_readwrite_ref_smoke"
+path = "examples/binary_readwrite_ref_smoke.rs"
+
+[[example]]
+name = "math_special_ref_smoke"
+path = "examples/math_special_ref_smoke.rs"
+
+[[example]]
+name = "bits_ref_smoke"
+path = "examples/bits_ref_smoke.rs"
+
+[[example]]
+name = "rand_ref_smoke"
+path = "examples/rand_ref_smoke.rs"
+
+[[example]]
+name = "url_ref_smoke"
+path = "examples/url_ref_smoke.rs"
+
+[[example]]
+name = "textproto_ref_smoke"
+path = "examples/textproto_ref_smoke.rs"
+
+[[example]]
+name = "mime_ref_smoke"
+path = "examples/mime_ref_smoke.rs"
+
+[[example]]
+name = "filepath_ref_smoke"
+path = "examples/filepath_ref_smoke.rs"
+
+[[example]]
+name = "strconv_ftoa_atof_ref_smoke"
+path = "examples/strconv_ftoa_atof_ref_smoke.rs"
+
+[[example]]
+name = "csv_ref_smoke"
+path = "examples/csv_ref_smoke.rs"
+
+[[example]]
+name = "time_zone_ref_smoke"
+path = "examples/time_zone_ref_smoke.rs"
+
+[[example]]
+name = "fmt_star_ref_smoke"
+path = "examples/fmt_star_ref_smoke.rs"

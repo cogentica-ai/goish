@@ -1,4 +1,4 @@
-// go: file time/time.go decls: Time.addSec, daysBefore, daysIn, isLeap, subMono, Month.String, Weekday.String, Duration.Nanoseconds, Duration.Microseconds, Duration.Milliseconds, Duration.Seconds, Duration.Minutes, Duration.Hours, Duration.Truncate, Duration.Round, Duration.Abs, Duration.String, fmtFrac, fmtInt, lessThanHalf, div, Time.IsZero, Time.Unix, Time.UnixMilli, Time.UnixMicro, Time.UnixNano, Time.After, Time.Before, Time.Equal, Time.Compare, Time.Sub, Time.Add, Time.Date, Time.Year, Time.Month, Time.Day, Time.Clock, Time.Hour, Time.Minute, Time.Second, Time.Nanosecond, Time.Weekday, Time.YearDay, Time.ISOWeek, Time.AddDate, Time.UTC, Time.Local, Time.Truncate, Time.Round, Time.Zone, Time.IsDST, Time.MarshalText, Time.UnmarshalText, Time.MarshalJSON, Time.UnmarshalJSON, Time.AppendBinary, Time.MarshalBinary, Time.UnmarshalBinary, Time.GobEncode, Time.GobDecode, Now, Since, Until, Unix, UnixMilli, UnixMicro, Date
+// go: file time/time.go decls: Time.addSec, daysBefore, daysIn, isLeap, subMono, Month.String, Weekday.String, Duration.Nanoseconds, Duration.Microseconds, Duration.Milliseconds, Duration.Seconds, Duration.Minutes, Duration.Hours, Duration.Truncate, Duration.Round, Duration.Abs, Duration.String, fmtFrac, fmtInt, lessThanHalf, div, Time.IsZero, Time.Unix, Time.UnixMilli, Time.UnixMicro, Time.UnixNano, Time.After, Time.Before, Time.Equal, Time.Compare, Time.Sub, Time.Add, Time.Date, Time.Year, Time.Month, Time.Day, Time.Clock, Time.Hour, Time.Minute, Time.Second, Time.Nanosecond, Time.Weekday, Time.YearDay, Time.ISOWeek, Time.AddDate, Time.UTC, Time.Local, Time.Truncate, Time.Round, Time.Zone, Time.In, Time.Location, Time.IsDST, Time.MarshalText, Time.UnmarshalText, Time.MarshalJSON, Time.UnmarshalJSON, Time.AppendBinary, Time.MarshalBinary, Time.UnmarshalBinary, Time.GobEncode, Time.GobDecode, Now, Since, Until, Unix, UnixMilli, UnixMicro, Date
 //
 // time.go — Time and Duration themselves, Month and Weekday, the
 // constructors (Now, Unix, Date) and the calendar arithmetic they all
@@ -622,6 +622,10 @@ pub struct Time {
     pub(crate) sec: int,
     pub(crate) nsec: i32,
     pub(crate) mono: int, // 0 = absent
+    /// Go: `loc *Location`, nil meaning UTC. goish's is a value,
+    /// because `Time` is `Copy` and every method takes it by value; see
+    /// the note on [`Location`].
+    pub(crate) loc: Location,
 }
 
 // go: sdk 1.25.5 time/time.go:531-563 unixToInternal
@@ -662,6 +666,7 @@ impl Time {
             sec,
             nsec: toint32(nsec),
             mono: 0,
+            loc: crate::time::UTC,
         };
     }
 
@@ -694,6 +699,15 @@ impl Time {
     //     shift is spelled and everything Unix-shaped goes through it.
     pub(crate) fn unixSec(self) -> int {
         return self.sec + internalToUnix;
+    }
+
+    // go: none — goish idiom: Go decomposes a Time through `absSec()`,
+    //     which adds the zone offset to the internal seconds before
+    //     splitting out a date or a clock. goish's decomposition is
+    //     keyed off Unix seconds, so this is the same shift applied
+    //     there.
+    pub(crate) fn locSec(self) -> int {
+        return self.unixSec() + self.loc.__offset();
     }
 
     // go: sdk 1.25.5 time/time.go:1428-1430 Time.Unix
@@ -808,6 +822,8 @@ impl Time {
             sec: new_sec,
             nsec: new_nsec,
             mono: new_mono,
+            // Go: `Add` keeps the location.
+            loc: self.loc,
         };
     }
 
@@ -821,7 +837,7 @@ impl Time {
     // go: sdk 1.25.5 time/time.go:808-810 Time.Date
     /// `t.Date()` — `(year, month, day)`. Month is 1..=12.
     pub fn Date(self) -> (int, int, int) {
-        let (y, m, d, _, _, _) = civil_from_unix(self.unixSec());
+        let (y, m, d, _, _, _) = civil_from_unix(self.locSec());
         return (y, m, d);
     }
 
@@ -843,7 +859,7 @@ impl Time {
     // go: sdk 1.25.5 time/time.go:866-868 Time.Clock
     /// `t.Clock()` — `(hour, minute, second)` within the day, UTC.
     pub fn Clock(self) -> (int, int, int) {
-        let (_, _, _, hh, mm, ss) = civil_from_unix(self.unixSec());
+        let (_, _, _, hh, mm, ss) = civil_from_unix(self.locSec());
         return (hh, mm, ss);
     }
     // go: sdk 1.25.5 time/time.go:881-883 Time.Hour
@@ -869,7 +885,7 @@ impl Time {
     /// [`Weekday`]. Use `.Int()` for the underlying 0..=6 number
     /// (0=Sunday .. 6=Saturday).
     pub fn Weekday(self) -> Weekday {
-        let days = self.unixSec().div_euclid(86_400);
+        let days = self.locSec().div_euclid(86_400);
         // 1970-01-01 was a Thursday (=4 in Sun..Sat = 0..6).
         return Weekday((days + 4).rem_euclid(7));
     }
@@ -881,7 +897,7 @@ impl Time {
         // Go: time.go:904 — `_, yday := t.absSec().days().yearYday()`.
         // Slim: derive from current Date() vs Jan 1 of the same year.
         let (y, _, _) = self.Date();
-        let unix_days_now = self.unixSec().div_euclid(86_400);
+        let unix_days_now = self.locSec().div_euclid(86_400);
         let unix_days_jan1 = days_from_civil(y, 1, 1);
         // Go: yday is 1-based.
         return toint(unix_days_now - unix_days_jan1 + 1);
@@ -894,7 +910,7 @@ impl Time {
     /// likewise December 31 can fall in week 1 of the next ISO year.
     pub fn ISOWeek(self) -> (int, int) {
         // Go: time.go:859 — `days := t.absSec().days()`.
-        let days = self.unixSec().div_euclid(86_400);
+        let days = self.locSec().div_euclid(86_400);
         // Go: time.go:860 — `thu := days + absDays(Thursday - ((days-1).weekday()+1))`.
         // `weekday()` on absDays returns Sun=0..Sat=6 (Go's standard
         // `Weekday`). We derive the same numbering from Unix days:
@@ -941,15 +957,38 @@ impl Time {
     }
 
     // go: sdk 1.25.5 time/time.go:1364-1367 Time.UTC
-    /// `t.UTC()` (time.go:1364) — slim time is always UTC, returns self.
+    /// Go: "UTC returns t with the location set to UTC."
     pub fn UTC(self) -> Time {
-        return self;
+        return self.In(crate::time::UTC);
     }
 
     // go: sdk 1.25.5 time/time.go:1370-1373 Time.Local
-    /// `t.Local()` (time.go:1370) — slim time has no Location, returns self.
+    /// Go: "Local returns t with the location set to local time."
     pub fn Local(self) -> Time {
-        return self;
+        return self.In(crate::time::Local);
+    }
+
+    // go: sdk 1.25.5 time/time.go:1377-1385 Time.In
+    /// Go: "In returns a copy of t representing the same time instant,
+    /// but with the copy's location information set to loc for display
+    /// purposes."
+    ///
+    /// The INSTANT does not move — only what `Date`, `Clock` and
+    /// `Format` say about it.
+    pub fn In(self, loc: Location) -> Time {
+        let mut t = self;
+        t.loc = loc;
+        // Go: `t.stripMono()` — a wall/monotonic Time loses its
+        // monotonic reading when its location changes.
+        t.mono = 0;
+        return t;
+    }
+
+    // go: sdk 1.25.5 time/time.go:1388-1396 Time.Location
+    /// Go: "Location returns the time zone information associated with
+    /// t."
+    pub fn Location(self) -> Location {
+        return self.loc;
     }
 
     // go: sdk 1.25.5 time/time.go:1778-1785 Time.Truncate
@@ -984,10 +1023,14 @@ impl Time {
     }
 
     // go: sdk 1.25.5 time/time.go:1399-1402 Time.Zone
-    /// `t.Zone()` (time.go:1399) — slim port. Always returns
-    /// ("UTC", 0) since slim time has no Location.
+    /// Go: "Zone computes the time zone in effect at time t, returning
+    /// the abbreviated name of the zone (such as "CET") and its offset
+    /// in seconds east of UTC."
     pub fn Zone(self) -> (crate::gostring::string, int) {
-        return (crate::gostring::string::from("UTC"), 0);
+        return (
+            crate::gostring::string::from_bytes(self.loc.__abbrev()),
+            self.loc.__offset(),
+        );
     }
 
     // go: sdk 1.25.5 time/time.go:1677-1680 Time.IsDST
@@ -1076,8 +1119,33 @@ impl Time {
         self,
         b: crate::goslice::slice<crate::types::byte>,
     ) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
-        // Go: var offsetMin int16  (slim: always UTC → -1)
-        let offset_min: i16 = -1;
+        // Go: "var offsetMin int16 // minutes east of UTC. -1 is
+        // UTC." — and, one line later, an error for a zone whose
+        // offset is not a whole number of minutes.
+        //
+        // goish hardcoded -1, so a Time in a fixed zone marshalled as
+        // UTC and came back an hour or two off.
+        let off = self.loc.__offset();
+        let offset_min: i16 = if self.loc == crate::time::UTC || self.loc == crate::time::Local {
+            -1
+        } else {
+            if off % 60 != 0 {
+                let empty: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+                return (
+                    crate::goslice::slice::__from_vec(empty),
+                    crate::errors::New("Time.MarshalBinary: zone offset has fractional minute"),
+                );
+            }
+            let m = off / 60;
+            if m < -32768 || m > 32767 {
+                let empty: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+                return (
+                    crate::goslice::slice::__from_vec(empty),
+                    crate::errors::New("Time.MarshalBinary: unexpected zone offset"),
+                );
+            }
+            toint16(m)
+        };
         // Go: version := timeBinaryVersionV1
         let version: u8 = 1;
         // Go: sec := t.sec(); nsec := t.nsec()
@@ -1165,13 +1233,24 @@ impl Time {
             | (toint32(buf[10]) << 16)
             | (toint32(buf[9]) << 24);
         // Go: buf = buf[4:]; offset := int(int16(buf[1])|int16(buf[0])<<8) * 60
-        // (parsed but ignored — slim time is UTC-only)
-        let _offset: i16 = toint16(buf[14]) | (toint16(buf[13]) << 8);
+        // Go: offset is MINUTES east of UTC, and -1 means UTC. goish
+        // used to parse it and throw it away; a Time marshalled in a
+        // fixed zone came back as UTC and rendered an hour or two off.
+        let offset_min: crate::types::int16 = toint16(buf[14]) | (toint16(buf[13]) << 8);
+        let loc = if offset_min == -1 {
+            crate::time::UTC
+        } else {
+            // Go: `t.setLoc(FixedZone("", offset))` — the zone recovered
+            // from the wire has no NAME, only an offset, exactly as one
+            // parsed out of an RFC 3339 string does.
+            crate::time::FixedZone("", toint(offset_min) * 60)
+        };
         // Go: *t = Time{}; t.wall = uint64(nsec); t.ext = sec
         *self = Time {
             sec: toint(sec),
             nsec,
             mono: 0,
+            loc,
         };
         // Go: return nil
         return crate::errors::nil;
@@ -1244,6 +1323,8 @@ pub fn Now() -> Time {
         sec: wall.tv_sec.wrapping_add(unixToInternal),
         nsec: toint32(wall.tv_nsec),
         mono: mono_safe,
+        // Go: `Now` returns a Time in the LOCAL zone.
+        loc: crate::time::Local,
     };
 }
 
@@ -1280,6 +1361,8 @@ pub fn Unix(sec: int, nsec: int) -> Time {
         sec: sec.wrapping_add(extra_sec).wrapping_add(unixToInternal),
         nsec: final_nsec,
         mono: 0,
+        // Go: `Unix` returns a Time in the LOCAL zone.
+        loc: crate::time::Local,
     };
 }
 
@@ -1318,7 +1401,7 @@ pub fn Date<M: __MonthArg>(
     min: int,
     sec: int,
     nsec: int,
-    _loc: Location,
+    loc: Location,
 ) -> Time {
     let m = month.__as_int();
     let days = days_from_civil(year, m, day);
@@ -1327,7 +1410,16 @@ pub fn Date<M: __MonthArg>(
         .wrapping_add(hour.wrapping_mul(3600))
         .wrapping_add(min.wrapping_mul(60))
         .wrapping_add(sec);
-    return Unix(total_sec, nsec);
+    // Go: "Date returns the Time corresponding to
+    //     yyyy-mm-dd hh:mm:ss + nsec nanoseconds
+    //     in the appropriate zone for that time in the given location."
+    //
+    // The arguments are a WALL clock in `loc`, so the instant is that
+    // wall clock minus the zone's offset. goish ignored `loc` entirely
+    // and read the arguments as UTC, so `Date(…, FixedZone("CEST",
+    // 7200))` named an instant two hours later than Go's.
+    let t = Unix(total_sec.wrapping_sub(loc.__offset()), nsec);
+    return t.In(loc);
 }
 
 /// Hidden trait so `Date`'s month parameter accepts both `int` and

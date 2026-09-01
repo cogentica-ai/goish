@@ -316,6 +316,7 @@ pub fn init() {
         bytes::register_bytes_impls();
         strings::register_strings_impls();
         os::register_os_impls();
+        os::register_os_error_impls();
         os::exec::register_exec_impls();
         net::register_net_impls();
         net::http::server::register_http_impls();

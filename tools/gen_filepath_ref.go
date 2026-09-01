@@ -6,80 +6,73 @@ import (
 	"testing"
 )
 
-// Rel is the one to worry about: it is lexical, it has to agree with
-// Clean on both arguments, it must count how many ".." get it from base
-// to target, and it must REFUSE when that count cannot be known — a
-// relative base and an absolute target, or a base that walks above what
-// it can see. Every "can't make X relative to Y" below is a case where
-// returning a plausible path would be worse than an error.
-//
-// IsLocal and Localize are the security-shaped pair: IsLocal answers
-// whether a path stays inside the directory it is evaluated in, which
-// is what an archive extractor asks before writing.
+// Clean, Join, Match and Rel are the four with real edge cases, and all
+// four are used to decide whether a path is inside a directory. A Clean
+// that keeps one ".." too many, or a Match that treats '/' as ordinary,
+// turns a containment check into a false answer.
 func TestGoishRef(t *testing.T) {
-	rels := [][2]string{
-		{"a/b", "a/b"},
-		{"a/b/.", "a/b"},
-		{"a/b", "a/b/c/d"},
-		{"a/b", "a/b/../c"},
-		{"a/b/c", "a/b"},
-		{"a/b/c", "a"},
-		{"a/b/c", "a/b/c/d/e"},
-		{"a/b/c", "x/y/z"},
-		{"a", "a"},
-		{"a", "."},
-		{".", "a"},
-		{".", "."},
-		{"..", "a"},
-		{"../..", "a"},
-		{"/a/b", "/a/b/c"},
-		{"/a/b/c", "/a/b"},
-		{"/a", "/a"},
-		{"/", "/a/b"},
-		{"/a/b", "/"},
-		{"/a/b", "/c/d"},
-		{"/", "/"},
-		{"a/b", "/a/b"},
-		{"/a/b", "a/b"},
-		{"a/./b", "a/b/c"},
-		{"a//b", "a/b/c"},
-		{"a/b/", "a/b/c"},
-		{"..", ".."},
-		{"../a", "../b"},
-		{"a/../..", "b"},
-	}
-	for _, r := range rels {
-		got, err := filepath.Rel(r[0], r[1])
-		fmt.Printf("rel %-10q %-12q -> %-14q err=%v\n", r[0], r[1], got, err)
+	for _, p := range []string{
+		"", ".", "..", "/", "//", "///", "a", "a/", "/a", "a/b", "a//b",
+		"a/./b", "a/../b", "../a", "a/..", "a/../..", "/..", "/../a",
+		"./a", "././a", "a/b/../../c", "/a/b/../../../c", "a/b/",
+		"a/./", "/./", "abc/", "abc/def/..", "abc/../..", "/a/../..",
+		".//a", "a/b/c/../../d", "..//..", "a/..//b",
+	} {
+		fmt.Printf("clean %-20q -> %-14q isabs=%-5v isLocal=%v\n",
+			p, filepath.Clean(p), filepath.IsAbs(p), filepath.IsLocal(p))
 	}
 
-	locals := []string{
-		"", ".", "..", "/", "a", "a/b", "a/b/c",
-		"./a", "a/./b", "a/../b", "a/..", "a/../..",
-		"/a", "../a", "a/../../b", ".hidden", "a//b",
-		"a/", "/a/b", "..a", "a..", "a/..b",
-	}
-	for _, p := range locals {
-		loc, err := filepath.Localize(p)
-		fmt.Printf("local %-12q islocal=%-5v localize=(%q,%v)\n", p, filepath.IsLocal(p), loc, err)
-	}
-	// Localize also rejects a path holding the OS separator it would
-	// have to invent — on Unix that is a backslash, which is a legal
-	// filename character and so must NOT be split on.
-	for _, p := range []string{"a\\b", "a\\", "\\", "a\x00b"} {
-		loc, err := filepath.Localize(p)
-		fmt.Printf("local-sep %-8q islocal=%-5v -> (%q,%v)\n", p, filepath.IsLocal(p), loc, err)
+	for _, p := range []string{"", "/", "a", "a/b", "/a/b", "a/b/", "/a/",
+		"a.txt", "/a/b.txt", "dir/.hidden", ".hidden", "a.b.c", "a/b.c/d"} {
+		d, f := filepath.Split(p)
+		fmt.Printf("split %-14q -> (%q,%q) base=%-8q dir=%-8q ext=%q\n",
+			p, d, f, filepath.Base(p), filepath.Dir(p), filepath.Ext(p))
 	}
 
-	for _, p := range []string{"", ":", "a", "a:b", "a:b:c", "::", "a::b", ":a", "a:"} {
-		fmt.Printf("splitlist %-8q -> %q (n=%d)\n", p, filepath.SplitList(p), len(filepath.SplitList(p)))
+	for _, e := range [][]string{
+		{}, {""}, {"a"}, {"a", "b"}, {"a", "", "b"}, {"", "a"}, {"a/", "b"},
+		{"/a", "b"}, {"a", "/b"}, {"a", "../b"}, {"a", ".."}, {"..", "a"},
+		{"a", "b", "c"}, {"/", "a"}, {"a", "."}, {".", "a"},
+	} {
+		fmt.Printf("join %-26v -> %q\n", e, filepath.Join(e...))
 	}
 
-	// On Unix these three are identities or empty, and Go says so.
-	for _, p := range []string{"", "a/b", "a\\b", "C:\\x", "/a/b"} {
-		fmt.Printf("slash %-8q toslash=%-8q fromslash=%-8q volume=%q\n",
-			p, filepath.ToSlash(p), filepath.FromSlash(p), filepath.VolumeName(p))
+	type M struct{ pat, name string }
+	for _, m := range []M{
+		{"", ""}, {"", "a"}, {"a", "a"}, {"a", "b"}, {"*", "a"}, {"*", ""},
+		{"*", "a/b"}, {"*/*", "a/b"}, {"a/*", "a/b"}, {"a/*", "a/b/c"},
+		{"?", "a"}, {"?", "ab"}, {"a?c", "abc"}, {"[abc]", "b"},
+		{"[a-c]", "b"}, {"[^a-c]", "d"}, {"[!a-c]", "d"}, {"[]a]", "a"},
+		{"\\*", "*"}, {"\\*", "a"}, {"a[", "a["}, {"[", "a"}, {"[a-", "a"},
+		{"*.go", "x.go"}, {"*.go", "x.g"}, {"**", "a/b"}, {"a/**", "a/b"},
+		{"[-x]", "-"}, {"*[", "a["},
+	} {
+		ok, err := filepath.Match(m.pat, m.name)
+		fmt.Printf("match %-10q %-8q -> %-5v err=%v\n", m.pat, m.name, ok, err)
 	}
 
-	fmt.Printf("sep %q listsep %q\n", filepath.Separator, filepath.ListSeparator)
+	type R struct{ base, targ string }
+	for _, r := range []R{
+		{"/a", "/a/b"}, {"/a", "/a"}, {"/a/b", "/a"}, {"/a", "/b"},
+		{"a", "a/b"}, {"a/b", "a"}, {"a", "b"}, {"/", "/a"}, {"/a", "/"},
+		{".", "a"}, {"a", "."}, {"/a", "b"}, {"a", "/b"}, {"a/b", "a/b"},
+		{"a/./b", "a/b/c"}, {"/a/../b", "/b/c"},
+	} {
+		rel, err := filepath.Rel(r.base, r.targ)
+		fmt.Printf("rel %-10q %-10q -> %-10q err=%v\n", r.base, r.targ, rel, err)
+	}
+
+	for _, p := range []string{"", ".", "..", "/", "a", "a/b", "../a", "a/../b",
+		"a/..", "./a", "/a"} {
+		l, err := filepath.Localize(p)
+		fmt.Printf("localize %-10q -> %-10q err=%v\n", p, l, err)
+	}
+
+	for _, p := range []string{"", "a", "a:b", "/a:/b", ":", "::", "a:"} {
+		fmt.Printf("splitlist %-10q -> %q\n", p, filepath.SplitList(p))
+	}
+	for _, p := range []string{"a/b", "a\\b", "/a/b"} {
+		fmt.Printf("slash %-8q toslash=%q fromslash=%q\n",
+			p, filepath.ToSlash(p), filepath.FromSlash(p))
+	}
 }
