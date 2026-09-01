@@ -59,7 +59,11 @@ extern crate alloc;
 macro_rules! __goish_slices_sort {
     ($xs:expr) => {{
         let __s: &mut $crate::slice<_> = &mut $xs;
-        __s.sort_unstable();
+        // Go: `slices.Sort` orders by `cmp.Less`, not by `<` — a NaN
+        // sorts BEFORE every non-NaN. Sorting with Rust's `Ord` needed
+        // `T: Ord`, which no float satisfies, so `slices.Sort` could
+        // not be called on a `[]float64` at all.
+        __s.sort_unstable_by(|a, b| $crate::slices::__go_ordering(a, b));
     }};
 }
 
@@ -110,7 +114,8 @@ macro_rules! __goish_slices_sort_stable_func {
     }};
 }
 
-/// `slices::Sort!(xs)` — in-place pdqsort. Requires `T: Ord`.
+/// `slices::Sort!(xs)` — in-place pdqsort in Go's order, which is
+/// `cmp.Less`: a NaN sorts before every non-NaN. Requires `T: PartialOrd`.
 pub use crate::__goish_slices_sort as Sort;
 
 /// `slices::Reverse!(xs)` — in-place reverse.
@@ -123,6 +128,22 @@ pub use crate::__goish_slices_sort_func as SortFunc;
 /// `slices::SortStableFunc!(xs, |a, b| <int>)` — stable sort with comparator.
 /// Equal elements keep their original relative order.
 pub use crate::__goish_slices_sort_stable_func as SortStableFunc;
+
+// go: none — goish idiom: Rust's sorts want a `core::cmp::Ordering`,
+//     and Go's want `cmp.Compare`. This is the bridge, and it is where
+//     the NaN rule enters every sort in the package: `T: Ord` would
+//     have been the obvious bound and it excludes every float.
+#[doc(hidden)]
+pub fn __go_ordering<T: PartialOrd>(a: &T, b: &T) -> core::cmp::Ordering {
+    let n = crate::cmp::Compare(a, b);
+    if n < 0 {
+        return core::cmp::Ordering::Less;
+    }
+    if n > 0 {
+        return core::cmp::Ordering::Greater;
+    }
+    return core::cmp::Ordering::Equal;
+}
 
 #[path = "slices.rs"]
 mod slices_go;

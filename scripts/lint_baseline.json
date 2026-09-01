@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 8988,
+ "total": 8981,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -17,11 +17,6 @@
   },
   "src/builtin_macros.rs": {
    "GOISH014": 3,
-   "GOISH023": 3
-  },
-  "src/cmp/mod.rs": {
-   "GOISH014": 3,
-   "GOISH016": 1,
    "GOISH023": 3
   },
   "src/compress/bzip2/bit_reader.rs": {
