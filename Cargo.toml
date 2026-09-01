@@ -2026,3 +2026,7 @@ path = "examples/net_error_iface_smoke.rs"
 [[example]]
 name = "time_zero_smoke"
 path = "examples/time_zero_smoke.rs"
+
+[[example]]
+name = "regexp_ref_smoke"
+path = "examples/regexp_ref_smoke.rs"

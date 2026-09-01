@@ -406,18 +406,15 @@ fn main() {
         die(m.as_bytes());
     }
 
-    // Compile-time rejection is part of the contract: `(?s)`/`(?m)` and
-    // every other `(?...)` construct must still fail loudly rather than
-    // silently parsing as something else.
-    for bad in [
-        r"(?s)a",
-        r"(?m)a",
-        r"(?U)a",
-        r"(?)a",
-        r"(?-)a",
-        r"(?=a)",
-        r"(?P<n>a)",
-    ] {
+    // Compile-time rejection is part of the contract: a `(?...)`
+    // construct the matcher does not implement must fail loudly rather
+    // than silently parsing as something else.
+    //
+    // `(?s)`, `(?m)` and `(?P<name>...)` used to be on this list. They
+    // are implemented now — see examples/regexp_ref_smoke.rs, which
+    // checks all three against a running Go — so asserting that they
+    // are REJECTED would now be asserting a bug.
+    for bad in [r"(?U)a", r"(?)a", r"(?-)a", r"(?=a)"] {
         let (_, err) = regexp::Compile(bad);
         if err == goish::nil {
             die(b"regexp_fold: unsupported (?...) construct compiled\n");
