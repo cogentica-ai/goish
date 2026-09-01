@@ -2094,3 +2094,7 @@ path = "examples/sort_nan_ref_smoke.rs"
 [[example]]
 name = "binary_readwrite_ref_smoke"
 path = "examples/binary_readwrite_ref_smoke.rs"
+
+[[example]]
+name = "math_special_ref_smoke"
+path = "examples/math_special_ref_smoke.rs"
