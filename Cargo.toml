@@ -2030,3 +2030,7 @@ path = "examples/time_zero_smoke.rs"
 [[example]]
 name = "regexp_ref_smoke"
 path = "examples/regexp_ref_smoke.rs"
+
+[[example]]
+name = "sched_gosched_fairness_smoke"
+path = "examples/sched_gosched_fairness_smoke.rs"

@@ -90,6 +90,17 @@ pub(crate) fn globrunqput_batch(batch: &[*mut G]) {
     }
 }
 
+// go: none — this file is still one unanchored scheduler; anchoring it
+//     against Go's proc.go is its own unit. Mirrors Go's
+//     `globrunqput`: the destination for a goroutine that yielded, so
+//     it goes behind every other runnable G rather than back onto the
+//     front of its own P's queue.
+/// Push one G onto the back of the global runq and wake an idle M.
+pub(crate) fn globrunqput(g_ptr: NonNull<G>) {
+    SCHED.lock().runq.push_back(g_ptr);
+    wake_idle_m();
+}
+
 /// Pop one G off the global runq, returning `None` if empty.
 /// Used by `findrunnable_local_then_global` as the second-tier
 /// fallback when the M's local P runq is empty.
@@ -968,9 +979,25 @@ extern "C" fn gosched_m(g_ptr: *mut G) -> ! {
     // Tripwire BEFORE enqueue: once the G is on a runqueue another M
     // can dispatch and finish it, racing our fatal exit.
     check_no_locks_at_schedule(g_ptr, b"gosched_m");
-    // `next=false` matches Go's `goschedImpl(_, false)` — Gosched
-    // yields to the back of the queue (proc.go:4307 globrunqput).
-    enqueue_runnable(g, false);
+    // Go's `goschedImpl` puts the yielding G on the GLOBAL runq —
+    // `globrunqput(gp)` — not on the P's local one.
+    // That is not a detail: `find_runnable` checks the local runq
+    // BEFORE the general global one, so a G returned to the local
+    // queue is handed straight back to the same M. A goroutine
+    // looping on `Gosched()` then starves every other G on the
+    // machine — measured at 3 s of total starvation for a `net::Dial`
+    // running alongside such a loop, released the instant the loop
+    // stopped. This code used to call `enqueue_runnable`, whose
+    // comment already said `globrunqput`.
+    //
+    // A G locked to an M still goes through `enqueue_runnable`, which
+    // is the path that knows how to wake that M.
+    let locked_m = unsafe { (*g.as_ptr()).locked_m.load(Ordering::Acquire) };
+    if locked_m != 0 {
+        enqueue_runnable(g, false);
+    } else {
+        globrunqput(g);
+    }
     schedule_loop()
 }
 
