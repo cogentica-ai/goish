@@ -2,7 +2,7 @@
 name = "goish-macros"
 # Released in lockstep with goish; the goish manifest pins this exactly.
 # See the version note there.
-version = "1.0.0-alpha.6"
+version = "1.0.0-alpha.7"
 edition = "2021"
 rust-version = "1.86"
 authors = ["Chanwit Kaewkasi <chanwit@gmail.com>"]
