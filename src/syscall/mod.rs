@@ -395,12 +395,14 @@ impl Errno {
     #[allow(non_snake_case)]
     pub fn Error(&self) -> crate::gostring::string {
         crate::gostring::string::from_static(match self.0 {
+            1 => "operation not permitted",
             2 => "no such file or directory",
             4 => "interrupted system call",
             13 => "permission denied",
             17 => "file exists",
             20 => "not a directory",
             21 => "is a directory",
+            22 => "invalid argument",
             38 => "function not implemented",
             39 => "directory not empty",
             95 => "operation not supported",
@@ -461,11 +463,13 @@ impl PartialEq<crate::errors::error> for Errno {
 
 /// Common errno values (Linux, from `<errno.h>`). Match the Go-side
 /// `syscall.E*` consts in name; type is `Errno` to match Go shape.
+pub const EPERM: Errno = Errno(1);
 pub const ENOENT: Errno = Errno(2);
 pub const EACCES: Errno = Errno(13);
 pub const EEXIST: Errno = Errno(17);
 pub const ENOTDIR: Errno = Errno(20);
 pub const EISDIR: Errno = Errno(21);
+pub const EINVAL: Errno = Errno(22);
 pub const ENOTEMPTY: Errno = Errno(39);
 pub const EINTR: Errno = Errno(4);
 pub const ENOSYS: Errno = Errno(38);

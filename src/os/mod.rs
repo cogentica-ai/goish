@@ -1018,90 +1018,23 @@ pub fn Mkdir<N: Into<string>, M: Into<FileMode>>(name: N, perm: M) -> error {
     buf.push(0);
     let rc = syscall::Mkdir(buf.as_ptr(), perm.0);
     if rc < 0 {
-        return errors::New(string("mkdir failed"));
+        // Go: &PathError{Op: "mkdir", Path: name, Err: e}. goish
+        // returned a bare `errors.New("mkdir failed")`, which names
+        // neither the path nor the reason and is not a *PathError, so
+        // `errors::As` and `IsExist`/`IsNotExist` could not see through
+        // it.
+        return errors::Wrap(PathError {
+            Op: string::from("mkdir"),
+            Path: name,
+            Err: syscall::Errno(-rc).into(),
+        });
     }
     nil
 }
 
-/// `os.MkdirAll(path, perm)` (os/path.go:19) — create `path` and any
-/// missing parent directories. If `path` is already a directory,
-/// returns nil.
-pub fn MkdirAll<P: Into<string>, M: Into<FileMode>>(path: P, perm: M) -> error {
-    let path: string = path.into();
-    let perm: FileMode = perm.into();
-    // Go: dir, err := Stat(path); if err == nil { if dir.IsDir() { return nil }; return ... }
-    let (dir, err) = Stat(path.clone());
-    if err.IsNil() {
-        if dir.IsDir() {
-            return nil;
-        }
-        return errors::New(string("mkdir: path exists and is not a directory"));
-    }
-
-    // Go: scan back for parent.
-    let bs = bytes_of(&path);
-    let mut i: int = bs.len() as int - 1;
-    while i >= 0 && bs[i as usize] == b'/' {
-        i -= 1;
-    }
-    while i >= 0 && bs[i as usize] != b'/' {
-        i -= 1;
-    }
-    if i < 0 {
-        i = 0;
-    }
-    // Go: if parent := path[:i]; len(parent) > 0 { MkdirAll(parent, perm) }
-    if i > 0 {
-        let parent = string::from_bytes(&bs[..i as usize]);
-        let perr = MkdirAll(parent, perm);
-        if !perr.IsNil() {
-            return perr;
-        }
-    }
-    // Go: Mkdir(path, perm); on failure double-check.
-    let merr = Mkdir(path.clone(), perm);
-    if !merr.IsNil() {
-        let (d2, err2) = Stat(path);
-        if err2.IsNil() && d2.IsDir() {
-            return nil;
-        }
-        return merr;
-    }
-    nil
-}
-
-/// `os.RemoveAll(path)` (os/path.go:73) — recursively delete `path`
-/// and everything beneath. Missing paths return nil.
-pub fn RemoveAll<P: Into<string>>(path: P) -> error {
-    let path: string = path.into();
-    // Stat to learn if it's a dir.
-    let (fi, err) = Stat(path.clone());
-    if !err.IsNil() {
-        // Treat any stat failure as "doesn't exist" — matches Go's
-        // os.IsNotExist short-circuit.
-        return nil;
-    }
-    if !fi.IsDir() {
-        return Remove(path);
-    }
-    // Recurse into children.
-    let (entries, derr) = ReadDir(path.clone());
-    if !derr.IsNil() {
-        return derr;
-    }
-    for i in 0..entries.Len() {
-        let e = entries[i].clone();
-        let mut child = crate::strings::Builder::new();
-        let _ = child.WriteString(path.clone());
-        let _ = child.WriteByte(b'/');
-        let _ = child.WriteString(e.Name());
-        let cerr = RemoveAll(child.String());
-        if !cerr.IsNil() {
-            return cerr;
-        }
-    }
-    Remove(path)
-}
+#[path = "path.rs"]
+mod path;
+pub use path::*;
 
 /// `os.Remove(name)` (os/file_unix.go). Removes a file or empty
 /// directory. First tries unlink; falls back to rmdir on EISDIR.
@@ -1110,16 +1043,27 @@ pub fn Remove<N: Into<string>>(name: N) -> error {
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     buf.extend_from_slice(bytes_of(&name));
     buf.push(0);
-    let rc = syscall::Unlink(buf.as_ptr());
-    if rc == 0 {
+    // Go tries both calls rather than stat-ing first: it is cheaper on
+    // average. Which error it reports is deliberate — the rmdir error
+    // wins unless it is ENOTDIR, in which case the name was not a
+    // directory and unlink's error is the true one.
+    let e = syscall::Unlink(buf.as_ptr());
+    if e == 0 {
         return nil;
     }
-    // EISDIR (-21) or EPERM (-1) on dirs → try rmdir.
-    let rc2 = syscall::Rmdir(buf.as_ptr());
-    if rc2 == 0 {
+    let e1 = syscall::Rmdir(buf.as_ptr());
+    if e1 == 0 {
         return nil;
     }
-    errors::New(string("remove failed"))
+    let mut errno = -e;
+    if syscall::Errno(-e1) != syscall::ENOTDIR {
+        errno = -e1;
+    }
+    errors::Wrap(PathError {
+        Op: string::from("remove"),
+        Path: name,
+        Err: syscall::Errno(errno).into(),
+    })
 }
 
 // ─── DirEntry / ReadDir ──────────────────────────────────────────────
