@@ -2106,3 +2106,7 @@ path = "examples/bits_ref_smoke.rs"
 [[example]]
 name = "rand_ref_smoke"
 path = "examples/rand_ref_smoke.rs"
+
+[[example]]
+name = "url_ref_smoke"
+path = "examples/url_ref_smoke.rs"
