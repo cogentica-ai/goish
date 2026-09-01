@@ -2098,3 +2098,7 @@ path = "examples/binary_readwrite_ref_smoke.rs"
 [[example]]
 name = "math_special_ref_smoke"
 path = "examples/math_special_ref_smoke.rs"
+
+[[example]]
+name = "bits_ref_smoke"
+path = "examples/bits_ref_smoke.rs"
