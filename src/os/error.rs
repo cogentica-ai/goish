@@ -225,12 +225,11 @@ pub fn underlyingErrorIs(err: error, target: error) -> bool {
 /// Go: "underlyingError returns the underlying error for known os error
 /// types." A SHALLOW type switch — it peels exactly one layer, and only
 /// off the three types os itself builds.
-// goishlint:ignore GOISH018 LinkError — the `case *LinkError` arm is
-//     missing because goish has no `LinkError`: `os::Link`, `Symlink`
-//     and `Rename` all return a bare error today. Porting os/file.go's
-//     LinkError is its own unit; when it lands, its arm belongs here.
 pub fn underlyingError(err: error) -> error {
     if let Some(e) = errors::AsConcrete::<PathError>(&err) {
+        return e.Err.clone();
+    }
+    if let Some(e) = errors::AsConcrete::<super::LinkError>(&err) {
         return e.Err.clone();
     }
     if let Some(e) = errors::AsConcrete::<SyscallError>(&err) {

@@ -85,6 +85,97 @@ pub fn IsPathSeparator(c: u8) -> bool {
 mod error_go;
 pub use error_go::*;
 
+// go: sdk 1.25.5 os/file.go:103-108 LinkError
+/// Go: "LinkError records an error during a link or symlink or rename
+/// system call and the paths that caused it."
+///
+/// goish had no such type: `Link`, `Symlink` and `Rename` all returned
+/// `errors.New("link failed")` and friends, naming neither path. Go's
+/// `underlyingError` has a `case *LinkError` arm precisely so that
+/// `os.IsExist` on a failed rename can see the EEXIST underneath.
+#[derive(Clone, Default)]
+pub struct LinkError {
+    pub Op: string,
+    pub Old: string,
+    pub New: string,
+    pub Err: error,
+}
+
+impl errors::ErrorTrait for LinkError {
+    // go: sdk 1.25.5 os/file.go:110-112 LinkError.Error
+    fn Error(&self) -> string {
+        // Go: e.Op + " " + e.Old + " " + e.New + ": " + e.Err.Error()
+        let mut out: Vec<u8> = Vec::new();
+        out.extend_from_slice(self.Op.as_bytes());
+        out.push(b' ');
+        out.extend_from_slice(self.Old.as_bytes());
+        out.push(b' ');
+        out.extend_from_slice(self.New.as_bytes());
+        out.extend_from_slice(b": ");
+        out.extend_from_slice(self.Err.Error().as_bytes());
+        return string::from_bytes(&out);
+    }
+
+    // go: sdk 1.25.5 os/file.go:114-116 LinkError.Unwrap
+    fn Unwrap(&self) -> error {
+        return self.Err.clone();
+    }
+}
+
+// go: none — goish idiom: Go writes `&PathError{Op: …, Path: name, Err:
+//     e}` inline at each call site because `e` is already an `error`
+//     there. goish holds a negative kernel return code instead, so the
+//     errno has to be rebuilt; doing that in one place keeps the
+//     fifteen call sites from each inventing their own text, which is
+//     how they came to say "chmod failed" in the first place.
+fn pathErr(op: &'static str, path: string, rc: i32) -> error {
+    return errors::Wrap(PathError {
+        Op: string::from_static(op),
+        Path: path,
+        Err: syscall::Errno(-rc).into(),
+    });
+}
+
+// go: none — goish idiom: goish's syscall wrappers return the raw
+//     kernel value, and its width varies with the call — `i32` from
+//     `Chdir`, `i64` from `Getdents64`, `isize` from `Read`. A negative
+//     one is `-errno`. This narrows whichever it is to the `i32` that
+//     `syscall::Errno` is declared over, in one place, so the twelve
+//     `fdErr` call sites do not each write a cast. Go has no
+//     counterpart: its syscall layer hands the caller an `error`.
+trait KernelRC {
+    fn rc(self) -> i32;
+}
+
+impl KernelRC for i32 {
+    // go: none — goish idiom: see the trait above.
+    fn rc(self) -> i32 {
+        return self;
+    }
+}
+impl KernelRC for i64 {
+    // go: none — goish idiom: see the trait above.
+    fn rc(self) -> i32 {
+        return self as i32; // goishlint:ignore GOISH005 - a kernel return code, not a Go value.
+    }
+}
+impl KernelRC for isize {
+    // go: none — goish idiom: see the trait above.
+    fn rc(self) -> i32 {
+        return self as i32; // goishlint:ignore GOISH005 - a kernel return code, not a Go value.
+    }
+}
+
+// go: none — goish idiom: the two-path form of `pathErr` above.
+fn linkErr(op: &'static str, old: string, new: string, rc: i32) -> error {
+    return errors::Wrap(LinkError {
+        Op: string::from_static(op),
+        Old: old,
+        New: new,
+        Err: syscall::Errno(-rc).into(),
+    });
+}
+
 // ─── FileInfo (alias + concrete) ──────────────────────────────────────
 //
 // Go: `os.FileInfo` is an exact type alias for `fs.FileInfo`
@@ -356,8 +447,42 @@ pub fn Lstat<N: Into<string>>(name: N) -> (FileInfoData, error) {
     (fileinfo_from_stat(base, &st), nil)
 }
 
-/// `(*File).Stat()` (os/file.go:432) — fstat the open fd.
 impl File {
+    // go: sdk 1.25.5 os/file.go:469-479 File.wrapErr
+    /// Go: every `*File` method routes its error through here, so the
+    /// caller gets `read /etc/passwd: bad file descriptor` and not a
+    /// bare errno. goish's methods returned `errors.New("read failed")`
+    /// and the bare `ErrClosed` sentinel — no path, no errno, nothing
+    /// `errors::As` could inspect.
+    ///
+    /// Go's `poll.ErrFileClosing → ErrClosed` remap has no counterpart
+    /// here: goish has no poller, and a closed `File` is `fd < 0`,
+    /// which [`fdErr`](File::fdErr) turns into `ErrClosed` directly.
+    fn wrapErr(&self, op: &'static str, err: error) -> error {
+        // Go: if err == nil || err == io.EOF { return err }
+        if err.IsNil() || err == io::EOF {
+            return err;
+        }
+        return errors::Wrap(PathError {
+            Op: string::from_static(op),
+            Path: self.name.clone(),
+            Err: err,
+        });
+    }
+
+    // go: none — goish idiom: Go's `*File` methods get their error from
+    //     `internal/poll`, which reports a closed descriptor as
+    //     `ErrFileClosing` and everything else as an errno. goish calls
+    //     the kernel directly and marks a closed file with `fd < 0`, so
+    //     the same two cases are decided here.
+    fn fdErr<R: KernelRC>(&self, op: &'static str, rc: R) -> error {
+        if self.fd < 0 {
+            return self.wrapErr(op, ErrClosed.into());
+        }
+        return self.wrapErr(op, syscall::Errno(-rc.rc()).into());
+    }
+
+    /// `(*File).Stat()` (os/file.go:432) — fstat the open fd.
     pub fn Stat(&self) -> (FileInfoData, error) {
         let mut st = syscall::Stat_t::default();
         let rc = syscall::Fstat(self.fd, &mut st);
@@ -370,7 +495,7 @@ impl File {
                     mod_time: crate::time::Time::default(),
                     is_dir: false,
                 },
-                errors::New(string("fstat failed")),
+                self.fdErr("stat", rc),
             );
         }
         let base = base_name(&self.name);
@@ -395,7 +520,7 @@ impl File {
             if got < 0 {
                 return (
                     slice::<string>::__from_vec(names),
-                    errors::New(string("readdir failed")),
+                    self.fdErr("readdirent", got),
                 );
             }
             if got == 0 {
@@ -431,7 +556,7 @@ impl File {
     pub fn Seek(&self, offset: int, whence: int) -> (int, error) {
         let rc = syscall::Lseek(self.fd, offset, whence as i32);
         if rc < 0 {
-            return (0, errors::New(string("seek failed")));
+            return (0, self.fdErr("seek", rc));
         }
         (rc as int, nil)
     }
@@ -637,7 +762,7 @@ pub fn Chdir<N: Into<string>>(name: N) -> error {
     buf.push(0);
     let rc = syscall::Chdir(buf.as_ptr());
     if rc < 0 {
-        return errors::New(string("chdir failed"));
+        return pathErr("chdir", name, rc);
     }
     nil
 }
@@ -660,7 +785,7 @@ pub fn Chmod<N: Into<string>, M: Into<FileMode>>(name: N, mode: M) -> error {
     let rc = syscall::Chmod(buf.as_ptr(), mode.0 & 0o7777);
     if rc < 0 {
         // Go: return &PathError{Op: "chmod", Path: name, Err: e}
-        return errors::New(string("chmod failed"));
+        return pathErr("chmod", name, rc);
     }
     nil
 }
@@ -680,7 +805,7 @@ pub fn Symlink<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> erro
     let rc = syscall::Symlink(old_buf.as_ptr(), new_buf.as_ptr());
     if rc < 0 {
         // Go: return &LinkError{"symlink", oldname, newname, e}
-        return errors::New(string("symlink failed"));
+        return linkErr("symlink", oldname, newname, rc);
     }
     nil
 }
@@ -704,7 +829,9 @@ pub fn Readlink<N: Into<string>>(name: N) -> (string, error) {
         let n = syscall::Readlink(buf.as_ptr(), b.as_mut_ptr(), len_);
         if n < 0 {
             // Go: return "", &PathError{Op: "readlink", Path: name, Err: e}
-            return (string::new(), errors::New(string("readlink failed")));
+            // `n` is the raw kernel return, negated into an errno.
+            let e = n as i32; // goishlint:ignore GOISH005 - a kernel return code, not a Go value.
+            return (string::new(), pathErr("readlink", name, e));
         }
         let nu = n as usize;
         // Go: if n < len { return string(b[0:n]), nil }
@@ -773,7 +900,7 @@ pub fn Chtimes<N: Into<string>>(
     //         return &PathError{Op: "chtimes", Path: name, Err: e} }
     let r = syscall::Utimensat(syscall::AT_FDCWD, buf.as_ptr(), utimes.as_ptr(), 0);
     if r < 0 {
-        return errors::New(string("chtimes failed"));
+        return pathErr("chtimes", name, r);
     }
     nil
 }
@@ -789,7 +916,13 @@ pub fn Rename<O: Into<string>, N: Into<string>>(oldpath: O, newpath: N) -> error
     // Go: fi, err := Lstat(newname); if err == nil && fi.IsDir() { return &LinkError{...EEXIST} }
     let (fi, e) = Lstat(newpath.clone());
     if e.IsNil() && fi.IsDir() {
-        return errors::New(string("rename: newname is a directory"));
+        // Go: return &LinkError{"rename", oldname, newname, syscall.EEXIST}
+        return errors::Wrap(LinkError {
+            Op: string::from_static("rename"),
+            Old: oldpath,
+            New: newpath,
+            Err: syscall::EEXIST.into(),
+        });
     }
     // Go: err = ignoringEINTR(func() error { return syscall.Rename(oldname, newname) })
     let mut old_buf: Vec<u8> = Vec::with_capacity(oldpath.Len() as usize + 1);
@@ -800,7 +933,7 @@ pub fn Rename<O: Into<string>, N: Into<string>>(oldpath: O, newpath: N) -> error
     new_buf.push(0);
     let rc = syscall::Rename(old_buf.as_ptr(), new_buf.as_ptr());
     if rc < 0 {
-        return errors::New(string("rename failed"));
+        return linkErr("rename", oldpath, newpath, rc);
     }
     nil
 }
@@ -819,7 +952,7 @@ pub fn Link<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> error {
     new_buf.push(0);
     let rc = syscall::Link(old_buf.as_ptr(), new_buf.as_ptr());
     if rc < 0 {
-        return errors::New(string("link failed"));
+        return linkErr("link", oldname, newname, rc);
     }
     nil
 }
@@ -834,7 +967,7 @@ pub fn Truncate<N: Into<string>>(name: N, size: int) -> error {
     buf.push(0);
     let rc = syscall::Truncate(buf.as_ptr(), size);
     if rc < 0 {
-        return errors::New(string("truncate failed"));
+        return pathErr("truncate", name, rc);
     }
     nil
 }
@@ -850,7 +983,7 @@ pub fn Chown<N: Into<string>>(name: N, uid: int, gid: int) -> error {
     buf.push(0);
     let rc = syscall::Chown(buf.as_ptr(), uid as i32, gid as i32);
     if rc < 0 {
-        return errors::New(string("chown failed"));
+        return pathErr("chown", name, rc);
     }
     nil
 }
@@ -865,7 +998,7 @@ pub fn Lchown<N: Into<string>>(name: N, uid: int, gid: int) -> error {
     buf.push(0);
     let rc = syscall::Lchown(buf.as_ptr(), uid as i32, gid as i32);
     if rc < 0 {
-        return errors::New(string("lchown failed"));
+        return pathErr("lchown", name, rc);
     }
     nil
 }
@@ -1300,7 +1433,7 @@ impl File {
         let old_fd = self.fd;
         self.fd = -1;
         if rc < 0 {
-            errors::New("close failed")
+            self.fdErr("close", rc)
         } else {
             let _ = old_fd;
             nil
@@ -1311,11 +1444,11 @@ impl File {
     /// if the underlying fsync syscall fails.
     pub fn Sync(&mut self) -> error {
         if self.fd < 0 {
-            return errors::New("file already closed");
+            return self.wrapErr("sync", ErrClosed.into());
         }
         let rc = unsafe { syscall::syscall1(syscall::SYS_FSYNC, self.fd as usize) };
         if rc < 0 {
-            errors::New("fsync failed")
+            self.fdErr("sync", rc)
         } else {
             nil
         }
@@ -1325,13 +1458,13 @@ impl File {
     /// Does not change the current file offset.
     pub fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
         if self.fd < 0 {
-            return (0, ErrClosed.into());
+            return (0, self.wrapErr("read", ErrClosed.into()));
         }
         let len = p.len();
         let ptr = p.as_mut_ptr();
         let n = syscall::Pread64(self.fd, ptr, len, off);
         if n < 0 {
-            (0, errors::New("read failed"))
+            (0, self.fdErr("read", n))
         } else if n == 0 {
             (0, io::EOF.into())
         } else {
@@ -1343,11 +1476,11 @@ impl File {
     /// Does not change the current file offset.
     pub fn WriteAt(&mut self, p: slice<byte>, off: i64) -> (int, error) {
         if self.fd < 0 {
-            return (0, ErrClosed.into());
+            return (0, self.wrapErr("write", ErrClosed.into()));
         }
         let n = syscall::Pwrite64(self.fd, p.as_ptr(), p.len(), off);
         if n < 0 {
-            (0, errors::New("write failed"))
+            (0, self.fdErr("write", n))
         } else {
             (n as int, nil)
         }
@@ -1356,11 +1489,11 @@ impl File {
     /// `f.Truncate(size)` — truncate file to given size.
     pub fn Truncate(&mut self, size: int) -> error {
         if self.fd < 0 {
-            return ErrClosed.into();
+            return self.wrapErr("truncate", ErrClosed.into());
         }
         let rc = syscall::Ftruncate(self.fd, size as i64);
         if rc < 0 {
-            errors::New("truncate failed")
+            self.fdErr("truncate", rc)
         } else {
             nil
         }
@@ -1378,12 +1511,12 @@ impl File {
     /// the syscall faithfully.
     pub fn Chmod<M: Into<FileMode>>(&self, mode: M) -> error {
         if self.fd < 0 {
-            return ErrClosed.into();
+            return self.wrapErr("chmod", ErrClosed.into());
         }
         let mode: FileMode = mode.into();
         let rc = syscall::Fchmod(self.fd, mode.0 & 0o7777);
         if rc < 0 {
-            errors::New("fchmod failed")
+            self.fdErr("chmod", rc)
         } else {
             nil
         }
@@ -1402,7 +1535,7 @@ impl File {
     pub fn Write(&self, p: slice<byte>) -> (int, error) {
         let n = syscall::Write(self.fd, p.as_ptr(), p.len());
         if n < 0 {
-            (0, errors::New("write failed"))
+            (0, self.fdErr("write", n))
         } else {
             (n as int, nil)
         }
@@ -1415,7 +1548,7 @@ impl File {
         let ptr = p.as_mut_ptr();
         let n = syscall::Read(self.fd, ptr, len);
         if n < 0 {
-            (0, errors::New("read failed"))
+            (0, self.fdErr("read", n))
         } else if n == 0 {
             (0, io::EOF.into())
         } else {
