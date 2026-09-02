@@ -5,15 +5,15 @@
 // of golang.org/x/net/internal/socks. Names keep Go's `socks` prefix
 // because the bundler adds it and net/http refers to them that way.
 //
-// Two deliberate divergences, both forced by goish's `net` package and
-// both noted at the site:
-//   - `net::IP` is IPv4-only (no `To16`, mod.rs:675), so the
-//     ATYP=IPv6 branch of `connect` cannot construct an address. The
-//     branch is kept and returns the same "unknown address type"
-//     error Go returns for an unrepresentable IP.
-//   - `net::Conn` is a trait with concrete `TCPAddr` accessors rather
-//     than Go's `net.Addr` interface, so `socksConn` holds a
-//     `TCPConn` instead of embedding `net.Conn`.
+// One deliberate divergence, noted at the site: `net::Conn` is a trait
+// with concrete `TCPAddr` accessors rather than Go's `net.Addr`
+// interface, so `socksConn` holds a `TCPConn` instead of embedding
+// `net.Conn`.
+//
+// The ATYP=IPv6 branch used to be a second one: `net::IP` held only
+// four bytes, so an IPv6 target could neither be asked for nor read
+// back, and both directions returned "unknown address type". net/ip.go
+// is now ported and `To16` exists, so both directions are Go's.
 
 #![allow(non_snake_case, non_camel_case_types)]
 

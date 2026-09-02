@@ -2958,14 +2958,6 @@ pub(crate) const defaultMaxRSAKeySize: crate::types::int = 8192;
 /// Go: "hostnameInSNI converts name into an appropriate hostname for SNI.
 /// Literal IP addresses and absolute FQDNs are not permitted as SNI
 /// values. See RFC 6066, Section 3."
-///
-/// **Known gap, not a port deviation:** goish's `net::IP` is four bytes
-/// and `net::ParseIP` only parses IPv4, so an IPv6 literal — bracketed,
-/// zoned, or bare — is not recognised as an address and is returned as
-/// a hostname. Go returns "" for all three. The bracket-stripping and
-/// zone-stripping above are ported and do run; it is the final
-/// `ParseIP` test that cannot see the result. This closes when
-/// `net::ParseIP` grows IPv6.
 pub(crate) fn hostnameInSNI(name: crate::gostring::string) -> crate::gostring::string {
     // Go: host := name
     //     if len(host) > 0 && host[0] == '[' && host[len(host)-1] == ']' {

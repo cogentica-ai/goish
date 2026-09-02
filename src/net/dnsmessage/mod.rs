@@ -881,16 +881,22 @@ impl ResourceBody for SOAResource {
     fn pack_body(
         &self,
         msg: Vec<u8>,
-        _c: Option<&mut BTreeMap<String, u16>>,
+        mut c: Option<&mut BTreeMap<String, u16>>,
         co: usize,
     ) -> Result<Vec<u8>, error> {
+        // Go: msg, err := r.NS.pack(msg, compression, compressionOff)
+        // Both names take the compression map. SRV's Target is the one
+        // that must NOT (RFC 2782); SOA is not that case, and packing
+        // these two uncompressed makes every SOA answer 12 bytes longer
+        // than Go's for the same record.
         let msg = self
             .NS
-            .pack(msg, None, co)
+            .pack(msg, c.as_deref_mut(), co)
             .map_err(|e| nested_err("SOAResource.NS", e))?;
+        // Go: msg, err = r.MBox.pack(msg, compression, compressionOff)
         let msg = self
             .MBox
-            .pack(msg, None, co)
+            .pack(msg, c.as_deref_mut(), co)
             .map_err(|e| nested_err("SOAResource.MBox", e))?;
         let msg = pack_u32(msg, self.Serial);
         let msg = pack_u32(msg, self.Refresh);

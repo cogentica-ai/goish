@@ -2790,3 +2790,7 @@ path = "examples/html_ref_smoke.rs"
 [[example]]
 name = "net_ip_ref_smoke"
 path = "examples/net_ip_ref_smoke.rs"
+
+[[example]]
+name = "dnsmessage_ref_smoke"
+path = "examples/dnsmessage_ref_smoke.rs"
