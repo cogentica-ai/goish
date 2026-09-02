@@ -564,3 +564,11 @@ fn anyString(v: &GoishAny) -> crate::gostring::string {
     }
     return crate::gostring::string::from_static("<nil>");
 }
+
+// go: none — goish idiom: Go's `Value.Group()` unpacks the group out of
+//     the packed representation; goish stores it whole, and the
+//     handlers need it, so this is that accessor under a name that says
+//     it is goish's rather than Go's `Group`.
+pub fn __group_attrs(v: &Value) -> crate::goslice::slice<Attr> {
+    return group_of(v);
+}

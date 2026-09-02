@@ -30,18 +30,25 @@
 
 mod attr;
 mod handler;
+mod json_handler;
 mod level;
 mod logger;
 mod record;
+mod text_handler;
 mod value;
 pub use attr::{argsToAttrSlice, Any, Duration, Float64, Group, Int64, Time, Uint64};
-pub use handler::{LevelKey, MessageKey, SourceKey, TimeKey};
+pub use handler::{HandlerOptions, LevelKey, MessageKey, SourceKey, TimeKey};
+
+pub(crate) use json_handler::{__appendEscapedTo, appendJSONTime, appendJSONValue, safeSet};
+pub use json_handler::{JSONHandler, NewJSONHandler};
 pub use level::{Level, LevelDebug, LevelError, LevelInfo, LevelVar, LevelWarn, Leveler};
 pub use record::{argsToAttr, badKey};
+pub(crate) use text_handler::{appendTextValue, needsQuoting};
+pub use text_handler::{NewTextHandler, TextHandler};
 pub use value::{
-    appendAttrString, countEmptyGroups, isEmptyGroup, maxLogValues, AnyValue, BoolValue,
-    DurationValue, Float64Value, GroupValue, Int64Value, IntValue, LogValuer, LogValuerBox,
-    LogValuerValue, Resolve, StringValue, TimeValue, Uint64Value,
+    __group_attrs, appendAttrString, countEmptyGroups, isEmptyGroup, maxLogValues, AnyValue,
+    BoolValue, DurationValue, Float64Value, GroupValue, Int64Value, IntValue, LogValuer,
+    LogValuerBox, LogValuerValue, Resolve, StringValue, TimeValue, Uint64Value,
 };
 
 extern crate alloc;
