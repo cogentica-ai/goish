@@ -1043,6 +1043,40 @@ impl_format_for_unsigned!(u16: "uint16", u32: "uint32", u64: "uint", usize: "uin
 
 // Floats — route through strconv::FormatFloat.
 //
+
+// go: none — goish idiom: Go's `(*fmt).pad` counts the
+// field width with `utf8.RuneCount`. goish inlines the same count over
+// `&[u8]` rather than calling `utf8::RuneCount`, which takes an
+// `AsRef<[byte]>` and would have the fmt hot path build a `slice<byte>`
+// for every padded field.
+// Erroneous and short encodings count as one rune each, exactly as
+// Go's does — which is what makes it safe on whatever bytes a verb
+// happened to produce.
+fn rune_count(b: &[u8]) -> usize {
+    let mut n = 0usize;
+    let mut i = 0usize;
+    while i < b.len() {
+        let c = b[i];
+        if c < 0x80 {
+            i += 1;
+        } else {
+            // Width of the encoding, or 1 for an invalid leading byte.
+            let size = if c < 0xC0 {
+                1
+            } else if c < 0xE0 {
+                2
+            } else if c < 0xF0 {
+                3
+            } else {
+                4
+            };
+            i += size;
+        }
+        n += 1;
+    }
+    return n;
+}
+
 // Go: "For floating-point values, width sets the minimum width of the
 // field and precision sets the number of places after the decimal
 // point, if appropriate. For example %6.2f prints 123.45. The default
@@ -1541,7 +1575,13 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
                     }
                 }
 
-                let pad_count = width.saturating_sub(bytes.len());
+                // Go's `(*fmt).pad`: `width := f.wid - utf8.RuneCount(b)`.
+                // The field width is counted in RUNES, not bytes — so
+                // "%-8s" of "日本語" pads by five, not by none. goish
+                // subtracted the BYTE length, which silently produced
+                // short fields for every non-ASCII value in every
+                // padded column in the library.
+                let pad_count = width.saturating_sub(rune_count(&bytes));
                 // Go zero-pads only for numeric verbs, and the zeros go
                 // AFTER the sign — "%05d" of -42 is "-0042", not
                 // "00-42". For the INTEGER verbs the padding was just

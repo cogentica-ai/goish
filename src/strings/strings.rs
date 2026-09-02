@@ -557,9 +557,32 @@ pub fn IndexByte<S: Into<string>>(s: S, c: byte) -> int {
 // go: sdk 1.25.5 strings/strings.go:127-197 IndexRune
 pub fn IndexRune<S: Into<string>>(s: S, r: rune) -> int {
     let s = s.into();
+    // Go: case 0 <= r && r < utf8.RuneSelf: return IndexByte(s, byte(r))
     if r >= 0 && touint32(r) < touint32(utf8::RuneSelf) {
         return index_byte(s.as_bytes(), tobyte(r));
     }
+    // Go: case r == utf8.RuneError:
+    //         for i, r := range s { if r == utf8.RuneError { return i } }
+    //         return -1
+    //
+    // Searching for the ENCODED U+FFFD bytes is not the same question:
+    // ranging over a string yields RuneError for a genuine U+FFFD *and*
+    // for any invalid byte, so this is how a caller asks "where does
+    // this string stop being valid UTF-8?". Encoding-only search
+    // answered -1 for every malformed input, i.e. "it is all fine".
+    if r == utf8::RuneError {
+        let sb = s.as_bytes();
+        let mut i = 0usize;
+        while i < sb.len() {
+            let (c, w) = utf8::DecodeRune(&sb[i..]);
+            if c == utf8::RuneError {
+                return toint(i);
+            }
+            i += if w <= 0 { 1 } else { w as usize };
+        }
+        return -1;
+    }
+    // Go: case !utf8.ValidRune(r): return -1
     if !utf8::ValidRune(r) {
         return -1;
     }
@@ -889,16 +912,37 @@ pub fn ContainsFunc<S: Into<string>, F: Fn(rune) -> bool>(s: S, f: F) -> bool {
 pub fn IndexAny<S1: Into<string>, S2: Into<string>>(s: S1, chars: S2) -> int {
     let s = s.into();
     let chars = chars.into();
-    let cb = chars.as_bytes();
-    if cb.is_empty() {
+    // Go: if chars == "" { return -1 }  — "Avoid scanning all of s."
+    if chars.Len() == 0 {
         return -1;
     }
-    for (i, &b) in s.as_bytes().iter().enumerate() {
-        for &c in cb {
-            if b == c {
-                return toint(i);
-            }
+    // Go: if len(chars) == 1 { r := rune(chars[0]); if r >= utf8.RuneSelf
+    //     { r = utf8.RuneError }; return IndexRune(s, r) }
+    let cb = chars.as_bytes();
+    if cb.len() == 1 {
+        let mut r = torune(cb[0]);
+        if r >= torune(utf8::RuneSelf) {
+            r = utf8::RuneError;
         }
+        return IndexRune(s, r);
+    }
+    // Go: for i, c := range s { if IndexRune(chars, c) >= 0 { return i } }
+    //
+    // The cutset is a set of RUNES. Comparing raw bytes instead — which
+    // is what this did — matches a shared lead or continuation byte
+    // between two different runes, so "日本語" against the cutset "本語"
+    // answered 0: 日 and 本 both begin 0xE6. That index is not even a
+    // rune boundary, so a caller slicing at it splits a character in
+    // half. Go's ASCII fast path is an optimisation with identical
+    // semantics and is not reproduced.
+    let sb = s.as_bytes();
+    let mut i = 0usize;
+    while i < sb.len() {
+        let (c, w) = utf8::DecodeRune(&sb[i..]);
+        if IndexRune(chars.clone(), c) >= 0 {
+            return toint(i);
+        }
+        i += if w <= 0 { 1 } else { w as usize };
     }
     return -1;
 }
@@ -908,18 +952,35 @@ pub fn IndexAny<S1: Into<string>, S2: Into<string>>(s: S1, chars: S2) -> int {
 pub fn LastIndexAny<S1: Into<string>, S2: Into<string>>(s: S1, chars: S2) -> int {
     let s = s.into();
     let chars = chars.into();
-    let cb = chars.as_bytes();
-    if cb.is_empty() {
+    // Go: if chars == "" { return -1 }
+    if chars.Len() == 0 {
         return -1;
     }
     let sb = s.as_bytes();
+    // Go: if len(s) == 1 { rc := rune(s[0]); if rc >= utf8.RuneSelf
+    //     { rc = utf8.RuneError }; if IndexRune(chars, rc) >= 0 { return 0 };
+    //     return -1 }
+    if sb.len() == 1 {
+        let mut rc = torune(sb[0]);
+        if rc >= torune(utf8::RuneSelf) {
+            rc = utf8::RuneError;
+        }
+        if IndexRune(chars, rc) >= 0 {
+            return 0;
+        }
+        return -1;
+    }
+    // Go: for i := len(s); i > 0; { r, size := utf8.DecodeLastRuneInString(s[:i])
+    //     i -= size; if IndexRune(chars, r) >= 0 { return i } }
+    //
+    // Runes, not bytes — see the note on IndexAny.
     let mut i = sb.len();
     while i > 0 {
-        i -= 1;
-        for &c in cb {
-            if sb[i] == c {
-                return toint(i);
-            }
+        let (r, size) = utf8::DecodeLastRune(&sb[..i]);
+        let step = if size <= 0 { 1 } else { size as usize };
+        i -= step;
+        if IndexRune(chars.clone(), r) >= 0 {
+            return toint(i);
         }
     }
     return -1;
@@ -1238,6 +1299,13 @@ pub fn SplitAfterN<S1: Into<string>, S2: Into<string>>(s: S1, sep: S2, n: int) -
     let s = s.into();
     let sep = sep.into();
     let mut out: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+    // Go: genSplit's first act — `if n == 0 { return nil }`. Zero is a
+    // cap of zero, not "unlimited": the guards below all read `n > 0`,
+    // so a zero fell through to the unlimited path and returned every
+    // piece to a caller that had asked for none.
+    if n == 0 {
+        return slice::__from_vec(out);
+    }
     if sep.Len() == 0 {
         let bytes = s.as_bytes();
         let mut i = 0;
