@@ -1102,6 +1102,7 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         Field(string, string),
     }
     let mut count = 0;
+    let mut host_seen = false;
     loop {
         let item = match read_line_with(br, max_line, |line| {
             if line.is_empty() {
@@ -1127,12 +1128,45 @@ pub(crate) fn __read_request_server<R: io::Reader>(
                 }
                 // Special-case Host: into req.Host, not into Header.
                 if name.as_bytes() == b"Host" {
+                    // Go (request.go:1138): `if len(req.Header["Host"]) > 1
+                    // { return nil, fmt.Errorf("too many Host headers") }`.
+                    //
+                    // goish kept the LAST one, which is a host-confusion
+                    // primitive: a front end that routes on the first
+                    // Host and a back end that reads the last can be made
+                    // to disagree about which site a request is for. Go
+                    // refuses the request rather than choosing, because
+                    // choosing is what lets two hops choose differently.
+                    if host_seen {
+                        return (req, errors::New(string("too many Host headers")));
+                    }
+                    host_seen = true;
                     req.Host = value;
                 } else {
                     req.Header.__add_canonical(name, value);
                 }
             }
         }
+    }
+
+    // Go (request.go:1142-1152): "RFC 7230, section 5.3: Must treat
+    //     GET /index.html HTTP/1.1
+    //     Host: www.google.com
+    // and
+    //     GET http://www.google.com/index.html HTTP/1.1
+    //     Host: doesntmatter
+    // the same. In the second case, any Host line is ignored."
+    //     req.Host = req.URL.Host
+    //     if req.Host == "" { req.Host = req.Header.get("Host") }
+    //
+    // goish had the precedence backwards: the Host HEADER won over the
+    // absolute-form request target. That is the other half of the
+    // host-confusion problem above — a request whose line says one site
+    // and whose header says another was routed by the header here and
+    // by the line in Go, so a proxy and this server could be made to
+    // disagree about the destination.
+    if req.URL.Host.Len() != 0 {
+        req.Host = req.URL.Host.clone();
     }
 
     // Head fully parsed — lift the connReader's header-byte limit

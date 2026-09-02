@@ -72,8 +72,11 @@ pub struct Cookie {
 }
 
 impl Default for Cookie {
-    // go: none — goish-only: Go's zero value. SameSite must default to
-    // SameSiteDefaultMode (iota+1 == 1), not to a derived zero.
+    // go: none — goish-only: Go's zero value. `SameSiteDefaultMode` is
+    // `iota + 1`, so the zero value of the field is 0 and NOT
+    // DefaultMode; `readSetCookies` only assigns when the attribute is
+    // present. Defaulting to DefaultMode here made every cookie look as
+    // though it had asked for it.
     fn default() -> Self {
         Cookie {
             Name: string::new(),
@@ -86,7 +89,7 @@ impl Default for Cookie {
             MaxAge: 0,
             Secure: false,
             HttpOnly: false,
-            SameSite: SameSite::DefaultMode,
+            SameSite: SameSite::Unset,
             Partitioned: false,
             Raw: string::new(),
             Unparsed: slice::<string>::__from_vec(Vec::new()),
@@ -113,6 +116,12 @@ impl Cookie {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(i32)]
 pub enum SameSite {
+    /// Go's ZERO value. `SameSiteDefaultMode` is `iota + 1`, so a
+    /// `Cookie` that never mentioned SameSite carries 0 — which is not
+    /// DefaultMode, and is how a caller tells "the attribute was
+    /// absent" from "the attribute said default". goish had no way to
+    /// represent it, so every parsed cookie claimed DefaultMode.
+    Unset = 0,
     DefaultMode = 1,
     LaxMode = 2,
     StrictMode = 3,
@@ -388,7 +397,11 @@ impl Cookie {
         }
         // Go: switch c.SameSite { case SameSiteDefaultMode: ... }
         match self.SameSite {
-            SameSite::DefaultMode => {} // Go: skip — default mode = no attribute
+            // Go: `case SameSiteDefaultMode:` — "Skip, default mode is
+            // obtained by not emitting the attribute." The zero value
+            // falls through Go's switch untouched and emits nothing
+            // either, so both are silent here.
+            SameSite::Unset | SameSite::DefaultMode => {}
             SameSite::NoneMode => {
                 let _ = b.WriteString("; SameSite=None");
             }
