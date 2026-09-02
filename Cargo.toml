@@ -2742,3 +2742,7 @@ path = "examples/net_mac_ref_smoke.rs"
 [[example]]
 name = "sync_map_ref_smoke"
 path = "examples/sync_map_ref_smoke.rs"
+
+[[example]]
+name = "sync_once_ref_smoke"
+path = "examples/sync_once_ref_smoke.rs"

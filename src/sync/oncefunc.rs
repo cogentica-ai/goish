@@ -1,6 +1,16 @@
-// sync::OnceFunc / OnceValue / OnceValues — Go 1.21+ helpers.
+// go: file sync/oncefunc.go decls: OnceFunc, OnceValue, OnceValues
 //
-// Reference: /share/go/src/sync/oncefunc.go.
+// oncefunc.go — the Go 1.21+ once helpers.
+//
+// This file carried NO provenance anchors, like the rest of src/sync/.
+//
+// goish deviation: Go's wrappers RE-PANIC with the original value on
+// every later call if f panicked, and clear their captured f so it can
+// be collected. goish's runtime does not unwind on panic — a panicking
+// goroutine runs its defers and dies — so there is no panic to capture
+// and replay, and that half has no counterpart here. The
+// exactly-once and value-caching halves are diffed against Go in
+// examples/sync_once_ref_smoke.rs.
 //
 //   Go                                       goish
 //   ─────────────────────────────────        ──────────────────────────────────
@@ -29,10 +39,9 @@ use alloc::sync::Arc;
 
 use super::{Mutex, Once};
 
-/// `sync.OnceFunc(f)` (oncefunc.go:11) — return a closure that calls
-/// `f` exactly once across all callers, racing them on the underlying
-/// `Once`. Caller-side ergonomics match Go: the returned closure can
-/// be passed around and invoked from any number of goroutines.
+// go: sdk 1.25.5 sync/oncefunc.go:11-44 OnceFunc
+/// Go: "OnceFunc returns a function that invokes f only once. The
+/// returned function may be called concurrently."
 pub fn OnceFunc<F>(f: F) -> impl Fn() + Send + Sync + 'static
 where
     F: FnOnce() + Send + 'static,
@@ -56,10 +65,13 @@ where
     }
 }
 
-/// `sync.OnceValues(f)` (oncefunc.go:80) — return a closure that
-/// invokes `f` exactly once and replays the produced `(T1, T2)`
-/// pair on every subsequent call. Both `T1: Clone` and `T2: Clone`
-/// so callers each receive an owned copy.
+// go: sdk 1.25.5 sync/oncefunc.go:80-113 OnceValues
+/// Go: "OnceValues returns a function that invokes f only once and
+/// returns the values returned by f. The returned function may be
+/// called concurrently."
+///
+/// goish adds `T1: Clone`/`T2: Clone` so each caller receives an owned
+/// copy of the cached pair, where Go hands back the same values.
 pub fn OnceValues<T1, T2, F>(f: F) -> impl Fn() -> (T1, T2) + Send + Sync + 'static
 where
     T1: Clone + Send + 'static,
@@ -94,10 +106,14 @@ where
     }
 }
 
-/// `sync.OnceValue(f)` (oncefunc.go:46) — return a closure that
-/// invokes `f` exactly once and replays the produced value on every
-/// subsequent call. `T: Clone` so callers can each receive an owned
-/// copy of the cached result.
+// go: sdk 1.25.5 sync/oncefunc.go:46-78 OnceValue
+/// Go: "OnceValue returns a function that invokes f only once and
+/// returns the value returned by f. The returned function may be called
+/// concurrently."
+///
+/// The cached value is held in an `Option`, not compared against the
+/// zero value — a function that legitimately returns 0 must still be
+/// computed exactly once.
 pub fn OnceValue<T, F>(f: F) -> impl Fn() -> T + Send + Sync + 'static
 where
     T: Clone + Send + 'static,
