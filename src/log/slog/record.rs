@@ -1,4 +1,4 @@
-// go: file log/slog/record.go decls: argsToAttr, Record.Clone, Record.NumAttrs, Record.Attrs, Record.AddAttrs, Record.Add
+// go: file log/slog/record.go decls: argsToAttr, Source, Source.group, Source.isEmpty, Record.Source, Record.Clone, Record.NumAttrs, Record.Attrs, Record.AddAttrs, Record.Add
 //
 // log/slog/record.go — the loose-argument pairing behind the `...any`
 // logging form.
@@ -154,5 +154,95 @@ impl super::Record {
             out.push(a);
         }
         self.attrs = crate::goslice::slice::__from_vec(out);
+    }
+}
+
+// ─── Source (record.go:184) ─────────────────────────────────────────
+
+// go: sdk 1.25.5 log/slog/record.go:184-194 Source
+/// Go: "Source describes the location of a line of source code."
+///
+/// This is what `HandlerOptions.AddSource` puts in the output. It was
+/// the one part of the handler port left as a stated no-op, because it
+/// needs a PC resolved to a function, file and line — and goish has a
+/// real symboliser (`runtime::CallersFrames`), so it is portable after
+/// all.
+#[derive(Clone, Default, PartialEq)]
+pub struct Source {
+    /// Go: "Function is the package path-qualified function name
+    /// containing the source line. … This may be the empty string if
+    /// not known."
+    pub Function: crate::gostring::string,
+    /// Go: "File and Line are the file name and line number (1-based) of
+    /// the source line. These may be the empty string and zero,
+    /// respectively, if not known."
+    pub File: crate::gostring::string,
+    pub Line: crate::types::int,
+}
+
+impl crate::reflect::Reflect for Source {
+    // go: none — goish idiom: minimal descriptor so a `Source` can live
+    //     in a `goany::Any`, which requires Reflect. The handlers reach
+    //     it by downcast, not by walking it.
+    fn __reflect_type() -> crate::reflect::Type {
+        return crate::reflect::Type::__new(crate::reflect::Kind::Struct, "Source", &[]);
+    }
+    // go: none — goish idiom: as `__reflect_type`.
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        return crate::reflect::Value::Struct {
+            ty: <Source as crate::reflect::Reflect>::__reflect_type(),
+            fields: alloc::vec![],
+        };
+    }
+}
+
+impl Source {
+    // go: sdk 1.25.5 log/slog/record.go:200-212 Source.group
+    /// Go: "group returns the non-zero fields of s as a slice of Attrs.
+    /// It is similar to a LogValue method, but we don't want Source to
+    /// implement LogValuer because it would be resolved before
+    /// PC-to-Source translation."
+    pub(crate) fn group(&self) -> super::Value {
+        let mut as_: alloc::vec::Vec<Attr> = alloc::vec::Vec::new();
+        if self.Function.Len() != 0 {
+            as_.push(super::String("function", self.Function.clone()));
+        }
+        if self.File.Len() != 0 {
+            as_.push(super::String("file", self.File.clone()));
+        }
+        if self.Line != 0 {
+            as_.push(super::Int("line", self.Line));
+        }
+        return super::GroupValue(crate::goslice::slice::__from_vec(as_));
+    }
+
+    // go: sdk 1.25.5 log/slog/record.go:215-215 Source.isEmpty
+    /// Go: `func (s *Source) isEmpty() bool { return s == nil || *s == Source{} }`
+    pub(crate) fn isEmpty(&self) -> bool {
+        return self.Function.Len() == 0 && self.File.Len() == 0 && self.Line == 0;
+    }
+}
+
+impl super::Record {
+    // go: sdk 1.25.5 log/slog/record.go:220-232 Record.Source
+    /// Go: "Source returns a new Source for the log event using r's PC.
+    /// If the PC field is zero, meaning the Record was created without
+    /// the necessary information or the location is unavailable, then
+    /// nil is returned."
+    ///
+    /// goish returns `Option<Source>` where Go returns a nil-able
+    /// pointer.
+    pub fn Source(&self) -> Option<Source> {
+        if self.PC == 0 {
+            return None;
+        }
+        let mut fs =
+            crate::runtime::CallersFrames(crate::goslice::slice::__from_vec(alloc::vec![self.PC]));
+        let (f, _) = fs.Next();
+        return Some(Source {
+            Function: f.Function,
+            File: f.File,
+            Line: f.Line,
+        });
     }
 }

@@ -250,11 +250,15 @@ impl commonHandler {
                     Value: super::StringValue(r.Level.String()),
                 });
             }
-            // Go: source — `h.opts.AddSource` builds a *Source from the
-            // record's PC. goish's Record carries the PC but the
-            // package has no `Source` type yet, so AddSource is
-            // accepted and has no effect; stated rather than silently
-            // dropped.
+            // Go: source
+            if self.opts.AddSource {
+                // Go: src := r.Source(); if src == nil { src = &Source{} }
+                let src = r.Source().unwrap_or_default();
+                st.appendAttr(&super::Any(
+                    string::from_bytes(super::SourceKey.as_bytes()),
+                    crate::goany::Any::new(src),
+                ));
+            }
 
             // Go: msg
             if rep.is_none() {
@@ -395,8 +399,27 @@ impl<'a> handleState<'a> {
         if a.isEmpty() {
             return false;
         }
-        // Go's `Source` special case has no counterpart here: the
-        // package has no Source type yet, so there is nothing to match.
+        // Go: "Special case: Source." An `any`-kinded Source renders as
+        // a nested group in JSON and as "file:line" in text, and an
+        // EMPTY one is elided entirely rather than printed as "{}" or
+        // ":0".
+        if a.Value.Kind() == super::KindAny {
+            let src = a.Value.Any().As::<super::Source>().cloned();
+            if let Some(src) = src {
+                if src.isEmpty() {
+                    return false;
+                }
+                if self.h.json {
+                    a.Value = src.group();
+                } else {
+                    a.Value = super::StringValue(crate::fmt::Sprintf!(
+                        "%s:%d",
+                        src.File.clone(),
+                        src.Line
+                    ));
+                }
+            }
+        }
         if a.Value.Kind() == super::KindGroup {
             let attrs = super::__group_attrs(&a.Value);
             // Go: "Output only non-empty groups."

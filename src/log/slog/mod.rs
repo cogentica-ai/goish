@@ -42,7 +42,7 @@ pub use handler::{HandlerOptions, LevelKey, MessageKey, SourceKey, TimeKey};
 pub(crate) use json_handler::{__appendEscapedTo, appendJSONTime, appendJSONValue, safeSet};
 pub use json_handler::{JSONHandler, NewJSONHandler};
 pub use level::{Level, LevelDebug, LevelError, LevelInfo, LevelVar, LevelWarn, Leveler};
-pub use record::{argsToAttr, badKey};
+pub use record::{argsToAttr, badKey, Source};
 pub(crate) use text_handler::{appendTextValue, needsQuoting};
 pub use text_handler::{NewTextHandler, TextHandler};
 pub use value::{

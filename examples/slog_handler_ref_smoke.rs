@@ -45,7 +45,7 @@ use alloc::vec::Vec;
 use goish::goslice::slice;
 use goish::gostring::string;
 use goish::log::slog;
-use goish::types::{byte, int};
+use goish::types::{byte, int, uintptr};
 use goish::{fmt, syscall};
 
 fn s(x: &str) -> string {
@@ -95,6 +95,27 @@ fn rec(msg: &str, level: slog::Level, attrs: &[slog::Attr]) -> slog::Record {
     return r;
 }
 
+fn opts_addsource() -> slog::HandlerOptions {
+    let mut o = slog::HandlerOptions::default();
+    o.AddSource = true;
+    return o;
+}
+fn opts_pin_source(src: Option<slog::Source>) -> slog::HandlerOptions {
+    let mut o = slog::HandlerOptions::default();
+    o.AddSource = true;
+    o.ReplaceAttr = Some(Arc::new(move |g: &[string], mut a: slog::Attr| {
+        if g.is_empty() && a.Key == s(slog::SourceKey) {
+            match &src {
+                None => return slog::Attr::default(),
+                Some(v) => {
+                    a.Value = slog::AnyValue(goish::goany::Any::new(v.clone()));
+                }
+            }
+        }
+        return a;
+    }));
+    return o;
+}
 fn opts_level_warn() -> slog::HandlerOptions {
     let mut o = slog::HandlerOptions::default();
     o.Level = Some(Arc::new(slog::LevelWarn));
@@ -981,6 +1002,305 @@ fn main() {
             "empty-msg json",
         );
     }
+
+    // 4. AddSource. The two handlers render a Source differently: text
+    //    flattens it to "file:line" — always both, so a Source with no
+    //    line prints "a.go:0" — while JSON nests it and OMITS the empty
+    //    fields. An empty Source is elided entirely rather than printed
+    //    as ":0" or "{}", which is also what a zero PC produces.
+    //
+    //    The real file and line differ between a Go build and a goish
+    //    one, so ReplaceAttr pins a fixed Source. That leaves the
+    //    handler's own conversion as the only thing under test.
+    {
+        let b = SharedBuf::new();
+        let h = slog::NewTextHandler(
+            b.clone(),
+            Some(opts_pin_source(Some(slog::Source {
+                Function: s("pkg.Fn"),
+                File: s("a.go"),
+                Line: 42,
+            }))),
+        );
+        let _ = h.Handle(
+            ctx.as_ref(),
+            slog::NewRecord(fixed(), slog::LevelInfo, "m", 1),
+        );
+        eq(
+            &mut failed,
+            b.take(),
+            "time=2024-01-02T03:04:05.123Z level=INFO source=a.go:42 msg=m\n",
+            "source full text",
+        );
+    }
+    {
+        let b = SharedBuf::new();
+        let h = slog::NewJSONHandler(
+            b.clone(),
+            Some(opts_pin_source(Some(slog::Source {
+                Function: s("pkg.Fn"),
+                File: s("a.go"),
+                Line: 42,
+            }))),
+        );
+        let _ = h.Handle(
+            ctx.as_ref(),
+            slog::NewRecord(fixed(), slog::LevelInfo, "m", 1),
+        );
+        eq(&mut failed, b.take(), "{\"time\":\"2024-01-02T03:04:05.123456789Z\",\"level\":\"INFO\",\"source\":{\"function\":\"pkg.Fn\",\"file\":\"a.go\",\"line\":42},\"msg\":\"m\"}\n", "source full json");
+    }
+    {
+        let b = SharedBuf::new();
+        let h = slog::NewTextHandler(
+            b.clone(),
+            Some(opts_pin_source(Some(slog::Source {
+                Function: s(""),
+                File: s("a.go"),
+                Line: 42,
+            }))),
+        );
+        let _ = h.Handle(
+            ctx.as_ref(),
+            slog::NewRecord(fixed(), slog::LevelInfo, "m", 1),
+        );
+        eq(
+            &mut failed,
+            b.take(),
+            "time=2024-01-02T03:04:05.123Z level=INFO source=a.go:42 msg=m\n",
+            "source no-function text",
+        );
+    }
+    {
+        let b = SharedBuf::new();
+        let h = slog::NewJSONHandler(
+            b.clone(),
+            Some(opts_pin_source(Some(slog::Source {
+                Function: s(""),
+                File: s("a.go"),
+                Line: 42,
+            }))),
+        );
+        let _ = h.Handle(
+            ctx.as_ref(),
+            slog::NewRecord(fixed(), slog::LevelInfo, "m", 1),
+        );
+        eq(&mut failed, b.take(), "{\"time\":\"2024-01-02T03:04:05.123456789Z\",\"level\":\"INFO\",\"source\":{\"file\":\"a.go\",\"line\":42},\"msg\":\"m\"}\n", "source no-function json");
+    }
+    {
+        let b = SharedBuf::new();
+        let h = slog::NewTextHandler(
+            b.clone(),
+            Some(opts_pin_source(Some(slog::Source {
+                Function: s(""),
+                File: s("a.go"),
+                Line: 0,
+            }))),
+        );
+        let _ = h.Handle(
+            ctx.as_ref(),
+            slog::NewRecord(fixed(), slog::LevelInfo, "m", 1),
+        );
+        eq(
+            &mut failed,
+            b.take(),
+            "time=2024-01-02T03:04:05.123Z level=INFO source=a.go:0 msg=m\n",
+            "source file-only text",
+        );
+    }
+    {
+        let b = SharedBuf::new();
+        let h = slog::NewJSONHandler(
+            b.clone(),
+            Some(opts_pin_source(Some(slog::Source {
+                Function: s(""),
+                File: s("a.go"),
+                Line: 0,
+            }))),
+        );
+        let _ = h.Handle(
+            ctx.as_ref(),
+            slog::NewRecord(fixed(), slog::LevelInfo, "m", 1),
+        );
+        eq(&mut failed, b.take(), "{\"time\":\"2024-01-02T03:04:05.123456789Z\",\"level\":\"INFO\",\"source\":{\"file\":\"a.go\"},\"msg\":\"m\"}\n", "source file-only json");
+    }
+    {
+        let b = SharedBuf::new();
+        let h = slog::NewTextHandler(
+            b.clone(),
+            Some(opts_pin_source(Some(slog::Source {
+                Function: s(""),
+                File: s(""),
+                Line: 42,
+            }))),
+        );
+        let _ = h.Handle(
+            ctx.as_ref(),
+            slog::NewRecord(fixed(), slog::LevelInfo, "m", 1),
+        );
+        eq(
+            &mut failed,
+            b.take(),
+            "time=2024-01-02T03:04:05.123Z level=INFO source=:42 msg=m\n",
+            "source line-only text",
+        );
+    }
+    {
+        let b = SharedBuf::new();
+        let h = slog::NewJSONHandler(
+            b.clone(),
+            Some(opts_pin_source(Some(slog::Source {
+                Function: s(""),
+                File: s(""),
+                Line: 42,
+            }))),
+        );
+        let _ = h.Handle(
+            ctx.as_ref(),
+            slog::NewRecord(fixed(), slog::LevelInfo, "m", 1),
+        );
+        eq(&mut failed, b.take(), "{\"time\":\"2024-01-02T03:04:05.123456789Z\",\"level\":\"INFO\",\"source\":{\"line\":42},\"msg\":\"m\"}\n", "source line-only json");
+    }
+    {
+        let b = SharedBuf::new();
+        let h = slog::NewTextHandler(
+            b.clone(),
+            Some(opts_pin_source(Some(slog::Source::default()))),
+        );
+        let _ = h.Handle(
+            ctx.as_ref(),
+            slog::NewRecord(fixed(), slog::LevelInfo, "m", 1),
+        );
+        eq(
+            &mut failed,
+            b.take(),
+            "time=2024-01-02T03:04:05.123Z level=INFO msg=m\n",
+            "source empty-source text",
+        );
+    }
+    {
+        let b = SharedBuf::new();
+        let h = slog::NewJSONHandler(
+            b.clone(),
+            Some(opts_pin_source(Some(slog::Source::default()))),
+        );
+        let _ = h.Handle(
+            ctx.as_ref(),
+            slog::NewRecord(fixed(), slog::LevelInfo, "m", 1),
+        );
+        eq(
+            &mut failed,
+            b.take(),
+            "{\"time\":\"2024-01-02T03:04:05.123456789Z\",\"level\":\"INFO\",\"msg\":\"m\"}\n",
+            "source empty-source json",
+        );
+    }
+    {
+        let b = SharedBuf::new();
+        let h = slog::NewTextHandler(b.clone(), Some(opts_pin_source(None)));
+        let _ = h.Handle(
+            ctx.as_ref(),
+            slog::NewRecord(fixed(), slog::LevelInfo, "m", 1),
+        );
+        eq(
+            &mut failed,
+            b.take(),
+            "time=2024-01-02T03:04:05.123Z level=INFO msg=m\n",
+            "source dropped text",
+        );
+    }
+    {
+        let b = SharedBuf::new();
+        let h = slog::NewJSONHandler(b.clone(), Some(opts_pin_source(None)));
+        let _ = h.Handle(
+            ctx.as_ref(),
+            slog::NewRecord(fixed(), slog::LevelInfo, "m", 1),
+        );
+        eq(
+            &mut failed,
+            b.take(),
+            "{\"time\":\"2024-01-02T03:04:05.123456789Z\",\"level\":\"INFO\",\"msg\":\"m\"}\n",
+            "source dropped json",
+        );
+    }
+    {
+        let b = SharedBuf::new();
+        let h = slog::NewTextHandler(b.clone(), Some(opts_addsource()));
+        let _ = h.Handle(
+            ctx.as_ref(),
+            slog::NewRecord(fixed(), slog::LevelInfo, "m", 0),
+        );
+        eq(
+            &mut failed,
+            b.take(),
+            "time=2024-01-02T03:04:05.123Z level=INFO msg=m\n",
+            "source zero-pc text",
+        );
+    }
+    {
+        let b = SharedBuf::new();
+        let h = slog::NewJSONHandler(b.clone(), Some(opts_addsource()));
+        let _ = h.Handle(
+            ctx.as_ref(),
+            slog::NewRecord(fixed(), slog::LevelInfo, "m", 0),
+        );
+        eq(
+            &mut failed,
+            b.take(),
+            "{\"time\":\"2024-01-02T03:04:05.123456789Z\",\"level\":\"INFO\",\"msg\":\"m\"}\n",
+            "source zero-pc json",
+        );
+    }
+    {
+        let b = SharedBuf::new();
+        let h = slog::NewTextHandler(b.clone(), Some(slog::HandlerOptions::default()));
+        let _ = h.Handle(
+            ctx.as_ref(),
+            slog::NewRecord(fixed(), slog::LevelInfo, "m", 1),
+        );
+        eq(
+            &mut failed,
+            b.take(),
+            "time=2024-01-02T03:04:05.123Z level=INFO msg=m\n",
+            "source addsource-off text",
+        );
+    }
+    {
+        let b = SharedBuf::new();
+        let h = slog::NewJSONHandler(b.clone(), Some(slog::HandlerOptions::default()));
+        let _ = h.Handle(
+            ctx.as_ref(),
+            slog::NewRecord(fixed(), slog::LevelInfo, "m", 1),
+        );
+        eq(
+            &mut failed,
+            b.take(),
+            "{\"time\":\"2024-01-02T03:04:05.123456789Z\",\"level\":\"INFO\",\"msg\":\"m\"}\n",
+            "source addsource-off json",
+        );
+    }
+    // Record::Source itself: None for a zero PC, and for a real one a
+    //    resolved frame — goish has a symboliser, so this is not a stub.
+    {
+        let r0 = slog::NewRecord(fixed(), slog::LevelInfo, "m", 0);
+        if r0.Source().is_some() {
+            fmt::Println!("[!!] Source() on a zero PC should be None");
+            failed += 1;
+        }
+        let mut pcs: slice<goish::types::uintptr> = goish::make!([]uintptr, 1);
+        goish::runtime::Callers(1, &mut pcs);
+        let r1 = slog::NewRecord(fixed(), slog::LevelInfo, "m", pcs[0]);
+        // A non-zero PC always yields a Source. Whether its File and
+        // Line are FILLED IN depends on the binary carrying a symbol
+        // table, and the release profile in Cargo.toml sets
+        // `strip = true` — so asserting they resolve would pass under
+        // `make e2e` (which builds debug) and fail under a release
+        // build, which is a property of the build and not of this port.
+        if r1.Source().is_none() {
+            fmt::Println!("[!!] Source() on a real PC should be Some");
+            failed += 1;
+        }
+    }
+    fmt::Println!("[  4 ] AddSource renders and elides like Go");
 
     if failed == 0 {
         fmt::Println!("ok - slog handlers match Go");
