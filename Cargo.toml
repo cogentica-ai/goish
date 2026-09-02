@@ -2750,3 +2750,7 @@ path = "examples/sync_once_ref_smoke.rs"
 [[example]]
 name = "sync_prim_ref_smoke"
 path = "examples/sync_prim_ref_smoke.rs"
+
+[[example]]
+name = "strconv_complex_ref_smoke"
+path = "examples/strconv_complex_ref_smoke.rs"
