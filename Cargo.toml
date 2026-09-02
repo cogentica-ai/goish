@@ -2142,3 +2142,7 @@ path = "examples/fmt_star_ref_smoke.rs"
 [[example]]
 name = "range_int_smoke"
 path = "examples/range_int_smoke.rs"
+
+[[example]]
+name = "mail_ref_smoke"
+path = "examples/mail_ref_smoke.rs"
