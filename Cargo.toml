@@ -2838,3 +2838,7 @@ path = "examples/readrequest_ref_smoke.rs"
 [[example]]
 name = "readresponse_ref_smoke"
 path = "examples/readresponse_ref_smoke.rs"
+
+[[example]]
+name = "cookiejar_ref_smoke"
+path = "examples/cookiejar_ref_smoke.rs"
