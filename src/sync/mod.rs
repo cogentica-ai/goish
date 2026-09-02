@@ -22,6 +22,7 @@
 pub mod atomic;
 mod cond;
 pub mod errgroup;
+mod map;
 mod mutex;
 mod once;
 mod oncefunc;
@@ -29,14 +30,13 @@ mod pool;
 mod rwmutex;
 mod sema;
 pub mod singleflight;
-mod syncmap;
 mod waitgroup;
 
 pub use cond::{Cond, Locker, NewCond};
+pub use map::Map;
 pub use mutex::{Mutex, MutexGuard};
 pub use once::Once;
 pub use oncefunc::{OnceFunc, OnceValue, OnceValues};
 pub use pool::Pool;
 pub use rwmutex::RWMutex;
-pub use syncmap::Map;
 pub use waitgroup::WaitGroup;
