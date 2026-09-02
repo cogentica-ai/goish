@@ -2834,3 +2834,7 @@ path = "examples/multipart_ref_smoke.rs"
 [[example]]
 name = "readrequest_ref_smoke"
 path = "examples/readrequest_ref_smoke.rs"
+
+[[example]]
+name = "readresponse_ref_smoke"
+path = "examples/readresponse_ref_smoke.rs"

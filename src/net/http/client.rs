@@ -629,7 +629,19 @@ pub(crate) fn read_response_head<R: Reader>(
     // Status line: "HTTP/1.1 200 OK\r\n"
     let line = match read_crlf_line(br) {
         Ok(l) => l,
-        Err(e) => return (resp, BodyKind::Empty, e),
+        Err(e) => {
+            // Go (response.go, ReadResponse): `if err == io.EOF { err =
+            // io.ErrUnexpectedEOF }`. A response that is not there at
+            // all is a TRUNCATED response, not a clean end of stream —
+            // and that is the distinction a client uses to decide
+            // whether the connection died mid-answer or the server
+            // simply finished. goish reported a plain io.EOF, so both
+            // read the same.
+            if crate::errors::Is(e.clone(), crate::io::EOF) {
+                return (resp, BodyKind::Empty, crate::io::ErrUnexpectedEOF.into());
+            }
+            return (resp, BodyKind::Empty, e);
+        }
     };
     let lb = line.as_bytes();
     let sp1 = match lb.iter().position(|&b| b == b' ') {
@@ -638,7 +650,7 @@ pub(crate) fn read_response_head<R: Reader>(
             return (
                 resp,
                 BodyKind::Empty,
-                errors::New(string("http: malformed response status line")),
+                crate::fmt::Errorf!("malformed HTTP response %q", line.clone()),
             )
         }
     };
@@ -650,7 +662,7 @@ pub(crate) fn read_response_head<R: Reader>(
         return (
             resp,
             BodyKind::Empty,
-            errors::New(string("http: malformed HTTP status code")),
+            crate::fmt::Errorf!("malformed HTTP status code %q", string::from_bytes(code_b)),
         );
     }
     let mut code: int = 0;
@@ -659,7 +671,7 @@ pub(crate) fn read_response_head<R: Reader>(
             return (
                 resp,
                 BodyKind::Empty,
-                errors::New(string("http: malformed HTTP status code")),
+                crate::fmt::Errorf!("malformed HTTP status code %q", string::from_bytes(code_b)),
             );
         }
         code = code * 10 + (b - b'0') as int;
@@ -668,10 +680,11 @@ pub(crate) fn read_response_head<R: Reader>(
     resp.Status = string::from_bytes(rest);
     let (major, minor) = parse_http_version(&resp.Proto);
     if major == 0 {
+        let proto = resp.Proto.clone();
         return (
             resp,
             BodyKind::Empty,
-            errors::New(string("http: malformed HTTP version")),
+            crate::fmt::Errorf!("malformed HTTP version %q", proto),
         );
     }
     resp.ProtoMajor = major;
@@ -681,7 +694,16 @@ pub(crate) fn read_response_head<R: Reader>(
     loop {
         let h = match read_crlf_line(br) {
             Ok(l) => l,
-            Err(e) => return (resp, BodyKind::Empty, e),
+            Err(e) => {
+                // Go (ReadResponse, after ReadMIMEHeader): the same
+                // `if err == io.EOF { err = io.ErrUnexpectedEOF }` as
+                // on the status line — a response whose headers stop
+                // partway was cut off, not finished.
+                if crate::errors::Is(e.clone(), crate::io::EOF) {
+                    return (resp, BodyKind::Empty, crate::io::ErrUnexpectedEOF.into());
+                }
+                return (resp, BodyKind::Empty, e);
+            }
         };
         if h.Len() == 0 {
             break;
