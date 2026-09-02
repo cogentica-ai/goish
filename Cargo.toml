@@ -2826,3 +2826,7 @@ path = "examples/json_decode_ref_smoke.rs"
 [[example]]
 name = "base64_ref_smoke"
 path = "examples/base64_ref_smoke.rs"
+
+[[example]]
+name = "multipart_ref_smoke"
+path = "examples/multipart_ref_smoke.rs"

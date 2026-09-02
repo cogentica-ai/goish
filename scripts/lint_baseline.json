@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 8333,
+ "total": 8332,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -471,7 +471,7 @@
   "src/mime/multipart/reader.rs": {
    "GOISH005": 2,
    "GOISH014": 11,
-   "GOISH023": 10
+   "GOISH023": 9
   },
   "src/net/dnsclient.rs": {
    "GOISH005": 12,

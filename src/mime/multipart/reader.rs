@@ -69,7 +69,21 @@ impl Part {
             return string::new();
         }
         let (v, _) = params.Get(string("filename"));
-        v
+        // Go: if filename == "" { return "" }
+        if v.Len() == 0 {
+            return string::new();
+        }
+        // Go: "RFC 7578, Section 4.2 requires that if a filename is
+        // provided, the directory path information must not be used."
+        //     return filepath.Base(filename)
+        //
+        // This was returning the parameter verbatim, so a part sent
+        // with filename="../../etc/passwd" reported exactly that, and
+        // any handler doing the obvious `os.Create(part.FileName())`
+        // wrote outside its upload directory. The base-naming is not a
+        // tidy-up, it is the defence RFC 7578 asks for, and it is why
+        // Go's answer here is "passwd".
+        return crate::path::filepath::Base(v);
     }
 }
 
@@ -80,6 +94,14 @@ pub struct Reader {
     boundary: string,
     pos: int,
     finished: bool,
+    /// Go's `Reader.nl`: "\r\n" normally, "\n" once the FIRST
+    /// delimiter line has been seen to end with a bare LF. Go
+    /// (isBoundaryDelimiterLine): "On the first part, see our lines are
+    /// ending in \n instead of \r\n and switch into that mode if so.
+    /// This is a violation of the spec, but occurs in practice." goish
+    /// was CRLF-only, so a body from any client that sends bare LF —
+    /// and real ones do — failed to parse at all.
+    lf_only: bool,
 }
 
 /// `multipart.NewReader(r, boundary)` (multipart.go:457). Slim port:
@@ -93,6 +115,7 @@ pub fn NewReader<B: Into<string>>(body: slice<byte>, boundary: B) -> Reader {
         boundary,
         pos: 0,
         finished: false,
+        lf_only: false,
     }
 }
 
@@ -105,7 +128,6 @@ impl Reader {
         }
         let body_bytes = body_as_slice(&self.body);
         let dash_boundary_bytes: Vec<u8> = make_dash_boundary(&self.boundary);
-        let crlf_dash_boundary_bytes: Vec<u8> = make_crlf_dash_boundary(&self.boundary);
         let close_marker: &[u8] = b"--";
 
         let n = body_bytes.len();
@@ -118,12 +140,47 @@ impl Reader {
             if has_prefix(&body_bytes[p..], &dash_boundary_bytes) {
                 p += dash_boundary_bytes.len();
             } else {
-                match find_subseq(&body_bytes[p..], &crlf_dash_boundary_bytes) {
-                    Some(off) => p += off + crlf_dash_boundary_bytes.len(),
-                    None => {
-                        self.finished = true;
-                        return (empty_part(), io::EOF.into());
-                    }
+                // The preamble is skipped by looking for the delimiter
+                // on a line of its own. Try CRLF first, then bare LF,
+                // because the mode is only decided once the delimiter
+                // has been found.
+                let crlf = make_nl_dash_boundary(&self.boundary, false);
+                let lf = make_nl_dash_boundary(&self.boundary, true);
+                match find_subseq(&body_bytes[p..], &crlf) {
+                    Some(off) => p += off + crlf.len(),
+                    None => match find_subseq(&body_bytes[p..], &lf) {
+                        Some(off) => {
+                            self.lf_only = true;
+                            p += off + lf.len();
+                        }
+                        None => {
+                            // Go: `fmt.Errorf("multipart: NextPart: %w", err)`
+                            // — a body that never contains a delimiter
+                            // is MALFORMED, not merely finished. goish
+                            // returned a bare io.EOF, so the ordinary
+                            // `if err == io.EOF { break }` loop read
+                            // rubbish as "zero parts, fine". The wrap
+                            // keeps errors.Is(err, io.EOF) true, as
+                            // Go's does.
+                            self.finished = true;
+                            return (
+                                empty_part(),
+                                crate::fmt::Errorf!("multipart: NextPart: %w", io::EOF.into()),
+                            );
+                        }
+                    },
+                }
+            }
+            // Go (isBoundaryDelimiterLine): after the delimiter and any
+            // linear whitespace, a lone "\n" rather than "\r\n" puts
+            // the whole reader into LF mode for the rest of the body.
+            {
+                let mut q = p;
+                while q < n && (body_bytes[q] == b' ' || body_bytes[q] == b'\t') {
+                    q += 1;
+                }
+                if q < n && body_bytes[q] == b'\n' {
+                    self.lf_only = true;
                 }
             }
         } else {
@@ -143,7 +200,12 @@ impl Reader {
         while p < n && (body_bytes[p] == b' ' || body_bytes[p] == b'\t') {
             p += 1;
         }
-        if p + 1 < n && body_bytes[p] == b'\r' && body_bytes[p + 1] == b'\n' {
+        let nl_len = if self.lf_only { 1usize } else { 2usize };
+        if self.lf_only {
+            if p < n && body_bytes[p] == b'\n' {
+                p += 1;
+            }
+        } else if p + 1 < n && body_bytes[p] == b'\r' && body_bytes[p + 1] == b'\n' {
             p += 2;
         }
 
@@ -153,10 +215,16 @@ impl Reader {
             // Find next CRLF.
             let line_start = p;
             let mut line_end = p;
-            while line_end + 1 < n
-                && !(body_bytes[line_end] == b'\r' && body_bytes[line_end + 1] == b'\n')
-            {
-                line_end += 1;
+            if self.lf_only {
+                while line_end < n && body_bytes[line_end] != b'\n' {
+                    line_end += 1;
+                }
+            } else {
+                while line_end + 1 < n
+                    && !(body_bytes[line_end] == b'\r' && body_bytes[line_end + 1] == b'\n')
+                {
+                    line_end += 1;
+                }
             }
             if line_end >= n {
                 self.finished = true;
@@ -166,7 +234,7 @@ impl Reader {
                 );
             }
             let line = &body_bytes[line_start..line_end];
-            p = line_end + 2; // consume CRLF
+            p = line_end + nl_len; // consume the line ending
             if line.is_empty() {
                 break;
             }
@@ -189,12 +257,35 @@ impl Reader {
             header.Add(key, value);
         }
 
-        // 5. Body of this part runs until next `\r\n--<boundary>`.
-        match find_subseq(&body_bytes[p..], &crlf_dash_boundary_bytes) {
+        // 5. Body of this part runs until the next delimiter, which is
+        //    preceded by the line ending this body is using.
+        let nl_dash_boundary = make_nl_dash_boundary(&self.boundary, self.lf_only);
+        match find_subseq(&body_bytes[p..], &nl_dash_boundary) {
             Some(off) => {
                 let body_end = p + off;
-                let part_body = self.body.slice(p as int, body_end as int);
-                self.pos = (body_end + crlf_dash_boundary_bytes.len()) as int;
+                let mut part_body = self.body.slice(p as int, body_end as int);
+                self.pos = (body_end + nl_dash_boundary.len()) as int;
+                // Go (multipart.go:159-165): NextPart decodes a
+                // quoted-printable part TRANSPARENTLY and removes the
+                // header, so a caller reading the body never sees the
+                // encoding. Go matches the value case-insensitively.
+                // goish returned the raw "=3D" text and left the header
+                // in place, so every quoted-printable upload arrived
+                // still encoded.
+                let cte = string::from("Content-Transfer-Encoding");
+                if crate::strings::EqualFold(
+                    header.Get(cte.clone()),
+                    string::from("quoted-printable"),
+                ) {
+                    header.Del(cte);
+                    let mut src = crate::bytes::NewReader(part_body.clone());
+                    let mut qr = crate::mime::quotedprintable::NewReader(&mut src);
+                    let (decoded, qerr) = crate::io::ReadAll(&mut qr);
+                    if !qerr.IsNil() {
+                        return (empty_part(), qerr);
+                    }
+                    part_body = decoded;
+                }
                 (
                     Part {
                         Header: header,
@@ -231,9 +322,13 @@ fn make_dash_boundary(boundary: &string) -> Vec<u8> {
     v
 }
 
-fn make_crlf_dash_boundary(boundary: &string) -> Vec<u8> {
+fn make_nl_dash_boundary(boundary: &string, lf_only: bool) -> Vec<u8> {
     let mut v = Vec::with_capacity(4 + boundary.Len() as usize);
-    v.extend_from_slice(b"\r\n--");
+    if lf_only {
+        v.extend_from_slice(b"\n--");
+    } else {
+        v.extend_from_slice(b"\r\n--");
+    }
     let bs = bytes(boundary.clone());
     for i in 0..bs.Len() {
         v.push(bs[i]);
