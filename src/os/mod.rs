@@ -83,7 +83,7 @@ pub const PathListSeparator: u8 = b':';
 /// the OS's path separator. Linux-pinned in goish v1, so just `c == '/'`.
 #[inline]
 pub fn IsPathSeparator(c: u8) -> bool {
-    c == PathSeparator
+    return c == PathSeparator;
 }
 
 // os/error.go — the error sentinels, the PathError alias, SyscallError
@@ -206,6 +206,13 @@ pub struct FileInfoData {
     mode: FileMode,
     mod_time: crate::time::Time,
     is_dir: bool,
+    /// Go's `fileStat.sys` — the raw `syscall.Stat_t` that `Sys()`
+    /// hands back and that `SameFile` compares. goish used to discard
+    /// it and return `Arc::new(())` from `Sys()`, so a caller asking
+    /// for the underlying stat got an empty tuple and no way to tell.
+    /// `(dev, ino)` is the identifying pair; the rest of the struct is
+    /// already unpacked into the fields above.
+    sys: Option<(u64, u64)>,
 }
 
 // Polymorphic-nil per priority #5. Go's `os.FileInfo` is an interface
@@ -275,6 +282,11 @@ impl FileInfoData {
             mode,
             mod_time,
             is_dir,
+            // An in-memory FileInfo has no kernel identity, so it is
+            // never the same file as anything — including itself, which
+            // is what Go's type assertion in SameFile also produces for
+            // a non-*fileStat.
+            sys: None,
         }
     }
 
@@ -293,8 +305,36 @@ impl FileInfoData {
     pub fn IsDir(&self) -> bool {
         self.is_dir
     }
+    // go: sdk 1.25.5 os/types_unix.go:26-26 fileStat.Sys
+    /// Go: "Sys returns the underlying data source (can return nil)."
+    /// On Unix that is the `*syscall.Stat_t`; goish hands back the
+    /// identifying `(dev, ino)` pair it keeps, and `None` — Go's nil —
+    /// for a FileInfo that never came from a stat.
     pub fn Sys(&self) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
-        alloc::sync::Arc::new(())
+        match self.sys {
+            Some(id) => return alloc::sync::Arc::new(id),
+            None => return alloc::sync::Arc::new(()),
+        }
+    }
+}
+
+// go: sdk 1.25.5 os/types.go:69-76 SameFile
+/// Go: "SameFile reports whether fi1 and fi2 describe the same file.
+/// For example, on Unix this means that the device and inode fields of
+/// the two underlying structures are identical; on other systems the
+/// decision may be based on the path names. SameFile only applies to
+/// results returned by this package's Stat. It returns false in other
+/// cases."
+///
+/// That last sentence is the load-bearing one: Go type-asserts both
+/// arguments to `*fileStat` and returns false if either is not one. A
+/// FileInfo from an in-memory filesystem is never the same file as
+/// anything, INCLUDING ITSELF — which is why goish keeps `sys: None`
+/// for those and answers false rather than comparing the paths.
+pub fn SameFile(fi1: &FileInfoData, fi2: &FileInfoData) -> bool {
+    match (fi1.sys, fi2.sys) {
+        (Some(a), Some(b)) => return a == b,
+        _ => return false,
     }
 }
 
@@ -342,6 +382,7 @@ fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfoData {
         mode,
         mod_time: crate::time::Unix(st.st_mtime, st.st_mtime_nsec as int),
         is_dir,
+        sys: Some((st.st_dev, st.st_ino)),
     }
 }
 
@@ -439,6 +480,7 @@ pub fn Stat<N: Into<string>>(name: N) -> (FileInfoData, error) {
                 mode: FileMode(0),
                 mod_time: crate::time::Time::default(),
                 is_dir: false,
+                sys: None,
             },
             err,
         );
@@ -467,6 +509,7 @@ pub fn Lstat<N: Into<string>>(name: N) -> (FileInfoData, error) {
                 mode: FileMode(0),
                 mod_time: crate::time::Time::default(),
                 is_dir: false,
+                sys: None,
             },
             // Go: &PathError{Op: "lstat", Path: name, Err: e}. goish
             // returned one flat "lstat failed" for every errno, so
@@ -530,6 +573,7 @@ impl File {
                     mode: FileMode(0),
                     mod_time: crate::time::Time::default(),
                     is_dir: false,
+                    sys: None,
                 },
                 self.fdErr("stat", rc),
             );
@@ -1720,6 +1764,18 @@ impl File {
     /// callers reach in through `t.Must().File.Write(data)` (immutable
     /// cell access). The underlying syscall doesn't mutate the `File`
     /// struct itself — only the kernel's file-offset table.
+    // go: sdk 1.25.5 os/file.go:319-322 File.WriteString
+    /// Go: "WriteString is like Write, but writes the contents of
+    /// string s rather than a slice of bytes."
+    ///
+    /// Go reaches the bytes without copying, through
+    /// `unsafe.Slice(unsafe.StringData(s), len(s))`; goish's `string`
+    /// already lends its bytes, so the copy Go avoids does not arise.
+    pub fn WriteString<S: Into<string>>(&self, s: S) -> (int, error) {
+        let s: string = s.into();
+        return self.Write(slice::__from_vec(s.as_bytes().to_vec()));
+    }
+
     pub fn Write(&self, p: slice<byte>) -> (int, error) {
         let n = syscall::Write(self.fd, p.as_ptr(), p.len());
         if n < 0 {

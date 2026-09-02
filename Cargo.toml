@@ -2766,3 +2766,7 @@ path = "examples/math_ref_smoke.rs"
 [[example]]
 name = "math2_ref_smoke"
 path = "examples/math2_ref_smoke.rs"
+
+[[example]]
+name = "os_samefile_ref_smoke"
+path = "examples/os_samefile_ref_smoke.rs"
