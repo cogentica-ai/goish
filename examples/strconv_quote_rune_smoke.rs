@@ -96,10 +96,16 @@ fn main() {
         }
     }
 
-    // 8. QuoteRune(0xE9) ('é') → "'\\u00e9'".
+    // 8. QuoteRune(0xE9) ('é') → "'é'".
+    //
+    // Go's QuoteRune keeps a PRINTABLE rune literal however wide it is;
+    // it is QuoteRuneToASCII (check 11) that escapes non-ASCII. This
+    // line expected the escaped form, which is the OTHER function's
+    // output, and was wrong from the day it was written — the example
+    // is not declared in Cargo.toml, so e2e never ran it.
     {
         let s = strconv::QuoteRune(0xE9);
-        if s == "'\\u00e9'" {
+        if s == "'\u{e9}'" {
             fmt::Println!("[ 8] QuoteRune Latin-1 é     PASS");
         } else {
             fmt::Println!("[ 8] QuoteRune Latin-1 é     FAIL got=", s);
@@ -107,10 +113,11 @@ fn main() {
         }
     }
 
-    // 9. QuoteRune(0x1F600) (smiley) → "'\\U0001f600'".
+    // 9. QuoteRune(0x1F600) (smiley) → "'😀'". See check 8: the
+    //    escaped form is QuoteRuneToASCII's.
     {
         let s = strconv::QuoteRune(0x1F600);
-        if s == "'\\U0001f600'" {
+        if s == "'\u{1F600}'" {
             fmt::Println!("[ 9] QuoteRune SMP rune       PASS");
         } else {
             fmt::Println!("[ 9] QuoteRune SMP rune       FAIL got=", s);
