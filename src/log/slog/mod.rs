@@ -30,11 +30,13 @@
 
 mod attr;
 mod handler;
+mod level;
 mod logger;
 mod record;
 mod value;
 pub use attr::{argsToAttrSlice, Any, Group};
 pub use handler::{LevelKey, MessageKey, SourceKey, TimeKey};
+pub use level::{Level, LevelDebug, LevelError, LevelInfo, LevelVar, LevelWarn, Leveler};
 pub use record::{argsToAttr, badKey};
 pub use value::{
     countEmptyGroups, isEmptyGroup, maxLogValues, AnyValue, GroupValue, LogValuer, LogValuerBox,
@@ -51,30 +53,6 @@ use crate::goslice::slice;
 use crate::gostring::string;
 use crate::time;
 use crate::types::int;
-
-// ─── Level ──────────────────────────────────────────────────────────
-//
-// Go's `slog.Level` is `int` with named constants. We use a transparent
-// tuple-struct wrapper so it carries a distinct type identity at the
-// type system (vs raw `int`), matching what goishc emits for named
-// scalar types.
-
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-#[repr(transparent)]
-pub struct Level(pub int);
-
-impl From<int> for Level {
-    // go: none — goish idiom: Go writes `slog.Level(n)`; Rust needs the
-    // conversion spelled as a trait impl.
-    fn from(v: int) -> Self {
-        Level(v)
-    }
-}
-
-pub const LevelDebug: Level = Level(-4);
-pub const LevelInfo: Level = Level(0);
-pub const LevelWarn: Level = Level(4);
-pub const LevelError: Level = Level(8);
 
 // ─── Kind ───────────────────────────────────────────────────────────
 //
