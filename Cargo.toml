@@ -2798,3 +2798,7 @@ path = "examples/dnsmessage_ref_smoke.rs"
 [[example]]
 name = "big_int_ref_smoke"
 path = "examples/big_int_ref_smoke.rs"
+
+[[example]]
+name = "big_float_ref_smoke"
+path = "examples/big_float_ref_smoke.rs"

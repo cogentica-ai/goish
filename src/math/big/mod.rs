@@ -5647,6 +5647,16 @@ impl Float {
     ) -> (&mut Float, int, crate::error) {
         let s = s.into();
         let bytes = s.as_bytes().to_vec();
+        // Go: scanSign is the first thing `scan` does, and on empty
+        // input its ReadByte returns io.EOF, which Parse passes
+        // straight through. It must be that SENTINEL and not a
+        // look-alike message: a caller reading a stream of numbers
+        // distinguishes "done" from "malformed" with errors.Is(err,
+        // io.EOF).
+        if bytes.is_empty() {
+            self.form = form::Zero;
+            return (self, 0, crate::io::EOF.into());
+        }
         match float_scan(&bytes, base) {
             Ok((neg, mant_limbs, b, fcount, exp, ebase, is_inf)) => {
                 if is_inf {
@@ -6260,15 +6270,19 @@ type FloatScan = (bool, Vec<u32>, int, i64, i64, int, bool);
 /// fields, or an error message string. The whole input must be a valid
 /// number (no trailing junk).
 fn float_scan(bytes: &[u8], base: int) -> Result<FloatScan, crate::string> {
-    // ±Inf / ±inf
+    // ±Inf / ±inf — Go handles these in `Parse` BEFORE calling `scan`
+    // (floatconv.go: "scan doesn't handle ±Inf"), so the returned base
+    // is the named return's zero value: 0, not the requested base. A
+    // caller using Parse(s, 0) to learn which base the literal was
+    // written in gets 0 here, meaning "no digits, so no base".
     if bytes == b"Inf" || bytes == b"inf" {
-        return Ok((false, Vec::new(), 10, 0, 0, 10, true));
+        return Ok((false, Vec::new(), 0, 0, 0, 10, true));
     }
     if bytes.len() == 4
         && (bytes[0] == b'+' || bytes[0] == b'-')
         && (&bytes[1..] == b"Inf" || &bytes[1..] == b"inf")
     {
-        return Ok((bytes[0] == b'-', Vec::new(), 10, 0, 0, 10, true));
+        return Ok((bytes[0] == b'-', Vec::new(), 0, 0, 0, 10, true));
     }
 
     if !(base == 0 || base == 2 || base == 8 || base == 10 || base == 16) {
@@ -6429,7 +6443,12 @@ fn float_scan(bytes: &[u8], base: int) -> Result<FloatScan, crate::string> {
 
     // entire string must be consumed
     if i != bytes.len() {
-        return Err(crate::string::from("expected end of string"));
+        // Go: err = fmt.Errorf("expected end of string, found %q", ch)
+        // The offending byte is part of the message: a caller shown
+        // only "expected end of string" cannot tell which character
+        // ended the number.
+        return Err(crate::string::from("expected end of string, found ")
+            + crate::strconv::QuoteRune(bytes[i] as crate::types::rune));
     }
 
     // fcount is the number of fractional digits; pass it negated so a
