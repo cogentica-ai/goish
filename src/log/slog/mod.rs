@@ -38,10 +38,15 @@ mod text_handler;
 mod value;
 pub use attr::{argsToAttrSlice, Any, Duration, Float64, Group, Int64, Time, Uint64};
 pub use handler::{HandlerOptions, LevelKey, MessageKey, SourceKey, TimeKey};
+pub(crate) use logger::logLoggerLevel;
 
 pub(crate) use json_handler::{__appendEscapedTo, appendJSONTime, appendJSONValue, safeSet};
 pub use json_handler::{JSONHandler, NewJSONHandler};
 pub use level::{Level, LevelDebug, LevelError, LevelInfo, LevelVar, LevelWarn, Leveler};
+pub use logger::{
+    Debug, DebugContext, Default, Error, ErrorContext, Info, InfoContext, Log, LogAttrs,
+    SetDefault, SetLogLoggerLevel, Warn, WarnContext, With,
+};
 pub use record::{argsToAttr, badKey, Source};
 pub(crate) use text_handler::{appendTextValue, needsQuoting};
 pub use text_handler::{NewTextHandler, TextHandler};

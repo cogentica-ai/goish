@@ -2158,3 +2158,7 @@ path = "examples/slog_value_ref_smoke.rs"
 [[example]]
 name = "slog_handler_ref_smoke"
 path = "examples/slog_handler_ref_smoke.rs"
+
+[[example]]
+name = "slog_default_ref_smoke"
+path = "examples/slog_default_ref_smoke.rs"

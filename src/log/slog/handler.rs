@@ -1,4 +1,4 @@
-// go: file log/slog/handler.go decls: commonHandler.clone, commonHandler.enabled, commonHandler.withAttrs, commonHandler.withGroup, commonHandler.handle, commonHandler.attrSep, handleState.openGroups, handleState.openGroup, handleState.closeGroup, handleState.appendAttrs, handleState.appendAttr, handleState.appendNonBuiltIns, handleState.appendKey, handleState.appendString, handleState.appendTwoStrings, handleState.appendValue, handleState.appendTime, appendRFC3339Millis,
+// go: file log/slog/handler.go decls: commonHandler.clone, commonHandler.enabled, commonHandler.withAttrs, commonHandler.withGroup, commonHandler.handle, commonHandler.attrSep, handleState.openGroups, handleState.openGroup, handleState.closeGroup, handleState.appendAttrs, handleState.appendAttr, handleState.appendNonBuiltIns, handleState.appendKey, handleState.appendString, handleState.appendTwoStrings, handleState.appendValue, handleState.appendTime, appendRFC3339Millis, newDefaultHandler, defaultHandler.Enabled, defaultHandler.Handle, defaultHandler.WithAttrs, defaultHandler.WithGroup,
 //
 // log/slog/handler.go — the keys the built-in handlers use.
 //
@@ -7,8 +7,8 @@
 // share. `TextHandler` and `JSONHandler` themselves live one file each,
 // as in Go.
 //
-// goishlint:ignore GOISH018 Enabled, Handle, WithAttrs, WithGroup, appendError, free, newDefaultHandler, newHandleState — `Enabled`/`Handle`/`WithAttrs`/`WithGroup` are the Handler impls, which live on TextHandler and JSONHandler in their own files; `free`/`newHandleState` are Go's buffer-pool lifecycle, which goish has no pool for; `appendError` and `newDefaultHandler` belong to the default handler, which is not ported.
-// goishlint:ignore GOISH021 DiscardHandler, Handler, defaultHandler, discardHandler, groupPool — `Handler` and `discardHandler` are declared in the module root; `groupPool` is Go's sync.Pool, which goish allocates instead; `DiscardHandler` and `defaultHandler` are not ported.
+// goishlint:ignore GOISH018 Enabled, Handle, WithAttrs, WithGroup, appendError, free, newHandleState — `Enabled`/`Handle`/`WithAttrs`/`WithGroup` are the Handler impls, which live on TextHandler and JSONHandler in their own files; `free`/`newHandleState` are Go's buffer-pool lifecycle, which goish has no pool for; `appendError` and `newDefaultHandler` belong to the default handler, which is not ported.
+// goishlint:ignore GOISH021 DiscardHandler, Handler, discardHandler, groupPool — `Handler` and `discardHandler` are declared in the module root; `groupPool` is Go's sync.Pool, which goish allocates instead; `DiscardHandler` and `defaultHandler` are not ported.
 
 #![allow(non_snake_case)]
 
@@ -634,4 +634,111 @@ fn appendRFC3339Millis(b: &mut Vec<byte>, t: crate::time::Time) {
     // Go: b = append(b[:n+prefixLen], b[n+prefixLen+1:]...) — drop the
     // 4th digit.
     b.remove(n + prefixLen);
+}
+
+// ─── defaultHandler (handler.go:66) ─────────────────────────────────
+
+// go: sdk 1.25.5 log/slog/handler.go:94-98 defaultHandler
+/// The handler behind `slog.Default()` before anything calls
+/// `SetDefault`. It is NOT a TextHandler: it writes
+/// `LEVEL message key=value…` through the `log` package, so the log
+/// package's own prefix and flags apply on top. A port that wires the
+/// default to a TextHandler answers differently for every package-level
+/// `slog.Info` call — different keys, a `time=` field the log package
+/// would then duplicate, and a `level=` where Go writes a bare `INFO`.
+pub struct defaultHandler {
+    ch: commonHandler,
+}
+
+// go: sdk 1.25.5 log/slog/handler.go:100-105 newDefaultHandler
+// goishlint:ignore GOISH020 — Go takes the `output func(uintptr, []byte) error`
+// as a parameter so its own tests can substitute one; the sole production
+// caller passes the log package, and goish has no test that swaps it, so the
+// destination is named directly in `Handle` rather than threaded through.
+pub(crate) fn newDefaultHandler() -> defaultHandler {
+    return defaultHandler {
+        ch: commonHandler {
+            json: false,
+            opts: HandlerOptions::default(),
+            preformattedAttrs: Vec::new(),
+            groupPrefix: string::from_static(""),
+            groups: Vec::new(),
+            nOpenGroups: 0,
+            // Go's defaultHandler holds no writer: it routes through
+            // `output`, which is the log package. goish's
+            // `commonHandler` always has a `w`, so this one gets a
+            // discard — `Handle` below never reaches it.
+            w: __boxed_writer(__discard()),
+        },
+    };
+}
+
+impl super::Handler for defaultHandler {
+    // go: sdk 1.25.5 log/slog/handler.go:107-109 defaultHandler.Enabled
+    /// Go: the default handler's threshold is the package-level
+    /// `logLoggerLevel`, NOT `HandlerOptions.Level` — which is why
+    /// `slog.Debug` is silent until `SetLogLoggerLevel` says otherwise.
+    fn Enabled(&self, _ctx: &dyn crate::context::Context, l: Level) -> bool {
+        return l >= super::logLoggerLevel().Level();
+    }
+
+    // go: sdk 1.25.5 log/slog/handler.go:114-123 defaultHandler.Handle
+    fn Handle(&self, _ctx: &dyn crate::context::Context, r: Record) -> error {
+        let mut buf: Vec<byte> = Vec::new();
+        // Go: buf.WriteString(r.Level.String()); buf.WriteByte(' ');
+        //     buf.WriteString(r.Message)
+        buf.extend_from_slice(r.Level.String().as_bytes());
+        buf.push(b' ');
+        buf.extend_from_slice(r.Message.as_bytes());
+        let mut prefix: Vec<byte> = Vec::new();
+        let mut groups: Vec<string> = Vec::new();
+        {
+            // Go: state := h.ch.newHandleState(buf, true, " ") — the
+            // separator starts as a space, because the message is
+            // already in the buffer and the first attr must be spaced
+            // off it.
+            let mut st = handleState {
+                h: &self.ch,
+                buf: &mut buf,
+                sep: string::from_static(" "),
+                prefix: &mut prefix,
+                groups: Some(&mut groups),
+            };
+            st.appendNonBuiltIns(&r);
+        }
+        // Go: return h.output(r.PC, *buf) — internal.DefaultOutput,
+        // which is the log package's writer.
+        return crate::log::Output(0, string::__from_vec(buf));
+    }
+
+    // go: sdk 1.25.5 log/slog/handler.go:125-127 defaultHandler.WithAttrs
+    fn WithAttrs(&self, attrs: slice<Attr>) -> Arc<dyn super::Handler + Send + Sync> {
+        return Arc::new(defaultHandler {
+            ch: self.ch.withAttrs(&attrs.clone().__into_vec()),
+        });
+    }
+
+    // go: sdk 1.25.5 log/slog/handler.go:129-131 defaultHandler.WithGroup
+    fn WithGroup(&self, name: string) -> Arc<dyn super::Handler + Send + Sync> {
+        return Arc::new(defaultHandler {
+            ch: self.ch.withGroup(name),
+        });
+    }
+}
+
+// go: none — goish idiom: Go's defaultHandler has no writer field at
+//     all; goish's commonHandler always has one, so this is the writer
+//     that is never written to.
+struct __Discard;
+
+impl io::Writer for __Discard {
+    // go: none — goish idiom: see `__Discard`.
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        return (p.Len(), crate::errors::nil);
+    }
+}
+
+// go: none — goish idiom: see `__Discard`.
+fn __discard() -> __Discard {
+    return __Discard;
 }
