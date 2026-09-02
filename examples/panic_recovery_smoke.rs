@@ -74,9 +74,19 @@ fn main() {
         // wg.Wait() unblocks once the WG counter hits 0, which can
         // happen *before* the panicked G's `on_g_panic_aborted`
         // finishes incrementing G_PANIC_COUNT (the panic-recovery
-        // path runs in parallel on its M). Spin briefly until the
-        // counter reaches 1.
-        for _ in 0..10_000 {
+        // path runs in parallel on its M). Spin until the counter
+        // reaches 1.
+        //
+        // The bound used to be 10_000, which is plenty on an idle
+        // machine and not enough on a loaded CI runner: the recovery
+        // path is doing real work on another M, and this loop only
+        // yields. When it ran out the smoke printed panics=0 and
+        // exited 1, so a scheduling race read as a broken runtime. The
+        // bound is now large enough that exhausting it means the
+        // counter is never coming, which is the failure worth
+        // reporting — and the loop still terminates rather than
+        // hanging, so that failure is a FAIL and not a timeout.
+        for _ in 0..20_000_000 {
             if sched::G_PANIC_COUNT.load(Ordering::Acquire) >= 1 {
                 break;
             }
