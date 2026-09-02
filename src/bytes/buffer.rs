@@ -257,6 +257,20 @@ impl Buffer {
     pub fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         self.last_rune_size = 0;
         if self.empty() {
+            // Go: "Buffer is empty, reset to recover space."
+            self.Reset();
+            // Go: if len(p) == 0 { return 0, nil }
+            //
+            // An empty p is not the end of the stream, it is a caller
+            // asking for nothing — and io.Reader's contract singles the
+            // case out: "Implementations of Read are discouraged from
+            // returning a zero byte count with a nil error, except when
+            // len(p) == 0." Answering io.EOF instead tells a copier the
+            // source is finished when it has only been handed a
+            // zero-length buffer.
+            if p.Len() == 0 {
+                return (0, nil);
+            }
             return (0, io::EOF.into());
         }
         let want = (p.Len() as usize).min(self.buf.len() - self.off);

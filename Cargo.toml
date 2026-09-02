@@ -2810,3 +2810,7 @@ path = "examples/big_rat_ref_smoke.rs"
 [[example]]
 name = "strings_ref_smoke"
 path = "examples/strings_ref_smoke.rs"
+
+[[example]]
+name = "bytes_ref_smoke"
+path = "examples/bytes_ref_smoke.rs"
