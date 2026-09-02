@@ -1277,23 +1277,39 @@ impl<'a> Parser<'a> {
                             };
                             // Handle surrogate pairs for UTF-16.
                             if (0xD800..=0xDBFF).contains(&cp) {
-                                // High surrogate — must be followed by \uXXXX low surrogate.
-                                if self.advance() != Some(b'\\') {
-                                    return (Vec::new(), ErrSyntax.into());
+                                // Go's `unquoteBytes`: a high surrogate is
+                                // followed by a LOOKAHEAD for `\uXXXX`, and
+                                // if that is not a valid low surrogate the
+                                // rune becomes U+FFFD and the lookahead is
+                                // NOT consumed — Go never errors here.
+                                //
+                                // goish used to require the pair and reject
+                                // the string otherwise, so `"\uD800"` was a
+                                // syntax error where Go decodes it to U+FFFD.
+                                // A document carrying one lone surrogate —
+                                // and real-world JSON does — was rejected
+                                // whole.
+                                let save = self.pos;
+                                let mut paired = false;
+                                if self.advance() == Some(b'\\') && self.advance() == Some(b'u') {
+                                    if let Some(lo) = self.parse_hex4() {
+                                        if (0xDC00..=0xDFFF).contains(&lo) {
+                                            let combined = 0x10000
+                                                + (crate::uint32(cp - 0xD800) << 10)
+                                                + crate::uint32(lo - 0xDC00);
+                                            encode_utf8(&mut out, combined as i32);
+                                            paired = true;
+                                        }
+                                    }
                                 }
-                                if self.advance() != Some(b'u') {
-                                    return (Vec::new(), ErrSyntax.into());
+                                if !paired {
+                                    // Go: "Invalid surrogate; fall back to
+                                    // replacement rune." The lookahead is
+                                    // rewound so those bytes are re-read as
+                                    // whatever they actually are.
+                                    self.pos = save;
+                                    encode_utf8(&mut out, 0xFFFD);
                                 }
-                                let lo = match self.parse_hex4() {
-                                    Some(v) => v,
-                                    None => return (Vec::new(), ErrSyntax.into()),
-                                };
-                                if !(0xDC00..=0xDFFF).contains(&lo) {
-                                    return (Vec::new(), ErrSyntax.into());
-                                }
-                                let combined =
-                                    0x10000 + (((cp - 0xD800) as u32) << 10) + (lo - 0xDC00) as u32;
-                                encode_utf8(&mut out, combined as i32);
                             } else if (0xDC00..=0xDFFF).contains(&cp) {
                                 // Lone low surrogate — replace with U+FFFD per WHATWG.
                                 encode_utf8(&mut out, 0xFFFD);

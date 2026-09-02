@@ -179,6 +179,54 @@ fn main() {
         fmt::Println!("[  4 ] invalid UTF-8 becomes U+FFFD");
     }
 
+    // 5. The DECODE side of the same question: an unpaired surrogate.
+    //
+    //    Go's unquoteBytes never fails on one. An unpaired surrogate
+    //    becomes U+FFFD and the lookahead is NOT consumed, so whatever
+    //    follows is read as itself — "\uD800\u0041" is U+FFFD then 'A'.
+    //    goish used to require the pair and reject the string, so a
+    //    document carrying one lone surrogate — and real-world JSON
+    //    does — was rejected whole where Go accepts it.
+    {
+        let cases: [(&str, &[u8]); 10] = [
+            ("\"\\uD800\"", &[239, 191, 189]),
+            ("\"\\uDC00\"", &[239, 191, 189]),
+            ("\"\\uD800\\uD800\"", &[239, 191, 189, 239, 191, 189]),
+            ("\"\\uD83D\\uDE00\"", &[240, 159, 152, 128]),
+            ("\"a\\uD800b\"", &[97, 239, 191, 189, 98]),
+            ("\"\\uD800x\"", &[239, 191, 189, 120]),
+            ("\"\\u0041\"", &[65]),
+            ("\"\\u00e9\"", &[195, 169]),
+            ("\"\\uDC00\\uD800\"", &[239, 191, 189, 239, 191, 189]),
+            ("\"\\uD800\\u0041\"", &[239, 191, 189, 65]),
+        ];
+        let mut i = 0;
+        while i < cases.len() {
+            let (inp, want) = cases[i];
+            let mut v = json::Value::default();
+            let e = json::Unmarshal(inp.as_bytes(), &mut v);
+            if !e.IsNil() {
+                fmt::Printf!("[!!] Unmarshal(%s) err %q\n", s(inp), e.Error());
+                failed += 1;
+            } else {
+                match v.AsString() {
+                    None => {
+                        fmt::Printf!("[!!] Unmarshal(%s) is not a string\n", s(inp));
+                        failed += 1;
+                    }
+                    Some(got) => {
+                        if got.as_bytes() != want {
+                            fmt::Printf!("[!!] Unmarshal(%s) wrong bytes\n", s(inp));
+                            failed += 1;
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+        fmt::Println!("[  5 ] an unpaired surrogate decodes to U+FFFD");
+    }
+
     if failed == 0 {
         fmt::Println!("ok - json string escaping matches Go");
         syscall::Exit(0);
