@@ -305,10 +305,15 @@ fn main() {
     //      Go   `%3d` of []int{1,2,30} -> "[  1   2  30]"
     //      goish                       -> "[1 2 30]"
     //
-    //    Both have one root cause: goish's `Format` trait carries the
-    //    verb and the precision but not the flags or the width. Fixing
-    //    it means threading those through, which is its own unit — and
-    //    the day it lands these assertions fail and point here.
+    //    Both had one root cause: goish's `Format` trait carried the
+    //    verb and the precision but neither the flags nor the width.
+    //    The WIDTH half is fixed — it is threaded into the compound
+    //    renderers now, so `%3d` matches Go and this case asserts Go's
+    //    answer. The FLAG half (`#`, and the `0o`/`0x` prefixes it
+    //    produces) is still applied to the finished bytes, so `%O` over
+    //    a byte slice still wraps the whole rendering; that half is
+    //    asserted as it IS, and the day it lands this fails and points
+    //    here.
     {
         let mut ok = true;
         eq(
@@ -320,15 +325,15 @@ fn main() {
         let ii: slice<int> = goish::slice!([]int{1, 2, 30});
         eq(
             &mut ok,
-            "%3d over []int (diverges)",
+            "%3d over []int (per element, as Go)",
             fmt::Sprintf!("%3d", ii),
-            "[1 2 30]",
+            "[  1   2  30]",
         );
         report(
             &mut failed,
             ok,
             " 7",
-            "flags over a composite still diverge",
+            "flags over a composite still diverge; width no longer does",
         );
     }
 

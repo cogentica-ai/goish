@@ -746,25 +746,17 @@ fn main() {
             ),
         );
     }
-    // KNOWN GAP, asserted so it cannot drift silently. Go applies a
-    // field width to EACH ELEMENT of a compound value:
-    //
-    //     Printf("[%-16q]", []string{"a", "b"})
-    //         Go    [["a"              "b"             ]]
-    //         goish [["a" "b"]       ]
-    //     Printf("[%8.3f]", []float64{1.5, 2.5})
-    //         Go    [[   1.500    2.500]]
-    //
-    // goish pads the whole rendering instead. Closing it means
-    // threading the fmt state (width, flags, left-align) through every
-    // element renderer, which is a larger change than the four fixes
-    // this smoke exists to pin. Until then the current behaviour is
-    // asserted, so a change in either direction shows up here.
+    // This was a KNOWN GAP when this smoke was written: Go applies a
+    // field width to EACH ELEMENT of a compound value and goish applied
+    // it to the whole rendering. It is closed now — the width is
+    // threaded into the compound renderers — so the assertion is Go's
+    // answer rather than goish's, and it stays here because a
+    // regression would be invisible everywhere else.
     {
         let v: slice<string> = slice::__from_vec(alloc::vec![s("a"), s("b")]);
         let got = fmt::Sprintf!("[%-16q]", v);
-        if got != s("[[\"a\" \"b\"]       ]") {
-            fmt::Printf!("[!!] compound-width gap CHANGED: %q\n", got);
+        if got != s("[[\"a\"              \"b\"             ]]") {
+            fmt::Printf!("[!!] compound-width FAIL: %q\n", got);
             failed += 1;
         }
     }
