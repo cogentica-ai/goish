@@ -2818,3 +2818,7 @@ path = "examples/bytes_ref_smoke.rs"
 [[example]]
 name = "asn1_ref_smoke"
 path = "examples/asn1_ref_smoke.rs"
+
+[[example]]
+name = "json_decode_ref_smoke"
+path = "examples/json_decode_ref_smoke.rs"

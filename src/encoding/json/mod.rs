@@ -300,6 +300,18 @@ pub fn __parse_json_tag(tag: &string) -> (string, bool) {
 // macro emits the impl for user structs, walking each field with its
 // JSON tag-derived key.
 
+// go: none — goish idiom: Go's decoder writes through a reflect.Value,
+// so it can decline to write at all — which is exactly what it does for
+// a null into a primitive (decode.go, literalStore: "otherwise, ignore
+// null for primitives"). goish's `FromValue` RETURNS a value, so "do
+// not write" has to be signalled instead. This private sentinel does
+// that: `Unmarshal` recognises it, skips the assignment, and reports
+// success. Without it a document with an explicit null field failed to
+// decode at all, where Go leaves the field as it found it.
+crate::var! {
+    ERR_NULL_NOOP: error = "json: null is a no-op";
+}
+
 pub trait FromValue: Sized {
     /// Convert a JSON `Value` into `Self`. Returns `(Self, error)` —
     /// typical Go-shape, with the second value carrying the type-mismatch
@@ -319,6 +331,9 @@ impl FromValue for bool {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
             Value::Bool(b) => (*b, nil),
+            // Go: null is ignored for a primitive — see the note on
+            // ERR_NULL_NOOP.
+            Value::Null => (false, ERR_NULL_NOOP.into()),
             _ => (false, errors::New("json: cannot unmarshal into bool")),
         }
     }
@@ -357,10 +372,43 @@ impl<T: FromValue> FromValue for crate::gonilable::nilable<T> {
     }
 }
 
+// go: none — goish idiom: Go decodes a number by running
+// strconv.ParseInt over the ORIGINAL literal text, so "1.5" and "1.0"
+// both fail for an integer target and the error names the literal.
+// goish's `Value::Number` holds an f64 and has already lost the text,
+// so the integrality and range checks are done on the value instead;
+// the refusal is Go's, the literal in the message is goish's rendering
+// of it. Truncating instead — which is what `n as int` did — turns a
+// document Go REJECTS into a different number, silently, which is the
+// worst of the three possible behaviours.
+fn number_to_int(n: crate::types::float64, lo: f64, hi: f64, ty: &str) -> (i64, error) {
+    if n != crate::math::Trunc(n) || !(lo..=hi).contains(&n) {
+        return (
+            0,
+            errors::New(
+                string::from("json: cannot unmarshal number ")
+                    + crate::fmt::Sprintf!("%v", n)
+                    + string::from(" into Go value of type ")
+                    + string::from(ty),
+            ),
+        );
+    }
+    return (crate::convert::int64(n), nil);
+}
+
 impl FromValue for crate::types::int {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
-            Value::Number(n) => (*n as crate::types::int, nil),
+            Value::Number(n) => {
+                let (i, err) =
+                    number_to_int(*n, -9.223372036854776e18, 9.223372036854776e18, "int");
+                return (i as crate::types::int, err);
+            }
+            // Go (decode.go, literalStore): a null into a primitive is
+            // IGNORED — the target keeps whatever it held and no error
+            // is reported. Only interface, pointer, map and slice
+            // targets are zeroed.
+            Value::Null => (0, ERR_NULL_NOOP.into()),
             _ => (0, errors::New("json: cannot unmarshal into int")),
         }
     }
@@ -369,7 +417,12 @@ impl FromValue for crate::types::int {
 impl FromValue for crate::types::uint {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
-            Value::Number(n) if *n >= 0.0 => (*n as crate::types::uint, nil),
+            Value::Number(n) => {
+                let (i, err) = number_to_int(*n, 0.0, 1.8446744073709552e19, "uint");
+                return (i as crate::types::uint, err);
+            }
+            // Go: null is ignored for a primitive — see `int` above.
+            Value::Null => (0, ERR_NULL_NOOP.into()),
             _ => (0, errors::New("json: cannot unmarshal into uint")),
         }
     }
@@ -379,6 +432,8 @@ impl FromValue for crate::types::float64 {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
             Value::Number(n) => (*n, nil),
+            // Go: null is ignored for a primitive — see `int` above.
+            Value::Null => (0.0, ERR_NULL_NOOP.into()),
             _ => (0.0, errors::New("json: cannot unmarshal into float64")),
         }
     }
@@ -388,6 +443,8 @@ impl FromValue for crate::types::float32 {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
             Value::Number(n) => (*n as crate::types::float32, nil),
+            // Go: null is ignored for a primitive — see `int` above.
+            Value::Null => (0.0, ERR_NULL_NOOP.into()),
             _ => (0.0, errors::New("json: cannot unmarshal into float32")),
         }
     }
@@ -396,7 +453,12 @@ impl FromValue for crate::types::float32 {
 impl FromValue for crate::types::byte {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
-            Value::Number(n) if *n >= 0.0 && *n <= 255.0 => (*n as crate::types::byte, nil),
+            Value::Number(n) => {
+                let (i, err) = number_to_int(*n, 0.0, 255.0, "uint8");
+                return (i as crate::types::byte, err);
+            }
+            // Go: null is ignored for a primitive — see `int` above.
+            Value::Null => (0, ERR_NULL_NOOP.into()),
             _ => (0, errors::New("json: cannot unmarshal into byte")),
         }
     }
@@ -405,7 +467,12 @@ impl FromValue for crate::types::byte {
 impl FromValue for crate::types::rune {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
-            Value::Number(n) => (*n as crate::types::rune, nil),
+            Value::Number(n) => {
+                let (i, err) = number_to_int(*n, -2147483648.0, 2147483647.0, "int32");
+                return (i as crate::types::rune, err);
+            }
+            // Go: null is ignored for a primitive — see `int` above.
+            Value::Null => (0, ERR_NULL_NOOP.into()),
             _ => (0, errors::New("json: cannot unmarshal into rune")),
         }
     }
@@ -415,6 +482,9 @@ impl FromValue for string {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
             Value::String(s) => (s.clone(), nil),
+            // Go: null is ignored for a primitive — see the note on
+            // ERR_NULL_NOOP.
+            Value::Null => (string::new(), ERR_NULL_NOOP.into()),
             _ => (
                 string::new(),
                 errors::New("json: cannot unmarshal into string"),
@@ -1078,6 +1148,11 @@ pub fn Unmarshal<T: FromValue>(data: &[byte], dest: &mut T) -> error {
         return err;
     }
     let (v, err) = T::from_value(&raw);
+    // Go: a null into a primitive leaves the target alone and reports
+    // no error. See the note on ERR_NULL_NOOP.
+    if err == ERR_NULL_NOOP {
+        return nil;
+    }
     if err != nil {
         return err;
     }
