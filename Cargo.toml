@@ -2782,3 +2782,7 @@ path = "examples/json_escape_ref_smoke.rs"
 [[example]]
 name = "json_struct_ref_smoke"
 path = "examples/json_struct_ref_smoke.rs"
+
+[[example]]
+name = "html_ref_smoke"
+path = "examples/html_ref_smoke.rs"

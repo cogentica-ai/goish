@@ -2,6 +2,9 @@
 //
 // Reference: /share/go/src/html/escape.go (214 LOC).
 //
+// The full HTML5 named-entity table now ships, in entity.rs, generated
+// from Go's own entity.go rather than transcribed.
+//
 // Slim deviations from upstream (documented):
 //
 //   * Full HTML5 named-entity table (2261 LOC of static data in
@@ -26,6 +29,8 @@
 
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
+
+mod entity;
 
 extern crate alloc;
 
@@ -79,17 +84,34 @@ const replacementTable: [rune; 32] = [
 ///
 /// Goish deviation: only the inverse of `EscapeString`. The full
 /// HTML5 table from `entity.go` can replace this later.
+// go: none — goish idiom: Go looks the name up in a `map[string]rune`;
+//     goish's table is a sorted static array, so the lookup is a binary
+//     search over it. Same table, same answers.
 fn entity_lookup(name: &[byte]) -> rune {
-    // The five standard entities. Match with-and-without trailing
-    // semicolon; the caller already stripped the leading '&'.
-    match name {
-        b"amp" | b"amp;" => '&' as rune,
-        b"lt" | b"lt;" => '<' as rune,
-        b"gt" | b"gt;" => '>' as rune,
-        b"quot" | b"quot;" => '"' as rune,
-        b"apos" | b"apos;" => '\'' as rune,
-        _ => 0,
-    }
+    let key = match core::str::from_utf8(name) {
+        Ok(k) => k,
+        // A name is ASCII by construction — the scanner only accepts
+        // letters, digits and a trailing ';' — so this cannot happen,
+        // and "no match" is the right answer if it somehow does.
+        Err(_) => return 0,
+    };
+    return match entity::entity.binary_search_by(|probe| probe.0.cmp(key)) {
+        Ok(i) => entity::entity[i].1,
+        Err(_) => 0,
+    };
+}
+
+// go: none — goish idiom: as `entity_lookup`, for the names that expand
+//     to TWO runes.
+fn entity2_lookup(name: &[byte]) -> Option<(rune, rune)> {
+    let key = match core::str::from_utf8(name) {
+        Ok(k) => k,
+        Err(_) => return None,
+    };
+    return match entity::entity2.binary_search_by(|probe| probe.0.cmp(key)) {
+        Ok(i) => Some((entity::entity2[i].1, entity::entity2[i].2)),
+        Err(_) => None,
+    };
 }
 
 // Go: escape.go:56
@@ -216,8 +238,7 @@ fn unescapeEntity(b: &mut Vec<byte>, dst: int, src: int) -> (int, int) {
     if name_buf.is_empty() {
         // Go: escape.go:140 — no-op, fall through to literal copy.
     } else {
-        // Goish slim — only the 5 standard entities; the full HTML5
-        // table would slot in here.
+        // Go: escape.go:143 — else if x := entity[string(entityName)]; x != 0
         let x = entity_lookup(&name_buf);
         if x != 0 {
             // Go: escape.go:144 — return dst+utf8.EncodeRune(b[dst:], x), src+i
@@ -227,6 +248,42 @@ fn unescapeEntity(b: &mut Vec<byte>, dst: int, src: int) -> (int, int) {
                 b[dst as usize + k] = tmp[k];
             }
             return (dst + n as int, src + i);
+        }
+        // Go: escape.go:145 — else if x := entity2[string(entityName)]; x[0] != 0
+        if let Some((r1, r2)) = entity2_lookup(&name_buf) {
+            let mut tmp = [0u8; 4];
+            let n1 = utf8::EncodeRune(&mut tmp, r1) as usize;
+            for k in 0..n1 {
+                b[dst as usize + k] = tmp[k];
+            }
+            let d1 = dst + n1 as int;
+            let n2 = utf8::EncodeRune(&mut tmp, r2) as usize;
+            for k in 0..n2 {
+                b[d1 as usize + k] = tmp[k];
+            }
+            return (d1 + n2 as int, src + i);
+        }
+        // Go: escape.go:148-155 — the LONGEST-PREFIX walk. A name with
+        // no trailing semicolon can still match a shorter entity, which
+        // is why "&notreal;" decodes to "\u{ac}real;": `&not` matches
+        // and the rest is left alone. Only names in the
+        // without-semicolon set can do this, hence the length cap.
+        let mut max_len = name_buf.len() - 1;
+        if max_len > entity::longestEntityWithoutSemicolon {
+            max_len = entity::longestEntityWithoutSemicolon;
+        }
+        let mut j = max_len;
+        while j > 1 {
+            let x = entity_lookup(&name_buf[..j]);
+            if x != 0 {
+                let mut tmp = [0u8; 4];
+                let n = utf8::EncodeRune(&mut tmp, x) as usize;
+                for k in 0..n {
+                    b[dst as usize + k] = tmp[k];
+                }
+                return (dst + n as int, src + j as int + 1);
+            }
+            j -= 1;
         }
     }
 
@@ -286,9 +343,9 @@ pub fn EscapeString<S: Into<string>>(s: S) -> string {
 //       for len(s[src:]) > 0 { ... }
 //       return string(b[:dst])
 //   }
-/// `html.UnescapeString` — inverse of [`EscapeString`], plus all
-/// numeric character references (`&#NN;`, `&#xNN;`). The full HTML5
-/// named-entity table is **not** shipped (see module docs).
+/// `html.UnescapeString` — inverse of [`EscapeString`], plus every
+/// numeric character reference (`&#NN;`, `&#xNN;`) and the full HTML5
+/// named-entity table.
 pub fn UnescapeString<S: Into<string>>(s: S) -> string {
     let s: string = s.into();
     // Go: escape.go:188 — i := strings.IndexByte(s, '&')
