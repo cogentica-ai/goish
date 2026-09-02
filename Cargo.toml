@@ -2734,3 +2734,7 @@ path = "examples/segv_diagnostic_smoke.rs"
 [[example]]
 name = "netip_ref_smoke"
 path = "examples/netip_ref_smoke.rs"
+
+[[example]]
+name = "net_mac_ref_smoke"
+path = "examples/net_mac_ref_smoke.rs"
