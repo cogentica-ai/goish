@@ -60,6 +60,7 @@ pub use net::{
     Addr, AddrError, DNSConfigError, DNSError, ErrClosed, ErrWriteToConnected, InvalidAddrError,
     OpError, ParseError, UnknownNetworkError,
 };
+pub mod netip;
 pub mod textproto;
 pub mod url;
 

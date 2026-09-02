@@ -2730,3 +2730,7 @@ path = "examples/spawn_million.rs"
 [[example]]
 name = "segv_diagnostic_smoke"
 path = "examples/segv_diagnostic_smoke.rs"
+
+[[example]]
+name = "netip_ref_smoke"
+path = "examples/netip_ref_smoke.rs"
