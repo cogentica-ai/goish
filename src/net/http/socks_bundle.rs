@@ -406,11 +406,19 @@ impl socksDialer {
                     b.push(ip4.bytes[i]);
                 }
             } else {
-                // Go's ATYP=IPv6 branch needs `ip.To16()`. goish's
-                // net::IP is IPv4-only (mod.rs:675), so an address that
-                // is not 4-byte is unrepresentable — the same outcome
-                // Go reaches for an IP it cannot classify.
-                return (None, errors::New(string("unknown address type")));
+                // Go: else if ip6 := ip.To16(); ip6 != nil {
+                //         b = append(b, socksAddrTypeIPv6)
+                //         b = append(b, ip6...) }
+                let ip6 = ip.To16();
+                if !ip6.IsNil() {
+                    b.push(socksAddrTypeIPv6);
+                    for i in 0..ip6.bytes.Len() {
+                        b.push(ip6.bytes[i]);
+                    }
+                } else {
+                    // Go: return nil, errors.New("unknown address type")
+                    return (None, errors::New(string("unknown address type")));
+                }
             }
         } else {
             if host.Len() > 255 {
@@ -463,8 +471,11 @@ impl socksDialer {
                 };
             }
             x if x == socksAddrTypeIPv6 => {
-                // See the ATYP=IPv6 note above: goish cannot hold one.
-                return (None, errors::New(string("unknown address type 4")));
+                // Go: l += net.IPv6len; a.IP = make(net.IP, net.IPv6len)
+                l += net::IPv6len;
+                a.IP = net::IP {
+                    bytes: crate::make!([]byte, net::IPv6len),
+                };
             }
             x if x == socksAddrTypeFQDN => {
                 let mut n = crate::make!([]byte, 1);

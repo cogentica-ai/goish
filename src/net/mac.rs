@@ -24,7 +24,7 @@ use crate::types::{byte, int};
 
 // go: sdk 1.25.5 net/mac.go:7-7 hexDigit
 /// Go: `const hexDigit = "0123456789abcdef"`.
-const HEX_DIGIT: &[byte] = b"0123456789abcdef";
+pub(crate) const HEX_DIGIT: &[byte] = b"0123456789abcdef";
 
 // go: sdk 1.25.5 net/mac.go:10-10 HardwareAddr
 /// Go: "A HardwareAddr represents a physical hardware address."

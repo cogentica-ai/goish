@@ -2101,7 +2101,7 @@ pub(super) fn buildCertExtensions(
 // capturing the enclosing `ret[n]` borrow, so both are lifted to
 // file-private functions with the same names, bodies and order.
 fn ipAndMask(ipNet: &net::IPNet) -> slice<byte> {
-    let maskedIP = ipNet.IP.Mask(ipNet.Mask.clone());
+    let maskedIP = ipNet.IP.Mask(&ipNet.Mask);
     let mut ipAndMask: Vec<byte> =
         Vec::with_capacity((maskedIP.bytes.Len() + ipNet.Mask.bytes.Len()) as usize);
     for (_, b) in crate::range!(maskedIP.bytes.clone()) {
