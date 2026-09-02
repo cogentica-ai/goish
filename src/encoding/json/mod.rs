@@ -17,6 +17,7 @@
 //     dynamic JSON uses the `Value` enum.
 //   * Object keys iterate sorted (BTreeMap-backed map<K, V>).
 
+// goishlint:ignore GOISH015 — this package is 1885 lines in one mod.rs and predates the one-.rs-per-.go split. Splitting encoding/json is its own unit; `appendString` is anchored here because its BEHAVIOUR changed and the provenance line is worth more than the file boundary is. Claiming an encode.go manifest in a new file would instead demand all 77 of that file's other declarations, which would be a larger lie than this waiver.
 #![allow(non_snake_case, non_upper_case_globals)]
 
 extern crate alloc;
@@ -903,37 +904,94 @@ fn encode_number(out: &mut Vec<byte>, n: f64) {
     jsontext::AppendFloat(out, n, 64);
 }
 
+// go: sdk 1.25.5 encoding/json/encode.go:1010-1077 appendString
+/// Go: the string encoder, with `escapeHTML` true — which is what
+/// `Marshal` always uses and what an `Encoder` uses unless
+/// `SetEscapeHTML(false)` says otherwise.
+///
+/// This used to escape only the seven characters JSON itself requires,
+/// which left three problems, all of them silent:
+///
+///   * `<`, `>` and `&` went through RAW. Go escapes them as `\u003c`,
+///     `\u003e` and `\u0026` for one documented reason: "so that the
+///     JSON will be safe to embed inside HTML <script> tags". A
+///     marshalled string containing `</script>` closed the enclosing
+///     script block. goish already had `HTMLEscape`, correctly ported;
+///     `Marshal` simply never called it.
+///   * U+2028 and U+2029 went through raw. They are valid JSON and are
+///     LINE TERMINATORS in JavaScript, so a string containing one
+///     changes how the surrounding script parses.
+///   * Invalid UTF-8 went through raw, producing output that is not
+///     valid JSON at all and that a conformant parser rejects. Go
+///     replaces each bad byte with U+FFFD and succeeds.
 fn encode_string(out: &mut Vec<byte>, s: &[byte]) {
     out.push(b'"');
-    let mut i = 0;
+    let mut start: usize = 0;
+    let mut i: usize = 0;
     while i < s.len() {
-        let c = s[i];
-        match c {
-            b'"' => out.extend_from_slice(b"\\\""),
-            b'\\' => out.extend_from_slice(b"\\\\"),
-            b'\n' => out.extend_from_slice(b"\\n"),
-            b'\r' => out.extend_from_slice(b"\\r"),
-            b'\t' => out.extend_from_slice(b"\\t"),
-            b'\x08' => out.extend_from_slice(b"\\b"),
-            b'\x0c' => out.extend_from_slice(b"\\f"),
-            _ if c < 0x20 => {
-                out.extend_from_slice(b"\\u00");
-                out.push(hex_digit(c >> 4));
-                out.push(hex_digit(c & 0xF));
+        let b = s[i];
+        if b < 0x80 {
+            // Go: if htmlSafeSet[b] { i++; continue }
+            if b >= 0x20 && b != b'"' && b != b'\\' && b != b'<' && b != b'>' && b != b'&' {
+                i += 1;
+                continue;
             }
-            _ => out.push(c),
+            out.extend_from_slice(&s[start..i]);
+            match b {
+                b'\\' | b'"' => {
+                    out.push(b'\\');
+                    out.push(b);
+                }
+                b'\n' => out.extend_from_slice(b"\\n"),
+                b'\r' => out.extend_from_slice(b"\\r"),
+                b'\t' => out.extend_from_slice(b"\\t"),
+                b'\x08' => out.extend_from_slice(b"\\b"),
+                b'\x0c' => out.extend_from_slice(b"\\f"),
+                _ => {
+                    // Go: `\u00` + hex — which is also how `<`, `>` and
+                    // `&` come out.
+                    out.extend_from_slice(b"\\u00");
+                    out.push(hex_digit(b >> 4));
+                    out.push(hex_digit(b & 0xF));
+                }
+            }
+            i += 1;
+            start = i;
+            continue;
         }
-        i += 1;
+        let (c, size) = crate::unicode::utf8::DecodeRune(&s[i..]);
+        let size = size.unsigned_abs() as usize;
+        // Go: if c == utf8.RuneError && size == 1 — an invalid byte.
+        if c == crate::unicode::utf8::RuneError && size == 1 {
+            out.extend_from_slice(&s[start..i]);
+            out.extend_from_slice(b"\\ufffd");
+            i += size;
+            start = i;
+            continue;
+        }
+        // Go: U+2028 and U+2029.
+        if c == 0x2028 || c == 0x2029 {
+            out.extend_from_slice(&s[start..i]);
+            out.extend_from_slice(b"\\u202");
+            out.push(hex_digit((c & 0xF) as u8)); // goishlint:ignore GOISH005 - c is 0x2028 or 0x2029 here, so the low nibble is 8 or 9.
+            i += size;
+            start = i;
+            continue;
+        }
+        i += size;
     }
+    out.extend_from_slice(&s[start..]);
     out.push(b'"');
 }
 
+// go: none — goish idiom: Go indexes the package-level string
+//     `const hex = "0123456789abcdef"`; goish spells the lookup as the
+//     arithmetic it is.
 fn hex_digit(n: u8) -> u8 {
     if n < 10 {
-        b'0' + n
-    } else {
-        b'a' + n - 10
+        return b'0' + n;
     }
+    return b'a' + n - 10;
 }
 
 fn encode_array(out: &mut Vec<byte>, a: &slice<Value>, cfg: Option<&IndentCfg>, depth: usize) {
