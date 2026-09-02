@@ -2718,3 +2718,15 @@ path = "examples/utf16_smoke.rs"
 [[example]]
 name = "var_mut_smoke"
 path = "examples/var_mut_smoke.rs"
+
+[[example]]
+name = "atomic_value_smoke"
+path = "examples/atomic_value_smoke.rs"
+
+[[example]]
+name = "spawn_million"
+path = "examples/spawn_million.rs"
+
+[[example]]
+name = "segv_diagnostic_smoke"
+path = "examples/segv_diagnostic_smoke.rs"
