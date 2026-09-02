@@ -23,6 +23,9 @@
 
 #![allow(non_snake_case)]
 
+mod dir;
+pub use dir::CopyFS;
+
 pub mod exec;
 pub mod signal;
 pub mod user;
