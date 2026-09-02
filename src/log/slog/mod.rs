@@ -34,13 +34,14 @@ mod level;
 mod logger;
 mod record;
 mod value;
-pub use attr::{argsToAttrSlice, Any, Group};
+pub use attr::{argsToAttrSlice, Any, Duration, Float64, Group, Int64, Time, Uint64};
 pub use handler::{LevelKey, MessageKey, SourceKey, TimeKey};
 pub use level::{Level, LevelDebug, LevelError, LevelInfo, LevelVar, LevelWarn, Leveler};
 pub use record::{argsToAttr, badKey};
 pub use value::{
-    countEmptyGroups, isEmptyGroup, maxLogValues, AnyValue, GroupValue, LogValuer, LogValuerBox,
-    LogValuerValue, Resolve,
+    appendAttrString, countEmptyGroups, isEmptyGroup, maxLogValues, AnyValue, BoolValue,
+    DurationValue, Float64Value, GroupValue, Int64Value, IntValue, LogValuer, LogValuerBox,
+    LogValuerValue, Resolve, StringValue, TimeValue, Uint64Value,
 };
 
 extern crate alloc;
@@ -159,60 +160,6 @@ pub struct Record {
     pub Message: string,
     pub PC: crate::types::uintptr,
     attrs: slice<Attr>,
-}
-
-impl Record {
-    /// Append attributes to the record's attribute list.
-    pub fn AddAttrs(&mut self, attr: Attr) {
-        self.attrs = crate::append!(self.attrs.clone(), attr);
-    }
-
-    /// Iterate the record's attributes, calling `f` for each. Go's
-    /// signature is `func(yield func(Attr) bool)` (range-over-func);
-    /// we accept a plain `FnMut(Attr)` because the only goish-side
-    /// consumer (logr's slogHandler.Handle) doesn't use the bool
-    /// short-circuit.
-    pub fn Attrs<F: FnMut(Attr)>(&self, mut f: F) {
-        let n = self.attrs.Len();
-        let mut i: int = 0;
-        while i < n {
-            f(self.attrs[i].clone());
-            i += 1;
-        }
-    }
-
-    /// `(*Record).Add(args ...any)` — Go's variadic key-value form,
-    /// converting consecutive args into `Attr`s and appending. The
-    /// canonical Go shape is `record.Add("key1", val1, "key2", val2,
-    /// ...)`; we accept a single `slice<Any>` here to match the form
-    /// the logr port passes in (it converts its own kv slice via
-    /// `Add(kvList)`). The slice elements come in (key, value) pairs;
-    /// any unpaired tail element is dropped.
-    pub fn Add(&mut self, kvs: slice<GoishAny>) {
-        let n = kvs.Len();
-        let mut i: int = 0;
-        while i + 1 < n {
-            let _key = kvs[i].clone();
-            let val = kvs[i + 1].clone();
-            // Best-effort key string; if the key isn't a string,
-            // store it via the typed Any variant.
-            self.attrs = crate::append!(
-                self.attrs.clone(),
-                Attr {
-                    Key: crate::gostring::string::from_static(""),
-                    Value: Value {
-                        kind: KindAny,
-                        any: val,
-                    },
-                }
-            );
-            i += 2;
-        }
-    }
-
-    pub fn NumAttrs(&self) -> int {
-        self.attrs.Len()
-    }
 }
 
 /// Construct a fresh Record. Mirrors Go's `slog.NewRecord(t, level, msg, pc)`.

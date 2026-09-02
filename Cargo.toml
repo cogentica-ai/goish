@@ -2150,3 +2150,7 @@ path = "examples/mail_ref_smoke.rs"
 [[example]]
 name = "slog_level_ref_smoke"
 path = "examples/slog_level_ref_smoke.rs"
+
+[[example]]
+name = "slog_value_ref_smoke"
+path = "examples/slog_value_ref_smoke.rs"

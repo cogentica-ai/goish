@@ -97,9 +97,9 @@ impl Logger {
         let pc = pcs[0];
 
         let mut r = NewRecord(crate::time::Now(), level, msg, pc);
-        for i in 0..attrs.Len() {
-            r.AddAttrs(attrs[i].clone());
-        }
+        // Go: r.AddAttrs(attrs...) — one variadic call, which is also
+        // what skips the empty groups.
+        r.AddAttrs(&attrs.clone().__into_vec());
         let _ = self.Handler().Handle(ctx, r);
     }
 
