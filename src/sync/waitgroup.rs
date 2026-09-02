@@ -1,6 +1,11 @@
-// sync::WaitGroup — Go's `sync.WaitGroup` (Add / Done / Wait / Go).
+// go: file sync/waitgroup.go decls: WaitGroup.Add, WaitGroup.Done, WaitGroup.Wait, WaitGroup.Go
 //
-// Reference: /share/go/src/sync/waitgroup.go.
+// waitgroup.go — Go's `sync.WaitGroup`.
+//
+// This file carried NO provenance anchors, like the rest of src/sync/.
+//
+// goishlint:ignore GOISH021 waitGroupBubbleFlag — the flag Go's synctest bubbles set on the counter word; goish has no synctest.
+// goishlint:ignore GOISH020 GoStack, drop, __try_wait, new — `GoStack` is `Go` with an explicit stack size, which Go has no counterpart for because its goroutines grow theirs; `drop`/`__try_wait`/`new` are goish's own lifecycle.
 //
 // Implementation parity with Go: bit-packed AtomicU64 state
 // `[counter:32 | waiters:32]` for lock-free Add/Done/Wait fast paths;
@@ -47,6 +52,7 @@ impl WaitGroup {
         }
     }
 
+    // go: sdk 1.25.5 sync/waitgroup.go:77-153 WaitGroup.Add
     /// Add adds `delta` to the WaitGroup task counter. Negative
     /// counter panics. Mirrors `WaitGroup.Add` (waitgroup.go:77).
     pub fn Add(&self, delta: i64) {
@@ -81,6 +87,7 @@ impl WaitGroup {
         self.sema.release_n(waiters as i64);
     }
 
+    // go: sdk 1.25.5 sync/waitgroup.go:155-158 WaitGroup.Done
     /// Done decrements the counter by 1. Mirrors
     /// `WaitGroup.Done` (waitgroup.go:155).
     #[inline]
@@ -103,6 +110,7 @@ impl WaitGroup {
         return crate::int64(state >> 32) == 0;
     }
 
+    // go: sdk 1.25.5 sync/waitgroup.go:160-233 WaitGroup.Wait
     /// Wait blocks until the counter reaches zero. Mirrors
     /// `WaitGroup.Wait` (waitgroup.go:160).
     pub fn Wait(&self) {
@@ -126,6 +134,7 @@ impl WaitGroup {
         }
     }
 
+    // go: sdk 1.25.5 sync/waitgroup.go:235-244 WaitGroup.Go
     /// Go calls `f` in a new goroutine and adds it to the
     /// WaitGroup. Mirrors `WaitGroup.Go` (waitgroup.go:235), a Go
     /// 1.25 convenience method.
@@ -147,6 +156,9 @@ impl WaitGroup {
         self.go_inner(None, f);
     }
 
+    // go: none — goish idiom: `Go` with an explicit stack size. Go has no
+    // go: none — goish idiom:     counterpart because its goroutines grow their own stacks;
+    // go: none — goish idiom:     goish's take a size at spawn.
     /// Same as `Go`, but spawns the goroutine with an explicit stack
     /// size in bytes (rounded up to the nearest 4 KiB page). Mirrors
     /// the relationship between `runtime::sched::newproc` and
@@ -194,6 +206,7 @@ impl WaitGroup {
 }
 
 impl Drop for WaitGroup {
+    // go: none — goish idiom: Rust's Drop, which Go has no counterpart for.
     /// Block until the counter reaches zero before releasing the
     /// `WaitGroup` storage. This is the structural-correctness
     /// half of `Go`'s lifetime contract: every closure spawned by
