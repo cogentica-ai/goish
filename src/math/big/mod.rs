@@ -64,6 +64,8 @@ impl crate::fmt::Stringer for Accuracy {
     }
 }
 
+mod intconv;
+
 /// `big.Int` — signed multi-precision integer. Zero value represents 0.
 #[derive(Clone, Default)]
 pub struct Int {
@@ -905,7 +907,10 @@ impl Int {
     ///   * If m == 0 (nil-equivalent), z = x**y unless y <= 0 then z = 1.
     ///   * Otherwise z = x**y mod |m|, normalised to 0 <= z < |m|.
     ///   * For y < 0 with m != 0, z = (x⁻¹ mod |m|)**(-y) mod |m|.
-    ///     Panics with Go's message if x is not coprime to m.
+    ///     Go (int.go:563): "if y < 0, and x and m are not relatively
+    ///     prime, z is unchanged and nil is returned." goish returns
+    ///     `&mut Self`, so it leaves self unchanged — the same
+    ///     convention `ModInverse` uses in this file for Go's nil.
     ///   * For y < 0 with m == 0, z = 1 (matches Go).
     pub fn Exp(&mut self, x: &Int, y: &Int, m: &Int) -> &mut Self {
         let m_zero = m.abs.is_empty();
@@ -926,7 +931,15 @@ impl Int {
             let mut one = Int::new();
             one.SetInt64(1);
             if g.Cmp(&one) != 0 {
-                panic!("negative exponent and modulus not relatively prime");
+                // Go: inverse := new(Int).ModInverse(x, m)
+                //     if inverse == nil { return nil }
+                // A nil return, NOT a panic: Exp with a negative
+                // exponent is how a caller asks for a modular inverse,
+                // and whether one exists is a property of the operands,
+                // which in crypto can come from the far end of a
+                // connection. Panicking turned "no inverse" into a
+                // crash on attacker-chosen input.
+                return self;
             }
             let mut inv = Int::new();
             inv.ModInverse(&x_red, &m_abs);
@@ -1580,19 +1593,6 @@ impl Int {
         }
     }
 
-    /// `(*Int).Text(base)` — string representation of `self` in `base`.
-    /// `base` must be between 2 and 62 inclusive; lower-case letters
-    /// `a`..`z` cover digit values 10..35 and upper-case `A`..`Z` cover
-    /// 36..61. No `0x`-style prefix is added. Negative values are
-    /// prefixed with `-`.
-    pub fn Text(&self, base: int) -> crate::string {
-        if base < 2 || base > MAX_BASE {
-            panic!("big::Int::Text: invalid base");
-        }
-        let buf = itoa(self.neg, &self.abs, base);
-        crate::string::from_bytes(&buf)
-    }
-
     /// `(*Int).Bytes()` — big-endian byte representation of the absolute
     /// value of `self`. No sign and no leading zero bytes; zero yields
     /// an empty slice. Matches Go's `(*Int).Bytes()`.
@@ -2070,22 +2070,6 @@ impl Int {
             }
             r = m;
         }
-    }
-
-    /// `(*Int).Append(buf, base)` — append the base-`base` text of
-    /// `self` (as produced by `Text`) to `buf` and return the extended
-    /// slice. `base` must be 2..=62.
-    pub fn Append(
-        &self,
-        buf: crate::slice<crate::types::byte>,
-        base: int,
-    ) -> crate::slice<crate::types::byte> {
-        if base < 2 || base > MAX_BASE {
-            panic!("big::Int::Append: invalid base");
-        }
-        let mut out = buf.__into_vec();
-        out.extend_from_slice(&itoa(self.neg, &self.abs, base));
-        crate::slice::<crate::types::byte>::__from_vec(out)
     }
 
     /// `(*Int).AppendText(b)` — append the decimal text of `self` to
