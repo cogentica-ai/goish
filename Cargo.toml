@@ -2758,3 +2758,7 @@ path = "examples/strconv_complex_ref_smoke.rs"
 [[example]]
 name = "context_string_ref_smoke"
 path = "examples/context_string_ref_smoke.rs"
+
+[[example]]
+name = "math_ref_smoke"
+path = "examples/math_ref_smoke.rs"
