@@ -245,7 +245,7 @@ impl Rat {
     /// Aliasing-safe.
     pub fn Quo(&mut self, x: &Rat, y: &Rat) -> &mut Self {
         if y.num.Sign() == 0 {
-            panic!("big::Rat::Quo: division by zero");
+            panic!("division by zero");
         }
         let xnum = x.num.clone();
         let xden = x.den.clone();
@@ -282,7 +282,7 @@ impl Rat {
     /// `(*Rat).Inv(x)` — z = 1/x. Panics if x == 0. Aliasing-safe.
     pub fn Inv(&mut self, x: &Rat) -> &mut Self {
         if x.num.Sign() == 0 {
-            panic!("big::Rat::Inv: division by zero");
+            panic!("division by zero");
         }
         // Swap numerator and denominator.
         let new_num = x.den.clone();
@@ -448,12 +448,110 @@ impl Rat {
             self.norm();
             return (self, true);
         }
-        // Decimal / scientific float (or a plain integer).
-        if parse_decimal_into_rat(core::str::from_utf8(bytes).unwrap_or(""), self) {
-            (self, true)
-        } else {
-            (self, false)
+        // Floating-point form. Go scans the mantissa in base 0, so the
+        // 0x / 0b / 0o prefixes and '_' separators are accepted here
+        // exactly as they are in an Int literal, and a hex mantissa may
+        // carry a 'p' binary exponent. goish reuses `float_scan`, the
+        // same scanner Float::Parse uses, so the two cannot drift.
+        //
+        // This replaced a decimal-only parser that began with a
+        // `str::trim()`: it accepted " 1" and "1 ", which Go refuses
+        // because scanSign meets the space and the mantissa scan then
+        // fails on it. Accepting input Go rejects is the worse of the
+        // two directions for a parser to be wrong in.
+        let (neg, mant, base, fcount, exp, ebase, is_inf) = match float_scan(bytes, 0) {
+            Ok(v) => v,
+            Err(_) => return (self, false),
+        };
+        // Go has no ±Inf case here: `nat.scan` finds no digits and the
+        // whole SetString fails.
+        if is_inf {
+            return (self, false);
         }
+
+        let mut num = Int::default();
+        num.abs = mant;
+        let mut den = Int::default();
+        den.SetInt64(1);
+
+        // Go: special-case 0 (see also issue #16176)
+        if num.abs.is_empty() {
+            self.num = num;
+            self.den = den;
+            self.norm();
+            return (self, true);
+        }
+
+        // Go: "determine binary or decimal exponent contribution of
+        // radix point". A radix point is a division by base**(-fcount),
+        // i.e. a multiplication by base**fcount; powers of 10 split
+        // into the same powers of 2 and 5 so the factors stay small.
+        let mut exp2: i64 = 0;
+        let mut exp5: i64 = 0;
+        if fcount < 0 {
+            let d = fcount;
+            match base {
+                10 => {
+                    exp5 = d;
+                    exp2 = d;
+                }
+                2 => exp2 = d,
+                8 => exp2 = d * 3,
+                16 => exp2 = d * 4,
+                _ => return (self, false),
+            }
+        }
+        // Go: take actual exponent into account.
+        match ebase {
+            10 => {
+                exp5 += exp;
+                exp2 += exp;
+            }
+            2 => exp2 += exp,
+            _ => return (self, false),
+        }
+
+        // Go: apply exp5 contributions first, so the numbers to
+        // multiply are smaller.
+        if exp5 != 0 {
+            let n = if exp5 < 0 { -exp5 } else { exp5 };
+            if n < 0 || n > 1_000_000 {
+                // Go: "avoid excessively large exponents" (and the
+                // -(-1<<63) overflow that stays negative).
+                return (self, false);
+            }
+            let mut pow5 = Int::default();
+            let mut five = Int::default();
+            five.SetInt64(5);
+            let mut e = Int::default();
+            e.SetInt64(n);
+            pow5.Exp(&five, &e, &Int::default());
+            if exp5 > 0 {
+                let lhs = num.clone();
+                num.Mul(&lhs, &pow5);
+            } else {
+                den.Set(&pow5);
+            }
+        }
+
+        // Go: apply exp2 contributions.
+        if !(-10_000_000..=10_000_000).contains(&exp2) {
+            return (self, false);
+        }
+        if exp2 > 0 {
+            let lhs = num.clone();
+            num.Lsh(&lhs, exp2 as crate::types::uint);
+        } else if exp2 < 0 {
+            let lhs = den.clone();
+            den.Lsh(&lhs, (-exp2) as crate::types::uint);
+        }
+
+        // Go: z.a.neg = neg && len(z.a.abs) > 0  — 0 has no sign.
+        num.neg = neg && !num.abs.is_empty();
+        self.num = num;
+        self.den = den;
+        self.norm();
+        return (self, true);
     }
 
     /// `(*Rat).Float32()` — nearest f32 to x, plus an exact flag.
