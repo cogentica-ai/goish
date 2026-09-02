@@ -222,8 +222,9 @@ impl slog::Handler for Recorder {
             }
         }
         // …and finally the Record's own, under whatever groups are open.
-        r.Attrs(&mut |a: slog::Attr| {
-            self.put(&mut root, &self.groups, &a);
+        r.Attrs(|a: &slog::Attr| {
+            self.put(&mut root, &self.groups, a);
+            return true;
         });
 
         let flat = match root.collapse() {
@@ -274,8 +275,9 @@ impl slog::Handler for Flattener {
         }
         flat.Set(s(slog::LevelKey), Any::new(r.Level.0));
         flat.Set(s(slog::MessageKey), Any::new(r.Message.clone()));
-        r.Attrs(&mut |a: slog::Attr| {
+        r.Attrs(|a: &slog::Attr| {
             flat.Set(a.Key.clone(), slog::Resolve(&a.Value).Any());
+            return true;
         });
         SINK.Lock().push(flat);
         return errors::nil;
