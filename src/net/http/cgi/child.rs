@@ -81,7 +81,7 @@ pub fn RequestFromMap(params: &map<string, string>) -> (Request, error) {
         TLS: None,
         RequestURI: string::new(),
         Method: get("REQUEST_METHOD"),
-        URL: URL::empty(),
+        URL: URL::default(),
         Proto: string::new(),
         ProtoMajor: 0,
         ProtoMinor: 0,

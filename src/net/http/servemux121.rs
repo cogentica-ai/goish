@@ -178,7 +178,7 @@ impl serveMux121 {
 
         if path != r.URL.Path {
             let (_, pattern) = self.handler(host, path.clone());
-            let mut u = URL::empty();
+            let mut u = URL::default();
             u.Path = path;
             u.RawQuery = r.URL.RawQuery.clone();
             return (RedirectHandler(u.String(), StatusMovedPermanently), pattern);
@@ -220,7 +220,7 @@ impl serveMux121 {
             return (u.clone(), false);
         }
         let path = crate::fmt::Sprintf!("%s/", path);
-        let mut nu = URL::empty();
+        let mut nu = URL::default();
         nu.Path = path;
         nu.RawQuery = u.RawQuery.clone();
         return (nu, true);

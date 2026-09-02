@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 8596,
+ "total": 8462,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -310,7 +310,7 @@
    "GOISH021": 6
   },
   "src/fmt/print.rs": {
-   "GOISH018": 41,
+   "GOISH018": 40,
    "GOISH021": 18,
    "GOISH022": 4
   },
@@ -420,9 +420,9 @@
    "GOISH023": 5
   },
   "src/log/slog/mod.rs": {
-   "GOISH014": 18,
+   "GOISH014": 14,
    "GOISH016": 1,
-   "GOISH023": 15
+   "GOISH023": 13
   },
   "src/maps/mod.rs": {
    "GOISH014": 9,
@@ -587,15 +587,6 @@
    "GOISH018": 24,
    "GOISH021": 22
   },
-  "src/net/http/url.rs": {
-   "GOISH005": 1,
-   "GOISH007": 1,
-   "GOISH014": 28,
-   "GOISH015": 1,
-   "GOISH018": 20,
-   "GOISH021": 10,
-   "GOISH023": 50
-  },
   "src/net/lookup.rs": {
    "GOISH014": 23,
    "GOISH023": 23
@@ -604,12 +595,6 @@
    "GOISH005": 7,
    "GOISH014": 5,
    "GOISH015": 1,
-   "GOISH023": 5
-  },
-  "src/net/mail/mod.rs": {
-   "GOISH014": 5,
-   "GOISH015": 1,
-   "GOISH016": 1,
    "GOISH023": 5
   },
   "src/net/mod.rs": {
@@ -1008,11 +993,11 @@
    "GOISH018": 1
   },
   "src/time/time.rs": {
-   "GOISH018": 31,
+   "GOISH018": 29,
    "GOISH021": 29
   },
   "src/time/zoneinfo.rs": {
-   "GOISH018": 15,
+   "GOISH018": 13,
    "GOISH021": 17
   },
   "src/unicode/norm.rs": {

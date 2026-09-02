@@ -359,7 +359,7 @@ fn main() {
             }
         }
         {
-            let (as_, err) = mail::ParseAddressList("");
+            let (_as_, err) = mail::ParseAddressList("");
             if err.IsNil() {
                 fmt::Println!("[!!] list FAIL expected error");
                 failed += 1;

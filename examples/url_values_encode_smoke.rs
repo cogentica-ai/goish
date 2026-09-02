@@ -21,7 +21,7 @@ fn main() {
     // 1. Empty Values → empty string.
     {
         let v: map<string, slice<string>> = map::new();
-        if http::ValuesEncode(v).Len() == 0 {
+        if http::ValuesEncode(&v).Len() == 0 {
             fmt::Println!("[ 1] empty                      PASS");
         } else {
             fmt::Println!("[ 1] empty                      FAIL");
@@ -35,7 +35,7 @@ fn main() {
         let mut s: slice<string> = slice::__from_vec(alloc::vec![]);
         s = goish::append!(s, "hello");
         v.Set(string("greeting"), s);
-        let got = http::ValuesEncode(v);
+        let got = http::ValuesEncode(&v);
         if got == "greeting=hello" {
             fmt::Println!("[ 2] single pair                PASS");
         } else {
@@ -53,7 +53,7 @@ fn main() {
         b = goish::append!(b, "2");
         v.Set(string("z"), a);
         v.Set(string("a"), b);
-        let got = http::ValuesEncode(v);
+        let got = http::ValuesEncode(&v);
         if got == "a=2&z=1" {
             fmt::Println!("[ 3] sorted keys                PASS");
         } else {
@@ -70,7 +70,7 @@ fn main() {
         s = goish::append!(s, "2");
         s = goish::append!(s, "3");
         v.Set(string("k"), s);
-        let got = http::ValuesEncode(v);
+        let got = http::ValuesEncode(&v);
         if got == "k=1&k=2&k=3" {
             fmt::Println!("[ 4] multi-value                PASS");
         } else {
@@ -86,7 +86,7 @@ fn main() {
         let mut s: slice<string> = slice::__from_vec(alloc::vec![]);
         s = goish::append!(s, "hello world");
         v.Set(string("name=key"), s);
-        let got = http::ValuesEncode(v);
+        let got = http::ValuesEncode(&v);
         if got == "name%3Dkey=hello+world" {
             fmt::Println!("[ 5] special chars escaped      PASS");
         } else {

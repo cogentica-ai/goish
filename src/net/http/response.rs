@@ -141,7 +141,7 @@ impl Response {
     pub fn Location(&self) -> (URL, error) {
         let lv = self.Header.Get(string("Location"));
         if lv.Len() == 0 {
-            return (URL::empty(), ErrNoLocation.into());
+            return (URL::default(), ErrNoLocation.into());
         }
         if let Some(req) = self.Request.Try() {
             return req.URL.Parse(lv);

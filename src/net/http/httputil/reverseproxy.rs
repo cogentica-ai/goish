@@ -467,7 +467,7 @@ pub fn cleanQueryParams<S: Into<string>>(s: S) -> string {
     let b = s.as_bytes();
     let reencode = |q: &string| -> string {
         let (v, _) = super::super::url::ParseQuery(q.clone());
-        return super::super::url::ValuesEncode(v);
+        return super::super::url::ValuesEncode(&v);
     };
     let mut i: usize = 0;
     while i < b.len() {

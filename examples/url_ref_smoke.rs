@@ -720,7 +720,7 @@ fn main() {
                 i += 1;
                 continue;
             }
-            let (out, _) = base.ResolveReference(&rr);
+            let out = base.ResolveReference(&rr);
             eq(&mut ok, r, "ResolveReference", out.String(), want);
             i += 1;
         }
@@ -782,7 +782,7 @@ fn main() {
                     parts.push(s(p));
                 }
             }
-            let (j, _) = u.JoinPath(slice::__from_vec(parts));
+            let j = u.JoinPath(slice::__from_vec(parts));
             eq(&mut ok, joined, "JoinPath", j.String(), want);
             i += 1;
         }
@@ -794,19 +794,19 @@ fn main() {
     //    routes the host through `escape` too.
     {
         let mut ok = true;
-        eq(&mut ok, "u", "User", url::Userinfo::User("u").String(), "u");
+        eq(&mut ok, "u", "User", url::User("u").String(), "u");
         eq(
             &mut ok,
             "u:p",
             "UserPassword",
-            url::Userinfo::UserPassword("u", "p").String(),
+            url::UserPassword("u", "p").String(),
             "u:p",
         );
         eq(
             &mut ok,
             "u:x/p@y",
             "UserPassword",
-            url::Userinfo::UserPassword("u:x", "p@y").String(),
+            url::UserPassword("u:x", "p@y").String(),
             "u%3Ax:p%40y",
         );
         report(&mut failed, ok, " 9", "Userinfo escapes ':' and '@'");

@@ -58,7 +58,7 @@ fn run() -> ! {
     let (u, e) = Parse("http://user:pw@example.com/p");
     check("parse ok", fmt::Sprintf!("%v", e), "<nil>");
     check("host is clean", u.Host.clone(), "example.com");
-    let ui = u.User.clone().unwrap();
+    let ui = u.User.clone();
     check("username", ui.Username(), "user");
     let (pw, set) = ui.Password();
     check("password", pw, "pw");
@@ -86,7 +86,7 @@ fn run() -> ! {
     // ── '@' inside the password: split at the LAST '@' ──
     let (u2, _) = Parse("http://u:p@ss@example.com/p");
     check("last-@ host", u2.Host.clone(), "example.com");
-    let ui2 = u2.User.clone().unwrap();
+    let ui2 = u2.User.clone();
     let (pw2, _) = ui2.Password();
     check("last-@ password", pw2, "p@ss");
     check(
@@ -97,7 +97,7 @@ fn run() -> ! {
 
     // ── username only: password NOT set ──
     let (u3, _) = Parse("http://justuser@example.com/p");
-    let ui3 = u3.User.clone().unwrap();
+    let ui3 = u3.User.clone();
     let (_, set3) = ui3.Password();
     check(
         "user-only not set",
@@ -117,7 +117,7 @@ fn run() -> ! {
 
     // ── empty password still counts as set ──
     let (u4, _) = Parse("http://u:@example.com/p");
-    let ui4 = u4.User.clone().unwrap();
+    let ui4 = u4.User.clone();
     let (_, set4) = ui4.Password();
     check(
         "empty pw is set",
@@ -142,7 +142,7 @@ fn run() -> ! {
 
     // ── percent-decoding at Parse, re-encoding at String ──
     let (u5, _) = Parse("http://a%20b:c%2Fd@example.com/");
-    let ui5 = u5.User.clone().unwrap();
+    let ui5 = u5.User.clone();
     check("decoded username", ui5.Username(), "a b");
     let (pw5, _) = ui5.Password();
     check("decoded password", pw5, "c/d");
@@ -171,7 +171,11 @@ fn run() -> ! {
     let (u7, _) = Parse("http://example.com/p");
     check(
         "no userinfo → None",
-        string(if u7.User.is_none() { "none" } else { "some" }),
+        string(if u7.User == goish::nil {
+            "none"
+        } else {
+            "some"
+        }),
         "none",
     );
 

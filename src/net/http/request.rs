@@ -30,7 +30,7 @@ use crate::string;
 use crate::types::{byte, int};
 
 use super::header::{hasToken, Header};
-use super::url::{parse_request_uri, URL};
+use super::url::{ParseRequestURI, URL};
 
 /// `net/http.Request`. Slim — only fields a handler typically reads.
 #[derive(Clone)]
@@ -998,7 +998,7 @@ impl Default for Request {
             TLS: None,
             RequestURI: string::new(),
             Method: string::new(),
-            URL: URL::empty(),
+            URL: URL::default(),
             Proto: string::new(),
             ProtoMajor: 0,
             ProtoMinor: 0,
@@ -1039,7 +1039,7 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         TLS: None,
         RequestURI: string::new(),
         Method: string::new(),
-        URL: URL::empty(),
+        URL: URL::default(),
         Proto: string::new(),
         ProtoMajor: 0,
         ProtoMinor: 0,
@@ -1079,10 +1079,12 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         None => return (req, errors::New(string("net/http: malformed HTTP version"))),
     };
 
-    let url = match parse_request_uri(&target) {
-        Ok(u) => u,
-        Err(msg) => return (req, errors::New(msg)),
-    };
+    // Go: `url, err := url.ParseRequestURI(target)` — a (value, error)
+    // pair, where net/http's own copy returned a Result.
+    let (url, uerr) = ParseRequestURI(target.clone());
+    if !uerr.IsNil() {
+        return (req, uerr);
+    }
 
     req.Method = method;
     req.URL = url;

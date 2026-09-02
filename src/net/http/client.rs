@@ -1014,7 +1014,7 @@ pub fn ProxyFromEnvironment() -> ProxyResolver {
         let (u, err) = f(&r.URL);
         let out = match u {
             Some(u) => u,
-            None => super::url::URL::empty(),
+            None => super::url::URL::default(),
         };
         return (out, err);
     })
@@ -1634,8 +1634,11 @@ pub fn refererForURL(lastReq: &URL, newReq: &URL, explicitRef: string) -> string
     //     auth := lastReq.User.String() + "@"
     //     referer = strings.Replace(referer, auth, "", 1) }
     let referer = lastReq.String();
-    if let Some(u) = &lastReq.User {
-        let auth = u.String() + "@";
+    // Go: `if lastReq.User != nil` — a nil-able *Userinfo. goish's
+    // net/url models the nil with the same `== nil` comparison the rest
+    // of the tree uses, where net/http's own copy used an Option.
+    if lastReq.User != crate::nil {
+        let auth = lastReq.User.String() + "@";
         return crate::strings::Replace(referer, auth, string(""), 1);
     }
     return referer;
@@ -1700,7 +1703,8 @@ pub fn shouldCopyHeaderOnRedirect(initial: &URL, dest: &URL) -> bool {
 /// Redacts the password in a URL for error messages. An EMPTY password
 /// still counts as set: `http://u:@a.com` renders as `http://u:***@a.com`.
 pub fn stripPassword(u: &URL) -> string {
-    if let Some(ui) = &u.User {
+    if u.User != crate::nil {
+        let ui = &u.User;
         let (_, passSet) = ui.Password();
         if passSet {
             return crate::strings::Replace(
@@ -1979,7 +1983,8 @@ pub(crate) fn send(
 
     // Go: if u := req.URL.User; u != nil && req.Header.Get(
     // "Authorization") == "" { … "Basic " + basicAuth(...) }
-    if let Some(u) = req.URL.User.clone() {
+    if req.URL.User != crate::nil {
+        let u = req.URL.User.clone();
         if req.Header.Get(string("Authorization")).Len() == 0 {
             let username = u.Username();
             let (password, _) = u.Password();
@@ -2497,12 +2502,12 @@ pub fn NewRequest<M: Into<string>, U: Into<string>, B: __RequestBody>(
             errors::New(string("net/http: invalid method \"") + m + string("\"")),
         );
     }
-    // Go uses urlpkg.Parse here, NOT parse_request_uri. The latter is
+    // Go uses urlpkg.Parse here, NOT ParseRequestURI. The latter is
     // for server-side request-line URIs (RFC 9112 origin-form) and
     // differs on two forms NewRequest must handle: a scheme-relative
-    // "//host/path" (Parse splits the authority; parse_request_uri
+    // "//host/path" (Parse splits the authority; ParseRequestURI
     // treats it all as a path) and userinfo (Parse puts "user:pw" in
-    // URL.User, leaving Host clean; parse_request_uri leaves it in
+    // URL.User, leaving Host clean; ParseRequestURI leaves it in
     // Host, which then leaked the credentials into the Host header).
     let (u, perr) = super::url::Parse(url);
     if perr != errors::nil {
@@ -2553,7 +2558,7 @@ fn default_request() -> Request {
         TLS: None,
         RequestURI: string::new(),
         Method: string::new(),
-        URL: URL::empty(),
+        URL: URL::default(),
         Proto: string::new(),
         ProtoMajor: 0,
         ProtoMinor: 0,

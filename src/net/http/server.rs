@@ -300,7 +300,7 @@ impl ServeMux {
         // was made from. That mismatch is the classic shape of a
         // path-based access-control bypass.
         if path != r.URL.EscapedPath() {
-            let mut u = super::url::URL::empty();
+            let mut u = super::url::URL::default();
             u.Path = path.clone();
             u.RawPath = path.clone();
             u.RawQuery = r.URL.RawQuery.clone();
@@ -438,7 +438,7 @@ impl ServeMux {
             let (n2, _) = s.tree.r#match(host, method, &slashed);
             if exactMatch(n2, &slashed) {
                 let uu = u.unwrap();
-                let mut redirect = super::url::URL::empty();
+                let mut redirect = super::url::URL::default();
                 redirect.Path = cleanPath(uu.Path.clone()) + "/";
                 redirect.RawQuery = uu.RawQuery.clone();
                 return Some(redirect);

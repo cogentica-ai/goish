@@ -30,6 +30,15 @@ fn f(u: &url::URL) -> string {
     );
 }
 
+fn chkEq(got: string, want: &'static str, what: &'static str, bad: &mut i32) {
+    if got != want {
+        fmt::Println!("FAIL ", what);
+        fmt::Println!("  got  ", got);
+        fmt::Println!("  want ", want);
+        *bad += 1;
+    }
+}
+
 fn chk(raw: &'static str, want: &'static str, bad: &mut i32) {
     let (u, err) = url::Parse(string(raw));
     if err != errors::nil {
@@ -133,45 +142,63 @@ fn main() {
     chkStr("/just/a/path", "/just/a/path", &mut bad);
     chkStr("//example.com/x", "//example.com/x", &mut bad);
 
-    // ── KNOWN DIVERGENCE, pinned so a fix trips this test ──────────
+    // ── The divergence this file used to pin, now CLOSED ───────────
     //
     // Go PERCENT-DECODES Path during Parse and keeps the raw form in
     // RawPath, setting RawPath only when it differs from the default
     // escaping of Path:
     //
-    //   Go:    "/a%2Fb" -> Path="/a/b"   RawPath="/a%2Fb"
-    //          "/a/b"   -> Path="/a/b"   RawPath=""
-    //   goish: "/a%2Fb" -> Path="/a%2Fb" RawPath="/a%2Fb"
-    //          "/a/b"   -> Path="/a/b"   RawPath="/a/b"
+    //   "/a%2Fb" -> Path="/a/b"   RawPath="/a%2Fb"
+    //   "/a/b"   -> Path="/a/b"   RawPath=""
     //
-    // goish never decodes and always sets RawPath. This is not
-    // cosmetic: ServeMux matches on r.URL.Path, so a request for
-    // "/a%2Fb" does NOT match a "/a/b" pattern here as it would in
-    // Go, and any handler inspecting Path sees the encoded bytes.
-    // Fixing it changes what EVERY handler observes, so it wants its
-    // own session and a full suite run — it is recorded here rather
-    // than bodged.
+    // goish used to answer Path="/a%2Fb" and always set RawPath. That
+    // was not cosmetic: ServeMux matches on r.URL.Path, so a request
+    // for "/a%2Fb" did not match a "/a/b" pattern as it does in Go, and
+    // every handler inspecting Path saw the encoded bytes.
+    //
+    // The cause was not a bug in the parser — it was that there were
+    // TWO. net/http had its own 1504-line URL parser, unanchored and
+    // never diffed, shadowing the anchored port in `crate::net::url`,
+    // which decoded correctly all along. net/http now uses the one
+    // parser, and these are Go's values.
     {
         let (u, _) = url::Parse(string("http://example.com/a%2Fb"));
-        if u.Path != "/a%2Fb" || u.RawPath != "/a%2Fb" {
-            fmt::Println!(
-                "KNOWN DIVERGENCE CHANGED — Path/RawPath now ",
-                u.Path.clone(),
-                " / ",
-                u.RawPath.clone(),
-                " (Go: /a/b and /a%2Fb). Update this test and the note above."
-            );
-            bad += 1;
-        }
+        chkEq(u.Path.clone(), "/a/b", "decoded Path", &mut bad);
+        chkEq(
+            u.RawPath.clone(),
+            "/a%2Fb",
+            "RawPath keeps the raw form",
+            &mut bad,
+        );
+
+        // RawPath is EMPTY when the default escaping of Path round-trips
+        // — Go only sets it when the two differ.
         let (u2, _) = url::Parse(string("http://example.com/a/b"));
-        if u2.RawPath != "/a/b" {
-            fmt::Println!("KNOWN DIVERGENCE CHANGED — RawPath for a plain path");
-            bad += 1;
-        }
+        chkEq(u2.Path.clone(), "/a/b", "plain Path", &mut bad);
+        chkEq(
+            u2.RawPath.clone(),
+            "",
+            "plain path leaves RawPath empty",
+            &mut bad,
+        );
+
+        // EscapedPath reconstructs the raw form from either.
+        chkEq(
+            u.EscapedPath(),
+            "/a%2Fb",
+            "EscapedPath from RawPath",
+            &mut bad,
+        );
+        chkEq(
+            u2.EscapedPath(),
+            "/a/b",
+            "EscapedPath with no RawPath",
+            &mut bad,
+        );
     }
 
     if bad == 0 {
-        fmt::Println!("URL_PARSE_OK 17/17");
+        fmt::Println!("URL_PARSE_OK 23/23");
         syscall::Exit(0);
     } else {
         fmt::Println!("FAILED ", bad);
