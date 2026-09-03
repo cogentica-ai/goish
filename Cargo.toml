@@ -2902,3 +2902,7 @@ path = "examples/gzip_transport_ref_smoke.rs"
 [[example]]
 name = "ed25519_ref_smoke"
 path = "examples/ed25519_ref_smoke.rs"
+
+[[example]]
+name = "ecdsa_ref_smoke"
+path = "examples/ecdsa_ref_smoke.rs"
