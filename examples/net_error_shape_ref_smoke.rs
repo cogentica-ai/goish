@@ -52,11 +52,20 @@ use goish::{go, string, time};
 // goish's current shape columns; the Go reference is in the header
 // above and in tools/gen_net_error_shape_ref.go.
 const GO: [&str; 2] = [
-    // dial: KNOWN GAP. Go's shape columns are
-    //   opErr=true  op="dial"   net="tcp" netErr=true  timeout=false
-    // goish returns an untyped string, so all four answer false/empty.
-    "dial-refused   opErr=false op=\"\"       net=\"\"    netErr=false timeout=false",
-    // read: matches Go exactly.
+    // dial: matches Go on every column, and on the message too —
+    // "dial tcp IP:1: connect: connection refused", byte for byte.
+    // Until this line was fixed goish returned an untyped string
+    // carrying only Go's INNER half ("connect: connection refused"),
+    // so errors.As(err, &opErr) and err.(net.Error) both missed.
+    "dial-refused   opErr=true  op=\"dial\"   net=\"tcp\" netErr=true  timeout=false",
+    // read: KNOWN GAP, narrower than dial's was. The type is right —
+    // opErr, netErr and timeout all answer as Go's do — but Net is
+    // empty where Go says "tcp", because `timeout_error` composes an
+    // OpError without the network or the addresses. Go renders
+    // "read tcp IP:55922->IP:37159: i/o timeout"; goish renders
+    // "read: i/o timeout". Closing it means plumbing the conn's
+    // addresses into the read path, which is the same work the other
+    // errno_error sites (accept, close, dup, shutdown) still need.
     "read-timeout   opErr=true  op=\"read\"   net=\"\"    netErr=true  timeout=true ",
 ];
 

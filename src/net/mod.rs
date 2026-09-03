@@ -1128,7 +1128,16 @@ pub fn Dial<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (TCPConn, 
         let errno = -r;
         if errno != EINPROGRESS {
             let _ = syscall::Close(fd);
-            return (TCPConn::dead(), errno_error("connect", errno));
+            return (
+                TCPConn::dead(),
+                op_error(
+                    "dial",
+                    &network,
+                    Some(alloc::sync::Arc::new(TCPAddr::from_sockaddr_in(&parsed))),
+                    "connect",
+                    errno,
+                ),
+            );
         }
         // Wait for the connect to finalize.
         let arc = match netpoll::open(fd) {
@@ -1161,7 +1170,16 @@ pub fn Dial<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (TCPConn, 
         if so_err != 0 {
             netpoll::close(arc);
             let _ = syscall::Close(fd);
-            return (TCPConn::dead(), errno_error("connect", so_err));
+            return (
+                TCPConn::dead(),
+                op_error(
+                    "dial",
+                    &network,
+                    Some(alloc::sync::Arc::new(TCPAddr::from_sockaddr_in(&parsed))),
+                    "connect",
+                    so_err,
+                ),
+            );
         }
         // Connect succeeded — recover both ends. We move the Arc
         // into the new TCPConn's AtomicPtr via Arc::into_raw, so the
@@ -1257,6 +1275,39 @@ fn deadline_from_time(t: crate::time::Time) -> i64 {
         return -1;
     }
     crate::runtime::sysmon::monotonic_ns().wrapping_add(ns as i64)
+}
+
+// go: none — goish-only: Go builds `&OpError{Op, Net, Addr, Err:
+// &os.SyscallError{Syscall, Err: errno}}` inline at each site; this
+// names the composition once.
+/// The error a failed socket syscall produces, in Go's shape.
+///
+/// goish used to return `errno_error(syscall, errno)` here — the right
+/// INNER text ("connect: connection refused") and no type at all, so
+/// `errors.As(err, &opErr)` and `err.(net.Error)` both missed and a
+/// caller could not tell a refused connection from any other failure
+/// except by matching on the message. Go's text for the same failure
+/// is "dial tcp 127.0.0.1:1: connect: connection refused"; goish was
+/// producing exactly its inner half and dropping the wrapper that
+/// carries the operation, the network and the address.
+fn op_error(
+    op: &str,
+    network: &string,
+    addr: Option<alloc::sync::Arc<dyn net::Addr>>,
+    syscall_name: &str,
+    errno: i32,
+) -> error {
+    let inner = crate::os::NewSyscallError(
+        string::from_bytes(syscall_name.as_bytes()),
+        errors::Wrap(syscall::Errno(errno as _)),
+    );
+    return errors::Wrap(net::OpError {
+        Op: string::from_bytes(op.as_bytes()),
+        Net: network.clone(),
+        Source: None,
+        Addr: addr,
+        Err: inner,
+    });
 }
 
 /// Build a "i/o timeout" error matching Go's net.OpError +
