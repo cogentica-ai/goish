@@ -1060,10 +1060,25 @@ pub(crate) fn __read_request_server<R: io::Reader>(
     // Request-line: METHOD SP request-target SP HTTP-version CRLF —
     // parsed from a borrowed view of the bufio buffer; only the
     // three kept substrings are materialized (method/proto interned).
-    let (method, target, proto) = match read_line_with(br, max_line, parse_request_line) {
-        Ok(Some(t)) => t,
-        Ok(None) => return (req, errors::New(string("net/http: malformed request line"))),
+    // Go: `badStringError("malformed HTTP request", s)` — the offending
+    // LINE is part of the message, because with a request line the text
+    // is the diagnosis. goish said only "malformed request line", which
+    // tells a log nothing about what arrived. The raw line is carried
+    // back out of the parse so it can be quoted.
+    let (parsed, raw_line) = match read_line_with(br, max_line, |line| {
+        (parse_request_line(line), string::from_bytes(line))
+    }) {
+        Ok(v) => v,
         Err(e) => return (req, e),
+    };
+    let (method, target, proto) = match parsed {
+        Some(t) => t,
+        None => {
+            return (
+                req,
+                crate::fmt::Errorf!("malformed HTTP request %q", raw_line),
+            )
+        }
     };
 
     // Go: req.RequestURI = rawurl — the UNMODIFIED request-target,
@@ -1072,11 +1087,21 @@ pub(crate) fn __read_request_server<R: io::Reader>(
     req.RequestURI = target.clone();
 
     if !validMethod(method.clone()) {
-        return (req, errors::New(string("net/http: invalid method")));
+        // Go: `badStringError("invalid method", req.Method)`.
+        return (
+            req,
+            crate::fmt::Errorf!("invalid method %q", method.clone()),
+        );
     }
     let (major, minor) = match parse_http_version(proto.as_bytes()) {
         Some(v) => v,
-        None => return (req, errors::New(string("net/http: malformed HTTP version"))),
+        // Go: `badStringError("malformed HTTP version", req.Proto)`.
+        None => {
+            return (
+                req,
+                crate::fmt::Errorf!("malformed HTTP version %q", proto.clone()),
+            )
+        }
     };
 
     // Go: `url, err := url.ParseRequestURI(target)` — a (value, error)

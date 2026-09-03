@@ -45,6 +45,21 @@
 // agrees on every malformed pair including empty names, embedded NULs
 // and repeated names; and CanonicalHeaderKey agrees on every form
 // including the ones it must leave alone.
+//
+// Two KNOWN GAPs remain, each marked at its line:
+//
+//   * An obs-fold continuation line is REFUSED where Go joins it with a
+//     space. goish is the stricter of the two and RFC 7230 Section
+//     3.2.4 permits refusing, but it is still a request Go accepts.
+//   * Content-Length together with Transfer-Encoding: Go returns the
+//     request and fails on the body READ, where goish fails from
+//     ReadRequest because its Body is decoded eagerly. That is the same
+//     structural gap multipart has, and closing either means changing
+//     how a body is held rather than how it is parsed.
+//
+// The three malformed-request-line messages that used to be pinned here
+// are not gaps any more: they name the offending text, as Go's
+// badStringError does.
 
 #![no_std]
 #![no_main]
@@ -140,15 +155,12 @@ const GO: [&str; 79] = [
     "req te-chunked-not-last   -> err=\"unsupported transfer encoding: \\\"chunked, gzip\\\"\"",
     "req te-http10             -> m=\"POST\"   uri=\"/\"                        proto=\"HTTP/1.0\" host=\"\"        cl=0   te=[] hdr= body=\"\" berr=<nil>",
     "req space-before-colon    -> m=\"GET\"    uri=\"/\"                        proto=\"HTTP/1.1\" host=\"\"        cl=0   te=[] hdr=Host =x; body=\"\" berr=<nil>",
-    // KNOWN GAP — Go says: "req method-space          -> err=\"malformed HTTP version \\\"/ HTTP/1.1\\\"\""
-    "req method-space          -> err=\"net/http: malformed HTTP version\"",
+    "req method-space          -> err=\"malformed HTTP version \\\"/ HTTP/1.1\\\"\"",
     "req method-lower          -> m=\"get\"    uri=\"/\"                        proto=\"HTTP/1.1\" host=\"x\"       cl=0   te=[] hdr= body=\"\" berr=<nil>",
     "req bad-version           -> m=\"GET\"    uri=\"/\"                        proto=\"HTTP/9.9\" host=\"x\"       cl=0   te=[] hdr= body=\"\" berr=<nil>",
-    // KNOWN GAP — Go says: "req no-version            -> err=\"malformed HTTP request \\\"GET /\\\"\""
-    "req no-version            -> err=\"net/http: malformed request line\"",
+    "req no-version            -> err=\"malformed HTTP request \\\"GET /\\\"\"",
     "req empty                 -> err=\"EOF\"",
-    // KNOWN GAP — Go says: "req only-crlf             -> err=\"malformed HTTP request \\\"\\\"\""
-    "req only-crlf             -> err=\"net/http: malformed request line\"",
+    "req only-crlf             -> err=\"malformed HTTP request \\\"\\\"\"",
     "req dup-host              -> err=\"too many Host headers\"",
     "req header-case           -> m=\"GET\"    uri=\"/\"                        proto=\"HTTP/1.1\" host=\"x\"       cl=0   te=[] hdr=Content-Type=t; body=\"\" berr=<nil>",
     "req multi-value           -> m=\"GET\"    uri=\"/\"                        proto=\"HTTP/1.1\" host=\"x\"       cl=0   te=[] hdr=X-A=1|2; body=\"\" berr=<nil>",
