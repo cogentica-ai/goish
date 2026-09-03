@@ -2850,3 +2850,7 @@ path = "examples/chacha20_poly1305_ref_smoke.rs"
 [[example]]
 name = "tabwriter_ref_smoke"
 path = "examples/tabwriter_ref_smoke.rs"
+
+[[example]]
+name = "scanner_ref_smoke"
+path = "examples/scanner_ref_smoke.rs"
