@@ -2910,3 +2910,7 @@ path = "examples/ecdsa_ref_smoke.rs"
 [[example]]
 name = "rsa_ref_smoke"
 path = "examples/rsa_ref_smoke.rs"
+
+[[example]]
+name = "x509verify_ref_smoke"
+path = "examples/x509verify_ref_smoke.rs"
