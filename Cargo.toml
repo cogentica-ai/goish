@@ -3054,3 +3054,11 @@ path = "examples/quoterune_ref_smoke.rs"
 [[example]]
 name = "time_layouts_ref_smoke"
 path = "examples/time_layouts_ref_smoke.rs"
+
+[[example]]
+name = "json_surrogate_ref_smoke"
+path = "examples/json_surrogate_ref_smoke.rs"
+
+[[example]]
+name = "hex_dump_ref_smoke"
+path = "examples/hex_dump_ref_smoke.rs"
