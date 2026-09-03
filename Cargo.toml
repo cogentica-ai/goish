@@ -3110,3 +3110,7 @@ path = "examples/server_hooks_ref_smoke.rs"
 [[example]]
 name = "errno_ref_smoke"
 path = "examples/errno_ref_smoke.rs"
+
+[[example]]
+name = "path_error_ref_smoke"
+path = "examples/path_error_ref_smoke.rs"
