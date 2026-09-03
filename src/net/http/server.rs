@@ -3442,39 +3442,6 @@ impl Server {
                     let _ = conn.Close();
                     return;
                 }
-                // Unusable request framing (bad or contradictory
-                // Content-Length) → plain 400, as Go answers. Closing
-                // with no response at all, which is what goish did,
-                // leaves the client with a reset and no diagnosis.
-                if errors::Is(err.clone(), super::request::ErrBadRequestFraming) {
-                    let _ = crate::io::Writer::Write(
-                        &mut conn,
-                        crate::convert::bytes(__status_error_response(
-                            super::status::StatusBadRequest,
-                            string(""),
-                        )),
-                    );
-                    let _ = conn.Close();
-                    return;
-                }
-                // Invalid header field name → Go's statusError arm
-                // (conn.serve, server.go:2069) renders
-                // "400 Bad Request: invalid header name". The request
-                // is refused rather than served with the offending
-                // header quietly dropped: a header this server ignores
-                // and a proxy in front of it honours is how two hops
-                // come to disagree about a request's shape.
-                if errors::Is(err.clone(), super::request::ErrInvalidHeaderName) {
-                    let _ = crate::io::Writer::Write(
-                        &mut conn,
-                        crate::convert::bytes(__status_error_response(
-                            super::status::StatusBadRequest,
-                            string("invalid header name"),
-                        )),
-                    );
-                    let _ = conn.Close();
-                    return;
-                }
                 // Unknown Expect value → 417 + close (Go
                 // sendExpectationFailed, server.go:2103).
                 if errors::Is(err.clone(), super::request::ErrUnsupportedExpect) {
@@ -3483,9 +3450,66 @@ impl Server {
                     let _ = w.close_conn();
                     return;
                 }
-                // EOF, parse error, or idle timeout — all close the conn.
+                // Go (conn.serve, server.go:2062-2075): an ordinary
+                // end-of-connection read — EOF, a timeout, a reset —
+                // just closes. ANY OTHER parse error gets a response
+                // before the close, defaulting to a plain
+                // "400 Bad Request" and using the statusError's own
+                // code and text when it carries one.
+                //
+                // goish closed on every error alike, so a client that
+                // sent a malformed Content-Length got a reset with
+                // nothing to go on, where Go tells it what was wrong.
+                if isCommonNetReadError(err.clone()) {
+                    let _ = conn.Close();
+                    return;
+                }
+                let _ = crate::io::Writer::Write(
+                    &mut conn,
+                    crate::convert::bytes(__status_error_response(
+                        super::status::StatusBadRequest,
+                        string(""),
+                    )),
+                );
                 let _ = conn.Close();
                 return;
+            }
+            // Go (c.readRequest, server.go:1063-1072) validates the
+            // parsed header map before the request reaches a handler.
+            // This is deliberately NOT in the shared request parser:
+            // `http.ReadRequest` accepts `Host : x` and keeps the key
+            // verbatim, spaces and all, and a smoke pins that against
+            // Go. It is the SERVER that refuses it, because a server
+            // is the hop where a disagreement matters — a header this
+            // server would ignore and a proxy in front of it would
+            // honour is how two hops come to disagree about a
+            // request's shape, which is the shape of a smuggled
+            // request.
+            {
+                let mut bad: Option<&'static str> = None;
+                'outer: for (k, vals) in req.Header.__inner().__iter() {
+                    if !super::http::isToken(&k) {
+                        bad = Some("invalid header name");
+                        break 'outer;
+                    }
+                    for j in 0..vals.Len() {
+                        if !super::http::ValidHeaderFieldValue(&vals[j]) {
+                            bad = Some("invalid header value");
+                            break 'outer;
+                        }
+                    }
+                }
+                if let Some(text) = bad {
+                    let _ = crate::io::Writer::Write(
+                        &mut conn,
+                        crate::convert::bytes(__status_error_response(
+                            super::status::StatusBadRequest,
+                            string(text),
+                        )),
+                    );
+                    let _ = conn.Close();
+                    return;
+                }
             }
             // Go's readRequest rejects anything an HTTP/1 server has
             // no business parsing (server.go:1113), and conn.serve

@@ -75,17 +75,16 @@ const GO: [&str; 14] = [
     //   "bad-chunk-size       n=1 status=HTTP/1.1 200 OK                  body=\"\""
     // A chunk-size line of "5x" is not a number. Go runs the handler
     // anyway, hands it an empty body, and closes the connection after.
-    // goish refuses the request and closes without answering.
+    // goish refuses the request with 400 and closes.
     //
     // Matching Go here would mean serving a request whose body could
     // not be decoded — and if the body cannot be decoded, the server
     // does not know where this request ends and the next one begins.
     // That is precisely the state in which the read-ahead this port
-    // now carries across requests (connReader.__pushback) must not be
-    // trusted. Closing is the conservative answer to an undecodable
-    // frame, so this divergence is left standing on purpose rather
-    // than loosened to match.
-    "bad-chunk-size       n=0 status=<none>                           body=\"\"",
+    // carries across requests (connReader.__pushback) must not be
+    // trusted. Refusing an undecodable frame is the conservative
+    // answer, so this divergence stands on purpose.
+    "bad-chunk-size       n=1 status=HTTP/1.1 400 Bad Request         body=\"400 Bad Request\"",
     "neg-cl               n=1 status=HTTP/1.1 400 Bad Request         body=\"400 Bad Request\"",
 ];
 
