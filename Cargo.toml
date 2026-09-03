@@ -2862,3 +2862,7 @@ path = "examples/osuser_ref_smoke.rs"
 [[example]]
 name = "flate_ref_smoke"
 path = "examples/flate_ref_smoke.rs"
+
+[[example]]
+name = "codecs_ref_smoke"
+path = "examples/codecs_ref_smoke.rs"
