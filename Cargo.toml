@@ -2854,3 +2854,7 @@ path = "examples/tabwriter_ref_smoke.rs"
 [[example]]
 name = "scanner_ref_smoke"
 path = "examples/scanner_ref_smoke.rs"
+
+[[example]]
+name = "osuser_ref_smoke"
+path = "examples/osuser_ref_smoke.rs"

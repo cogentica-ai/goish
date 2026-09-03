@@ -15,6 +15,18 @@
 # vectors. It is copied in as zz_ref_test.go and removed afterwards.
 #
 # The GOROOT copy is cached under $TMPDIR; delete it to refresh.
+#
+# CGO: this runs with whatever CGO_ENABLED the environment has, and a
+# handful of packages have TWO implementations selected by it — os/user
+# is the clearest (getpwuid through cgo, or reading /etc/passwd without
+# it), and net's resolver is another. If the port reads the files
+# itself, generate the reference with CGO_ENABLED=0 or the diff will
+# show Go's OTHER implementation and every line will look like a defect:
+#
+#   CGO_ENABLED=0 scripts/goref.sh os/user tools/gen_osuser_ref.go
+#
+# That mistake cost a full round of investigation on os/user; the smoke
+# it produced records which implementation it pins.
 set -euo pipefail
 
 pkg="${1:?usage: goref.sh <import-path> <ref-test-file>}"
