@@ -652,19 +652,37 @@ pub fn MaxBytesHandler(h: Arc<dyn Handler>, n: crate::types::int) -> Arc<dyn Han
 /// matches on the error TEXT the net package produces, which is the
 /// same substitution header.rs makes for httpguts.
 pub fn isCommonNetReadError(err: crate::errors::error) -> bool {
+    // Go:
+    //   if err == io.EOF { return true }
+    //   if neterr, ok := err.(net.Error); ok && neterr.Timeout() { … }
+    //   if oe, ok := err.(*net.OpError); ok && oe.Op == "read" { … }
+    //
+    // This used to match on the error TEXT — `contains("i/o timeout")`
+    // and `starts_with("read")` — under a comment saying goish had no
+    // typed net.Error/net.OpError to assert on. It has both, and both
+    // are registered; `errors::AsIface` is the assertion.
+    //
+    // The text version was not merely inelegant. `starts_with("read")`
+    // matches ANY error whose message happens to begin with those four
+    // letters, whatever produced it, where Go requires an actual
+    // *net.OpError whose Op is "read". This function decides whether
+    // the serve loop closes the connection in silence or answers the
+    // client, so a false positive there turns a diagnosable 400 into a
+    // bare reset.
     if err.IsNil() {
         return false;
     }
     if crate::errors::Is(err.clone(), crate::io::EOF) {
         return true;
     }
-    let msg = err.Error();
-    let m: &str = msg.as_ref();
-    if m.contains("i/o timeout") {
+    let (ne, ok) = crate::errors::AsIface::<crate::d!(crate::net::net::Error)>(&err);
+    if ok && ne.Timeout() {
         return true;
     }
-    if m.starts_with("read") || m.contains("read:") {
-        return true;
+    if let Some(oe) = crate::errors::AsConcrete::<crate::net::net::OpError>(&err) {
+        if oe.Op == "read" {
+            return true;
+        }
     }
     return false;
 }
@@ -2234,7 +2252,7 @@ impl connReader {
 
     // go: sdk 1.25.5 net/http/server.go:672-677 connReader.lock
     /// Go: acquires `cr.mu` and lazily builds `cr.cond` under it.
-    /// goish has no Cond yet (it arrives with the background reader),
+    /// goish's `sync::Cond` exists but is not wired into this path yet,
     /// so this is the acquire alone — a MANUAL lock, because Go's
     /// callers unlock in a different function than they lock in.
     pub fn lock(&self) {
