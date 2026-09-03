@@ -3014,3 +3014,7 @@ path = "examples/sniff_server_ref_smoke.rs"
 [[example]]
 name = "keepalive_ref_smoke"
 path = "examples/keepalive_ref_smoke.rs"
+
+[[example]]
+name = "pipeline_body_ref_smoke"
+path = "examples/pipeline_body_ref_smoke.rs"

@@ -1245,6 +1245,10 @@ pub(crate) fn __read_request_server<R: io::Reader>(
             // an inbound body before the handler runs), then read the
             // trailer block the decoder leaves behind.
             let mut buf: Vec<u8> = Vec::new();
+            // `cr` below shadows the connReader parameter, so hold on
+            // to it first — the read-ahead pushback at the end of this
+            // arm needs it.
+            let conn_reader = cr;
             // ChunkedReader wraps its own bufio::Reader; feed it a
             // thin `BufioPassthrough` that delegates to `br`.
             let mut cr = super::internal::chunked::NewChunkedReader(BufioPassthrough { inner: br });
@@ -1278,6 +1282,32 @@ pub(crate) fn __read_request_server<R: io::Reader>(
             let trerr = super::transfer::readTrailer(cr.__bufio_mut(), &mut req.Trailer);
             if !trerr.IsNil() {
                 return (req, trerr);
+            }
+            // The chunked reader's own bufio read ahead out of `br`,
+            // and whatever is left in it once the trailer is consumed
+            // belongs to the NEXT request on this connection. It is
+            // about to be dropped with the reader, so hand it to the
+            // connReader, which outlives the serve loop.
+            //
+            // These bytes come BEFORE anything still sitting in `br`
+            // (they were pulled out of it), and the serve loop appends
+            // br's remainder after this call returns — so pushing here
+            // first keeps the stream in order.
+            //
+            // Without this, a pipelined request that followed a
+            // CHUNKED body was lost, even though one following a
+            // Content-Length body was not: the Content-Length path
+            // reads `br` directly and leaves the surplus where the
+            // serve loop can see it.
+            if let Some(conn_reader) = conn_reader {
+                let inner = cr.__bufio_mut();
+                let ahead = inner.Buffered();
+                if ahead > 0 {
+                    let (peeked, perr) = inner.Peek(ahead);
+                    if perr.IsNil() {
+                        conn_reader.__pushback(&peeked);
+                    }
+                }
             }
             req.Body = super::Body::from_bytes(slice::<byte>::__from_vec(buf));
             return (req, errors::nil);
