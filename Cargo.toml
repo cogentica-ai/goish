@@ -3130,3 +3130,7 @@ path = "examples/elliptic_unmarshal_ref_smoke.rs"
 [[example]]
 name = "net_error_shape_ref_smoke"
 path = "examples/net_error_shape_ref_smoke.rs"
+
+[[example]]
+name = "close_error_shape_ref_smoke"
+path = "examples/close_error_shape_ref_smoke.rs"

@@ -383,6 +383,23 @@ pub trait Conn: Send + Sync {
 /// TCP `net.TCPConn`. Implements `Conn` plus `io::{Reader, Writer, Closer}`.
 /// The fd is set non-blocking; Read/Write park on the netpoller when
 /// the kernel returns EAGAIN.
+// go: none — goish-only: Go has no such constant. It keeps the same
+// distinction in `poll.fdMutex`, whose `increfAndClose` succeeds
+// once per descriptor (internal/poll/fd_mutex.go); goish's conn
+// holds a bare fd, so the state lives in the fd field itself.
+/// Marks a fd this conn has already closed, as distinct from `-1`,
+/// which is a conn that was never opened (`dead()`, the value Dial
+/// returns beside a non-nil error).
+///
+/// Go keeps the distinction in `poll.fdMutex`: `increfAndClose`
+/// succeeds once and every later Close, Read or Write on that
+/// descriptor returns `ErrNetClosing` rather than the kernel's EBADF.
+/// A `dead()` conn never got that far, so Closing it stays a no-op —
+/// `defer c.Close()` after a failed Dial must not manufacture an
+/// error. Every fd guard in this file tests `< 0`, which both
+/// sentinels satisfy.
+const FD_CLOSED: i32 = -2;
+
 pub struct TCPConn {
     fd: i32,
     local: TCPAddr,
@@ -650,10 +667,28 @@ impl TCPConn {
             Err: net::errTimeout(),
         });
     }
+
+    // go: none — goish-only: see the note on the impl block.
+    /// The conn's `use of closed network connection`, in the same
+    /// shape. Go builds this one in three places — `(*conn).Close`,
+    /// `.Read` and `.Write` all wrap `poll`'s `ErrNetClosing` in an
+    /// `OpError` naming both addresses — so `op` selects which.
+    fn closed_err(&self, op: &str) -> error {
+        return errors::Wrap(net::OpError {
+            Op: string::from_bytes(op.as_bytes()),
+            Net: string::from_static("tcp"),
+            Source: Some(alloc::sync::Arc::new(self.local.clone())),
+            Addr: Some(alloc::sync::Arc::new(self.remote.clone())),
+            Err: ErrClosed.into(),
+        });
+    }
 }
 
 impl io::Reader for TCPConn {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        if self.fd == FD_CLOSED {
+            return (0, self.closed_err("read"));
+        }
         let len = p.len();
         let ptr = p.as_mut_ptr();
         loop {
@@ -688,6 +723,9 @@ impl io::Writer for TCPConn {
         // Drain the buffer; partial writes loop. Matches Go's
         // internal/poll.FD.Write which keeps writing until n == len(p)
         // or an error is hit.
+        if self.fd == FD_CLOSED {
+            return (0, self.closed_err("write"));
+        }
         let total = p.len();
         let base = p.as_ptr();
         let mut off: usize = 0;
@@ -727,6 +765,9 @@ impl io::Writer for TCPConn {
 
 impl io::Closer for TCPConn {
     fn Close(&mut self) -> error {
+        if self.fd == FD_CLOSED {
+            return self.closed_err("close");
+        }
         if self.fd < 0 {
             return errors::nil;
         }
@@ -746,9 +787,9 @@ impl io::Closer for TCPConn {
             netpoll::close(arc);
         }
         let r = syscall::Close(self.fd);
-        self.fd = -1;
+        self.fd = FD_CLOSED;
         if r < 0 {
-            errno_error("close", -r)
+            self.op_err("close", "close", -r)
         } else {
             errors::nil
         }
