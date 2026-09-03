@@ -1,4 +1,4 @@
-// go: file time/tick.go decls: Ticker.Stop, Tick, NewTicker
+// go: file time/tick.go decls: Ticker.Stop, Ticker.Reset, Tick, NewTicker
 //
 // tick.go — Ticker, NewTicker and Tick.
 
@@ -47,6 +47,12 @@ pub struct Ticker {
     stopped: Arc<AtomicBool>,
     /// Shared with the tick loop; `Stop` cancels the in-flight park.
     token: Arc<TimerToken>,
+    /// Shared with the tick loop, in nanoseconds, so `Reset` can
+    /// change the period of a loop that is already running. Go keeps
+    /// the period in the runtime timer it re-arms; goish's loop owns
+    /// its own park, so the period has to be reachable from outside
+    /// it.
+    period: Arc<core::sync::atomic::AtomicI64>,
 }
 
 impl Ticker {
@@ -60,6 +66,89 @@ impl Ticker {
         self.stopped.store(true, Ordering::Release);
         let _ = timer_cancel(&self.token);
     }
+
+    // go: sdk 1.25.5 time/tick.go:62-79 Ticker.Reset
+    /// Go: "Reset stops a ticker and resets its period to the
+    /// specified duration. The next tick will arrive after the new
+    /// period elapses. The duration d must be greater than zero; if
+    /// not, Reset will panic."
+    ///
+    /// Two cases, and the second is the one that is easy to miss.
+    ///
+    /// A RUNNING ticker: the period is published and the in-flight
+    /// park is cancelled, so the loop wakes at once and re-parks on
+    /// the new duration. The loop tells this cancel from a Stop by
+    /// re-reading `stopped` — a Stop always sets that flag before it
+    /// cancels, so a cancel with the flag clear can only be a Reset.
+    ///
+    /// A STOPPED ticker: Go RESTARTS it (this has been true since
+    /// 1.15), and goish must too — the old loop goroutine has already
+    /// returned, so there is nothing left to wake. Clearing the flag
+    /// alone would not do it; a fresh token and a fresh loop are
+    /// required, sending on the SAME channel the caller already holds.
+    pub fn Reset(&mut self, d: Duration) {
+        if d.0 <= 0 {
+            // Go panics; we abort, as NewTicker does.
+            const MSG: &[u8] = b"goish: time: non-positive interval for Ticker.Reset\n";
+            syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
+            syscall::Exit(2);
+        }
+        self.period.store(d.0, Ordering::Release);
+        if self.stopped.load(Ordering::Acquire) {
+            self.stopped.store(false, Ordering::Release);
+            self.token = TimerToken::new();
+            spawn_tick_loop(
+                self.C.clone(),
+                self.token.clone(),
+                self.stopped.clone(),
+                self.period.clone(),
+            );
+            return;
+        }
+        // Running: wake the park so the new period takes effect now
+        // rather than after the old one elapses.
+        let _ = timer_cancel(&self.token);
+    }
+}
+
+// go: none — goish-only: Go re-arms one runtime timer; goish's ticker
+// is a parked goroutine, so both NewTicker and a Reset that restarts a
+// stopped ticker need to start one, and they must start the SAME loop.
+fn spawn_tick_loop(
+    c: chan<Time>,
+    tok: Arc<TimerToken>,
+    stop_flag: Arc<AtomicBool>,
+    period: Arc<core::sync::atomic::AtomicI64>,
+) {
+    crate::go!(stack(64 * crate::KB), move || {
+        loop {
+            if stop_flag.load(Ordering::Acquire) {
+                return;
+            }
+            if !timer_park_cancellable(period.load(Ordering::Acquire), &tok) {
+                // The park was cancelled. Stop sets `stopped` BEFORE
+                // it cancels, so a clear flag here means the cancel
+                // came from Reset: re-arm and park again, picking up
+                // the period it just published.
+                if stop_flag.load(Ordering::Acquire) {
+                    return;
+                }
+                tok.rearm();
+                continue;
+            }
+            // The fire won the CAS, but Stop may have landed just
+            // after losing it — honour the flag before ticking.
+            if stop_flag.load(Ordering::Acquire) {
+                return;
+            }
+            let _ = c.__try_send(Now());
+            // Re-arm for the next round. Owner-only, no park in
+            // flight here; a Stop racing this is caught by the flag
+            // check at the top (its cancel either loses to nothing
+            // or pre-cancels the next park).
+            tok.rearm();
+        }
+    });
 }
 
 // go: sdk 1.25.5 time/tick.go:86-91 Tick
@@ -99,34 +188,12 @@ pub fn NewTicker(d: Duration) -> Ticker {
     let c: chan<Time> = crate::make!(chan Time, 1);
     let token = TimerToken::new();
     let stopped = Arc::new(AtomicBool::new(false));
-    let c_inner = c.clone();
-    let tok = token.clone();
-    let stop_flag = stopped.clone();
-    crate::go!(stack(64 * crate::KB), move || {
-        loop {
-            if stop_flag.load(Ordering::Acquire) {
-                return;
-            }
-            if !timer_park_cancellable(d.0, &tok) {
-                // Stop cancelled the in-flight park.
-                return;
-            }
-            // The fire won the CAS, but Stop may have landed just
-            // after losing it — honour the flag before ticking.
-            if stop_flag.load(Ordering::Acquire) {
-                return;
-            }
-            let _ = c_inner.__try_send(Now());
-            // Re-arm for the next round. Owner-only, no park in
-            // flight here; a Stop racing this is caught by the flag
-            // check at the top (its cancel either loses to nothing
-            // or pre-cancels the next park).
-            tok.rearm();
-        }
-    });
+    let period = Arc::new(core::sync::atomic::AtomicI64::new(d.0));
+    spawn_tick_loop(c.clone(), token.clone(), stopped.clone(), period.clone());
     return Ticker {
         C: c,
         stopped,
         token,
+        period,
     };
 }

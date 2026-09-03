@@ -3078,3 +3078,7 @@ path = "examples/preconditions_ref_smoke.rs"
 [[example]]
 name = "dirlist_ref_smoke"
 path = "examples/dirlist_ref_smoke.rs"
+
+[[example]]
+name = "timer_reset_ref_smoke"
+path = "examples/timer_reset_ref_smoke.rs"
