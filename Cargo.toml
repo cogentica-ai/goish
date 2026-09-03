@@ -2946,3 +2946,7 @@ path = "examples/structtag_ref_smoke.rs"
 [[example]]
 name = "expvar_ref_smoke"
 path = "examples/expvar_ref_smoke.rs"
+
+[[example]]
+name = "ascii85_ref_smoke"
+path = "examples/ascii85_ref_smoke.rs"
