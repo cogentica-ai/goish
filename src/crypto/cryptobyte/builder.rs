@@ -69,10 +69,22 @@ pub struct Builder {
 // go: sdk 1.25.5 vendor/golang.org/x/crypto/cryptobyte/builder.go:35-42 NewBuilder
 /// Create a Builder that appends its output to the given buffer.
 pub fn NewBuilder(buffer: slice<byte>) -> Builder {
-    let r: &[byte] = &buffer;
+    // Go writes `&Builder{result: buffer}`, which keeps the caller's
+    // BACKING ARRAY — length and capacity both. goish used to copy the
+    // contents out through a `&[byte]`, which preserved the length and
+    // silently dropped the capacity to match it.
+    //
+    // For a growing builder that was invisible. For a fixed one it was
+    // fatal: `NewFixedBuilder` exists precisely to bound writes by the
+    // buffer's CAPACITY (builder.go:44-52, "does not reallocate"), and
+    // with the capacity flattened to the length, the idiomatic
+    // `NewFixedBuilder(make([]byte, 0, n))` had room for nothing at all
+    // and failed on its first byte with "Builder is exceeding its
+    // fixed-size buffer". Taking the Vec preserves both, and drops a
+    // copy on the way.
     return Builder {
         err: crate::nil.into(),
-        result: r.to_vec(),
+        result: buffer.__into_vec(),
         fixedSize: false,
         child: false,
         offset: 0,

@@ -2878,3 +2878,7 @@ path = "examples/mux_ref_smoke.rs"
 [[example]]
 name = "pem_ref_smoke"
 path = "examples/pem_ref_smoke.rs"
+
+[[example]]
+name = "cryptobyte_ref_smoke"
+path = "examples/cryptobyte_ref_smoke.rs"
