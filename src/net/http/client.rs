@@ -2078,8 +2078,7 @@ impl Drop for __CancelOnDrop {
 /// goish carries only the knownRoundTripperImpl arm — every goish
 /// transport is "known", and the deprecated `Request.Cancel` channel
 /// (whose legacy doCancel machinery is the rest of Go's function) has
-/// no goish field. Go's WithDeadline is spelled WithTimeout(until):
-/// context.WithDeadline is not ported yet.
+/// no goish field.
 pub(crate) fn setRequestCancel(
     req: &mut Request,
     rt: &Arc<dyn RoundTripper>,
@@ -2100,8 +2099,20 @@ pub(crate) fn setRequestCancel(
     if !timeBeforeContextDeadline(deadline.clone(), &oldCtx) {
         return (alloc::boxed::Box::new(super::transport::nop), af);
     }
-    let until = deadline.clone().Sub(crate::time::Now());
-    let (ctx, cancelCtx) = crate::context::WithTimeout(oldCtx, until);
+    // Go: ctx, cancelCtx := context.WithDeadline(oldCtx, deadline)
+    //
+    // This used to convert to a duration — `deadline.Sub(Now())` — and
+    // call WithTimeout, under a comment saying context.WithDeadline was
+    // not ported yet. It has been all along.
+    //
+    // The conversion samples `Now()` here and WithTimeout samples it
+    // again to add the duration back on, so the effective deadline
+    // landed LATER than the caller's by whatever elapsed between the
+    // two reads. Microseconds when idle, and this box has shown
+    // milliseconds under load. A deadline is an absolute instant the
+    // caller chose; handing it through as one costs nothing and is what
+    // `ctx.Deadline()` then reports.
+    let (ctx, cancelCtx) = crate::context::WithDeadline(oldCtx, deadline.clone());
     req.ctx = Some(ctx);
     let dl = deadline;
     return (
