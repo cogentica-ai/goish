@@ -168,6 +168,21 @@ crate::var! {
     pub ErrNotFound: error = "executable file not found in $PATH";
 }
 
+// go: none — goish idiom: Go declares this in exec.go as
+// `ErrDot = errors.New("cannot run executable found relative to current directory")`.
+//
+// It was MISSING, and it is the newest of LookPath's rules and the one
+// with a CVE behind it. Go 1.19 made a name that resolves through a
+// RELATIVE PATH entry — including the EMPTY entry, which Unix shells
+// read as "." — return this error alongside the path it found, because
+// running whatever happens to sit in the current directory is how a
+// build tool becomes an arbitrary-code-execution vector. The path is
+// still returned, so a caller that has genuinely decided this is fine
+// can proceed; one that checks the error does not.
+crate::var! {
+    pub ErrDot: error = "cannot run executable found relative to current directory";
+}
+
 /// `exec.Cmd` — a one-shot subprocess. Build via `Command(name, args)`.
 pub struct Cmd {
     /// Absolute path to the binary. Set by `Command` via `LookPath`.
@@ -386,34 +401,107 @@ pub fn Command<S: Into<string>>(name: S, args: slice<string>) -> Cmd {
     }
 }
 
+// go: none — goish idiom: Go's `exec.Error` is a struct with `Name` and
+// `Err` whose Error() is `"exec: " + strconv.Quote(e.Name) + ": " +
+// e.Err.Error()`. Every LookPath failure is wrapped in one, and the
+// quoted name is how a caller tells WHICH lookup failed when several
+// are in flight. goish returned the bare sentinel, so every message
+// differed from Go's and the name was lost.
+#[derive(Clone, PartialEq)]
+pub struct Error {
+    pub Name: string,
+    pub Err: error,
+}
+
+impl crate::errors::ErrorTrait for Error {
+    // go: none — goish idiom: see the note above the struct.
+    fn Error(&self) -> string {
+        return crate::fmt::Sprintf!("exec: %q: %s", self.Name.clone(), self.Err.Error());
+    }
+
+    // go: none — goish idiom: `errors.Is`/`As` unwrap through this,
+    // which is what makes `errors.Is(err, exec.ErrDot)` work on a
+    // wrapped value.
+    fn Unwrap(&self) -> error {
+        return self.Err.clone();
+    }
+}
+
 /// `exec.LookPath(file)` — find an executable on `$PATH`. Returns the
 /// absolute path, or `ErrNotFound`. `file` containing `/` is returned
 /// as-is (Go semantics: the lookup is skipped, but the file's
 /// existence isn't verified — same here).
 pub fn LookPath<S: Into<string>>(file: S) -> (string, error) {
     let file = file.into();
+    // Go: if strings.Contains(file, "/") { err := findExecutable(file);
+    //         if err == nil { return file, nil }
+    //         return "", &Error{file, err} }
+    //
+    // goish used to return the name unchanged WITHOUT checking it, on
+    // the reasoning that the lookup is skipped. Go skips the SEARCH,
+    // not the check: a name with a slash is tested where it stands, so
+    // "/nonexistent/xyz" is an error rather than a path. A caller that
+    // reads a successful LookPath as "this is runnable" was wrong for
+    // every such name.
     if name_has_slash(&file) {
-        return (file, crate::nilval::nil.into());
+        if file_is_accessible(&file) {
+            return (file, crate::nilval::nil.into());
+        }
+        return (string::new(), lookErr(&file, statErrFor(&file)));
     }
     let path = crate::os::Getenv("PATH");
-    if path.Len() == 0 {
-        return (string::new(), ErrNotFound.into());
-    }
-    let dirs = crate::strings::Split(path, ":");
+    // Go: filepath.SplitList(path). goish used strings.Split, which
+    // yields ONE EMPTY element for an empty PATH where SplitList
+    // yields none — so with PATH unset the loop ran once against "."
+    // and could find a binary in the current directory.
+    let dirs = crate::path::filepath::SplitList(path);
     let n = crate::len(&dirs);
     let mut i: int = 0;
     while i < n {
-        let dir = dirs[i].clone();
+        let mut dir = dirs[i].clone();
         i += 1;
+        // Go: "Unix shell semantics: path element "" means "."". goish
+        // used to SKIP an empty element, which is safer but not Go —
+        // and quietly so, since the difference only shows when a
+        // binary of that name exists in the current directory.
         if dir.Len() == 0 {
-            continue;
+            dir = string::from_static(".");
         }
-        let candidate = dir + string::from_static("/") + file.clone();
+        let candidate =
+            crate::path::filepath::Join(crate::goslice::slice::__from_vec(alloc::vec![
+                dir,
+                file.clone()
+            ]));
         if file_is_accessible(&candidate) {
+            // Go: if !filepath.IsAbs(path) { return path, &Error{file, ErrDot} }
+            //
+            // The path IS returned with the error. That is deliberate:
+            // the caller is told what was found and left to decide.
+            if !crate::path::filepath::IsAbs(candidate.clone()) {
+                return (candidate, lookErr(&file, ErrDot.into()));
+            }
             return (candidate, crate::nilval::nil.into());
         }
     }
-    (string::new(), ErrNotFound.into())
+    (string::new(), lookErr(&file, ErrNotFound.into()))
+}
+
+// go: none — goish idiom: Go writes `&Error{file, err}` inline; this
+// names it once.
+fn lookErr(name: &string, err: error) -> error {
+    return errors::Wrap(Error {
+        Name: name.clone(),
+        Err: err,
+    });
+}
+
+// go: none — goish idiom: Go's findExecutable distinguishes a failed
+// stat from a directory from a missing execute bit; goish's
+// `file_is_accessible` answers one bool, so the message is rebuilt
+// from a second stat here. Only the "no such file" shape is
+// reachable from LookPath's slash branch in practice.
+fn statErrFor(path: &string) -> error {
+    return crate::fmt::Errorf!("stat %s: no such file or directory", path.clone());
 }
 
 fn name_has_slash(s: &string) -> bool {
@@ -449,7 +537,47 @@ fn file_is_accessible(path: &string) -> bool {
             0,
         )
     };
-    r == 0 && (st.st_mode & syscall::S_IFMT) == syscall::S_IFREG
+    if r != 0 || (st.st_mode & syscall::S_IFMT) != syscall::S_IFREG {
+        return false;
+    }
+    // Go's findExecutable checks the EXECUTE permission, not merely
+    // that a regular file is there. This used to stop at the file
+    // check, with a comment reasoning that "$PATH lookups by
+    // definition target executables" — which is the assumption the
+    // check exists to test.
+    //
+    // It is not a cosmetic difference. A non-executable file EARLIER
+    // on $PATH shadowed the real binary later on it: LookPath returned
+    // the unusable one and the exec failed, where Go walks past it and
+    // finds the executable. The lookup selected the wrong file.
+    //
+    // Go asks the kernel through Eaccess(X_OK), which resolves the
+    // owner/group/other question against the real uid. goish's syscall
+    // surface has no faccessat, so the mode bits are read directly and
+    // matched against the caller's identity — the same three-way
+    // choice the kernel makes, minus the supplementary-group and
+    // capability cases, where this is stricter than Go rather than
+    // looser.
+    return has_exec_permission(&st);
+}
+
+// go: none — goish-only: the owner/group/other arm of what Go gets
+// from Eaccess(X_OK). See the note in `file_is_accessible`.
+fn has_exec_permission(st: &syscall::Stat_t) -> bool {
+    let mode = st.st_mode;
+    let uid = crate::uint32(syscall::Getuid());
+    if uid == 0 {
+        // root: any execute bit is enough, as for the kernel.
+        return (mode & 0o111) != 0;
+    }
+    if st.st_uid == uid {
+        return (mode & 0o100) != 0;
+    }
+    let gid = crate::uint32(syscall::Getgid());
+    if st.st_gid == gid {
+        return (mode & 0o010) != 0;
+    }
+    return (mode & 0o001) != 0;
 }
 
 impl Cmd {

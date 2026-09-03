@@ -2922,3 +2922,7 @@ path = "examples/tls_ref_smoke.rs"
 [[example]]
 name = "iofs_ref_smoke"
 path = "examples/iofs_ref_smoke.rs"
+
+[[example]]
+name = "lookpath_ref_smoke"
+path = "examples/lookpath_ref_smoke.rs"
