@@ -2866,3 +2866,7 @@ path = "examples/flate_ref_smoke.rs"
 [[example]]
 name = "codecs_ref_smoke"
 path = "examples/codecs_ref_smoke.rs"
+
+[[example]]
+name = "x509_ref_smoke"
+path = "examples/x509_ref_smoke.rs"
