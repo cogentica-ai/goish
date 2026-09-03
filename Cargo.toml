@@ -2918,3 +2918,7 @@ path = "examples/x509verify_ref_smoke.rs"
 [[example]]
 name = "tls_ref_smoke"
 path = "examples/tls_ref_smoke.rs"
+
+[[example]]
+name = "iofs_ref_smoke"
+path = "examples/iofs_ref_smoke.rs"

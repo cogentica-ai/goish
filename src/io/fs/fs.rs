@@ -37,6 +37,19 @@ impl FileMode {
 // Bit operators — Go writes `mode | os.ModeDir`, `mode & os.ModePerm`,
 // `flag &^ os.O_TRUNC` (Go's bit-clear). Mirror that ergonomically on
 // the newtype so ports keep their idioms without `.0` unwrapping.
+// go: none — goish idiom: Go's `fmt` finds `FileMode.String` by
+// structural assertion, so `%s` and `%v` on a mode just work. goish's
+// printer dispatches on the `Format` trait, which a type reaches
+// through `Stringer` — and nothing implemented it here, so a
+// `FileMode` could not be printed at all. The method it forwards to
+// has been present all along.
+impl crate::fmt::Stringer for FileMode {
+    // go: none — goish idiom: see the note above this impl.
+    fn String(&self) -> string {
+        return FileMode::String(self);
+    }
+}
+
 impl core::ops::BitOr for FileMode {
     type Output = FileMode;
     // go: none — goish idiom: Go's `FileMode` is a defined `uint32`, so
