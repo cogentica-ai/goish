@@ -45,10 +45,19 @@ use goish::net::net as gnet;
 use goish::string;
 
 // Go's verbatim output.
-const GO: [&str; 3] = [
+const GO: [&str; 4] = [
     "deadline-bare  iface-timeout=true  iface-temporary=true  net.Error=true  netTimeout=true  osIsTimeout=true",
     "oper-deadline  iface-timeout=true  iface-temporary=true  net.Error=true  netTimeout=true  osIsTimeout=true",
     "oper-plain     iface-timeout=false iface-temporary=false net.Error=true  netTimeout=false osIsTimeout=false",
+    // A REAL socket read deadline. The three above are built by hand
+    // in this file, which is precisely what let the same gap hide in
+    // common_read_error_ref_smoke: a hand-built error uses a type that
+    // IS registered, while goish's `net` produced an untyped string
+    // until f5f523c and every assertion below missed it. This case
+    // asks the two questions Go's own documentation tells a caller to
+    // ask — os.IsTimeout and err.(net.Error).Timeout() — about the
+    // error `net` actually returns.
+    "real-read-timeout iface-timeout=true  iface-temporary=true  net.Error=true  netTimeout=true  osIsTimeout=true",
 ];
 
 static FAILED: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
@@ -78,6 +87,15 @@ fn chk(got: goish::string) {
 
 #[goish::main]
 fn main() {
+    goish::go!(stack(1024 * 1024), move || {
+        run();
+    });
+    loop {
+        goish::runtime::sched::Gosched();
+    }
+}
+
+fn run() {
     let deadline: goish::error = goish::os::ErrDeadlineExceeded.into();
     let oper_deadline = errors::Wrap(gnet::OpError {
         Op: string("read"),
@@ -99,6 +117,42 @@ fn main() {
         ("oper-deadline", oper_deadline),
         ("oper-plain", oper_plain),
     ];
+    // A real socket read deadline, so the error comes from `net`.
+    let real_err: goish::error = {
+        let (ln, le) = goish::net::Listen(string("tcp"), string("127.0.0.1:0"));
+        if !le.IsNil() {
+            le
+        } else {
+            let port = ln.Addr().Port;
+            goish::go!(stack(256 * 1024), move || {
+                let (mut c, e) = ln.Accept();
+                if e.IsNil() {
+                    goish::time::Sleep(goish::time::Duration(300_000_000));
+                    let _ = goish::io::Closer::Close(&mut c);
+                }
+            });
+            goish::time::Sleep(goish::time::Duration(80_000_000));
+            let addr = fmt::Sprintf!("127.0.0.1:%d", port as i64);
+            let (mut c, de) = goish::net::Dial(string("tcp"), addr);
+            if !de.IsNil() {
+                de
+            } else {
+                let _ =
+                    c.SetReadDeadline(goish::time::Now().Add(goish::time::Duration(100_000_000)));
+                let mut buf = goish::make!([]goish::byte, 16);
+                let (_n, rerr) = goish::io::Reader::Read(&mut c, &mut buf);
+                let _ = goish::io::Closer::Close(&mut c);
+                rerr
+            }
+        }
+    };
+    let cases: [(&str, goish::error); 4] = [
+        cases[0].clone(),
+        cases[1].clone(),
+        cases[2].clone(),
+        ("real-read-timeout", real_err),
+    ];
+
     for (name, e) in cases.iter() {
         let (t, okt) = errors::AsIface::<goish::d!(gnet::timeout)>(e);
         let (m, okm) = errors::AsIface::<goish::d!(gnet::temporary)>(e);
