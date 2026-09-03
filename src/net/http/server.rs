@@ -2168,6 +2168,15 @@ struct connReaderState {
         Arc<crate::context::CancelFunc>,
         Arc<super::responsewriter::closeNotifyCell>,
     )>,
+    /// Bytes already read off the socket that belong to a LATER
+    /// request. Go has no equivalent field because it does not need
+    /// one: `c.bufr` is built once per connection (server.go:2017) and
+    /// survives every request on it, so read-ahead is simply still
+    /// there next time round. goish rebuilds its bufio.Reader per
+    /// request — the buffer is pooled, and `putBufioReader` hands it
+    /// back with `r`/`w` reset — so anything read ahead used to be
+    /// dropped on the floor between requests. See `pushback`.
+    pushback: Vec<crate::types::byte>,
 }
 
 impl connReader {
@@ -2181,6 +2190,7 @@ impl connReader {
                 hasByte: false,
                 released: false,
                 hooks: None,
+                pushback: Vec::new(),
             }),
         };
     }
@@ -2325,6 +2335,27 @@ impl connReader {
         return self.state.Lock().released;
     }
 
+    // go: none — goish-only: stands in for Go's per-CONNECTION
+    // `c.bufr`, which keeps read-ahead across requests for free.
+    /// Hand back bytes that were read off the socket but belong to a
+    /// later request, so the next request on this connection sees them.
+    ///
+    /// Without this, a client that sends request N+1 before reading
+    /// response N lost it: the bytes sat in a bufio.Reader that was
+    /// returned to the pool (and reset) the moment request N finished
+    /// parsing. The connection stayed open advertising keep-alive and
+    /// the second request was silently discarded, so the client waited
+    /// for a response that was never coming. That is not just
+    /// pipelining — any client that writes two requests back to back
+    /// fast enough for them to land in one read hits it.
+    pub(crate) fn __pushback(&self, b: &[crate::types::byte]) {
+        if b.is_empty() {
+            return;
+        }
+        self.state.Lock().pushback.extend_from_slice(b);
+        return;
+    }
+
     // go: sdk 1.25.5 net/http/server.go:755 connReader.setReadLimit
     pub fn setReadLimit(&self, remain: i64) {
         self.state.Lock().remain = remain;
@@ -2357,6 +2388,25 @@ impl connReader {
         rwc: &mut crate::net::TCPConn,
         p: &mut crate::goslice::slice<crate::types::byte>,
     ) -> (crate::types::int, crate::errors::error) {
+        // Bytes carried over from a previous request on this
+        // connection come first, and deliberately BEFORE the read
+        // limit is consulted: they were already counted against the
+        // limit when they came off the socket, and in Go they would be
+        // sitting in c.bufr where connReader's accounting never sees
+        // them at all. Charging them twice would let a pipelined
+        // request trip the header limit that its own bytes did not
+        // exceed.
+        {
+            let mut st = self.state.Lock();
+            if !st.pushback.is_empty() {
+                let n = core::cmp::min(st.pushback.len(), crate::builtin::__make_size(p.Len()));
+                for i in 0..n {
+                    p[i] = st.pushback[i];
+                }
+                st.pushback.drain(0..n);
+                return (n as crate::types::int, crate::errors::nil);
+            }
+        }
         let remain = {
             let st = self.state.Lock();
             // Go: if cr.hitReadLimit() { return 0, io.EOF }
@@ -3326,6 +3376,18 @@ impl Server {
                     conn_fd,
                     Some(&cr),
                 );
+                // Anything the parser read past this request's end
+                // belongs to the next one on this connection. Go keeps
+                // it in c.bufr; goish is about to return that buffer
+                // to the pool, so hand the bytes to the connReader,
+                // which outlives the loop.
+                let ahead = br.Buffered();
+                if ahead > 0 {
+                    let (peeked, perr) = br.Peek(ahead);
+                    if perr.IsNil() {
+                        cr.__pushback(&peeked);
+                    }
+                }
                 putBufioReader(br);
                 out
             };
@@ -3465,6 +3527,7 @@ impl Server {
                 request_keep_alive(&mut req) && !self.__state.in_shutdown.load(Ordering::Acquire);
             let w = response::__new_with_cnc(conn, cnc);
             w.__set_keep_alive(keep_alive);
+            w.__set_proto11(req.ProtoAtLeast(1, 1));
             // HEAD: handler writes are eaten by the response writer
             // (Go's `isHEAD` at server.go:1302, eat-writes at :1339).
             w.__set_head(req.Method == string("HEAD"));

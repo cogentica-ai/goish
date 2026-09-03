@@ -151,10 +151,15 @@ impl tlsResponse {
             {
                 h.Set(string("Content-Length"), int_to_string(g.body.len() as i64));
             }
-            super::responsewriter::finalizeHeaders(&mut h, g.status, &g.body);
-            if !g.keep_alive && h.Get(string("Connection")).Len() == 0 {
-                h.Set(string("Connection"), string("close"));
-            }
+            // The HTTPS loop speaks HTTP/1.1 only, so proto11 is true.
+            super::responsewriter::finalizeHeaders(
+                &mut h,
+                g.status,
+                &g.body,
+                g.keep_alive,
+                true,
+                g.is_head,
+            );
             let mut buf = build_head(g.status, &h);
             if !suppress_body {
                 buf.extend_from_slice(&g.body);
@@ -184,13 +189,17 @@ impl tlsResponse {
             let mut h = self.header.Lock();
             // Before the auto `chunked`: Go still sniffs a flushed
             // response (its hasTE guard means a HANDLER-set TE).
-            super::responsewriter::finalizeHeaders(&mut h, g.status, &g.body);
+            super::responsewriter::finalizeHeaders(
+                &mut h,
+                g.status,
+                &g.body,
+                g.keep_alive,
+                true,
+                g.is_head,
+            );
             if !suppress_body {
                 h.Del(string("Content-Length"));
                 h.Set(string("Transfer-Encoding"), string("chunked"));
-            }
-            if !g.keep_alive && h.Get(string("Connection")).Len() == 0 {
-                h.Set(string("Connection"), string("close"));
             }
             build_head(g.status, &h)
         };

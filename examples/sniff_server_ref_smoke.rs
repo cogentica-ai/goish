@@ -148,21 +148,14 @@ const GO: [&str; 27] = [
     "ct-after-write   ct=application/too-late            cl=14   te=-        date=<present>",
     "304-with-hdrs    ct=-                               cl=-    te=-        date=<present>",
     "cl-too-big       ct=text/plain; charset=utf-8       cl=100  te=-        date=<present>",
-    // KNOWN GAP. Go's line is:
-    //   "cl-too-small     ct=-                               cl=2    te=-        date=<present>"
-    // A handler that declares Content-Length: 2 and then writes 16
-    // bytes. Go's response.Write returns ErrContentLength and writes
-    // NOTHING past the declared length, so the body is empty (and the
-    // Content-Type unsniffed, because no bytes reached writeHeader).
-    // goish sends all 16 bytes under the handler's Content-Length: 2.
-    //
-    // This is not a smuggling primitive in goish: shouldReuseConnection
-    // already compares the declared length against the buffered body
-    // and refuses to reuse the connection when they disagree, so the
-    // surplus bytes cannot be read as the head of a following
-    // response — the connection closes instead. What is missing is the
-    // Write-side bound that would stop them being sent at all.
-    "cl-too-small     ct=text/plain; charset=utf-8       cl=2    te=-        date=<present>",
+    // Was a KNOWN GAP; closed by the Content-Length bound in
+    // response.Write. A handler that declares Content-Length: 2 and
+    // then writes 16 bytes now gets ErrContentLength on the write that
+    // would exceed, exactly as Go does, so nothing past the declared
+    // length reaches the wire. The Content-Type is absent for the same
+    // reason it is absent in Go: no body bytes ever arrived, so there
+    // was nothing to sniff.
+    "cl-too-small     ct=-                               cl=2    te=-        date=<present>",
     "own-date         ct=text/plain; charset=utf-8       cl=1    te=-        date=<present>",
     "gzip-ce          ct=-                               cl=14   te=-        date=<present>",
     "wh200-then-html  ct=text/html; charset=utf-8        cl=14   te=-        date=<present>",

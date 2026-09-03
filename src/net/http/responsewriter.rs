@@ -469,6 +469,18 @@ struct respInner {
     /// never emitted — Go's `chunkWriter.Write` "Eat writes."
     /// (server.go:1339).
     is_head: bool,
+    /// Go's `w.req.ProtoAtLeast(1, 1)`, passed in by the server the
+    /// way `is_head` is. Go reads it off the request the response
+    /// holds; goish's writer holds no request, and without it the
+    /// Connection header cannot follow Go's rules — `close` is only
+    /// ever ADDED on HTTP/1.1, and `keep-alive` only on HTTP/1.0.
+    /// Defaults true so a writer built outside the serve loop behaves
+    /// as the common case.
+    proto11: bool,
+    /// Go's `response.written` (server.go:206) — bytes the handler has
+    /// passed to Write, counted whether or not they reached the wire,
+    /// so a declared Content-Length can be enforced against them.
+    written: i64,
     /// Go's `response.closeAfterReply` (server.go:236) — set when the
     /// request or something during the handler decided this connection
     /// must not be reused.
@@ -546,6 +558,8 @@ impl response {
                 chunked: false,
                 keep_alive: false,
                 is_head: false,
+                proto11: true,
+                written: 0,
                 closeAfterReply: false,
                 requestBodyLimitHit: false,
                 werr: errors::nil,
@@ -695,6 +709,13 @@ impl response {
         self.inner.Lock().keep_alive = keep_alive;
     }
 
+    // go: none — goish-only: Go stores the request on the response; goish passes the protocol version in.
+    /// Server hook: record `w.req.ProtoAtLeast(1, 1)`. Drives the
+    /// Connection header rules in `finalizeHeaders`.
+    pub fn __set_proto11(&self, proto11: bool) {
+        self.inner.Lock().proto11 = proto11;
+    }
+
     // go: none — goish-only: Go stores the request on the response; goish passes the HEAD-ness in.
     /// Server hook: mark this response as answering a HEAD request.
     /// Mirrors Go's `isHEAD := w.req.Method == "HEAD"`
@@ -756,13 +777,17 @@ impl response {
             // Before the auto `chunked` below: Go's hasTE guard tests a
             // HANDLER-set Transfer-Encoding, and a flushed response is
             // still sniffed.
-            finalizeHeaders(&mut h, g.status, &g.body);
+            finalizeHeaders(
+                &mut h,
+                g.status,
+                &g.body,
+                g.keep_alive,
+                g.proto11,
+                g.is_head,
+            );
             if !suppress_body {
                 h.Del(string("Content-Length"));
                 h.Set(string("Transfer-Encoding"), string("chunked"));
-            }
-            if !g.keep_alive && h.Get(string("Connection")).Len() == 0 {
-                h.Set(string("Connection"), string("close"));
             }
             build_head(g.status, &h)
         };
@@ -1013,10 +1038,14 @@ impl response {
             {
                 h.Set(string("Content-Length"), int_to_string(g.body.len() as i64));
             }
-            finalizeHeaders(&mut h, g.status, &g.body);
-            if !g.keep_alive && h.Get(string("Connection")).Len() == 0 {
-                h.Set(string("Connection"), string("close"));
-            }
+            finalizeHeaders(
+                &mut h,
+                g.status,
+                &g.body,
+                g.keep_alive,
+                g.proto11,
+                g.is_head,
+            );
             let mut buf = build_head(g.status, &h);
             if !suppress_body {
                 buf.reserve(g.body.len());
@@ -1146,6 +1175,25 @@ impl ResponseWriter for response {
         // a body rejects handler writes with ErrBodyNotAllowed.
         if p.len() > 0 && !bodyAllowedForStatus(g.status) {
             return (0, super::server::ErrBodyNotAllowed.into());
+        }
+        // `(*response).write` (server.go:1694-1700): count the bytes
+        // BEFORE the bound is tested, then reject the write whole —
+        // Go returns (0, ErrContentLength) rather than a short write,
+        // and the counter stays advanced so every later write fails
+        // too. Without this a handler that declared N bytes and wrote
+        // more put all of them on the wire under a Content-Length that
+        // did not cover them.
+        {
+            let declared = self.header.Lock().Get(string("Content-Length"));
+            if declared.Len() != 0 {
+                let (cl, perr) = crate::strconv::ParseInt(declared, 10, 64);
+                if perr.IsNil() && cl >= 0 {
+                    g.written += crate::int64(p.len());
+                    if g.written > cl {
+                        return (0, super::server::ErrContentLength.into());
+                    }
+                }
+            }
         }
         // HEAD: eat writes (server.go:1339) — report success so the
         // handler proceeds normally. In buffered mode the bytes are
@@ -1320,7 +1368,14 @@ pub(crate) fn sniffContentType(h: &mut Header, status: int, body: &[byte]) {
 ///      request-smuggling desync: a proxy honouring Transfer-Encoding
 ///      and one honouring Content-Length disagree about where the
 ///      body ends.
-pub(crate) fn finalizeHeaders(h: &mut Header, status: int, body: &[byte]) {
+pub(crate) fn finalizeHeaders(
+    h: &mut Header,
+    status: int,
+    body: &[byte],
+    keep_alive: bool,
+    proto11: bool,
+    is_head: bool,
+) {
     if bodyAllowedForStatus(status) {
         sniffContentType(h, status, body);
     } else {
@@ -1346,6 +1401,28 @@ pub(crate) fn finalizeHeaders(h: &mut Header, status: int, body: &[byte]) {
             h.Get(string("Content-Length"))
         );
         h.Del(string("Content-Length"));
+    }
+
+    // Go's Connection rules (server.go:1366-1373 and :1557-1565).
+    // A handler that set the header itself is left alone; otherwise:
+    //
+    //   * `close` is only ever ADDED on HTTP/1.1. On HTTP/1.0 the
+    //     absence of `keep-alive` already means "closing", so Go sends
+    //     nothing and just closes. goish sent `Connection: close` to
+    //     every 1.0 client.
+    //   * `keep-alive` is only ever added on HTTP/1.0, and only when
+    //     the response is self-delimiting (a Content-Length, a HEAD,
+    //     or a status that allows no body) — otherwise the client
+    //     cannot find the end of it. goish sent nothing, so a 1.0
+    //     client that asked to keep the connection had no way to learn
+    //     it could, and closed after one request.
+    if h.Values(string("Connection")).Len() == 0 {
+        let hasCL2 = h.Values(string("Content-Length")).Len() != 0;
+        if !proto11 && keep_alive && (is_head || hasCL2 || !bodyAllowedForStatus(status)) {
+            h.Set(string("Connection"), string("keep-alive"));
+        } else if !keep_alive && proto11 {
+            h.Set(string("Connection"), string("close"));
+        }
     }
     return;
 }
