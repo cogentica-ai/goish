@@ -3122,3 +3122,7 @@ path = "examples/client_timeout_ref_smoke.rs"
 [[example]]
 name = "responsecontroller_ref_smoke"
 path = "examples/responsecontroller_ref_smoke.rs"
+
+[[example]]
+name = "elliptic_unmarshal_ref_smoke"
+path = "examples/elliptic_unmarshal_ref_smoke.rs"
