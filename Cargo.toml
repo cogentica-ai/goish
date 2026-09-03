@@ -3070,3 +3070,7 @@ path = "examples/asn1_time_ref_smoke.rs"
 [[example]]
 name = "slog_source_ref_smoke"
 path = "examples/slog_source_ref_smoke.rs"
+
+[[example]]
+name = "preconditions_ref_smoke"
+path = "examples/preconditions_ref_smoke.rs"
