@@ -157,7 +157,13 @@ fn rthash(buf: &[byte], seed: u64) -> u64 {
 
 /// `maphash.Seed` — random value identifying a hash function instance.
 /// Zero seed is invalid; obtain one via [`MakeSeed`] or [`Hash::Seed`].
-#[derive(Copy, Clone, Default)]
+///
+/// `PartialEq`/`Eq` because Go's `Seed` is a struct of one uint64 and
+/// therefore COMPARABLE: `s1 == s2` is ordinary Go, and a caller
+/// checking that a Hash kept its seed across Reset, or that two seeds
+/// differ, writes exactly that. goish's derive list omitted it, so the
+/// comparison did not compile.
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
 pub struct Seed {
     pub(crate) s: u64,
 }

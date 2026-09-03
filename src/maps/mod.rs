@@ -31,9 +31,6 @@ pub use iter::{All, Collect, Insert, Keys, Values};
 
 use crate::gomap::map;
 
-
-
-
 /// `maps.Equal(m1, m2)` — same keys with equal values.
 pub fn Equal<K, V>(m1: &map<K, V>, m2: &map<K, V>) -> bool
 where
