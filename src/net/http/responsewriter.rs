@@ -898,6 +898,30 @@ impl response {
         if g.flushed {
             return errors::nil;
         }
+        // Trailers REQUIRE chunked framing: they are sent after the
+        // body, and a Content-Length response has nowhere to put them.
+        // Go arranges this by declining to derive a Content-Length when
+        // the handler declared trailers (chunkWriter.writeHeader's
+        // `!trailers` guard), which drops the response into chunked.
+        //
+        // goish derived the length regardless, so a handler that set
+        // `Trailer: X-Sum` and wrote a short body got a Content-Length
+        // response, the announcement was dropped, and the trailer
+        // itself was never sent — silently, with the body intact. The
+        // case that found it was a reverse proxy relaying a backend's
+        // trailer announcement to a client, which could not work
+        // because there was no announcement left to relay.
+        if !g.chunked && !g.is_head && bodyAllowedForStatus(g.status) {
+            let declares = self.header.Lock().Values(string("Trailer")).Len() > 0;
+            if declares {
+                drop(g);
+                let e = self.promote_chunked();
+                if !e.IsNil() {
+                    return e;
+                }
+                g = self.inner.Lock();
+            }
+        }
         g.flushed = true;
         if !g.wrote_header {
             g.wrote_header = true;

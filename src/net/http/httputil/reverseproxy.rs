@@ -28,9 +28,18 @@ use crate::types::byte;
 pub fn NewSingleHostReverseProxy(
     target: super::super::url::URL,
 ) -> alloc::sync::Arc<dyn super::super::server::Handler> {
+    let mut c = super::super::client::Client::default();
+    // See ServeHTTP: a proxy RELAYS a redirect, it does not chase it.
+    c.CheckRedirect = Some(alloc::sync::Arc::new(
+        |_req: &super::super::request::Request,
+         _via: &[super::super::request::Request]|
+         -> crate::errors::error {
+            return super::super::client::ErrUseLastResponse.into();
+        },
+    ));
     return alloc::sync::Arc::new(reverseProxyHandler {
         target,
-        client: alloc::sync::Arc::new(super::super::client::Client::default()),
+        client: alloc::sync::Arc::new(c),
     });
 }
 
@@ -119,8 +128,13 @@ impl super::super::server::Handler for reverseProxyHandler {
 
         // Go: rewriteRequestURL(req, target)
         rewriteRequestURL(&mut outreq, &self.target);
-        // Drop the original Host so URL.Host wins on serialization.
-        outreq.Host = string::new();
+        // Go leaves req.Host ALONE: "If the Director/Rewrite does not
+        // set Host, the outbound request keeps the inbound one", which
+        // is what lets a backend do name-based virtual hosting behind
+        // a proxy. goish used to clear it, because the client dialled
+        // and addressed from the same value and this was the only way
+        // to make the URL host win; the client now separates the two,
+        // so the inbound Host survives as Go intends.
 
         // Go (reverseproxy.go:369-372): capture the upgrade type BEFORE
         // the hop-by-hop strip removes Connection/Upgrade, then add
@@ -128,11 +142,31 @@ impl super::super::server::Handler for reverseProxyHandler {
         // the re-add, no upgrade request can traverse the proxy.
         let reqUpType = upgradeType(&outreq.Header);
         // Go: removeHopByHopHeaders(outreq.Header)
-        let inner = outreq.Header.__inner().clone();
-        for (k, _) in inner.__iter() {
-            if isHopHeader(k) {
-                outreq.Header.Del(k.clone());
-            }
+        //
+        // This used to be an inline loop over `hopHeaders` alone, which
+        // is only HALF the rule. RFC 7230 §6.1 says the Connection
+        // header itself names further hop-by-hop headers, and those
+        // must be removed too — `removeHopByHopHeaders` below does both
+        // passes in the order that matters, and was already written,
+        // documented and never called.
+        //
+        // With only the fixed list stripped, a client sending
+        // `Connection: X-Secret` alongside `X-Secret: …` had the
+        // X-Secret forwarded to the backend, where Go deletes it. A
+        // connection-option header that survives an intermediary is
+        // the raw material of request smuggling: the two ends disagree
+        // about which headers belong to the hop and which to the
+        // message.
+        //
+        // Go re-adds `Te: trailers` after the strip
+        // (`httpguts.HeaderValuesContainsToken(req.Header["Te"],
+        // "trailers")`), because trailers are negotiated end-to-end
+        // even though Te itself is hop-by-hop. That was missing too, so
+        // no request could negotiate trailers across the proxy.
+        let teTrailers = headerValuesContainToken(&outreq.Header, "Te", "trailers");
+        removeHopByHopHeaders(&mut outreq.Header);
+        if teTrailers {
+            outreq.Header.Set(string("Te"), string("trailers"));
         }
         if reqUpType.Len() != 0 {
             outreq.Header.Set(string("Connection"), string("Upgrade"));
@@ -175,14 +209,32 @@ impl super::super::server::Handler for reverseProxyHandler {
             }
         }
 
+        // Go: "If the outbound request doesn't have a User-Agent header
+        // set, don't send the default Go HTTP client User-Agent."
+        // Setting it EMPTY is the documented way to send none — the
+        // serializer tests `has`, not the value. Without this the proxy
+        // stamps its own agent on a request that deliberately carried
+        // none, which the backend then attributes to the client.
+        if !outreq.Header.has(string("User-Agent")) {
+            outreq.Header.Set(string("User-Agent"), string::new());
+        }
+
         // Go: roundTrip via Transport / our Client.
+        //
+        // Go calls Transport.RoundTrip, which performs exactly ONE
+        // exchange. goish routes through Client::Do, which by default
+        // follows up to ten redirects — so a 302 from the backend never
+        // reached the client; the proxy went and fetched the target
+        // itself. That is wrong twice over: the client loses a response
+        // it was entitled to see, and the proxy is turned into a
+        // fetcher for whatever URL the backend names, including hosts
+        // it was never pointed at. `ErrUseLastResponse` is the
+        // documented way to say "hand me the redirect, do not follow
+        // it", which is what a proxy wants.
         let (mut resp, err) = self.client.Do(&outreq);
         if !err.IsNil() {
-            super::super::server::Error(
-                w,
-                string("Bad Gateway"),
-                super::super::status::StatusBadGateway,
-            );
+            // Go's defaultErrorHandler writes the status and NO body.
+            w.WriteHeader(super::super::status::StatusBadGateway);
             return;
         }
 
@@ -196,12 +248,36 @@ impl super::super::server::Handler for reverseProxyHandler {
             return;
         }
 
-        // Go: copyHeader(rw.Header(), res.Header) minus hop-by-hop.
+        // Go: removeHopByHopHeaders(res.Header), then
+        // copyHeader(rw.Header(), res.Header).
+        //
+        // Same half-rule as the request side, and the leak runs the
+        // other way: a backend answering `Connection: X-Internal`
+        // alongside `X-Internal: …` expects the proxy to delete
+        // X-Internal before the client sees it. goish relayed it.
+        removeHopByHopHeaders(&mut resp.Header);
+        // Go announces the trailers the response declared, which the
+        // strip above has just removed along with the rest of the
+        // hop-by-hop set. Without this a client is never told which
+        // trailers to expect.
+        let announced = resp.Trailer.__inner().Len();
+        if announced > 0 {
+            let mut keys: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+            for (k, _) in resp.Trailer.__inner().__iter() {
+                keys.push(k.clone());
+            }
+            keys.sort_by(|a, b| crate::strings::Compare(a.clone(), b.clone()).cmp(&0));
+            let mut joined = string::new();
+            for (i, k) in keys.iter().enumerate() {
+                if i > 0 {
+                    joined = joined + ", ";
+                }
+                joined = joined + k.clone();
+            }
+            w.Header().Add(string("Trailer"), joined);
+        }
         let r_inner = resp.Header.__inner();
         for (k, vs) in r_inner.__iter() {
-            if isHopHeader(k) {
-                continue;
-            }
             for i in 0..vs.Len() {
                 w.Header().Add(k.clone(), vs[i].clone());
             }
@@ -324,6 +400,20 @@ pub fn removeHopByHopHeaders(h: &mut super::super::header::Header) {
     for f in hopHeaders.iter() {
         h.Del(string(*f));
     }
+}
+
+// go: none — goish-only. Go reaches for
+// `httpguts.HeaderValuesContainsToken(h[key], token)`, which scans
+// every value of a multi-valued header; goish's `header::hasToken`
+// takes one value at a time, so this loops over them.
+fn headerValuesContainToken(h: &super::super::header::Header, key: &str, token: &str) -> bool {
+    let vs = h.Values(string::from_bytes(key.as_bytes()));
+    for i in 0..vs.Len() {
+        if super::super::header::hasToken(vs[i].clone(), string::from_bytes(token.as_bytes())) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:743-748 upgradeType

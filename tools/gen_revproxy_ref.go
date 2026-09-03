@@ -32,6 +32,13 @@ import (
 // proxy meant to send.
 func TestGoishRef(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Accept-Encoding is added by Go's TRANSPORT, not by the
+		// proxy, and goish's client does not request gzip — which is
+		// self-consistent, since it does not transparently decode it
+		// either. Excluded so the rest of the comparison pins the
+		// PROXY exactly rather than drowning in one transport-level
+		// difference repeated on every line.
+		delete(r.Header, "Accept-Encoding")
 		var keys []string
 		for k := range r.Header {
 			keys = append(keys, k)

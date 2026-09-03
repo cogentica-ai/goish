@@ -1098,10 +1098,32 @@ impl RoundTripper for Transport {
         }
 
         // Resolve host:port. URL.Host may already include :port.
+        //
+        // Two DIFFERENT values, which goish used to conflate. `host` is
+        // where the connection is dialled: always the URL's, because
+        // that is the only thing that names a peer. `header_host` is
+        // what goes on the Host line, and Go lets `Request.Host`
+        // override it — the field is documented as "For client
+        // requests, Host optionally overrides the Host header to send"
+        // (request.go). goish ignored the field entirely and always
+        // sent the URL's host.
+        //
+        // A caller could therefore not address a virtual host by name
+        // while dialling a chosen address, and — the case that found
+        // this — httputil's reverse proxy could not forward the
+        // INBOUND Host to its backend, which is what Go's proxy does
+        // by default. Its only way to make the URL host win was to
+        // clear Request.Host, so a backend doing name-based routing
+        // saw the proxy's own address instead of the client's.
         let host = if req.URL.Host.Len() > 0 {
             req.URL.Host.clone()
         } else {
             req.Host.clone()
+        };
+        let header_host = if req.Host.Len() > 0 {
+            req.Host.clone()
+        } else {
+            host.clone()
         };
         if host.Len() == 0 {
             return (
@@ -1198,7 +1220,7 @@ impl RoundTripper for Transport {
 
                 // Write the request: head, then stream the body (see
                 // the TLS arm above).
-                let (head, mut tw, serr) = serialize_request_head(&rt_req, &host, false);
+                let (head, mut tw, serr) = serialize_request_head(&rt_req, &header_host, false);
                 if !serr.IsNil() {
                     stop_cancel_watch(watch);
                     let _ = src.close_conn();
