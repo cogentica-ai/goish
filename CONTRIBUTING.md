@@ -50,11 +50,30 @@ replaces an in-flight run rather than queueing behind it.
 |---|---|
 | `cargo check --lib` | typecheck goish runtime |
 | `cargo build --examples` | build all e2e examples |
-| `make lint` | **goishlint ratchet - run before every commit** |
+| `make lint` | **goishlint ratchet - run before every commit**; also runs `anchors` and `ifaces` |
+| `make ifaces` | interfaces asserted on with no registered implementor |
 | `make e2e` | **tiered**: each example at its own loop count |
 | `make e2e-full` | everything x50 - required for runtime-core changes |
 | `make e2e LOOPS=1` | force one run each (uniform; overrides tiers) |
 | `make e2e LOOPS=10 FILTER='^chan_'` | stress one family |
+
+#### `make ifaces` - assertions that can never hit
+
+Go satisfies an interface structurally. goish resolves the same
+assertion through a runtime registry, so a concrete type needs the
+trait impl, the `__goish_as_dyn_any` hook, AND
+`__goish_register_<Iface>_impl::<Concrete>()`. Two of the three looks
+finished and behaves like nothing: the assertion misses silently and
+the caller takes the "not supported" branch.
+
+That has cost real defects — net/http/cgi's and crypto/tls's response
+writers each had impl and hook and no registration, so every CGI and
+every HTTPS handler saw a writer that could not flush, and
+ResponseController's four capability interfaces had no implementor at
+all. `scripts/iface_check.py` reports both shapes. It reports rather
+than fails, because a zero-implementor interface is sometimes correct:
+Go's own `rwUnwrapper` has none either, being a hook for user
+middleware. Use `--strict` for a gate.
 
 #### `make lint` - the backlog may shrink, never grow
 
@@ -127,6 +146,23 @@ Two rules go with it:
 Tests that reach the real internet (`NETWORK_FLAKY` in the runner,
 currently `https_real_smoke`) tolerate timeouts as long as at least one
 iteration passes and nothing panics; anything else is a real failure.
+
+- **Never let a smoke's runtime be a random variable.** Anything that
+  searches for primes — `dsa.GenerateParameters`, `rsa.GenerateKey` at
+  a large size — takes however long the search takes. `dsa_ref_smoke`
+  measured 27s, 53s and >120s on three consecutive local runs against a
+  30s per-example budget: a coin flip that reddened CI on an unrelated
+  commit and invited the conclusion that the unrelated commit was at
+  fault. Embed fixed parameters and a matching key instead, generated
+  once by the same code path. Nothing is lost when the assertions are
+  about behaviour rather than about specific key material, which is the
+  usual case. The RSA smokes already do this — `fips_rsa_smoke` says so
+  in its header and keeps to exactly one small-size `GenerateKey`.
+
+When a run goes red, read WHICH bucket it landed in before reasoning
+about the cause: the runner separates `panic`, `timeout` and `fail`,
+and a timeout on an example that does not import the package you
+changed is not your regression.
 
 ### Conventions
 
