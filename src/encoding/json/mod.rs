@@ -1162,6 +1162,59 @@ pub fn Unmarshal<T: FromValue>(data: &[byte], dest: &mut T) -> error {
 
 /// Internal: parse bytes into a dynamic `Value`. Used by `Unmarshal`
 /// and by `Decoder.Decode`. Mirrors Go's package-private parsing path.
+
+// go: sdk 1.25.5 encoding/json/scanner.go:600-612 quoteChar
+/// Go: "special cases - different from quoted strings" — a single quote
+/// is `'\''` and a double quote is `'"'`; everything else is
+/// strconv.Quote's rendering with the outer quotes swapped for single
+/// ones.
+fn quote_char(c: crate::types::byte) -> string {
+    if c == b'\'' {
+        return string::from("'\\''");
+    }
+    if c == b'"' {
+        return string::from("'\"'");
+    }
+    // Go: s := strconv.Quote(string(c)); return "'" + s[1:len(s)-1] + "'"
+    let q = crate::strconv::Quote(string::from_bytes(&[c]));
+    let qb = q.as_bytes();
+    let inner = string::from_bytes(&qb[1..qb.len() - 1]);
+    return string::from("'") + inner + string::from("'");
+}
+
+// go: none — goish idiom: Go's scanner builds a `*SyntaxError` whose msg
+// is "invalid character " + quoteChar(c) + " " + <what it was looking
+// for>. goish's parser is recursive descent rather than a state
+// machine, so the context is the call site's own words instead of a
+// state name — but the SENTENCE is Go's, because that sentence is what
+// a caller reads when a document fails to parse. Answering "invalid
+// syntax" to all of them, as this did, says only that something is
+// wrong somewhere.
+fn syntax_err(c: crate::types::byte, context: &str) -> error {
+    return errors::New(
+        string::from("invalid character ")
+            + quote_char(c)
+            + string::from(" ")
+            + string::from(context),
+    );
+}
+
+// go: none — goish idiom: Go's scanner substitutes a SPACE for the
+// end of input when it is part-way through a literal or a number, so
+// "1e" reports "invalid character ' ' in exponent of numeric literal"
+// rather than a truncation. Inside a container it reports the
+// truncation instead; see `unexpected_end`.
+fn syntax_err_eof(context: &str) -> error {
+    return syntax_err(b' ', context);
+}
+
+// go: none — goish idiom: Go's `Unmarshal` reports a truncated document
+// as "unexpected end of JSON input" (SyntaxError, encoding/json), not
+// as an invalid character.
+fn unexpected_end() -> error {
+    return errors::New(string::from("unexpected end of JSON input"));
+}
+
 fn parse_to_value(data: &[byte]) -> (Value, error) {
     let mut p = Parser { data, pos: 0 };
     p.skip_ws();
@@ -1171,7 +1224,11 @@ fn parse_to_value(data: &[byte]) -> (Value, error) {
     }
     p.skip_ws();
     if p.pos != data.len() {
-        return (Value::Null, ErrSyntax.into());
+        // Go: "invalid character 'x' after top-level value"
+        return (
+            Value::Null,
+            syntax_err(data[p.pos], "after top-level value"),
+        );
     }
     (v, nil)
 }
@@ -1205,14 +1262,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expect(&mut self, c: byte) -> error {
+    fn expect_ctx(&mut self, c: byte, context: &str) -> error {
         match self.peek() {
             Some(b) if b == c => {
                 self.pos += 1;
                 nil
             }
-            Some(_) => ErrSyntax.into(),
-            None => ErrUnexpectedEnd.into(),
+            Some(b) => syntax_err(b, context),
+            None => unexpected_end(),
         }
     }
 
@@ -1225,8 +1282,9 @@ impl<'a> Parser<'a> {
             Some(b't') | Some(b'f') => self.parse_bool(),
             Some(b'n') => self.parse_null(),
             Some(b'-') | Some(b'0'..=b'9') => self.parse_number(),
-            Some(_) => (Value::Null, ErrSyntax.into()),
-            None => (Value::Null, ErrUnexpectedEnd.into()),
+            // Go: "invalid character 'x' looking for beginning of value"
+            Some(b) => (Value::Null, syntax_err(b, "looking for beginning of value")),
+            None => (Value::Null, unexpected_end()),
         }
     }
 
@@ -1234,7 +1292,10 @@ impl<'a> Parser<'a> {
         if self.literal_match(b"null") {
             (Value::Null, nil)
         } else {
-            (Value::Null, ErrSyntax.into())
+            // Go: "invalid character 'x' in literal null (expecting 'u')"
+            // — the byte reported is the first one that did NOT match,
+            // and at end of input Go substitutes a space.
+            return (Value::Null, self.literal_err(b"null"));
         }
     }
 
@@ -1244,8 +1305,55 @@ impl<'a> Parser<'a> {
         } else if self.literal_match(b"false") {
             (Value::Bool(false), nil)
         } else {
-            (Value::Null, ErrSyntax.into())
+            let lit: &[byte] = if self.peek() == Some(b'f') {
+                b"false"
+            } else {
+                b"true"
+            };
+            return (Value::Null, self.literal_err(lit));
         }
+    }
+
+    // go: none — goish idiom: Go's scanner walks a literal byte by byte
+    // and names the first one that does not fit, together with the one
+    // it wanted: "invalid character 'p' in literal true (expecting 'e')".
+    // At end of input it substitutes a space, which is why "tru" reports
+    // ' ' rather than a truncation.
+    fn literal_err(&self, lit: &[byte]) -> error {
+        let mut i = 0usize;
+        while i < lit.len() {
+            let got = if self.pos + i < self.data.len() {
+                Some(self.data[self.pos + i])
+            } else {
+                None
+            };
+            match got {
+                Some(b) if b == lit[i] => i += 1,
+                Some(b) => {
+                    return errors::New(
+                        string::from("invalid character ")
+                            + quote_char(b)
+                            + string::from(" in literal ")
+                            + string::from_bytes(lit)
+                            + string::from(" (expecting ")
+                            + quote_char(lit[i])
+                            + string::from(")"),
+                    );
+                }
+                None => {
+                    return errors::New(
+                        string::from("invalid character ")
+                            + quote_char(b' ')
+                            + string::from(" in literal ")
+                            + string::from_bytes(lit)
+                            + string::from(" (expecting ")
+                            + quote_char(lit[i])
+                            + string::from(")"),
+                    );
+                }
+            }
+        }
+        return unexpected_end();
     }
 
     fn literal_match(&mut self, lit: &[byte]) -> bool {
@@ -1257,6 +1365,18 @@ impl<'a> Parser<'a> {
         }
         self.pos += lit.len();
         true
+    }
+
+    // go: none — goish idiom: the byte the parser is looking at, in
+    // Go's sentence. At end of input Go substitutes a space, which is
+    // what makes "1e" report "invalid character ' ' in exponent of
+    // numeric literal" rather than a truncation.
+    fn here_err(&self, context: &str) -> error {
+        let e = match self.peek() {
+            Some(b) => syntax_err(b, context),
+            None => syntax_err_eof(context),
+        };
+        return e;
     }
 
     fn parse_number(&mut self) -> (Value, error) {
@@ -1272,13 +1392,19 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                 }
             }
-            _ => return (Value::Null, ErrSyntax.into()),
+            // Go: "invalid character 'x' in numeric literal"
+            _ => return (Value::Null, self.here_err("in numeric literal")),
         }
         // Fraction
         if self.peek() == Some(b'.') {
             self.pos += 1;
             if !matches!(self.peek(), Some(b'0'..=b'9')) {
-                return (Value::Null, ErrSyntax.into());
+                // Go: "invalid character 'x' after decimal point in
+                // numeric literal"
+                return (
+                    Value::Null,
+                    self.here_err("after decimal point in numeric literal"),
+                );
             }
             while matches!(self.peek(), Some(b'0'..=b'9')) {
                 self.pos += 1;
@@ -1291,7 +1417,9 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
             }
             if !matches!(self.peek(), Some(b'0'..=b'9')) {
-                return (Value::Null, ErrSyntax.into());
+                // Go: "invalid character 'x' in exponent of numeric
+                // literal"
+                return (Value::Null, self.here_err("in exponent of numeric literal"));
             }
             while matches!(self.peek(), Some(b'0'..=b'9')) {
                 self.pos += 1;
@@ -1301,12 +1429,12 @@ impl<'a> Parser<'a> {
         // SAFETY: literal is ASCII digits + '.' / 'e' / sign.
         let s = match core::str::from_utf8(lit) {
             Ok(s) => s,
-            Err(_) => return (Value::Null, ErrSyntax.into()),
+            Err(_) => return (Value::Null, self.here_err("in numeric literal")),
         };
         let owned = string::from_bytes(s.as_bytes());
         let (n, err) = strconv::ParseFloat(owned, 64);
         if err != nil {
-            return (Value::Null, ErrSyntax.into());
+            return (Value::Null, self.here_err("in numeric literal"));
         }
         (Value::Number(n), nil)
     }
@@ -1320,21 +1448,30 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_string_bytes(&mut self) -> (Vec<byte>, error) {
-        if self.advance() != Some(b'"') {
-            return (Vec::new(), ErrSyntax.into());
+        // Go: an object key that is not a string is
+        // "invalid character 'x' looking for beginning of object key
+        // string" — the only place a string is REQUIRED rather than
+        // merely one of the possible values.
+        if self.peek() != Some(b'"') {
+            let e = match self.peek() {
+                Some(b) => syntax_err(b, "looking for beginning of object key string"),
+                None => unexpected_end(),
+            };
+            return (Vec::new(), e);
         }
+        self.pos += 1;
         let mut out: Vec<byte> = Vec::new();
         loop {
             let c = match self.advance() {
                 Some(c) => c,
-                None => return (Vec::new(), ErrUnexpectedEnd.into()),
+                None => return (Vec::new(), unexpected_end()),
             };
             match c {
                 b'"' => return (out, nil),
                 b'\\' => {
                     let esc = match self.advance() {
                         Some(c) => c,
-                        None => return (Vec::new(), ErrUnexpectedEnd.into()),
+                        None => return (Vec::new(), unexpected_end()),
                     };
                     match esc {
                         b'"' => out.push(b'"'),
@@ -1348,7 +1485,14 @@ impl<'a> Parser<'a> {
                         b'u' => {
                             let cp = match self.parse_hex4() {
                                 Some(v) => v,
-                                None => return (Vec::new(), ErrSyntax.into()),
+                                // Go: "invalid character 'Z' in \u
+                                // hexadecimal character escape"
+                                None => {
+                                    return (
+                                        Vec::new(),
+                                        self.here_err("in \\u hexadecimal character escape"),
+                                    )
+                                }
                             };
                             // Handle surrogate pairs for UTF-16.
                             if (0xD800..=0xDBFF).contains(&cp) {
@@ -1392,7 +1536,8 @@ impl<'a> Parser<'a> {
                                 encode_utf8(&mut out, cp as i32);
                             }
                         }
-                        _ => return (Vec::new(), ErrSyntax.into()),
+                        // Go: "invalid character 'x' in string escape code"
+                        _ => return (Vec::new(), syntax_err(esc, "in string escape code")),
                     }
                 }
                 _ => out.push(c),
@@ -1420,7 +1565,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_array(&mut self) -> (Value, error) {
-        let err = self.expect(b'[');
+        let err = self.expect_ctx(b'[', "looking for beginning of value");
         if err != nil {
             return (Value::Null, err);
         }
@@ -1446,14 +1591,15 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     return (Value::Array(slice::__from_vec(items)), nil);
                 }
-                Some(_) => return (Value::Null, ErrSyntax.into()),
-                None => return (Value::Null, ErrUnexpectedEnd.into()),
+                // Go: "invalid character 'x' after array element"
+                Some(b) => return (Value::Null, syntax_err(b, "after array element")),
+                None => return (Value::Null, unexpected_end()),
             }
         }
     }
 
     fn parse_object(&mut self) -> (Value, error) {
-        let err = self.expect(b'{');
+        let err = self.expect_ctx(b'{', "looking for beginning of value");
         if err != nil {
             return (Value::Null, err);
         }
@@ -1472,7 +1618,8 @@ impl<'a> Parser<'a> {
             }
             let key = string::__from_vec(key_bytes);
             self.skip_ws();
-            let err = self.expect(b':');
+            // Go: "invalid character 'x' after object key"
+            let err = self.expect_ctx(b':', "after object key");
             if err != nil {
                 return (Value::Null, err);
             }
@@ -1491,8 +1638,9 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     return (Value::Object(m), nil);
                 }
-                Some(_) => return (Value::Null, ErrSyntax.into()),
-                None => return (Value::Null, ErrUnexpectedEnd.into()),
+                // Go: "invalid character 'x' after object key:value pair"
+                Some(b) => return (Value::Null, syntax_err(b, "after object key:value pair")),
+                None => return (Value::Null, unexpected_end()),
             }
         }
     }

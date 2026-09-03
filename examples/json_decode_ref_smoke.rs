@@ -33,23 +33,18 @@
 // it rather than partly overwriting; and every string escape decodes to
 // the same bytes.
 //
-// The two gaps that remain, both pinned above:
+// One gap remains, pinned above: `1.0` and `1e2` decode into an int
+// where Go refuses them. Go runs strconv.ParseInt over the ORIGINAL
+// LITERAL, so anything not written as an integer fails even when its
+// value is integral, and goish's `Value::Number` holds an f64 that has
+// already lost the text. Closing it means carrying the literal on the
+// Value, which changes the shape of a public enum used by callers.
+// Worth noting the direction: goish accepts what Go rejects, which is
+// the more permissive and therefore more dangerous way to differ.
 //
-//   * Syntax errors are generic. Go names the offending character and
-//     what the parser was looking for — "invalid character '}' looking
-//     for beginning of object key string" — where goish says
-//     "json: invalid syntax" for all thirteen. In a megabyte of input
-//     that is the difference between finding the problem and not.
-//     Closing it means porting Go's scanner state machine, which is a
-//     larger change than the two fixes here.
-//   * `1.0` and `1e2` decode into an int where Go refuses them. Go runs
-//     strconv.ParseInt over the ORIGINAL LITERAL, so anything not
-//     written as an integer fails even when its value is integral;
-//     goish's `Value::Number` holds an f64 and has already lost the
-//     text. Closing it means carrying the literal on the Value, which
-//     changes a public enum shape. Note the direction: goish accepts
-//     what Go rejects, which is the more permissive and therefore more
-//     dangerous way to differ.
+// The fourteen generic syntax messages that used to be pinned here are
+// closed: each site now names the offending character and what the
+// parser was looking for, in Go's own sentence.
 
 #![no_std]
 #![no_main]
@@ -134,33 +129,20 @@ const GO: [&str; 101] = [
     "roundtrip \"{\\\"a\\\":{\\\"b\\\":[1,2]}}\" -> {\"a\":{\"b\":[1,2]}} merr=<nil>",
     "roundtrip \"[]\"               -> [] merr=<nil>",
     "roundtrip \"{}\"               -> {} merr=<nil>",
-    // KNOWN GAP — Go says: "roundtrip \"\"                 -> err=\"unexpected end of JSON input\""
-    "roundtrip \"\"                 -> err=\"json: unexpected end of input\"",
-    // KNOWN GAP — Go says: "roundtrip \"{\"                -> err=\"unexpected end of JSON input\""
-    "roundtrip \"{\"                -> err=\"json: invalid syntax\"",
-    // KNOWN GAP — Go says: "roundtrip \"[1,]\"             -> err=\"invalid character ']' looking for beginning of value\""
-    "roundtrip \"[1,]\"             -> err=\"json: invalid syntax\"",
-    // KNOWN GAP — Go says: "roundtrip \"{\\\"a\\\":1,}\"       -> err=\"invalid character '}' looking for beginning of object key string\""
-    "roundtrip \"{\\\"a\\\":1,}\"       -> err=\"json: invalid syntax\"",
-    // KNOWN GAP — Go says: "roundtrip \"{a:1}\"            -> err=\"invalid character 'a' looking for beginning of object key string\""
-    "roundtrip \"{a:1}\"            -> err=\"json: invalid syntax\"",
-    // KNOWN GAP — Go says: "roundtrip \"[1 2]\"            -> err=\"invalid character '2' after array element\""
-    "roundtrip \"[1 2]\"            -> err=\"json: invalid syntax\"",
-    // KNOWN GAP — Go says: "roundtrip \"01\"               -> err=\"invalid character '1' after top-level value\""
-    "roundtrip \"01\"               -> err=\"json: invalid syntax\"",
-    // KNOWN GAP — Go says: "roundtrip \"+1\"               -> err=\"invalid character '+' looking for beginning of value\""
-    "roundtrip \"+1\"               -> err=\"json: invalid syntax\"",
-    // KNOWN GAP — Go says: "roundtrip \"{\\\"a\\\":}\"         -> err=\"invalid character '}' looking for beginning of value\""
-    "roundtrip \"{\\\"a\\\":}\"         -> err=\"json: invalid syntax\"",
-    // KNOWN GAP — Go says: "roundtrip \"tru\"              -> err=\"invalid character ' ' in literal true (expecting 'e')\""
-    "roundtrip \"tru\"              -> err=\"json: invalid syntax\"",
+    "roundtrip \"\"                 -> err=\"unexpected end of JSON input\"",
+    "roundtrip \"{\"                -> err=\"unexpected end of JSON input\"",
+    "roundtrip \"[1,]\"             -> err=\"invalid character ']' looking for beginning of value\"",
+    "roundtrip \"{\\\"a\\\":1,}\"       -> err=\"invalid character '}' looking for beginning of object key string\"",
+    "roundtrip \"{a:1}\"            -> err=\"invalid character 'a' looking for beginning of object key string\"",
+    "roundtrip \"[1 2]\"            -> err=\"invalid character '2' after array element\"",
+    "roundtrip \"01\"               -> err=\"invalid character '1' after top-level value\"",
+    "roundtrip \"+1\"               -> err=\"invalid character '+' looking for beginning of value\"",
+    "roundtrip \"{\\\"a\\\":}\"         -> err=\"invalid character '}' looking for beginning of value\"",
+    "roundtrip \"tru\"              -> err=\"invalid character ' ' in literal true (expecting 'e')\"",
     "roundtrip \"\\\"\\\\ud800\\\"\"      -> \"�\" merr=<nil>",
-    // KNOWN GAP — Go says: "roundtrip \"1e\"               -> err=\"invalid character ' ' in exponent of numeric literal\""
-    "roundtrip \"1e\"               -> err=\"json: invalid syntax\"",
-    // KNOWN GAP — Go says: "roundtrip \"{\\\"a\\\":1}x\"       -> err=\"invalid character 'x' after top-level value\""
-    "roundtrip \"{\\\"a\\\":1}x\"       -> err=\"json: invalid syntax\"",
-    // KNOWN GAP — Go says: "roundtrip \"[1] [2]\"          -> err=\"invalid character '[' after top-level value\""
-    "roundtrip \"[1] [2]\"          -> err=\"json: invalid syntax\"",
+    "roundtrip \"1e\"               -> err=\"invalid character ' ' in exponent of numeric literal\"",
+    "roundtrip \"{\\\"a\\\":1}x\"       -> err=\"invalid character 'x' after top-level value\"",
+    "roundtrip \"[1] [2]\"          -> err=\"invalid character '[' after top-level value\"",
     "roundtrip \"\\\"A\\\"\"            -> \"A\" merr=<nil>",
     "roundtrip \"\\\"a\\\\/b\\\"\"        -> \"a/b\" merr=<nil>",
     "roundtrip \"\\\"\\\\t\\\"\"          -> \"\\t\" merr=<nil>",
@@ -199,8 +181,7 @@ const GO: [&str; 101] = [
     "str \"\\\"\\\\ud800\\\"\"        -> \"�\" bytes=efbfbd",
     "str \"\\\"\\\\udc00\\\"\"        -> \"�\" bytes=efbfbd",
     "str \"\\\"\\\\ud800x\\\"\"       -> \"�x\" bytes=efbfbd78",
-    // KNOWN GAP — Go says: "str \"\\\"\\\\uZZZZ\\\"\"        -> err=\"invalid character 'Z' in \\\\u hexadecimal character escape\""
-    "str \"\\\"\\\\uZZZZ\\\"\"        -> err=\"json: invalid syntax\"",
+    "str \"\\\"\\\\uZZZZ\\\"\"        -> err=\"invalid character 'Z' in \\\\u hexadecimal character escape\"",
     "str \"\\\"a\\x7fb\\\"\"         -> \"a\\x7fb\" bytes=617f62",
 ];
 
