@@ -258,10 +258,14 @@ pub fn RegisterStandardHashes() {
 /// and never the key's. `Any`'s inherent `As` goes through `as_any()`
 /// and sees the payload.
 ///
-/// `crypto/ecdsa`'s `PrivateKey` is absent because it does not yet
-/// implement [`Signer`] in goish — Go's does. Adding it belongs to
-/// `crypto/ecdsa`, not here; until then an ECDSA key cannot sign an
-/// x509 certificate.
+/// `crypto/ecdsa`'s `PrivateKey` is here now. It used to be absent,
+/// with a note that implementing [`Signer`] for it belonged to
+/// `crypto/ecdsa` rather than here — which was true, and the impl now
+/// exists. Until it did, an ECDSA key could not sign an x509
+/// certificate and, worse, could not serve a TLS handshake at all:
+/// `crypto/tls` finds a certificate's signer through this registry,
+/// so the modern default key type failed every handshake with
+/// "certificate private key does not implement crypto.Signer".
 pub fn RegisterStandardSigners() {
     __goish_register_SignerOpts_impl::<Hash>();
     __goish_register_SignerOpts_impl::<crate::crypto::ed25519::Options>();
@@ -269,6 +273,7 @@ pub fn RegisterStandardSigners() {
     __goish_register_Decrypter_impl::<crate::crypto::rsa::PrivateKey>();
     __goish_register_Signer_impl::<crate::crypto::rsa::PrivateKey>();
     __goish_register_Signer_impl::<crate::crypto::ed25519::PrivateKey>();
+    __goish_register_Signer_impl::<crate::crypto::ecdsa::PrivateKey>();
 }
 
 // ─── Signer / Decrypter trait surface — crypto.go:162-243 ────────────

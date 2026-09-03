@@ -1001,10 +1001,17 @@ where
     X509KeyPair(cert_raw, key_raw)
 }
 
-/// `parsePrivateKey(der)` (tls.go:361) — attempt to parse the DER key
-/// as PKCS#1 (RSA), then PKCS#8 (RSA or Ed25519). OpenSSL 3.x writes
-/// PKCS#8 by default; OpenSSL 1.x with `-traditional` writes PKCS#1.
-/// EC (SEC1/ECDSA) keys are rejected — no ECDSA signer yet.
+/// `parsePrivateKey(der)` — attempt to parse the DER key as PKCS#1
+/// (RSA), then PKCS#8 (RSA, ECDSA or Ed25519), then SEC 1 (EC).
+/// OpenSSL 3.x writes PKCS#8 by default; OpenSSL 1.x with
+/// `-traditional` writes PKCS#1, and an "EC PRIVATE KEY" block is
+/// SEC 1.
+///
+/// The EC arms were MISSING, and the omission was total: an ECDSA
+/// key — the modern default for a TLS certificate — could not be
+/// loaded by X509KeyPair at all, so no ECDSA server certificate could
+/// serve a handshake. The stale comment here said "no ECDSA signer
+/// yet"; there is one, and `crypto::Signer` is implemented for it.
 fn parsePrivateKey(der: slice<byte>) -> (crate::crypto::PrivateKey, error) {
     // PKCS#1.
     let (k, err) = crate::crypto::x509::goishParsePKCS1RSAPrivateKey(der.clone());
@@ -1022,11 +1029,26 @@ fn parsePrivateKey(der: slice<byte>) -> (crate::crypto::PrivateKey, error) {
     if let Some(k) = parse_pkcs8_ed25519(&der) {
         return (Arc::new(k), errors::nil);
     }
+    // PKCS#8, ecPublicKey OID. Go reaches this through
+    // x509.ParsePKCS8PrivateKey's type switch; goish's returns an `Any`,
+    // so the ECDSA arm is a downcast.
+    let (any, err) = crate::crypto::x509::ParsePKCS8PrivateKey(der.clone());
+    if err.IsNil() {
+        if let Some(k) = any
+            .as_any()
+            .downcast_ref::<crate::crypto::ecdsa::PrivateKey>()
+        {
+            return (Arc::new(k.clone()), errors::nil);
+        }
+    }
+    // SEC 1, the "EC PRIVATE KEY" PEM shape.
+    let (k, err) = crate::crypto::x509::ParseECPrivateKey(der.clone());
+    if err.IsNil() {
+        return (Arc::new(k), errors::nil);
+    }
     (
         Arc::new(()),
-        errors::New(
-            "tls: failed to parse private key (PKCS#1/PKCS#8 RSA and PKCS#8 Ed25519 supported)",
-        ),
+        errors::New("tls: failed to parse private key"),
     )
 }
 

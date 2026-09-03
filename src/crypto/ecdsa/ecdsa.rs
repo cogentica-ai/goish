@@ -480,6 +480,45 @@ fn privateKeyBytes<P: fipsec::Point>(
     return (k.Bytes(), nil);
 }
 
+// go: none — goish idiom: Go's `*ecdsa.PrivateKey` satisfies
+// `crypto.Signer` through the inherent `Sign` above; the trait impl
+// forwards to it and widens `Public` to `crypto::PublicKey`.
+//
+// This was MISSING, and its absence was not local: `crypto/tls`
+// finds a certificate's signer by downcasting to `dyn crypto::Signer`,
+// so with no impl here every ECDSA server certificate failed the
+// handshake with "certificate private key does not implement
+// crypto.Signer" — the modern default key type could not serve TLS at
+// all.
+//
+// One deviation, forced by types rather than chosen. `SignASN1` takes
+// `&mut (dyn io::Reader + Send + Sync + 'static)`, because
+// `fips140only::ApprovedRandomReader` has to downcast it; the trait's
+// reader carries none of those bounds. The caller's reader is
+// therefore not threaded through, and `crypto/rand`'s is used instead.
+// Signatures stay randomised — the security property is unchanged —
+// but a caller supplying a deterministic reader here does not get a
+// deterministic signature. Go would.
+impl crypto::Signer for PrivateKey {
+    // go: none — goish idiom: Go's `*PrivateKey` satisfies
+    // `crypto.Signer` structurally; this forwards and widens the
+    // return to `crypto::PublicKey`.
+    fn Public(&self) -> crypto::PublicKey {
+        return alloc::sync::Arc::new(self.PublicKey.clone());
+    }
+
+    // go: none — goish idiom: see Public. The reader is not threaded
+    // through; see the note above the impl.
+    fn Sign(
+        &self,
+        _rand: &mut dyn io::Reader,
+        digest: slice<byte>,
+        _opts: &dyn crypto::SignerOpts,
+    ) -> (slice<byte>, error) {
+        return SignASN1(&mut crate::crypto::rand::Reader, self, &digest);
+    }
+}
+
 // go: sdk 1.25.5 crypto/ecdsa/ecdsa.go:337-361 GenerateKey
 /// Generate a new ECDSA private key for the specified curve.
 ///

@@ -1970,9 +1970,7 @@ impl Conn {
     /// ships no QUIC transport); Go's `net.Error` temporary-error test
     /// around `readFromUntil` is absent, because goish's `net` exposes no
     /// `Error` interface — the error is always recorded, which is Go's
-    /// behaviour for every non-temporary error; and the remote alert is
-    /// stored directly rather than wrapped in a `*net.OpError{Op:
-    /// "remote error"}`.
+    /// behaviour for every non-temporary error.
     pub(crate) fn readRecordOrCCS(&mut self, expectChangeCipherSpec: bool) -> error {
         // Go: if c.in.err != nil { return c.in.err }
         if self.in_.err != errors::nil {
@@ -2159,7 +2157,7 @@ impl Conn {
                     // record and retry.
                     return self.retryReadRecord(expectChangeCipherSpec);
                 }
-                return self.in_.setErrorLocked(crate::errors::Wrap(alert(data[1])));
+                return self.in_.setErrorLocked(remoteAlertError(alert(data[1])));
             }
             // Go: switch data[0] {
             //     case alertLevelWarning: // Drop the record on the floor and retry.
@@ -2171,7 +2169,7 @@ impl Conn {
                 return self.retryReadRecord(expectChangeCipherSpec);
             }
             if crate::int(data[0]) == super::alert::alertLevelError {
-                return self.in_.setErrorLocked(crate::errors::Wrap(alert(data[1])));
+                return self.in_.setErrorLocked(remoteAlertError(alert(data[1])));
             }
             let e = self.sendAlert(alertUnexpectedMessage);
             return self.in_.setErrorLocked(e);
@@ -3036,4 +3034,25 @@ impl Conn {
         }
         return alertErr;
     }
+}
+
+// go: none — goish-only. Go writes the received alert as
+// `&net.OpError{Op: "remote error", Err: alert(data[1])}` inline at
+// both alert-handling sites; this names it once.
+//
+// The wrapper is not decoration. `alert(...).Error()` alone reads
+// "tls: handshake failure", which is exactly what a LOCALLY generated
+// alert reads — so without the "remote error: " prefix a caller cannot
+// tell whether its own stack refused the handshake or the peer did.
+// That is the first question anyone asks of a failed TLS connection,
+// and goish used to answer it wrongly for every received alert.
+fn remoteAlertError(a: alert) -> error {
+    let e = crate::net::OpError {
+        Op: string::from_static("remote error"),
+        Net: string::new(),
+        Source: None,
+        Addr: None,
+        Err: crate::errors::Wrap(a),
+    };
+    return crate::errors::Wrap(e);
 }

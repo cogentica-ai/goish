@@ -3206,13 +3206,17 @@ fn main() {
     let (rd6, _, _) = rr(6);
     eq("readRecord maps close_notify to EOF", rd6, "EOF");
     // Go wraps a remote alert in a net.OpError that prints
-    // "remote error: " first; goish has no OpError and stores the alert
-    // itself, so the prefix is absent and the alert text is identical.
+    // "remote error: " first. This expectation used to be the bare
+    // alert text, on the reasoning that goish had no OpError — it has
+    // one, and the prefix is not decoration: without it a caller cannot
+    // tell whether its own stack refused the handshake or the PEER did,
+    // since a locally generated alert prints the same words. Measured
+    // against a running Go in tls_ref_smoke and corrected here.
     let (rd7, _, _) = rr(7);
     eq(
         "readRecord surfaces a fatal alert",
         rd7,
-        "tls: handshake failure",
+        "remote error: tls: handshake failure",
     );
     // A warning alert is dropped and the read retried — here nothing
     // follows, so the retry hits EOF with the counter at 1.
