@@ -2886,3 +2886,11 @@ path = "examples/cryptobyte_ref_smoke.rs"
 [[example]]
 name = "quotedprintable_ref_smoke"
 path = "examples/quotedprintable_ref_smoke.rs"
+
+[[example]]
+name = "zz_probe_rp"
+path = "examples/zz_probe_rp.rs"
+
+[[example]]
+name = "requesturi_ref_smoke"
+path = "examples/requesturi_ref_smoke.rs"

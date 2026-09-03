@@ -2752,24 +2752,52 @@ pub fn serialize_request_head(
     let mut b = strings::Builder::new();
     b.Grow(256);
 
-    // Go: fmt.Fprintf(&b, "%s %s HTTP/1.1\r\n", req.Method, ruri)
+    // Go: ruri := req.URL.RequestURI() in Request.write, then
+    // fmt.Fprintf(&b, "%s %s HTTP/1.1\r\n", req.Method, ruri)
+    //
+    // goish used to write `req.URL.Path` and `RawQuery` directly, which
+    // is the DECODED path, and that broke the request line three ways:
+    //
+    //   * "%2F" was written back as "/", so a request for "/a%2Fb"
+    //     arrived at the server as "/a/b" — a different resource, and
+    //     precisely the client/server disagreement that path confusion
+    //     is made of.
+    //   * A non-ASCII path went out as raw UTF-8 ("/☃" rather than
+    //     "/%E2%98%83"), which is not a valid request target.
+    //   * A path containing a SPACE — "/a b", or the "/a%20b" that
+    //     decodes to it — put a space in the middle of the request
+    //     line, so the server read a malformed line and closed. Every
+    //     such URL was simply unfetchable, failing with "unexpected
+    //     EOF" rather than anything that named the cause.
+    //
+    // RequestURI() was already correct and already handled Opaque, the
+    // "//"-prefix case and the empty-path "/" default; nothing here
+    // called it.
+    let mut ruri = req.URL.RequestURI();
+    if using_proxy && req.URL.Scheme.Len() != 0 && req.URL.Opaque.Len() == 0 {
+        ruri = req.URL.Scheme.clone() + "://" + host.clone() + ruri;
+    } else if req.Method == "CONNECT" && req.URL.Path.Len() == 0 {
+        // Go: "CONNECT requests normally give just the host and port,
+        // not a full URL."
+        ruri = host.clone();
+        if req.URL.Opaque.Len() != 0 {
+            ruri = req.URL.Opaque.clone();
+        }
+    }
+    // Go refuses a control character here, in Request.write, rather
+    // than writing it. Without the check a CR or LF reaching the URL
+    // ends the request line early and everything after it is read as
+    // headers — request splitting, from whatever built the URL.
+    if super::http::stringContainsCTLByte(&ruri) {
+        return (
+            slice::<byte>::__from_vec(Vec::new()),
+            tw,
+            errors::New("net/http: can't write control character in Request.URL"),
+        );
+    }
     let _ = b.WriteString(req.Method.clone());
     let _ = b.WriteByte(b' ');
-    // Go: when usingProxy, ruri = req.URL.Scheme + "://" + host + path
-    if using_proxy && req.URL.Scheme.Len() != 0 {
-        let _ = b.WriteString(req.URL.Scheme.clone());
-        let _ = b.WriteString("://");
-        let _ = b.WriteString(host.clone());
-    }
-    if req.URL.Path.Len() == 0 {
-        let _ = b.WriteByte(b'/');
-    } else {
-        let _ = b.WriteString(req.URL.Path.clone());
-    }
-    if req.URL.RawQuery.Len() > 0 {
-        let _ = b.WriteByte(b'?');
-        let _ = b.WriteString(req.URL.RawQuery.clone());
-    }
+    let _ = b.WriteString(ruri);
     let _ = b.WriteString(" HTTP/1.1\r\n");
 
     // Go: fmt.Fprintf(&b, "Host: %s\r\n", host)
