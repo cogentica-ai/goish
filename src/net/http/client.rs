@@ -975,12 +975,16 @@ pub struct Transport {
     /// Maximum time `RoundTrip` will spend on the entire request
     /// (dial + write + read). Zero ≡ no timeout.
     pub Timeout: time::Duration,
-    /// Disable transparent gzip request/response. Inert in v1.
+    /// Disable the transparent gzip Accept-Encoding/decode. LIVE — it
+    /// is the first clause of the `requestedGzip` test in roundTrip,
+    /// and gzip_transport_ref_smoke pins the behaviour both ways.
     pub DisableCompression: bool,
     /// Proxy resolver. `Option` so the zero value is None (`nil` in Go).
     pub Proxy: Option<ProxyResolver>,
-    /// Idle-connection eviction timeout. Inert until the connection
-    /// pool lands.
+    /// Idle-connection eviction timeout. LIVE — it is the cutoff
+    /// `closeIdleConnections` compares each pooled conn's idle
+    /// timestamp against, and the duration the per-conn idle timer is
+    /// armed with when a conn is banked.
     pub IdleConnTimeout: time::Duration,
     /// Per-dial timeout/keepalive callback. `Option` so the zero value
     /// is None.
@@ -999,22 +1003,35 @@ pub struct Transport {
                 + Sync,
         >,
     >,
-    /// Maximum time waiting for the TLS handshake. Inert in v1.
+    /// Maximum time waiting for the TLS handshake. LIVE — armed as a
+    /// deadline on the plaintext conn for the handshake's duration and
+    /// cleared after, with a timed-out handshake reported as such.
     pub TLSHandshakeTimeout: time::Duration,
     /// Maximum time waiting for an Expect: 100-continue response.
     pub ExpectContinueTimeout: time::Duration,
-    /// TLS configuration applied per-connection. Inert in v1 (TLS not
-    /// yet plumbed); the field exists so user ports can store and
-    /// reset it for thread-safety.
+    /// TLS configuration applied per-connection. LIVE — cloned into
+    /// each dial's handshake config (goish's is a VALUE where Go's is
+    /// a pointer, so the clone is also the thread-safety story).
     pub TLSClientConfig: crate::crypto::tls::Config,
-    /// Disable HTTP keep-alive. Inert in v1 (each request dials anew).
+    /// Disable HTTP keep-alive: dial per request, and tell the server
+    /// so with `Connection: close`. LIVE — it gates whether the
+    /// connection is banked for reuse (see the bank-back in roundTrip)
+    /// and is asserted by http_client_reuse_smoke and
+    /// client_wire_ref_smoke.
     pub DisableKeepAlives: bool,
-    /// Idle-connection-pool cap. Inert until the pool lands.
+    /// Idle-connection-pool cap, across all hosts. LIVE — carried into
+    /// the pool config as `max_idle_conns` and enforced when trimming
+    /// the idle LRU.
     pub MaxIdleConns: int,
-    /// Per-host idle-connection cap. Inert until the pool lands.
-    /// Negative values mean "no pool for this host" in Go.
+    /// Per-host idle-connection cap. LIVE — read through
+    /// `maxIdleConnsPerHost()`, which falls back to
+    /// DefaultMaxIdleConnsPerHost only when this is ZERO, so a
+    /// NEGATIVE value passes through and means "no pool for this
+    /// host", as in Go.
     pub MaxIdleConnsPerHost: int,
-    /// Max in-flight connections per host. Inert in v1.
+    /// Max in-flight connections per host. LIVE — `__take_conn_slot`
+    /// refuses a slot past the cap and `decConnsPerHost` hands the
+    /// freed slot to a waiting dial.
     pub MaxConnsPerHost: int,
     /// Prefer HTTP/2 over TLS. Inert in v1 (HTTP/2 not yet plumbed).
     pub ForceAttemptHTTP2: bool,
