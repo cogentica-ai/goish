@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 8322,
+ "total": 8358,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -473,6 +473,11 @@
    "GOISH014": 11,
    "GOISH023": 9
   },
+  "src/net/dial.rs": {
+   "GOISH018": 24,
+   "GOISH019": 1,
+   "GOISH021": 14
+  },
   "src/net/dnsclient.rs": {
    "GOISH005": 12,
    "GOISH006": 1,
@@ -584,7 +589,7 @@
    "GOISH021": 6
   },
   "src/net/http/transport.rs": {
-   "GOISH018": 24,
+   "GOISH018": 23,
    "GOISH021": 22
   },
   "src/net/lookup.rs": {
@@ -599,10 +604,10 @@
   },
   "src/net/mod.rs": {
    "GOISH005": 25,
-   "GOISH014": 52,
+   "GOISH014": 51,
    "GOISH016": 1,
    "GOISH022": 1,
-   "GOISH023": 48
+   "GOISH023": 47
   },
   "src/net/parse.rs": {
    "GOISH005": 30,

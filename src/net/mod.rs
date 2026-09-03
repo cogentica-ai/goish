@@ -47,6 +47,7 @@ use crate::syscall;
 use crate::types::{byte, int};
 use alloc::sync::Arc;
 
+pub mod dial;
 pub mod dnsclient;
 mod dnsconfig;
 pub mod dnsmessage;
@@ -71,6 +72,7 @@ pub mod netip;
 pub mod textproto;
 pub mod url;
 
+pub use dial::{Dial, DialTimeout, Dialer};
 pub use lookup::{
     IPAddr as LookupIPAddr, LookupAddr, LookupCNAME, LookupHost, LookupIP, LookupMX, LookupNS,
     LookupSRV, LookupTXT, Resolver, MX, NS, SRV,
@@ -411,51 +413,6 @@ pub struct TCPConn {
 
 unsafe impl Send for TCPConn {}
 unsafe impl Sync for TCPConn {}
-
-/// `net.Dialer` (Go 1.25 src/net/dial.go) — connection-establishing
-/// configuration. Goish v1 carries the Timeout / KeepAlive fields
-/// most commonly read; the actual `DialContext`/`Dial` method-typed
-/// resolver is exposed via `.DialContext()` returning an opaque
-/// `Arc<dyn Fn>` that can be assigned to
-/// `http::Transport.DialContext` etc. The closure is inert in v1
-/// (each `RoundTrip` dials via `crate::net::Dial` directly).
-#[derive(Clone, Default)]
-pub struct Dialer {
-    pub Timeout: crate::time::Duration,
-    pub KeepAlive: crate::time::Duration,
-    /// Allow IPv4-or-IPv6 dialing on systems with both stacks. Inert
-    /// in v1 (the dial path picks whichever the kernel's address
-    /// resolver returns first).
-    pub DualStack: bool,
-}
-
-impl Dialer {
-    /// `(*Dialer).DialContext` — Go's bound method value, the closure
-    /// `http.Transport.DialContext` defaults to.
-    ///
-    /// This used to return `Arc::new(|| {})`, a closure that took no
-    /// arguments and did nothing, on the note that the real form was
-    /// "deferred until the connection-pool layer lands". It dials now.
-    /// The Dialer's Timeout and KeepAlive are still not threaded
-    /// through — `net::Dial` has no deadline argument to give them to
-    /// — so a Dialer carrying them dials as if they were zero, which
-    /// is the same thing it did before and is recorded here rather
-    /// than pinned in a smoke.
-    pub fn DialContext(&self) -> crate::net::http::DialContextFn {
-        alloc::sync::Arc::new(
-            |_ctx: Option<alloc::sync::Arc<dyn crate::context::Context>>,
-             network: crate::gostring::string,
-             addr: crate::gostring::string| {
-                let (conn, err) = crate::net::Dial(network, addr);
-                if !err.IsNil() {
-                    return (None, err);
-                }
-                let boxed: alloc::boxed::Box<dyn Conn> = alloc::boxed::Box::new(conn);
-                return (Some(boxed), crate::errors::nil);
-            },
-        )
-    }
-}
 
 impl TCPConn {
     /// Internal: dead-conn placeholder returned alongside an error.
@@ -1189,6 +1146,20 @@ fn listen_with_config(
 ///
 /// Failures are ignored (Go's test hooks aside, these setsockopts
 /// are best-effort on exotic transports).
+// go: none — goish-only: Go passes the Duration to
+// `setKeepAliveIdle`, which converts inside internal/poll. goish calls
+// setsockopt(2) directly, so the conversion is here.
+/// A keepalive Duration as the whole seconds the TCP_KEEPIDLE and
+/// TCP_KEEPINTVL socket options take.
+///
+/// The fallback is unreachable for the constants above — 15 seconds is
+/// nowhere near i32 — and returns 0 rather than a made-up interval, so
+/// an out-of-range value leaves the socket on the kernel's default
+/// instead of a number goish invented.
+fn keepalive_secs(d: crate::time::Duration) -> i32 {
+    return i32::try_from(d.0 / 1_000_000_000).unwrap_or(0);
+}
+
 fn set_tcp_conn_defaults(fd: i32) {
     let one: i32 = 1;
     let _ = syscall::Setsockopt(
@@ -1205,7 +1176,7 @@ fn set_tcp_conn_defaults(fd: i32) {
         &one as *const i32 as *const u8,
         core::mem::size_of::<i32>() as u32,
     );
-    let idle_secs: i32 = 15;
+    let idle_secs: i32 = keepalive_secs(dial::defaultTCPKeepAliveIdle);
     let _ = syscall::Setsockopt(
         fd,
         syscall::IPPROTO_TCP,
@@ -1213,7 +1184,7 @@ fn set_tcp_conn_defaults(fd: i32) {
         &idle_secs as *const i32 as *const u8,
         core::mem::size_of::<i32>() as u32,
     );
-    let intvl_secs: i32 = 15;
+    let intvl_secs: i32 = keepalive_secs(dial::defaultTCPKeepAliveInterval);
     let _ = syscall::Setsockopt(
         fd,
         syscall::IPPROTO_TCP,
@@ -1221,7 +1192,7 @@ fn set_tcp_conn_defaults(fd: i32) {
         &intvl_secs as *const i32 as *const u8,
         core::mem::size_of::<i32>() as u32,
     );
-    let cnt: i32 = 9;
+    let cnt: i32 = dial::defaultTCPKeepAliveCount;
     let _ = syscall::Setsockopt(
         fd,
         syscall::IPPROTO_TCP,
@@ -1231,9 +1202,12 @@ fn set_tcp_conn_defaults(fd: i32) {
     );
 }
 
-pub fn Dial<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (TCPConn, error) {
-    let network: string = network.into();
-    let addr: string = addr.into();
+// go: none — goish-only: Go threads the deadline through sysDialer as
+// a time.Time on the context; goish's dial has no context, so the
+// deadline rides as the absolute monotonic nanosecond value
+// `netpoll::set_deadline` takes directly (0 = none).
+/// The body shared by `Dial` and `DialTimeout`.
+fn dial_deadline(network: string, addr: string, deadline_ns: i64) -> (TCPConn, error) {
     if !is_tcp_network(&network) {
         return (
             TCPConn::dead(),
@@ -1290,13 +1264,25 @@ pub fn Dial<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (TCPConn, 
                 return (TCPConn::dead(), errno_error("connect/poll_open", 0));
             }
         };
-        // Connect has no deadline in this Dial path (v1); a future
-        // DialTimeout would `set_deadline(pd, …, b'w')` before this
-        // call and translate Timedout into a connect-timeout error.
+        // The connect deadline, if DialTimeout set one. It is armed on
+        // the WRITE side because that is what a finishing connect(2)
+        // makes ready.
+        if deadline_ns != 0 {
+            netpoll::set_deadline(&arc, deadline_ns, b'w');
+        }
         if let BlockResult::Timedout = netpoll::block(&arc, b'w') {
             netpoll::close(arc);
             let _ = syscall::Close(fd);
-            return (TCPConn::dead(), timeout_error("connect"));
+            return (
+                TCPConn::dead(),
+                dial_timeout_error(&network, TCPAddr::from_sockaddr_in(&parsed)),
+            );
+        }
+        // Clear it before the conn is handed back: the PollDesc
+        // outlives the dial, and a leftover write deadline would time
+        // out the caller's first Write.
+        if deadline_ns != 0 {
+            netpoll::set_deadline(&arc, 0, b'w');
         }
         // SO_ERROR carries the asynchronous connect result. Zero
         // means success; anything else is the errno from the failed
@@ -1418,6 +1404,27 @@ fn deadline_from_time(t: crate::time::Time) -> i64 {
         return -1;
     }
     crate::runtime::sysmon::monotonic_ns().wrapping_add(ns as i64)
+}
+
+// go: none — goish-only: the timeout twin of `op_error`. Go reaches
+// the same value through `internal/poll`, whose `ErrDeadlineExceeded`
+// the dial path wraps in the very same OpError it uses for a failed
+// connect.
+/// The error a connect that ran out of time produces, in Go's shape:
+/// `dial tcp 192.0.2.1:80: i/o timeout`.
+///
+/// The Op is "dial", not "connect" — Go names the OPERATION the caller
+/// asked for, and reserves the syscall name for the `os.SyscallError`
+/// it wraps, which a timeout has none of. `timeout_error("connect")`
+/// was the old value here: no Net, no Addr, and the wrong Op.
+fn dial_timeout_error(network: &string, addr: TCPAddr) -> error {
+    return errors::Wrap(net::OpError {
+        Op: string::from_static("dial"),
+        Net: network.clone(),
+        Source: None,
+        Addr: Some(alloc::sync::Arc::new(addr)),
+        Err: net::errTimeout(),
+    });
 }
 
 // go: none — goish-only: Go builds `&OpError{Op, Net, Addr, Err:

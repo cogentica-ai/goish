@@ -83,7 +83,11 @@ fn run() -> ! {
     // it, which is what "callable" was standing in for.
     {
         let (ln, lerr) = net::Listen(string("tcp"), string("127.0.0.1:0"));
-        check("defaultTransportDialContext: listen", lerr.IsNil(), why(&lerr));
+        check(
+            "defaultTransportDialContext: listen",
+            lerr.IsNil(),
+            why(&lerr),
+        );
         let addr = ln.Addr().String();
         let f = http::transport_default_other::defaultTransportDialContext(net::Dialer::default());
         let (conn, derr) = f(None, string("tcp"), addr.clone());

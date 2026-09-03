@@ -99,7 +99,11 @@ fn chk(
         Some(o) => (o.Op.clone(), o.Net.clone()),
         None => (string(""), string("")),
     };
-    let msg = if e.IsNil() { string("<nil>") } else { e.Error() };
+    let msg = if e.IsNil() {
+        string("<nil>")
+    } else {
+        e.Error()
+    };
     let ms: &str = msg.as_ref();
     let l: &str = local.as_ref();
     let r: &str = remote.as_ref();

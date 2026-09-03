@@ -99,7 +99,10 @@ fn run() {
     } else {
         let (b, _rerr) = io::ReadAll(&mut resp.Body);
         let _ = io::Closer::Close(&mut resp.Body);
-        chk(fmt::Sprintf!("body           %q", string::from_bytes(&b.to_vec())));
+        chk(fmt::Sprintf!(
+            "body           %q",
+            string::from_bytes(&b.to_vec())
+        ));
         chk(fmt::Sprintf!("status         %d", resp.StatusCode as i64));
     }
     {
