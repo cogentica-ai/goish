@@ -3034,3 +3034,15 @@ path = "examples/cookie_ref_smoke.rs"
 [[example]]
 name = "handlers_ref_smoke"
 path = "examples/handlers_ref_smoke.rs"
+
+[[example]]
+name = "io_ref_smoke"
+path = "examples/io_ref_smoke.rs"
+
+[[example]]
+name = "path_ref_smoke"
+path = "examples/path_ref_smoke.rs"
+
+[[example]]
+name = "tar_ref_smoke"
+path = "examples/tar_ref_smoke.rs"
