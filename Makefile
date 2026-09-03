@@ -81,7 +81,7 @@ e2e-clean:
 
 # The lint backlog is grandfathered by scripts/lint_baseline.json; these
 # targets let it shrink and never grow. See scripts/port_lint.py.
-lint: anchors
+lint: anchors ifaces
 	@python3 scripts/port_lint.py --check --scope $(SCOPE)
 
 # goishlint resolves an anchored symbol by name and never looks at the
@@ -90,6 +90,15 @@ lint: anchors
 # was first measured. Cheap to check, so check it every time.
 anchors:
 	@python3 scripts/anchor_check.py $(SCOPE)
+
+# Go satisfies an interface structurally; goish needs impl + hook +
+# registry entry, and two of the three looks finished while the
+# assertion silently misses. That has cost real defects here — CGI and
+# HTTPS handlers whose writer could not flush, a ResponseController
+# where every method answered "not supported". Reports rather than
+# fails: some zero-implementor interfaces are extension points.
+ifaces:
+	@python3 scripts/iface_check.py
 
 lint-new:
 	@python3 scripts/port_lint.py --new --scope $(SCOPE)
