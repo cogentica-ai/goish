@@ -3022,3 +3022,7 @@ path = "examples/pipeline_body_ref_smoke.rs"
 [[example]]
 name = "request_framing_ref_smoke"
 path = "examples/request_framing_ref_smoke.rs"
+
+[[example]]
+name = "client_wire_ref_smoke"
+path = "examples/client_wire_ref_smoke.rs"

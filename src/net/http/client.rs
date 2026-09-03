@@ -1225,6 +1225,33 @@ impl RoundTripper for Transport {
             if added_gzip && !rt_req.Header.has(string("Accept-Encoding")) {
                 rt_req.Header.Set(string("Accept-Encoding"), string("gzip"));
             }
+            // Go (persistConn.roundTrip, transport.go:2791-2795):
+            //
+            //   if pc.t.DisableKeepAlives && !req.wantsClose() &&
+            //       !isProtocolSwitchHeader(req.Header) {
+            //       req.extraHeaders().Set("Connection", "close")
+            //   }
+            //
+            // goish read DisableKeepAlives only to decide whether to
+            // bank the connection afterwards, and never told the SERVER
+            // anything. So the client hung up while the server kept the
+            // connection open waiting for another request, until its
+            // idle timeout expired — one stranded server-side
+            // connection per request, exactly the cost
+            // DisableKeepAlives is set to avoid.
+            //
+            // The two exclusions are not decoration. A caller that
+            // already asked to close does not need it said twice, and
+            // an upgrade request (WebSocket) must NOT carry
+            // `Connection: close` — its Connection header is what
+            // carries the `Upgrade` token, and overwriting it would
+            // turn a protocol switch into a plain closing request.
+            if self.DisableKeepAlives
+                && !rt_req.wantsClose()
+                && !super::response::isProtocolSwitchHeader(&rt_req.Header)
+            {
+                rt_req.Header.Set(string("Connection"), string("close"));
+            }
             // Go (roundTrip): treq := &transportRequest{Request: req, …}
             // — the error cell mapRoundTripError consults, rebuilt per
             // rewind like Go rebuilds it per retry loop turn.
