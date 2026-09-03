@@ -47,7 +47,7 @@ use goish::net::net as gnet;
 use goish::string;
 
 // Go's verbatim output.
-const GO: [&str; 9] = [
+const GO: [&str; 10] = [
     "eof                true",
     "nil-like           false",
     "deadline           true",
@@ -57,6 +57,14 @@ const GO: [&str; 9] = [
     "oper-read-timeout  true",
     "text-read-prefix   false",
     "text-io-timeout    false",
+    // The case hand-built errors cannot stand in for: a REAL socket
+    // read deadline, with the error built by `net` the way production
+    // builds it. Its absence is exactly why the typed rewrite in
+    // 0773a9d measured 9/9 against Go while breaking idle-close on
+    // every live connection — every typed input above happens to be a
+    // type that IS registered, and goish's own deadline error was an
+    // untyped string until f5f523c.
+    "real-read-timeout  true",
 ];
 
 static FAILED: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
@@ -96,6 +104,15 @@ fn oper(op: &str, inner: goish::error) -> goish::error {
 
 #[goish::main]
 fn main() {
+    goish::go!(stack(1024 * 1024), move || {
+        run();
+    });
+    loop {
+        goish::runtime::sched::Gosched();
+    }
+}
+
+fn run() {
     let cases: [(&str, goish::error); 9] = [
         ("eof", goish::io::EOF.into()),
         ("nil-like", errors::New(string("boom"))),
@@ -122,6 +139,46 @@ fn main() {
             goish::string::from_bytes(name.as_bytes()),
             http::server::isCommonNetReadError(e.clone())
         ));
+    }
+
+    // A real socket read deadline: the error comes from `net`, not
+    // from this file, which is the whole point of the case.
+    let (ln, le) = goish::net::Listen(string("tcp"), string("127.0.0.1:0"));
+    if !le.IsNil() {
+        chk(fmt::Sprintf!(
+            "%-18s listen error %v",
+            string("real-read-timeout"),
+            le
+        ));
+    } else {
+        let port = ln.Addr().Port;
+        goish::go!(stack(256 * 1024), move || {
+            let (mut c, e) = ln.Accept();
+            if e.IsNil() {
+                goish::time::Sleep(goish::time::Duration(300_000_000));
+                let _ = goish::io::Closer::Close(&mut c);
+            }
+        });
+        goish::time::Sleep(goish::time::Duration(80_000_000));
+        let addr = fmt::Sprintf!("127.0.0.1:%d", port as i64);
+        let (mut c, de) = goish::net::Dial(string("tcp"), addr);
+        if !de.IsNil() {
+            chk(fmt::Sprintf!(
+                "%-18s dial error %v",
+                string("real-read-timeout"),
+                de
+            ));
+        } else {
+            let _ = c.SetReadDeadline(goish::time::Now().Add(goish::time::Duration(100_000_000)));
+            let mut buf = goish::make!([]goish::byte, 16);
+            let (_n, rerr) = goish::io::Reader::Read(&mut c, &mut buf);
+            chk(fmt::Sprintf!(
+                "%-18s %v",
+                string("real-read-timeout"),
+                http::server::isCommonNetReadError(rerr)
+            ));
+            let _ = goish::io::Closer::Close(&mut c);
+        }
     }
 
     use core::sync::atomic::Ordering;

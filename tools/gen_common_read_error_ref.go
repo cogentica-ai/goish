@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"time"
 	"testing"
 )
 
@@ -28,4 +29,32 @@ func TestGoishRef(t *testing.T) {
 	for _, c := range cases {
 		fmt.Printf("%-18s %v\n", c.name, isCommonNetReadError(c.err))
 	}
+
+	// The case that matters most, and the one hand-built errors cannot
+	// stand in for: a REAL socket read deadline, with the error built
+	// by the net package the way production builds it.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c, e := ln.Accept()
+		if e == nil {
+			time.Sleep(300 * time.Millisecond)
+			c.Close()
+		}
+	}()
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	buf := make([]byte, 16)
+	_, rerr := c.Read(buf)
+	fmt.Printf("%-18s %v\n", "real-read-timeout", isCommonNetReadError(rerr))
+	<-done
 }
