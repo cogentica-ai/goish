@@ -2966,3 +2966,7 @@ path = "examples/fcgi_ref_smoke.rs"
 [[example]]
 name = "container_ref_smoke"
 path = "examples/container_ref_smoke.rs"
+
+[[example]]
+name = "maps_ref_smoke"
+path = "examples/maps_ref_smoke.rs"
