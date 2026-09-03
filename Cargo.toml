@@ -2950,3 +2950,7 @@ path = "examples/expvar_ref_smoke.rs"
 [[example]]
 name = "ascii85_ref_smoke"
 path = "examples/ascii85_ref_smoke.rs"
+
+[[example]]
+name = "checksum_ref_smoke"
+path = "examples/checksum_ref_smoke.rs"
