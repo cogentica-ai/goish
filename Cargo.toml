@@ -2942,3 +2942,7 @@ path = "examples/hkdf_ref_smoke.rs"
 [[example]]
 name = "structtag_ref_smoke"
 path = "examples/structtag_ref_smoke.rs"
+
+[[example]]
+name = "expvar_ref_smoke"
+path = "examples/expvar_ref_smoke.rs"
