@@ -3082,3 +3082,11 @@ path = "examples/dirlist_ref_smoke.rs"
 [[example]]
 name = "timer_reset_ref_smoke"
 path = "examples/timer_reset_ref_smoke.rs"
+
+[[example]]
+name = "timeout_iface_ref_smoke"
+path = "examples/timeout_iface_ref_smoke.rs"
+
+[[example]]
+name = "url_error_ref_smoke"
+path = "examples/url_error_ref_smoke.rs"

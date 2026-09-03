@@ -1,5 +1,5 @@
-// go: file net/url/url.go decls: JoinPath, Error.Error, Error.Unwrap, EscapeError.Error, InvalidHostError.Error, escape, unescape, shouldEscape, QueryUnescape, PathUnescape, QueryEscape, PathEscape, User, UserPassword, Userinfo.Username, Userinfo.Password, Userinfo.String, getScheme, Parse, ParseRequestURI, parse, parseAuthority, parseHost, URL.setPath, URL.EscapedPath, validEncoded, URL.setFragment, URL.EscapedFragment, URL.String, validOptionalPort, ParseQuery, parseQuery, resolvePath, URL.IsAbs, URL.Parse, URL.ResolveReference, URL.RequestURI, URL.Hostname, URL.Port, splitHostPort, URL.Redacted, validUserinfo, stringContainsCTLByte, URL.JoinPath, ParseQueryValues, ValuesGet, ValuesSet, ValuesAdd, ValuesDel, ValuesHas, SetPassword, URL.Query, URL.MarshalBinary, URL.AppendBinary, URL.UnmarshalBinary
-// goishlint:ignore GOISH018 Add, Del, Get, Has, Set, Encode, MarshalBinary, UnmarshalBinary, Timeout, Temporary, ishex, unhex, badSetPath, shouldEscape, Encode — Go's `Values` is a NAMED map type carrying methods; goish's is a type alias for `map<string, slice<string>>`, which Rust cannot hang methods on, so the same six are free functions `ValuesAdd`/`ValuesDel`/`ValuesGet`/`ValuesHas`/`ValuesSet`/`ValuesEncode`. `Error`'s net.Error pair is not ported yet; the smoke says so. `ishex`/`unhex` are ported under Rust casing as `is_hex`/`un_hex`, and `badSetPath` is a test-only helper, and `shouldEscape` is `should_escape`. `Encode` is `ValuesEncode`, for the same reason as the other five.
+// go: file net/url/url.go decls: JoinPath, Error.Error, Error.Unwrap, Error.Timeout, Error.Temporary, EscapeError.Error, InvalidHostError.Error, escape, unescape, shouldEscape, QueryUnescape, PathUnescape, QueryEscape, PathEscape, User, UserPassword, Userinfo.Username, Userinfo.Password, Userinfo.String, getScheme, Parse, ParseRequestURI, parse, parseAuthority, parseHost, URL.setPath, URL.EscapedPath, validEncoded, URL.setFragment, URL.EscapedFragment, URL.String, validOptionalPort, ParseQuery, parseQuery, resolvePath, URL.IsAbs, URL.Parse, URL.ResolveReference, URL.RequestURI, URL.Hostname, URL.Port, splitHostPort, URL.Redacted, validUserinfo, stringContainsCTLByte, URL.JoinPath, ParseQueryValues, ValuesGet, ValuesSet, ValuesAdd, ValuesDel, ValuesHas, SetPassword, URL.Query, URL.MarshalBinary, URL.AppendBinary, URL.UnmarshalBinary
+// goishlint:ignore GOISH018 Add, Del, Get, Has, Set, Encode, MarshalBinary, UnmarshalBinary, ishex, unhex, badSetPath, shouldEscape, Encode — Go's `Values` is a NAMED map type carrying methods; goish's is a type alias for `map<string, slice<string>>`, which Rust cannot hang methods on, so the same six are free functions `ValuesAdd`/`ValuesDel`/`ValuesGet`/`ValuesHas`/`ValuesSet`/`ValuesEncode`. `Error`'s net.Error pair (Timeout, Temporary) IS ported now — see the manifest above and examples/url_error_ref_smoke.rs. `ishex`/`unhex` are ported under Rust casing as `is_hex`/`un_hex`, and `badSetPath` is a test-only helper, and `shouldEscape` is `should_escape`. `Encode` is `ValuesEncode`, for the same reason as the other five.
 // goishlint:ignore GOISH021 encoding, encodePath, encodePathSegment, encodeHost, encodeZone, encodeUserPassword, encodeQueryComponent, encodeFragment — Go's `encoding` is an untyped int const set; goish's is the `Encoding` enum below, whose variants carry the same seven names in Rust casing.
 //
 // url.go — the whole package: parsing, escaping, the URL type and
@@ -49,6 +49,38 @@ impl ErrorTrait for Error {
 }
 
 impl Error {
+    // go: sdk 1.25.5 net/url/url.go:37-42 Error.Timeout
+    /// Go: `func (e *Error) Timeout() bool` — probe the wrapped error
+    /// for `interface{ Timeout() bool }` and ask it.
+    ///
+    /// This is how a caller of `http.Client.Do` decides whether a
+    /// failure is worth retrying — a timeout usually is, a refused
+    /// connection usually is not — so its absence was not cosmetic.
+    ///
+    /// Two details, both learned the hard way elsewhere in this tree.
+    /// The probe is `errors::AsIface`, NOT `cast!`: `cast!` on an
+    /// `error` downcasts the HANDLE rather than what it wraps, so it
+    /// can never hit (net.rs:253 records that exact bug). And the
+    /// interface is `net::timeout` because Go writes an ANONYMOUS
+    /// interface here — net/url does not import net — while goish
+    /// needs a named trait, and the named one already exists there.
+    /// Single crate, so the reference costs nothing but the layering
+    /// note.
+    pub fn Timeout(&self) -> bool {
+        let (t, ok) = crate::errors::AsIface::<crate::d!(crate::net::net::timeout)>(&self.Err);
+        return ok && t.Timeout();
+    }
+
+    // go: sdk 1.25.5 net/url/url.go:44-49 Error.Temporary
+    /// Go: `func (e *Error) Temporary() bool` — as `Timeout`, for
+    /// `interface{ Temporary() bool }`. Go marks the concept
+    /// deprecated ("Temporary errors are not well-defined") but still
+    /// implements it, and code in the wild still branches on it.
+    pub fn Temporary(&self) -> bool {
+        let (t, ok) = crate::errors::AsIface::<crate::d!(crate::net::net::temporary)>(&self.Err);
+        return ok && t.Temporary();
+    }
+
     // go: none — goish idiom: a helper with no Go counterpart; see the surrounding port.
     pub fn new<O: Into<string>, U: Into<string>>(op: O, url: U, err: error) -> error {
         return errors::Wrap(Error {
