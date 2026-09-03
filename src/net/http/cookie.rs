@@ -299,7 +299,17 @@ pub fn ParseSetCookie<L: Into<string>>(line: L) -> (Cookie, error) {
             if let Some(t) = parse_imf_fixdate(&vv).or_else(|| parse_legacy_cookie_date(&vv)) {
                 c.Expires = t;
             } else {
+                // Go zeroes Expires and then `break`s out of the
+                // switch, which falls into the append that every
+                // UNRECOGNISED attribute takes (cookie.go:204-205 —
+                // the successful path `continue`s past it instead).
+                // So an Expires that neither layout parses is reported
+                // in Unparsed, and a caller checking that slice can
+                // tell "no Expires was sent" from "one was sent and I
+                // could not read it". goish dropped it silently, which
+                // reads to such a caller as a cookie with no expiry.
                 c.Expires = time::Time::default();
+                unparsed.push(part);
             }
         } else if strings::EqualFold(attr.clone(), string("path")) {
             c.Path = vv;

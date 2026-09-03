@@ -3026,3 +3026,7 @@ path = "examples/request_framing_ref_smoke.rs"
 [[example]]
 name = "client_wire_ref_smoke"
 path = "examples/client_wire_ref_smoke.rs"
+
+[[example]]
+name = "cookie_ref_smoke"
+path = "examples/cookie_ref_smoke.rs"
