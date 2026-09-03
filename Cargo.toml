@@ -3002,3 +3002,7 @@ path = "examples/range_ref_smoke.rs"
 [[example]]
 name = "iface_wiring_smoke"
 path = "examples/iface_wiring_smoke.rs"
+
+[[example]]
+name = "https_iface_ref_smoke"
+path = "examples/https_iface_ref_smoke.rs"

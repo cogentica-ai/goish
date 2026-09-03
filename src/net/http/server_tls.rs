@@ -50,6 +50,7 @@ use crate::types::{byte, int};
 
 use super::header::Header;
 use super::request::{ReadRequestWithLimit, Request};
+use super::responsewriter::{__goish_register_Flusher_impl, __goish_register_ResponseWriter_impl};
 use super::responsewriter::{build_head, push_hex};
 use super::responsewriter::{Flusher, HeaderHandle, ResponseWriter};
 use super::server::request_keep_alive_pub;
@@ -269,6 +270,18 @@ impl Flusher for tlsResponse {
     fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
         Some(self)
     }
+}
+
+// go: none — goish-only: Go's `w.(http.Flusher)` is structural, so a
+// type with a Flush method needs no registration and there is nothing
+// to forget. goish resolves the same assertion through a runtime
+// registry, so the impl above is invisible to `cast!` until the
+// concrete type is registered for the trait. Without this call an
+// HTTPS handler's `w.(http.Flusher)` misses and every streaming
+// response over TLS silently buffers to completion.
+pub(super) fn register_server_tls_impls() {
+    __goish_register_ResponseWriter_impl::<tlsResponse>();
+    __goish_register_Flusher_impl::<tlsResponse>();
 }
 
 // ─── serve loop ─────────────────────────────────────────────────────

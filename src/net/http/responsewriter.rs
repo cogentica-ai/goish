@@ -40,17 +40,32 @@
 // — backed by the per-trait downcast registry the interface macro
 // emits (see `goish::any`).
 //
-// v1 capability matrix for `response`:
+// Capability matrix for `response` (the PLAINTEXT writer), as
+// measured against Go by examples/https_iface_ref_smoke.rs:
 //   * ResponseWriter — yes.
 //   * Flusher        — yes (chunked streaming, see `promote_chunked`).
-//   * Hijacker       — no. The buffered v1 writer owns its socket for
-//                      its whole lifecycle; raw-socket handoff is
-//                      deferred. `w.(Hijacker)` therefore yields
-//                      `ok == false`.
+//   * Hijacker       — yes (`response::Hijack`), with the slimmed
+//                      return described on the trait below.
+//   * CloseNotifier  — yes (`response::CloseNotify`), driven by the
+//                      netpoll disconnect watcher.
 //   * Pusher         — no. Server push is HTTP/2-only; Go's HTTP/1
 //                      `*response` doesn't implement Pusher either,
 //                      so `w.(Pusher)` yielding `ok == false` is
 //                      Go-faithful.
+//
+// HTTPS does NOT use this writer. goish's serve loop is specialised
+// on net::TCPConn, so `Server.ServeTLS` runs a second loop with a
+// second writer, `server_tls::tlsResponse`, whose matrix is narrower
+// (Flusher only). Go has one writer for both and cannot drift this
+// way; goish can, so both are pinned side by side in that smoke.
+//
+// A concrete writer needs THREE things for `w.(Iface)` to hit: the
+// trait impl, the `__goish_as_dyn_any` hook, and registration in the
+// runtime registry. Go's assertion is structural and has none of
+// these. Two writers have already shipped with the impl and hook but
+// no registration (net/http/cgi's response, and tlsResponse), each
+// silently disabling flushing for every handler on that transport.
+// If you add a writer, register it and add a line to that smoke.
 //
 // Buffered v1 (unchanged from the pre-interface design): handler
 // `Write` calls accumulate into an internal body buffer; `flush`
@@ -160,11 +175,17 @@ pub trait Flusher {
 /// `http.Hijacker` (server.go:150) — implemented by ResponseWriters
 /// that allow an HTTP handler to take over the connection.
 ///
-/// v1 slim: Go's `Hijack() (net.Conn, *bufio.ReadWriter, error)`
-/// drops the buffered-ReadWriter slot (the v1 `response` has no
-/// pending buffered read state to hand off). The v1 `response` does
-/// not implement this trait — see the capability matrix at the top
-/// of this file.
+/// v1 slim, in two ways. Go returns `(net.Conn, *bufio.ReadWriter,
+/// error)`; goish drops the buffered-ReadWriter slot (the v1
+/// `response` has no pending buffered read state to hand off) and
+/// returns a CONCRETE `TCPConn` rather than the `net.Conn` interface.
+///
+/// The concrete return is what keeps `tlsResponse` from implementing
+/// this trait: a hijacked HTTPS connection is a `tls::Conn`, which is
+/// not a `TCPConn`, so the signature cannot express it. Go hijacks
+/// TLS conns fine. Closing that gap means widening this return to an
+/// interface — a breaking change to a public trait, not a wiring fix.
+/// See the KNOWN GAP note in examples/https_iface_ref_smoke.rs.
 #[goish::interface]
 pub trait Hijacker {
     /// `Hijack()` — take over the connection. Returns the raw conn,

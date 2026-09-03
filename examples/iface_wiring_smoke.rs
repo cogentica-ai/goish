@@ -69,12 +69,7 @@ fn want(what: &str, got: bool, expect: bool) {
     if got == expect {
         return;
     }
-    fmt::Printf!(
-        "[!!] %s: cast %v, expected %v\n",
-        s(what),
-        got,
-        expect
-    );
+    fmt::Printf!("[!!] %s: cast %v, expected %v\n", s(what), got, expect);
     *FAILED.Lock() += 1;
 }
 
@@ -122,7 +117,11 @@ fn main() {
         let rec = httptest::NewRecorder();
         let w: &(dyn ResponseWriter + Send + Sync + 'static) = &rec;
         want("recorder is Flusher", goish::cast!(w, Flusher).1, true);
-        want("recorder is not Hijacker", goish::cast!(w, Hijacker).1, false);
+        want(
+            "recorder is not Hijacker",
+            goish::cast!(w, Hijacker).1,
+            false,
+        );
     }
     // Go: cgi's response has Flush. This is the one that was broken.
     {
@@ -145,7 +144,11 @@ fn main() {
         let f: &(dyn fs::FS + Send + Sync + 'static) = &*m;
         want("MapFS is ReadDirFS", goish::cast!(f, fs::ReadDirFS).1, true);
         want("MapFS is StatFS", goish::cast!(f, fs::StatFS).1, true);
-        want("MapFS is ReadFileFS", goish::cast!(f, fs::ReadFileFS).1, true);
+        want(
+            "MapFS is ReadFileFS",
+            goish::cast!(f, fs::ReadFileFS).1,
+            true,
+        );
     }
     // Go: the FS returned by fs.Sub implements ReadDirFS and ReadFileFS.
     {
@@ -157,7 +160,11 @@ fn main() {
         } else {
             let f: &(dyn fs::FS + Send + Sync + 'static) = &*sub;
             want("subFS is ReadDirFS", goish::cast!(f, fs::ReadDirFS).1, true);
-            want("subFS is ReadFileFS", goish::cast!(f, fs::ReadFileFS).1, true);
+            want(
+                "subFS is ReadFileFS",
+                goish::cast!(f, fs::ReadFileFS).1,
+                true,
+            );
         }
     }
 

@@ -3902,6 +3902,7 @@ pub fn register_http_impls() {
     super::cgi::host::register_cgi_impls();
     super::fcgi::child::register_fcgi_impls();
     super::cgi::child::register_cgi_impls();
+    super::server_tls::register_server_tls_impls();
     super::client::register_client_impls();
 }
 
