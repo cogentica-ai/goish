@@ -169,6 +169,54 @@ impl timeoutError {
     }
 }
 
+// go: none — goish idiom: the interface VIEWS of the anchored
+//     inherent methods above. Without them `errTimeout` carries no
+//     type any assertion can reach, and every caller asking the way
+//     Go's docs say to ask — `err.(net.Error).Timeout()` — gets false
+//     for a genuine timeout.
+impl timeout for timeoutError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above.
+    fn Timeout(&self) -> bool {
+        return timeoutError::Timeout(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl temporary for timeoutError {
+    // go: none — goish idiom: as above.
+    fn Temporary(&self) -> bool {
+        return timeoutError::Temporary(self);
+    }
+    // go: none — goish idiom: as above.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl Error for timeoutError {
+    // go: none — goish idiom: as above.
+    fn Error(&self) -> string {
+        return ErrorTrait::Error(self);
+    }
+    // go: none — goish idiom: as above.
+    fn Timeout(&self) -> bool {
+        return timeoutError::Timeout(self);
+    }
+    // go: none — goish idiom: as above.
+    fn Temporary(&self) -> bool {
+        return timeoutError::Temporary(self);
+    }
+    // go: none — goish idiom: as above.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
 // go: none — goish-only: Go writes `var errTimeout error = &timeoutError{}`
 // and `errCanceled = canceledError{}`. goish's errors are Arc-backed, so
 // the singletons are built here rather than by a composite literal.
@@ -972,6 +1020,9 @@ impl temporary for DNSError {
 //     AGENTS.md §9b. Without these, every `net.Error` assertion in the
 //     tree is a silent miss.
 pub fn register_net_error_impls() {
+    __goish_register_Error_impl::<timeoutError>();
+    __goish_register_timeout_impl::<timeoutError>();
+    __goish_register_temporary_impl::<timeoutError>();
     __goish_register_Error_impl::<OpError>();
     __goish_register_timeout_impl::<OpError>();
     __goish_register_temporary_impl::<OpError>();

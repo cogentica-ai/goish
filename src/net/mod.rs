@@ -1262,13 +1262,26 @@ fn deadline_from_time(t: crate::time::Time) -> i64 {
 /// Build a "i/o timeout" error matching Go's net.OpError +
 /// `Err: errors.New("i/o timeout")` pattern. Returned when a
 /// `SetReadDeadline` / `SetWriteDeadline` fires before the I/O
-/// completes. Callers can still inspect the error; v1 does not yet
-/// expose `IsTimeout()` — the message is the contract.
+/// completes.
+///
+/// The message is unchanged, and it is now TYPED: `net::timeoutError`
+/// answers `Timeout()` and `Temporary()` and satisfies `net.Error`, so
+/// `os.IsTimeout(err)` and `err.(net.Error).Timeout()` — the two ways
+/// Go's own documentation tells a caller to ask — both work. Before,
+/// this was an `errors::New` string and every typed assertion on it
+/// missed.
 fn timeout_error(op: &str) -> error {
-    let mut buf: Vec<u8> = Vec::with_capacity(32);
-    buf.extend_from_slice(op.as_bytes());
-    buf.extend_from_slice(b": i/o timeout");
-    errors::New(string::from_bytes(&buf))
+    // Go: &OpError{Op: op, Err: errTimeout} — the same composition,
+    // so the rendered text is unchanged ("read: i/o timeout") and the
+    // value is now typed all the way down: OpError.Timeout() asks its
+    // inner error, and errTimeout answers.
+    errors::Wrap(net::OpError {
+        Op: string::from_bytes(op.as_bytes()),
+        Net: string::new(),
+        Source: None,
+        Addr: None,
+        Err: net::errTimeout(),
+    })
 }
 
 fn errno_message(errno: i32) -> &'static str {
