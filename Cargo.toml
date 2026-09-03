@@ -2982,3 +2982,7 @@ path = "examples/cmp_ref_smoke.rs"
 [[example]]
 name = "fstest_ref_smoke"
 path = "examples/fstest_ref_smoke.rs"
+
+[[example]]
+name = "rwwrap_ref_smoke"
+path = "examples/rwwrap_ref_smoke.rs"
