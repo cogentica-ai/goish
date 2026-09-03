@@ -1200,7 +1200,30 @@ pub(crate) fn write_elem(
         return;
     }
     fmt_one(v, verb, prec, &mut tmp);
-    let bytes = tmp.__into_vec();
+    let mut bytes = tmp.__into_vec();
+    // Go's `#` flag, and the `O` verb, put their base prefix on EACH
+    // element too: `%O` of []byte("ab") is "[0o141 0o142]", not
+    // "0o[141 142]". The prefix goes after the sign, exactly as the
+    // scalar path below does it.
+    // A bad-verb marker is not a number and takes no prefix: Go's
+    // `%O` over a map[string]int gives `map[%!O(string=a):0o10]`, with
+    // the prefix on the value and not on the key's marker.
+    let is_marker = bytes.len() >= 2 && bytes[0] == b'%' && bytes[1] == b'!';
+    if is_integer_verb(verb) && !is_marker {
+        let sign = if !bytes.is_empty() && (bytes[0] == b'-' || bytes[0] == b'+') {
+            1usize
+        } else {
+            0usize
+        };
+        let pre = alt_prefix(verb, &bytes[sign..]);
+        if !pre.is_empty() {
+            let mut with: Vec<byte> = Vec::with_capacity(bytes.len() + pre.len());
+            with.extend_from_slice(&bytes[..sign]);
+            with.extend_from_slice(pre);
+            with.extend_from_slice(&bytes[sign..]);
+            bytes = with;
+        }
+    }
     pad_runes(f, &bytes, width, left);
 }
 
@@ -1664,7 +1687,9 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
                 // Go's `printValue` carries the width down into a
                 // compound and applies it to each ELEMENT; only a scalar
                 // is padded whole. Ask the operand which it is.
-                let elem_padded = has_width
+                // A compound wants the element treatment when there is
+                // a width to distribute OR a base prefix to repeat.
+                let elem_padded = (has_width || prefixed)
                     && args[arg_idx].try_elem_width(verb, prec_arg, width, left_align, &mut tmp);
                 if !elem_padded {
                     args[arg_idx].write_prec(verb, prec_arg, &mut tmp);

@@ -297,44 +297,37 @@ fn main() {
 
     // 7. The gap that remains, recorded rather than hidden. The '#'
     //    flag's base prefix and a WIDTH are both applied by the format
-    //    scanner over the FINISHED bytes, so over a composite they wrap
-    //    the whole rendering instead of distributing to each element:
+    //    scanner over the FINISHED bytes, so over a composite they used
+    //    to wrap the whole rendering instead of distributing to each
+    //    element:
     //
-    //      Go   `%O` of []byte("ab")  ->  "[0o141 0o142]"
-    //      goish                      ->  "0o[141 142]"
-    //      Go   `%3d` of []int{1,2,30} -> "[  1   2  30]"
-    //      goish                       -> "[1 2 30]"
+    //      Go   `%O` of []byte("ab")   ->  "[0o141 0o142]"
+    //      goish (before)              ->  "0o[141 142]"
+    //      Go   `%3d` of []int{1,2,30} ->  "[  1   2  30]"
+    //      goish (before)              ->  "[1 2 30]"
     //
     //    Both had one root cause: goish's `Format` trait carried the
-    //    verb and the precision but neither the flags nor the width.
-    //    The WIDTH half is fixed — it is threaded into the compound
-    //    renderers now, so `%3d` matches Go and this case asserts Go's
-    //    answer. The FLAG half (`#`, and the `0o`/`0x` prefixes it
-    //    produces) is still applied to the finished bytes, so `%O` over
-    //    a byte slice still wraps the whole rendering; that half is
-    //    asserted as it IS, and the day it lands this fails and points
-    //    here.
+    //    verb and the precision but neither the width nor the flags.
+    //    Both are fixed — the compound renderers take a width and repeat
+    //    the base prefix per element — so these assert Go's answers now.
+    //    A bad-verb marker takes no prefix, which is why the map case
+    //    below reads `%!O(string=a)` and not `0o%!O(string=a)`.
     {
         let mut ok = true;
         eq(
             &mut ok,
-            "%O over []byte (diverges)",
+            "%O over []byte",
             fmt::Sprintf!("%O", goish::bytes("ab")),
-            "0o[141 142]",
+            "[0o141 0o142]",
         );
         let ii: slice<int> = goish::slice!([]int{1, 2, 30});
         eq(
             &mut ok,
-            "%3d over []int (per element, as Go)",
+            "%3d over []int",
             fmt::Sprintf!("%3d", ii),
             "[  1   2  30]",
         );
-        report(
-            &mut failed,
-            ok,
-            " 7",
-            "flags over a composite still diverge; width no longer does",
-        );
+        report(&mut failed, ok, " 7", "width and flags reach each element");
     }
 
     if failed == 0 {
