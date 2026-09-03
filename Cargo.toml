@@ -2958,3 +2958,7 @@ path = "examples/checksum_ref_smoke.rs"
 [[example]]
 name = "mlkem_ref_smoke"
 path = "examples/mlkem_ref_smoke.rs"
+
+[[example]]
+name = "fcgi_ref_smoke"
+path = "examples/fcgi_ref_smoke.rs"
