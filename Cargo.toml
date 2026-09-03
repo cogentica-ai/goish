@@ -2974,3 +2974,7 @@ path = "examples/maps_ref_smoke.rs"
 [[example]]
 name = "crc64_maphash_ref_smoke"
 path = "examples/crc64_maphash_ref_smoke.rs"
+
+[[example]]
+name = "cmp_ref_smoke"
+path = "examples/cmp_ref_smoke.rs"
