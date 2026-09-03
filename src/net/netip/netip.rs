@@ -1650,3 +1650,40 @@ pub fn MustParsePrefix<S: Into<string>>(s: S) -> Prefix {
 //     so the import is kept only where it is used.
 #[allow(unused_imports)]
 use strings as _unused_strings;
+
+// go: none — goish idiom: Go's `fmt` finds `String()` by structural
+// assertion, so `%%v` and `%%s` on a value whose METHOD SET includes it
+// print through it. goish's printer dispatches on `Format`, which a
+// type reaches through `Stringer`, and these did not implement it —
+// so `fmt.Printf("%%v", x)`, entirely ordinary Go, did not compile.
+//
+// Only VALUE-receiver String methods are bridged. Go puts a
+// pointer-receiver String in the POINTER's method set only, so
+// printing the value prints the struct instead; goish has no
+// value/pointer distinction, and implementing Stringer for those types
+// would print where Go does not. net.IPNet, url.URL, url.Userinfo,
+// http.Cookie, mail.Address and regexp.Regexp are left alone for that
+// reason.
+impl crate::fmt::Stringer for Addr {
+    // go: none — goish idiom: see the note above.
+    fn String(&self) -> crate::gostring::string {
+        let v = self;
+        return Addr::String(v);
+    }
+}
+
+impl crate::fmt::Stringer for AddrPort {
+    // go: none — goish idiom: see the note above.
+    fn String(&self) -> crate::gostring::string {
+        let v = self;
+        return AddrPort::String(v);
+    }
+}
+
+impl crate::fmt::Stringer for Prefix {
+    // go: none — goish idiom: see the note above.
+    fn String(&self) -> crate::gostring::string {
+        let v = self;
+        return Prefix::String(v);
+    }
+}
