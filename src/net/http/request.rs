@@ -1124,6 +1124,10 @@ pub(crate) fn __read_request_server<R: io::Reader>(
     enum HeaderLine {
         End,
         Malformed,
+        /// Field name carried a non-token byte — a distinct outcome
+        /// from a line that simply has no colon, because Go answers it
+        /// with its own status text.
+        BadName,
         Field(string, string),
     }
     let mut count = 0;
@@ -1135,6 +1139,7 @@ pub(crate) fn __read_request_server<R: io::Reader>(
             }
             match parse_header_line(line) {
                 Some((n, v)) => HeaderLine::Field(n, v),
+                None if !header_name_is_valid(line) => HeaderLine::BadName,
                 None => HeaderLine::Malformed,
             }
         }) {
@@ -1143,6 +1148,7 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         };
         match item {
             HeaderLine::End => break,
+            HeaderLine::BadName => return (req, ErrInvalidHeaderName.into()),
             HeaderLine::Malformed => {
                 return (req, errors::New(string("net/http: malformed header")))
             }
@@ -1236,7 +1242,12 @@ pub(crate) fn __read_request_server<R: io::Reader>(
     let (kind, terr) =
         super::transfer::readTransfer(super::transfer::TransferMsgMut::Req(&mut req));
     if !terr.IsNil() {
-        return (req, terr);
+        // The unsupported-Transfer-Encoding case has its own status
+        // (501) in the serve loop, so it keeps its own error.
+        if super::transfer::isUnsupportedTEError(terr.clone()) {
+            return (req, terr);
+        }
+        return (req, ErrBadRequestFraming.into());
     }
 
     match kind {
@@ -1399,6 +1410,24 @@ crate::var! {
     /// The serve loop maps it to `417 Expectation Failed` + close
     /// (Go `sendExpectationFailed`, server.go:2103).
     pub(crate) ErrUnsupportedExpect: error = "net/http: unsupported Expect header";
+
+    /// Sentinel returned when a header field name contains a byte that
+    /// is not a token character. The serve loop maps it to Go's
+    /// `400 Bad Request: invalid header name` (net/textproto
+    /// readMIMEHeader, rendered by conn.serve's statusError arm).
+    pub(crate) ErrInvalidHeaderName: error = "net/http: invalid header name";
+
+    /// Sentinel for a request whose FRAMING is unusable — a
+    /// Content-Length that is negative, non-decimal, or disagrees with
+    /// a duplicate. The serve loop maps it to a plain `400 Bad
+    /// Request`, which is what Go answers; goish used to close the
+    /// connection with no response at all, so a client saw a reset
+    /// where Go tells it what was wrong.
+    ///
+    /// The detail is deliberately dropped here rather than echoed:
+    /// statusError's contract is "plain text WITHOUT user info", and
+    /// these errors quote the offending header value.
+    pub(crate) ErrBadRequestFraming: error = "net/http: bad request framing";
 }
 
 /// Blast the `100 Continue` interim response onto the raw conn fd.
@@ -1516,6 +1545,28 @@ fn parse_request_line(bytes: &[u8]) -> Option<(string, string, string)> {
     ))
 }
 
+// go: none — goish-only: the field-name half of Go's readMIMEHeader validation (net/textproto/reader.go), split out so the caller can tell an invalid NAME from a line with no colon.
+/// Whether the field name of `bytes` (everything before the first
+/// colon) is a valid token. Split out so the caller can tell an
+/// invalid NAME from a line with no colon at all — Go answers the two
+/// with different status text.
+fn header_name_is_valid(bytes: &[u8]) -> bool {
+    let colon = match bytes.iter().position(|&b| b == b':') {
+        Some(i) => i,
+        None => return true,
+    };
+    let name = &bytes[..colon];
+    if name.is_empty() {
+        return true;
+    }
+    for b in name.iter() {
+        if !crate::net::textproto::validHeaderFieldByte(*b) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /// `parseHeaderLine` — split "Name: value" on the first colon and
 /// trim optional whitespace around `value`. Byte-view in; the name
 /// comes back ALREADY canonicalized (interned for the common header
@@ -1525,6 +1576,27 @@ fn parse_header_line(bytes: &[u8]) -> Option<(string, string)> {
     let name = &bytes[..colon];
     if name.is_empty() {
         return None;
+    }
+    // Every byte of the field name must be a token character
+    // (net/textproto readMIMEHeader; Go answers 400 "invalid header
+    // name"). The canonicaliser below does not check, so an invalid
+    // name used to canonicalise to something harmless and the header
+    // was SILENTLY IGNORED.
+    //
+    // That is a request-smuggling primitive, not a cosmetic slip.
+    // `Content-Length : 3` is the classic case: a front end that
+    // tolerates the space and reads a Content-Length disagrees with a
+    // back end that ignores the header and reads none, and the two
+    // then disagree about where this request's body ends and the next
+    // request begins — which is the whole trick. The three body bytes
+    // become the start of an attacker-chosen request.
+    //
+    // Rejecting the request outright is what removes the
+    // disagreement: a request that is not served cannot desync.
+    for b in name.iter() {
+        if !crate::net::textproto::validHeaderFieldByte(*b) {
+            return None;
+        }
     }
     let mut start = colon + 1;
     while start < bytes.len() && (bytes[start] == b' ' || bytes[start] == b'\t') {

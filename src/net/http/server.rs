@@ -1907,7 +1907,14 @@ pub(crate) fn http1ServerSupportsRequest(req: &Request) -> bool {
 // body, and there is no Content-Length — `Connection: close` is what
 // delimits it.
 pub(crate) fn __status_error_response(code: int, text: string) -> string {
-    let publicErr = super::status::StatusText(code) + ": " + text;
+    // Go appends the statusError's text only when there IS one
+    // (conn.serve, server.go:2069); a plain badRequestError renders as
+    // "400 Bad Request", not "400 Bad Request: ".
+    let publicErr = if text.Len() == 0 {
+        super::status::StatusText(code)
+    } else {
+        super::status::StatusText(code) + ": " + text
+    };
     return string("HTTP/1.1 ")
         + crate::strconv::Itoa(code)
         + string(" ")
@@ -3430,6 +3437,39 @@ impl Server {
                             code,
                             super::status::StatusText(code),
                             string(ERROR_HEADERS)
+                        )),
+                    );
+                    let _ = conn.Close();
+                    return;
+                }
+                // Unusable request framing (bad or contradictory
+                // Content-Length) → plain 400, as Go answers. Closing
+                // with no response at all, which is what goish did,
+                // leaves the client with a reset and no diagnosis.
+                if errors::Is(err.clone(), super::request::ErrBadRequestFraming) {
+                    let _ = crate::io::Writer::Write(
+                        &mut conn,
+                        crate::convert::bytes(__status_error_response(
+                            super::status::StatusBadRequest,
+                            string(""),
+                        )),
+                    );
+                    let _ = conn.Close();
+                    return;
+                }
+                // Invalid header field name → Go's statusError arm
+                // (conn.serve, server.go:2069) renders
+                // "400 Bad Request: invalid header name". The request
+                // is refused rather than served with the offending
+                // header quietly dropped: a header this server ignores
+                // and a proxy in front of it honours is how two hops
+                // come to disagree about a request's shape.
+                if errors::Is(err.clone(), super::request::ErrInvalidHeaderName) {
+                    let _ = crate::io::Writer::Write(
+                        &mut conn,
+                        crate::convert::bytes(__status_error_response(
+                            super::status::StatusBadRequest,
+                            string("invalid header name"),
                         )),
                     );
                     let _ = conn.Close();

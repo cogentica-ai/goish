@@ -160,7 +160,7 @@ impl tlsResponse {
                 true,
                 g.is_head,
             );
-            let mut buf = build_head(g.status, &h);
+            let mut buf = build_head(g.status, &h, true);
             if !suppress_body {
                 buf.extend_from_slice(&g.body);
             }
@@ -201,7 +201,7 @@ impl tlsResponse {
                 h.Del(string("Content-Length"));
                 h.Set(string("Transfer-Encoding"), string("chunked"));
             }
-            build_head(g.status, &h)
+            build_head(g.status, &h, true)
         };
         let mut c = self.conn.Lock();
         let (_, err) = c.Write(&head);

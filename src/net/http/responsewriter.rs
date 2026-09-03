@@ -789,7 +789,7 @@ impl response {
                 h.Del(string("Content-Length"));
                 h.Set(string("Transfer-Encoding"), string("chunked"));
             }
-            build_head(g.status, &h)
+            build_head(g.status, &h, g.proto11)
         };
         let (_, err) = g.conn.Write(slice::<byte>::__from_vec(head));
         if !err.IsNil() {
@@ -1046,7 +1046,7 @@ impl response {
                 g.proto11,
                 g.is_head,
             );
-            let mut buf = build_head(g.status, &h);
+            let mut buf = build_head(g.status, &h, g.proto11);
             if !suppress_body {
                 buf.reserve(g.body.len());
                 buf.extend_from_slice(&g.body);
@@ -1428,12 +1428,14 @@ pub(crate) fn finalizeHeaders(
 }
 
 // go: none — goish-only: renders status line + sorted headers in one buffer; Go streams the same bytes through chunkWriter.writeHeader.
-pub(crate) fn build_head(status: int, header: &Header) -> Vec<u8> {
+pub(crate) fn build_head(status: int, header: &Header, is11: bool) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::with_capacity(256);
     // Go's writeStatusLine (server.go:1596), ported in server.rs.
-    // `is11` is true because goish's server only speaks HTTP/1.1;
-    // Go passes `w.req.ProtoAtLeast(1, 1)`.
-    buf.extend_from_slice(super::server::writeStatusLine(true, status).as_bytes());
+    // Go passes `w.req.ProtoAtLeast(1, 1)`, and so does goish now:
+    // this used to be hard-coded true, so an HTTP/1.0 request got a
+    // status line claiming HTTP/1.1 — a version the client never
+    // offered and may not speak.
+    buf.extend_from_slice(super::server::writeStatusLine(is11, status).as_bytes());
     // Go's chunkWriter.writeHeader ends with
     // `cw.header.WriteSubset(w, excludeHeader)` — the SAME writer the
     // public Header.Write uses.
