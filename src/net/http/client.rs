@@ -237,6 +237,17 @@ enum FramedBody {
     Piped {
         r: alloc::boxed::Box<dyn crate::io::ReadCloser + Send + Sync>,
     },
+    /// Go's `gzipReader` (transport.go): a body the TRANSPORT asked to
+    /// be gzipped and must therefore un-gzip before the caller sees
+    /// it. `inner` is the original conn-backed body — kept whole, so
+    /// Close still hands the connection back for reuse — and `z` is
+    /// built on the FIRST Read rather than here, because Go's
+    /// gzipReader is lazy: a bad gzip header has to surface from
+    /// Read, not from the call that returned the response.
+    Gzip {
+        inner: Body,
+        z: Option<alloc::boxed::Box<crate::compress::gzip::Reader<Body>>>,
+    },
     /// A 101 Switching Protocols response: the connection itself IS
     /// the body (Go: newReadWriteCloserBody, transport.go:2548).
     /// Reads drain any bytes the peer sent past the head (still in
@@ -315,6 +326,19 @@ fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
         FramedBody::UntilEof { src } => src.Read(p),
         FramedBody::Upgraded { src } => src.Read(p),
         FramedBody::Piped { r } => r.Read(p),
+        FramedBody::Gzip { inner, z } => {
+            if z.is_none() {
+                let (r, e) = crate::compress::gzip::NewReader(inner.clone());
+                if !e.IsNil() {
+                    return (0, e);
+                }
+                *z = Some(alloc::boxed::Box::new(r));
+            }
+            match z.as_mut() {
+                Some(r) => r.Read(p),
+                None => (0, io::EOF.into()),
+            }
+        }
         FramedBody::Closed => (0, errors::New(string("http: read on closed response body"))),
     };
     // A read interrupted by the cancel watcher surfaces as a timeout
@@ -380,6 +404,9 @@ fn close_locked(st: &mut BodyState) -> error {
         | FramedBody::Upgraded { src } => src.close_conn(),
         FramedBody::Chunked { cr } => cr.__bufio_mut().__rd_mut().close_conn(),
         FramedBody::Piped { r } => r.Close(),
+        // Closing the decoder closes the body underneath it, which is
+        // where the reuse bookkeeping lives.
+        FramedBody::Gzip { inner, .. } => inner.__close_shared(),
         _ => errors::nil,
     };
     st.framing = FramedBody::Closed;
@@ -1168,6 +1195,36 @@ impl RoundTripper for Transport {
             // — the retry path below must be able to replay a consumed
             // body via GetBody (rewindBody), never resend it empty.
             let mut rt_req = super::transport::setupRewindBody(req);
+            // Go (transport.roundTrip): ask for gzip on the caller's
+            // behalf, and REMEMBER having asked, so the answer can be
+            // unwrapped before the caller sees it.
+            //
+            //   requestedGzip = !t.DisableCompression &&
+            //       req.Header.Get("Accept-Encoding") == "" &&
+            //       req.Header.Get("Range") == "" && req.Method != "HEAD"
+            //
+            // Every clause earns its place. A caller who set
+            // Accept-Encoding themselves gets the ENCODED bytes and the
+            // Content-Encoding header intact — a proxy depends on that,
+            // since it has to relay what the origin sent rather than a
+            // decoded copy whose headers no longer describe it. A Range
+            // request must not be answered with a gzip stream of the
+            // whole resource. A HEAD has no body to decode.
+            //
+            // The header is only ADDED when the key is absent, while
+            // the flag is set whenever Get returns empty. That is not a
+            // subtlety goish invented: Go puts its "Accept-Encoding:
+            // gzip" in `extraHeaders`, which does not displace an
+            // explicit `Accept-Encoding: ""` the caller set — so the
+            // wire carries the caller's empty value AND the response is
+            // still decoded. Pinned in the smoke as caller-ae="".
+            let added_gzip = !self.DisableCompression
+                && rt_req.Header.Get(string("Accept-Encoding")).Len() == 0
+                && rt_req.Header.Get(string("Range")).Len() == 0
+                && rt_req.Method != "HEAD";
+            if added_gzip && !rt_req.Header.has(string("Accept-Encoding")) {
+                rt_req.Header.Set(string("Accept-Encoding"), string("gzip"));
+            }
             // Go (roundTrip): treq := &transportRequest{Request: req, …}
             // — the error cell mapRoundTripError consults, rebuilt per
             // rewind like Go rebuilds it per retry loop turn.
@@ -1448,11 +1505,57 @@ impl RoundTripper for Transport {
                 } else {
                     None
                 };
+                // Go decides this BEFORE attaching, because `kind` is
+                // moved into the body; the flag is all that is needed.
+                let had_body = !matches!(kind, BodyKind::Empty | BodyKind::Cl(0));
                 attach_stream_body(&mut resp, kind, src, ctx, watch, bank);
+                maybe_gunzip(&mut resp, added_gzip, had_body);
                 return (resp, errors::nil);
             }
         }
     }
+}
+
+// go: none — goish-only. In Go this is four statements inline in
+// `persistConn.readLoop`, whose anchor lives in transport.rs; it is a
+// named function here because the `Body` internals it needs — the
+// framing enum and `from_parts` — are private to this file. The Go
+// text it reproduces:
+//
+//     if addedGzip && ascii.EqualFold(
+//             resp.Header.Get("Content-Encoding"), "gzip") {
+//         resp.Body = &gzipReader{body: body}
+//         resp.Header.Del("Content-Encoding")
+//         resp.Header.Del("Content-Length")
+//         resp.ContentLength = -1
+//         resp.Uncompressed = true
+//     }
+///
+/// The header deletions are not tidiness. A decoded body with a
+/// Content-Length describing the COMPRESSED bytes is a response whose
+/// framing lies about itself, and anything that re-serializes it — a
+/// proxy, a cache, a dump — would write a length that does not match
+/// the body it writes. Removing both is what makes the decoded
+/// response internally consistent, and `Uncompressed` is how a caller
+/// that cared can still tell what happened.
+///
+/// The `had_body` guard matches Go's structure rather than its text:
+/// Go reaches the gzip arm only on the branch that has a body to
+/// stream, so a `Content-Encoding: gzip` with nothing after it is
+/// passed through untouched, header and all. Pinned as `gzip-empty`.
+fn maybe_gunzip(resp: &mut Response, added_gzip: bool, had_body: bool) {
+    if !added_gzip || !had_body {
+        return;
+    }
+    if !strings::EqualFold(resp.Header.Get(string("Content-Encoding")), string("gzip")) {
+        return;
+    }
+    let inner = core::mem::replace(&mut resp.Body, Body::default());
+    resp.Body = Body::from_parts(FramedBody::Gzip { inner, z: None }, None, None);
+    resp.Header.Del(string("Content-Encoding"));
+    resp.Header.Del(string("Content-Length"));
+    resp.ContentLength = -1;
+    resp.Uncompressed = true;
 }
 
 /// Wire a parsed head + owned conn into a streaming `resp.Body`.

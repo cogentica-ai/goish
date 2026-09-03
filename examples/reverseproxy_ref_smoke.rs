@@ -68,14 +68,13 @@
 //   * Path joining across the slash boundaries, and query merging with
 //     the target's own query first.
 //
-// One KNOWN GAP, and it is deliberate: Accept-Encoding is excluded
-// from the header dump on both sides. Go's TRANSPORT adds
-// "Accept-Encoding: gzip" and transparently decodes the result;
-// goish's client does neither, which is self-consistent but different.
-// Excluding it lets the other thirty lines pin the PROXY exactly
-// instead of drowning in one transport-level difference repeated
-// everywhere. That gap belongs to net/http's transport, not to this
-// file, and it is not fixed here.
+// The Accept-Encoding line is worth reading. Go's TRANSPORT asks the
+// backend for gzip on the proxy's behalf and decodes the answer before
+// the proxy relays it, so a reverse proxy in front of a gzipping origin
+// forwards PLAIN bytes with no Content-Encoding. goish did neither when
+// this smoke was first written, and the header was excluded from the
+// comparison as a known gap; the transport now implements it and the
+// header is pinned like everything else.
 
 #![no_std]
 #![no_main]
@@ -97,35 +96,35 @@ use goish::strings;
 use goish::syscall;
 use goish::types::int;
 const GO: [&str; 31] = [
-    "hop/plain                    code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "hop/connection-close         code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\" X-Keep=\"yes\"]",
-    "hop/connection-names         code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\" X-Keep=\"yes\"]",
-    "hop/connection-multi         code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-C=\"3\" X-Forwarded-For=\"192.0.2.9\"]",
-    "hop/connection-empty-item    code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "hop/connection-spaces        code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "hop/all-hop-headers          code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Te=\"trailers\" X-Forwarded-For=\"192.0.2.9\" X-Survives=\"yes\"]",
-    "hop/te-not-trailers          code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\" X-Keep=\"yes\"]",
-    "hop/connection-names-xff     code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "xff/absent                   code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "xff/present                  code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"1.2.3.4, 192.0.2.9\"]",
-    "xff/chain                    code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"1.2.3.4, 5.6.7.8, 192.0.2.9\"]",
-    "xff/multi-header             code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"1.2.3.4, 5.6.7.8, 192.0.2.9\"]",
-    "xff/spoofed-private          code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"127.0.0.1, 192.0.2.9\"]",
-    "xff/client-sets-proto        code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\" X-Forwarded-Host=\"evil.example\" X-Forwarded-Proto=\"https\"]",
-    "xff/connection-names-xff     code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "path/root->root              code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "path/prefix                  code=200 method=GET uri=\"/api/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "path/prefix-slash            code=200 method=GET uri=\"/api/x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "path/prefix+slash-req        code=200 method=GET uri=\"/api//x\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "path/req-root                code=200 method=GET uri=\"/api/\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "path/req-empty               code=200 method=GET uri=\"/api/\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "path/escaped-req             code=200 method=GET uri=\"/api/a%2Fb\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "path/dots-req                code=200 method=GET uri=\"/api/a/../b\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "path/query-req               code=200 method=GET uri=\"/api/x?a=1\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "path/query-both              code=200 method=GET uri=\"/api/x?t=9&a=1\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "path/query-target-only       code=200 method=GET uri=\"/api/x?t=9\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "path/semicolon-query         code=200 method=GET uri=\"/api/x?a=1;b=2\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
-    "path/unicode                 code=200 method=GET uri=\"/api/%E2%98%83\" proto=HTTP/1.1 host=\"front\" hdr=[X-Forwarded-For=\"192.0.2.9\"]",
+    "hop/plain                    code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "hop/connection-close         code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\" X-Keep=\"yes\"]",
+    "hop/connection-names         code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\" X-Keep=\"yes\"]",
+    "hop/connection-multi         code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-C=\"3\" X-Forwarded-For=\"192.0.2.9\"]",
+    "hop/connection-empty-item    code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "hop/connection-spaces        code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "hop/all-hop-headers          code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" Te=\"trailers\" X-Forwarded-For=\"192.0.2.9\" X-Survives=\"yes\"]",
+    "hop/te-not-trailers          code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\" X-Keep=\"yes\"]",
+    "hop/connection-names-xff     code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "xff/absent                   code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "xff/present                  code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"1.2.3.4, 192.0.2.9\"]",
+    "xff/chain                    code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"1.2.3.4, 5.6.7.8, 192.0.2.9\"]",
+    "xff/multi-header             code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"1.2.3.4, 5.6.7.8, 192.0.2.9\"]",
+    "xff/spoofed-private          code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"127.0.0.1, 192.0.2.9\"]",
+    "xff/client-sets-proto        code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\" X-Forwarded-Host=\"evil.example\" X-Forwarded-Proto=\"https\"]",
+    "xff/connection-names-xff     code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "path/root->root              code=200 method=GET uri=\"/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "path/prefix                  code=200 method=GET uri=\"/api/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "path/prefix-slash            code=200 method=GET uri=\"/api/x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "path/prefix+slash-req        code=200 method=GET uri=\"/api//x\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "path/req-root                code=200 method=GET uri=\"/api/\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "path/req-empty               code=200 method=GET uri=\"/api/\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "path/escaped-req             code=200 method=GET uri=\"/api/a%2Fb\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "path/dots-req                code=200 method=GET uri=\"/api/a/../b\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "path/query-req               code=200 method=GET uri=\"/api/x?a=1\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "path/query-both              code=200 method=GET uri=\"/api/x?t=9&a=1\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "path/query-target-only       code=200 method=GET uri=\"/api/x?t=9\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "path/semicolon-query         code=200 method=GET uri=\"/api/x?a=1;b=2\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
+    "path/unicode                 code=200 method=GET uri=\"/api/%E2%98%83\" proto=HTTP/1.1 host=\"front\" hdr=[Accept-Encoding=\"gzip\" X-Forwarded-For=\"192.0.2.9\"]",
     "error/unreachable            code=502 body=\"\"",
     "resp/hop-stripped            code=203 hdr=[Content-Type=\"text/plain; charset=utf-8\" Trailer=\"X-T\" X-Ok=\"fine\"] body=\"body\"",
 ];

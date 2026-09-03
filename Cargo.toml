@@ -2894,3 +2894,7 @@ path = "examples/requesturi_ref_smoke.rs"
 [[example]]
 name = "reverseproxy_ref_smoke"
 path = "examples/reverseproxy_ref_smoke.rs"
+
+[[example]]
+name = "gzip_transport_ref_smoke"
+path = "examples/gzip_transport_ref_smoke.rs"
