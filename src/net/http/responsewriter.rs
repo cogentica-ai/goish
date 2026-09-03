@@ -1,4 +1,4 @@
-// go: file net/http/server.go decls: response.ReadFrom, conn.hijacked, conn.hijackLocked, response.finishRequest, response.shouldReuseConnection, response.CloseNotify, response.closeNotify, response.Hijack, response.sendExpectationFailed, response.requestTooLarge, response.disableWriteContinue, response.closedRequestBodyEarly, response.declareTrailer, response.finalTrailers, response.bodyAllowed, response.Header, response.Write, response.WriteHeader
+// go: file net/http/server.go decls: response.FlushError, response.SetReadDeadline, response.SetWriteDeadline, response.EnableFullDuplex, response.ReadFrom, conn.hijacked, conn.hijackLocked, response.finishRequest, response.shouldReuseConnection, response.CloseNotify, response.closeNotify, response.Hijack, response.sendExpectationFailed, response.requestTooLarge, response.disableWriteContinue, response.closedRequestBodyEarly, response.declareTrailer, response.finalTrailers, response.bodyAllowed, response.Header, response.Write, response.WriteHeader
 // goishlint:ignore GOISH015 — this file is the `response`/ResponseWriter
 // half of server.go, split out for size the same way server_tls.rs holds
 // its ServeTLS third; the decls manifest above carries the traceability
@@ -303,6 +303,13 @@ fn register_response_impls() {
         __goish_register_Flusher_impl::<response>();
         __goish_register___RequestTooLarge_impl::<response>();
         __goish_register_CloseNotifier_impl::<response>();
+        // The ResponseController capabilities. Without these four the
+        // controller's probe misses on the server's own writer and
+        // every method answers ErrNotSupported — which is what it did.
+        super::responsecontroller::__goish_register_FlushErrorer_impl::<response>();
+        super::responsecontroller::__goish_register_ReadDeadliner_impl::<response>();
+        super::responsecontroller::__goish_register_WriteDeadliner_impl::<response>();
+        super::responsecontroller::__goish_register_FullDuplexer_impl::<response>();
         __goish_register_Hijacker_impl::<response>();
     });
     let _ = REGISTER.get();
@@ -1312,6 +1319,78 @@ impl CloseNotifier for response {
     /// `(*response).CloseNotify()` (server.go:2260).
     fn CloseNotify(&self) -> crate::gochan::chan<bool> {
         return response::CloseNotify(self);
+    }
+}
+
+// go: sdk 1.25.5 net/http/server.go:1760-1770 response.FlushError
+/// Go: "FlushError is an internal Flush wrapper which differs from
+/// Flush in that it returns an error." `ResponseController.Flush`
+/// prefers it over `Flusher` precisely so a failed flush can be
+/// reported rather than swallowed.
+impl super::responsecontroller::FlushErrorer for response {
+    // go: none — goish idiom: the interface VIEW of promote_chunked,
+    //     which is the anchored flush machinery.
+    fn FlushError(&self) -> error {
+        return self.promote_chunked();
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: sdk 1.25.5 net/http/server.go:499-501 response.SetReadDeadline
+/// Go sets the deadline on the underlying connection, so a handler can
+/// bound how long it will wait for the rest of a request body.
+impl super::responsecontroller::ReadDeadliner for response {
+    // go: none — goish idiom: the conn is the deadline's owner.
+    fn SetReadDeadline(&self, deadline: crate::time::Time) -> error {
+        let g = self.inner.Lock();
+        return g.conn.SetReadDeadline(deadline);
+    }
+    // go: none — goish idiom: as above.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: sdk 1.25.5 net/http/server.go:503-505 response.SetWriteDeadline
+/// The write half of the same, bounding how long a slow client may
+/// take to accept the response.
+impl super::responsecontroller::WriteDeadliner for response {
+    // go: none — goish idiom: as ReadDeadline.
+    fn SetWriteDeadline(&self, deadline: crate::time::Time) -> error {
+        let g = self.inner.Lock();
+        return g.conn.SetWriteDeadline(deadline);
+    }
+    // go: none — goish idiom: as above.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: sdk 1.25.5 net/http/server.go:507-510 response.EnableFullDuplex
+/// Go: "EnableFullDuplex indicates that the request handler will
+/// interleave reads from Request.Body with writes to the
+/// ResponseWriter." Go must be told, because its default is to consume
+/// the request body before replying.
+///
+/// goish reads the body EAGERLY, before the handler runs, so there is
+/// never an unread body for a write to deadlock against — the
+/// behaviour Go's flag buys is already unconditional here. Answering
+/// nil is therefore honest: the caller asked for full duplex and full
+/// duplex is what it gets. Returning ErrNotSupported would say the
+/// opposite of the truth.
+impl super::responsecontroller::FullDuplexer for response {
+    // go: none — goish idiom: see the note above; the eager body read
+    //     makes this unconditional.
+    fn EnableFullDuplex(&self) -> error {
+        return errors::nil;
+    }
+    // go: none — goish idiom: as above.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
     }
 }
 

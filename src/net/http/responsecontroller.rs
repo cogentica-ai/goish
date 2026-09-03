@@ -19,14 +19,29 @@
 // Go already names — Flusher and Hijacker — are reused from
 // response.rs, not redeclared.
 //
-// goish's own concrete writer implements only Flusher so far. Go's
-// `*response` also has FlushError, SetReadDeadline, SetWriteDeadline
-// and EnableFullDuplex, but all four are declared in server.go, and
-// server.go is not ported yet — putting them here or in response.rs
-// would mix two Go files into one Rust file, which GOISH015 exists to
-// prevent. They arrive with the server.go port. Until then a handler
-// gets ErrNotSupported for them, which is exactly what Go gives for a
-// writer that lacks them.
+// goish's concrete writer implements all five capabilities Go's
+// `*response` does: Flusher, FlushError, SetReadDeadline,
+// SetWriteDeadline and EnableFullDuplex. The four beyond Flusher live
+// in responsewriter.rs, which is the Rust file that ports server.go's
+// `response` decls — so no GOISH015 mixing.
+//
+// This note used to say they could not be written "because server.go
+// is not ported yet". server.go IS ported, and responsewriter.rs was
+// already the file porting its response methods; the stated blocker
+// had not applied for some time. Until they were added, every one of
+// these methods answered ErrNotSupported on the server's own writer —
+// a handler asking for a read deadline was told the writer did not
+// support one.
+//
+// KNOWN GAP, and it is in the CONSTRUCTOR rather than the
+// capabilities. Go's `NewResponseController(w)` takes the interface
+// VALUE a handler is given. goish's takes `Arc<dyn ResponseWriter>`,
+// and a goish handler receives `&dyn ResponseWriter`, which cannot be
+// turned into one — so the controller is reachable from code that
+// already holds an Arc (httputil's reverse proxy does) and not from an
+// ordinary handler. Closing that means changing either the Handler
+// signature or this type's storage, which is a public API decision
+// rather than a fix.
 
 #![allow(non_snake_case)]
 
