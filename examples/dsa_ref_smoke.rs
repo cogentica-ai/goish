@@ -119,31 +119,62 @@ fn newInt(v: i64) -> Int {
     i.SetInt64(v);
     return i;
 }
+
+// One L1024N160 group and a matching key, generated once by
+// dsa::GenerateParameters/GenerateKey. See the note at their use.
+const P_HEX: &str = "c6629fd6765014566da1651bde74d84c50c6b3b07e481bcfd541a92bac25acd800b73fc727839faadf47d615f08d410afb15c013536ae9917204400b6d554aa0a9e5a28a188b2976d6ca048eb0101bccca29c2027b93b1c94e5c72c4aad321d05bed1db871177170d1b3a1672437d80b6951787485b0bab7d757bdd967a30f87";
+const Q_HEX: &str = "e2fc8de3f7a9b4e7a53658c5910694739f7e0291";
+const G_HEX: &str = "6e1c3c6a07c439920961b2514e2a9bccb9ffbfea2696db772961ca1f21a3b305a4b225e93d9ddffeb81be7cafb44f6022b3937df86c8c8616e97d137f800a591e49c79aa314e9f7d8bb68430b851de6d3c60f71ed846e3f127d083f4cff28e0213b652cdd75b76a7406a38ed700b23356fecde7f1386246576c3f6f817b233b4";
+const Y_HEX: &str = "687158a4fc590e27e63304fdc1095e914f4ca5455f7f6355102e8d888cb35ed76e353307159d7acae84809e96b4ed3cfc8151fbdc9443e0bade59113a3e3cd60965e2712173a6030d19f38be7eb1ffec886d0aa9293a134c074f1e88bcb0a789a4ae35eb5c0f308fa01f01f10fa33a1c2cdf3daad5215ea8df88cdc284683c41";
+const X_HEX: &str = "9cae36f41b824df118015b0f9dd813144f4a950b";
+
 #[goish::main]
 fn main() {
     let mut failed: int = 0;
     let mut ln: int = 0;
+    // FIXED parameters, not generated. `GenerateParameters` searches
+    // for primes by trial, so its runtime is a random variable: three
+    // consecutive local runs took 27s, 53s and over 120s, against
+    // e2e's 30s per-example budget. This smoke intermittently timed
+    // out in CI for that reason alone, with nothing wrong in the code
+    // it measures — the flake was introduced with the smoke in
+    // f71c491.
+    //
+    // Nothing here is weakened by fixing them. What is measured is the
+    // VERIFIER — the range rules on r and s, and digest truncation —
+    // and every assertion is about a true/false outcome that does not
+    // depend on which valid group was chosen. The set below is one
+    // L1024N160 group generated once by the same code path, with a
+    // matching key.
     let mut params = dsa::Parameters::default();
-    let e = dsa::GenerateParameters(&mut params, &mut rand::Reader, dsa::L1024N160);
-    if e != goish::nil {
-        chk(
-            &mut failed,
-            &mut ln,
-            fmt::Sprintf!("[!!] params: %q", e.Error()),
-        );
-        return;
-    }
     let mut priv_ = dsa::PrivateKey::default();
-    priv_.PublicKey.Parameters = params.clone();
-    let e = dsa::GenerateKey(&mut priv_, &mut rand::Reader);
-    if e != goish::nil {
-        chk(
-            &mut failed,
-            &mut ln,
-            fmt::Sprintf!("[!!] key: %q", e.Error()),
-        );
-        return;
+    {
+        let mut pi = goish::math::big::Int::default();
+        let mut qi = goish::math::big::Int::default();
+        let mut gi = goish::math::big::Int::default();
+        let mut yi = goish::math::big::Int::default();
+        let mut xi = goish::math::big::Int::default();
+        let (_, okp) = pi.SetString(goish::string::from_bytes(P_HEX.as_bytes()), 16);
+        let (_, okq) = qi.SetString(goish::string::from_bytes(Q_HEX.as_bytes()), 16);
+        let (_, okg) = gi.SetString(goish::string::from_bytes(G_HEX.as_bytes()), 16);
+        let (_, oky) = yi.SetString(goish::string::from_bytes(Y_HEX.as_bytes()), 16);
+        let (_, okx) = xi.SetString(goish::string::from_bytes(X_HEX.as_bytes()), 16);
+        if !(okp && okq && okg && oky && okx) {
+            chk(
+                &mut failed,
+                &mut ln,
+                goish::string::from_bytes(b"[!!] fixed DSA parameters did not parse".as_ref()),
+            );
+            return;
+        }
+        params.P = pi;
+        params.Q = qi;
+        params.G = gi;
+        priv_.PublicKey.Parameters = params.clone();
+        priv_.PublicKey.Y = yi;
+        priv_.X = xi;
     }
+    {}
     let pub_ = priv_.PublicKey.clone();
     let q = params.Q.clone();
     let gInRange = params.G.Cmp(&one0()) > 0 && params.G.Cmp(&params.P) < 0;
