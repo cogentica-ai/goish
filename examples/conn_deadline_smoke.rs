@@ -2,7 +2,15 @@
 //
 // Spawns one server goroutine that accepts and idles. The main
 // goroutine dials, SetReadDeadlines 100 ms in the future, and tries
-// to Read. Expects "read: i/o timeout" within ~100-1000 ms.
+// to Read. Expects Go's read-timeout error within ~100-1000 ms.
+//
+// The message is Go's full OpError rendering — "read tcp
+// 127.0.0.1:36748->127.0.0.1:39527: i/o timeout" — so the assertion
+// checks the SUFFIX and the operation rather than the whole string:
+// the two addresses carry ephemeral ports that differ every run. This
+// used to assert the exact string "read: i/o timeout", which was
+// goish's message before the conn's addresses were plumbed into the
+// error, and not Go's.
 
 #![no_std]
 #![no_main]
@@ -80,8 +88,10 @@ fn main() {
         if err.IsNil() {
             die(b"Read returned no error on timeout\n");
         }
-        if !(err.Error() == "read: i/o timeout") {
-            die(b"Error message is not 'read: i/o timeout'\n");
+        let msg = err.Error();
+        let m: &str = msg.as_ref();
+        if !(m.starts_with("read tcp ") && m.ends_with(": i/o timeout")) {
+            die(b"Error message is not Go's 'read tcp <local>-><remote>: i/o timeout'\n");
         }
         if elapsed.Nanoseconds() < 50_000_000 || elapsed.Nanoseconds() > 1_000_000_000 {
             die(b"Read returned at the wrong time (50ms..1s window)\n");

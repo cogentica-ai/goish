@@ -567,6 +567,44 @@ impl TCPConn {
     }
 }
 
+// go: none — goish-only: Go's read/write errors are
+// `&OpError{Op, Net, Source: laddr, Addr: raddr, Err: …}`, built where
+// the conn is in scope because only the conn knows its addresses.
+impl TCPConn {
+    // go: none — goish-only: see the note on the impl block.
+    /// The conn's own `*net.OpError` for a failed syscall.
+    ///
+    /// Go renders "read tcp 127.0.0.1:55922->127.0.0.1:37159: i/o
+    /// timeout" — the local address, an arrow, the remote. Without
+    /// Source and Addr the message is just "read: …", which says
+    /// nothing about WHICH connection failed; on a server holding
+    /// hundreds that is the only part worth logging.
+    fn op_err(&self, op: &str, syscall_name: &str, errno: i32) -> error {
+        return errors::Wrap(net::OpError {
+            Op: string::from_bytes(op.as_bytes()),
+            Net: string::from_static("tcp"),
+            Source: Some(alloc::sync::Arc::new(self.local.clone())),
+            Addr: Some(alloc::sync::Arc::new(self.remote.clone())),
+            Err: crate::os::NewSyscallError(
+                string::from_bytes(syscall_name.as_bytes()),
+                errors::Wrap(syscall::Errno(errno as _)),
+            ),
+        });
+    }
+
+    // go: none — goish-only: see the note on the impl block.
+    /// The conn's own timeout error, in the same shape.
+    fn timeout_err(&self, op: &str) -> error {
+        return errors::Wrap(net::OpError {
+            Op: string::from_bytes(op.as_bytes()),
+            Net: string::from_static("tcp"),
+            Source: Some(alloc::sync::Arc::new(self.local.clone())),
+            Addr: Some(alloc::sync::Arc::new(self.remote.clone())),
+            Err: net::errTimeout(),
+        });
+    }
+}
+
 impl io::Reader for TCPConn {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         let len = p.len();
@@ -586,14 +624,14 @@ impl io::Reader for TCPConn {
             if errno == EAGAIN {
                 let pd = self.ensure_pd();
                 if pd.is_null() {
-                    return (0, errno_error("read", errno));
+                    return (0, self.op_err("read", "read", errno));
                 }
                 match netpoll::block(unsafe { &*pd }, b'r') {
                     BlockResult::Ready | BlockResult::Aborted => continue,
-                    BlockResult::Timedout => return (0, timeout_error("read")),
+                    BlockResult::Timedout => return (0, self.timeout_err("read")),
                 }
             }
-            return (0, errno_error("read", errno));
+            return (0, self.op_err("read", "read", errno));
         }
     }
 }
