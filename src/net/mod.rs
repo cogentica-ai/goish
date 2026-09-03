@@ -117,6 +117,53 @@ pub struct Listener {
 unsafe impl Send for Listener {}
 unsafe impl Sync for Listener {}
 
+// go: none — goish-only: Go's accept errors are
+// `&OpError{Op: "accept", Net: "tcp", Addr: laddr, Err: …}`, built
+// where the listener is in scope because only it knows its address.
+impl Listener {
+    // go: none — goish-only: see the note on the impl block.
+    /// The listener's own `*net.OpError` for a failed accept.
+    fn op_err(&self, syscall_name: &str, errno: i32) -> error {
+        return errors::Wrap(net::OpError {
+            Op: string::from_static("accept"),
+            Net: string::from_static("tcp"),
+            Source: None,
+            Addr: Some(alloc::sync::Arc::new(self.addr.clone())),
+            Err: crate::os::NewSyscallError(
+                string::from_bytes(syscall_name.as_bytes()),
+                errors::Wrap(syscall::Errno(errno as _)),
+            ),
+        });
+    }
+
+    // go: none — goish-only: see the note on the impl block.
+    /// The listener's accept-deadline error, in the same shape.
+    fn timeout_err(&self) -> error {
+        return errors::Wrap(net::OpError {
+            Op: string::from_static("accept"),
+            Net: string::from_static("tcp"),
+            Source: None,
+            Addr: Some(alloc::sync::Arc::new(self.addr.clone())),
+            Err: net::errTimeout(),
+        });
+    }
+
+    // go: none — goish-only: see the note on the impl block.
+    /// The listener's `use of closed network connection`, wrapped as
+    /// Go wraps it — an OpError naming the listener, not a bare
+    /// sentinel. `errors::Is(err, net::ErrClosed)` still matches,
+    /// because OpError unwraps to it.
+    fn closed_err(&self) -> error {
+        return errors::Wrap(net::OpError {
+            Op: string::from_static("accept"),
+            Net: string::from_static("tcp"),
+            Source: None,
+            Addr: Some(alloc::sync::Arc::new(self.addr.clone())),
+            Err: ErrClosed.into(),
+        });
+    }
+}
+
 impl Listener {
     /// `(*TCPListener).Accept` — return a new `TCPConn` for the next
     /// connecting peer, parking the calling goroutine on the netpoller
@@ -160,7 +207,7 @@ impl Listener {
             if errno == EAGAIN {
                 let pd = self.ensure_pd();
                 if pd.is_null() {
-                    return (TCPConn::dead(), errno_error("accept", errno), false);
+                    return (TCPConn::dead(), self.op_err("accept", errno), false);
                 }
                 match netpoll::block(unsafe { &*pd }, b'r') {
                     BlockResult::Ready | BlockResult::Aborted => continue,
@@ -170,20 +217,20 @@ impl Listener {
                         // Go: Accept on a closed listener returns
                         // ErrClosed (net.go:747).
                         if self.closed.load(Ordering::Acquire) {
-                            return (TCPConn::dead(), ErrClosed.into(), false);
+                            return (TCPConn::dead(), self.closed_err(), false);
                         }
-                        return (TCPConn::dead(), timeout_error("accept"), false);
+                        return (TCPConn::dead(), self.timeout_err(), false);
                     }
                 }
             }
             if errno == EBADF && self.closed.load(Ordering::Acquire) {
                 // The fd was closed under us mid-loop (Close raced the
                 // retry) — same contract as the parked case.
-                return (TCPConn::dead(), ErrClosed.into(), false);
+                return (TCPConn::dead(), self.closed_err(), false);
             }
             let temporary =
                 errno == EMFILE || errno == ENFILE || errno == ENOBUFS || errno == ENOMEM;
-            return (TCPConn::dead(), errno_error("accept", errno), temporary);
+            return (TCPConn::dead(), self.op_err("accept", errno), temporary);
         }
     }
 
