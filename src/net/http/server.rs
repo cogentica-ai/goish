@@ -271,15 +271,34 @@ impl ServeMux {
         crate::goslice::slice<string>,
     ) {
         let host = stripHostPort(r.Host.clone());
-        let path = cleanPath(r.URL.Path.clone());
+        // Go cleans and matches the ESCAPED path, never the decoded one
+        // (findHandler, server.go:2698-2700). goish used to clean
+        // `r.URL.Path`, which is the decoded form, and that was wrong in
+        // two directions at once.
+        //
+        // Reading down: any request carrying a percent-escape had a
+        // cleaned path that could not equal its escaped path, so the
+        // `path != escapedPath` branch below fired and answered 301 to
+        // the SAME URL — "/v/a%20b/c" redirected to "/v/a%20b/c", an
+        // infinite loop for every escaped path.
+        //
+        // Reading up, and worse: "%2F" decodes to "/", so cleaning the
+        // decoded path treated an encoded slash as a separator.
+        // "/v/%2F/2" became "/v///2" and cleaned to "/v/2" — a request
+        // for a segment whose name is "/" answered with a redirect to a
+        // different resource entirely. An encoded slash is exactly the
+        // character a proxy and an origin must agree not to split on;
+        // splitting on it here is the disagreement.
+        let escapedPath = r.URL.EscapedPath();
+        let path = cleanPath(escapedPath.clone());
         let s = self.state.Lock();
         // Go: if the given path is /tree and its handler is not
         // registered, redirect for /tree/ (findHandler, server.go:2865).
-        if let Some(u) = self.matchOrRedirect(&s, &host, &r.Method, &path, Some(&r.URL)) {
+        if let Some((u, patstr)) = self.matchOrRedirect(&s, &host, &r.Method, &path, Some(&r.URL)) {
             let target = u.String();
             return (
-                RedirectHandler(target.clone(), super::status::StatusMovedPermanently),
-                target,
+                RedirectHandler(target, super::status::StatusMovedPermanently),
+                patstr,
                 None,
                 crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
             );
@@ -299,15 +318,27 @@ impl ServeMux {
         // r.URL.Path saw a different path than the routing decision
         // was made from. That mismatch is the classic shape of a
         // path-based access-control bypass.
-        if path != r.URL.EscapedPath() {
+        if path != escapedPath {
+            // Go reports the pattern the CLEANED path would have hit,
+            // not the redirect target (findHandler, server.go:2712-2717).
+            let (n, _) = s.tree.r#match(&host, &r.Method, &path);
+            let patstr = match n.and_then(|n| n.pattern.as_ref()) {
+                Some(p) => p.str.clone(),
+                None => string::new(),
+            };
+            // Go builds the target from `Path` alone. Leaving `RawPath`
+            // unset is deliberate, not an omission: `URL.String` then
+            // re-escapes the cleaned path, so a surviving "%2F" is
+            // emitted as "%252F". That is Go's answer, quirk included —
+            // and pinning it beats improving on it, since a redirect
+            // target that differs from Go's is a redirect to a
+            // different resource.
             let mut u = super::url::URL::default();
             u.Path = path.clone();
-            u.RawPath = path.clone();
             u.RawQuery = r.URL.RawQuery.clone();
-            let target = u.String();
             return (
-                RedirectHandler(target.clone(), super::status::StatusMovedPermanently),
-                target,
+                RedirectHandler(u.String(), super::status::StatusMovedPermanently),
+                patstr,
                 None,
                 crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
             );
@@ -428,7 +459,7 @@ impl ServeMux {
         method: &string,
         path: &string,
         u: Option<&super::url::URL>,
-    ) -> Option<super::url::URL> {
+    ) -> Option<(super::url::URL, string)> {
         let (n, _matches) = s.tree.r#match(host, method, path);
         // Go: if we have an exact match, or were asked not to try
         // trailing-slash redirection, or the URL already ends in one,
@@ -441,7 +472,16 @@ impl ServeMux {
                 let mut redirect = super::url::URL::default();
                 redirect.Path = cleanPath(uu.Path.clone()) + "/";
                 redirect.RawQuery = uu.RawQuery.clone();
-                return Some(redirect);
+                // Go returns n2 here purely so findHandler can name the
+                // pattern that the trailing slash WOULD have matched
+                // (matchOrRedirect, server.go:2760-2764); goish hands
+                // back the pattern string for the same reason, since
+                // the node itself is borrowed from the locked state.
+                let patstr = match n2.and_then(|n| n.pattern.as_ref()) {
+                    Some(p) => p.str.clone(),
+                    None => string::new(),
+                };
+                return Some((redirect, patstr));
             }
         }
         return None;

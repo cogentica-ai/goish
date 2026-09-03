@@ -2870,3 +2870,7 @@ path = "examples/codecs_ref_smoke.rs"
 [[example]]
 name = "x509_ref_smoke"
 path = "examples/x509_ref_smoke.rs"
+
+[[example]]
+name = "mux_ref_smoke"
+path = "examples/mux_ref_smoke.rs"
