@@ -563,10 +563,29 @@ macro_rules! go {
             $crate::__macro_alloc::Box::new($closure),
         );
     }};
-    // Bare form: default-sized (2 KiB) home stack, AUTO-GROW via
-    // `maybe_grow_step` — pivots lazily to tier-2 (64 KiB) when home
-    // runs low, then to tier-3 (1 MiB) if user calls maybe_grow_step
-    // again from deeper recursion.
+    // Bare form: default-sized (2 KiB) home stack, and NO automatic
+    // growth. This comment used to claim "AUTO-GROW via
+    // `maybe_grow_step`"; the arm below has never done that — it has
+    // called `newproc`/`newproc_at` unchanged since the growth
+    // machinery landed in M28, which added the claim and four
+    // harnesses for it but never wired the macro up.
+    //
+    // The claim was worth removing rather than leaving to be found
+    // later: a reader who believed it would spawn deep recursion in a
+    // bare `go!()` and get the failure `newproc_with_stack` documents
+    // — "the stack you request is the stack you get — overflow
+    // silently corrupts adjacent memory". Silently.
+    //
+    // To get more stack, either size it up front with
+    // `go!(stack(N), …)`, or call `runtime::sched::maybe_grow` /
+    // `maybe_grow_step` at the recursion site. Both work; see
+    // examples/grow_smoke.rs, which is declared and passes.
+    //
+    // The four harnesses for the unimplemented automatic form —
+    // grow_auto, grow_macro, grow_3tier, grow_park — are deliberately
+    // NOT declared in Cargo.toml, so e2e never runs them. They are
+    // specifications for a feature that does not exist yet, and each
+    // now says so in its own header.
     ($closure:expr) => {{
         $crate::runtime::sched::newproc_at(
             file!(),
