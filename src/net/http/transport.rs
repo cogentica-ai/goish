@@ -409,9 +409,10 @@ pub struct connOrError {
 
 // goishlint:ignore GOISH019 wantConn — Go's wantConn carries
 // `ctx context.Context` and `result chan connOrError` alongside the
-// mutex-guarded `done`. The channel is the delivery half, which
-// belongs with getConn/queueForIdleConn and is not ported yet; what
-// lands here is the STATE machine those two coordinate through.
+// mutex-guarded `done`. goish carries all three; this ignore covers
+// the shape difference in the state half only. (This note used to say
+// the result channel "is not ported yet"; it is — see the field
+// below, and getConn/queueForIdleConn, which deliver through it.)
 // go: sdk 1.25.5 net/http/transport.go:1300-1315 wantConn
 /// Go: "A wantConn records state about a wanted connection (that is, a
 /// connection that's not yet delivered)."
@@ -892,12 +893,27 @@ crate::var! {
     // its FIN in flight with already-written POST body bytes from the
     // client." (golang/go#19943)
     pub errServerClosedIdle: error = "http: server closed idle connection";
-    // go: none — goish-only: see the dialConn placeholder.
-    pub errDialNotPorted: error = "http: dialConn not yet ported";
-    // go: none — goish-only: getConn returns this instead of blocking
-    // on a dial that cannot happen yet. Not a Go sentinel; it exists
-    // only while dialConn is unported and disappears with it.
-    pub errNoIdleConn: error = "http: no idle connection available (dial not yet ported)";
+    // go: none — goish-only: `dialConn` covers Go's TCP and TLS arms;
+    // its proxy-CONNECT and ALPN arms are not ported, and this is what
+    // a request needing one gets. The name is historical — dialConn
+    // itself IS ported — but the sentinel is matched on by name in a
+    // couple of places, so the TEXT is what was corrected: it used to
+    // read "http: dialConn not yet ported", which sent anyone hitting
+    // a proxy looking for a function that has been there all along.
+    pub errDialNotPorted: error =
+        "http: proxy-CONNECT and ALPN dialing are not supported";
+    // go: none — goish-only: getConn returns this when a delivery it
+    // was already promised does not arrive — `w.result` closed on the
+    // idle-HIT path, where queueForIdleConn has reported a hit and the
+    // buffered send should therefore be waiting. It is an internal
+    // invariant failure, not a missing feature.
+    //
+    // Its text used to end "(dial not yet ported)", and its comment
+    // used to say it "exists only while dialConn is unported". Both
+    // outlived the staging they described: the MISS path now queues a
+    // dial and blocks on it (see getConn), so nothing about this
+    // sentinel has to do with dialing any more.
+    pub errNoIdleConn: error = "http: idle connection promised but not delivered";
     // go: sdk 1.25.5 net/http/transport.go:751 errCannotRewind
     pub errCannotRewind: error = "net/http: cannot rewind body after connection loss";
     // go: sdk 1.25.5 net/http/transport.go:2729 errRequestCanceled
@@ -2066,12 +2082,13 @@ impl Transport {
     /// sends without a receiver parked, and the receive below picks it
     /// up immediately. That is what makes this testable now.
     ///
-    /// Staged: on a MISS this queues the waiter and returns
-    /// `errNoIdleConn` rather than blocking, because
-    /// startDialConnForLocked / dialConn are not ported — a real wait
-    /// would hang forever. Go blocks in a `select` on the result
-    /// channel and the request context. The waiter IS left on the
-    /// queue, so a later putOrCloseIdleConn can still find it.
+    /// On a MISS this queues the dial and BLOCKS on a `select` over
+    /// the result channel and the request context, as Go does. That
+    /// paragraph used to say the opposite — that the miss path
+    /// returned `errNoIdleConn` rather than blocking, because
+    /// startDialConnForLocked and dialConn were not ported. Both are
+    /// ported (queueForDial, startDialConnForLocked, dialConn), the
+    /// code below blocks, and the note simply outlived the staging.
     /// Go's first parameter is `*transportRequest`, a wrapper that
     /// adds extra headers and an error cell around `*Request`. goish
     /// has no wrapper yet, so the Request arrives directly — the arity
