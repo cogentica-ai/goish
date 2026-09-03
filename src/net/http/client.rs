@@ -923,10 +923,33 @@ pub trait RoundTripper: Send + Sync {
 /// don't need a public URL type in the surface.
 pub type ProxyResolver =
     alloc::sync::Arc<dyn Fn(&Request) -> (super::url::URL, error) + Send + Sync>;
-/// Type alias for the dial-context closure. Same opaque shape as
-/// `ProxyResolver` — the real signature would carry `(Context, network,
-/// addr) -> (Conn, error)` but those are inert in v1.
-pub type DialContextFn = alloc::sync::Arc<dyn Fn() + Send + Sync>;
+/// `Transport.DialContext`'s shape (transport.go:110): dial a plain
+/// connection for `(network, addr)`. Go's is
+/// `func(ctx, network, addr) (net.Conn, error)`.
+///
+/// This used to be `Arc<dyn Fn()>` — no arguments, no return — with a
+/// note that the real signature was "inert in v1". A hook of that
+/// shape cannot dial anything even if it is called, and nothing
+/// called it: `Transport.dial` did not exist and the dial site went
+/// straight to `net::Dial`. It is the real signature now, and the
+/// hook is consulted.
+pub type DialContextFn = alloc::sync::Arc<
+    dyn Fn(
+            Option<alloc::sync::Arc<dyn crate::context::Context>>,
+            string,
+            string,
+        ) -> (Option<alloc::boxed::Box<dyn crate::net::Conn>>, error)
+        + Send
+        + Sync,
+>;
+
+/// `Transport.Dial`'s shape (transport.go:100) — the ctx-less
+/// deprecated form, the plain-conn sibling of `DialTLS`.
+pub type DialFn = alloc::sync::Arc<
+    dyn Fn(string, string) -> (Option<alloc::boxed::Box<dyn crate::net::Conn>>, error)
+        + Send
+        + Sync,
+>;
 
 /// `Transport.DialTLSContext`'s shape (transport.go:120): dial AND
 /// handshake, returning a ready encrypted conn. Go's is
@@ -941,11 +964,13 @@ pub type DialTLSContextFn = alloc::sync::Arc<
         + Sync,
 >;
 
-/// `http.Transport` (transport.go:163). v1: dial-per-request, no idle
-/// pool. Field surface mirrors Go's struct so user ports can configure
-/// or read these slots; only `Timeout` actually drives behaviour
+/// `http.Transport` (transport.go:163).
+///
+/// This doc used to say "only `Timeout` actually drives behaviour
 /// today, the rest are inert metadata until the connection-pool layer
-/// lands.
+/// lands". The pool landed, and so did most of the rest: read each
+/// field's own comment, which says LIVE or names what is missing.
+/// Inert slots still exist — they are the ones whose comment says so.
 pub struct Transport {
     /// The idle-connection pool: Go's `idleMu` + `idleConn` +
     /// `idleLRU` + `closeIdle` (transport.go:270-276), which its own
@@ -986,9 +1011,15 @@ pub struct Transport {
     /// timestamp against, and the duration the per-conn idle timer is
     /// armed with when a conn is banked.
     pub IdleConnTimeout: time::Duration,
-    /// Per-dial timeout/keepalive callback. `Option` so the zero value
-    /// is None.
+    /// `Transport.DialContext` (transport.go:110) — Go: "specifies the
+    /// dial function for creating unencrypted TCP connections". LIVE —
+    /// `Transport::dial` consults it before falling back to the zero
+    /// Dialer, so the conn it returns is the one the request rides,
+    /// and its error reaches the caller unchanged.
     pub DialContext: Option<DialContextFn>,
+    /// `Transport.Dial` (transport.go:100) — the ctx-less deprecated
+    /// form; DialContext wins when both are set.
+    pub Dial: Option<DialFn>,
     /// `Transport.DialTLSContext` (transport.go:117) — Go: "specifies
     /// an optional dial function for creating TLS connections for
     /// non-proxied HTTPS requests" — the conn arrives already
@@ -1051,6 +1082,7 @@ impl Default for Transport {
             Proxy: None,
             IdleConnTimeout: time::Duration(0),
             DialContext: None,
+            Dial: None,
             DialTLSContext: None,
             DialTLS: None,
             TLSHandshakeTimeout: time::Duration(0),

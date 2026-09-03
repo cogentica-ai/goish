@@ -3134,3 +3134,7 @@ path = "examples/net_error_shape_ref_smoke.rs"
 [[example]]
 name = "close_error_shape_ref_smoke"
 path = "examples/close_error_shape_ref_smoke.rs"
+
+[[example]]
+name = "dialcontext_ref_smoke"
+path = "examples/dialcontext_ref_smoke.rs"

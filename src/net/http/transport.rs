@@ -1080,7 +1080,7 @@ impl persistConn {
         &self,
         t: &Transport,
         name: crate::gostring::string,
-        plain: crate::net::TCPConn,
+        plain: alloc::boxed::Box<dyn crate::net::Conn>,
     ) -> error {
         let mut cfg = t.TLSClientConfig.clone();
         if cfg.ServerName.Len() == 0 {
@@ -1089,8 +1089,7 @@ impl persistConn {
         if t.TLSHandshakeTimeout.0 > 0 {
             let _ = plain.SetDeadline(crate::time::Now().Add(t.TLSHandshakeTimeout));
         }
-        let boxed: alloc::boxed::Box<dyn crate::net::Conn> = alloc::boxed::Box::new(plain);
-        let mut tls_conn = crate::crypto::tls::Client(boxed, &cfg);
+        let mut tls_conn = crate::crypto::tls::Client(plain, &cfg);
         let herr = tls_conn.Handshake();
         if !herr.IsNil() {
             let _ = tls_conn.Close();
@@ -2032,9 +2031,41 @@ impl Transport {
             )));
             return (Some(pc), errors::nil);
         }
-        // Go: t.dial(ctx, "tcp", cm.addr()) — goish's DialContext
-        // hook is not consulted here yet (nor was it on the inline
-        // path this replaces).
+        // Go: t.dial(ctx, "tcp", cm.addr()). A caller-supplied plain
+        // dialer returns the interface type, so — exactly as with the
+        // custom TLS dialer above — there is no PollDesc to watch and
+        // the conn is banked as Dyn. https still handshakes here: Go's
+        // DialContext dials PLAINTEXT and addTLS runs on top, which is
+        // what separates it from DialTLSContext.
+        if self.hasCustomDialer() {
+            let (conn, derr) = self.dial(ctx.clone(), crate::string("tcp"), key.addr.clone());
+            if !derr.IsNil() {
+                return (None, derr);
+            }
+            let conn = conn.unwrap();
+            let pc = Arc::new(persistConn::__new(key.clone()));
+            if key.scheme == "https" {
+                if let Some(c) = &ctx {
+                    if let Some(dl) = c.Deadline() {
+                        let _ = conn.SetDeadline(dl);
+                    }
+                }
+                let name = super::client::host_without_port(&key.addr);
+                let aerr = pc.addTLS(self, name, conn);
+                if !aerr.IsNil() {
+                    let ctx_err = ctx.map(|c| c.Err()).unwrap_or(errors::nil);
+                    if !ctx_err.IsNil() {
+                        return (None, ctx_err);
+                    }
+                    return (None, aerr);
+                }
+                return (Some(pc), errors::nil);
+            }
+            pc.__put_src(super::client::ConnSrc::Dyn(crate::bufio::NewReader(
+                super::client::DynConn(conn),
+            )));
+            return (Some(pc), errors::nil);
+        }
         let (conn, derr) = crate::net::Dial(crate::string("tcp"), key.addr.clone());
         if !derr.IsNil() {
             return (None, derr);
@@ -2058,7 +2089,7 @@ impl Transport {
             }
             let watch = super::client::arm_cancel_watch(&ctx, conn.__disconnect_watch_parts());
             let name = super::client::host_without_port(&key.addr);
-            let aerr = pc.addTLS(self, name, conn);
+            let aerr = pc.addTLS(self, name, alloc::boxed::Box::new(conn));
             super::client::stop_cancel_watch(watch);
             if !aerr.IsNil() {
                 let ctx_err = ctx.map(|c| c.Err()).unwrap_or(errors::nil);
@@ -2544,11 +2575,71 @@ impl Transport {
     }
 
     // go: sdk 1.25.5 net/http/transport.go:385-387 Transport.hasCustomTLSDialer
-    /// goish's Transport has no DialTLS/DialTLSContext fields yet, so
-    /// this is constant false. Named now so the TLS dial path has a
-    /// hook to fill rather than a condition to invent.
+    /// This doc used to say "goish's Transport has no
+    /// DialTLS/DialTLSContext fields yet, so this is constant false".
+    /// Both fields exist and both are read below.
     pub fn hasCustomTLSDialer(&self) -> bool {
         return self.DialTLS.is_some() || self.DialTLSContext.is_some();
+    }
+
+    // go: none — goish-only: the plain-dial sibling of
+    // hasCustomTLSDialer. Go has no such predicate because `t.dial`
+    // can return `net.Conn` for every arm; goish's default arm hands
+    // back a concrete TCPConn so the disconnect watch can reach its
+    // PollDesc, and dialConn needs to know which shape it is getting
+    // before it dials.
+    /// True when a caller supplied a plain-connection dialer.
+    pub fn hasCustomDialer(&self) -> bool {
+        return self.Dial.is_some() || self.DialContext.is_some();
+    }
+
+    // go: sdk 1.25.5 net/http/transport.go:1276-1292 Transport.dial
+    /// Go: DialContext wins over the deprecated Dial, and a hook
+    /// answering (nil, nil) is a hard error naming the hook rather
+    /// than a nil conn that faults deep in the pool.
+    ///
+    /// The final arm is Go's `zeroDialer.DialContext(ctx, …)`. It is
+    /// reachable only through a direct call to this method: `dialConn`
+    /// tests `hasCustomDialer` first and takes a concrete `TCPConn`
+    /// route when there is no hook, because boxing the conn into
+    /// `dyn Conn` here would hide the `PollDesc` the client-disconnect
+    /// watch needs. Go keeps one path because its `net.Conn` is an
+    /// interface all the way down.
+    pub(crate) fn dial(
+        &self,
+        ctx: Option<Arc<dyn crate::context::Context>>,
+        network: crate::gostring::string,
+        addr: crate::gostring::string,
+    ) -> (Option<alloc::boxed::Box<dyn crate::net::Conn>>, error) {
+        if let Some(f) = &self.DialContext {
+            let (conn, err) = f(ctx, network, addr);
+            if conn.is_none() && err.IsNil() {
+                return (
+                    None,
+                    errors::New(crate::string(
+                        "net/http: Transport.DialContext hook returned (nil, nil)",
+                    )),
+                );
+            }
+            return (conn, err);
+        }
+        if let Some(f) = &self.Dial {
+            let (conn, err) = f(network, addr);
+            if conn.is_none() && err.IsNil() {
+                return (
+                    None,
+                    errors::New(crate::string(
+                        "net/http: Transport.Dial hook returned (nil, nil)",
+                    )),
+                );
+            }
+            return (conn, err);
+        }
+        let (conn, err) = crate::net::Dial(network, addr);
+        if !err.IsNil() {
+            return (None, err);
+        }
+        return (Some(alloc::boxed::Box::new(conn)), errors::nil);
     }
 
     // go: sdk 1.25.5 net/http/transport.go:1471-1481 Transport.customDialTLS

@@ -380,9 +380,6 @@ pub trait Conn: Send + Sync {
     fn SetWriteDeadline(&self, t: crate::time::Time) -> error;
 }
 
-/// TCP `net.TCPConn`. Implements `Conn` plus `io::{Reader, Writer, Closer}`.
-/// The fd is set non-blocking; Read/Write park on the netpoller when
-/// the kernel returns EAGAIN.
 // go: none — goish-only: Go has no such constant. It keeps the same
 // distinction in `poll.fdMutex`, whose `increfAndClose` succeeds
 // once per descriptor (internal/poll/fd_mutex.go); goish's conn
@@ -400,6 +397,9 @@ pub trait Conn: Send + Sync {
 /// sentinels satisfy.
 const FD_CLOSED: i32 = -2;
 
+/// TCP `net.TCPConn`. Implements `Conn` plus `io::{Reader, Writer, Closer}`.
+/// The fd is set non-blocking; Read/Write park on the netpoller when
+/// the kernel returns EAGAIN.
 pub struct TCPConn {
     fd: i32,
     local: TCPAddr,
@@ -430,13 +430,30 @@ pub struct Dialer {
 }
 
 impl Dialer {
-    /// `(*Dialer).DialContext` — Go method that returns the dial
-    /// callback. Goish exposes it as a no-op closure for now (the
-    /// real implementation routes through `net::Dial` with the
-    /// Dialer's timeouts; deferred until the connection-pool layer
-    /// lands).
+    /// `(*Dialer).DialContext` — Go's bound method value, the closure
+    /// `http.Transport.DialContext` defaults to.
+    ///
+    /// This used to return `Arc::new(|| {})`, a closure that took no
+    /// arguments and did nothing, on the note that the real form was
+    /// "deferred until the connection-pool layer lands". It dials now.
+    /// The Dialer's Timeout and KeepAlive are still not threaded
+    /// through — `net::Dial` has no deadline argument to give them to
+    /// — so a Dialer carrying them dials as if they were zero, which
+    /// is the same thing it did before and is recorded here rather
+    /// than pinned in a smoke.
     pub fn DialContext(&self) -> crate::net::http::DialContextFn {
-        alloc::sync::Arc::new(|| {})
+        alloc::sync::Arc::new(
+            |_ctx: Option<alloc::sync::Arc<dyn crate::context::Context>>,
+             network: crate::gostring::string,
+             addr: crate::gostring::string| {
+                let (conn, err) = crate::net::Dial(network, addr);
+                if !err.IsNil() {
+                    return (None, err);
+                }
+                let boxed: alloc::boxed::Box<dyn Conn> = alloc::boxed::Box::new(conn);
+                return (Some(boxed), crate::errors::nil);
+            },
+        )
     }
 }
 
