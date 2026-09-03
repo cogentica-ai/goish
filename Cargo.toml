@@ -3046,3 +3046,11 @@ path = "examples/path_ref_smoke.rs"
 [[example]]
 name = "tar_ref_smoke"
 path = "examples/tar_ref_smoke.rs"
+
+[[example]]
+name = "quoterune_ref_smoke"
+path = "examples/quoterune_ref_smoke.rs"
+
+[[example]]
+name = "time_layouts_ref_smoke"
+path = "examples/time_layouts_ref_smoke.rs"
