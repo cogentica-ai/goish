@@ -36,7 +36,15 @@
 // The fixed cap of 32 cases is more than any realistic Go select
 // (typical is 2–4). Exceeding it triggers a macro-cryptic error.
 //
-// ─── Codegen mirrors examples/select_handcoded.rs ─────────────────
+// ─── What the codegen emits, in three passes ──────────────────────
+//
+// This heading used to read "Codegen mirrors
+// examples/select_handcoded.rs". That file — 426 lines of the
+// hand-written equivalent this macro generates — was deleted in
+// 8737e2f, so the pointer has been sending readers after a file that
+// is not there. The four points below are the description it stood
+// for, and they are self-contained; what exercises the emitted code
+// now is the chan_micro_select_* family.
 //
 //   - Pass-1: random Fisher-Yates poll order via cheaprandn,
 //     each case's `__try_send` / `__try_recv` checked once. On a
