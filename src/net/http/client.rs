@@ -1180,16 +1180,41 @@ impl RoundTripper for Transport {
         // conn after it.
         {
             let dial_addr = ensure_default_port(&host, if is_https { 443 } else { 80 });
-            let cm = super::transport::connectMethod {
-                proxyURL: None,
-                targetScheme: if is_https {
+            // Go (roundTrip): cm, err := t.connectMethodForRequest(treq)
+            //
+            // `proxyURL` used to be hard-coded None here, so
+            // `Transport.Proxy` was resolved by nobody: goish picked
+            // the proxy correctly — ProxyFromEnvironment and its
+            // NO_PROXY matching are pinned in http_proxyenv_smoke —
+            // and then threw the answer away and dialled the target
+            // DIRECTLY, with no error to say so.
+            //
+            // That is the wrong direction to fail in. Where a proxy is
+            // the egress control point, silently going around it is a
+            // bypass, and the caller cannot tell: the request
+            // succeeds. `connectMethodForRequest` is the ported
+            // function that fills this in and was simply not wired to
+            // the request path.
+            //
+            // With the key populated, a proxied request now reaches
+            // dialConn's proxy arm and gets `errDialNotPorted` —
+            // CONNECT tunnelling is still unimplemented. An explicit
+            // "not supported" is the honest answer, and it fails
+            // CLOSED.
+            let (mut cm, cmerr) = self.connectMethodForRequest(req);
+            if !cmerr.IsNil() {
+                return (Response::default(), ctx_err_or(&ctx, cmerr));
+            }
+            if cm.targetAddr.Len() == 0 {
+                cm.targetAddr = dial_addr.clone();
+            }
+            if cm.targetScheme.Len() == 0 {
+                cm.targetScheme = if is_https {
                     string("https")
                 } else {
                     string("http")
-                },
-                targetAddr: dial_addr.clone(),
-                onlyH1: false,
-            };
+                };
+            }
 
             // Go (roundTrip, transport.go:598): req = setupRewindBody(req)
             // — the retry path below must be able to replay a consumed

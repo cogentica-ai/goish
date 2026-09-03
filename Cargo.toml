@@ -3094,3 +3094,7 @@ path = "examples/url_error_ref_smoke.rs"
 [[example]]
 name = "common_read_error_ref_smoke"
 path = "examples/common_read_error_ref_smoke.rs"
+
+[[example]]
+name = "proxy_dial_smoke"
+path = "examples/proxy_dial_smoke.rs"
