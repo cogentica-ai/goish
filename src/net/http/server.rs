@@ -539,9 +539,18 @@ impl Handler for ServeMux {
 /// `NotFoundHandler() Handler`, not a struct of the same name).
 struct notFoundHandler;
 impl Handler for notFoundHandler {
-    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request) {
-        w.WriteHeader(404);
-        let _ = w.Write(crate::convert::bytes("404 page not found\n"));
+    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
+        // Go: `NotFoundHandler` is literally `HandlerFunc(NotFound)`
+        // (server.go:2362), so it goes through `Error` and gets its
+        // headers. Writing the status and body directly, as this used
+        // to, produced the same bytes with neither `Content-Type:
+        // text/plain` nor `X-Content-Type-Options: nosniff` — and the
+        // nosniff is the reason Error sets it: an error body must not
+        // be sniffed as HTML by a browser. The divergence was
+        // invisible from `NotFound` itself, which was correct; it
+        // showed up through StripPrefix's not-matched path and
+        // `NotFoundHandler()`, both of which route here.
+        NotFound(w, r);
     }
 }
 
@@ -590,10 +599,12 @@ pub fn NotFound(w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request) 
 /// `MaxBytesReader(None, …)` does not.
 ///
 /// The server buffers an inbound body before the handler runs, so the
-/// wrap TRUNCATES eagerly and reports the same MaxBytesError to the
-/// handler on over-limit, instead of deferring it to the handler's
-/// first Read. Same cap, same 413-shaped outcome, same conn close;
-/// the difference is when the error surfaces.
+/// MaxBytesReader is layered over those bytes rather than over the
+/// connection, and `requestTooLarge` fires as soon as the length is
+/// known instead of at the read that crosses the limit. Same cap,
+/// same MaxBytesError to the handler, same conn close; what differs
+/// is that goish notices the overrun even if the handler never reads
+/// the body, where Go would not.
 pub fn MaxBytesHandler(h: Arc<dyn Handler>, n: crate::types::int) -> Arc<dyn Handler> {
     return Arc::new(HandlerFunc(
         move |w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request| {
@@ -601,12 +612,31 @@ pub fn MaxBytesHandler(h: Arc<dyn Handler>, n: crate::types::int) -> Arc<dyn Han
             let mut r2 = r.clone();
             let (body_bytes, _) = r2.Body.__materialize();
             if body_bytes.Len() > n {
-                // Over the cap: truncate and tell the writer, which is
-                // what forces the connection closed.
-                r2.Body = super::Body::from_bytes(body_bytes.slice(0, n));
+                // Over the cap: tell the writer, which is what forces
+                // the connection closed.
                 if let (rt, true) = crate::cast!(w, super::responsewriter::__RequestTooLarge) {
                     rt.requestTooLarge();
                 }
+                // Go replaces the body with a MaxBytesReader
+                // (server.go:MaxBytesHandler), so the handler reads up
+                // to the limit and then gets a MaxBytesError. goish
+                // used to hand over a plain truncated body instead, so
+                // the handler read short data and saw err == nil — it
+                // could not tell a body that fitted from one that had
+                // been cut, and would go on to parse, verify or store
+                // a fragment as if it were the whole request.
+                //
+                // The body is already materialised here (goish's
+                // server reads it eagerly), so the reader is layered
+                // over those bytes rather than over the connection.
+                // The boundary logic is the real maxBytesReader's,
+                // including the read-one-extra-byte trick that tells
+                // "exactly at the limit" from "one over" — worth
+                // reusing rather than reimplementing, since getting it
+                // wrong silently accepts an oversized body.
+                r2.Body = super::Body::from_reader(alloc::boxed::Box::new(
+                    super::request::__eager_max_bytes_body(body_bytes, n),
+                ));
             }
             h.ServeHTTP(w, &r2);
         },

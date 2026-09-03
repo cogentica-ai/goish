@@ -1803,6 +1803,38 @@ fn empty_multipart_reader() -> crate::mime::multipart::Reader {
     crate::mime::multipart::NewReader(slice::<byte>::__from_vec(Vec::new()), string::new())
 }
 
+// go: none — goish-only: Go layers MaxBytesReader over the live
+// connection; goish's server has already materialised the body by the
+// time a handler runs, so the same reader is layered over those bytes
+// and given the Close that `Body::from_reader` requires.
+/// A `maxBytesReader` over an in-memory body, as a `ReadCloser`.
+pub(crate) fn __eager_max_bytes_body(data: slice<byte>, n: int) -> eagerMaxBytesBody {
+    return eagerMaxBytesBody {
+        inner: MaxBytesReader(None, crate::bytes::NewReader(data), n),
+    };
+}
+
+// go: none — goish-only: see __eager_max_bytes_body.
+pub(crate) struct eagerMaxBytesBody {
+    inner: maxBytesReader<'static, crate::bytes::Reader>,
+}
+
+impl io::Reader for eagerMaxBytesBody {
+    // go: none — goish-only: forwards to the real maxBytesReader.
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        return io::Reader::Read(&mut self.inner, p);
+    }
+}
+
+impl io::Closer for eagerMaxBytesBody {
+    // go: none — goish-only: nothing underneath to close (the bytes
+    // are in memory); Go's MaxBytesReader.Close closes the wrapped
+    // body, which here is already drained.
+    fn Close(&mut self) -> error {
+        return errors::nil;
+    }
+}
+
 /// `http.MaxBytesError` (request.go:1193) — typed error returned by
 /// MaxBytesReader when its read limit is exceeded. Carries the
 /// configured byte limit so callers can introspect it. Mirrors:

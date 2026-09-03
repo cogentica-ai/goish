@@ -3030,3 +3030,7 @@ path = "examples/client_wire_ref_smoke.rs"
 [[example]]
 name = "cookie_ref_smoke"
 path = "examples/cookie_ref_smoke.rs"
+
+[[example]]
+name = "handlers_ref_smoke"
+path = "examples/handlers_ref_smoke.rs"
