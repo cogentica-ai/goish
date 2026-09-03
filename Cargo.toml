@@ -2990,3 +2990,7 @@ path = "examples/rwwrap_ref_smoke.rs"
 [[example]]
 name = "dsa_ref_smoke"
 path = "examples/dsa_ref_smoke.rs"
+
+[[example]]
+name = "cgi_child_ref_smoke"
+path = "examples/cgi_child_ref_smoke.rs"

@@ -329,7 +329,35 @@ impl response {
     }
 }
 
+// go: sdk 1.25.5 net/http/cgi/child.go:178-180 response.Flush
+//
+// Go's `*response` satisfies http.Flusher by having a Flush method, so
+// a CGI handler's `w.(http.Flusher)` finds it. goish had the method —
+// `response::Flush` above — with no `Flusher` impl, no registration and
+// no `__goish_as_dyn_any` on the ResponseWriter impl below, so the
+// assertion missed and every CGI handler saw a writer that could not
+// flush.
+//
+// That is the failure mode CGI exists to avoid: a long-running script
+// streams progress by flushing, and a handler whose Flush is
+// unreachable buffers its whole response instead. Nothing reports it —
+// the output is identical, it just all arrives at the end.
+impl super::super::responsewriter::Flusher for response {
+    // go: sdk 1.25.5 net/http/cgi/child.go:178-180 response.Flush
+    fn Flush(&self) {
+        response::Flush(self);
+    }
+}
+
 impl super::super::responsewriter::ResponseWriter for response {
+    // go: none — goish idiom: the hidden Any-view hook every
+    // `#[goish::interface]` concrete impl overrides. `cast!` cannot see
+    // past a trait object without it, so an assertion for Flusher on
+    // this writer missed even with the impl above registered.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+
     // go: sdk 1.25.5 net/http/cgi/child.go:182-184 response.Header
     fn Header(&self) -> super::super::responsewriter::HeaderHandle {
         return self.header.clone();
@@ -393,4 +421,11 @@ pub fn Serve(handler: Arc<dyn super::super::Handler>) -> error {
     let _ = super::super::responsewriter::ResponseWriter::Write(&rw, slice::<byte>::new());
     let mut g = rw.st.Lock();
     return g.bufw.Flush();
+}
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registry for this module's ResponseWriter, as fcgi's child does.
+pub(crate) fn register_cgi_impls() {
+    super::super::responsewriter::__goish_register_ResponseWriter_impl::<response>();
+    super::super::responsewriter::__goish_register_Flusher_impl::<response>();
 }
