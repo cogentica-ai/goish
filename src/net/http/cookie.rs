@@ -772,7 +772,7 @@ const MONTH_NAMES: [&[byte; 3]; 12] = [
 // go: none — goish-only: fills a fixed 29-byte buffer where Go calls
 // `c.Expires.UTC().AppendFormat(buf[:0], TimeFormat)`. See the note on
 // DAY_NAMES above.
-fn append_imf_fixdate_into<'a>(buf: &'a mut [byte; 29], t: &time::Time) -> &'a [byte] {
+pub(crate) fn append_imf_fixdate_into<'a>(buf: &'a mut [byte; 29], t: &time::Time) -> &'a [byte] {
     let weekday = (t.Weekday().Int() as usize) % 7;
     let (year, month, day) = t.Date();
     let (hh, mm, ss) = t.Clock();

@@ -530,8 +530,12 @@ impl response {
     /// before invoking the handler.
     pub fn new(conn: TCPConn) -> Self {
         register_response_impls();
-        let mut h = Header::new();
-        h.Set(string("Content-Type"), string("text/plain; charset=utf-8"));
+        // Go does NOT seed a Content-Type. It sniffs the body when the
+        // handler set none (see `sniffContentType`); seeding one here
+        // made `haveType` permanently true, so nothing was ever
+        // sniffed and every handler-generated response went out as
+        // text/plain — HTML rendered as source in a browser.
+        let h = Header::new();
         response {
             inner: crate::sync::Mutex::new(respInner {
                 conn,
@@ -749,6 +753,10 @@ impl response {
         // Content-Length (mutually exclusive per RFC 7230 §3.3.2).
         let head = {
             let mut h = self.header.Lock();
+            // Before the auto `chunked` below: Go's hasTE guard tests a
+            // HANDLER-set Transfer-Encoding, and a flushed response is
+            // still sniffed.
+            finalizeHeaders(&mut h, g.status, &g.body);
             if !suppress_body {
                 h.Del(string("Content-Length"));
                 h.Set(string("Transfer-Encoding"), string("chunked"));
@@ -933,7 +941,16 @@ impl response {
         // trailer announcement to a client, which could not work
         // because there was no announcement left to relay.
         if !g.chunked && !g.is_head && bodyAllowedForStatus(g.status) {
-            let declares = self.header.Lock().Values(string("Trailer")).Len() > 0;
+            // Same reasoning for a handler-set `Transfer-Encoding:
+            // chunked`: Go sets cw.chunking and frames the body
+            // (server.go:1524-1535). goish used to leave it buffered,
+            // so the response advertised chunked framing and then sent
+            // raw bytes — unparseable to any client that believed the
+            // header.
+            let hdr = self.header.Lock();
+            let declares = hdr.Values(string("Trailer")).Len() > 0
+                || hdr.Get(string("Transfer-Encoding")).as_ref() as &str == "chunked";
+            drop(hdr);
             if declares {
                 drop(g);
                 let e = self.promote_chunked();
@@ -986,9 +1003,17 @@ impl response {
             // HEAD still advertises the GET-equivalent length; 1xx/
             // 204/304 must not carry an auto Content-Length at all
             // (Go omits it for bodyless statuses, server.go:1533).
-            if bodyAllowedForStatus(g.status) && h.Get(string("Content-Length")).Len() == 0 {
+            // Go also declines to derive one when the handler set a
+            // Transfer-Encoding, "because they're generally
+            // incompatible" (server.go:1361).
+            let hasTE = h.Get(string("Transfer-Encoding")).Len() != 0;
+            if bodyAllowedForStatus(g.status)
+                && !hasTE
+                && h.Values(string("Content-Length")).Len() == 0
+            {
                 h.Set(string("Content-Length"), int_to_string(g.body.len() as i64));
             }
+            finalizeHeaders(&mut h, g.status, &g.body);
             if !g.keep_alive && h.Get(string("Connection")).Len() == 0 {
                 h.Set(string("Connection"), string("close"));
             }
@@ -1225,6 +1250,104 @@ fn build_trailer_block(trailers: &Header) -> Vec<u8> {
     let mut hb = crate::bytes::Buffer::new();
     let _ = trailers.WriteSubset(&mut hb, &crate::gomap::map::<string, bool>::new());
     return hb.Bytes().as_ref().to_vec();
+}
+
+// go: none — goish-only: the Content-Type sniffing branch of Go's chunkWriter.writeHeader (server.go:1482-1493), extracted so both goish response writers can share it.
+/// Go's Content-Type sniffing branch, lifted out of `writeHeader` so
+/// both goish response writers can call it:
+///
+///     if bodyAllowedForStatus(w.status) {
+///         _, haveType := header["Content-Type"]
+///         hasTE := header.Get("Transfer-Encoding") != ""
+///         if !haveType && !hasTE && len(p) > 0 {
+///             setHeader.contentType = DetectContentType(p)
+///         }
+///     }
+///
+/// Three details this mirrors exactly, each confirmed against a
+/// running Go by examples/sniff_server_ref_smoke.rs:
+///
+///   * `haveType` tests for the KEY, not a non-empty value. A handler
+///     that does `Set("Content-Type", "")` gets an empty Content-Type
+///     on the wire, not a sniffed one — hence `Values(..).Len()`
+///     rather than `Get(..).Len()`.
+///   * `hasTE` is a HANDLER-set Transfer-Encoding. The auto
+///     `chunked` that a `Flush()` adds must not suppress sniffing, so
+///     this has to run BEFORE the writer sets that header.
+///   * An empty body is not sniffed, and the response then carries no
+///     Content-Type at all. Go does not fall back to text/plain.
+pub(crate) fn sniffContentType(h: &mut Header, status: int, body: &[byte]) {
+    if !bodyAllowedForStatus(status) {
+        return;
+    }
+    if h.Values(string("Content-Type")).Len() != 0 {
+        return;
+    }
+    if h.Get(string("Transfer-Encoding")).Len() != 0 {
+        return;
+    }
+    // Go issue 31753: a Content-Encoding means the bytes on the wire
+    // are compressed, so sniffing them reports the container's type
+    // (gzip → application/x-gzip) instead of the payload's. Go
+    // declines to sniff at all rather than guess wrong.
+    if h.Get(string("Content-Encoding")).Len() != 0 {
+        return;
+    }
+    if body.is_empty() {
+        return;
+    }
+    let ct = super::sniff::DetectContentType(slice::<byte>::__from_vec(body.to_vec()));
+    h.Set(string("Content-Type"), ct);
+    return;
+}
+
+// go: none — goish-only: the header-finalising tail of Go's chunkWriter.writeHeader (server.go:1482-1511), extracted so both goish response writers can share it.
+/// The three header adjustments Go makes after the status is known and
+/// before the head is written, shared by both goish response writers:
+///
+///   1. Sniff the Content-Type, or — for a status that allows no body
+///      — drop the headers RFC 7232 §4.1 forbids on it
+///      (`suppressedHeaders`, already ported in transfer.rs but until
+///      now never called from the response path, so a 304 went out
+///      still carrying the handler's Content-Type and Content-Length).
+///   2. Stamp `Date` unless the handler set one. Go sends Date on
+///      EVERY response including 204 and 304; RFC 9110 §6.6.1 makes it
+///      a MUST for an origin server with a clock. goish sent none at
+///      all, which breaks any cache that dates a response by it.
+///   3. Reject a Content-Length that arrives alongside a non-identity
+///      Transfer-Encoding. Go logs and drops the Content-Length.
+///      goish used to send BOTH, which is the response half of a
+///      request-smuggling desync: a proxy honouring Transfer-Encoding
+///      and one honouring Content-Length disagree about where the
+///      body ends.
+pub(crate) fn finalizeHeaders(h: &mut Header, status: int, body: &[byte]) {
+    if bodyAllowedForStatus(status) {
+        sniffContentType(h, status, body);
+    } else {
+        let sup = super::transfer::suppressedHeaders(status);
+        for i in 0..sup.Len() {
+            h.Del(sup[i].clone());
+        }
+    }
+
+    if h.Values(string("Date")).Len() == 0 {
+        let mut buf = [0u8; 29];
+        let now = crate::time::Now().UTC();
+        let rendered = super::cookie::append_imf_fixdate_into(&mut buf, &now);
+        h.Set(string("Date"), string::from_bytes(rendered));
+    }
+
+    let te = h.Get(string("Transfer-Encoding"));
+    let hasCL = h.Values(string("Content-Length")).Len() != 0;
+    if hasCL && te.Len() != 0 && te.as_ref() as &str != "identity" {
+        crate::log::Printf!(
+            "http: WriteHeader called with both Transfer-Encoding of %q and a Content-Length of %s",
+            te,
+            h.Get(string("Content-Length"))
+        );
+        h.Del(string("Content-Length"));
+    }
+    return;
 }
 
 // go: none — goish-only: renders status line + sorted headers in one buffer; Go streams the same bytes through chunkWriter.writeHeader.

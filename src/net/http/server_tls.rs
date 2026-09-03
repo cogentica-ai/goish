@@ -85,8 +85,9 @@ impl tlsResponse {
     // Go builds its `response` inline in `(*conn).readRequest`
     // (server.go:1079); the split serve loop needs a named one.
     fn new(conn: Arc<crate::sync::Mutex<tls::Conn>>) -> Self {
-        let mut h = Header::new();
-        h.Set(string("Content-Type"), string("text/plain; charset=utf-8"));
+        // No seeded Content-Type: Go sniffs. See
+        // responsewriter::sniffContentType.
+        let h = Header::new();
         tlsResponse {
             conn,
             header: Arc::new(crate::sync::Mutex::new(h)),
@@ -143,9 +144,14 @@ impl tlsResponse {
 
         let buf = {
             let mut h = self.header.Lock();
-            if bodyAllowedForStatus(g.status) && h.Get(string("Content-Length")).Len() == 0 {
+            let hasTE = h.Get(string("Transfer-Encoding")).Len() != 0;
+            if bodyAllowedForStatus(g.status)
+                && !hasTE
+                && h.Values(string("Content-Length")).Len() == 0
+            {
                 h.Set(string("Content-Length"), int_to_string(g.body.len() as i64));
             }
+            super::responsewriter::finalizeHeaders(&mut h, g.status, &g.body);
             if !g.keep_alive && h.Get(string("Connection")).Len() == 0 {
                 h.Set(string("Connection"), string("close"));
             }
@@ -176,6 +182,9 @@ impl tlsResponse {
         let suppress_body = g.is_head || !bodyAllowedForStatus(g.status);
         let head = {
             let mut h = self.header.Lock();
+            // Before the auto `chunked`: Go still sniffs a flushed
+            // response (its hasTE guard means a HANDLER-set TE).
+            super::responsewriter::finalizeHeaders(&mut h, g.status, &g.body);
             if !suppress_body {
                 h.Del(string("Content-Length"));
                 h.Set(string("Transfer-Encoding"), string("chunked"));
