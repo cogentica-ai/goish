@@ -3066,3 +3066,7 @@ path = "examples/hex_dump_ref_smoke.rs"
 [[example]]
 name = "asn1_time_ref_smoke"
 path = "examples/asn1_time_ref_smoke.rs"
+
+[[example]]
+name = "slog_source_ref_smoke"
+path = "examples/slog_source_ref_smoke.rs"
