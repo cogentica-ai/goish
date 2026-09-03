@@ -2926,3 +2926,7 @@ path = "examples/iofs_ref_smoke.rs"
 [[example]]
 name = "lookpath_ref_smoke"
 path = "examples/lookpath_ref_smoke.rs"
+
+[[example]]
+name = "cgi_ref_smoke"
+path = "examples/cgi_ref_smoke.rs"
