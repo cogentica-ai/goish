@@ -3102,3 +3102,7 @@ path = "examples/proxy_dial_smoke.rs"
 [[example]]
 name = "server_options_ref_smoke"
 path = "examples/server_options_ref_smoke.rs"
+
+[[example]]
+name = "server_hooks_ref_smoke"
+path = "examples/server_hooks_ref_smoke.rs"

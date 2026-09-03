@@ -469,6 +469,13 @@ struct respInner {
     /// never emitted — Go's `chunkWriter.Write` "Eat writes."
     /// (server.go:1339).
     is_head: bool,
+    /// The `Server.ErrorLog` this response should report handler
+    /// misuse through, passed in by the serve loop. Go reaches it as
+    /// `c.server.logf`; goish's response has no server pointer, so the
+    /// logger itself is handed over. None — a response built outside a
+    /// serve loop — falls back to the package logger, which is what
+    /// `Server.logf` does when ErrorLog is nil.
+    error_log: Option<Arc<crate::log::Logger>>,
     /// Go's `w.req.ProtoAtLeast(1, 1)`, passed in by the server the
     /// way `is_head` is. Go reads it off the request the response
     /// holds; goish's writer holds no request, and without it the
@@ -560,6 +567,7 @@ impl response {
                 is_head: false,
                 proto11: true,
                 written: 0,
+                error_log: None,
                 closeAfterReply: false,
                 requestBodyLimitHit: false,
                 werr: errors::nil,
@@ -714,6 +722,39 @@ impl response {
     /// Connection header rules in `finalizeHeaders`.
     pub fn __set_proto11(&self, proto11: bool) {
         self.inner.Lock().proto11 = proto11;
+    }
+
+    // go: none — goish-only: Go reaches the logger as `c.server.logf`;
+    // goish's response has no server pointer, so the serve loop hands
+    // the logger over instead.
+    /// Server hook: route this response's handler-misuse messages to
+    /// `Server.ErrorLog`.
+    pub fn __set_error_log(&self, l: Option<Arc<crate::log::Logger>>) {
+        self.inner.Lock().error_log = l;
+    }
+
+    // go: none — goish-only: Go reaches the server's logger as
+    // `c.server.logf` (server.go:3459, ported on Server in server.rs);
+    // goish's response has no server pointer, so this forwards to the
+    // logger the serve loop handed it, with Server.logf's own
+    // package-logger fallback.
+    /// The `c.server.logf` every handler-misuse message in this file
+    /// goes through. These used to call `log::Printf!` directly, which
+    /// meant `Server.ErrorLog` was accepted and then ignored for
+    /// exactly the messages a handler provokes — superfluous
+    /// WriteHeader, WriteHeader after Hijack, Content-Length beside a
+    /// Transfer-Encoding. They went to the process logger instead,
+    /// escaping whatever pipeline the application had configured.
+    fn logf(&self, msg: string) {
+        let l = self.inner.Lock().error_log.clone();
+        match l {
+            Some(l) => {
+                let _ = l.Output(2, msg);
+            }
+            None => {
+                crate::log::println_impl(&[crate::fmt::FmtArg::Val(&msg)]);
+            }
+        }
     }
 
     // go: none — goish-only: Go stores the request on the response; goish passes the HEAD-ness in.
@@ -1214,28 +1255,30 @@ impl ResponseWriter for response {
         // (server.go:1186-1194) — the whole point of relevantCaller is
         // that "some handler you wrote called this twice" names the
         // handler, not net/http. Go routes through c.server.logf;
-        // goish's response carries no server pointer, so the package
-        // log fallback (what logf does with no ErrorLog) is used.
+        // goish's response has no server pointer, so the serve loop
+        // hands it the logger — see `__set_error_log`. A response built
+        // outside a serve loop still falls back to the package logger,
+        // which is what Server.logf does with no ErrorLog.
         if self.hijacked() {
             let caller = super::server::relevantCaller();
-            crate::log::Printf!(
+            self.logf(crate::Sprintf!(
                 "http: response.WriteHeader on hijacked connection from %s (%s:%d)",
                 caller.Function,
                 crate::path::Base(caller.File),
                 caller.Line
-            );
+            ));
             return;
         }
         let mut g = self.inner.Lock();
         if g.wrote_header {
             drop(g);
             let caller = super::server::relevantCaller();
-            crate::log::Printf!(
+            self.logf(crate::Sprintf!(
                 "http: superfluous response.WriteHeader call from %s (%s:%d)",
                 caller.Function,
                 crate::path::Base(caller.File),
                 caller.Line
-            );
+            ));
             return;
         }
         g.wrote_header = true;

@@ -3640,6 +3640,7 @@ impl Server {
             let w = response::__new_with_cnc(conn, cnc);
             w.__set_keep_alive(keep_alive);
             w.__set_proto11(req.ProtoAtLeast(1, 1));
+            w.__set_error_log(self.ErrorLog.clone());
             // HEAD: handler writes are eaten by the response writer
             // (Go's `isHEAD` at server.go:1302, eat-writes at :1339).
             w.__set_head(req.Method == string("HEAD"));
