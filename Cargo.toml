@@ -2934,3 +2934,7 @@ path = "examples/cgi_ref_smoke.rs"
 [[example]]
 name = "ecdh_ref_smoke"
 path = "examples/ecdh_ref_smoke.rs"
+
+[[example]]
+name = "hkdf_ref_smoke"
+path = "examples/hkdf_ref_smoke.rs"
