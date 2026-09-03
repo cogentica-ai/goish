@@ -3114,3 +3114,7 @@ path = "examples/errno_ref_smoke.rs"
 [[example]]
 name = "path_error_ref_smoke"
 path = "examples/path_error_ref_smoke.rs"
+
+[[example]]
+name = "client_timeout_ref_smoke"
+path = "examples/client_timeout_ref_smoke.rs"

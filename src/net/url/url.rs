@@ -48,6 +48,38 @@ impl ErrorTrait for Error {
     }
 }
 
+// go: none — goish idiom: Go's `*url.Error` satisfies `net.Error`
+//     structurally — it has Error, Timeout and Temporary — and callers
+//     assert exactly that on a failed request. goish needs the impl
+//     spelled out and registered, or `errors.As(err, &netErr)` on a
+//     client error misses where Go's finds it.
+impl crate::net::net::Error for Error {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent methods below.
+    fn Error(&self) -> string {
+        return ErrorTrait::Error(self);
+    }
+    // go: none — goish idiom: as above.
+    fn Timeout(&self) -> bool {
+        return Error::Timeout(self);
+    }
+    // go: none — goish idiom: as above.
+    fn Temporary(&self) -> bool {
+        return Error::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: none — goish idiom: Go's linker builds the equivalent itab; see
+//     AGENTS.md §9b. Called from `goish::init()`; idempotent.
+pub fn register_url_impls() {
+    crate::net::net::__goish_register_Error_impl::<Error>();
+}
+
 impl Error {
     // go: sdk 1.25.5 net/url/url.go:37-42 Error.Timeout
     /// Go: `func (e *Error) Timeout() bool` — probe the wrapped error

@@ -251,9 +251,39 @@ fn run() -> ! {
         );
         req.RequestURI = string("/auth");
         let (_, err) = client.Do(&req);
+        // Go wraps EVERY error out of Client.do in a *url.Error, so
+        // the message carries the request that failed:
+        //
+        //   Get "URL/auth": http: Request.RequestURI can't be set …
+        //
+        // This assertion used to expect the bare inner message, which
+        // was goish's behaviour and not Go's — goish returned the
+        // unwrapped error. Measured against a running Go by
+        // tools/gen_client_url_error_ref.go; the suffix is checked so
+        // the ephemeral port stays out of the expectation.
+        let got = fmt::Sprintf!("%v", err);
+        let gs: &str = got.as_ref();
+        check(
+            "a set RequestURI is refused in client requests (url.Error-wrapped)",
+            goish::string::from_bytes(
+                if gs.starts_with("Get \"") {
+                    "wrapped"
+                } else {
+                    "unwrapped"
+                }
+                .as_bytes(),
+            ),
+            "wrapped",
+        );
         check(
             "a set RequestURI is refused in client requests",
-            fmt::Sprintf!("%v", err),
+            goish::string::from_bytes(
+                match gs.find("\": ") {
+                    Some(i) => &gs[i + 3..],
+                    None => gs,
+                }
+                .as_bytes(),
+            ),
             "http: Request.RequestURI can't be set in client requests",
         );
         ts.Close();

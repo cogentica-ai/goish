@@ -2295,6 +2295,23 @@ impl Client {
         // measured against Go's ten with a self-redirecting server.
         // Requests already made, oldest first — Go's `via`.
         let mut via: Vec<Request> = Vec::new();
+        // Go (client.go:617-634): every error return from `do` goes
+        // through this, so a caller always receives a *url.Error and
+        // can ask WHICH request failed and whether it timed out:
+        //
+        //     if ue, ok := err.(*url.Error); ok && ue.Timeout() { … }
+        //
+        // goish returned the bare inner error, so that assertion never
+        // matched — including for `Client.Timeout`, the one case the
+        // idiom exists for. url.Error.Timeout/Temporary were ported
+        // earlier today onto a type the client never produced.
+        let uerr = |method: string, u: &URL, err: error| -> error {
+            if err.IsNil() {
+                return err;
+            }
+            super::url::Error::new(urlErrorOp(method), stripPassword(u), err)
+        };
+        let uerr_method = req.Method.clone();
         // The caller's own Cookie header, before any jar additions.
         let originalCookies = current.Header.Values(string("Cookie"));
         // Go builds this ONCE from the initial request and calls it on
@@ -2346,7 +2363,7 @@ impl Client {
             // and below this call.
             let (resp, _did_timeout, err) = send(&current, &self.Transport, deadline.clone());
             if !err.IsNil() {
-                return (resp, err);
+                return (resp, uerr(uerr_method.clone(), &current.URL, err));
             }
             // Go (client.go, send): if c.Jar != nil { if rc :=
             // resp.Cookies(); len(rc) > 0 { c.Jar.SetCookies(req.URL, rc) } }
@@ -2426,7 +2443,7 @@ impl Client {
                         if let Some(gb) = &ireqGetBody {
                             let (b, gerr) = gb();
                             if !gerr.IsNil() {
-                                return (resp, gerr);
+                                return (resp, uerr(uerr_method.clone(), &current.URL, gerr));
                             }
                             next.Body = b;
                             next.ContentLength = ireqContentLength;
@@ -2478,7 +2495,7 @@ impl Client {
                             if errors::Is(e.clone(), sentinel) {
                                 return (resp, errors::nil);
                             }
-                            return (resp, e);
+                            return (resp, uerr(uerr_method.clone(), &current.URL, e));
                         }
                     }
                     current = next;
