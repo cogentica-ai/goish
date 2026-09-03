@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 8323,
+ "total": 8322,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -944,7 +944,7 @@
    "GOISH014": 116,
    "GOISH015": 1,
    "GOISH016": 1,
-   "GOISH023": 112
+   "GOISH023": 111
   },
   "src/term/mod.rs": {
    "GOISH005": 7,

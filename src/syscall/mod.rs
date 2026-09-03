@@ -394,11 +394,23 @@ impl Errno {
     /// surface and fall through to the numeric form for anything else).
     #[allow(non_snake_case)]
     pub fn Error(&self) -> crate::gostring::string {
-        crate::gostring::string::from_static(match self.0 {
+        // The nine socket errnos below used to be absent, so every one
+        // of them rendered as the bare word "errno": a refused
+        // connection, a reset peer, an address already in use and a
+        // broken pipe all produced the same useless message. They are
+        // the errnos `net` hands back most often.
+        //
+        // The fallback carries the NUMBER, as Go's does — Go renders
+        // an unknown errno as "errno 0", not "errno", and without the
+        // number two different failures are indistinguishable in a
+        // log.
+        let msg = match self.0 {
             1 => "operation not permitted",
             2 => "no such file or directory",
             4 => "interrupted system call",
+            9 => "bad file descriptor",
             11 => "resource temporarily unavailable",
+            12 => "cannot allocate memory",
             13 => "permission denied",
             17 => "file exists",
             20 => "not a directory",
@@ -406,12 +418,24 @@ impl Errno {
             22 => "invalid argument",
             23 => "too many open files in system",
             24 => "too many open files",
+            32 => "broken pipe",
             38 => "function not implemented",
             39 => "directory not empty",
             95 => "operation not supported",
+            98 => "address already in use",
+            99 => "cannot assign requested address",
+            103 => "software caused connection abort",
+            104 => "connection reset by peer",
+            105 => "no buffer space available",
             110 => "connection timed out",
-            _ => "errno",
-        })
+            111 => "connection refused",
+            _ => "",
+        };
+        if !msg.is_empty() {
+            return crate::gostring::string::from_static(msg);
+        }
+        return crate::gostring::string::from_static("errno ")
+            + crate::strconv::Itoa(self.0 as crate::types::int);
     }
 
     // go: sdk 1.25.5 syscall/syscall_unix.go:138-140 Errno.Timeout
