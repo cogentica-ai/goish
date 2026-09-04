@@ -3234,3 +3234,7 @@ path = "examples/bufio_error_ref_smoke.rs"
 [[example]]
 name = "http_body_close_ref_smoke"
 path = "examples/http_body_close_ref_smoke.rs"
+
+[[example]]
+name = "chan_close_ref_smoke"
+path = "examples/chan_close_ref_smoke.rs"
