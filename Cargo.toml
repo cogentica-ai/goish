@@ -3286,3 +3286,7 @@ path = "examples/ioutil_ref_smoke.rs"
 [[example]]
 name = "stringer_verb_ref_smoke"
 path = "examples/stringer_verb_ref_smoke.rs"
+
+[[example]]
+name = "netip_ctor_ref_smoke"
+path = "examples/netip_ctor_ref_smoke.rs"
