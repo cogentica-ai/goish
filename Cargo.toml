@@ -3178,3 +3178,7 @@ path = "examples/exitstatus_ref_smoke.rs"
 [[example]]
 name = "process_ref_smoke"
 path = "examples/process_ref_smoke.rs"
+
+[[example]]
+name = "signal_notify_ref_smoke"
+path = "examples/signal_notify_ref_smoke.rs"

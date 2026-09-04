@@ -122,6 +122,25 @@ static REGISTRY: SpinLock<Vec<Registration>> = SpinLock::new(Vec::new());
 /// (signal_unix.go).
 pub fn register(c: &chan<i32>, sigs: &[i32]) {
     let mut bitmap: u64 = 0;
+    if sigs.is_empty() {
+        // Go: "If no signals are provided, all incoming signals will
+        // be relayed to c" (os/signal/signal.go, Notify). An empty
+        // list used to build an EMPTY bitmap here, so `Notify(c)`
+        // registered the channel for nothing at all and installed no
+        // handler — the exact opposite of what it asks for.
+        //
+        // SIGKILL (9) and SIGSTOP (19) cannot be caught; asking for
+        // them is not an error, they simply never arrive, and
+        // rt_sigaction would fail on them anyway.
+        let max_sig = MAX_SIG as i32; // goishlint:ignore GOISH005 - a signal-table bound, not a Go value
+        for s in 1..max_sig {
+            if s == 9 || s == 19 {
+                continue;
+            }
+            bitmap |= 1u64 << s;
+            install_handler(s);
+        }
+    }
     for &s in sigs {
         if (s as u32) < 64 {
             bitmap |= 1u64 << s;
