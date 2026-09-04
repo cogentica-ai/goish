@@ -11,8 +11,6 @@
 
 #![allow(non_snake_case)]
 
-use alloc::sync::Arc;
-
 use crate::errors::error;
 use crate::gostring::string;
 use crate::net::{dial_deadline, Conn, TCPConn};

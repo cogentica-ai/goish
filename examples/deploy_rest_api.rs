@@ -482,6 +482,23 @@ fn main() {
     time::Sleep(time::Millisecond * 100); // slow request is in flight
     syscall::Kill(syscall::Getpid(), syscall::SIGTERM);
 
+    // Wait for the signal to be OBSERVED before probing. Kill(2)
+    // returns as soon as the signal is queued, not when the handler
+    // has run, so probing straight after it raced the shutdown
+    // goroutine and read 200 roughly one run in five. READY is the
+    // observable that goroutine sets first, so waiting on it removes
+    // the race without weakening the check: if READY never flips, the
+    // budget expires and the readyz probe below still reports 200,
+    // which is the failure this step exists to catch.
+    //
+    // The wait costs microseconds in the normal case, so the 100ms
+    // grace window the next line depends on is still open.
+    let mut sig_waited = 0i64;
+    while READY.load(Ordering::Acquire) && sig_waited < 2_000 {
+        time::Sleep(time::Millisecond * 2);
+        sig_waited += 2;
+    }
+
     // readyz must flip 503 while the listener still accepts (the
     // 100ms grace window in the shutdown goroutine).
     let resp = raw_roundtrip(
