@@ -84,12 +84,12 @@ pub(crate) const paxSchilyXattr: &str = "SCHILY.xattr.";
 /// The prefix every `GNU.sparse.*` key shares.
 const paxGNUSparse: &str = "GNU.sparse.";
 
-const paxGNUSparseMajor: &str = "GNU.sparse.major";
-const paxGNUSparseMinor: &str = "GNU.sparse.minor";
-const paxGNUSparseName: &str = "GNU.sparse.name";
-const paxGNUSparseSize: &str = "GNU.sparse.size";
-const paxGNUSparseRealSize: &str = "GNU.sparse.realsize";
-const paxGNUSparseNumBlocks: &str = "GNU.sparse.numblocks";
+pub(crate) const paxGNUSparseMajor: &str = "GNU.sparse.major";
+pub(crate) const paxGNUSparseMinor: &str = "GNU.sparse.minor";
+pub(crate) const paxGNUSparseName: &str = "GNU.sparse.name";
+pub(crate) const paxGNUSparseSize: &str = "GNU.sparse.size";
+pub(crate) const paxGNUSparseRealSize: &str = "GNU.sparse.realsize";
+pub(crate) const paxGNUSparseNumBlocks: &str = "GNU.sparse.numblocks";
 pub(crate) const paxGNUSparseOffset: &str = "GNU.sparse.offset";
 pub(crate) const paxGNUSparseNumBytes: &str = "GNU.sparse.numbytes";
 pub(crate) const paxGNUSparseMap: &str = "GNU.sparse.map";
@@ -112,6 +112,11 @@ crate::var! {
     /// A sparse file's archive holds data its map never refers to.
     pub(crate) errUnrefData: error =
         "archive/tar: sparse file contains unreferenced data";
+
+    /// A PAX 1.0 sparse map ran past `maxSpecialFileSize`. The map is
+    /// stored in the file's own data, so an archive can otherwise ask
+    /// the reader to buffer without bound.
+    pub(crate) errSparseTooLong: error = "archive/tar: sparse map too long";
 }
 
 

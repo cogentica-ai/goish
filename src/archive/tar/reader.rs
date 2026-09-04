@@ -1,8 +1,8 @@
-// go: file archive/tar/reader.go decls: NewReader, Reader.Next, Reader.next, Reader.Read, Reader.handleRegularFile, Reader.handleSparseFile, Reader.readOldGNUSparseMap, sparseFileReader.Read, regFileReader.Read, regFileReader.logicalRemaining, regFileReader.physicalRemaining, Reader.readHeader, mergePAX, parsePAX, discard, tryReadFull, mustReadFull, readSpecialFile
+// go: file archive/tar/reader.go decls: NewReader, Reader.Next, Reader.next, Reader.Read, Reader.handleRegularFile, Reader.handleSparseFile, Reader.readOldGNUSparseMap, Reader.readGNUSparsePAXHeaders, readGNUSparseMap1x0, readGNUSparseMap0x1, sparseFileReader.Read, regFileReader.Read, regFileReader.logicalRemaining, regFileReader.physicalRemaining, Reader.readHeader, mergePAX, parsePAX, discard, tryReadFull, mustReadFull, readSpecialFile
 //
 // reader.go — Reader, and the PAX/GNU header machinery it drives.
 //
-// goishlint:ignore GOISH018 readGNUSparsePAXHeaders, readGNUSparseMap1x0, readGNUSparseMap0x1, writeTo, WriteTo, logicalRemaining, physicalRemaining - the PAX half of sparse reading (the `GNU.sparse.*` extended headers) is not decoded yet; the OLD GNU map, which is what the 'S' type flag carries, is ported as `readOldGNUSparseMap`. `logicalRemaining`/`physicalRemaining` ARE ported, as `logical_remaining`/`physical_remaining` on Reader, and are listed here only because the names differ. The `WriteTo` pair are `io.Copy` wrappers around the same Read this port already has.
+// goishlint:ignore GOISH018 writeTo, WriteTo, logicalRemaining, physicalRemaining - `logicalRemaining`/`physicalRemaining` ARE ported, as `logical_remaining`/`physical_remaining` on Reader, and are listed here only because the names differ. The `WriteTo` pair are `io.Copy` wrappers around the same Read this port already has. All four sparse map readers — old GNU, PAX 0.0/0.1 and PAX 1.0 — are ported.
 // goishlint:ignore GOISH021 fileReader, regFileReader, sparseFileReader, zeroReader - Go layers a `sparseFileReader` over a `regFileReader` through the `fileReader` interface. Both hold the archive's io.Reader, which this port's `Reader` owns, and a Rust field cannot borrow its sibling; so the physical counters stay on `Reader` and the hole map sits beside them, with `sp` empty meaning "not sparse". `zeroReader` is a reader that returns zeros and cannot fail — the hole branch writes them directly.
 
 extern crate alloc;
@@ -447,15 +447,156 @@ impl Reader {
         return out;
     }
 
+    // go: sdk 1.25.5 archive/tar/reader.go:216-259 Reader.readGNUSparsePAXHeaders
+    /// The PAX spelling of a sparse map: the entries live in
+    /// `GNU.sparse.*` extended-header records rather than in the
+    /// header block. Three layouts share the prefix, and the version
+    /// records that tell them apart were themselves only added in 0.1.
+    fn readGNUSparsePAXHeaders(&mut self, hdr: &mut Header) -> (sparseDatas, error) {
+        let major = hdr.PAXRecords.Get(crate::string(paxGNUSparseMajor)).0;
+        let minor = hdr.PAXRecords.Get(crate::string(paxGNUSparseMinor)).0;
+        let map_rec = hdr.PAXRecords.Get(crate::string(paxGNUSparseMap)).0;
+
+        let is1x0: bool;
+        if major == "0" && (minor == "0" || minor == "1") {
+            is1x0 = false;
+        } else if major == "1" && minor == "0" {
+            is1x0 = true;
+        } else if major != "" || minor != "" {
+            // A version this reader does not know. Go returns no map
+            // and no error, so the file reads as an ordinary one.
+            return (sparseDatas::new(), nil);
+        } else if map_rec != "" {
+            // 0.0 and 0.1 predate the version records, so the presence
+            // of a map is the only signal.
+            is1x0 = false;
+        } else {
+            return (sparseDatas::new(), nil);
+        }
+        hdr.Format.mayOnlyBe(FormatPAX);
+
+        // The real name and size live in records too: the header's own
+        // name is the internal `GNUSparseFile.NNN/...` placeholder and
+        // its size is the DENSE byte count.
+        let name = hdr.PAXRecords.Get(crate::string(paxGNUSparseName)).0;
+        if name != "" {
+            hdr.Name = name;
+        }
+        let mut size = hdr.PAXRecords.Get(crate::string(paxGNUSparseSize)).0;
+        if size == "" {
+            size = hdr.PAXRecords.Get(crate::string(paxGNUSparseRealSize)).0;
+        }
+        if size != "" {
+            let (n, err) = strconv::ParseInt(&size, 10, 64);
+            if !err.IsNil() {
+                return (sparseDatas::new(), ErrHeader.into());
+            }
+            hdr.Size = n;
+        }
+
+        if is1x0 {
+            return self.readGNUSparseMap1x0();
+        }
+        return readGNUSparseMap0x1(&hdr.PAXRecords);
+    }
+
+    // go: sdk 1.25.5 archive/tar/reader.go:529-592 readGNUSparseMap1x0
+    // goishlint:ignore GOISH014 readGNUSparseMap1x0 — Go's is a free
+    //     function taking the fileReader; this port has no fileReader
+    //     (see the GOISH021 waiver at the top), so it is a method and
+    //     reads through `read_physical`.
+    /// PAX 1.0 keeps the map in the file's own DATA, ahead of the
+    /// contents: a newline-delimited count followed by that many
+    /// (offset, length) pairs, padded to a block boundary.
+    fn readGNUSparseMap1x0(&mut self) -> (sparseDatas, error) {
+        let mut buf: Vec<byte> = Vec::new();
+        let mut consumed: usize = 0;
+        let mut cnt_newline: i64 = 0;
+        let mut total_size: int = 0;
+
+        // Read whole blocks until `buf` holds at least `n` newlines —
+        // never more blocks than that needs.
+        macro_rules! feed_tokens {
+            ($n:expr) => {{
+                let mut e: error = nil;
+                while cnt_newline < $n {
+                    total_size += 512;
+                    if total_size > maxSpecialFileSize {
+                        e = errSparseTooLong.into();
+                        break;
+                    }
+                    let mut blk = crate::make!([]byte, 512);
+                    let (_, err) = mustReadFull(&mut *self.r, &mut blk);
+                    if !err.IsNil() {
+                        e = err;
+                        break;
+                    }
+                    for i in 0..512usize {
+                        let c = blk[i];
+                        buf.push(c);
+                        if c == b'\n' {
+                            cnt_newline += 1;
+                        }
+                    }
+                    // The map is part of the file's data, so the dense
+                    // counters have to move with it.
+                    self.nb -= 512;
+                }
+                e
+            }};
+        }
+
+        // Take the next newline-delimited token. Assumes one is there.
+        macro_rules! next_token {
+            () => {{
+                cnt_newline -= 1;
+                let start = consumed;
+                while consumed < buf.len() && buf[consumed] != b'\n' {
+                    consumed += 1;
+                }
+                let tok = string::from_bytes(&buf[start..consumed]);
+                if consumed < buf.len() {
+                    consumed += 1;
+                }
+                tok
+            }};
+        }
+
+        let e = feed_tokens!(1);
+        if !e.IsNil() {
+            return (sparseDatas::new(), e);
+        }
+        let (num_entries, err) = strconv::ParseInt(&next_token!(), 10, 0);
+        if !err.IsNil() || num_entries < 0 || 2 * num_entries < num_entries {
+            return (sparseDatas::new(), ErrHeader.into());
+        }
+
+        // `num_entries` is trusted from here: feed_tokens caps the
+        // token count at maxSpecialFileSize.
+        let e = feed_tokens!(2 * num_entries);
+        if !e.IsNil() {
+            return (sparseDatas::new(), e);
+        }
+        let mut spd = sparseDatas::new();
+        let mut i: i64 = 0;
+        while i < num_entries {
+            let (offset, err1) = strconv::ParseInt(&next_token!(), 10, 64);
+            let (length, err2) = strconv::ParseInt(&next_token!(), 10, 64);
+            if !err1.IsNil() || !err2.IsNil() {
+                return (sparseDatas::new(), ErrHeader.into());
+            }
+            spd = crate::append!(spd, sparseEntry { Offset: offset, Length: length });
+            i += 1;
+        }
+        return (spd, nil);
+    }
+
     // go: sdk 1.25.5 archive/tar/reader.go:194-213 Reader.handleSparseFile
     fn handleSparseFile(&mut self, hdr: &mut Header, raw: &block) -> error {
         let (spd, err) = if hdr.Typeflag == TypeGNUSparse {
             self.readOldGNUSparseMap(hdr, raw)
         } else {
-            // PAX sparse files are not decoded yet; an empty map with
-            // no error means "ordinary file", which is what a PAX
-            // archive without sparse headers is.
-            (sparseDatas::new(), nil)
+            self.readGNUSparsePAXHeaders(hdr)
         };
 
         if err.IsNil() && !spd.is_empty() {
@@ -702,6 +843,44 @@ fn discard(r: &mut dyn crate::io::Reader, n: i64) -> error {
         err = io::ErrUnexpectedEOF.into();
     }
     return err;
+}
+
+// go: sdk 1.25.5 archive/tar/reader.go:596-627 readGNUSparseMap0x1
+/// PAX 0.0 and 0.1 keep the map in the extended headers themselves: a
+/// count in `GNU.sparse.numblocks` and the pairs as a comma-separated
+/// list in `GNU.sparse.map`. Nothing is read from the data stream, so
+/// unlike the 1.0 form this needs no reader.
+fn readGNUSparseMap0x1(paxHdrs: &map<string, string>) -> (sparseDatas, error) {
+    let num_entries_str = paxHdrs.Get(crate::string(paxGNUSparseNumBlocks)).0;
+    let (num_entries, err) = strconv::ParseInt(&num_entries_str, 10, 0);
+    if !err.IsNil() || num_entries < 0 || 2 * num_entries < num_entries {
+        return (sparseDatas::new(), ErrHeader.into());
+    }
+
+    // Two numbers per entry.
+    let raw = paxHdrs.Get(crate::string(paxGNUSparseMap)).0;
+    let mut sparse_map = strings::Split(&raw, ",");
+    if sparse_map.Len() == 1 && sparse_map[0] == "" {
+        sparse_map = slice::new();
+    }
+    if toint64(sparse_map.Len()) != 2 * num_entries {
+        return (sparseDatas::new(), ErrHeader.into());
+    }
+
+    let mut spd = sparseDatas::new();
+    let mut i: usize = 0;
+    // Go consumes the list two at a time (`sparseMap = sparseMap[2:]`
+    // while `len >= 2`); the index form of the same walk.
+    while i + 2 <= sparse_map.Len() as usize {
+        let (offset, err1) = strconv::ParseInt(&sparse_map[i], 10, 64);
+        let (length, err2) = strconv::ParseInt(&sparse_map[i + 1], 10, 64);
+        if !err1.IsNil() || !err2.IsNil() {
+            return (sparseDatas::new(), ErrHeader.into());
+        }
+        spd = crate::append!(spd, sparseEntry { Offset: offset, Length: length });
+        i += 2;
+    }
+    return (spd, nil);
 }
 
 // go: sdk 1.25.5 archive/tar/reader.go:835-845 tryReadFull
