@@ -3146,3 +3146,7 @@ path = "examples/dialtimeout_ref_smoke.rs"
 [[example]]
 name = "halfclose_error_shape_ref_smoke"
 path = "examples/halfclose_error_shape_ref_smoke.rs"
+
+[[example]]
+name = "sockopt_ref_smoke"
+path = "examples/sockopt_ref_smoke.rs"

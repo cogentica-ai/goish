@@ -57,6 +57,7 @@ mod mac;
 pub mod mail;
 pub mod net;
 mod parse;
+pub mod tcpsock;
 
 pub mod ip;
 pub use ip::{
@@ -531,6 +532,42 @@ impl TCPConn {
             return self.op_err("close", "shutdown", -r);
         }
         return errors::nil;
+    }
+
+    // go: none — goish-only: Go's setters each call a `setXxx(fd, …)`
+    // in sockopt_posix.go and wrap the failure identically. goish
+    // names that shared tail once, so net/tcpsock.rs's four setters
+    // read as the four Go declarations they port and nothing else.
+    /// setsockopt(2) plus Go's error shape for these setters: nil on
+    /// success, else `&OpError{Op: "set", …}`.
+    ///
+    /// Two measured details live here rather than in each setter.
+    ///
+    /// The Op is "set" — not "setsockopt", which is the SYSCALL name
+    /// Go keeps for the `os.SyscallError` it wraps, and not "close".
+    ///
+    /// On a conn this side has closed, Go reports ErrClosed and not
+    /// the kernel's EBADF: `set tcp L->R: use of closed network
+    /// connection`, with errors.Is(err, net.ErrClosed) true. Go gets
+    /// there through `poll.FD.incref`, which refuses before the
+    /// syscall is ever made; goish checks the same state on the fd.
+    pub(crate) fn __setsockopt(&self, level: i32, name: i32, val: *const u8, len: u32) -> error {
+        if self.fd == FD_CLOSED {
+            return self.closed_err("set");
+        }
+        let r = syscall::Setsockopt(self.fd, level, name, val, len);
+        if r < 0 {
+            return self.op_err("set", "setsockopt", -r);
+        }
+        return errors::nil;
+    }
+
+    // go: none — goish-only: see __setsockopt.
+    /// setsockopt(2) with a single `int` value, the shape all but
+    /// SetLinger use.
+    pub(crate) fn __setsockopt_int(&self, level: i32, name: i32, v: i32) -> error {
+        let len = core::mem::size_of::<i32>() as u32; // goishlint:ignore GOISH005 - socklen_t, a C ABI width, not a Go value
+        return self.__setsockopt(level, name, &v as *const i32 as *const u8, len);
     }
 
     /// Internal raw fd accessor — used by `bufio` adapters and by
