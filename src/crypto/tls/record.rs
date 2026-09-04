@@ -429,6 +429,19 @@ pub fn decrypt_record(
         );
     }
 
+    // Go: conn.go:82 — `if len(data) > maxPlaintext { ...
+    //     c.sendAlert(alertRecordOverflow) }`, applied to the DECRYPTED
+    //     bytes. The record-length bound in `read_record` caps the
+    //     ciphertext at maxCiphertext (16384+2048); the plaintext that
+    //     comes out of it must still fit maxPlaintext (16384), and the
+    //     ~2 KiB between the two is exactly what this catches.
+    if plaintext.len() > super::common::maxPlaintext as usize {
+        return (
+            slice::<byte>::__from_vec(Vec::new()),
+            errors::New("tls: oversized record received"),
+        );
+    }
+
     (slice::<byte>::__from_vec(plaintext.to_vec()), errors::nil)
 }
 
@@ -876,6 +889,19 @@ pub fn decrypt_record_aead(
     let (pt_s, derr) = gcm.Open(empty_dst, nonce_s, ct_s, aad_s);
     if !derr.IsNil() {
         return (slice::<byte>::__from_vec(Vec::new()), derr);
+    }
+
+    // Go: conn.go:82 — `if len(data) > maxPlaintext { ...
+    //     c.sendAlert(alertRecordOverflow) }`, applied to the DECRYPTED
+    //     bytes. The record-length bound in `read_record` caps the
+    //     ciphertext at maxCiphertext (16384+2048); the plaintext that
+    //     comes out of it must still fit maxPlaintext (16384), and the
+    //     ~2 KiB between the two is exactly what this catches.
+    if pt_s.Len() > super::common::maxPlaintext {
+        return (
+            slice::<byte>::__from_vec(Vec::new()),
+            errors::New("tls: oversized record received"),
+        );
     }
 
     (pt_s, errors::nil)

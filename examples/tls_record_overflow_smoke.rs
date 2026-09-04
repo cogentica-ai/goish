@@ -19,6 +19,13 @@
 // The boundary is the assertion: 18432 is accepted and 18433 is not,
 // which is Go's `n > maxCiphertext` and not an off-by-one either side.
 //
+// The second half pins the OTHER bound Go applies, on the DECRYPTED
+// bytes (conn.go:82): the ciphertext cap leaves ~2 KiB of slack, so a
+// record of 18432 ciphertext bytes decrypts to as much as 18395 of
+// plaintext, and maxPlaintext is 16384. That gap was also unchecked:
+// before the fix a 17000-byte plaintext round-tripped whole. The
+// boundary is exact — 16384 back, 16385 refused.
+//
 // The TLS 1.3 bound is NOT enforced here. `read_record` is handed a
 // bare io::Reader and has no connection state to know the version from;
 // `conn.rs`'s readRecordOrCCS — the real port, which this file is meant
@@ -34,17 +41,21 @@ extern crate goish;
 use alloc::vec::Vec;
 
 use goish::bytes;
+use goish::crypto::tls::record;
 use goish::fmt;
 use goish::goslice::slice;
 use goish::gostring::string;
 use goish::types::{byte, int};
 
-const GO: [&str; 5] = [
+const GO: [&str; 8] = [
     "len=16384  type=22 got=16384 err=<nil>",
     "len=18432  type=22 got=18432 err=<nil>",
     "len=18433  type=22 got=0 err=tls: oversized record received",
     "len=40000  type=22 got=0 err=tls: oversized record received",
     "len=65535  type=22 got=0 err=tls: oversized record received",
+    "plaintext=16384  ct=16437 back=16384 err=<nil>",
+    "plaintext=16385  ct=16437 back=0 err=tls: oversized record received",
+    "plaintext=17000  ct=17045 back=0 err=tls: oversized record received",
 ];
 
 fn chk(ln: &mut usize, got: &string) {
@@ -80,6 +91,25 @@ fn main() {
         chk(&mut ln, &fmt::Sprintf!("len=%-6d type=%d got=%d err=%v",
             *n as int, ct as int, payload.Len() as int, err));
     }
+
+    let dir = record::DirectionKeys {
+        mac_key: [7u8; 20],
+        enc_key: [9u8; 16],
+        iv: [3u8; 16],
+    };
+    for n in [16384usize, 16385, 17000].iter() {
+        let pt: Vec<byte> = alloc::vec![0x41u8; *n];
+        let (ct, err) = record::encrypt_record(22, 0, &dir, &pt);
+        if !err.IsNil() {
+            chk(&mut ln, &fmt::Sprintf!("plaintext=%-6d encrypt-err=%v", *n as int, err));
+            continue;
+        }
+        let ctv = ct.__into_vec();
+        let (got, derr) = record::decrypt_record(22, 0, &dir, &ctv[5..]);
+        chk(&mut ln, &fmt::Sprintf!("plaintext=%-6d ct=%d back=%d err=%v",
+            *n as int, ctv.len() as int, got.Len() as int, derr));
+    }
+
     if ln != GO.len() {
         fmt::Printf!("[!!] produced %d lines, pinned %d\n", ln as int, GO.len() as int);
     }
