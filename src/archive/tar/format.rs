@@ -1,4 +1,4 @@
-// go: file archive/tar/format.go decls: Format.has, Format.mayBe, Format.mayOnlyBe, Format.mustNotBe, Format.String, formatNames, headerV7.name, headerV7.mode, headerV7.uid, headerV7.gid, headerV7.size, headerV7.modTime, headerV7.chksum, headerV7.typeFlag, headerV7.linkName, headerUSTAR.magic, headerUSTAR.version, headerUSTAR.userName, headerUSTAR.groupName, headerUSTAR.devMajor, headerUSTAR.devMinor, headerUSTAR.prefix, headerGNU.accessTime, headerGNU.changeTime, headerGNU.sparse, headerGNU.realSize, headerSTAR.prefix, headerSTAR.accessTime, headerSTAR.changeTime, headerSTAR.trailer, block.computeChecksum, block.getFormat, block.reset, headerGNU.magic, headerGNU.version, block.setFormat, blockPadding
+// go: file archive/tar/format.go decls: Format.has, Format.mayBe, Format.mayOnlyBe, Format.mustNotBe, Format.String, formatNames, headerV7.name, headerV7.mode, headerV7.uid, headerV7.gid, headerV7.size, headerV7.modTime, headerV7.chksum, headerV7.typeFlag, headerV7.linkName, headerUSTAR.magic, headerUSTAR.version, headerUSTAR.userName, headerUSTAR.groupName, headerUSTAR.devMajor, headerUSTAR.devMinor, headerUSTAR.prefix, headerGNU.accessTime, headerGNU.changeTime, headerGNU.sparse, headerGNU.realSize, headerSTAR.prefix, headerSTAR.accessTime, headerSTAR.changeTime, headerSTAR.trailer, block.computeChecksum, block.getFormat, block.reset, headerGNU.magic, headerGNU.version, block.setFormat, blockPadding, sparseArray.entry, sparseArray.isExtended, sparseArray.maxEntries, sparseElem.offset, sparseElem.length
 //
 // format.go — Format, the on-disk `block` and its four views.
 //
@@ -11,9 +11,12 @@
 // headerV7/headerGNU/headerSTAR/headerUSTAR exist in Go only as cast
 // targets (see the GOISH018 waiver above) and are flattened into
 // `block`; formatNames is spelled as the lookup function formatName;
-// sparseArray and sparseElem belong to the sparse-file half, which
-// this port stubs — a sparse header returns ErrHeader.
-// goishlint:ignore GOISH018 entry, isExtended, maxEntries, offset, length - sparseArray/sparseElem accessors; see GOISH021 above.
+// sparseArray and sparseElem are the sparse-file half's view of a
+// block: a run of 24-byte (offset, length) pairs followed by one
+// "is there another extension block" byte. Go spells them as named
+// []byte types with methods; Rust cannot give an inherent impl to
+// `[byte]`, so they are free functions taking the region, and the
+// GOISH018 waiver below covers the name difference, not a gap.
 // goishlint:ignore GOISH020 String - Go's `String()` satisfies fmt.Stringer structurally and takes only the receiver; the Rust equivalent is `Display::fmt`, which takes the receiver and a Formatter.
 
 extern crate alloc;
@@ -840,6 +843,56 @@ pub(crate) fn copyBytes(dst: &mut [u8], src: &[u8]) -> usize {
 // go: sdk 1.25.5 archive/tar/format.go:154-156 blockPadding
 pub(crate) fn blockPadding(offset: i64) -> i64 {
     return (-offset) & (512_i64 - 1);
+}
+
+// ─── sparseArray / sparseElem ────────────────────────────────────────
+//
+// Go declares `type sparseArray []byte` with methods; the Rust side is
+// free functions over the same region, named `sparse_array_*` /
+// `sparse_elem_*`. A block used as an extension header is the whole
+// 512 bytes (21 entries), while the GNU header's own map is the 97
+// bytes at 386 (4 entries) — both are just regions here, which is why
+// these take a slice rather than hanging off `block`.
+
+// go: sdk 1.25.5 archive/tar/format.go:300-300 sparseArray.entry
+// goishlint:ignore GOISH014 sparse_array_entry — the anchor names Go's
+//     `sparseArray.entry`; Rust has no inherent impl on `[byte]`, so
+//     the method becomes a free function and the names cannot match.
+/// The i'th 24-byte (offset, length) pair.
+pub(crate) fn sparse_array_entry(s: &[byte], i: usize) -> &[byte] {
+    return &s[i * 24..i * 24 + 24];
+}
+
+// go: sdk 1.25.5 archive/tar/format.go:301-301 sparseArray.isExtended
+// goishlint:ignore GOISH014 sparse_array_is_extended — see
+//     `sparse_array_entry`.
+/// The one byte after the last entry: non-zero means another extension
+/// block follows.
+pub(crate) fn sparse_array_is_extended(s: &[byte]) -> byte {
+    return s[24 * sparse_array_max_entries(s)];
+}
+
+// go: sdk 1.25.5 archive/tar/format.go:302-302 sparseArray.maxEntries
+// goishlint:ignore GOISH014 sparse_array_max_entries — see
+//     `sparse_array_entry`.
+/// How many pairs fit in the region. Integer division, so the trailing
+/// isExtended byte is excluded.
+pub(crate) fn sparse_array_max_entries(s: &[byte]) -> usize {
+    return s.len() / 24;
+}
+
+// go: sdk 1.25.5 archive/tar/format.go:306-306 sparseElem.offset
+// goishlint:ignore GOISH014 sparse_elem_offset — see
+//     `sparse_array_entry`.
+pub(crate) fn sparse_elem_offset(e: &[byte]) -> &[byte] {
+    return &e[0..12];
+}
+
+// go: sdk 1.25.5 archive/tar/format.go:307-307 sparseElem.length
+// goishlint:ignore GOISH014 sparse_elem_length — see
+//     `sparse_array_entry`.
+pub(crate) fn sparse_elem_length(e: &[byte]) -> &[byte] {
+    return &e[12..24];
 }
 
 // ─── zeroBlock ───────────────────────────────────────────────────────

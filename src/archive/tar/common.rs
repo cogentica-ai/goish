@@ -102,7 +102,19 @@ crate::var! {
 
     /// Header field too long.
     pub ErrFieldTooLong: error = "archive/tar: header field too long";
+
+    /// A sparse file's map claims more data than the archive holds.
+    /// Unexported in Go: it surfaces from `Read`, never from `Next`,
+    /// because only reading discovers the mismatch.
+    pub(crate) errMissData: error =
+        "archive/tar: sparse file references non-existent data";
+
+    /// A sparse file's archive holds data its map never refers to.
+    pub(crate) errUnrefData: error =
+        "archive/tar: sparse file contains unreferenced data";
 }
+
+
 
 // ─── Header ──────────────────────────────────────────────────────────
 
@@ -182,7 +194,7 @@ pub type sparseDatas = slice<sparseEntry>;
 pub type sparseHoles = slice<sparseEntry>;
 
 // go: sdk 1.25.5 archive/tar/common.go:257-278 validateSparseEntries
-fn validateSparseEntries(sp: &sparseDatas, size: i64) -> bool {
+pub(crate) fn validateSparseEntries(sp: &sparseDatas, size: i64) -> bool {
     if size < 0 {
         return false;
     }
@@ -210,7 +222,7 @@ fn validateSparseEntries(sp: &sparseDatas, size: i64) -> bool {
 }
 
 // go: sdk 1.25.5 archive/tar/common.go:310-325 invertSparseEntries
-fn invertSparseEntries(src: &sparseDatas, size: i64) -> sparseHoles {
+pub(crate) fn invertSparseEntries(src: &sparseDatas, size: i64) -> sparseHoles {
     let mut dst = sparseHoles::new();
     let mut pre = sparseEntry {
         Offset: 0,

@@ -1,10 +1,9 @@
-// go: file archive/tar/reader.go decls: NewReader, Reader.Next, Reader.next, Reader.Read, Reader.handleRegularFile, Reader.handleSparseFile, Reader.readHeader, mergePAX, parsePAX, discard, tryReadFull, mustReadFull, readSpecialFile
+// go: file archive/tar/reader.go decls: NewReader, Reader.Next, Reader.next, Reader.Read, Reader.handleRegularFile, Reader.handleSparseFile, Reader.readOldGNUSparseMap, sparseFileReader.Read, regFileReader.Read, regFileReader.logicalRemaining, regFileReader.physicalRemaining, Reader.readHeader, mergePAX, parsePAX, discard, tryReadFull, mustReadFull, readSpecialFile
 //
 // reader.go — Reader, and the PAX/GNU header machinery it drives.
 //
-// goishlint:ignore GOISH018 readGNUSparsePAXHeaders, readOldGNUSparseMap, readGNUSparseMap1x0, readGNUSparseMap0x1, writeTo, WriteTo, logicalRemaining, physicalRemaining - the sparse-file half of the reader, which this port stubs: a sparse header returns ErrHeader rather than being decoded. The three `WriteTo`/`logicalRemaining`/`physicalRemaining` triples are methods of the fileReader interface that only exists to let the regular and sparse readers share a shape, and Go's regular ones are one-line `io.Copy` wrappers around the same Read this port already has.
-// goishlint:ignore GOISH021 fileReader, regFileReader, sparseFileReader, zeroReader - same: fileReader is the interface the two readers share, and only the sparse side needs it.
-// goishlint:ignore GOISH020 handleSparseFile - Go passes the raw block alongside the header so the OLD GNU sparse map can be read out of it. This port stubs sparse files, so the block is unused and the parameter is not taken.
+// goishlint:ignore GOISH018 readGNUSparsePAXHeaders, readGNUSparseMap1x0, readGNUSparseMap0x1, writeTo, WriteTo, logicalRemaining, physicalRemaining - the PAX half of sparse reading (the `GNU.sparse.*` extended headers) is not decoded yet; the OLD GNU map, which is what the 'S' type flag carries, is ported as `readOldGNUSparseMap`. `logicalRemaining`/`physicalRemaining` ARE ported, as `logical_remaining`/`physical_remaining` on Reader, and are listed here only because the names differ. The `WriteTo` pair are `io.Copy` wrappers around the same Read this port already has.
+// goishlint:ignore GOISH021 fileReader, regFileReader, sparseFileReader, zeroReader - Go layers a `sparseFileReader` over a `regFileReader` through the `fileReader` interface. Both hold the archive's io.Reader, which this port's `Reader` owns, and a Rust field cannot borrow its sibling; so the physical counters stay on `Reader` and the hole map sits beside them, with `sp` empty meaning "not sparse". `zeroReader` is a reader that returns zeros and cannot fail — the hole branch writes them directly.
 
 extern crate alloc;
 use alloc::boxed::Box;
@@ -31,6 +30,14 @@ pub struct Reader {
     nb: i64,
     blk: block,
     pub(crate) err: error,
+    // The sparse-file half. Go wraps `curr` in a `sparseFileReader`;
+    // this port keeps the physical counters where they already were
+    // and carries the hole map beside them, because `regFileReader`
+    // borrows the same `r` this struct owns and Rust will not let a
+    // field hold a borrow of its sibling. `sp` empty means "not a
+    // sparse file" and every read below takes the plain path.
+    sp: sparseHoles,
+    spos: i64,
 }
 
 // go: sdk 1.25.5 archive/tar/reader.go:39-41 NewReader
@@ -42,6 +49,8 @@ pub fn NewReader(r: Box<dyn crate::io::Reader>) -> Reader {
         nb: 0,
         blk: block::new(),
         err: nil,
+        sp: sparseHoles::new(),
+        spos: 0,
     };
 }
 
@@ -165,8 +174,11 @@ impl Reader {
                         return (Header::new(), err);
                     }
 
-                    // Sparse file support: stubbed.
-                    let err = self.handleSparseFile(&hdr);
+                    // The raw header block is Go's `rawHdr`: the OLD
+                    // GNU sparse map lives inside it, so it has to be
+                    // taken before anything else reads a block.
+                    let raw_blk = block(self.blk.0);
+                    let err = self.handleSparseFile(&mut hdr, &raw_blk);
                     if !err.IsNil() {
                         return (Header::new(), err);
                     }
@@ -187,6 +199,13 @@ impl crate::io::Reader for Reader {
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         if !self.err.IsNil() {
             return (0, self.err.clone());
+        }
+        if !self.sp.is_empty() {
+            let (n, err) = self.read_sparse(p);
+            if !err.IsNil() && err != io::EOF {
+                self.err = err.clone();
+            }
+            return (n, err);
         }
         let want = if toint64(p.Len()) > self.nb {
             toint(self.nb)
@@ -230,11 +249,223 @@ impl Reader {
         return nil;
     }
 
+    // go: sdk 1.25.5 archive/tar/reader.go:699-702 regFileReader.logicalRemaining
+    /// Bytes left in the file as the SPARSE MAP describes it — the end
+    /// of the last hole entry, which `invertSparseEntries` guarantees
+    /// is the file's full logical size.
+    fn logical_remaining(&self) -> i64 {
+        return self.sp[self.sp.Len() as usize - 1].endOffset() - self.spos;
+    }
+
+    // go: sdk 1.25.5 archive/tar/reader.go:704-707 regFileReader.physicalRemaining
+    /// Bytes left in the archive's dense copy. `nb` already tracks
+    /// exactly this for the regular path.
+    fn physical_remaining(&self) -> i64 {
+        return self.nb;
+    }
+
+    // go: sdk 1.25.5 archive/tar/reader.go:677-693 regFileReader.Read
+    // goishlint:ignore GOISH014 read_physical — the anchor names Go's
+    //     `regFileReader.Read`; this port has no `regFileReader` (see
+    //     the GOISH021 waiver at the top), so the method lives on
+    //     `Reader` under a name that cannot collide with its own
+    //     `Read`.
+    /// The physical read: Go's `regFileReader.Read`, which this port
+    /// had inlined into `Reader::Read`. Factored out because the
+    /// sparse path needs to call it for data fragments while filling
+    /// holes itself.
+    fn read_physical(&mut self, p: &mut slice<byte>, want: usize) -> (int, error) {
+        let want = if toint64(want) > self.nb {
+            toint(self.nb)
+        } else {
+            toint(want)
+        };
+        if want == 0 {
+            return (0, io::EOF.into());
+        }
+        let mut tmp = crate::make!([]byte, want);
+        let (n, mut err) = self.r.Read(&mut tmp);
+        for i in 0..n {
+            p[i] = tmp[i];
+        }
+        self.nb -= toint64(n);
+        if err.IsNil() && self.nb == 0 {
+            err = io::EOF.into();
+        }
+        if err == io::EOF && self.nb > 0 {
+            err = io::ErrUnexpectedEOF.into();
+        }
+        return (n, err);
+    }
+
+    // go: sdk 1.25.5 archive/tar/reader.go:716-753 sparseFileReader.Read
+    // goishlint:ignore GOISH014 read_sparse — same as `read_physical`:
+    //     Go's method is on a type this port does not have, so it
+    //     lands on `Reader` under a distinct name.
+    /// Reconstruct the logical file: data fragments come from the
+    /// archive, holes are zeros that were never stored. Go layers this
+    /// over `fr`; here it drives `read_physical` directly.
+    fn read_sparse(&mut self, p: &mut slice<byte>) -> (int, error) {
+        let finished = toint64(p.Len()) >= self.logical_remaining();
+        let limit = if finished {
+            self.logical_remaining() as usize
+        } else {
+            p.Len() as usize
+        };
+
+        let mut off: usize = 0;
+        let mut err: error = nil;
+        let end_pos = self.spos + toint64(limit);
+        while end_pos > self.spos && err.IsNil() {
+            let hole_start = self.sp[0].Offset;
+            let hole_end = self.sp[0].endOffset();
+            let remaining = toint64(limit - off);
+            let nf: usize;
+            if self.spos < hole_start {
+                // In a data fragment: take it from the archive.
+                let span = crate::convert::int(core::cmp::min(remaining, hole_start - self.spos)) as usize;
+                let mut tmp = crate::make!([]byte, crate::convert::int64(span));
+                // Go reads the fragment with `tryReadFull`, which
+                // loops until the buffer is full and then CLEARS an
+                // io.EOF that arrived on the last byte. Without that
+                // clear, a fragment ending exactly at the end of the
+                // dense data reports EOF, and the caller reads it as
+                // errMissData — the archive is fine, the reader just
+                // stopped one fragment early.
+                let mut got: usize = 0;
+                let mut e: error = nil;
+                while got < span && e.IsNil() {
+                    let mut part = crate::make!([]byte, crate::convert::int64(span - got));
+                    let (nn, ee) = self.read_physical(&mut part, span - got);
+                    for i in 0..nn as usize {
+                        tmp[got + i] = part[i];
+                    }
+                    got += nn as usize;
+                    e = ee;
+                }
+                if got == span && e == io::EOF {
+                    e = nil;
+                }
+                for i in 0..got {
+                    p[off + i] = tmp[i];
+                }
+                nf = got;
+                err = e;
+            } else {
+                // In a hole: the bytes were never stored, so they are
+                // zeros. Go reads them from `zeroReader{}`; writing
+                // them straight into `p` is the same thing without the
+                // ceremony of a reader that cannot fail.
+                let span = crate::convert::int(core::cmp::min(remaining, hole_end - self.spos)) as usize;
+                for i in 0..span {
+                    p[off + i] = 0;
+                }
+                nf = span;
+            }
+            off += nf;
+            self.spos += toint64(nf);
+            if self.spos >= hole_end && self.sp.Len() > 1 {
+                // Advance past this hole; the last entry always stays,
+                // so `logical_remaining` keeps working.
+                let rest = self.sp.slice(1, self.sp.Len());
+                self.sp = rest;
+            }
+            if nf == 0 && err.IsNil() {
+                break;
+            }
+        }
+
+        let n = toint(off);
+        if err == io::EOF {
+            // Less data in the dense file than the map promised.
+            return (n, errMissData.into());
+        }
+        if !err.IsNil() {
+            return (n, err);
+        }
+        if self.logical_remaining() == 0 && self.physical_remaining() > 0 {
+            // More data in the dense file than the map refers to.
+            return (n, errUnrefData.into());
+        }
+        if finished {
+            return (n, io::EOF.into());
+        }
+        return (n, nil);
+    }
+
+    // go: sdk 1.25.5 archive/tar/reader.go:477-517 Reader.readOldGNUSparseMap
+    /// The GNU 'S' type keeps its sparse map in the header block
+    /// itself — four entries — and continues into extension blocks
+    /// when `isExtended` is set.
+    fn readOldGNUSparseMap(&mut self, hdr: &mut Header, blk: &block) -> (sparseDatas, error) {
+        // The STAR format reuses this type flag with a different
+        // layout, so the format has to be GNU before the map means
+        // what we think it means.
+        if blk.getFormat() != FormatGNU {
+            return (sparseDatas::new(), ErrHeader.into());
+        }
+        hdr.Format.mayOnlyBe(FormatGNU);
+
+        let mut p = parser::new();
+        hdr.Size = p.parseNumeric(blk.gnu_realSize());
+        if !p.err.IsNil() {
+            return (sparseDatas::new(), p.err.clone());
+        }
+        let mut region: Vec<byte> = blk.gnu_sparse().to_vec();
+        let mut spd = sparseDatas::new();
+        let out: (sparseDatas, error) = loop {
+            let max = sparse_array_max_entries(&region);
+            for i in 0..max {
+                let e = sparse_array_entry(&region, i);
+                // The same termination condition GNU and BSD tar use:
+                // a zero first byte of `offset` ends the map. Don't
+                // return here — an extension header may still follow.
+                if sparse_elem_offset(e)[0] == 0x00 {
+                    break;
+                }
+                let off = p.parseNumeric(slice::__from_vec(sparse_elem_offset(e).to_vec()));
+                let len = p.parseNumeric(slice::__from_vec(sparse_elem_length(e).to_vec()));
+                if !p.err.IsNil() {
+                    return (sparseDatas::new(), p.err.clone());
+                }
+                spd = crate::append!(spd, sparseEntry { Offset: off, Length: len });
+            }
+
+            if sparse_array_is_extended(&region) > 0 {
+                let mut ext = crate::make!([]byte, 512);
+                let (_, err) = mustReadFull(&mut *self.r, &mut ext);
+                if !err.IsNil() {
+                    return (sparseDatas::new(), err);
+                }
+                // An extension block is entries end to end: 21 of them
+                // in 512 bytes, with the isExtended byte after.
+                region = ext.to_vec();
+                continue;
+            }
+            break (spd, nil);
+        };
+        return out;
+    }
+
     // go: sdk 1.25.5 archive/tar/reader.go:194-213 Reader.handleSparseFile
-    fn handleSparseFile(&mut self, _hdr: &Header) -> error {
-        // Sparse file reading is stubbed.
-        // In a full port this would set up a sparseFileReader wrapper.
-        return nil;
+    fn handleSparseFile(&mut self, hdr: &mut Header, raw: &block) -> error {
+        let (spd, err) = if hdr.Typeflag == TypeGNUSparse {
+            self.readOldGNUSparseMap(hdr, raw)
+        } else {
+            // PAX sparse files are not decoded yet; an empty map with
+            // no error means "ordinary file", which is what a PAX
+            // archive without sparse headers is.
+            (sparseDatas::new(), nil)
+        };
+
+        if err.IsNil() && !spd.is_empty() {
+            if isHeaderOnlyType(hdr.Typeflag) || !validateSparseEntries(&spd, hdr.Size) {
+                return ErrHeader.into();
+            }
+            self.sp = invertSparseEntries(&spd, hdr.Size);
+            self.spos = 0;
+        }
+        return err;
     }
 
     // go: sdk 1.25.5 archive/tar/reader.go:355-467 Reader.readHeader
