@@ -57,18 +57,16 @@ impl FileMode {
 //
 // %x stays the hex of the STRING, not of the number: that is Go's
 // behaviour too, because %x is one of the verbs a Stringer serves.
+// The verb split itself lives in `fmt::__stringer_serves`, shared with
+// time's Duration, Month and Weekday — the other three types in this
+// tree that are both a Stringer and a number.
 impl crate::fmt::Format for FileMode {
     // go: none — goish idiom: see the note above this impl.
     fn fmt(&self, verb: crate::types::byte, f: &mut crate::fmt::FmtBuf) {
-        match verb {
-            b'd' | b'b' | b'o' | b'O' | b'c' | b'U' => {
-                crate::fmt::Format::fmt(&self.0, verb, f);
-            }
-            _ => {
-                let s = FileMode::String(self);
-                crate::fmt::Format::fmt(&s, verb, f);
-            }
+        if crate::fmt::__stringer_serves(verb) {
+            return crate::fmt::Format::fmt(&FileMode::String(self), verb, f);
         }
+        return crate::fmt::Format::fmt(&self.0, verb, f);
     }
 }
 

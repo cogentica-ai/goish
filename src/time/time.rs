@@ -217,20 +217,22 @@ impl crate::fmt::Format for Month {
     //     printer finds it through the interface; goish's fmt dispatches on
     //     a trait, so the bridge is written out.
     fn fmt(&self, verb: crate::types::byte, f: &mut crate::fmt::FmtBuf) {
-        match verb {
-            b'd' | b'b' | b'o' | b'x' | b'X' | b'c' | b'U' => self.0.fmt(verb, f),
-            _ => f.extend(self.String().as_bytes()),
+        if crate::fmt::__stringer_serves(verb) {
+            crate::fmt::Format::fmt(&self.String(), verb, f);
+            return;
         }
+        return self.0.fmt(verb, f);
     }
 }
 // go: none — goish idiom: see the note on `Format for Month`.
 impl crate::fmt::Format for Weekday {
     // go: none — goish idiom: see the note on `Format for Month`.
     fn fmt(&self, verb: crate::types::byte, f: &mut crate::fmt::FmtBuf) {
-        match verb {
-            b'd' | b'b' | b'o' | b'x' | b'X' | b'c' | b'U' => self.0.fmt(verb, f),
-            _ => f.extend(self.String().as_bytes()),
+        if crate::fmt::__stringer_serves(verb) {
+            crate::fmt::Format::fmt(&self.String(), verb, f);
+            return;
         }
+        return self.0.fmt(verb, f);
     }
 }
 
@@ -568,16 +570,14 @@ impl fmt::Format for Duration {
     // go: none — goish idiom: Go's Duration satisfies `Stringer`; see the
     //     note on `Format for Month`.
     fn fmt(&self, verb: u8, buf: &mut FmtBuf) {
-        let s = self.String();
-        match verb {
-            b's' | b'v' => {
-                buf.extend(s.as_bytes());
-            }
-            _ => {
-                // Fallback: print as a plain string for unknown verbs.
-                buf.extend(s.as_bytes());
-            }
+        // `%d` of a Duration is its nanoseconds, not "1m30s". This
+        // sent every verb to the string, calling it a "fallback ...
+        // for unknown verbs" — but %d, %o and %b are not unknown, and
+        // Go answers them with the number.
+        if crate::fmt::__stringer_serves(verb) {
+            return fmt::Format::fmt(&self.String(), verb, buf);
         }
+        return fmt::Format::fmt(&self.0, verb, buf);
     }
 }
 

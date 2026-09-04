@@ -328,6 +328,28 @@ pub(crate) fn fmt_one(v: &dyn Format, verb: byte, prec: i64, f: &mut FmtBuf) {
     v.fmt_prec(verb, prec, f);
 }
 
+// go: none — goish idiom: the verb list from Go's `handleMethods`
+//     (fmt/print.go), which goish's trait dispatch has to apply by
+//     hand at each type that is both a Stringer and a number.
+//
+/// Whether a type's `String()` serves this verb.
+///
+/// Go's `handleMethods` consults a Stringer for exactly `%v`, `%s`,
+/// `%q`, `%x` and `%X`, and formats the underlying VALUE for every
+/// other verb. So a `time.Duration` prints `1m30s` for %v and
+/// 90000000000 for %d — and `316d333073` for %x, which is the hex of
+/// "1m30s" rather than of the number, because %x is on this list.
+///
+/// A type that is both a Stringer and a number must apply this split
+/// itself, because goish's printer dispatches on a trait rather than
+/// reflecting: the blanket below sends every verb through the string,
+/// which is right for a type with no numeric identity and wrong for
+/// one that has it. `time::Duration`, `time::Month`, `time::Weekday`
+/// and `fs::FileMode` are the four in this tree.
+pub fn __stringer_serves(verb: byte) -> bool {
+    return matches!(verb, b'v' | b's' | b'q' | b'x' | b'X');
+}
+
 // Blanket so any user type that impls Stringer is automatically
 // formattable. Coherence: this doesn't conflict with the per-builtin
 // impls below because none of our builtins impl Stringer (we hand-
