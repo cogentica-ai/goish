@@ -3150,3 +3150,7 @@ path = "examples/halfclose_error_shape_ref_smoke.rs"
 [[example]]
 name = "sockopt_ref_smoke"
 path = "examples/sockopt_ref_smoke.rs"
+
+[[example]]
+name = "lookupport_ref_smoke"
+path = "examples/lookupport_ref_smoke.rs"

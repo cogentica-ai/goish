@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 8383,
+ "total": 8423,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -594,6 +594,8 @@
   },
   "src/net/lookup.rs": {
    "GOISH014": 23,
+   "GOISH018": 34,
+   "GOISH021": 5,
    "GOISH023": 23
   },
   "src/net/mac.rs": {
@@ -614,6 +616,9 @@
    "GOISH007": 2,
    "GOISH014": 10,
    "GOISH023": 9
+  },
+  "src/net/port_unix.rs": {
+   "GOISH021": 1
   },
   "src/net/tcpsock.rs": {
    "GOISH018": 23,

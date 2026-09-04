@@ -57,6 +57,8 @@ mod mac;
 pub mod mail;
 pub mod net;
 mod parse;
+pub mod port;
+pub mod port_unix;
 pub mod tcpsock;
 
 pub mod ip;
