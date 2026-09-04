@@ -51,8 +51,9 @@ use goish::os::signal;
 use goish::{fmt, string, syscall, time};
 
 /// Go's output, verbatim.
-const GO: [&str; 6] = [
+const GO: [&str; 7] = [
     "one-signal                 got=[user defined signal 1]",
+    "unregistered               got=[]",
     "two-channels               c1=[user defined signal 1] c2=[user defined signal 1]",
     "notify-additive            got=[user defined signal 2]",
     "full-channel-drops         got=1",
@@ -94,6 +95,16 @@ fn main() {
     chk(fmt::Sprintf!(
         "%-26s got=%s",
         string("one-signal"),
+        drain(&c1, 200)
+    ));
+
+    // A signal NOTHING registered for: delivered nowhere, and — since
+    // the runtime now catches every notifiable signal — survivable.
+    // Raising this used to kill the process outright.
+    me(syscall::SIGUSR2);
+    chk(fmt::Sprintf!(
+        "%-26s got=%s",
+        string("unregistered"),
         drain(&c1, 200)
     ));
 

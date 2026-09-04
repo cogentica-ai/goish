@@ -715,6 +715,55 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
         let _ = syscall::RtSigaction(syscall::SIGPIPE, &sa, core::ptr::null_mut());
     }
 
+    // Catch the signals Go catches and drops.
+    //
+    // Go's runtime installs a handler for every signal its sigtable
+    // marks `_SigNotify` (runtime/sigtab_linux_generic.go), whether or
+    // not the program ever imports os/signal. When one arrives and no
+    // channel is listening, `sigsend` fails, and — with no `_SigKill`
+    // or `_SigThrow` on that entry — the handler simply returns. The
+    // signal is dropped and the program lives.
+    //
+    // goish installed a handler only for signals passed to
+    // `signal.Notify`, so everything else took the KERNEL default.
+    // For these entries that default is to terminate, which made a
+    // goish program killable by a signal it never asked about —
+    // SIGWINCH included, and a terminal sends that on every resize.
+    // Measured 2026-09-04: a probe registered for SIGUSR1 died with
+    // rc=140 the moment the next case raised SIGUSR2.
+    //
+    // This is the same class as the SIGPIPE ignore above, and the same
+    // fix. The trampoline counts the delivery and sysmon forwards it
+    // to whichever channels registered; with none, it is dropped —
+    // which is exactly Go's behaviour.
+    //
+    // NOT installed here, each for a reason:
+    //   * SIGPIPE (13) — SIG_IGN above, which is stronger.
+    //   * SIGCHLD (17) — its default is ALREADY ignore, so nothing is
+    //     needed, and SIG_IGN would make the kernel auto-reap and
+    //     break exec.Cmd.Wait's wait4.
+    //   * SIGCONT/TSTP/TTIN/TTOU (18, 20-22) — Go marks these
+    //     `_SigDefault`: unhandled, it RESTORES the default and
+    //     re-raises, so Ctrl-Z still suspends. Catching them without
+    //     that logic would break job control.
+    //   * SIGURG (23) — goish's own preemption uses it; the handler
+    //     below owns it.
+    //   * SIGHUP/SIGINT/SIGTERM (1, 2, 15) — `_SigNotify+_SigKill`:
+    //     Go DIES on these when nothing is listening, so the kernel
+    //     default already matches.
+    //   * everything fatal (SIGILL, SIGSEGV, SIGBUS, SIGFPE, …) —
+    //     `_SigThrow`/`_SigPanic`, which goish reports its own way.
+    for sig in [
+        syscall::SIGUSR1,
+        syscall::SIGUSR2,
+        syscall::SIGALRM,
+        syscall::SIGXCPU,
+        syscall::SIGXFSZ,
+        syscall::SIGWINCH,
+    ] {
+        crate::runtime::signal::install_handler(sig);
+    }
+
     // Install the SIGURG preempt handler (M18b-α phase B).
     // Decision-only: counts would-be preempts but does not modify
     // ucontext yet. Phase C wires the asyncPreempt trampoline.
