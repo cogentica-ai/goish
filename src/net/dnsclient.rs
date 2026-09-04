@@ -9,10 +9,43 @@
 //
 //     Until then, note what "Port of" above does NOT mean: nothing in
 //     this file is anchored, so no coverage, anchor or body-diff tier
-//     can compare any of it to the Go it names. Two defects have come
-//     out of reading it by hand — a xorshift DNS transaction ID
-//     (7a089bc) and a truncated response returned as success — and it
-//     has not been read in full.
+//     can compare any of it to the Go it names.
+//
+// ─── What has been diffed against Go, 2026-09-04 ─────────────────────
+//
+// Read against net/dnsclient.go and net/dnsclient_unix.go function by
+// function. Two defects, each fixed with a smoke or a regression run:
+//
+//   * the transaction ID came from a xorshift64 with a hardcoded seed
+//     under a heading that called it "poor-man's random using clock",
+//     where Go uses the OS-seeded runtime generator. That ID is the
+//     defence against off-path spoofing (7a089bc).
+//   * a UDP response with TC set, whose TCP retry then failed, was
+//     returned as a SUCCESS. Go returns the TCP error. A truncated
+//     answer is an incomplete record set the caller cannot tell from a
+//     complete one.
+//
+// Checked and found to MATCH Go, so the next reader need not redo it:
+//
+//   * checkResponse verifies the Response flag, the ID, and the
+//     question's type, class and case-insensitive name — Go's list
+//     exactly. This is the other half of the spoofing defence.
+//   * dnsPacketRoundTrip IGNORES a non-matching UDP response and keeps
+//     waiting, rather than failing the lookup. Go's comment explains
+//     why (golang.org/issue/13281): a forged packet must not be able
+//     to kill a query. goish continues on all three failure modes.
+//   * checkHeader's five branches, including the lame-referral rule
+//     from golang.org/issue/15434 and the ServerFailure/other split.
+//   * extractExtendedRCode's OPT walk, including `hasAdd` being set
+//     before the type test.
+//   * skipToAnswer's ErrSectionDone-is-NoSuchHost distinction.
+//   * tryOneName's attempt x server loops, and both early returns on
+//     errNoSuchHost — an authoritative negative answer must not be
+//     retried against the remaining servers.
+//   * dnsStreamRoundTrip: the length prefix bounds the allocation at
+//     65535 as Go's does, and a checkResponse mismatch on TCP is an
+//     error rather than a retry, which is right for a stream from a
+//     peer already chosen.
 //
 // Provides:
 //   - newRequest        — build a DNS query packet using dnsmessage::Builder

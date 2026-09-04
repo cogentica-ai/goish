@@ -54,6 +54,34 @@ regression there is an outage rather than a test failure. Dispatch
    `crypto/ecdsa/ecdsa.rs`. It is the one pair `split_brain_check.py`
    still reports, deliberately and with a note saying so.
 
+## 2b. Unanchored files — the code no tier can check
+
+Added 2026-09-04, because it turned out to be where the defects were.
+
+A file with no `// go: sdk` anchor is invisible to every tier this
+project has: `port_coverage.py` cannot count it, `anchor_check.py` has
+nothing to check, and `port_bodydiff.py` has no Go body to compare. If
+it also carries a header saying "Port of …", it reads as done. Reading
+three such files against their Go on one afternoon produced seven
+defects, in three separate packages:
+
+| file | lines | found |
+|---|--:|---|
+| `crypto/tls/record.rs` | 938 | no record-length bound; no decrypted-length bound; a padding oracle (distinguishable bad-MAC vs bad-padding, and an early return) |
+| `crypto/tls/session.rs` | 145 | cached tickets never expired; the cache was unbounded, so the peer decided how much it held |
+| `net/dnsclient.rs` | 1143 | a xorshift transaction ID where Go uses the OS-seeded generator; a truncated answer returned as success |
+
+All three now carry a "What has been diffed against Go" block listing
+what was checked CLEAN as well as what was fixed, so the next reader
+starts where this left off rather than repeating it.
+
+`scripts/example_coverage.py` finds packages no example imports. The
+equivalent for this class is a one-liner — every `.rs` over 200 lines
+with zero `go: sdk` anchors — and the remaining candidates are
+`encoding/json/jsontext/mod.rs` (1500) and `runtime/netpoll/mod.rs`
+(1112). `crypto/ssh/mod.rs` (1235) was read and is invented with no Go
+counterpart at all; its header says what that means.
+
 ## 3. Gaps other packages will hit next
 
 Re-measured 2026-09-04; four of the five entries this section used to
