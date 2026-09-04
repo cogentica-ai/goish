@@ -3278,3 +3278,7 @@ path = "examples/elliptic_unmarshal_ref_smoke.rs"
 [[example]]
 name = "httpproxy_ref_smoke"
 path = "examples/httpproxy_ref_smoke.rs"
+
+[[example]]
+name = "ioutil_ref_smoke"
+path = "examples/ioutil_ref_smoke.rs"
