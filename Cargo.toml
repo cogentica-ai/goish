@@ -3198,3 +3198,7 @@ path = "examples/atomic_ref_smoke.rs"
 [[example]]
 name = "errors_ref_smoke"
 path = "examples/errors_ref_smoke.rs"
+
+[[example]]
+name = "cipher_edge_ref_smoke"
+path = "examples/cipher_edge_ref_smoke.rs"
