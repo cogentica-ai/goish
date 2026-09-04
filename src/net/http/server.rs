@@ -4024,7 +4024,11 @@ pub fn Serve(ln: net::Listener, handler: Arc<dyn Handler>) -> error {
 }
 
 /// Decide whether to keep the connection alive after this request.
-/// Mirrors Go's `Request.shouldClose()` (request.go:1450) inverted.
+/// Mirrors Go's `shouldClose` INVERTED — and that function is a
+/// package-level one in transfer.go:748, not a method on Request.
+/// This used to cite it as a Request method in request.go, at a line
+/// that holds a MultipartForm check — neither the right file nor the
+/// right kind of declaration.
 ///
 /// HTTP/1.1: keep-alive default; `Connection: close` opts out.
 /// HTTP/1.0: close default; `Connection: keep-alive` opts in.

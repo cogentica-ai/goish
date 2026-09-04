@@ -120,7 +120,7 @@ pub fn NewReader<B: Into<string>>(body: slice<byte>, boundary: B) -> Reader {
 }
 
 impl Reader {
-    /// `(*Reader).NextPart()` (multipart.go:343) — return the next
+    /// `(*Reader).NextPart()` (multipart.go:371) — return the next
     /// part. Returns `io::EOF` after the last part.
     pub fn NextPart(&mut self) -> (Part, error) {
         if self.finished {

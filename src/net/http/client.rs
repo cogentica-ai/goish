@@ -2959,7 +2959,7 @@ fn has_port(host: &string) -> bool {
 /// ready to write to the underlying conn — head plus fully-encoded
 /// body (chunked framing included when the transferWriter chose it).
 ///
-/// Loose port of `(*Request).write` (request.go:603). The Client's
+/// Loose port of `(*Request).write` (request.go:582). The Client's
 /// send path avoids this buffered form: it writes the head, then
 /// STREAMS the body with `transferWriter::writeBody` directly onto
 /// the conn.
@@ -3100,7 +3100,7 @@ pub fn serialize_request_head(
         let _ = b.WriteString(string::from_bytes(&hb.Bytes()));
     }
 
-    // Go (request.go:707): err = r.Header.writeSubset(w,
+    // Go (header.go:190, called from request.go): err = r.Header.writeSubset(w,
     //     reqWriteExcludeHeader, trace)
     //
     // This used to be a hand-rolled loop that skipped only Host and

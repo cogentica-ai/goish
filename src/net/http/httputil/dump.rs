@@ -73,7 +73,7 @@ pub fn drainBody(
 /// the first CRLFCRLF (dump.go:160-165).
 pub fn DumpRequestOut(req: &Request, body: bool) -> (slice<byte>, error) {
     // Go computes host the way the transport does: URL.Host, unless
-    // Request.Host overrides (request write, request.go:665).
+    // Request.Host overrides (request write; the field is request.go:245).
     let host = if req.Host.Len() != 0 {
         req.Host.clone()
     } else {

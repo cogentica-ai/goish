@@ -43,7 +43,7 @@ pub struct Request {
     pub Header: Header,
     pub Host: string,
     pub ContentLength: int, // -1 if unknown
-    /// `Request.TransferEncoding` (request.go:196) — Go: "lists the
+    /// `Request.TransferEncoding` (request.go:212) — Go: "lists the
     /// transfer encodings from outermost to innermost. An empty list
     /// denotes the 'identity' encoding. … Transfer-Encoding can
     /// usually be ignored; chunked encoding is automatically added
@@ -202,7 +202,7 @@ impl Request {
 
     // go: sdk 1.25.5 net/http/request.go:428-430 Request.Cookies
     /// `r.Cookies()` — parse all `Cookie:` request headers. Mirrors
-    /// `(*Request).Cookies()` (request.go:404).
+    /// `(*Request).Cookies()` (request.go:428).
     pub fn Cookies(&self) -> slice<super::cookie::Cookie> {
         super::cookie::readCookies(&self.Header, &string::new())
     }
@@ -223,7 +223,7 @@ impl Request {
     // go: sdk 1.25.5 net/http/request.go:448-456 Request.Cookie
     /// `r.Cookie(name)` — return the named cookie, or
     /// `(Cookie::default(), ErrNoCookie)` if absent. Mirrors
-    /// `(*Request).Cookie(name)` (request.go:418).
+    /// `(*Request).Cookie(name)` (request.go:448).
     pub fn Cookie<S: Into<string>>(&self, name: S) -> (super::cookie::Cookie, error) {
         let matches = super::cookie::readCookies(&self.Header, &name.into());
         if matches.Len() > 0 {
@@ -639,7 +639,7 @@ impl Request {
 
     // go: sdk 1.25.5 net/http/request.go:464-471 Request.AddCookie
     /// `r.AddCookie(c)` — append a cookie to the `Cookie:` request
-    /// header. Mirrors `(*Request).AddCookie(c)` (request.go:434);
+    /// header. Mirrors `(*Request).AddCookie(c)` (request.go:464);
     /// per RFC 6265 the request only has a single `Cookie:` line, so
     /// repeat calls fold into one space+`; `-separated value.
     pub fn AddCookie(&mut self, c: &super::cookie::Cookie) {
