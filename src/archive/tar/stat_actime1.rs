@@ -11,7 +11,6 @@
 
 use crate::syscall;
 use crate::time;
-use crate::types::int;
 
 // go: sdk 1.25.5 archive/tar/stat_actime1.go:14-16 statAtime
 /// The file's last-access time.

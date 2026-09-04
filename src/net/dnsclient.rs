@@ -39,7 +39,6 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU64, Ordering};
 
 use super::dnsconfig::{dns_read_config, DnsConfig};
 use super::dnsmessage as dns;
@@ -64,28 +63,40 @@ crate::var! {
 
 const MAX_DNS_PACKET_SIZE: usize = 1232;
 
-// ─── randInt (poor-man's random using clock) ──────────────────────────────
-
-static RAND_STATE: AtomicU64 = AtomicU64::new(0x6c62272e07bb0142);
-
-fn rand_u64() -> u64 {
-    // xorshift64
-    let mut x = RAND_STATE.load(Ordering::Relaxed);
-    // Mix in clock to seed variance across calls
-    let mut ts: [i64; 2] = [0, 0];
-    unsafe {
-        syscall::syscall2(228, 1, ts.as_mut_ptr() as usize);
-    } // CLOCK_GETTIME
-    x ^= (ts[1] as u64).wrapping_add(ts[0] as u64 * 1_000_000_000);
-    x ^= x << 13;
-    x ^= x >> 7;
-    x ^= x << 17;
-    RAND_STATE.store(x, Ordering::Relaxed);
-    x
-}
-
-fn rand_u16() -> u16 {
-    (rand_u64() >> 32) as u16
+// ─── randInt ───────────────────────────────────────────────────────────────
+//
+// Go: dnsclient.go:22 — `func randInt() int { return
+//     int(uint(runtime_rand()) >> 1) }`, where `runtime_rand` is the
+//     runtime's generator, seeded from the OS.
+//
+// This was a xorshift64 with a hardcoded seed, mixed with
+// clock_gettime, under a heading that called it "poor-man's random
+// using clock". It produced the DNS TRANSACTION ID.
+//
+// That ID is the whole of a stub resolver's defence against off-path
+// spoofing: an attacker who can guess it, and the source port, can race
+// a forged answer ahead of the real one and be believed. Sixteen bits
+// is already thin, which is exactly why the value has to be
+// unpredictable rather than merely varying. A xorshift with a known
+// constant seed is recoverable from a few observed IDs, and the clock
+// mixed into it is something an off-path attacker can approximate to
+// within microseconds.
+//
+// goish has a real CSPRNG — the one `crypto/tls` draws record IVs from
+// — so this uses it. `crypto::rand::Read` can fail; Go's cannot, so
+// there is no Go behaviour to copy for that case, and the caller is
+// given the error rather than a guessable ID.
+fn rand_u16() -> (u16, error) {
+    let mut b = crate::goslice::slice::<u8>::__from_vec(vec![0u8; 2]);
+    let (n, err) = crate::crypto::rand::Read(&mut b);
+    if !err.IsNil() {
+        return (0, err);
+    }
+    if n != 2 {
+        return (0, errors::New("net: short read from random source"));
+    }
+    let v = b.__into_vec();
+    return (((v[0] as u16) << 8) | (v[1] as u16), errors::nil);
 }
 
 // ─── newRequest ────────────────────────────────────────────────────────────
@@ -93,7 +104,10 @@ fn rand_u16() -> u16 {
 /// Build a DNS query for `q`. Returns (id, udpReq, tcpReq, err).
 /// udpReq is the bare DNS message; tcpReq has a 2-byte length prefix.
 pub fn new_request(q: dns::Question, ad: bool) -> (u16, Vec<u8>, Vec<u8>, error) {
-    let id = rand_u16();
+    let (id, rerr) = rand_u16();
+    if !rerr.IsNil() {
+        return (0, Vec::new(), Vec::new(), rerr);
+    }
     let mut buf = vec![0u8; 2];
     buf.resize(2, 0); // 2-byte placeholder for TCP len prefix
     let mut b = dns::NewBuilder(

@@ -26,7 +26,6 @@ use crate::errors::{error, nil};
 use crate::os::user;
 use crate::strconv;
 use crate::syscall;
-use crate::types::int;
 
 use super::common::Header;
 use super::{TypeBlock, TypeChar};
