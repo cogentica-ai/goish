@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 8433,
+ "total": 8435,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -641,6 +641,10 @@
    "GOISH014": 4,
    "GOISH015": 1,
    "GOISH023": 19
+  },
+  "src/net/textproto/writer.rs": {
+   "GOISH018": 1,
+   "GOISH021": 1
   },
   "src/nilval.rs": {
    "GOISH014": 8,

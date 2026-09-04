@@ -944,6 +944,17 @@ impl<W: io::Writer> Writer<W> {
         return (toint(nn), nil);
     }
 
+    // go: none — goish-only: the write-side twin of `Reader::__rd_mut`.
+    // Go reaches a bufio.Writer's sink by keeping its own reference to
+    // the value it wrapped; Rust moved it in, so callers that need it
+    // back — net/textproto's Conn, and tests that read what was
+    // written — go through here.
+    /// The wrapped writer. Bypasses the buffer: Flush first.
+    #[doc(hidden)]
+    pub fn __wr_mut(&mut self) -> &mut W {
+        return &mut self.wr;
+    }
+
     // go: sdk 1.25.5 bufio/bufio.go:704-714 Writer.WriteByte
     /// `WriteByte(c)` — append one byte.
     pub fn WriteByte(&mut self, c: byte) -> error {

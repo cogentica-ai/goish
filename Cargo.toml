@@ -3186,3 +3186,7 @@ path = "examples/signal_notify_ref_smoke.rs"
 [[example]]
 name = "signal_ignore_ref_smoke"
 path = "examples/signal_ignore_ref_smoke.rs"
+
+[[example]]
+name = "textproto_writer_ref_smoke"
+path = "examples/textproto_writer_ref_smoke.rs"
