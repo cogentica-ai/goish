@@ -99,6 +99,23 @@ fn nested_err<S: AsRef<str>>(s: S, err: error) -> error {
 
 // ─── Type ─────────────────────────────────────────────────────────────────
 
+// Divergence, shared by Type, Class, OpCode and RCode below: Go
+// declares each as a NAMED type (`type Type uint16`) carrying
+// `String()` and `GoString()` off a name table, so `%v` of a Type
+// prints `TypeA` and of an RCode prints `RCodeSuccess`. These are
+// aliases, which cannot carry a method, so `%v` prints 1 and 0.
+//
+// Measured against Go 1.25.5 on a packed 247-byte response: every
+// parsed VALUE agrees — names through compression pointers, TTLs, and
+// the A/AAAA/CNAME/MX/TXT/NS/PTR/SOA bodies — and the rendering of
+// these four is the only thing that differs.
+//
+// Left alone deliberately. Nothing in this tree formats one (Go's own
+// net package uses them as values too), so the divergence is currently
+// unobservable; closing it means making four newtypes and touching
+// every comparison and struct field in this 1978-line file plus net's
+// resolver. Adding a `TypeString()` helper nothing calls would be
+// worse — API written to make a measurement look clean.
 pub type Type = u16;
 
 pub const TypeA: Type = 1;
