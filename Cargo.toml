@@ -3246,3 +3246,7 @@ path = "examples/slice_alias_ref_smoke.rs"
 [[example]]
 name = "map_semantics_ref_smoke"
 path = "examples/map_semantics_ref_smoke.rs"
+
+[[example]]
+name = "utf8bad_ref_smoke"
+path = "examples/utf8bad_ref_smoke.rs"
