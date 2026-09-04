@@ -290,10 +290,31 @@ pub fn encrypt_record(
     }
 
     // 3. Generate random explicit IV (TLS 1.2 per-record)
+    //
+    // Go: conn.go:500 — `if _, err := io.ReadFull(rand, explicitNonce);
+    //     err != nil { return nil, err }`.
+    //
+    // This discarded the result with `let _ =`. A failed or short read
+    // left `iv_buf` as the zeros it was initialised to, and the record
+    // went out encrypted under a PREDICTABLE IV — which for CBC is the
+    // BEAST precondition, and leaks equality between plaintext blocks
+    // across records. `encrypt_record` already returns an error; it
+    // simply was not asked for.
     let mut iv_buf = [0u8; AES_BLOCK_SIZE];
     {
         let mut iv_slice = slice::<byte>::__from_vec(alloc::vec![0u8; AES_BLOCK_SIZE]);
-        let _ = rand::Read(&mut iv_slice);
+        let (n, rerr) = rand::Read(&mut iv_slice);
+        if !rerr.IsNil() {
+            return (slice::<byte>::__from_vec(Vec::new()), rerr);
+        }
+        // A short read is as dangerous as an error: the untouched tail
+        // stays zero. Go uses ReadFull, which treats it the same way.
+        if n as usize != AES_BLOCK_SIZE {
+            return (
+                slice::<byte>::__from_vec(Vec::new()),
+                errors::New("tls: short read from random source"),
+            );
+        }
         let iv_vec = iv_slice.__into_vec();
         iv_buf.copy_from_slice(&iv_vec[..AES_BLOCK_SIZE]);
     }

@@ -3306,3 +3306,7 @@ path = "examples/tls_record_overflow_smoke.rs"
 [[example]]
 name = "tls_padding_oracle_smoke"
 path = "examples/tls_padding_oracle_smoke.rs"
+
+[[example]]
+name = "tls_record_iv_smoke"
+path = "examples/tls_record_iv_smoke.rs"
