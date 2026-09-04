@@ -19,9 +19,10 @@
 //
 // A statistical test cannot prove unpredictability, and this does not
 // pretend to. What it checks is what the OLD code would fail: 64 draws
-// all distinct, no constant spacing between them, and no zeros — the
-// last because the new code returns an error rather than leaving the
-// buffer it failed to fill.
+// all distinct, and no constant spacing between them. The zero check
+// is a cheap sanity assertion, not a guard against a real failure
+// mode — `crypto::rand::Read` fatals rather than returning a
+// half-filled buffer, as Go's does.
 #![no_std]
 #![no_main]
 #![allow(non_snake_case)]

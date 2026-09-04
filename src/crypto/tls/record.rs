@@ -332,12 +332,18 @@ pub fn encrypt_record(
     // Go: conn.go:500 — `if _, err := io.ReadFull(rand, explicitNonce);
     //     err != nil { return nil, err }`.
     //
-    // This discarded the result with `let _ =`. A failed or short read
-    // left `iv_buf` as the zeros it was initialised to, and the record
-    // went out encrypted under a PREDICTABLE IV — which for CBC is the
-    // BEAST precondition, and leaks equality between plaintext blocks
-    // across records. `encrypt_record` already returns an error; it
-    // simply was not asked for.
+    // The result is checked, but the branch is UNREACHABLE today and
+    // saying so is the point. goish's `crypto::rand::Read` matches Go's
+    // contract: on a read failure it calls `fatal`, which diverges, so
+    // it can neither return a non-nil error nor short-read. The `let _
+    // =` this replaced was therefore correct, and an earlier version of
+    // this comment claiming it left a zero IV — the BEAST precondition
+    // — was wrong. See the correction in the commit that added this
+    // note.
+    //
+    // Kept because it costs nothing and it is the check Go writes; if
+    // that never-fails contract is ever relaxed, this is already
+    // right.
     let mut iv_buf = [0u8; AES_BLOCK_SIZE];
     {
         let mut iv_slice = slice::<byte>::__from_vec(alloc::vec![0u8; AES_BLOCK_SIZE]);

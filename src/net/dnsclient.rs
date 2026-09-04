@@ -83,9 +83,10 @@ const MAX_DNS_PACKET_SIZE: usize = 1232;
 // within microseconds.
 //
 // goish has a real CSPRNG — the one `crypto/tls` draws record IVs from
-// — so this uses it. `crypto::rand::Read` can fail; Go's cannot, so
-// there is no Go behaviour to copy for that case, and the caller is
-// given the error rather than a guessable ID.
+// — so this uses it. The error is checked, though the branch is
+// unreachable: `crypto::rand::Read` calls `fatal` on failure, matching
+// Go's contract that it never returns one. The substantive change here
+// is the SOURCE, not the error handling.
 fn rand_u16() -> (u16, error) {
     let mut b = crate::goslice::slice::<u8>::__from_vec(vec![0u8; 2]);
     let (n, err) = crate::crypto::rand::Read(&mut b);
