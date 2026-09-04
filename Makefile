@@ -107,6 +107,7 @@ ifaces:
 # the same file said "no space left on device". Reports rather than
 # fails: a deliberate divergence is fine when it is written down.
 split-brain:
+	@python3 scripts/hook_pair_check.py
 	@python3 scripts/split_brain_check.py
 
 lint-new:

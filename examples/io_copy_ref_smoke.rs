@@ -1,26 +1,35 @@
-// io_copy_ref_smoke — which of Go's two `Copy` fast paths goish takes.
+// io_copy_ref_smoke — that `Copy` takes Go's WriterTo fast path.
 //
 // Go's `copyBuffer` begins with `src.(WriterTo)`, then
-// `dst.(ReaderFrom)`, and returns through whichever hits. goish always
-// runs its 32 KiB loop. The BYTES are identical either way, so nothing
-// here is a correctness bug — but the difference is observable to a
-// writer that counts calls, and this pins it rather than leaving it to
-// be discovered.
+// `dst.(ReaderFrom)`, and returns through whichever hits. goish ran its
+// 32 KiB loop unconditionally: the traits were real and the
+// implementors registered, but the assertion could not see through a
+// `&mut dyn Reader`, so copying 100 KiB out of a `strings.Reader` was
+// four `Write` calls where Go makes one.
 //
-// The traits are real and the implementors ARE registered; `Copy`
-// cannot ask. goish resolves an interface-on-interface assertion
-// through a registry keyed on the concrete type, reached via
-// `core::any`, which requires `'static`. `Copy` takes `&mut dyn
-// Reader`, whose object lifetime is the borrow's. Requiring `'static`
-// does not stay local — it breaks `CopyN`, which limits through a
-// `LimitedReader<&mut dyn Reader>`, and cascades to every caller
-// holding a reader by reference. Measured, not guessed: nine errors in
-// this crate alone before reaching the examples.
+// The bytes were never in question — this is a count of write calls,
+// not correctness — but the same miss is what keeps `archive/tar`'s
+// sparse `WriteTo` unreachable, and that one is a real behaviour
+// difference: Go seeks over holes and writes a sparse file to disk.
 //
-// Each row is (Go, goish). Rows where they differ are marked
-// DIVERGENT, and the last two — a reader with no WriteTo, and a
-// destination with ReadFrom — agree, which is what says the gap is
-// the assertion and not the loop.
+// Two things had to be true at once. The assertion goes through
+// `core::any`, so `src` must be `'static`; that costs one call site,
+// `CopyN`, which limits through a borrowing `LimitedReader` and now
+// uses the loop directly. And the concrete types need
+// `__goish_as_dyn_any_mut`, the `&mut` twin of a hook this tree
+// overrides 162 times in its immutable form and had almost nowhere in
+// its mutable one — which is why the assertion missed even for
+// `strings::Reader`, a type that IS registered for `WriterTo`.
+//
+// `dst.(ReaderFrom)` is deliberately NOT taken: the same `'static`
+// requirement on a destination would refuse a writer that borrows, and
+// `http::AsWriter(w)` over a `&dyn ResponseWriter` is exactly that.
+// Refusing writers Go accepts is not worth a count of write calls. So
+// the last row is not a fast path — it checks that a destination with
+// ReadFrom still receives every byte through the loop.
+//
+// The fourth row is the control that did not move: a reader with no
+// WriteTo puts Go in the same loop goish uses.
 #![no_std]
 #![no_main]
 #![allow(non_snake_case)]
@@ -40,11 +49,11 @@ use goish::types::{byte, int};
 // (Go 1.25.5, goish)
 const ROWS: [(&str, &str); 5] = [
     ("strings.Reader             n=102400 writes=1 bytes=102400",
-     "strings.Reader             n=102400 writes=4 bytes=102400"),
+     "strings.Reader             n=102400 writes=1 bytes=102400"),
     ("bytes.Reader               n=102400 writes=1 bytes=102400",
-     "bytes.Reader               n=102400 writes=4 bytes=102400"),
+     "bytes.Reader               n=102400 writes=1 bytes=102400"),
     ("bytes.Buffer               n=102400 writes=1 bytes=102400",
-     "bytes.Buffer               n=102400 writes=4 bytes=102400"),
+     "bytes.Buffer               n=102400 writes=1 bytes=102400"),
     ("plain (no WriteTo)         n=102400 writes=4 bytes=102400",
      "plain (no WriteTo)         n=102400 writes=4 bytes=102400"),
     ("dst bytes.Buffer           n=102400 len=102400",

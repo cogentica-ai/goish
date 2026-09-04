@@ -310,51 +310,59 @@ crate::var! {
 ///
 /// Buffer size: 32 KiB (matches Go's default genericReadFrom path).
 ///
-/// # Divergence: the two fast paths are not taken
+/// # The WriterTo fast path
 ///
 /// Go's `copyBuffer` begins with `src.(WriterTo)` and then
-/// `dst.(ReaderFrom)`, and returns through whichever hits. goish always
-/// runs the loop. The copied BYTES are identical either way — this
-/// costs write calls, not correctness — but it is visible to a writer
-/// that counts them: copying 100 KiB out of a `strings.Reader` is one
-/// `Write` in Go and four here. See `io_copy_ref_smoke`.
+/// `dst.(ReaderFrom)`, returning through whichever hits. This takes the
+/// first and not the second, and the asymmetry is deliberate.
 ///
-/// It is not an oversight, and the traits above are real and
-/// registered; `Copy` cannot ask. goish resolves an interface-on-
-/// interface assertion through a registry keyed on the concrete type,
-/// reached via `core::any`, which requires the value to be `'static`.
-/// `Copy` takes `&mut dyn Reader`, whose object lifetime is the
-/// borrow's. Go has no such constraint because it has no lifetimes.
+/// goish resolves an interface-on-interface assertion through a
+/// registry keyed on the concrete type, reached via `core::any`, which
+/// requires `'static`. On `src` that is nearly free: it costs one call
+/// site in this crate — `CopyN`, which limits through a borrowing
+/// `LimitedReader` and calls `copy_loop` directly — and nothing
+/// outside it.
 ///
-/// Two things were tried, and what each cost is worth recording.
+/// On `dst` it is NOT free, which is why `dst` stays unbounded. A
+/// writer that BORROWS is an ordinary thing to pass here —
+/// `http::AsWriter(w)` over a `&dyn ResponseWriter` is the shape
+/// `serveContent` needs — and such an adapter is not `'static`. Go has
+/// no such constraint because it has no lifetimes; taking
+/// `dst.(ReaderFrom)` would mean refusing writers Go accepts, and a
+/// count of write calls is not worth an API that rejects real callers.
 ///
-/// Requiring `'static` operands works, and is CHEAPER than it looks:
-/// it breaks exactly one call site in this crate — `CopyN`, which
-/// limits through a borrowing `LimitedReader<&mut dyn Reader>` — and
-/// none outside it. (An earlier note here said nine; that count came
-/// from a broken intermediate state, not from the change.) `CopyN`
-/// can limit with its own loop instead, giving up only `dst`'s
-/// ReaderFrom path.
-///
-/// What actually blocks it is one layer down. Reaching the registry
-/// through a `&mut` needs `__goish_as_dyn_any_mut`, and
-/// `#[goish::interface]` emits the override only for the immutable
-/// `__goish_as_dyn_any` — 162 impls in this tree carry that one, and
-/// almost none carry the mutable twin, so the assertion misses even
-/// for `strings::Reader`, which IS registered for `WriterTo`.
-/// Measured, not assumed: with the `'static` bound in place the hook
-/// returned `None` on every call.
-///
-/// So the fix belongs in goish-macros — emit the mutable override
-/// wherever the immutable one is emitted — and not here. A defaulted
-/// hook on `Reader`/`Writer` is not an alternative: the macro's `&mut
-/// T` forwarding blanket is skipped for any trait with a defaulted
-/// method, which makes `&mut dyn Reader` stop being a `Reader` at all.
+/// Reaching the registry through a `&mut` also needs the concrete type
+/// to override `__goish_as_dyn_any_mut`. The tree overrides the
+/// immutable `__goish_as_dyn_any` 162 times and had the mutable twin
+/// almost nowhere, so this assertion missed even for `strings::Reader`,
+/// which is registered for `WriterTo`. Both hooks are now on every
+/// type implementing `WriterTo` or `ReaderFrom`, and
+/// `scripts/hook_pair_check.py` keeps them together — it found
+/// `NopCloserWriterToImpl` missing within a minute of being written.
+// goishlint:ignore GOISH023 — the body ends in an infinite `loop` whose
+pub fn Copy(dst: &mut dyn Writer, src: &mut (dyn Reader + 'static)) -> (i64, error) {
+    if let Some(any) = src.__goish_as_dyn_any_mut() {
+        if let Some(wt) =
+            <crate::d!(WriterTo) as crate::goany::DowncastableFromAnyMut>::from_any_mut(any)
+        {
+            return wt.WriteTo(dst);
+        }
+    }
+    return copy_loop(dst, src);
+}
+
+// go: sdk 1.25.5 io/io.go:407-456 copyBuffer
+// goishlint:ignore GOISH014 copy_loop — the anchor names the tail of
+//     Go's `copyBuffer`: the read/write loop after the two interface
+//     assertions. Go keeps them in one function; here the assertions
+//     need a `'static` operand and the loop does not, so they are
+//     split and `CopyN` reaches the loop directly.
 // goishlint:ignore GOISH023 — the body ends in an infinite `loop` whose
 //     every exit is a `return` from inside it, so there is no tail
 //     expression to make explicit. Go writes the same shape: `for { … }`
 //     with returns in the body.
-pub fn Copy(dst: &mut dyn Writer, src: &mut dyn Reader) -> (i64, error) {
+/// The read/write loop, with no fast path. 32 KiB buffer.
+fn copy_loop(dst: &mut dyn Writer, src: &mut dyn Reader) -> (i64, error) {
     let mut total: i64 = 0;
     let mut buf = crate::make!([]byte, 32 * 1024);
     let eof: error = EOF.into();
@@ -587,6 +595,20 @@ impl ReaderFrom for Discard {
 }
 
 impl Writer for Discard {
+    // go: none — goish idiom: the hidden Any-view hooks every
+    // `#[goish::interface]` concrete impl overrides so an assertion on
+    // a `dyn io::Reader` / `dyn io::Writer` can reach this type. Go's
+    // itabs make them unnecessary. Without the MUTABLE one, `io::Copy`
+    // misses `src.(WriterTo)` / `dst.(ReaderFrom)` and the fast-path
+    // impl on this type is unreachable through the interface.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: see `__goish_as_dyn_any`.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+
     // go: sdk 1.25.5 io/io.go:647-649 discard.Write
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
         // Go: return len(p), nil
@@ -685,7 +707,19 @@ pub struct NopCloserWriterToImpl<R: Reader + WriterTo> {
     Reader: R,
 }
 
-impl<R: Reader + WriterTo> Reader for NopCloserWriterToImpl<R> {
+impl<R: Reader + WriterTo + Send + Sync + 'static> Reader for NopCloserWriterToImpl<R> {
+    // go: none — goish idiom: the hidden Any-view hooks, so an
+    //     assertion on a `dyn Reader` can reach this type. Without the
+    //     mutable one `io::Copy` misses `src.(WriterTo)` and the
+    //     WriteTo below — the entire reason this wrapper exists — is
+    //     unreachable through the interface.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: see `__goish_as_dyn_any`.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
     // go: none — goish idiom: the promoted `Read` of Go's embedded
     //     `Reader`, written out. Same as `NopCloserImpl`.
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
@@ -976,7 +1010,7 @@ pub fn NewOffsetWriter(w: alloc::boxed::Box<dyn WriterAt>, off: i64) -> OffsetWr
 pub fn CopyN(dst: &mut dyn Writer, src: &mut dyn Reader, n: i64) -> (i64, error) {
     // Go: written, err = Copy(dst, LimitReader(src, n))
     let mut limited = LimitReader(src, toint(n));
-    let (written, err) = Copy(dst, &mut limited);
+    let (written, err) = copy_loop(dst, &mut limited);
     // Go: if written == n { return n, nil }
     if written == n {
         return (n, nil);

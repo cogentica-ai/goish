@@ -315,6 +315,20 @@ pub struct noBody {}
 pub const NoBody: noBody = noBody {};
 
 impl crate::io::Reader for noBody {
+    // go: none — goish idiom: the hidden Any-view hooks every
+    // `#[goish::interface]` concrete impl overrides so an assertion on
+    // a `dyn io::Reader` / `dyn io::Writer` can reach this type. Go's
+    // itabs make them unnecessary. Without the MUTABLE one, `io::Copy`
+    // misses `src.(WriterTo)` / `dst.(ReaderFrom)` and the fast-path
+    // impl on this type is unreachable through the interface.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: see `__goish_as_dyn_any`.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+
     // go: sdk 1.25.5 net/http/http.go:181-181 noBody.Read
     fn Read(&mut self, _p: &mut crate::slice<byte>) -> (int, crate::error) {
         return (0, crate::io::EOF.into());
