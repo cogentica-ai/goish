@@ -207,10 +207,19 @@ impl core::borrow::Borrow<[u8]> for string {
 // utf8's five `*InString` entry points — now take `AsRef<[byte]>` and
 // never come through here. See utf8bad_ref_smoke.
 //
-// Remaining consumers (locale::Parse, text/language::Parse,
-// reflect::StructTag::Get/Lookup, dnsmessage::NewName) all parse
-// structured ASCII where a non-UTF-8 input has no valid parse anyway;
-// each should still move to bytes so this impl can be deleted.
+// The truncation is now confined to three text parsers —
+// locale::Parse, text/language::Parse/MustParse and dnsmessage's
+// nested_err — which match structured ASCII (BCP-47 tags, locale
+// names) where a non-UTF-8 input has no valid parse either way, so a
+// truncated prefix and the raw bytes fail alike.
+//
+// Everything that treats a string as DATA rather than as text now
+// takes `AsRef<[byte]>` and never reaches this impl. That distinction
+// is load-bearing: xxh3's `HashString` laundered through here, and
+// once the conversion became checked, truncation made every string
+// with a leading invalid byte hash equal to "" — real collisions
+// (`HashString("a\xffb") == HashString("a")`). Hashing is not parsing;
+// it must see the bytes. See xxh3_bytes_smoke.
 impl AsRef<str> for string {
     #[inline]
     fn as_ref(&self) -> &str {

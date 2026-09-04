@@ -245,7 +245,7 @@ impl StructTag {
     /// because Go's source side has no `&str` distinction; widening
     /// the param is the priority #2 "Go idioms first" pattern from
     /// CLAUDE.md.
-    pub fn Get<S: AsRef<str>>(&self, key: S) -> string {
+    pub fn Get<S: AsRef<[byte]>>(&self, key: S) -> string {
         let (v, _) = self.Lookup(key);
         v
     }
@@ -254,8 +254,8 @@ impl StructTag {
     /// "present with empty value". Verbatim port of Go 1.25
     /// `reflect.StructTag.Lookup` (reflect/type.go:1056). Same widened
     /// param as `Get`.
-    pub fn Lookup<S: AsRef<str>>(&self, key: S) -> (string, bool) {
-        let key_bytes = key.as_ref().as_bytes();
+    pub fn Lookup<S: AsRef<[byte]>>(&self, key: S) -> (string, bool) {
+        let key_bytes = key.as_ref();
         let mut tag = self.raw.as_bytes();
 
         while !tag.is_empty() {

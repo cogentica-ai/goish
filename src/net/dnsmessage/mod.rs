@@ -16,6 +16,7 @@ use alloc::vec::Vec;
 
 use crate::errors::{self, error};
 use crate::gostring::string;
+use crate::types::byte;
 
 // ─── Error sentinels ────────────────────────────────────────────────────────
 
@@ -502,8 +503,8 @@ fn skip_name(msg: &[u8], off: usize) -> Result<usize, error> {
 
 // ─── NewName / MustNewName ────────────────────────────────────────────────
 
-pub fn NewName<S: AsRef<str>>(name: S) -> (Name, error) {
-    let b = name.as_ref().as_bytes();
+pub fn NewName<S: AsRef<[byte]>>(name: S) -> (Name, error) {
+    let b = name.as_ref();
     if b.len() > 255 {
         return (Name::default(), err_calc_len());
     }
@@ -513,7 +514,7 @@ pub fn NewName<S: AsRef<str>>(name: S) -> (Name, error) {
     (n, crate::errors::nil)
 }
 
-pub fn MustNewName<S: AsRef<str>>(name: S) -> Name {
+pub fn MustNewName<S: AsRef<[byte]>>(name: S) -> Name {
     let (n, err) = NewName(name);
     if err != crate::errors::nil {
         panic!("creating name");
