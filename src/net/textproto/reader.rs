@@ -746,3 +746,200 @@ fn trim_right_crlf(s: &string) -> string {
     }
     return string::from_bytes(&b[..end]);
 }
+
+// go: sdk 1.25.5 net/textproto/reader.go:339-342 dotReader
+/// Go's `dotReader`, the decoder `DotReader` hands back.
+///
+/// Go's holds a `*Reader` and the parent holds a `*dotReader` back, so
+/// `closeDot` can drain an abandoned decoder before the next read.
+/// goish's borrows the parent mutably instead, which makes the case
+/// closeDot guards against — reading the parent while a decoder is
+/// still live — impossible to write rather than something to clean up
+/// after. A decoder ABANDONED mid-block still leaves the stream
+/// mid-block, exactly as Go's does before closeDot runs; call
+/// `Drain` if the rest of the block must be consumed.
+pub struct dotReader<'a, R: io::Reader> {
+    r: &'a mut Reader<R>,
+    state: u8,
+}
+
+// go: none — goish-only: the state constants Go declares inside
+// `dotReader.Read` as a `const (… = iota)` block.
+const stateBeginLine: u8 = 0;
+const stateDot: u8 = 1;
+const stateDotCR: u8 = 2;
+const stateCR: u8 = 3;
+const stateData: u8 = 4;
+const stateEOF: u8 = 5;
+
+impl<'a, R: io::Reader> dotReader<'a, R> {
+    // go: sdk 1.25.5 net/textproto/reader.go:434-446
+    // (Go's `Reader.closeDot`; the name diverges because the receiver
+    // does — see the doc below.)
+    /// Go: "drains the current DotReader if any, making sure that it
+    /// reads until the ending dot line." goish cannot reach the
+    /// parent while this borrow is live, so the drain is a method on
+    /// the decoder rather than on the Reader.
+    pub fn Drain(&mut self) {
+        let mut buf = crate::make!([]byte, 128);
+        loop {
+            let (_n, err) = io::Reader::Read(self, &mut buf);
+            if !err.IsNil() {
+                return;
+            }
+        }
+    }
+}
+
+impl<'a, R: io::Reader> io::Reader for dotReader<'a, R> {
+    // go: sdk 1.25.5 net/textproto/reader.go:345-430 dotReader.Read
+    /// Go: "Run data through a simple state machine to elide leading
+    /// dots, rewrite trailing \r\n into \n, and detect ending .\r\n
+    /// line."
+    ///
+    /// Two details the state machine exists for, both measured: a
+    /// lone `\r` that is NOT followed by `\n` is emitted as data
+    /// (stateCR unreads and writes the saved `\r`), and a line
+    /// beginning `.` that is not the terminator has exactly ONE dot
+    /// removed — so "..stuffed" decodes to ".stuffed" and ".leading"
+    /// decodes to "leading".
+    ///
+    /// Running out of input before the terminator is
+    /// `io.ErrUnexpectedEOF`, not `io.EOF`, and whatever was decoded
+    /// so far still comes back.
+    fn Read(&mut self, b: &mut slice<byte>) -> (int, error) {
+        let mut n: usize = 0;
+        let mut err = nil;
+        while n < b.len() && self.state != stateEOF {
+            let (mut c, rerr) = self.r.R.ReadByte();
+            if !rerr.IsNil() {
+                if crate::errors::Is(rerr.clone(), io::EOF) {
+                    err = io::ErrUnexpectedEOF.into();
+                } else {
+                    err = rerr;
+                }
+                break;
+            }
+            match self.state {
+                stateBeginLine => {
+                    if c == b'.' {
+                        self.state = stateDot;
+                        continue;
+                    }
+                    if c == b'\r' {
+                        self.state = stateCR;
+                        continue;
+                    }
+                    self.state = stateData;
+                }
+                stateDot => {
+                    if c == b'\r' {
+                        self.state = stateDotCR;
+                        continue;
+                    }
+                    if c == b'\n' {
+                        self.state = stateEOF;
+                        continue;
+                    }
+                    self.state = stateData;
+                }
+                stateDotCR => {
+                    if c == b'\n' {
+                        self.state = stateEOF;
+                        continue;
+                    }
+                    // Go: "Not part of .\r\n. Consume leading dot and
+                    // emit saved \r."
+                    let _ = self.r.R.UnreadByte();
+                    c = b'\r';
+                    self.state = stateData;
+                }
+                stateCR => {
+                    if c == b'\n' {
+                        self.state = stateBeginLine;
+                    } else {
+                        // Go: "Not part of \r\n. Emit saved \r"
+                        let _ = self.r.R.UnreadByte();
+                        c = b'\r';
+                        self.state = stateData;
+                    }
+                }
+                _ => {
+                    if c == b'\r' {
+                        self.state = stateCR;
+                        continue;
+                    }
+                    if c == b'\n' {
+                        self.state = stateBeginLine;
+                    }
+                }
+            }
+            b[n] = c;
+            n += 1;
+        }
+        if err.IsNil() && self.state == stateEOF {
+            err = io::EOF.into();
+        }
+        let n64 = i64::try_from(n).unwrap_or(i64::MAX);
+        return (int::from(n64), err);
+    }
+}
+
+impl<R: io::Reader> Reader<R> {
+    // go: sdk 1.25.5 net/textproto/reader.go:333-337 Reader.DotReader
+    /// Go: "returns a new Reader that satisfies Reads using the
+    /// decoded text of a dot-encoded block read from r."
+    pub fn DotReader(&mut self) -> dotReader<'_, R> {
+        return dotReader {
+            r: self,
+            state: stateBeginLine,
+        };
+    }
+
+    // go: sdk 1.25.5 net/textproto/reader.go:449-451 Reader.ReadDotBytes
+    /// Go: "reads a dot-encoding and returns the decoded data."
+    pub fn ReadDotBytes(&mut self) -> (slice<byte>, error) {
+        let mut d = self.DotReader();
+        return io::ReadAll(&mut d);
+    }
+
+    // go: sdk 1.25.5 net/textproto/reader.go:457-483 Reader.ReadDotLines
+    /// Go: "reads a dot-encoding and returns a slice containing the
+    /// decoded lines, with the final \r\n or \n elided from each."
+    ///
+    /// Go's own comment says why this is not ReadDotBytes plus a
+    /// Split: "reading a line at a time avoids needing a large
+    /// contiguous block of memory and is simpler."
+    ///
+    /// A dot alone ends the block; any other leading dot has exactly
+    /// one removed. Running out of input first is
+    /// io.ErrUnexpectedEOF, with the lines read so far returned
+    /// beside it.
+    pub fn ReadDotLines(&mut self) -> (slice<string>, error) {
+        let mut v = slice::<string>::new();
+        let mut err = nil;
+        loop {
+            let (line, lerr) = self.ReadLine();
+            if !lerr.IsNil() {
+                if crate::errors::Is(lerr.clone(), io::EOF) {
+                    err = io::ErrUnexpectedEOF.into();
+                } else {
+                    err = lerr;
+                }
+                break;
+            }
+            // Go: "Dot by itself marks end; otherwise cut one dot."
+            let lb = line.as_bytes();
+            let line = if lb.len() > 0 && lb[0] == b'.' {
+                if lb.len() == 1 {
+                    break;
+                }
+                string::from_bytes(&lb[1..])
+            } else {
+                line
+            };
+            v = crate::append!(v, line);
+        }
+        return (v, err);
+    }
+}
