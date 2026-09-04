@@ -190,16 +190,18 @@ pub trait StringWriter {
 }
 
 // go: sdk 1.25.5 io/io.go:189-191 ReaderFrom
-/// Go's `io.ReaderFrom` (io.go:189). Used by `Copy` for fast-path
-/// fan-in when the destination supports it.
+/// Go's `io.ReaderFrom` (io.go:189). In Go this is one of the two
+/// fast paths `copyBuffer` takes; goish's `Copy` does NOT take it —
+/// see the note on `Copy`.
 #[goish::interface] // goishlint:ignore GOISH022 - `goish::interface`, not `goish::int`
 pub trait ReaderFrom {
     fn ReadFrom(&mut self, r: &mut dyn Reader) -> (i64, error);
 }
 
 // go: sdk 1.25.5 io/io.go:200-202 WriterTo
-/// Go's `io.WriterTo` (io.go:200). Used by `Copy` for fast-path
-/// fan-out when the source supports it.
+/// Go's `io.WriterTo` (io.go:200). In Go this is one of the two fast
+/// paths `copyBuffer` takes; goish's `Copy` does NOT take it — see the
+/// note on `Copy`.
 #[goish::interface] // goishlint:ignore GOISH022 - `goish::interface`, not `goish::int`
 pub trait WriterTo {
     fn WriteTo(&mut self, w: &mut dyn Writer) -> (i64, error);
@@ -307,6 +309,33 @@ crate::var! {
 /// `io.EOF`, which is normal termination).
 ///
 /// Buffer size: 32 KiB (matches Go's default genericReadFrom path).
+///
+/// # Divergence: the two fast paths are not taken
+///
+/// Go's `copyBuffer` begins with `src.(WriterTo)` and then
+/// `dst.(ReaderFrom)`, and returns through whichever hits. goish always
+/// runs the loop. The copied BYTES are identical either way — this
+/// costs write calls, not correctness — but it is visible to a writer
+/// that counts them: copying 100 KiB out of a `strings.Reader` is one
+/// `Write` in Go and four here. See `io_copy_ref_smoke`.
+///
+/// It is not an oversight, and the traits above are real and
+/// registered; `Copy` cannot ask. goish resolves an interface-on-
+/// interface assertion through a registry keyed on the concrete type,
+/// reached via `core::any`, which requires the value to be `'static`.
+/// `Copy` takes `&mut dyn Reader`, whose object lifetime is the
+/// borrow's, and requiring `'static` instead does not stay local: it
+/// fails inside this file (`CopyN` limits through
+/// `LimitedReader<&mut dyn Reader>`, which borrows) and cascades to
+/// every caller that holds a reader by reference. Go has no such
+/// constraint because it has no lifetimes.
+///
+/// Closing it means giving `Reader`/`Writer` a defaulted hook that
+/// each `WriterTo`/`ReaderFrom` implementor overrides — no `Any`, so
+/// no `'static` — at the cost of a second registration that can fall
+/// silently out of step with the first. That is the failure mode
+/// `scripts/iface_check.py` exists for, and it would need to learn
+/// about the new hook first.
 // goishlint:ignore GOISH023 — the body ends in an infinite `loop` whose
 //     every exit is a `return` from inside it, so there is no tail
 //     expression to make explicit. Go writes the same shape: `for { … }`
