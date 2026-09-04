@@ -3318,3 +3318,7 @@ path = "examples/tls_session_expiry_smoke.rs"
 [[example]]
 name = "dns_txid_smoke"
 path = "examples/dns_txid_smoke.rs"
+
+[[example]]
+name = "json_depth_limit_smoke"
+path = "examples/json_depth_limit_smoke.rs"

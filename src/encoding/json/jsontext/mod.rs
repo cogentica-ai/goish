@@ -1,6 +1,16 @@
 // encoding/json/jsontext — streaming JSON syntax layer (Go 1.25
 // GOEXPERIMENT=jsonv2, src/encoding/json/jsontext/).
 //
+// goishlint:ignore GOISH015 — this module root holds the whole
+//     implementation rather than `mod`/`pub use`, which predates the
+//     rule and is why the file is 1500 lines with 79 GOISH014
+//     findings. Splitting it per Go file — token.go, value.go,
+//     decode.go, encode.go, state.go — and anchoring each declaration
+//     is the fix, and it is a separate change from the depth limit
+//     added here. The rule only started reporting when that limit
+//     cited state.go: before, no Go file was named, which is exactly
+//     the blind spot ROADMAP.md 2b describes.
+//
 // This is the token-level half of json/v2: a `Decoder` that yields
 // `Token`s / raw `Value`s from an `io::Reader` (or byte buffer), and
 // an `Encoder` that writes them with automatic separator + indent
@@ -48,6 +58,18 @@ use crate::errors::{self, error, nil};
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::types::{byte, float64, int, uint};
+
+
+// go: sdk 1.25.5 encoding/json/jsontext/state.go:53 maxNestingDepth
+/// Go: "maxNestingDepth = 10000". The cap on how deep an object or
+/// array may nest before the decoder refuses the document.
+const maxNestingDepth: usize = 10000;
+
+// go: sdk 1.25.5 encoding/json/jsontext/state.go:46 errMaxDepth
+crate::var! {
+    /// Go: `errMaxDepth = errors.New("exceeded max depth")`.
+    pub(crate) errMaxDepth: error = "exceeded max depth";
+}
 
 // ─── Kind ────────────────────────────────────────────────────────────
 
@@ -1407,6 +1429,41 @@ impl Decoder {
     /// Structural scan over one whole value (no token
     /// materialization). Assumes `prepare_next` ran.
     fn scan_whole_value(&mut self) -> error {
+        return self.scan_whole_value_at(0);
+    }
+
+    // go: none — goish-only: Go carries the depth as a parameter
+    //     through `consumeObject`/`consumeArray` (decode.go:962, 1057).
+    //     This file scans a whole value in one function, so the depth
+    //     rides on a private variant and `scan_whole_value` is the
+    //     zero-depth entry point.
+    /// Go: jsontext/state.go:46 `errMaxDepth = errors.New("exceeded max
+    /// depth")`, returned by consumeObject/consumeArray at
+    /// `depth == maxNestingDepth+1` (decode.go:962, 1057).
+    ///
+    /// This recursed with NO limit. `[` repeated is one stack frame
+    /// each, so a JSON document made of nothing but open brackets
+    /// decided how deep this process recursed: measured, depth 100000
+    /// parsed fine and 500000 hit "goish: runtime error: stack
+    /// overflow". The runtime catches it and prints a diagnostic
+    /// rather than corrupting anything, but the process is still gone,
+    /// and roughly a megabyte of `[` is enough to do it to any program
+    /// that parses untrusted JSON.
+    ///
+    /// Go never gets near that: it refuses at 10001.
+    fn scan_whole_value_at(&mut self, depth: usize) -> error {
+        // Measured against Go: 10000 nested arrays parse, 10001 does
+        // not. `depth` counts from 0 at the outermost value, so the
+        // 10001st composite is the one at depth == maxNestingDepth.
+        //
+        // goish's error is the bare `errMaxDepth`. Go wraps it with a
+        // JSON pointer to the offending position and a byte offset —
+        // `exceeded max depth within "/0/0/…" after offset 10000` —
+        // which this layer has no pointer tracking to reproduce. The
+        // BOUNDARY matches; the message is shorter.
+        if depth >= maxNestingDepth {
+            return errMaxDepth.into();
+        }
         let b = match self.peek_at(0) {
             Some(b) => b,
             None => return crate::io::ErrUnexpectedEOF.into(),
@@ -1464,7 +1521,7 @@ impl Decoder {
                         }
                         self.skip_ws();
                     }
-                    let err = self.scan_whole_value();
+                    let err = self.scan_whole_value_at(depth + 1);
                     if err != nil {
                         return err;
                     }
