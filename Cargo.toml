@@ -3222,3 +3222,7 @@ path = "examples/osfile_error_ref_smoke.rs"
 [[example]]
 name = "log_flags_ref_smoke"
 path = "examples/log_flags_ref_smoke.rs"
+
+[[example]]
+name = "tls_deadline_ref_smoke"
+path = "examples/tls_deadline_ref_smoke.rs"

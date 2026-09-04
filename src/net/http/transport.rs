@@ -925,7 +925,7 @@ crate::var! {
 // writing zero bytes." Whether a retry is safe hinges on this: if
 // nothing reached the wire, re-sending cannot duplicate a side
 // effect. A sentinel: goish HAS errors::As, but a sentinel compares
-        // by identity, which is what this test wants.
+// by identity, which is what this test wants.
 crate::var! {
     pub errNothingWritten: error = "http: nothing written";
 }

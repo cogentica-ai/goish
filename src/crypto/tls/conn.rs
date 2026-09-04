@@ -195,8 +195,7 @@ impl halfConn {
         // it as temporary. goish stored the error as-is on a note that
         // it had no `net.Error` to assert against; it has one, so the
         // arm is live.
-        let (_ne, is_net) =
-            crate::errors::AsIface::<crate::d!(crate::net::net::Error)>(&err);
+        let (_ne, is_net) = crate::errors::AsIface::<crate::d!(crate::net::net::Error)>(&err);
         if is_net {
             self.err = crate::errors::Wrap(permanentError { err });
         } else {
@@ -2021,7 +2020,20 @@ impl Conn {
             if err == crate::io::ErrUnexpectedEOF && self.rawInput.len() == 0 {
                 err = crate::io::EOF.into();
             }
-            self.in_.setErrorLocked(err.clone());
+            // Go: if e, ok := err.(net.Error); !ok || !e.Temporary() {
+            //         c.in.setErrorLocked(err) }
+            //
+            // The condition is the whole point and goish dropped it:
+            // storing the error LATCHES it, so every later read on this
+            // connection returns it. A read DEADLINE is a temporary
+            // net.Error, so Go does not latch it — which is what lets a
+            // caller poll with a deadline, clear it and carry on, the
+            // standard "wait a bit, then wait properly" idiom. Without
+            // the guard the first timeout killed the connection.
+            let (ne, is_net) = crate::errors::AsIface::<crate::d!(crate::net::net::Error)>(&err);
+            if !is_net || !ne.Temporary() {
+                self.in_.setErrorLocked(err.clone());
+            }
             return err;
         }
         // Go: hdr := c.rawInput.Bytes()[:recordHeaderLen]
