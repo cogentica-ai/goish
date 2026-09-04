@@ -3254,3 +3254,7 @@ path = "examples/utf8bad_ref_smoke.rs"
 [[example]]
 name = "xxh3_bytes_smoke"
 path = "examples/xxh3_bytes_smoke.rs"
+
+[[example]]
+name = "runeconv_ref_smoke"
+path = "examples/runeconv_ref_smoke.rs"

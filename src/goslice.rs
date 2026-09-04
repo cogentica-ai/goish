@@ -291,6 +291,41 @@ impl From<crate::gostring::string> for slice<crate::types::byte> {
     }
 }
 
+// go: none — `string(rs)` for a []rune is a Go CONVERSION, not a
+//     stdlib function, so there is no Go decl to anchor to. The
+//     encoding rule it implements is utf8.EncodeRune's
+//     (unicode/utf8/utf8.go:336-348), and the runtime routine behind
+//     the conversion is runtime.rawruneslice + encoderune.
+//
+// The mirror of `[]rune(s)` above. Go encodes each rune as UTF-8 and
+// substitutes U+FFFD for anything that is not a valid code point — a
+// negative value, a surrogate half, or anything above MaxRune — so
+// `string([]rune{0xD800})` is the three bytes EF BF BD, not an error
+// and not a lost element. `AppendRune` is Go's own function and
+// already applies that rule, so this walks the runes through it
+// rather than repeating the test.
+impl From<&slice<crate::types::rune>> for crate::gostring::string {
+    // go: none — see the anchor on the impl above.
+    fn from(rs: &slice<crate::types::rune>) -> Self {
+        let mut buf: slice<crate::types::byte> = slice::new();
+        for r in rs.iter() {
+            buf = crate::unicode::utf8::AppendRune(buf, *r);
+        }
+        return crate::gostring::string::from_bytes(&buf);
+    }
+}
+
+// go: none — the by-value half of the same conversion; Go has one
+//     `string(rs)` and no notion of an owned vs borrowed operand.
+//     Forwards so the rule lives in one place.
+impl From<slice<crate::types::rune>> for crate::gostring::string {
+    // go: none — see the anchor on the impl above.
+    #[inline]
+    fn from(rs: slice<crate::types::rune>) -> Self {
+        return Self::from(&rs);
+    }
+}
+
 impl<T> PartialEq<slice<T>> for crate::nilval::Nil {
     #[inline]
     fn eq(&self, other: &slice<T>) -> bool {
