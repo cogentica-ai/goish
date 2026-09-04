@@ -191,3 +191,95 @@ impl ProcessState {
         return res;
     }
 }
+
+// go: none — goish-only placement: Go declares `ErrProcessDone` in
+// os/exec.go:18, whose name collides with the os/exec DIRECTORY, so
+// there is no .rs to anchor it to. See the note on ProcessState.
+/// Go: "ErrProcessDone indicates a Process has finished."
+pub fn ErrProcessDone() -> crate::errors::error {
+    return crate::errors::New(string::from_static("os: process already finished"));
+}
+
+// go: none — goish-only placement: Go declares `Process` in
+// os/exec.go:23-40 with a handle, a pid and a status word behind a
+// mutex, because it supports pidfd. goish signals by pid and tracks
+// only whether the process has been reaped.
+/// Go: "Process stores the information about a process created by
+/// StartProcess."
+///
+/// Cloneable, and every clone shares the done flag: that is what lets
+/// one goroutine `Kill` a child while another sits in `Wait`, which is
+/// the whole point of the type.
+#[derive(Clone)]
+pub struct Process {
+    pub Pid: int,
+    done: alloc::sync::Arc<core::sync::atomic::AtomicBool>,
+}
+
+impl Process {
+    // go: none — goish-only: Go's Process is built by startProcess or
+    // FindProcess; this names the construction for both.
+    /// A Process for a pid that is believed live.
+    pub fn __new(pid: int) -> Self {
+        return Process {
+            Pid: pid,
+            done: alloc::sync::Arc::new(core::sync::atomic::AtomicBool::new(false)),
+        };
+    }
+
+    // go: none — goish-only: Go sets the status word under sigMu when
+    // Wait reaps. goish's flag is the same signal, shared by clones.
+    /// Mark the process reaped, so later signals report ErrProcessDone.
+    pub fn __set_done(&self) {
+        self.done.store(true, core::sync::atomic::Ordering::Release);
+    }
+
+    // go: none — goish-only placement: Go's is `Process.pidSignal`
+    // (os/exec_unix.go:93-111) plus `convertESRCH` (:113-118). goish
+    // has no .rs for exec_unix.go, and anchoring across it would make
+    // goishlint audit that whole file against this one — the same
+    // reason the citations above are prose.
+    /// Go: send a signal, answering ErrProcessDone when the process
+    /// has already been reaped.
+    ///
+    /// The ESRCH translation is Go's `convertESRCH`
+    /// (os/exec_unix.go:113-118): a pid that no longer exists is
+    /// reported as finished, not as a raw errno. Without it a caller
+    /// racing Wait would see "no such process" — an error about the
+    /// implementation rather than about the process.
+    pub fn Signal(&self, sig: int) -> crate::errors::error {
+        if self.done.load(core::sync::atomic::Ordering::Acquire) {
+            return ErrProcessDone();
+        }
+        let pid32 = self.Pid as i32; // goishlint:ignore GOISH005 - a pid for kill(2), a C ABI int
+        let sig32 = sig as i32; // goishlint:ignore GOISH005 - a signal number for kill(2), a C ABI int
+        let r = crate::syscall::Kill(pid32, sig32);
+        if r == 0 {
+            return crate::errors::nil;
+        }
+        // ESRCH is 3 on Linux.
+        if -r == 3 {
+            return ErrProcessDone();
+        }
+        return crate::errors::Wrap(crate::syscall::Errno((-r) as _));
+    }
+
+    // go: none — goish-only placement: Go's `Process.Kill` is
+    // os/exec.go:325-331; see the note on ProcessState.
+    /// Go: "Kill causes the Process to exit immediately. Kill does not
+    /// wait until the Process has actually exited."
+    pub fn Kill(&self) -> crate::errors::error {
+        // SIGKILL is 9.
+        return self.Signal(int::from(9));
+    }
+}
+
+// go: none — goish-only placement: Go's `FindProcess` is
+// os/exec.go:247-252; see the note on ProcessState.
+/// Go: "On Unix systems, FindProcess always succeeds and returns a
+/// Process for the given pid, regardless of whether the process
+/// exists. To test whether the process actually exists, see whether
+/// p.Signal(syscall.Signal(0)) reports an error."
+pub fn FindProcess(pid: int) -> (Process, crate::errors::error) {
+    return (Process::__new(pid), crate::errors::nil);
+}

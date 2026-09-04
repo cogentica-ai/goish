@@ -211,6 +211,14 @@ pub struct Cmd {
     pub Stderr: Option<
         Arc<crate::sync::Mutex<core::cell::UnsafeCell<alloc::boxed::Box<dyn io::Writer + Send>>>>,
     >,
+
+    // go: none — goish-only placement: Go's `Cmd.Process` is
+    // os/exec/exec.go:189. See the note on ExitError for why the
+    // citation is prose.
+    /// Go: "Process is the underlying process, once started." It is
+    /// None before Start and stays set after Wait, so `Kill` on a
+    /// finished process reports ErrProcessDone rather than panicking.
+    pub Process: Option<crate::os::exec_posix::Process>,
     /// PID of the running child; set by Start(), cleared by Wait().
     /// -1 means "not started" or "already waited".
     pid: i32,
@@ -398,6 +406,7 @@ pub fn Command<S: Into<string>>(name: S, args: slice<string>) -> Cmd {
         cached_err_fd: -1,
         stdout_pipe_write_fd: -1,
         stderr_pipe_write_fd: -1,
+        Process: None,
     }
 }
 
@@ -898,6 +907,12 @@ impl Cmd {
             }
         }
 
+        // The child is running: publish it, as Go's Start does, so a
+        // caller can Kill or Signal it while another goroutine Waits.
+        self.Process = Some(crate::os::exec_posix::Process::__new(int::from(i64::from(
+            pid,
+        ))));
+
         // Close the child's end of the stdin pipe in the parent.
         if (want_in_reader || want_in_pipe) && in_pipe[0] >= 0 {
             syscall::Close(in_pipe[0]);
@@ -992,7 +1007,14 @@ impl Cmd {
     /// Returns the exit-status error (nil on exit code 0).
     pub fn Wait(&mut self) -> error {
         if self.pid < 0 {
-            return errors::New("os/exec: Wait called before Start");
+            // Go distinguishes the two: a Wait before Start is
+            // "exec: not started", a second Wait is "exec: Wait was
+            // already called". goish said "Wait called before Start"
+            // for both, which is wrong for the far more common one.
+            if self.Process.is_some() {
+                return errors::New("exec: Wait was already called");
+            }
+            return errors::New("exec: not started");
         }
         let pid = self.pid;
         self.pid = -1;
@@ -1015,6 +1037,11 @@ impl Cmd {
 
         let mut status: i32 = 0;
         let r = syscall::Wait4(pid, &mut status as *mut i32, 0, core::ptr::null_mut());
+        // The process is reaped either way: a later Kill must report
+        // ErrProcessDone rather than signalling a recycled pid.
+        if let Some(p) = &self.Process {
+            p.__set_done();
+        }
         if r < 0 {
             return errors::New("os/exec: wait4 failed");
         }
