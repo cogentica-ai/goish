@@ -81,7 +81,7 @@ e2e-clean:
 
 # The lint backlog is grandfathered by scripts/lint_baseline.json; these
 # targets let it shrink and never grow. See scripts/port_lint.py.
-lint: anchors ifaces
+lint: anchors ifaces split-brain
 	@python3 scripts/port_lint.py --check --scope $(SCOPE)
 
 # goishlint resolves an anchored symbol by name and never looks at the
@@ -99,6 +99,15 @@ anchors:
 # fails: some zero-implementor interfaces are extension points.
 ifaces:
 	@python3 scripts/iface_check.py
+
+# Rust needs a trait impl written separately from the inherent method,
+# and when neither forwards to the other the type has TWO
+# implementations of one operation. `io::Writer for File` drifted that
+# way: io::Copy onto a full disk said "write failed" while f.Write on
+# the same file said "no space left on device". Reports rather than
+# fails: a deliberate divergence is fine when it is written down.
+split-brain:
+	@python3 scripts/split_brain_check.py
 
 lint-new:
 	@python3 scripts/port_lint.py --new --scope $(SCOPE)
