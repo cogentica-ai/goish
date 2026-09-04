@@ -1459,9 +1459,18 @@ fn int_from_arg(args: &[FmtArg], arg_num: &mut usize) -> Option<i64> {
 //     format string against a `[]any`; goish walks it against the
 //     `&[FmtArg]` the macro built, so the signature has no counterpart.
 //     The verb vocabulary and the flag handling below are Go's.
-pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Option<error> {
-    // Returns the first error captured by %w (Errorf semantics).
-    let mut wrap_target: Option<error> = None;
+pub(crate) fn do_format(
+    format: &[byte],
+    args: &[FmtArg],
+    f: &mut FmtBuf,
+) -> crate::goslice::slice<error> {
+    // Returns EVERY error captured by %w, in format order. Go collects
+    // them all (fmt/errors.go:19-52) and picks the result type by
+    // count: one gives a `wrapError` with `Unwrap() error`, two or
+    // more give a `wrapErrors` with `Unwrap() []error`. Returning only
+    // the first — which this did — made `errors.Is` miss every target
+    // after the first %w.
+    let mut wrap_targets = crate::goslice::slice::<error>::new();
     let mut i = 0usize;
     let mut arg_idx = 0usize;
     while i < format.len() {
@@ -1640,8 +1649,8 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
         if verb == b'w' {
             if arg_idx < args.len() {
                 if let Some(e) = args[arg_idx].as_error() {
-                    if wrap_target.is_none() && !e.IsNil() {
-                        wrap_target = Some(e.clone());
+                    if !e.IsNil() {
+                        wrap_targets = crate::append!(wrap_targets, e.clone());
                     }
                     // Go: nil error formats as "<nil>".
                     if e.IsNil() {
@@ -1844,7 +1853,7 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
         }
         f.push(b')');
     }
-    return wrap_target;
+    return wrap_targets;
 }
 
 // go: none — goish idiom: Go asks its `fmt` flag struct whether the

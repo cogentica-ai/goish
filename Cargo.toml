@@ -3194,3 +3194,7 @@ path = "examples/textproto_writer_ref_smoke.rs"
 [[example]]
 name = "atomic_ref_smoke"
 path = "examples/atomic_ref_smoke.rs"
+
+[[example]]
+name = "errors_ref_smoke"
+path = "examples/errors_ref_smoke.rs"
