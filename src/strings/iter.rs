@@ -1,8 +1,4 @@
-// go: file strings/iter.go decls: Lines, splitSeq, SplitSeq, SplitAfterSeq, FieldsSeq, FieldsFuncSeq, utf8_seq_len
-//
-// `utf8_seq_len` is named in the manifest above because GOISH017
-// matches every ported `fn` item against it; it has no Go counterpart
-// and carries a `// go: none` anchor saying why.
+// go: file strings/iter.go decls: Lines, splitSeq, SplitSeq, SplitAfterSeq, FieldsSeq, FieldsFuncSeq
 //
 // strings/iter.go — the `iter.Seq[string]` returning splitters.
 //
@@ -16,25 +12,9 @@
 extern crate alloc;
 
 use crate::gostring::string;
-use crate::types::{byte, rune};
+use crate::types::rune;
 use crate::unicode::utf8;
 
-// go: none — goish idiom: Go's `splitSeq` with an empty separator
-//     ranges the string with `for i, c := range s`, which advances by
-//     the decoded rune width for free. goish walks bytes, so the width
-//     of the sequence starting at `b` is spelled out — 1 on an invalid
-//     leading byte, matching what `DecodeRuneInString` reports as its
-//     error advance.
-/// Byte length of the UTF-8 sequence starting with `b`.
-fn utf8_seq_len(b: byte) -> usize {
-    return match b {
-        0x00..=0x7F => 1,
-        0xC0..=0xDF => 2,
-        0xE0..=0xEF => 3,
-        0xF0..=0xF7 => 4,
-        _ => 1,
-    };
-}
 
 // go: sdk 1.25.5 strings/iter.go:35-65 splitSeq
 // goishlint:ignore GOISH014 — the anchor names Go's `splitSeq`; the
@@ -49,9 +29,16 @@ fn split_seq(s: string, sep: string, sep_save: usize) -> impl crate::iter::Seq<s
         let sepb = sep.as_bytes();
         if sepb.is_empty() {
             // Go: split into UTF-8 sequences (like Split(s, "")).
+            // DecodeRune, not a length table keyed on the leading byte:
+            // it validates the CONTINUATION bytes too, and returns
+            // size 1 for anything malformed. A table says 0xe4 begins a
+            // 3-byte rune and hands back "\xe4\xb8" whole; Go yields
+            // "\xe4" and "\xb8" separately, which is also what this
+            // package's own `explode` (behind Split) already did.
             let mut pos = 0;
             while pos < b.len() {
-                let size = utf8_seq_len(b[pos]).min(b.len() - pos);
+                let (_, sz) = utf8::DecodeRune(&b[pos..]);
+                let size = sz as usize;
                 if !yield_(string::from_bytes(&b[pos..pos + size])) {
                     return;
                 }
