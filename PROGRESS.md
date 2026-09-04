@@ -6,6 +6,14 @@ than merely counted. Numbers are regenerated with
 the `compress` row refreshed 2026-08-17 and the `hash` and `encoding`
 rows 2026-08-30.
 
+> **The table below is three weeks old and its `crypto` row is wrong.**
+> Re-measured 2026-09-04: `crypto` is 1431/1447 = 98.9% and
+> `crypto/tls` alone is 275/291 = 94.5%, where ROADMAP.md used to
+> describe tls as 10.1% and mostly unwritten. `archive` is 79/182 =
+> 43.4% after archive/tar's sparse half landed. ROADMAP.md carries the
+> current figures for every subtree; this file's per-package detail has
+> not been regenerated to match, so read a number here as a floor.
+
 ## The whole tree — 4452 / 11061 functions (40.3%)
 
 Across the 169 packages of the Go 1.25.5 standard library that have a

@@ -4,98 +4,85 @@ What is left, in the order it makes sense to do it. Current state lives
 in [PROGRESS.md](PROGRESS.md); conventions and the rules a port must
 follow live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## 1. `crypto/tls` — the whole remaining crypto gap
+## 1. `crypto/tls` — the record layer is the last invented code
 
-266 of the 266 outstanding crypto functions are here. It is the last
-package below 100%, and it is not simply unwritten — it needs a
-demolition before it needs a port.
+**Re-measured 2026-09-04.** Everything this section used to describe as
+unwritten is written: `port_coverage.py crypto --pkg tls` reports
+**275/291 = 94.5%** across 21 Go files and 891 anchors, and every file
+the old order-of-work table listed — alert, common_string, defaults,
+prf, cipher_suites, auth, ticket, key_agreement, conn,
+handshake_client, handshake_server, handshake_server_tls13, common,
+ech, quic, cache — now exists as an anchored port.
 
-### What is actually there
+The 16 remaining declarations are **all QUIC**: HandleData, NextEvent,
+Start, StoreSession, SetTransportParameters and the eleven `quic*`
+helpers. Five more are already waived by design.
 
-goish ships a **hand-written TLS client and server** across nine `.rs`
-files. Five of them carry no provenance anchor at all, and
-`scripts/anchor_by_name.py --dry-run` reports **zero Go counterparts**
-in `record.rs`, `session.rs`, `handshake_client.rs` and
-`handshake_server_tls13.rs` — not one function Go declares. The names
-are invented: `do_client_handshake`, `encrypt_record`,
-`derive_master_secret`, `read_record`.
+What is left of the demolition:
 
-This is the same shape as the `crypto/ecdsa` squatter that read
-"present" for four sessions. It read 12.5% ported until
-`port_coverage.py` stopped folding underscores, which had been letting
-`read_record` count as a port of Go's `readRecord`. The honest figure is
-10.1%, and most of even that is unverified.
+| file | LOC | anchors | state |
+|---|--:|--:|---|
+| `record.rs` | 938 | 0 | invented. `conn.rs` is Go's record layer, ported with 55 anchors, and both are live. |
+| `session.rs` | 145 | 0 | invented. |
 
-The working TLS 1.2/1.3 client is *real* — `tls_smoke`, `tls12_smoke`,
-`tls_server_smoke` and `https_real_smoke` pass against live servers. It
-is simply not a port of Go, so it cannot be counted as one and cannot be
-diffed against Go by the fidelity tier.
-
-### Order of work
-
-Go's 21 in-scope files split into layers. Port the leaves first: each
-lands as a stem-matching `.rs` file with anchors, and none of them
-depends on the invented implementation.
-
-| Go file | LOC | notes |
-|---|--:|---|
-| `alert.go` | 111 | alert codes + `String`/`Error`. Fully isolated — start here. |
-| `common_string.go` | 120 | generated `String()` methods |
-| `defaults.go` | 102 | default cipher-suite and curve lists |
-| `prf.go` | 296 | TLS 1.0-1.2 PRF, master secret, finished hash |
-| `cipher_suites.go` | 724 | suite tables + AEAD constructors |
-| `auth.go` | 285 | signature-scheme selection and verification |
-| `ticket.go` | 430 | session-ticket encode/decode |
-| `key_agreement.go` | 382 | TLS 1.2 key agreement |
-| `conn.go` | 1692 | the record layer — replaces `record.rs` |
-| `handshake_client.go` | 1333 | replaces `handshake_client.rs` |
-| `handshake_server.go` | 1028 | no goish counterpart yet |
-| `handshake_server_tls13.go` | 1162 | replaces `handshake_server_tls13.rs` |
-| `common.go` | 1805 | `Config`, `ConnectionState` — the type surface everything else hangs on |
-
-`ech.go` and `quic.go` are the largest remaining consumers after that.
-`cache.go` needs weak pointers and `runtime.AddCleanup`, which goish
-does not have.
-
-Retire the invented files only as their Go counterparts land, the way
-the ecdsa eviction was sequenced — the live handshake is behind
-`tls_smoke` and the tier-3 (×50) stress family, so a regression there is
-a real outage, not a test failure. Dispatch `e2e-race.yml -f mode=full`
-after each swap.
+`handshake_client.rs` and `handshake_server_tls13.rs` are no longer
+squatters — they carry 22 and 19 anchors. Retire `record.rs` and
+`session.rs` the way the ecdsa eviction was sequenced: the live
+handshake is behind `tls_smoke` and the tier-3 (×50) stress family, so a
+regression there is an outage rather than a test failure. Dispatch
+`e2e-race.yml -f mode=full` after each swap.
 
 ## 2. Runtime defects blocking a clean CI
 
-All three are reproduced and recorded (see PROGRESS.md). Each is a
-`runtime/`-adjacent change, so each needs `make e2e-full` — all examples
-×50 — and none belongs in a porting commit.
-
-1. ~~**Process exit waits for every goroutine.**~~ **Fixed** — the main
-   goroutine now ends with `exit(0)`, as Go's `runtime.main` does, so a
-   leaked goroutine can no longer hold the process. What remains is the
-   narrower half: `Timer::Stop()` still does not cancel the `Sleep`
-   beneath it, so a stopped timer occupies a goroutine for its full
-   duration.
-2. **`cast!` on an `Any` carrier.** Three options were scoped: reject it
-   at compile time with a `const` assert pointing at `.As::<>()`
-   (cheapest, converts a silent miss into an error), narrow the blanket
-   `HasDynAny` impl (needs a marker trait threaded through every
-   implementor), or wait for specialization. Documented as CONTRIBUTING.md
-   §9b in the meantime.
-3. **`ecdsa::PrivateKey` must implement `crypto::Signer`** so an ECDSA
-   key can sign a certificate. Small and self-contained.
+1. **`Timer::Stop()` and the `Sleep` beneath it.** `tick.rs` now calls
+   `timer_cancel` and documents the ordering (the flag must be visible
+   before the wake). Re-verify before acting on this entry — the text
+   here predates that code.
+2. **`cast!` on an `Any` carrier.** Still open; documented as
+   CONTRIBUTING.md §9b. Three options were scoped: reject at compile
+   time with a `const` assert pointing at `.As::<>()`, narrow the
+   blanket `HasDynAny` impl, or wait for specialization.
+3. ~~**`ecdsa::PrivateKey` must implement `crypto::Signer`.**~~
+   **Done** — `impl crypto::Signer for PrivateKey` is in
+   `crypto/ecdsa/ecdsa.rs`. It is the one pair `split_brain_check.py`
+   still reports, deliberately and with a note saying so.
 
 ## 3. Gaps other packages will hit next
 
-- `net/netip` is absent entirely. `crypto/x509`'s `matchURIConstraint`
-  takes a documented narrowing via `net::ParseIP` instead.
-- `net::IP` is IPv4-only, so `marshalSANs` cannot round-trip an IPv6
-  SAN.
-- `iter` is a squatter: 0/4, no anchors. Go 1.23 iterator support
-  (`iter.Seq`) is faked with slices wherever it is needed.
-- `internal/godebug` is absent, so every `GODEBUG` branch takes the
-  unset default. Ported verbatim and marked unreachable.
-- `reflect` is 56/353. The parts `encoding/asn1` and `encoding/json`
-  need are done; setter dispatch was added this cycle.
+Re-measured 2026-09-04; four of the five entries this section used to
+carry were stale.
+
+- `reflect` is **58/353 (16.4%)** — the largest gap by count outside
+  `runtime`. The parts `encoding/asn1` and `encoding/json` need are
+  done.
+- `iter` is **0/4**: the `Seq`/`Seq2` shapes are real and used across
+  `strings`, `bytes`, `slices` and `maps`, but Go's `Pull` and `Pull2`
+  are absent. The old "squatter, no anchors" reading undersells it —
+  what is missing is the pull adapter, not the iterator model.
+- `internal/godebug` is still absent, so every `GODEBUG` branch takes
+  the unset default. Ported verbatim and marked unreachable.
+- ~~`net/netip` is absent entirely.~~ **Present** — 1825 lines, with
+  `netip_ref_smoke` and `netip_ctor_ref_smoke` against a running Go.
+- ~~`net::IP` is IPv4-only.~~ **Not true** — `IP` holds 4, 16 or 0
+  bytes. (The IPv4-only wildcard in `net`'s listener is a separate,
+  pinned divergence.)
+
+Whole-subtree coverage, same measurement:
+
+| subtree | ported | % |
+|---|--:|--:|
+| `crypto` | 1431/1447 | 98.9% |
+| `io` | 74/79 | 93.7% |
+| `net` | 966/1413 | 68.4% |
+| `archive` | 79/182 | 43.4% |
+| `os` | 148/366 | 40.4% |
+| `encoding` | 234/999 | 23.4% |
+| `text` | 47/271 | 17.3% |
+| `runtime` | 88/2722 | 3.2% |
+
+`text/template` (0/224) and `archive/zip` (0/69) are the largest
+single unported packages with a plausible port; `encoding`'s remaining
+gap is mostly the new `encoding/json/v2` internals.
 
 ## 4. Keeping the tooling honest
 
