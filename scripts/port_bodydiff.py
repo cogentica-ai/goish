@@ -28,11 +28,46 @@ positive rate, all from legitimate differences:
           Those have no operator or helper equivalent, so a deficit is
           nearly always either a dropped field or an obvious refactor.
           This is the mode worth running routinely.
+
+Last full triage: 2026-09-04, 1844 anchored fns, 12 deficits, ALL
+false positives of the kinds listed above. Worth writing down so the
+next reader does not re-derive it:
+
+  buildCertExtensions          the 4 AddBytes are in `serialiseConstraints`,
+                               a helper goish extracts and Go inlines.
+  certificateRequestMsgTLS13   goish merges Go's two identical arms for
+    .unmarshal                 SignatureAlgorithms and
+                               SignatureAlgorithmsCert, then splits them
+                               after; the deficit is the duplicate.
+  encryptedExtensionsMsg       `extData.0.clone().__into_vec()` where Go
+    .unmarshal                 writes make() + CopyBytes. Same operation.
+  Builder.AddUintNLengthPrefixed  Go's method calls the shared
+                               `addLengthPrefixed`; the tool counts the
+                               method's own name.
+
+So the class this exists to catch — a dropped field under a valid
+anchor — currently has no instances.
 """
 import os, re, sys, collections
 
 GOROOT = os.environ.get("GOROOT") or \
     "/nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src"
+
+# `go env GOROOT` prints the INSTALL root (/usr/local/go); the sources
+# live under its `src`. Accept either spelling, because the failure
+# mode of guessing wrong is silent: every anchored file resolves to a
+# path that does not exist, every Go body reads as empty, and the
+# script reports "0 anchored fns, 0 with a deficit" — which looks
+# exactly like a clean sweep.
+if not os.path.isdir(os.path.join(GOROOT, "crypto", "tls")):
+    _alt = os.path.join(GOROOT, "src")
+    if os.path.isdir(os.path.join(_alt, "crypto", "tls")):
+        GOROOT = _alt
+    else:
+        sys.exit("port_bodydiff: no Go sources under %r (tried it and %r).\n"
+                 "Set GOROOT to the Go install root or its src directory."
+                 % (GOROOT, _alt))
+
 ANCHOR = re.compile(r"//\s*go:\s*sdk\s+\S+\s+(\S+):(\d+)-(\d+)\s+(\S+)")
 CALL = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 EMIT = re.compile(r"^(AddUint\d+|AddBytes|AddUint\d+LengthPrefixed|addBytesWithLength|"
