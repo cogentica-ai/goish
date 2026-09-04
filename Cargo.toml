@@ -3162,3 +3162,7 @@ path = "examples/resolvetcpaddr_ref_smoke.rs"
 [[example]]
 name = "tcpsock_ctor_ref_smoke"
 path = "examples/tcpsock_ctor_ref_smoke.rs"
+
+[[example]]
+name = "textproto_code_ref_smoke"
+path = "examples/textproto_code_ref_smoke.rs"
