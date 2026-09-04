@@ -1813,12 +1813,28 @@ impl File {
     }
 
     pub fn Write(&self, p: slice<byte>) -> (int, error) {
-        let n = syscall::Write(self.fd, p.as_ptr(), p.len());
-        if n < 0 {
-            (0, self.fdErr("write", n))
-        } else {
-            (n as int, nil)
+        // Go's `poll.FD.Write` LOOPS until every byte is written or a
+        // syscall fails, which is what lets os.File satisfy io.Writer:
+        // "Write must return a non-nil error if it returns n < len(p)".
+        // A single write(2) does not — a pipe or socket-backed File
+        // takes what fits and reports success, and the caller loses
+        // the rest silently.
+        let total = p.len();
+        let mut n: usize = 0;
+        while n < total {
+            let ptr = unsafe { p.as_ptr().add(n) };
+            let got = syscall::Write(self.fd, ptr, total - n);
+            if got < 0 {
+                return (n as int, self.fdErr("write", got));
+            }
+            if got == 0 {
+                // Linux write(2) returning 0 for a non-empty buffer is
+                // not expected; treat it as a stall rather than spin.
+                return (n as int, self.fdErr("write", -5i64));
+            }
+            n += got as usize;
         }
+        return (n as int, nil);
     }
 
     /// `(*File).Read(p)` (os/file.go:118) — inherent forwarder, see
@@ -1838,30 +1854,27 @@ impl File {
 }
 
 impl io::Writer for File {
+    // go: none — goish idiom: Go's *File IS an io.Writer, so there is
+    // one implementation. Rust needs the trait impl separately, and
+    // this one used to be a SECOND implementation that called write(2)
+    // itself and reported `errors.New("write failed")` — no path, no
+    // errno, no closed-file detection.
+    //
+    // Everything generic goes through here: io::Copy, fmt::Fprintf,
+    // any `dyn io::Writer`. So `io.Copy(f, r)` onto a full disk said
+    // "write failed" while `f.Write(…)` on the same file said
+    // "write /path: no space left on device". It forwards now, and
+    // there is one implementation again.
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
-        let n = syscall::Write(self.fd, p.as_ptr(), p.len());
-        if n < 0 {
-            (0, errors::New("write failed"))
-        } else {
-            (n as int, nil)
-        }
+        return File::Write(self, p);
     }
 }
 
 impl io::Reader for File {
+    // go: none — goish idiom: see the note on the Writer impl. This
+    // reported `errors.New("read failed")` for every failure.
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
-        // p.len() is from Deref<[T]>. p.as_mut_ptr() needs DerefMut → [T].
-        let len = p.len();
-        let ptr = p.as_mut_ptr();
-        let n = syscall::Read(self.fd, ptr, len);
-        if n < 0 {
-            (0, errors::New("read failed"))
-        } else if n == 0 {
-            // Convention: Read returns (0, EOF) on end-of-input.
-            (0, io::EOF.into())
-        } else {
-            (n as int, nil)
-        }
+        return File::Read(self, p);
     }
 }
 
