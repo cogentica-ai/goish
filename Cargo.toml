@@ -3218,3 +3218,7 @@ path = "examples/osfile_offset_ref_smoke.rs"
 [[example]]
 name = "osfile_error_ref_smoke"
 path = "examples/osfile_error_ref_smoke.rs"
+
+[[example]]
+name = "log_flags_ref_smoke"
+path = "examples/log_flags_ref_smoke.rs"
