@@ -501,25 +501,36 @@ impl TCPConn {
     }
 
     /// Half-close the write direction (sends FIN). Mirrors
-    /// `(*TCPConn).CloseWrite`. Useful for "I'm done sending; expect
-    /// EOF on the read side from the peer's response now."
+    /// `(*TCPConn).CloseWrite` (net/tcpsock.go:198-206). Useful for
+    /// "I'm done sending; expect EOF on the read side from the peer's
+    /// response now."
+    ///
+    /// The Op Go reports here is "close", not "shutdown": Go names the
+    /// operation the caller asked for and keeps the syscall name for
+    /// the `os.SyscallError` it wraps. Both half-closes report the
+    /// same shape, which is why they share one Op.
     pub fn CloseWrite(&self) -> error {
+        if self.fd == FD_CLOSED {
+            return self.closed_err("close");
+        }
         let r = syscall::Shutdown(self.fd, syscall::SHUT_WR);
         if r < 0 {
-            errno_error("shutdown(write)", -r)
-        } else {
-            errors::nil
+            return self.op_err("close", "shutdown", -r);
         }
+        return errors::nil;
     }
 
-    /// Half-close the read direction.
+    /// Half-close the read direction. Mirrors `(*TCPConn).CloseRead`
+    /// (net/tcpsock.go:186-194) — see CloseWrite for the Op.
     pub fn CloseRead(&self) -> error {
+        if self.fd == FD_CLOSED {
+            return self.closed_err("close");
+        }
         let r = syscall::Shutdown(self.fd, syscall::SHUT_RD);
         if r < 0 {
-            errno_error("shutdown(read)", -r)
-        } else {
-            errors::nil
+            return self.op_err("close", "shutdown", -r);
         }
+        return errors::nil;
     }
 
     /// Internal raw fd accessor — used by `bufio` adapters and by
