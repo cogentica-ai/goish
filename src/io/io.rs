@@ -324,18 +324,32 @@ crate::var! {
 /// interface assertion through a registry keyed on the concrete type,
 /// reached via `core::any`, which requires the value to be `'static`.
 /// `Copy` takes `&mut dyn Reader`, whose object lifetime is the
-/// borrow's, and requiring `'static` instead does not stay local: it
-/// fails inside this file (`CopyN` limits through
-/// `LimitedReader<&mut dyn Reader>`, which borrows) and cascades to
-/// every caller that holds a reader by reference. Go has no such
-/// constraint because it has no lifetimes.
+/// borrow's. Go has no such constraint because it has no lifetimes.
 ///
-/// Closing it means giving `Reader`/`Writer` a defaulted hook that
-/// each `WriterTo`/`ReaderFrom` implementor overrides — no `Any`, so
-/// no `'static` — at the cost of a second registration that can fall
-/// silently out of step with the first. That is the failure mode
-/// `scripts/iface_check.py` exists for, and it would need to learn
-/// about the new hook first.
+/// Two things were tried, and what each cost is worth recording.
+///
+/// Requiring `'static` operands works, and is CHEAPER than it looks:
+/// it breaks exactly one call site in this crate — `CopyN`, which
+/// limits through a borrowing `LimitedReader<&mut dyn Reader>` — and
+/// none outside it. (An earlier note here said nine; that count came
+/// from a broken intermediate state, not from the change.) `CopyN`
+/// can limit with its own loop instead, giving up only `dst`'s
+/// ReaderFrom path.
+///
+/// What actually blocks it is one layer down. Reaching the registry
+/// through a `&mut` needs `__goish_as_dyn_any_mut`, and
+/// `#[goish::interface]` emits the override only for the immutable
+/// `__goish_as_dyn_any` — 162 impls in this tree carry that one, and
+/// almost none carry the mutable twin, so the assertion misses even
+/// for `strings::Reader`, which IS registered for `WriterTo`.
+/// Measured, not assumed: with the `'static` bound in place the hook
+/// returned `None` on every call.
+///
+/// So the fix belongs in goish-macros — emit the mutable override
+/// wherever the immutable one is emitted — and not here. A defaulted
+/// hook on `Reader`/`Writer` is not an alternative: the macro's `&mut
+/// T` forwarding blanket is skipped for any trait with a defaulted
+/// method, which makes `&mut dyn Reader` stop being a `Reader` at all.
 // goishlint:ignore GOISH023 — the body ends in an infinite `loop` whose
 //     every exit is a `return` from inside it, so there is no tail
 //     expression to make explicit. Go writes the same shape: `for { … }`
