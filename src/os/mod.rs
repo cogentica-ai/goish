@@ -27,6 +27,7 @@ mod dir;
 pub use dir::CopyFS;
 
 pub mod exec;
+pub mod exec_posix;
 pub mod signal;
 pub mod user;
 

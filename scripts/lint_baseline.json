@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 8423,
+ "total": 8425,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -621,7 +621,7 @@
    "GOISH021": 1
   },
   "src/net/tcpsock.rs": {
-   "GOISH018": 23,
+   "GOISH018": 19,
    "GOISH021": 4
   },
   "src/net/textproto/mod.rs": {
@@ -650,7 +650,10 @@
    "GOISH005": 2,
    "GOISH014": 25,
    "GOISH016": 1,
-   "GOISH023": 18
+   "GOISH023": 17
+  },
+  "src/os/exec_posix.rs": {
+   "GOISH018": 7
   },
   "src/os/mod.rs": {
    "GOISH005": 32,

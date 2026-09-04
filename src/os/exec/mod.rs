@@ -401,6 +401,66 @@ pub fn Command<S: Into<string>>(name: S, args: slice<string>) -> Cmd {
     }
 }
 
+// go: none — goish-only placement: Go declares `ExitError` in
+// os/exec/exec.go:877-895. goish's os/exec is a module root with the
+// whole package in it and no per-file split yet, so anchoring this to
+// exec.go would make goishlint audit all 34 of that file's
+// declarations against mod.rs. Splitting os/exec the way net/dial and
+// net/tcpsock were split is worth doing and is its own commit; the
+// citation is prose until then. The port is verbatim.
+/// Go: "An ExitError reports an unsuccessful exit by a command."
+///
+/// It embeds `*os.ProcessState`, which is what makes
+/// `err.(*exec.ExitError).ExitCode()` the way a caller reads a
+/// command's exit code. goish returned an untyped
+/// `errors.New("exit status 1")`, so the only way to get the number
+/// back was to parse the message.
+///
+/// Go's `Stderr` field — a captured prefix of the child's stderr,
+/// filled in only by `Cmd.Output` — is not carried: goish has no
+/// Output method yet, and an always-empty field would read as
+/// "the child printed nothing".
+#[derive(Clone)]
+pub struct ExitError {
+    pub ProcessState: crate::os::exec_posix::ProcessState,
+}
+
+impl crate::errors::ErrorTrait for ExitError {
+    // go: none — goish-only placement: Go's `ExitError.Error` is
+    // os/exec/exec.go:893-895. See the note on the struct.
+    /// Go: `return e.ProcessState.String()`.
+    fn Error(&self) -> string {
+        return self.ProcessState.String();
+    }
+}
+
+impl ExitError {
+    // go: none — goish-only: Go reaches this through the embedded
+    // *os.ProcessState. Rust has no embedding, so it forwards.
+    /// The exit code, or -1 if a signal ended the process.
+    pub fn ExitCode(&self) -> int {
+        return self.ProcessState.ExitCode();
+    }
+
+    // go: none — goish-only: see ExitCode.
+    /// Whether the process ran to completion.
+    pub fn Exited(&self) -> bool {
+        return self.ProcessState.Exited();
+    }
+
+    // go: none — goish-only: see ExitCode.
+    /// Whether it exited with status 0.
+    pub fn Success(&self) -> bool {
+        return self.ProcessState.Success();
+    }
+
+    // go: none — goish-only: see ExitCode.
+    /// The pid that was waited on.
+    pub fn Pid(&self) -> int {
+        return self.ProcessState.Pid();
+    }
+}
+
 // go: none — goish idiom: Go's `exec.Error` is a struct with `Name` and
 // `Err` whose Error() is `"exec: " + strconv.Quote(e.Name) + ": " +
 // e.Err.Error()`. Every LookPath failure is wrapped in one, and the
@@ -716,6 +776,21 @@ impl Cmd {
             err_pipe[1] = self.stderr_pipe_write_fd;
         }
 
+        // ── The exec-status pipe ─────────────────────────────────────
+        //
+        // Go's forkExec carries the child's failure back to the parent
+        // through a CLOEXEC pipe: a successful execve closes the write
+        // end and the parent reads EOF, while a failure writes the
+        // errno first. Without it the child can only signal failure by
+        // EXITING, and an exit code is indistinguishable from one the
+        // program itself chose — goish reported a missing binary as
+        // "exit status 127", which is also what `sh -c 'exit 127'`
+        // reports.
+        let mut exec_pipe: [i32; 2] = [-1, -1];
+        if syscall::Pipe2(&mut exec_pipe, syscall::O_CLOEXEC) < 0 {
+            return errors::New("os/exec: pipe2 failed for exec status");
+        }
+
         // ── Fork ─────────────────────────────────────────────────────
         let pid = syscall::Fork();
         if pid < 0 {
@@ -792,12 +867,36 @@ impl Cmd {
                 child_die(127);
             }
 
-            let _ = syscall::Execve(path_buf.as_ptr(), argv_ptrs.as_ptr(), envp_ptrs.as_ptr());
+            let rc = syscall::Execve(path_buf.as_ptr(), argv_ptrs.as_ptr(), envp_ptrs.as_ptr());
+            child_report(exec_pipe[1], rc);
             child_die(127);
         }
 
         // ── PARENT ───────────────────────────────────────────────────
         self.pid = pid;
+
+        // Read the exec-status pipe first. A successful execve closed
+        // the write end (O_CLOEXEC), so this reads 0 bytes; a failure
+        // wrote the errno. Reap the child either way before reporting,
+        // so a failed start does not leave a zombie.
+        syscall::Close(exec_pipe[1]);
+        {
+            let mut errbuf = [0u8; 4];
+            let n = syscall::Read(exec_pipe[0], errbuf.as_mut_ptr(), errbuf.len());
+            syscall::Close(exec_pipe[0]);
+            if n == 4 {
+                let errno = i32::from_ne_bytes(errbuf);
+                let mut status: i32 = 0;
+                let _ = syscall::Wait4(pid, &mut status as *mut i32, 0, core::ptr::null_mut());
+                self.pid = -1;
+                // Go: &PathError{Op: "fork/exec", Path: name, Err: errno}
+                return errors::Wrap(crate::os::PathError {
+                    Op: string::from_static("fork/exec"),
+                    Path: self.Path.clone(),
+                    Err: errors::Wrap(syscall::Errno(errno as _)),
+                });
+            }
+        }
 
         // Close the child's end of the stdin pipe in the parent.
         if (want_in_reader || want_in_pipe) && in_pipe[0] >= 0 {
@@ -919,7 +1018,7 @@ impl Cmd {
         if r < 0 {
             return errors::New("os/exec: wait4 failed");
         }
-        decode_wait_status(status)
+        decode_wait_status(int::from(i64::from(pid)), status)
     }
 
     /// `(*Cmd).Run()` — fork, exec, drain captured pipes, wait, return
@@ -944,6 +1043,24 @@ fn for_each_arg<F: FnMut(&string)>(args: &slice<string>, mut f: F) {
 }
 
 #[inline]
+// go: none — goish-only: the child half of Go's forkExec status pipe
+// (syscall/exec_unix.go). Go writes the errno from the child through
+// a CLOEXEC pipe and the parent turns it back into an error; this is
+// the write.
+/// Report a failed syscall to the parent, as a 4-byte errno.
+///
+/// `rc` is goish's negative-errno convention. Nothing can be done if
+/// the write fails — the parent then sees EOF and reports the exit
+/// status, which is the behaviour this replaces.
+fn child_report(fd: i32, rc: i32) {
+    if fd < 0 {
+        return;
+    }
+    let errno: i32 = if rc < 0 { -rc } else { 0 };
+    let bytes = errno.to_ne_bytes();
+    let _ = syscall::Write(fd, bytes.as_ptr(), bytes.len());
+}
+
 fn child_die(code: i32) -> ! {
     unsafe {
         syscall::syscall1(syscall::SYS_EXIT, code as usize);
@@ -955,16 +1072,15 @@ fn child_die(code: i32) -> ! {
 
 /// Decode the raw `wait4(2)` status word into a goish `error`.
 /// Returns nil on clean exit 0, otherwise a descriptive error.
-fn decode_wait_status(status: i32) -> error {
-    if status == 0 {
+fn decode_wait_status(pid: int, status: i32) -> error {
+    let st = crate::os::exec_posix::ProcessState::__new(pid, status);
+    if st.Success() {
         return crate::nilval::nil.into();
     }
-    if status & 0x7f == 0 {
-        let code = (status >> 8) & 0xff;
-        return errors::New(crate::fmt::Sprintf!("exit status %d", code));
-    }
-    let sig = status & 0x7f;
-    errors::New(crate::fmt::Sprintf!("signal: %d", sig))
+    // Go: Cmd.Wait returns `&ExitError{ProcessState: ps}` for any
+    // non-zero state, and the message is ProcessState.String() — so
+    // a signal renders by NAME ("signal: killed"), not by number.
+    return errors::Wrap(ExitError { ProcessState: st });
 }
 
 /// Read everything from `fd` into the goish writer. Buffers are 4 KiB.

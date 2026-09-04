@@ -3170,3 +3170,7 @@ path = "examples/textproto_code_ref_smoke.rs"
 [[example]]
 name = "textproto_dot_ref_smoke"
 path = "examples/textproto_dot_ref_smoke.rs"
+
+[[example]]
+name = "exitstatus_ref_smoke"
+path = "examples/exitstatus_ref_smoke.rs"
