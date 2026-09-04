@@ -17,6 +17,8 @@
 
 #![allow(non_snake_case)]
 
+extern crate alloc;
+
 use crate::errors::{self, error};
 use crate::gostring::string;
 use crate::net::TCPConn;
@@ -228,4 +230,158 @@ fn ipv4_octets(ip: &crate::net::IP) -> [u8; 4] {
         *v4.bytes.get(2).unwrap_or(&0),
         *v4.bytes.get(3).unwrap_or(&0),
     ];
+}
+
+// go: sdk 1.25.5 net/tcpsock.go:443-466 ListenTCP
+/// Go: "ListenTCP acts like [Listen] for TCP networks. … If the IP
+/// field of laddr is nil or an unspecified IP address, ListenTCP
+/// listens on all available unicast and anycast IP addresses of the
+/// local system. If the Port field of laddr is 0, a port number is
+/// automatically chosen."
+///
+/// A nil `laddr` is the zero TCPAddr, NOT an error — Go writes
+/// `laddr = &TCPAddr{}` before listening. An unknown network is an
+/// `&OpError{Op: "listen"}` wrapping `UnknownNetworkError`, which
+/// renders "listen udp: unknown network udp": the Net field and the
+/// wrapped error both name it, which looks redundant and is what Go
+/// prints.
+pub fn ListenTCP<N: Into<string>>(
+    network: N,
+    laddr: crate::nilable<crate::net::TCPAddr>,
+) -> (crate::nilable<crate::net::Listener>, error) {
+    let network: string = network.into();
+    let netw: &str = network.as_ref();
+    match netw {
+        "tcp" | "tcp4" | "tcp6" => {}
+        _ => {
+            return (
+                crate::nilable::nil(),
+                listen_op_error(&network, op_addr(&laddr)),
+            );
+        }
+    }
+    // Go: "if laddr == nil { laddr = &TCPAddr{} }".
+    let addr = match laddr.Try() {
+        Some(a) => a.String(),
+        None => crate::net::TCPAddr {
+            IP: [0, 0, 0, 0],
+            Port: int::from(0),
+        }
+        .String(),
+    };
+    let (ln, err) = crate::net::Listen(network.clone(), addr);
+    if !err.IsNil() {
+        return (crate::nilable::nil(), err);
+    }
+    return (crate::nilable::new(ln), errors::nil);
+}
+
+// go: sdk 1.25.5 net/tcpsock.go:317-340 DialTCP
+/// Go: "DialTCP acts like [Dial] for TCP networks." A nil `raddr` is
+/// `errMissingAddress` — "dial tcp: missing address" — and an unknown
+/// network fails before anything is dialled.
+pub fn DialTCP<N: Into<string>>(
+    network: N,
+    laddr: crate::nilable<crate::net::TCPAddr>,
+    raddr: crate::nilable<crate::net::TCPAddr>,
+) -> (crate::nilable<crate::net::TCPConn>, error) {
+    let network: string = network.into();
+    let netw: &str = network.as_ref();
+    match netw {
+        "tcp" | "tcp4" | "tcp6" => {}
+        _ => {
+            return (
+                crate::nilable::nil(),
+                dial_op_error(
+                    &network,
+                    op_addr(&laddr),
+                    op_addr(&raddr),
+                    errors::Wrap(crate::net::net::UnknownNetworkError(network.clone())),
+                ),
+            );
+        }
+    }
+    if raddr.IsNil() {
+        return (
+            crate::nilable::nil(),
+            dial_op_error(
+                &network,
+                op_addr(&laddr),
+                None,
+                crate::net::net::errMissingAddress.into(),
+            ),
+        );
+    }
+    // goish's Dial takes the address in string form; laddr (the local
+    // bind) is not honoured — see the note on op_addr.
+    let target = raddr.Must().String();
+    let (conn, err) = crate::net::Dial(network.clone(), target);
+    if !err.IsNil() {
+        return (crate::nilable::nil(), err);
+    }
+    return (crate::nilable::new(conn), errors::nil);
+}
+
+// go: none — goish-only: Go's `(*TCPAddr).opAddr` returns a nil `Addr`
+// interface for a nil receiver, which is how an OpError prints with no
+// address at all. goish's nilable makes the same distinction.
+//
+// NOTE: DialTCP ignores a non-nil `laddr`. Go binds the local end to
+// it; goish's dial path has no bind step, so a caller asking for a
+// specific source address silently gets an ephemeral one. That is a
+// real gap, recorded here rather than in a smoke because goish has no
+// way to observe the bound source address of a dial yet.
+/// The `Addr` an OpError should carry for a possibly-nil TCPAddr.
+fn op_addr(
+    a: &crate::nilable<crate::net::TCPAddr>,
+) -> Option<alloc::sync::Arc<dyn crate::net::net::Addr>> {
+    return match a.Try() {
+        Some(v) => Some(alloc::sync::Arc::new(v.clone())),
+        None => None,
+    };
+}
+
+// go: none — goish-only: the two OpError compositions ListenTCP and
+// DialTCP build, named once.
+fn listen_op_error(
+    network: &string,
+    addr: Option<alloc::sync::Arc<dyn crate::net::net::Addr>>,
+) -> error {
+    return errors::Wrap(crate::net::net::OpError {
+        Op: string::from_static("listen"),
+        Net: network.clone(),
+        Source: None,
+        Addr: addr,
+        Err: errors::Wrap(crate::net::net::UnknownNetworkError(network.clone())),
+    });
+}
+
+// go: none — goish-only: see listen_op_error.
+fn dial_op_error(
+    network: &string,
+    source: Option<alloc::sync::Arc<dyn crate::net::net::Addr>>,
+    addr: Option<alloc::sync::Arc<dyn crate::net::net::Addr>>,
+    err: error,
+) -> error {
+    return errors::Wrap(crate::net::net::OpError {
+        Op: string::from_static("dial"),
+        Net: network.clone(),
+        Source: source,
+        Addr: addr,
+        Err: err,
+    });
+}
+
+impl crate::net::Listener {
+    // go: sdk 1.25.5 net/tcpsock.go:363-372 TCPListener.AcceptTCP
+    /// Go: "AcceptTCP accepts the next incoming call and returns the
+    /// new connection." The error is an `&OpError{Op: "accept"}`
+    /// naming the listener, which `Accept` already builds.
+    pub fn AcceptTCP(&self) -> (crate::nilable<crate::net::TCPConn>, error) {
+        let (conn, err) = self.Accept();
+        if !err.IsNil() {
+            return (crate::nilable::nil(), err);
+        }
+        return (crate::nilable::new(conn), errors::nil);
+    }
 }
