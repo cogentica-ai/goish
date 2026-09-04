@@ -3298,3 +3298,7 @@ path = "examples/cryptobyte_asn1_ref_smoke.rs"
 [[example]]
 name = "asn1_string_ref_smoke"
 path = "examples/asn1_string_ref_smoke.rs"
+
+[[example]]
+name = "tls_record_overflow_smoke"
+path = "examples/tls_record_overflow_smoke.rs"

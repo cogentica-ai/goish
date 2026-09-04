@@ -1,5 +1,15 @@
 // crypto/tls/record.rs — TLS 1.2 record layer (encrypt / decrypt).
 //
+// goishlint:ignore GOISH015 — this file is INVENTED, not a port. It
+//     predates `conn.rs`, which is Go's record layer with 55 anchors,
+//     and ROADMAP.md §1 has retiring it as the last of the tls
+//     demolition: `handshake_client.rs` still reaches
+//     `record::read_record` nine times. The `conn.go` citation below is
+//     the RULE this file now enforces, quoted so the two can be
+//     compared — not a claim that record.rs ports conn.go. Renaming it
+//     to conn.rs, which is what this rule asks for, would collide with
+//     the real port.
+//
 // Implements the TLS 1.2 record-layer codec for cipher suite
 // TLS_RSA_WITH_AES_128_CBC_SHA (0x002F):
 //
@@ -902,6 +912,29 @@ pub fn read_record(conn: &mut dyn crate::io::Reader) -> (byte, slice<byte>, erro
 
     let content_type = hdr[0];
     let payload_len = u16::from_be_bytes([hdr[3], hdr[4]]) as usize; // goishlint:ignore GOISH005
+
+    // Go: conn.go:673 — `if c.vers == VersionTLS13 && n > maxCiphertextTLS13
+    // || n > maxCiphertext { c.sendAlert(alertRecordOverflow); ... }`
+    //
+    // This read no length limit at all: a u16 caps the damage at 64 KiB,
+    // but every record between 18433 and 65535 bytes was accepted and
+    // processed where Go refuses it with alertRecordOverflow. That is a
+    // peer-controlled input deciding how much this client allocates and
+    // parses, on the handshake path, and nothing reported it.
+    //
+    // Go applies a TIGHTER bound once the version is known to be TLS
+    // 1.3 (maxCiphertextTLS13, 16384+256). This function is handed a
+    // bare `io::Reader` and has no connection state, so it enforces the
+    // general bound only. `conn.rs`'s `readRecordOrCCS` — the ported
+    // record layer, which this file exists to be replaced by — does the
+    // version-dependent check properly.
+    if payload_len > super::common::maxCiphertext as usize {
+        return (
+            content_type,
+            empty,
+            errors::New("tls: oversized record received"),
+        );
+    }
 
     if payload_len == 0 {
         return (content_type, empty, errors::nil);
