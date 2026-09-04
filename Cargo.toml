@@ -3270,3 +3270,7 @@ path = "examples/tar_sparse_ref_smoke.rs"
 [[example]]
 name = "io_copy_ref_smoke"
 path = "examples/io_copy_ref_smoke.rs"
+
+[[example]]
+name = "tar_fileinfo_stat_smoke"
+path = "examples/tar_fileinfo_stat_smoke.rs"

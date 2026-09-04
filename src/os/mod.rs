@@ -211,12 +211,16 @@ pub struct FileInfoData {
     mod_time: crate::time::Time,
     is_dir: bool,
     /// Go's `fileStat.sys` — the raw `syscall.Stat_t` that `Sys()`
-    /// hands back and that `SameFile` compares. goish used to discard
-    /// it and return `Arc::new(())` from `Sys()`, so a caller asking
-    /// for the underlying stat got an empty tuple and no way to tell.
-    /// `(dev, ino)` is the identifying pair; the rest of the struct is
-    /// already unpacked into the fields above.
-    sys: Option<(u64, u64)>,
+    /// hands back and that `SameFile` compares.
+    ///
+    /// This kept only `(dev, ino)`, the pair `SameFile` needs, on the
+    /// grounds that "the rest of the struct is already unpacked into
+    /// the fields above". It is not: `st_uid`, `st_gid`, `st_rdev` and
+    /// the atime/ctime pairs have no field here, and `Sys()` is the
+    /// only way Go exposes them. `archive/tar`'s `statUnix` reads
+    /// exactly those to fill a header's Uid, Gid, Uname, Gname,
+    /// AccessTime and ChangeTime, all of which came back zero.
+    sys: Option<syscall::Stat_t>,
 }
 
 // Polymorphic-nil per priority #5. Go's `os.FileInfo` is an interface
@@ -260,7 +264,14 @@ impl FileInfo for FileInfoData {
         self.is_dir
     }
     fn Sys(&self) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
-        alloc::sync::Arc::new(())
+        // Forward. This used to return `Arc::new(())` of its own while
+        // the inherent `Sys` below returned the real stat — so the
+        // answer depended on whether the caller held a `FileInfoData`
+        // or an `fs::FileInfo`, and Go's own callers hold the
+        // interface. `archive/tar`'s statUnix is one: it reads the
+        // owner and the atime/ctime through `fi.Sys()` and got an
+        // empty tuple every time.
+        return FileInfoData::Sys(self);
     }
     fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
         Some(self)
@@ -316,7 +327,7 @@ impl FileInfoData {
     /// for a FileInfo that never came from a stat.
     pub fn Sys(&self) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
         match self.sys {
-            Some(id) => return alloc::sync::Arc::new(id),
+            Some(st) => return alloc::sync::Arc::new(st),
             None => return alloc::sync::Arc::new(()),
         }
     }
@@ -336,8 +347,13 @@ impl FileInfoData {
 /// anything, INCLUDING ITSELF — which is why goish keeps `sys: None`
 /// for those and answers false rather than comparing the paths.
 pub fn SameFile(fi1: &FileInfoData, fi2: &FileInfoData) -> bool {
+    // Go compares the whole `*syscall.Stat_t` pair through
+    // `sameFile`, which on Unix is exactly dev+ino — the two fields
+    // that identify a file. The rest of the struct (size, times) can
+    // differ between two stats of the same file, so comparing it all
+    // would be wrong.
     match (fi1.sys, fi2.sys) {
-        (Some(a), Some(b)) => return a == b,
+        (Some(a), Some(b)) => return a.st_dev == b.st_dev && a.st_ino == b.st_ino,
         _ => return false,
     }
 }
@@ -386,7 +402,7 @@ fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfoData {
         mode,
         mod_time: crate::time::Unix(st.st_mtime, st.st_mtime_nsec as int),
         is_dir,
-        sys: Some((st.st_dev, st.st_ino)),
+        sys: Some(*st),
     }
 }
 

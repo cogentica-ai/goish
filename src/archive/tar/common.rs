@@ -826,6 +826,33 @@ pub fn FileInfoHeader(
     if (fm & fs::ModeSticky) != fs::FileMode(0) {
         h.Mode |= c_ISVTX;
     }
+
+    // Go: a FileInfo that also implements FileInfoNames supplies Uname
+    // and Gname itself, and suppresses the system lookup.
+    let mut doNameLookups = true;
+    let (names, ok) = crate::cast!(fi, FileInfoNames);
+    if ok {
+        doNameLookups = false;
+        let (gname, err) = names.Gname();
+        if !err.IsNil() {
+            return (Header::new(), err);
+        }
+        h.Gname = gname;
+        let (uname, err) = names.Uname();
+        if !err.IsNil() {
+            return (Header::new(), err);
+        }
+        h.Uname = uname;
+    }
+
+    // Go reaches this through the `sysStat` function variable, which
+    // each stat_*.go sets in its own init; the indirection exists to
+    // pick a platform. goish builds for linux only, so the one
+    // implementation is called directly — see stat_unix.rs.
+    let err = super::stat_unix::statUnix(fi, &mut h, doNameLookups);
+    if !err.IsNil() {
+        return (Header::new(), err);
+    }
     return (h, nil);
 }
 

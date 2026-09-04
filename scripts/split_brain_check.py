@@ -28,8 +28,17 @@ The check reports a pair when ALL of these hold:
     name, in the same file;
   * neither body calls the other (`Type::meth(`, `self.meth(`, or
     `<Self as Trait>::meth(`);
-  * BOTH bodies are more than three lines, so a genuinely different
-    small accessor is not reported.
+  * EITHER body is more than three lines, OR the two bodies differ in
+    a way a one-line accessor can still get wrong.
+
+The threshold used to require BOTH bodies to be long, on the grounds
+that a small accessor is unlikely to diverge. That is exactly how
+`os.FileInfoData.Sys` slipped through: the trait impl was the single
+line `Arc::new(())` while the inherent method returned the real
+`syscall.Stat_t`. One line, and it cost `archive/tar` every header's
+owner, access time and change time, because Go's callers hold the
+interface. A short body is not a safe body — it is the easiest kind to
+leave behind when the other side is fixed.
 
 Forwarding in EITHER direction is fine — crypto/md5 puts the real
 implementation in the trait and forwards the inherent one, which is
@@ -51,12 +60,50 @@ RE_FN = re.compile(r"^\s{4}(?:pub(?:\([^)]*\))?\s+)?fn\s+([A-Za-z_]\w*)")
 
 
 def delegates(body, ty, meth):
-    """Does this body hand the work to the other implementation?"""
-    return bool(
-        re.search(r"\b%s::%s\s*\(" % (re.escape(ty), re.escape(meth)), body)
-        or re.search(r"self\s*\.\s*%s\s*\(" % re.escape(meth), body)
-        or re.search(r"<Self as [^>]*>::\s*%s\s*\(" % re.escape(meth), body)
-    )
+    """Does this body hand the work to the other implementation?
+
+    `Type::<T>::meth(` counts: a generic type forwards through a
+    turbofish, which is how crypto/elliptic's nistCurve reaches its
+    inherent methods, and matching only `Type::meth(` read every one of
+    those as a separate implementation.
+    """
+    if re.search(r"\b%s\s*(?:::<[^>]*>)?\s*::%s\s*\(" % (re.escape(ty), re.escape(meth)), body):
+        return True
+    if re.search(r"self\s*\.\s*%s\s*\(" % re.escape(meth), body):
+        return True
+    if re.search(r"<Self as [^>]*>::\s*%s\s*\(" % re.escape(meth), body):
+        return True
+    # `Self::meth(self)` — syscall's Errno::Error forwards this way.
+    if re.search(r"\bSelf\s*(?:::<[^>]*>)?\s*::%s\s*\(" % re.escape(meth), body):
+        return True
+    # A local bound to `self`, then called on: reflect's Stringer for
+    # Type writes `let ty: &Type = self; return ty.String();` to pick
+    # the inherent method over the trait one it is inside.
+    for alias in re.findall(r"let\s+(\w+)\s*(?::[^=]*)?=\s*self\s*;", body):
+        if re.search(r"\b%s\s*\.\s*%s\s*\(" % (re.escape(alias), re.escape(meth)), body):
+            return True
+    return False
+
+
+def same_inner_target(a, b, meth):
+    """Both bodies forwarding the SAME call to the same inner field.
+
+    `crypto/tls`'s `Conn::Write` is `self.inner.Write(...)` on both
+    sides, differing only in whether the argument is copied. That is
+    one implementation reached two ways, not two implementations — the
+    thing this check exists to find is two bodies that can DISAGREE.
+    """
+    # `self.w.Write(p)` and the UFCS spelling of the same call,
+    # `io::Writer::Write(&mut self.w, p)` — net/http/fcgi's bufWriter
+    # uses one on each side.
+    direct = re.compile(r"self\s*\.\s*(\w+)\s*\.\s*%s\s*\(" % re.escape(meth))
+    ufcs = re.compile(r"::%s\s*\(\s*&(?:mut\s+)?self\s*\.\s*(\w+)" % re.escape(meth))
+
+    def targets(body):
+        return set(direct.findall(body)) | set(ufcs.findall(body))
+
+    ta, tb = targets(a), targets(b)
+    return bool(ta) and ta == tb
 
 
 def scan_file(path):
@@ -96,8 +143,13 @@ def scan_file(path):
             continue
         if delegates(tbody, ty, meth) or delegates(ibody, ty, meth):
             continue
+        if same_inner_target(tbody, ibody, meth):
+            continue
         ni, nt = ibody.count("\n"), tbody.count("\n")
-        if ni > 3 and nt > 3:
+        # Either side being substantial is enough. A one-line trait
+        # body that does NOT forward is the shape that hid the
+        # os.FileInfo.Sys defect, and it is cheap to report.
+        if ni > 3 or nt > 3:
             out.append((ty, meth, tr, ni, nt))
     return out
 
