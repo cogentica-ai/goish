@@ -89,11 +89,14 @@ pub fn fatalln_impl(args: &[fmt::FmtArg]) -> ! {
 // serializing access through a mutex. The flag bits below control the
 // header prefixed to each line.
 //
-// KNOWN DIVERGENCE: goish has no `runtime.Caller`, so the Lshortfile /
-// Llongfile flags cannot recover the caller's file:line. Output therefore
-// always takes Go's own caller-failure fallback (file = "???", line = 0),
-// rendering "???:0: " when either flag is set. Date/Time/Microseconds and
-// the prefix are fully faithful.
+// The Lshortfile / Llongfile flags report the caller's file and line,
+// resolved through runtime::Caller at the depth `Output` is given.
+//
+// This block used to be a KNOWN DIVERGENCE saying goish had no
+// runtime.Caller and that Output therefore always took Go's
+// caller-failure fallback, rendering "???:0: ". goish has had
+// runtime::Caller for a while; the note was false, and it is why the
+// wrong output looked like a documented limitation.
 
 use crate::errors::error;
 use crate::goslice::slice;

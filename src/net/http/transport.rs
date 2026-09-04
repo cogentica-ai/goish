@@ -924,7 +924,8 @@ crate::var! {
 // Go: "nothingWrittenError wraps a write errors which ended up
 // writing zero bytes." Whether a retry is safe hinges on this: if
 // nothing reached the wire, re-sending cannot duplicate a side
-// effect. A sentinel because goish has no errors::As.
+// effect. A sentinel: goish HAS errors::As, but a sentinel compares
+        // by identity, which is what this test wants.
 crate::var! {
     pub errNothingWritten: error = "http: nothing written";
 }

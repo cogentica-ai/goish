@@ -64,7 +64,8 @@ pub struct muxEntry {
 
 // goishlint:ignore GOISH019 serveMux121 — Go's `mu sync.RWMutex` and
 // the three fields it guards (`m`, `es`, `hosts`) live together inside
-// `state: Mutex<mux121State>`; goish has no RWMutex. Same grouping as
+// `state: Mutex<mux121State>`. goish has sync::RWMutex, but the mux
+// is written far more often than it is read here. Same grouping as
 // cookiejar's Jar. This is the file's only GOISH019 finding.
 // go: sdk 1.25.5 net/http/servemux121.go:39-44 serveMux121
 /// Go: "serveMux121 holds the state of a ServeMux needed for Go 1.21
