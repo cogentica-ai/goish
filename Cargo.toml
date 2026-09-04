@@ -8,7 +8,7 @@ name = "goish"
 # crates.io. .github/workflows/publish.yml refuses to publish when the two
 # disagree, so a mismatched tag fails loudly instead of shipping the wrong
 # version. Bump this and goish-macros together — they are published as a pair.
-version = "1.0.0-alpha.8"
+version = "1.0.0-alpha.9"
 edition = "2021"
 rust-version = "1.86"
 authors = ["Chanwit Kaewkasi <chanwit@gmail.com>"]
@@ -47,7 +47,7 @@ default = []
 ffi-system-tls = []
 
 [dependencies]
-goish-macros = { path = "goish-macros", version = "=1.0.0-alpha.8" }
+goish-macros = { path = "goish-macros", version = "=1.0.0-alpha.9" }
 libm = { version = "0.2", default-features = false }
 
 [profile.dev]
