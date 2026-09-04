@@ -22,11 +22,18 @@ What is left of the demolition:
 
 | file | LOC | anchors | state |
 |---|--:|--:|---|
-| `record.rs` | 938 | 0 | invented. `conn.rs` is Go's record layer, ported with 55 anchors, and both are live. |
+| `record.rs` | 938 | 0 | invented. `conn.rs` is Go's record layer, ported with 55 anchors, and both are live. **Diffing it against conn.rs on 2026-09-04 produced four security defects** — two missing length bounds, a padding oracle, and a discarded RNG error — each fixed with a smoke. The file header lists what was checked clean. Retiring it is still the goal; until then it is no longer unexamined. |
 | `session.rs` | 145 | 0 | invented. |
 
 `handshake_client.rs` and `handshake_server_tls13.rs` are no longer
-squatters — they carry 22 and 19 anchors. Retire `record.rs` and
+squatters — they carry 22 and 19 anchors.
+
+Worth reading before planning the retirement: this section used to
+describe record.rs as a tidiness problem. It was a security backlog.
+Four defects in one afternoon, all of the same shape — invented crypto
+that no test had ever compared to the Go it replaces — and none of them
+would have been found by the coverage or anchor tiers, because the file
+claims to port nothing. Retire `record.rs` and
 `session.rs` the way the ecdsa eviction was sequenced: the live
 handshake is behind `tls_smoke` and the tier-3 (×50) stress family, so a
 regression there is an outage rather than a test failure. Dispatch

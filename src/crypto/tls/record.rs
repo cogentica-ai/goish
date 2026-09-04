@@ -10,6 +10,44 @@
 //     to conn.rs, which is what this rule asks for, would collide with
 //     the real port.
 //
+// ─── What has been diffed against Go, 2026-09-04 ─────────────────────
+//
+// This file had never been compared to `conn.rs`, the anchored port it
+// stands in for. Four defects came out of doing it, each in its own
+// commit with a smoke:
+//
+//   * no bound on the record length — a u16 was read and that many
+//     bytes allocated, where Go refuses anything over maxCiphertext.
+//   * no bound on the DECRYPTED length, which the first does not
+//     imply: maxCiphertext leaves ~2 KiB of slack over maxPlaintext.
+//   * a padding oracle — three distinguishable errors for bad padding
+//     versus bad MAC, and an early return on the first bad byte. Go's
+//     constant-time `extractPadding` is now ported verbatim and the
+//     two results are folded before either is acted on. The same check
+//     also refused padding over 16 bytes, where TLS permits 255.
+//   * a discarded `rand::Read` result, which on failure left the
+//     per-record IV as zeros.
+//
+// Checked and found to MATCH Go, so the next reader need not redo it:
+//
+//   * the per-record explicit IV is freshly drawn, not reused.
+//   * the AEAD path takes the 8-byte explicit nonce FROM THE WIRE and
+//     prepends the 4-byte fixed IV, which is the TLS 1.2 GCM
+//     construction.
+//   * `compute_mac` covers seq || type || version || length ||
+//     fragment, per RFC 5246 6.2.3.1.
+//   * unencrypted application data cannot be injected mid-handshake:
+//     `handshake_client.rs` rejects any record whose type is not the
+//     one its state machine expects, which is what Go's "Application
+//     Data messages are always protected" check buys.
+//   * sequence-number wraparound is not reachable here — `seq` is a
+//     u64 parameter the caller owns, and `conn.rs` carries Go's
+//     `incSeq` panic.
+//
+// Not established, and worth stating: none of this makes the CBC path
+// constant TIME. The padding scan is Go's, but the MAC is computed
+// over a variable-length payload, which is the other half of Lucky13.
+//
 // Implements the TLS 1.2 record-layer codec for cipher suite
 // TLS_RSA_WITH_AES_128_CBC_SHA (0x002F):
 //
