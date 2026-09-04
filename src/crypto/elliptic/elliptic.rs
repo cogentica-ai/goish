@@ -344,4 +344,18 @@ const _: int = 0;
 /// from `goish::init()`.
 pub fn register_elliptic_impls() {
     __goish_register_Curve_impl::<crate::crypto::elliptic::params::CurveParams>();
+
+    // The four nistec curves for `unmarshaler`. `Unmarshal` and
+    // `UnmarshalCompressed` both begin with `curve.(unmarshaler)` and
+    // fall back to generic big.Int arithmetic when it misses — which
+    // it always did, because these were never registered. The two
+    // paths agree on every answer measured (see
+    // elliptic_unmarshal_ref_smoke), so nothing was WRONG; but Go
+    // reaches nistec here, and nistec is the constant-time
+    // implementation while the fallback is not.
+    //
+    // Registered per instantiation because the impl is generic
+    // (`impl<Point: nistPoint> unmarshaler for nistCurve<Point>`) and
+    // the registry is keyed on a concrete type.
+    crate::crypto::elliptic::nistec::register_nistec_unmarshalers();
 }

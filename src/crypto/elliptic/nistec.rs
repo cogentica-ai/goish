@@ -514,3 +514,16 @@ impl<Point: nistPoint> unmarshaler for nistCurve<Point> {
         return Some(self);
     }
 }
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registry for the four concrete `nistCurve` instantiations. Go's
+// `curve.(unmarshaler)` is structural and needs no such step; here the
+// assertion in `elliptic::Unmarshal` misses without it, silently, and
+// the caller gets the generic big.Int path instead of nistec.
+// See AGENTS.md §9b.
+pub(crate) fn register_nistec_unmarshalers() {
+    crate::crypto::elliptic::elliptic::__goish_register_unmarshaler_impl::<nistCurve<nistec::P224Point>>();
+    crate::crypto::elliptic::elliptic::__goish_register_unmarshaler_impl::<nistCurve<nistec::P256Point>>();
+    crate::crypto::elliptic::elliptic::__goish_register_unmarshaler_impl::<nistCurve<nistec::P384Point>>();
+    crate::crypto::elliptic::elliptic::__goish_register_unmarshaler_impl::<nistCurve<nistec::P521Point>>();
+}
