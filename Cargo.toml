@@ -3274,3 +3274,7 @@ path = "examples/tar_fileinfo_stat_smoke.rs"
 [[example]]
 name = "elliptic_unmarshal_ref_smoke"
 path = "examples/elliptic_unmarshal_ref_smoke.rs"
+
+[[example]]
+name = "httpproxy_ref_smoke"
+path = "examples/httpproxy_ref_smoke.rs"
