@@ -3154,3 +3154,7 @@ path = "examples/sockopt_ref_smoke.rs"
 [[example]]
 name = "lookupport_ref_smoke"
 path = "examples/lookupport_ref_smoke.rs"
+
+[[example]]
+name = "resolvetcpaddr_ref_smoke"
+path = "examples/resolvetcpaddr_ref_smoke.rs"

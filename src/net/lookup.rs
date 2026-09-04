@@ -680,13 +680,37 @@ pub fn LookupHost<S: Into<string>>(host: S) -> (slice<string>, error) {
 
     let (raw_strs, e) = dnsclient::lookup_host(h);
     if e != errors::nil {
-        return (slice::<string>::new(), e);
+        return (slice::<string>::new(), as_dns_error(h, e));
     }
     let mut out = slice::<string>::new();
     for s in &raw_strs {
         out = crate::append!(out, string::from_bytes(s.as_bytes()));
     }
     (out, errors::nil)
+}
+
+// go: none — goish-only: Go's resolver builds `*DNSError` at the point
+// of failure (newDNSError, net.go), so every lookup error already
+// carries the name looked for. goish's dnsclient answers with bare
+// sentinels — `errNoSuchHost` renders "no such host" — so the name is
+// attached here instead.
+/// Give a lookup failure Go's shape: `lookup <name>: <err>`.
+///
+/// An error that is already a DNSError passes through untouched, so a
+/// failure that DID name a server keeps it.
+fn as_dns_error(host: &str, e: error) -> error {
+    if errors::AsConcrete::<super::net::DNSError>(&e).is_some() {
+        return e;
+    }
+    return errors::Wrap(super::net::DNSError {
+        UnwrapErr: errors::nil,
+        Err: e.Error(),
+        Name: string::from_bytes(host.as_bytes()),
+        Server: string::from_static(""),
+        IsTimeout: false,
+        IsTemporary: false,
+        IsNotFound: true,
+    });
 }
 
 /// `net.LookupIP` — resolves host to a list of IPv4 and IPv6 addresses.

@@ -17,7 +17,8 @@
 
 #![allow(non_snake_case)]
 
-use crate::errors::error;
+use crate::errors::{self, error};
+use crate::gostring::string;
 use crate::net::TCPConn;
 use crate::syscall;
 use crate::time::Duration;
@@ -99,4 +100,132 @@ impl TCPConn {
             if noDelay { 1 } else { 0 },
         );
     }
+}
+
+// go: sdk 1.25.5 net/tcpsock.go:84-97 ResolveTCPAddr
+/// Go: "ResolveTCPAddr returns an address of TCP end point. … If the
+/// host in the address parameter is not a literal IP address or the
+/// port is not a literal port number, ResolveTCPAddr resolves the
+/// address to an address of TCP end point."
+///
+/// Five behaviours the reference pins, all of them easy to lose:
+///
+///   * An EMPTY network is accepted and means "tcp" — Go calls it "a
+///     hint wildcard for Go 1.0 undocumented behavior".
+///   * "tcp4" and "tcp6" are accepted, but the address that comes back
+///     still answers "tcp" from Network(): TCPAddr.Network is a
+///     constant, not a record of the argument.
+///   * "host:" is port 0 and NOT an error, while a bare "host" is
+///     "address host: missing port in address". An EMPTY address is
+///     ":0".
+///   * The port may be a service NAME: "127.0.0.1:http" is port 80.
+///   * A host that merely LOOKS like an IP but is not one — 256.0.0.1
+///     — is treated as a hostname and fails as a lookup, not as a
+///     malformed address.
+pub fn ResolveTCPAddr<N: Into<string>, A: Into<string>>(
+    network: N,
+    address: A,
+) -> (crate::nilable<crate::net::TCPAddr>, error) {
+    let network: string = network.into();
+    let address: string = address.into();
+    let netw: &str = network.as_ref();
+    match netw {
+        "tcp" | "tcp4" | "tcp6" => {}
+        // Go: "a hint wildcard for Go 1.0 undocumented behavior".
+        "" => {}
+        _ => {
+            return (
+                crate::nilable::nil(),
+                errors::Wrap(crate::net::net::UnknownNetworkError(network.clone())),
+            );
+        }
+    }
+
+    // Go: an empty address is the zero end point, not an error.
+    if address.Len() == 0 {
+        return (
+            crate::nilable::new(crate::net::TCPAddr {
+                IP: [0, 0, 0, 0],
+                Port: int::from(0),
+            }),
+            crate::errors::nil,
+        );
+    }
+
+    let (host, port_str, serr) = crate::net::SplitHostPort(address.clone());
+    if !serr.IsNil() {
+        return (crate::nilable::nil(), serr);
+    }
+
+    // The port may be a number or a service name; LookupPort does both
+    // and reports "address <p>: invalid port" for an out-of-range one.
+    let (port, perr) = crate::net::lookup::LookupPort(string::from_static("tcp"), port_str);
+    if !perr.IsNil() {
+        return (crate::nilable::nil(), perr);
+    }
+
+    // Go: an empty host is the wildcard address, which String() then
+    // renders as ":port" rather than "0.0.0.0:port".
+    if host.Len() == 0 {
+        return (
+            crate::nilable::new(crate::net::TCPAddr {
+                IP: [0, 0, 0, 0],
+                Port: port,
+            }),
+            crate::errors::nil,
+        );
+    }
+
+    let ip = crate::net::ParseIP(host.clone());
+    if !ip.IsNil() {
+        return (
+            crate::nilable::new(crate::net::TCPAddr {
+                IP: ipv4_octets(&ip),
+                Port: port,
+            }),
+            crate::errors::nil,
+        );
+    }
+
+    let (addrs, lerr) = crate::net::lookup::LookupHost(host.clone());
+    if !lerr.IsNil() {
+        return (crate::nilable::nil(), lerr);
+    }
+    if addrs.len() == 0 {
+        return (crate::nilable::nil(), crate::net::net::errNoSuchHost.into());
+    }
+    let first = addrs.get(0).cloned().unwrap_or(string::from_static(""));
+    let rip = crate::net::ParseIP(first);
+    if rip.IsNil() {
+        return (crate::nilable::nil(), crate::net::net::errNoSuchHost.into());
+    }
+    return (
+        crate::nilable::new(crate::net::TCPAddr {
+            IP: ipv4_octets(&rip),
+            Port: port,
+        }),
+        crate::errors::nil,
+    );
+}
+
+// go: none — goish-only: goish's TCPAddr carries four octets where
+// Go's carries an `IP` (a byte slice that may be v4 or v16). This
+// narrows one to the other; an IPv6 address has no representation in
+// this TCPAddr, which is a known limit of the type rather than of
+// this function.
+/// The four IPv4 octets of an `IP`, or zeroes.
+fn ipv4_octets(ip: &crate::net::IP) -> [u8; 4] {
+    let v4 = ip.To4();
+    if v4.IsNil() {
+        return [0, 0, 0, 0];
+    }
+    if v4.bytes.len() < 4 {
+        return [0, 0, 0, 0];
+    }
+    return [
+        *v4.bytes.get(0).unwrap_or(&0),
+        *v4.bytes.get(1).unwrap_or(&0),
+        *v4.bytes.get(2).unwrap_or(&0),
+        *v4.bytes.get(3).unwrap_or(&0),
+    ];
 }
