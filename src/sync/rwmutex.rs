@@ -1,7 +1,11 @@
-// sync::RWMutex — Go's `sync.RWMutex` (RLock / RUnlock / Lock /
-// Unlock / TryRLock / TryLock).
+// go: file sync/rwmutex.go decls: RWMutex.RLock, RWMutex.TryRLock, RWMutex.RUnlock, RWMutex.Lock, RWMutex.TryLock, RWMutex.Unlock
 //
-// Reference: /share/go/src/sync/rwmutex.go.
+// rwmutex.go — Go's `sync.RWMutex`.
+//
+// This file carried NO provenance anchors, like the rest of src/sync/.
+//
+// goishlint:ignore GOISH021 rwmutexMaxReaders, rlocker — `rwmutexMaxReaders` is the sentinel Go subtracts to signal a pending writer; goish's reader_count uses the same negative-means-writer convention without naming the constant. `rlocker` is the `Locker` view type, which goish has no `Locker` interface for.
+// goishlint:ignore GOISH018 rUnlockSlow, RLocker, syscall_hasWaitingReaders — `rUnlockSlow` is the branch Go splits out so `RUnlock`'s fast path stays inlinable, and it also raises the "RUnlock of unlocked RWMutex" fatal error, which goish's RUnlock raises directly; `RLocker` returns a `Locker` view, and goish has no `Locker` interface for it to return; `syscall_hasWaitingReaders` is a linkname hook for package syscall, which goish does not provide.
 //
 // Direct port of Go's algorithm:
 //
@@ -59,6 +63,7 @@ impl RWMutex {
         }
     }
 
+    // go: sdk 1.25.5 sync/rwmutex.go:67-85 RWMutex.RLock
     /// RLock locks `rw` for reading. Mirrors `RWMutex.RLock`
     /// (rwmutex.go:67).
     #[inline]
@@ -69,6 +74,7 @@ impl RWMutex {
         }
     }
 
+    // go: sdk 1.25.5 sync/rwmutex.go:87-112 RWMutex.TryRLock
     /// TryRLock tries to acquire a read lock without blocking.
     /// Mirrors `RWMutex.TryRLock` (rwmutex.go:87).
     pub fn TryRLock(&self) -> bool {
@@ -87,6 +93,7 @@ impl RWMutex {
         }
     }
 
+    // go: sdk 1.25.5 sync/rwmutex.go:114-127 RWMutex.RUnlock
     /// RUnlock releases a read lock. Panics if `rw` was not
     /// read-locked. Mirrors `RWMutex.RUnlock` (rwmutex.go:114).
     #[inline]
@@ -109,6 +116,7 @@ impl RWMutex {
         }
     }
 
+    // go: sdk 1.25.5 sync/rwmutex.go:144-167 RWMutex.Lock
     /// Lock locks `rw` for writing. If the lock is held by readers
     /// or another writer, blocks. Mirrors `RWMutex.Lock`
     /// (rwmutex.go:144).
@@ -135,6 +143,7 @@ impl RWMutex {
         }
     }
 
+    // go: sdk 1.25.5 sync/rwmutex.go:169-199 RWMutex.TryLock
     /// TryLock tries to acquire a write lock without blocking.
     /// Mirrors `RWMutex.TryLock` (rwmutex.go:169).
     pub fn TryLock(&self) -> bool {
@@ -152,6 +161,7 @@ impl RWMutex {
         true
     }
 
+    // go: sdk 1.25.5 sync/rwmutex.go:201-223 RWMutex.Unlock
     /// Unlock releases a write lock. Panics if `rw` was not
     /// write-locked. Mirrors `RWMutex.Unlock` (rwmutex.go:201).
     pub fn Unlock(&self) {

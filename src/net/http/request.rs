@@ -30,7 +30,7 @@ use crate::string;
 use crate::types::{byte, int};
 
 use super::header::{hasToken, Header};
-use super::url::{parse_request_uri, URL};
+use super::url::{ParseRequestURI, URL};
 
 /// `net/http.Request`. Slim — only fields a handler typically reads.
 #[derive(Clone)]
@@ -998,7 +998,7 @@ impl Default for Request {
             TLS: None,
             RequestURI: string::new(),
             Method: string::new(),
-            URL: URL::empty(),
+            URL: URL::default(),
             Proto: string::new(),
             ProtoMajor: 0,
             ProtoMinor: 0,
@@ -1039,7 +1039,7 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         TLS: None,
         RequestURI: string::new(),
         Method: string::new(),
-        URL: URL::empty(),
+        URL: URL::default(),
         Proto: string::new(),
         ProtoMajor: 0,
         ProtoMinor: 0,
@@ -1060,10 +1060,25 @@ pub(crate) fn __read_request_server<R: io::Reader>(
     // Request-line: METHOD SP request-target SP HTTP-version CRLF —
     // parsed from a borrowed view of the bufio buffer; only the
     // three kept substrings are materialized (method/proto interned).
-    let (method, target, proto) = match read_line_with(br, max_line, parse_request_line) {
-        Ok(Some(t)) => t,
-        Ok(None) => return (req, errors::New(string("net/http: malformed request line"))),
+    // Go: `badStringError("malformed HTTP request", s)` — the offending
+    // LINE is part of the message, because with a request line the text
+    // is the diagnosis. goish said only "malformed request line", which
+    // tells a log nothing about what arrived. The raw line is carried
+    // back out of the parse so it can be quoted.
+    let (parsed, raw_line) = match read_line_with(br, max_line, |line| {
+        (parse_request_line(line), string::from_bytes(line))
+    }) {
+        Ok(v) => v,
         Err(e) => return (req, e),
+    };
+    let (method, target, proto) = match parsed {
+        Some(t) => t,
+        None => {
+            return (
+                req,
+                crate::fmt::Errorf!("malformed HTTP request %q", raw_line),
+            )
+        }
     };
 
     // Go: req.RequestURI = rawurl — the UNMODIFIED request-target,
@@ -1072,17 +1087,29 @@ pub(crate) fn __read_request_server<R: io::Reader>(
     req.RequestURI = target.clone();
 
     if !validMethod(method.clone()) {
-        return (req, errors::New(string("net/http: invalid method")));
+        // Go: `badStringError("invalid method", req.Method)`.
+        return (
+            req,
+            crate::fmt::Errorf!("invalid method %q", method.clone()),
+        );
     }
     let (major, minor) = match parse_http_version(proto.as_bytes()) {
         Some(v) => v,
-        None => return (req, errors::New(string("net/http: malformed HTTP version"))),
+        // Go: `badStringError("malformed HTTP version", req.Proto)`.
+        None => {
+            return (
+                req,
+                crate::fmt::Errorf!("malformed HTTP version %q", proto.clone()),
+            )
+        }
     };
 
-    let url = match parse_request_uri(&target) {
-        Ok(u) => u,
-        Err(msg) => return (req, errors::New(msg)),
-    };
+    // Go: `url, err := url.ParseRequestURI(target)` — a (value, error)
+    // pair, where net/http's own copy returned a Result.
+    let (url, uerr) = ParseRequestURI(target.clone());
+    if !uerr.IsNil() {
+        return (req, uerr);
+    }
 
     req.Method = method;
     req.URL = url;
@@ -1100,6 +1127,7 @@ pub(crate) fn __read_request_server<R: io::Reader>(
         Field(string, string),
     }
     let mut count = 0;
+    let mut host_seen = false;
     loop {
         let item = match read_line_with(br, max_line, |line| {
             if line.is_empty() {
@@ -1125,12 +1153,45 @@ pub(crate) fn __read_request_server<R: io::Reader>(
                 }
                 // Special-case Host: into req.Host, not into Header.
                 if name.as_bytes() == b"Host" {
+                    // Go (request.go:1138): `if len(req.Header["Host"]) > 1
+                    // { return nil, fmt.Errorf("too many Host headers") }`.
+                    //
+                    // goish kept the LAST one, which is a host-confusion
+                    // primitive: a front end that routes on the first
+                    // Host and a back end that reads the last can be made
+                    // to disagree about which site a request is for. Go
+                    // refuses the request rather than choosing, because
+                    // choosing is what lets two hops choose differently.
+                    if host_seen {
+                        return (req, errors::New(string("too many Host headers")));
+                    }
+                    host_seen = true;
                     req.Host = value;
                 } else {
                     req.Header.__add_canonical(name, value);
                 }
             }
         }
+    }
+
+    // Go (request.go:1142-1152): "RFC 7230, section 5.3: Must treat
+    //     GET /index.html HTTP/1.1
+    //     Host: www.google.com
+    // and
+    //     GET http://www.google.com/index.html HTTP/1.1
+    //     Host: doesntmatter
+    // the same. In the second case, any Host line is ignored."
+    //     req.Host = req.URL.Host
+    //     if req.Host == "" { req.Host = req.Header.get("Host") }
+    //
+    // goish had the precedence backwards: the Host HEADER won over the
+    // absolute-form request target. That is the other half of the
+    // host-confusion problem above — a request whose line says one site
+    // and whose header says another was routed by the header here and
+    // by the line in Go, so a proxy and this server could be made to
+    // disagree about the destination.
+    if req.URL.Host.Len() != 0 {
+        req.Host = req.URL.Host.clone();
     }
 
     // Head fully parsed — lift the connReader's header-byte limit
@@ -1184,6 +1245,10 @@ pub(crate) fn __read_request_server<R: io::Reader>(
             // an inbound body before the handler runs), then read the
             // trailer block the decoder leaves behind.
             let mut buf: Vec<u8> = Vec::new();
+            // `cr` below shadows the connReader parameter, so hold on
+            // to it first — the read-ahead pushback at the end of this
+            // arm needs it.
+            let conn_reader = cr;
             // ChunkedReader wraps its own bufio::Reader; feed it a
             // thin `BufioPassthrough` that delegates to `br`.
             let mut cr = super::internal::chunked::NewChunkedReader(BufioPassthrough { inner: br });
@@ -1217,6 +1282,32 @@ pub(crate) fn __read_request_server<R: io::Reader>(
             let trerr = super::transfer::readTrailer(cr.__bufio_mut(), &mut req.Trailer);
             if !trerr.IsNil() {
                 return (req, trerr);
+            }
+            // The chunked reader's own bufio read ahead out of `br`,
+            // and whatever is left in it once the trailer is consumed
+            // belongs to the NEXT request on this connection. It is
+            // about to be dropped with the reader, so hand it to the
+            // connReader, which outlives the serve loop.
+            //
+            // These bytes come BEFORE anything still sitting in `br`
+            // (they were pulled out of it), and the serve loop appends
+            // br's remainder after this call returns — so pushing here
+            // first keeps the stream in order.
+            //
+            // Without this, a pipelined request that followed a
+            // CHUNKED body was lost, even though one following a
+            // Content-Length body was not: the Content-Length path
+            // reads `br` directly and leaves the surplus where the
+            // serve loop can see it.
+            if let Some(conn_reader) = conn_reader {
+                let inner = cr.__bufio_mut();
+                let ahead = inner.Buffered();
+                if ahead > 0 {
+                    let (peeked, perr) = inner.Peek(ahead);
+                    if perr.IsNil() {
+                        conn_reader.__pushback(&peeked);
+                    }
+                }
             }
             req.Body = super::Body::from_bytes(slice::<byte>::__from_vec(buf));
             return (req, errors::nil);
@@ -1308,6 +1399,7 @@ crate::var! {
     /// The serve loop maps it to `417 Expectation Failed` + close
     /// (Go `sendExpectationFailed`, server.go:2103).
     pub(crate) ErrUnsupportedExpect: error = "net/http: unsupported Expect header";
+
 }
 
 /// Blast the `100 Continue` interim response onto the raw conn fd.
@@ -1709,6 +1801,38 @@ crate::var! {
 /// MultipartReader error paths.
 fn empty_multipart_reader() -> crate::mime::multipart::Reader {
     crate::mime::multipart::NewReader(slice::<byte>::__from_vec(Vec::new()), string::new())
+}
+
+// go: none — goish-only: Go layers MaxBytesReader over the live
+// connection; goish's server has already materialised the body by the
+// time a handler runs, so the same reader is layered over those bytes
+// and given the Close that `Body::from_reader` requires.
+/// A `maxBytesReader` over an in-memory body, as a `ReadCloser`.
+pub(crate) fn __eager_max_bytes_body(data: slice<byte>, n: int) -> eagerMaxBytesBody {
+    return eagerMaxBytesBody {
+        inner: MaxBytesReader(None, crate::bytes::NewReader(data), n),
+    };
+}
+
+// go: none — goish-only: see __eager_max_bytes_body.
+pub(crate) struct eagerMaxBytesBody {
+    inner: maxBytesReader<'static, crate::bytes::Reader>,
+}
+
+impl io::Reader for eagerMaxBytesBody {
+    // go: none — goish-only: forwards to the real maxBytesReader.
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        return io::Reader::Read(&mut self.inner, p);
+    }
+}
+
+impl io::Closer for eagerMaxBytesBody {
+    // go: none — goish-only: nothing underneath to close (the bytes
+    // are in memory); Go's MaxBytesReader.Close closes the wrapped
+    // body, which here is already drained.
+    fn Close(&mut self) -> error {
+        return errors::nil;
+    }
 }
 
 /// `http.MaxBytesError` (request.go:1193) — typed error returned by

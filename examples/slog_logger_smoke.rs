@@ -61,8 +61,11 @@ impl slog::Handler for Recorder {
         LAST_LEVEL.store((record.Level.0 + 100) as usize, Ordering::SeqCst);
         LAST_PC.store(record.PC as u64, Ordering::SeqCst);
         let mut n = 0usize;
-        record.Attrs(&mut |_a| {
+        // Go's `Attrs` takes `func(Attr) bool` and stops when it
+        // returns false; this one wants every attr, so it returns true.
+        record.Attrs(|_a| {
             n += 1;
+            return true;
         });
         LAST_ATTRS.store(n, Ordering::SeqCst);
         return errors::nil;

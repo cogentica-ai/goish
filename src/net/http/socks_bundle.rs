@@ -5,15 +5,15 @@
 // of golang.org/x/net/internal/socks. Names keep Go's `socks` prefix
 // because the bundler adds it and net/http refers to them that way.
 //
-// Two deliberate divergences, both forced by goish's `net` package and
-// both noted at the site:
-//   - `net::IP` is IPv4-only (no `To16`, mod.rs:675), so the
-//     ATYP=IPv6 branch of `connect` cannot construct an address. The
-//     branch is kept and returns the same "unknown address type"
-//     error Go returns for an unrepresentable IP.
-//   - `net::Conn` is a trait with concrete `TCPAddr` accessors rather
-//     than Go's `net.Addr` interface, so `socksConn` holds a
-//     `TCPConn` instead of embedding `net.Conn`.
+// One deliberate divergence, noted at the site: `net::Conn` is a trait
+// with concrete `TCPAddr` accessors rather than Go's `net.Addr`
+// interface, so `socksConn` holds a `TCPConn` instead of embedding
+// `net.Conn`.
+//
+// The ATYP=IPv6 branch used to be a second one: `net::IP` held only
+// four bytes, so an IPv6 target could neither be asked for nor read
+// back, and both directions returned "unknown address type". net/ip.go
+// is now ported and `To16` exists, so both directions are Go's.
 
 #![allow(non_snake_case, non_camel_case_types)]
 
@@ -406,11 +406,19 @@ impl socksDialer {
                     b.push(ip4.bytes[i]);
                 }
             } else {
-                // Go's ATYP=IPv6 branch needs `ip.To16()`. goish's
-                // net::IP is IPv4-only (mod.rs:675), so an address that
-                // is not 4-byte is unrepresentable — the same outcome
-                // Go reaches for an IP it cannot classify.
-                return (None, errors::New(string("unknown address type")));
+                // Go: else if ip6 := ip.To16(); ip6 != nil {
+                //         b = append(b, socksAddrTypeIPv6)
+                //         b = append(b, ip6...) }
+                let ip6 = ip.To16();
+                if !ip6.IsNil() {
+                    b.push(socksAddrTypeIPv6);
+                    for i in 0..ip6.bytes.Len() {
+                        b.push(ip6.bytes[i]);
+                    }
+                } else {
+                    // Go: return nil, errors.New("unknown address type")
+                    return (None, errors::New(string("unknown address type")));
+                }
             }
         } else {
             if host.Len() > 255 {
@@ -463,8 +471,11 @@ impl socksDialer {
                 };
             }
             x if x == socksAddrTypeIPv6 => {
-                // See the ATYP=IPv6 note above: goish cannot hold one.
-                return (None, errors::New(string("unknown address type 4")));
+                // Go: l += net.IPv6len; a.IP = make(net.IP, net.IPv6len)
+                l += net::IPv6len;
+                a.IP = net::IP {
+                    bytes: crate::make!([]byte, net::IPv6len),
+                };
             }
             x if x == socksAddrTypeFQDN => {
                 let mut n = crate::make!([]byte, 1);

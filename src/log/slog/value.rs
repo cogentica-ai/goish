@@ -1,4 +1,4 @@
-// go: file log/slog/value.go decls: AnyValue, Value.Resolve, GroupValue, countEmptyGroups, Value.isEmptyGroup
+// go: file log/slog/value.go decls: AnyValue, Value.Resolve, GroupValue, countEmptyGroups, Value.isEmptyGroup, StringValue, IntValue, Int64Value, Uint64Value, Float64Value, BoolValue, DurationValue, TimeValue, Kind.String, Value.String, Value.append
 //
 // log/slog/value.go — the group constructor and its emptiness pruning.
 //
@@ -311,4 +311,264 @@ pub fn Resolve(v: &Value) -> Value {
     return super::AnyValue(GoishAny::new(crate::errors::New(
         crate::gostring::string::from_static("LogValue called too many times on Value"),
     )));
+}
+
+// ─── Typed constructors (value.go:76) ───────────────────────────────
+//
+// Go packs a Value into a word plus a pointer and reads the Kind back
+// out of the packing; goish stores the Kind alongside the payload, so
+// each constructor sets it directly. The SET of constructors and the
+// Kind each produces are Go's.
+
+// go: sdk 1.25.5 log/slog/value.go:109-111 StringValue
+/// Go: "StringValue returns a new [Value] for a string."
+pub fn StringValue<S: Into<crate::gostring::string>>(value: S) -> Value {
+    return Value {
+        kind: super::KindString,
+        any: GoishAny::new(value.into()),
+    };
+}
+
+// go: sdk 1.25.5 log/slog/value.go:114-116 IntValue
+/// Go: "IntValue returns a [Value] for an int."
+pub fn IntValue(v: int) -> Value {
+    return Int64Value(v);
+}
+
+// go: sdk 1.25.5 log/slog/value.go:119-121 Int64Value
+/// Go: "Int64Value returns a [Value] for an int64."
+pub fn Int64Value(v: int) -> Value {
+    return Value {
+        kind: super::KindInt64,
+        any: GoishAny::new(v),
+    };
+}
+
+// go: sdk 1.25.5 log/slog/value.go:124-126 Uint64Value
+/// Go: "Uint64Value returns a [Value] for a uint64."
+pub fn Uint64Value(v: u64) -> Value {
+    return Value {
+        kind: super::KindUint64,
+        any: GoishAny::new(v),
+    };
+}
+
+// go: sdk 1.25.5 log/slog/value.go:129-131 Float64Value
+/// Go: "Float64Value returns a [Value] for a floating-point number."
+pub fn Float64Value(v: f64) -> Value {
+    return Value {
+        kind: super::KindFloat64,
+        any: GoishAny::new(v),
+    };
+}
+
+// go: sdk 1.25.5 log/slog/value.go:134-140 BoolValue
+/// Go: "BoolValue returns a [Value] for a bool."
+pub fn BoolValue(v: bool) -> Value {
+    return Value {
+        kind: super::KindBool,
+        any: GoishAny::new(v),
+    };
+}
+
+// go: sdk 1.25.5 log/slog/value.go:173-175 DurationValue
+/// Go: "DurationValue returns a [Value] for a [time.Duration]."
+pub fn DurationValue(v: crate::time::Duration) -> Value {
+    return Value {
+        kind: super::KindDuration,
+        any: GoishAny::new(v),
+    };
+}
+
+// go: sdk 1.25.5 log/slog/value.go:153-170 TimeValue
+/// Go: "TimeValue returns a [Value] for a [time.Time]."
+pub fn TimeValue(v: crate::time::Time) -> Value {
+    return Value {
+        kind: super::KindTime,
+        any: GoishAny::new(v),
+    };
+}
+
+// ─── Kind.String (value.go:44) ──────────────────────────────────────
+
+impl super::Kind {
+    // go: sdk 1.25.5 log/slog/value.go:75-80 Kind.String
+    /// Go: `func (k Kind) String() string` over the `kindStrings` table.
+    pub fn String(self) -> crate::gostring::string {
+        let k = self;
+        // Go: var kindStrings = []string{…} indexed by the Kind.
+        let names: [&str; 10] = [
+            "Any",
+            "Bool",
+            "Duration",
+            "Float64",
+            "Int64",
+            "String",
+            "Time",
+            "Uint64",
+            "Group",
+            "LogValuer",
+        ];
+        if k.0 >= 0 && k.0 < crate::int64(names.len()) {
+            return crate::gostring::string::from_bytes(
+                names[k.0.unsigned_abs() as usize].as_bytes(),
+            );
+        }
+        // Go: "<unknown slog.Kind>"
+        return crate::gostring::string::from_static("<unknown slog.Kind>");
+    }
+}
+
+// ─── Value.String (value.go:180) ────────────────────────────────────
+
+impl Value {
+    // go: sdk 1.25.5 log/slog/value.go:304-310 Value.String
+    /// Go: "String returns Value's value as a string, formatted like
+    /// [fmt.Sprint]. Unlike the methods Int64, Float64, and so on, which
+    /// panic if v is of the wrong kind, String never panics."
+    ///
+    /// This is the renderer every built-in handler leans on, and it is
+    /// per-Kind rather than one formatter: an Int64 is decimal, a Float64
+    /// is shortest-round-trip, a Duration is Go's duration syntax, a Time
+    /// is `time.Time.String()` (NOT RFC 3339 — the handlers apply that
+    /// themselves), and a Group is bracketed like a slice of Attrs.
+    pub fn String(&self) -> crate::gostring::string {
+        let v = self;
+        let k = v.Kind();
+        if k == super::KindString {
+            return match v.any.As::<crate::gostring::string>() {
+                Some(s) => s.clone(),
+                None => crate::gostring::string::from_static(""),
+            };
+        }
+        let mut buf: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
+        v.append(&mut buf);
+        return crate::gostring::string::__from_vec(buf);
+    }
+
+    // go: sdk 1.25.5 log/slog/value.go:458-481 Value.append
+    /// Go: "append appends a text representation of v to dst. v is
+    /// formatted as with fmt.Sprint."
+    pub fn append(&self, dst: &mut alloc::vec::Vec<crate::types::byte>) {
+        let v = self;
+        let k = v.Kind();
+        if k == super::KindString {
+            if let Some(s) = v.any.As::<crate::gostring::string>() {
+                dst.extend_from_slice(s.as_bytes());
+            }
+            return;
+        }
+        if k == super::KindInt64 {
+            if let Some(x) = v.any.As::<int>() {
+                dst.extend_from_slice(crate::strconv::FormatInt(*x, 10).as_bytes());
+            }
+            return;
+        }
+        if k == super::KindUint64 {
+            if let Some(x) = v.any.As::<u64>() {
+                dst.extend_from_slice(crate::strconv::FormatUint(*x, 10).as_bytes());
+            }
+            return;
+        }
+        if k == super::KindFloat64 {
+            if let Some(x) = v.any.As::<f64>() {
+                // Go: strconv.AppendFloat(dst, v.float(), 'g', -1, 64)
+                dst.extend_from_slice(crate::strconv::FormatFloat(*x, b'g', -1, 64).as_bytes());
+            }
+            return;
+        }
+        if k == super::KindBool {
+            if let Some(x) = v.any.As::<bool>() {
+                dst.extend_from_slice(crate::strconv::FormatBool(*x).as_bytes());
+            }
+            return;
+        }
+        if k == super::KindDuration {
+            if let Some(x) = v.any.As::<crate::time::Duration>() {
+                dst.extend_from_slice(x.String().as_bytes());
+            }
+            return;
+        }
+        if k == super::KindTime {
+            if let Some(x) = v.any.As::<crate::time::Time>() {
+                dst.extend_from_slice(x.String().as_bytes());
+            }
+            return;
+        }
+        if k == super::KindGroup {
+            // Go: return fmt.Append(dst, v.group()) — a []Attr prints as
+            // "[a=1 b=2]", space-separated inside brackets.
+            let g = group_of(v);
+            dst.push(b'[');
+            let mut i: int = 0;
+            while i < g.Len() {
+                if i > 0 {
+                    dst.push(b' ');
+                }
+                appendAttrString(&g[i], dst);
+                i += 1;
+            }
+            dst.push(b']');
+            return;
+        }
+        if k == super::KindLogValuer || k == super::KindAny {
+            // Go: return fmt.Append(dst, v.any) — the payload's own
+            // rendering, which for an error is its Error() text and for a
+            // nil `any` is "<nil>".
+            dst.extend_from_slice(anyString(&v.any).as_bytes());
+            return;
+        }
+    }
+}
+
+// go: none — goish idiom: Go renders a Group by handing the `[]Attr`
+//     to `fmt.Append`, which reaches each Attr's own String method.
+//     goish has no such reflection at this point, so the one-Attr
+//     rendering is a shared helper that both `Attr::String` (attr.rs)
+//     and the Group arm above call.
+/// `a.Key + "=" + a.Value.String()`, appended.
+pub fn appendAttrString(a: &Attr, dst: &mut alloc::vec::Vec<crate::types::byte>) {
+    dst.extend_from_slice(a.Key.as_bytes());
+    dst.push(b'=');
+    a.Value.append(dst);
+}
+
+// go: none — goish idiom: Go's `fmt.Append(dst, v.any)` reflects over
+//     the boxed `any` and calls its Error or String method if it has
+//     one. goish's `GoishAny` is a typed box, so the same rendering is
+//     a downcast ladder over the types slog can actually hold.
+fn anyString(v: &GoishAny) -> crate::gostring::string {
+    if v.IsNil() {
+        return crate::gostring::string::from_static("<nil>");
+    }
+    if let Some(e) = v.As::<crate::errors::error>() {
+        if e.IsNil() {
+            return crate::gostring::string::from_static("<nil>");
+        }
+        return e.Error();
+    }
+    if let Some(s) = v.As::<crate::gostring::string>() {
+        return s.clone();
+    }
+    if let Some(x) = v.As::<int>() {
+        return crate::strconv::FormatInt(*x, 10);
+    }
+    if let Some(x) = v.As::<u64>() {
+        return crate::strconv::FormatUint(*x, 10);
+    }
+    if let Some(x) = v.As::<bool>() {
+        return crate::strconv::FormatBool(*x);
+    }
+    if let Some(x) = v.As::<f64>() {
+        return crate::strconv::FormatFloat(*x, b'g', -1, 64);
+    }
+    return crate::gostring::string::from_static("<nil>");
+}
+
+// go: none — goish idiom: Go's `Value.Group()` unpacks the group out of
+//     the packed representation; goish stores it whole, and the
+//     handlers need it, so this is that accessor under a name that says
+//     it is goish's rather than Go's `Group`.
+pub fn __group_attrs(v: &Value) -> crate::goslice::slice<Attr> {
+    return group_of(v);
 }

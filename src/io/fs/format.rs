@@ -102,3 +102,29 @@ pub fn FormatDirEntry(dir: &(dyn DirEntry + Send + Sync)) -> string {
     }
     return string::from_bytes(&b);
 }
+
+// go: none — goish idiom. Go's `fmt` reaches an fs.FileInfo's String
+// through the dynamic value, and every FileInfo in the standard
+// library returns `fs.FormatFileInfo(i)` from it — which is what
+// `%v` on a FileInfo prints.
+//
+// goish's printer dispatches statically on `Format`, reached through
+// `Stringer`, and a trait OBJECT satisfied neither: `%v` on an
+// `fs.FileInfo` or an `fs.DirEntry` would not compile, so the two
+// functions below existed with nothing able to call them the way Go
+// does. Implementing `Stringer` on the trait objects closes it, and
+// the blanket `impl<T: Stringer + ?Sized> Format for T` does the rest.
+impl crate::fmt::Stringer for dyn FileInfo + Send + Sync {
+    // go: none — goish idiom: see the note above this impl.
+    fn String(&self) -> string {
+        return FormatFileInfo(self);
+    }
+}
+
+// go: none — goish idiom: see the FileInfo impl above.
+impl crate::fmt::Stringer for dyn DirEntry + Send + Sync {
+    // go: none — goish idiom: see the note above this impl.
+    fn String(&self) -> string {
+        return FormatDirEntry(self);
+    }
+}

@@ -1,3 +1,20 @@
+// NOT DECLARED IN Cargo.toml, SO e2e NEVER RUNS THIS.
+//
+// This harness specifies AUTOMATIC stack growth for the bare `go!()`
+// form. That feature does not exist: the bare arm of the `go!` macro
+// calls `newproc_at` with no growth wrap, and has since M28
+// (f49842f) — the commit that added this file, the growth machinery,
+// and a macro comment claiming the two were connected. They were not.
+//
+// It fails today, on purpose left visible rather than deleted: it is
+// the specification the feature would have to satisfy. Declaring it
+// would simply turn CI red.
+//
+// What DOES work: `go!(stack(N), …)` to size a stack up front, and
+// `runtime::sched::maybe_grow` / `maybe_grow_step` called explicitly
+// at a recursion site — see examples/grow_smoke.rs, which is declared
+// and passes.
+//
 // grow_3tier_smoke — exercise the 3-tier auto-grow ladder via
 // `runtime::sched::maybe_grow_step`.
 //

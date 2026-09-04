@@ -1,5 +1,5 @@
-// go: file net/url/url.go decls: Error.Error, Error.Unwrap, EscapeError.Error, InvalidHostError.Error, escape, unescape, shouldEscape, QueryUnescape, PathUnescape, QueryEscape, PathEscape, User, UserPassword, Userinfo.Username, Userinfo.Password, Userinfo.String, getScheme, Parse, ParseRequestURI, parse, parseAuthority, parseHost, URL.setPath, URL.EscapedPath, validEncoded, URL.setFragment, URL.EscapedFragment, URL.String, validOptionalPort, ParseQuery, parseQuery, resolvePath, URL.IsAbs, URL.Parse, URL.ResolveReference, URL.RequestURI, URL.Hostname, URL.Port, splitHostPort, URL.Redacted, validUserinfo, stringContainsCTLByte, URL.JoinPath, ParseQueryValues, ValuesGet, ValuesSet, ValuesAdd, ValuesDel, ValuesHas, SetPassword, URL.Query, URL.MarshalBinary, URL.AppendBinary, URL.UnmarshalBinary
-// goishlint:ignore GOISH018 Add, Del, Get, Has, Set, Encode, MarshalBinary, UnmarshalBinary, Timeout, Temporary, ishex, unhex, badSetPath, shouldEscape, Encode — Go's `Values` is a NAMED map type carrying methods; goish's is a type alias for `map<string, slice<string>>`, which Rust cannot hang methods on, so the same six are free functions `ValuesAdd`/`ValuesDel`/`ValuesGet`/`ValuesHas`/`ValuesSet`/`ValuesEncode`. `Error`'s net.Error pair is not ported yet; the smoke says so. `ishex`/`unhex` are ported under Rust casing as `is_hex`/`un_hex`, and `badSetPath` is a test-only helper, and `shouldEscape` is `should_escape`. `Encode` is `ValuesEncode`, for the same reason as the other five.
+// go: file net/url/url.go decls: JoinPath, Error.Error, Error.Unwrap, Error.Timeout, Error.Temporary, EscapeError.Error, InvalidHostError.Error, escape, unescape, shouldEscape, QueryUnescape, PathUnescape, QueryEscape, PathEscape, User, UserPassword, Userinfo.Username, Userinfo.Password, Userinfo.String, getScheme, Parse, ParseRequestURI, parse, parseAuthority, parseHost, URL.setPath, URL.EscapedPath, validEncoded, URL.setFragment, URL.EscapedFragment, URL.String, validOptionalPort, ParseQuery, parseQuery, resolvePath, URL.IsAbs, URL.Parse, URL.ResolveReference, URL.RequestURI, URL.Hostname, URL.Port, splitHostPort, URL.Redacted, validUserinfo, stringContainsCTLByte, URL.JoinPath, ParseQueryValues, ValuesGet, ValuesSet, ValuesAdd, ValuesDel, ValuesHas, SetPassword, URL.Query, URL.MarshalBinary, URL.AppendBinary, URL.UnmarshalBinary
+// goishlint:ignore GOISH018 Add, Del, Get, Has, Set, Encode, MarshalBinary, UnmarshalBinary, ishex, unhex, badSetPath, shouldEscape, Encode — Go's `Values` is a NAMED map type carrying methods; goish's is a type alias for `map<string, slice<string>>`, which Rust cannot hang methods on, so the same six are free functions `ValuesAdd`/`ValuesDel`/`ValuesGet`/`ValuesHas`/`ValuesSet`/`ValuesEncode`. `Error`'s net.Error pair (Timeout, Temporary) IS ported now — see the manifest above and examples/url_error_ref_smoke.rs. `ishex`/`unhex` are ported under Rust casing as `is_hex`/`un_hex`, and `badSetPath` is a test-only helper, and `shouldEscape` is `should_escape`. `Encode` is `ValuesEncode`, for the same reason as the other five.
 // goishlint:ignore GOISH021 encoding, encodePath, encodePathSegment, encodeHost, encodeZone, encodeUserPassword, encodeQueryComponent, encodeFragment — Go's `encoding` is an untyped int const set; goish's is the `Encoding` enum below, whose variants carry the same seven names in Rust casing.
 //
 // url.go — the whole package: parsing, escaping, the URL type and
@@ -48,7 +48,71 @@ impl ErrorTrait for Error {
     }
 }
 
+// go: none — goish idiom: Go's `*url.Error` satisfies `net.Error`
+//     structurally — it has Error, Timeout and Temporary — and callers
+//     assert exactly that on a failed request. goish needs the impl
+//     spelled out and registered, or `errors.As(err, &netErr)` on a
+//     client error misses where Go's finds it.
+impl crate::net::net::Error for Error {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent methods below.
+    fn Error(&self) -> string {
+        return ErrorTrait::Error(self);
+    }
+    // go: none — goish idiom: as above.
+    fn Timeout(&self) -> bool {
+        return Error::Timeout(self);
+    }
+    // go: none — goish idiom: as above.
+    fn Temporary(&self) -> bool {
+        return Error::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: none — goish idiom: Go's linker builds the equivalent itab; see
+//     AGENTS.md §9b. Called from `goish::init()`; idempotent.
+pub fn register_url_impls() {
+    crate::net::net::__goish_register_Error_impl::<Error>();
+}
+
 impl Error {
+    // go: sdk 1.25.5 net/url/url.go:37-42 Error.Timeout
+    /// Go: `func (e *Error) Timeout() bool` — probe the wrapped error
+    /// for `interface{ Timeout() bool }` and ask it.
+    ///
+    /// This is how a caller of `http.Client.Do` decides whether a
+    /// failure is worth retrying — a timeout usually is, a refused
+    /// connection usually is not — so its absence was not cosmetic.
+    ///
+    /// Two details, both learned the hard way elsewhere in this tree.
+    /// The probe is `errors::AsIface`, NOT `cast!`: `cast!` on an
+    /// `error` downcasts the HANDLE rather than what it wraps, so it
+    /// can never hit (net.rs:253 records that exact bug). And the
+    /// interface is `net::timeout` because Go writes an ANONYMOUS
+    /// interface here — net/url does not import net — while goish
+    /// needs a named trait, and the named one already exists there.
+    /// Single crate, so the reference costs nothing but the layering
+    /// note.
+    pub fn Timeout(&self) -> bool {
+        let (t, ok) = crate::errors::AsIface::<crate::d!(crate::net::net::timeout)>(&self.Err);
+        return ok && t.Timeout();
+    }
+
+    // go: sdk 1.25.5 net/url/url.go:44-49 Error.Temporary
+    /// Go: `func (e *Error) Temporary() bool` — as `Timeout`, for
+    /// `interface{ Temporary() bool }`. Go marks the concept
+    /// deprecated ("Temporary errors are not well-defined") but still
+    /// implements it, and code in the wild still branches on it.
+    pub fn Temporary(&self) -> bool {
+        let (t, ok) = crate::errors::AsIface::<crate::d!(crate::net::net::temporary)>(&self.Err);
+        return ok && t.Temporary();
+    }
+
     // go: none — goish idiom: a helper with no Go counterpart; see the surrounding port.
     pub fn new<O: Into<string>, U: Into<string>>(op: O, url: U, err: error) -> error {
         return errors::Wrap(Error {
@@ -344,27 +408,34 @@ pub struct Userinfo {
     passwordSet: bool,
 }
 
+// go: sdk 1.25.5 net/url/url.go:391-393 User
+/// Go: "User returns a [Userinfo] containing the provided username and
+/// no password set."
+///
+/// Go declares this at PACKAGE level (`url.User(name)`), not as a
+/// method; goish used to have it as an associated function on
+/// `Userinfo`, which is a different spelling for callers and is why
+/// net/http could not simply re-export it.
+pub fn User<U: Into<string>>(username: U) -> Userinfo {
+    return Userinfo {
+        username: username.into(),
+        password: string::new(),
+        passwordSet: false,
+    };
+}
+
+// go: sdk 1.25.5 net/url/url.go:403-405 UserPassword
+/// Go: "UserPassword returns a [Userinfo] containing the provided
+/// username and password."
+pub fn UserPassword<U: Into<string>, P: Into<string>>(username: U, password: P) -> Userinfo {
+    return Userinfo {
+        username: username.into(),
+        password: password.into(),
+        passwordSet: true,
+    };
+}
+
 impl Userinfo {
-    // go: sdk 1.25.5 net/url/url.go:391-393 User
-    /// `User(username)` (url.go:391) — returns Userinfo with username, no password.
-    pub fn User<U: Into<string>>(username: U) -> Userinfo {
-        return Userinfo {
-            username: username.into(),
-            password: string::new(),
-            passwordSet: false,
-        };
-    }
-
-    // go: sdk 1.25.5 net/url/url.go:403-405 UserPassword
-    /// `UserPassword(username, password)` (url.go:399) — returns Userinfo with both.
-    pub fn UserPassword<U: Into<string>, P: Into<string>>(username: U, password: P) -> Userinfo {
-        return Userinfo {
-            username: username.into(),
-            password: password.into(),
-            passwordSet: true,
-        };
-    }
-
     // go: sdk 1.25.5 net/url/url.go:418-423 Userinfo.Username
     /// `u.Username()` (url.go:407) — returns the username.
     pub fn Username(&self) -> string {
@@ -566,7 +637,7 @@ impl URL {
         if err != nil {
             return (URL::default(), err);
         }
-        return self.ResolveReference(&refurl);
+        return (self.ResolveReference(&refurl), nil.into());
     }
 
     // go: sdk 1.25.5 net/url/url.go:1137-1174 URL.ResolveReference
@@ -586,7 +657,10 @@ impl URL {
     /// single `*URL` because `setPath` cannot fail on an
     /// already-escaped path, and the error here is always nil for the
     /// same reason.
-    pub fn ResolveReference(&self, ref_: &URL) -> (URL, error) {
+    ///
+    /// Go returns `*URL` and no error; goish's port returned an error
+    /// that was always nil, which every caller then had to unpack.
+    pub fn ResolveReference(&self, ref_: &URL) -> URL {
         let mut url = ref_.clone();
         if ref_.Scheme.Len() == 0 {
             url.Scheme = self.Scheme.clone();
@@ -594,13 +668,13 @@ impl URL {
         if ref_.Scheme.Len() != 0 || ref_.Host.Len() != 0 || ref_.User != nil {
             // Go: "The 'absoluteURI' or 'net_path' cases."
             let _ = url.setPath(resolvePath(ref_.EscapedPath(), string::new()));
-            return (url, nil.into());
+            return url;
         }
         if ref_.Opaque.Len() != 0 {
             url.User = Userinfo::default();
             url.Host = string::new();
             url.Path = string::new();
-            return (url, nil.into());
+            return url;
         }
         if ref_.Path.Len() == 0 && !ref_.ForceQuery && ref_.RawQuery.Len() == 0 {
             url.RawQuery = self.RawQuery.clone();
@@ -614,13 +688,13 @@ impl URL {
             url.User = Userinfo::default();
             url.Host = string::new();
             url.Path = string::new();
-            return (url, nil.into());
+            return url;
         }
         // Go: "The 'abs_path' or 'rel_path' cases."
         url.Host = self.Host.clone();
         url.User = self.User.clone();
         let _ = url.setPath(resolvePath(self.EscapedPath(), ref_.EscapedPath()));
-        return (url, nil.into());
+        return url;
     }
 
     // go: sdk 1.25.5 net/url/url.go:1186-1202 URL.RequestURI
@@ -708,7 +782,10 @@ impl URL {
     /// joined to any existing path and the resulting path cleaned of any
     /// ./ or ../ elements. Any sequences of multiple / characters will
     /// be reduced to a single /."
-    pub fn JoinPath(&self, elem: slice<string>) -> (URL, error) {
+    ///
+    /// Go returns `*URL` and no error; goish's port returned an error
+    /// that was always nil, which every caller then had to unpack.
+    pub fn JoinPath(&self, elem: slice<string>) -> URL {
         let mut url = self.clone();
         // Go: elem = append([]string{u.EscapedPath()}, elem...)
         let mut parts: Vec<string> = Vec::with_capacity(elem.Len() as usize + 1);
@@ -737,7 +814,7 @@ impl URL {
             p
         };
         let _ = url.setPath(p);
-        return (url, nil.into());
+        return url;
     }
 }
 
@@ -824,7 +901,7 @@ impl URL {
 /// never had. Go's loop is deliberately written to keep a trailing
 /// slash when the last element was "." or "..", which is why
 /// `resolve "."` against `.../c/d;p` is `.../c/` and not `.../c`.
-fn resolvePath(base: string, ref_: string) -> string {
+pub fn resolvePath(base: string, ref_: string) -> string {
     let full;
     if ref_.Len() == 0 {
         full = base;
@@ -1124,7 +1201,7 @@ fn parseAuthority(authority: string) -> (Userinfo, string, error) {
         if !uerr.IsNil() {
             return (Userinfo::default(), string::new(), uerr);
         }
-        return (Userinfo::User(u), host, nil.into());
+        return (User(u), host, nil.into());
     }
     let (uname, pw, _) = cut(&userinfo, b':');
     let (uname, uerr) = unescape(uname, EncodeUserPassword);
@@ -1135,7 +1212,7 @@ fn parseAuthority(authority: string) -> (Userinfo, string, error) {
     if !perr.IsNil() {
         return (Userinfo::default(), string::new(), perr);
     }
-    return (Userinfo::UserPassword(uname, pw), host, nil.into());
+    return (UserPassword(uname, pw), host, nil.into());
 }
 
 // go: sdk 1.25.5 net/url/url.go:629-697 parseHost
@@ -1462,4 +1539,16 @@ pub fn ValuesEncode(v: &Values) -> string {
         }
     }
     return buf.String();
+}
+
+// go: sdk 1.25.5 net/url/url.go:1338-1345 JoinPath
+/// Go: "JoinPath returns a URL string with the provided path elements
+/// joined to the existing path of base and the resulting path cleaned
+/// of any ./ or ../ elements."
+pub fn JoinPath<B: Into<string>>(base: B, elem: slice<string>) -> (string, error) {
+    let (url, err) = Parse(base.into());
+    if !err.IsNil() {
+        return (string::new(), err);
+    }
+    return (url.JoinPath(elem).String(), nil.into());
 }

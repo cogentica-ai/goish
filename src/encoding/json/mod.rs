@@ -17,6 +17,7 @@
 //     dynamic JSON uses the `Value` enum.
 //   * Object keys iterate sorted (BTreeMap-backed map<K, V>).
 
+// goishlint:ignore GOISH015 — this package is 1885 lines in one mod.rs and predates the one-.rs-per-.go split. Splitting encoding/json is its own unit; `appendString` is anchored here because its BEHAVIOUR changed and the provenance line is worth more than the file boundary is. Claiming an encode.go manifest in a new file would instead demand all 77 of that file's other declarations, which would be a larger lie than this waiver.
 #![allow(non_snake_case, non_upper_case_globals)]
 
 extern crate alloc;
@@ -299,6 +300,18 @@ pub fn __parse_json_tag(tag: &string) -> (string, bool) {
 // macro emits the impl for user structs, walking each field with its
 // JSON tag-derived key.
 
+// go: none — goish idiom: Go's decoder writes through a reflect.Value,
+// so it can decline to write at all — which is exactly what it does for
+// a null into a primitive (decode.go, literalStore: "otherwise, ignore
+// null for primitives"). goish's `FromValue` RETURNS a value, so "do
+// not write" has to be signalled instead. This private sentinel does
+// that: `Unmarshal` recognises it, skips the assignment, and reports
+// success. Without it a document with an explicit null field failed to
+// decode at all, where Go leaves the field as it found it.
+crate::var! {
+    ERR_NULL_NOOP: error = "json: null is a no-op";
+}
+
 pub trait FromValue: Sized {
     /// Convert a JSON `Value` into `Self`. Returns `(Self, error)` —
     /// typical Go-shape, with the second value carrying the type-mismatch
@@ -318,6 +331,9 @@ impl FromValue for bool {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
             Value::Bool(b) => (*b, nil),
+            // Go: null is ignored for a primitive — see the note on
+            // ERR_NULL_NOOP.
+            Value::Null => (false, ERR_NULL_NOOP.into()),
             _ => (false, errors::New("json: cannot unmarshal into bool")),
         }
     }
@@ -356,10 +372,43 @@ impl<T: FromValue> FromValue for crate::gonilable::nilable<T> {
     }
 }
 
+// go: none — goish idiom: Go decodes a number by running
+// strconv.ParseInt over the ORIGINAL literal text, so "1.5" and "1.0"
+// both fail for an integer target and the error names the literal.
+// goish's `Value::Number` holds an f64 and has already lost the text,
+// so the integrality and range checks are done on the value instead;
+// the refusal is Go's, the literal in the message is goish's rendering
+// of it. Truncating instead — which is what `n as int` did — turns a
+// document Go REJECTS into a different number, silently, which is the
+// worst of the three possible behaviours.
+fn number_to_int(n: crate::types::float64, lo: f64, hi: f64, ty: &str) -> (i64, error) {
+    if n != crate::math::Trunc(n) || !(lo..=hi).contains(&n) {
+        return (
+            0,
+            errors::New(
+                string::from("json: cannot unmarshal number ")
+                    + crate::fmt::Sprintf!("%v", n)
+                    + string::from(" into Go value of type ")
+                    + string::from(ty),
+            ),
+        );
+    }
+    return (crate::convert::int64(n), nil);
+}
+
 impl FromValue for crate::types::int {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
-            Value::Number(n) => (*n as crate::types::int, nil),
+            Value::Number(n) => {
+                let (i, err) =
+                    number_to_int(*n, -9.223372036854776e18, 9.223372036854776e18, "int");
+                return (i as crate::types::int, err);
+            }
+            // Go (decode.go, literalStore): a null into a primitive is
+            // IGNORED — the target keeps whatever it held and no error
+            // is reported. Only interface, pointer, map and slice
+            // targets are zeroed.
+            Value::Null => (0, ERR_NULL_NOOP.into()),
             _ => (0, errors::New("json: cannot unmarshal into int")),
         }
     }
@@ -368,7 +417,12 @@ impl FromValue for crate::types::int {
 impl FromValue for crate::types::uint {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
-            Value::Number(n) if *n >= 0.0 => (*n as crate::types::uint, nil),
+            Value::Number(n) => {
+                let (i, err) = number_to_int(*n, 0.0, 1.8446744073709552e19, "uint");
+                return (i as crate::types::uint, err);
+            }
+            // Go: null is ignored for a primitive — see `int` above.
+            Value::Null => (0, ERR_NULL_NOOP.into()),
             _ => (0, errors::New("json: cannot unmarshal into uint")),
         }
     }
@@ -378,6 +432,8 @@ impl FromValue for crate::types::float64 {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
             Value::Number(n) => (*n, nil),
+            // Go: null is ignored for a primitive — see `int` above.
+            Value::Null => (0.0, ERR_NULL_NOOP.into()),
             _ => (0.0, errors::New("json: cannot unmarshal into float64")),
         }
     }
@@ -387,6 +443,8 @@ impl FromValue for crate::types::float32 {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
             Value::Number(n) => (*n as crate::types::float32, nil),
+            // Go: null is ignored for a primitive — see `int` above.
+            Value::Null => (0.0, ERR_NULL_NOOP.into()),
             _ => (0.0, errors::New("json: cannot unmarshal into float32")),
         }
     }
@@ -395,7 +453,12 @@ impl FromValue for crate::types::float32 {
 impl FromValue for crate::types::byte {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
-            Value::Number(n) if *n >= 0.0 && *n <= 255.0 => (*n as crate::types::byte, nil),
+            Value::Number(n) => {
+                let (i, err) = number_to_int(*n, 0.0, 255.0, "uint8");
+                return (i as crate::types::byte, err);
+            }
+            // Go: null is ignored for a primitive — see `int` above.
+            Value::Null => (0, ERR_NULL_NOOP.into()),
             _ => (0, errors::New("json: cannot unmarshal into byte")),
         }
     }
@@ -404,7 +467,12 @@ impl FromValue for crate::types::byte {
 impl FromValue for crate::types::rune {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
-            Value::Number(n) => (*n as crate::types::rune, nil),
+            Value::Number(n) => {
+                let (i, err) = number_to_int(*n, -2147483648.0, 2147483647.0, "int32");
+                return (i as crate::types::rune, err);
+            }
+            // Go: null is ignored for a primitive — see `int` above.
+            Value::Null => (0, ERR_NULL_NOOP.into()),
             _ => (0, errors::New("json: cannot unmarshal into rune")),
         }
     }
@@ -414,6 +482,9 @@ impl FromValue for string {
     fn from_value(v: &Value) -> (Self, error) {
         match v {
             Value::String(s) => (s.clone(), nil),
+            // Go: null is ignored for a primitive — see the note on
+            // ERR_NULL_NOOP.
+            Value::Null => (string::new(), ERR_NULL_NOOP.into()),
             _ => (
                 string::new(),
                 errors::New("json: cannot unmarshal into string"),
@@ -903,37 +974,94 @@ fn encode_number(out: &mut Vec<byte>, n: f64) {
     jsontext::AppendFloat(out, n, 64);
 }
 
+// go: sdk 1.25.5 encoding/json/encode.go:1010-1077 appendString
+/// Go: the string encoder, with `escapeHTML` true — which is what
+/// `Marshal` always uses and what an `Encoder` uses unless
+/// `SetEscapeHTML(false)` says otherwise.
+///
+/// This used to escape only the seven characters JSON itself requires,
+/// which left three problems, all of them silent:
+///
+///   * `<`, `>` and `&` went through RAW. Go escapes them as `\u003c`,
+///     `\u003e` and `\u0026` for one documented reason: "so that the
+///     JSON will be safe to embed inside HTML <script> tags". A
+///     marshalled string containing `</script>` closed the enclosing
+///     script block. goish already had `HTMLEscape`, correctly ported;
+///     `Marshal` simply never called it.
+///   * U+2028 and U+2029 went through raw. They are valid JSON and are
+///     LINE TERMINATORS in JavaScript, so a string containing one
+///     changes how the surrounding script parses.
+///   * Invalid UTF-8 went through raw, producing output that is not
+///     valid JSON at all and that a conformant parser rejects. Go
+///     replaces each bad byte with U+FFFD and succeeds.
 fn encode_string(out: &mut Vec<byte>, s: &[byte]) {
     out.push(b'"');
-    let mut i = 0;
+    let mut start: usize = 0;
+    let mut i: usize = 0;
     while i < s.len() {
-        let c = s[i];
-        match c {
-            b'"' => out.extend_from_slice(b"\\\""),
-            b'\\' => out.extend_from_slice(b"\\\\"),
-            b'\n' => out.extend_from_slice(b"\\n"),
-            b'\r' => out.extend_from_slice(b"\\r"),
-            b'\t' => out.extend_from_slice(b"\\t"),
-            b'\x08' => out.extend_from_slice(b"\\b"),
-            b'\x0c' => out.extend_from_slice(b"\\f"),
-            _ if c < 0x20 => {
-                out.extend_from_slice(b"\\u00");
-                out.push(hex_digit(c >> 4));
-                out.push(hex_digit(c & 0xF));
+        let b = s[i];
+        if b < 0x80 {
+            // Go: if htmlSafeSet[b] { i++; continue }
+            if b >= 0x20 && b != b'"' && b != b'\\' && b != b'<' && b != b'>' && b != b'&' {
+                i += 1;
+                continue;
             }
-            _ => out.push(c),
+            out.extend_from_slice(&s[start..i]);
+            match b {
+                b'\\' | b'"' => {
+                    out.push(b'\\');
+                    out.push(b);
+                }
+                b'\n' => out.extend_from_slice(b"\\n"),
+                b'\r' => out.extend_from_slice(b"\\r"),
+                b'\t' => out.extend_from_slice(b"\\t"),
+                b'\x08' => out.extend_from_slice(b"\\b"),
+                b'\x0c' => out.extend_from_slice(b"\\f"),
+                _ => {
+                    // Go: `\u00` + hex — which is also how `<`, `>` and
+                    // `&` come out.
+                    out.extend_from_slice(b"\\u00");
+                    out.push(hex_digit(b >> 4));
+                    out.push(hex_digit(b & 0xF));
+                }
+            }
+            i += 1;
+            start = i;
+            continue;
         }
-        i += 1;
+        let (c, size) = crate::unicode::utf8::DecodeRune(&s[i..]);
+        let size = size.unsigned_abs() as usize;
+        // Go: if c == utf8.RuneError && size == 1 — an invalid byte.
+        if c == crate::unicode::utf8::RuneError && size == 1 {
+            out.extend_from_slice(&s[start..i]);
+            out.extend_from_slice(b"\\ufffd");
+            i += size;
+            start = i;
+            continue;
+        }
+        // Go: U+2028 and U+2029.
+        if c == 0x2028 || c == 0x2029 {
+            out.extend_from_slice(&s[start..i]);
+            out.extend_from_slice(b"\\u202");
+            out.push(hex_digit((c & 0xF) as u8)); // goishlint:ignore GOISH005 - c is 0x2028 or 0x2029 here, so the low nibble is 8 or 9.
+            i += size;
+            start = i;
+            continue;
+        }
+        i += size;
     }
+    out.extend_from_slice(&s[start..]);
     out.push(b'"');
 }
 
+// go: none — goish idiom: Go indexes the package-level string
+//     `const hex = "0123456789abcdef"`; goish spells the lookup as the
+//     arithmetic it is.
 fn hex_digit(n: u8) -> u8 {
     if n < 10 {
-        b'0' + n
-    } else {
-        b'a' + n - 10
+        return b'0' + n;
     }
+    return b'a' + n - 10;
 }
 
 fn encode_array(out: &mut Vec<byte>, a: &slice<Value>, cfg: Option<&IndentCfg>, depth: usize) {
@@ -1020,6 +1148,11 @@ pub fn Unmarshal<T: FromValue>(data: &[byte], dest: &mut T) -> error {
         return err;
     }
     let (v, err) = T::from_value(&raw);
+    // Go: a null into a primitive leaves the target alone and reports
+    // no error. See the note on ERR_NULL_NOOP.
+    if err == ERR_NULL_NOOP {
+        return nil;
+    }
     if err != nil {
         return err;
     }
@@ -1029,6 +1162,59 @@ pub fn Unmarshal<T: FromValue>(data: &[byte], dest: &mut T) -> error {
 
 /// Internal: parse bytes into a dynamic `Value`. Used by `Unmarshal`
 /// and by `Decoder.Decode`. Mirrors Go's package-private parsing path.
+
+// go: sdk 1.25.5 encoding/json/scanner.go:600-612 quoteChar
+/// Go: "special cases - different from quoted strings" — a single quote
+/// is `'\''` and a double quote is `'"'`; everything else is
+/// strconv.Quote's rendering with the outer quotes swapped for single
+/// ones.
+fn quote_char(c: crate::types::byte) -> string {
+    if c == b'\'' {
+        return string::from("'\\''");
+    }
+    if c == b'"' {
+        return string::from("'\"'");
+    }
+    // Go: s := strconv.Quote(string(c)); return "'" + s[1:len(s)-1] + "'"
+    let q = crate::strconv::Quote(string::from_bytes(&[c]));
+    let qb = q.as_bytes();
+    let inner = string::from_bytes(&qb[1..qb.len() - 1]);
+    return string::from("'") + inner + string::from("'");
+}
+
+// go: none — goish idiom: Go's scanner builds a `*SyntaxError` whose msg
+// is "invalid character " + quoteChar(c) + " " + <what it was looking
+// for>. goish's parser is recursive descent rather than a state
+// machine, so the context is the call site's own words instead of a
+// state name — but the SENTENCE is Go's, because that sentence is what
+// a caller reads when a document fails to parse. Answering "invalid
+// syntax" to all of them, as this did, says only that something is
+// wrong somewhere.
+fn syntax_err(c: crate::types::byte, context: &str) -> error {
+    return errors::New(
+        string::from("invalid character ")
+            + quote_char(c)
+            + string::from(" ")
+            + string::from(context),
+    );
+}
+
+// go: none — goish idiom: Go's scanner substitutes a SPACE for the
+// end of input when it is part-way through a literal or a number, so
+// "1e" reports "invalid character ' ' in exponent of numeric literal"
+// rather than a truncation. Inside a container it reports the
+// truncation instead; see `unexpected_end`.
+fn syntax_err_eof(context: &str) -> error {
+    return syntax_err(b' ', context);
+}
+
+// go: none — goish idiom: Go's `Unmarshal` reports a truncated document
+// as "unexpected end of JSON input" (SyntaxError, encoding/json), not
+// as an invalid character.
+fn unexpected_end() -> error {
+    return errors::New(string::from("unexpected end of JSON input"));
+}
+
 fn parse_to_value(data: &[byte]) -> (Value, error) {
     let mut p = Parser { data, pos: 0 };
     p.skip_ws();
@@ -1038,7 +1224,11 @@ fn parse_to_value(data: &[byte]) -> (Value, error) {
     }
     p.skip_ws();
     if p.pos != data.len() {
-        return (Value::Null, ErrSyntax.into());
+        // Go: "invalid character 'x' after top-level value"
+        return (
+            Value::Null,
+            syntax_err(data[p.pos], "after top-level value"),
+        );
     }
     (v, nil)
 }
@@ -1072,14 +1262,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expect(&mut self, c: byte) -> error {
+    fn expect_ctx(&mut self, c: byte, context: &str) -> error {
         match self.peek() {
             Some(b) if b == c => {
                 self.pos += 1;
                 nil
             }
-            Some(_) => ErrSyntax.into(),
-            None => ErrUnexpectedEnd.into(),
+            Some(b) => syntax_err(b, context),
+            None => unexpected_end(),
         }
     }
 
@@ -1092,8 +1282,9 @@ impl<'a> Parser<'a> {
             Some(b't') | Some(b'f') => self.parse_bool(),
             Some(b'n') => self.parse_null(),
             Some(b'-') | Some(b'0'..=b'9') => self.parse_number(),
-            Some(_) => (Value::Null, ErrSyntax.into()),
-            None => (Value::Null, ErrUnexpectedEnd.into()),
+            // Go: "invalid character 'x' looking for beginning of value"
+            Some(b) => (Value::Null, syntax_err(b, "looking for beginning of value")),
+            None => (Value::Null, unexpected_end()),
         }
     }
 
@@ -1101,7 +1292,10 @@ impl<'a> Parser<'a> {
         if self.literal_match(b"null") {
             (Value::Null, nil)
         } else {
-            (Value::Null, ErrSyntax.into())
+            // Go: "invalid character 'x' in literal null (expecting 'u')"
+            // — the byte reported is the first one that did NOT match,
+            // and at end of input Go substitutes a space.
+            return (Value::Null, self.literal_err(b"null"));
         }
     }
 
@@ -1111,8 +1305,55 @@ impl<'a> Parser<'a> {
         } else if self.literal_match(b"false") {
             (Value::Bool(false), nil)
         } else {
-            (Value::Null, ErrSyntax.into())
+            let lit: &[byte] = if self.peek() == Some(b'f') {
+                b"false"
+            } else {
+                b"true"
+            };
+            return (Value::Null, self.literal_err(lit));
         }
+    }
+
+    // go: none — goish idiom: Go's scanner walks a literal byte by byte
+    // and names the first one that does not fit, together with the one
+    // it wanted: "invalid character 'p' in literal true (expecting 'e')".
+    // At end of input it substitutes a space, which is why "tru" reports
+    // ' ' rather than a truncation.
+    fn literal_err(&self, lit: &[byte]) -> error {
+        let mut i = 0usize;
+        while i < lit.len() {
+            let got = if self.pos + i < self.data.len() {
+                Some(self.data[self.pos + i])
+            } else {
+                None
+            };
+            match got {
+                Some(b) if b == lit[i] => i += 1,
+                Some(b) => {
+                    return errors::New(
+                        string::from("invalid character ")
+                            + quote_char(b)
+                            + string::from(" in literal ")
+                            + string::from_bytes(lit)
+                            + string::from(" (expecting ")
+                            + quote_char(lit[i])
+                            + string::from(")"),
+                    );
+                }
+                None => {
+                    return errors::New(
+                        string::from("invalid character ")
+                            + quote_char(b' ')
+                            + string::from(" in literal ")
+                            + string::from_bytes(lit)
+                            + string::from(" (expecting ")
+                            + quote_char(lit[i])
+                            + string::from(")"),
+                    );
+                }
+            }
+        }
+        return unexpected_end();
     }
 
     fn literal_match(&mut self, lit: &[byte]) -> bool {
@@ -1124,6 +1365,18 @@ impl<'a> Parser<'a> {
         }
         self.pos += lit.len();
         true
+    }
+
+    // go: none — goish idiom: the byte the parser is looking at, in
+    // Go's sentence. At end of input Go substitutes a space, which is
+    // what makes "1e" report "invalid character ' ' in exponent of
+    // numeric literal" rather than a truncation.
+    fn here_err(&self, context: &str) -> error {
+        let e = match self.peek() {
+            Some(b) => syntax_err(b, context),
+            None => syntax_err_eof(context),
+        };
+        return e;
     }
 
     fn parse_number(&mut self) -> (Value, error) {
@@ -1139,13 +1392,19 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                 }
             }
-            _ => return (Value::Null, ErrSyntax.into()),
+            // Go: "invalid character 'x' in numeric literal"
+            _ => return (Value::Null, self.here_err("in numeric literal")),
         }
         // Fraction
         if self.peek() == Some(b'.') {
             self.pos += 1;
             if !matches!(self.peek(), Some(b'0'..=b'9')) {
-                return (Value::Null, ErrSyntax.into());
+                // Go: "invalid character 'x' after decimal point in
+                // numeric literal"
+                return (
+                    Value::Null,
+                    self.here_err("after decimal point in numeric literal"),
+                );
             }
             while matches!(self.peek(), Some(b'0'..=b'9')) {
                 self.pos += 1;
@@ -1158,7 +1417,9 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
             }
             if !matches!(self.peek(), Some(b'0'..=b'9')) {
-                return (Value::Null, ErrSyntax.into());
+                // Go: "invalid character 'x' in exponent of numeric
+                // literal"
+                return (Value::Null, self.here_err("in exponent of numeric literal"));
             }
             while matches!(self.peek(), Some(b'0'..=b'9')) {
                 self.pos += 1;
@@ -1168,12 +1429,12 @@ impl<'a> Parser<'a> {
         // SAFETY: literal is ASCII digits + '.' / 'e' / sign.
         let s = match core::str::from_utf8(lit) {
             Ok(s) => s,
-            Err(_) => return (Value::Null, ErrSyntax.into()),
+            Err(_) => return (Value::Null, self.here_err("in numeric literal")),
         };
         let owned = string::from_bytes(s.as_bytes());
         let (n, err) = strconv::ParseFloat(owned, 64);
         if err != nil {
-            return (Value::Null, ErrSyntax.into());
+            return (Value::Null, self.here_err("in numeric literal"));
         }
         (Value::Number(n), nil)
     }
@@ -1187,21 +1448,30 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_string_bytes(&mut self) -> (Vec<byte>, error) {
-        if self.advance() != Some(b'"') {
-            return (Vec::new(), ErrSyntax.into());
+        // Go: an object key that is not a string is
+        // "invalid character 'x' looking for beginning of object key
+        // string" — the only place a string is REQUIRED rather than
+        // merely one of the possible values.
+        if self.peek() != Some(b'"') {
+            let e = match self.peek() {
+                Some(b) => syntax_err(b, "looking for beginning of object key string"),
+                None => unexpected_end(),
+            };
+            return (Vec::new(), e);
         }
+        self.pos += 1;
         let mut out: Vec<byte> = Vec::new();
         loop {
             let c = match self.advance() {
                 Some(c) => c,
-                None => return (Vec::new(), ErrUnexpectedEnd.into()),
+                None => return (Vec::new(), unexpected_end()),
             };
             match c {
                 b'"' => return (out, nil),
                 b'\\' => {
                     let esc = match self.advance() {
                         Some(c) => c,
-                        None => return (Vec::new(), ErrUnexpectedEnd.into()),
+                        None => return (Vec::new(), unexpected_end()),
                     };
                     match esc {
                         b'"' => out.push(b'"'),
@@ -1215,27 +1485,50 @@ impl<'a> Parser<'a> {
                         b'u' => {
                             let cp = match self.parse_hex4() {
                                 Some(v) => v,
-                                None => return (Vec::new(), ErrSyntax.into()),
+                                // Go: "invalid character 'Z' in \u
+                                // hexadecimal character escape"
+                                None => {
+                                    return (
+                                        Vec::new(),
+                                        self.here_err("in \\u hexadecimal character escape"),
+                                    )
+                                }
                             };
                             // Handle surrogate pairs for UTF-16.
                             if (0xD800..=0xDBFF).contains(&cp) {
-                                // High surrogate — must be followed by \uXXXX low surrogate.
-                                if self.advance() != Some(b'\\') {
-                                    return (Vec::new(), ErrSyntax.into());
+                                // Go's `unquoteBytes`: a high surrogate is
+                                // followed by a LOOKAHEAD for `\uXXXX`, and
+                                // if that is not a valid low surrogate the
+                                // rune becomes U+FFFD and the lookahead is
+                                // NOT consumed — Go never errors here.
+                                //
+                                // goish used to require the pair and reject
+                                // the string otherwise, so `"\uD800"` was a
+                                // syntax error where Go decodes it to U+FFFD.
+                                // A document carrying one lone surrogate —
+                                // and real-world JSON does — was rejected
+                                // whole.
+                                let save = self.pos;
+                                let mut paired = false;
+                                if self.advance() == Some(b'\\') && self.advance() == Some(b'u') {
+                                    if let Some(lo) = self.parse_hex4() {
+                                        if (0xDC00..=0xDFFF).contains(&lo) {
+                                            let combined = 0x10000
+                                                + (crate::uint32(cp - 0xD800) << 10)
+                                                + crate::uint32(lo - 0xDC00);
+                                            encode_utf8(&mut out, combined as i32);
+                                            paired = true;
+                                        }
+                                    }
                                 }
-                                if self.advance() != Some(b'u') {
-                                    return (Vec::new(), ErrSyntax.into());
+                                if !paired {
+                                    // Go: "Invalid surrogate; fall back to
+                                    // replacement rune." The lookahead is
+                                    // rewound so those bytes are re-read as
+                                    // whatever they actually are.
+                                    self.pos = save;
+                                    encode_utf8(&mut out, 0xFFFD);
                                 }
-                                let lo = match self.parse_hex4() {
-                                    Some(v) => v,
-                                    None => return (Vec::new(), ErrSyntax.into()),
-                                };
-                                if !(0xDC00..=0xDFFF).contains(&lo) {
-                                    return (Vec::new(), ErrSyntax.into());
-                                }
-                                let combined =
-                                    0x10000 + (((cp - 0xD800) as u32) << 10) + (lo - 0xDC00) as u32;
-                                encode_utf8(&mut out, combined as i32);
                             } else if (0xDC00..=0xDFFF).contains(&cp) {
                                 // Lone low surrogate — replace with U+FFFD per WHATWG.
                                 encode_utf8(&mut out, 0xFFFD);
@@ -1243,7 +1536,8 @@ impl<'a> Parser<'a> {
                                 encode_utf8(&mut out, cp as i32);
                             }
                         }
-                        _ => return (Vec::new(), ErrSyntax.into()),
+                        // Go: "invalid character 'x' in string escape code"
+                        _ => return (Vec::new(), syntax_err(esc, "in string escape code")),
                     }
                 }
                 _ => out.push(c),
@@ -1271,7 +1565,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_array(&mut self) -> (Value, error) {
-        let err = self.expect(b'[');
+        let err = self.expect_ctx(b'[', "looking for beginning of value");
         if err != nil {
             return (Value::Null, err);
         }
@@ -1297,14 +1591,15 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     return (Value::Array(slice::__from_vec(items)), nil);
                 }
-                Some(_) => return (Value::Null, ErrSyntax.into()),
-                None => return (Value::Null, ErrUnexpectedEnd.into()),
+                // Go: "invalid character 'x' after array element"
+                Some(b) => return (Value::Null, syntax_err(b, "after array element")),
+                None => return (Value::Null, unexpected_end()),
             }
         }
     }
 
     fn parse_object(&mut self) -> (Value, error) {
-        let err = self.expect(b'{');
+        let err = self.expect_ctx(b'{', "looking for beginning of value");
         if err != nil {
             return (Value::Null, err);
         }
@@ -1323,7 +1618,8 @@ impl<'a> Parser<'a> {
             }
             let key = string::__from_vec(key_bytes);
             self.skip_ws();
-            let err = self.expect(b':');
+            // Go: "invalid character 'x' after object key"
+            let err = self.expect_ctx(b':', "after object key");
             if err != nil {
                 return (Value::Null, err);
             }
@@ -1342,8 +1638,9 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     return (Value::Object(m), nil);
                 }
-                Some(_) => return (Value::Null, ErrSyntax.into()),
-                None => return (Value::Null, ErrUnexpectedEnd.into()),
+                // Go: "invalid character 'x' after object key:value pair"
+                Some(b) => return (Value::Null, syntax_err(b, "after object key:value pair")),
+                None => return (Value::Null, unexpected_end()),
             }
         }
     }
@@ -1882,4 +2179,25 @@ impl Decoder {
 /// called from `goish::init()`.
 pub fn register_json_impls() {
     __goish_register_Marshaler_impl::<Value>();
+}
+
+// go: none — goish idiom: Go's `fmt` finds `String()` by structural
+// assertion, so `%%v` and `%%s` on a value whose METHOD SET includes it
+// print through it. goish's printer dispatches on `Format`, which a
+// type reaches through `Stringer`, and these did not implement it —
+// so `fmt.Printf("%%v", x)`, entirely ordinary Go, did not compile.
+//
+// Only VALUE-receiver String methods are bridged. Go puts a
+// pointer-receiver String in the POINTER's method set only, so
+// printing the value prints the struct instead; goish has no
+// value/pointer distinction, and implementing Stringer for those types
+// would print where Go does not. net.IPNet, url.URL, url.Userinfo,
+// http.Cookie, mail.Address and regexp.Regexp are left alone for that
+// reason.
+impl crate::fmt::Stringer for Number {
+    // go: none — goish idiom: see the note above.
+    fn String(&self) -> crate::gostring::string {
+        let v = self;
+        return Number::String(v);
+    }
 }

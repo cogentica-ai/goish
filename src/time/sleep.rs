@@ -1,4 +1,4 @@
-// go: file time/sleep.go decls: Sleep, Timer.Stop, NewTimer, AfterFunc, After
+// go: file time/sleep.go decls: Sleep, Timer.Stop, Timer.Reset, NewTimer, AfterFunc, After
 //
 // sleep.go — Sleep, Timer, NewTimer, AfterFunc and After.
 
@@ -62,8 +62,11 @@ pub fn Sleep(d: Duration) {
 // likewise but periodic.
 //
 // Goish v1 limitations vs Go:
-//   - Reset is not implemented (now possible on this design; not
-//     ported yet).
+//   - Reset IS implemented for both Timer and Ticker (see the methods
+//     below and examples/timer_reset_ref_smoke.rs), with one carve-out:
+//     resetting an AfterFunc timer re-arms the channel, not the
+//     function, because goish's AfterFunc takes `FnOnce`. Documented
+//     on `Timer::Reset`.
 //   - Timer's chan is buffered cap=1 (matches Go's pre-1.23
 //     behavior; post-1.23 sync mode is not faithful here).
 //   - AfterFunc returns a Timer with a fresh (unused) C chan, since
@@ -101,6 +104,46 @@ impl Timer {
         // Stop after the fire, loses the CAS and returns false —
         // exactly Go's contract.
         return timer_cancel(&self.token);
+    }
+
+    // go: sdk 1.25.5 time/sleep.go:171-177 Timer.Reset
+    /// Go: "Reset changes the timer to expire after duration d. It
+    /// returns true if the timer had been active, false if the timer
+    /// had expired or been stopped."
+    ///
+    /// The return value is the SAME question Stop answers — did this
+    /// call catch the timer still pending — so it is answered the same
+    /// way, by the token CAS. A Reset that loses the CAS reports
+    /// false and still re-arms, which is Go's behaviour: the boolean
+    /// says what the timer WAS, not whether the reset took.
+    ///
+    /// goish re-arms by starting a fresh sleeper on the SAME channel
+    /// rather than re-arming one runtime timer, because that is what
+    /// this design has: the old sleeper has already been cancelled and
+    /// exits without sending. The channel identity is what callers
+    /// hold, and it is preserved.
+    ///
+    /// DIVERGENCE, on AfterFunc timers only. Go's Reset re-arms the
+    /// FUNCTION; goish's re-arms only the channel, which for an
+    /// AfterFunc timer is the chan nothing ever sends on — so the
+    /// function does not run again. The cause is the signature:
+    /// goish's AfterFunc takes `FnOnce`, which by construction cannot
+    /// be called twice, and widening it to `Fn` would reject every
+    /// caller whose closure moves a captured value — several in this
+    /// tree do. Resetting an AfterFunc timer is therefore not
+    /// supported; Stop still is.
+    pub fn Reset(&mut self, d: Duration) -> bool {
+        let was_active = timer_cancel(&self.token);
+        let token = TimerToken::new();
+        let c_inner = self.C.clone();
+        let tok = token.clone();
+        crate::go!(stack(64 * crate::KB), move || {
+            if timer_park_cancellable(d.0, &tok) {
+                let _ = c_inner.__try_send(Now());
+            }
+        });
+        self.token = token;
+        return was_active;
     }
 }
 

@@ -258,10 +258,14 @@ pub fn RegisterStandardHashes() {
 /// and never the key's. `Any`'s inherent `As` goes through `as_any()`
 /// and sees the payload.
 ///
-/// `crypto/ecdsa`'s `PrivateKey` is absent because it does not yet
-/// implement [`Signer`] in goish — Go's does. Adding it belongs to
-/// `crypto/ecdsa`, not here; until then an ECDSA key cannot sign an
-/// x509 certificate.
+/// `crypto/ecdsa`'s `PrivateKey` is here now. It used to be absent,
+/// with a note that implementing [`Signer`] for it belonged to
+/// `crypto/ecdsa` rather than here — which was true, and the impl now
+/// exists. Until it did, an ECDSA key could not sign an x509
+/// certificate and, worse, could not serve a TLS handshake at all:
+/// `crypto/tls` finds a certificate's signer through this registry,
+/// so the modern default key type failed every handshake with
+/// "certificate private key does not implement crypto.Signer".
 pub fn RegisterStandardSigners() {
     __goish_register_SignerOpts_impl::<Hash>();
     __goish_register_SignerOpts_impl::<crate::crypto::ed25519::Options>();
@@ -269,6 +273,7 @@ pub fn RegisterStandardSigners() {
     __goish_register_Decrypter_impl::<crate::crypto::rsa::PrivateKey>();
     __goish_register_Signer_impl::<crate::crypto::rsa::PrivateKey>();
     __goish_register_Signer_impl::<crate::crypto::ed25519::PrivateKey>();
+    __goish_register_Signer_impl::<crate::crypto::ecdsa::PrivateKey>();
 }
 
 // ─── Signer / Decrypter trait surface — crypto.go:162-243 ────────────
@@ -374,4 +379,25 @@ pub trait Decrypter: Send + Sync {
         msg: slice<byte>,
         opts: Option<&DecrypterOpts>,
     ) -> (slice<byte>, error);
+}
+
+// go: none — goish idiom: Go's `fmt` finds `String()` by structural
+// assertion, so `%%v` and `%%s` on a value whose METHOD SET includes it
+// print through it. goish's printer dispatches on `Format`, which a
+// type reaches through `Stringer`, and these did not implement it —
+// so `fmt.Printf("%%v", x)`, entirely ordinary Go, did not compile.
+//
+// Only VALUE-receiver String methods are bridged. Go puts a
+// pointer-receiver String in the POINTER's method set only, so
+// printing the value prints the struct instead; goish has no
+// value/pointer distinction, and implementing Stringer for those types
+// would print where Go does not. net.IPNet, url.URL, url.Userinfo,
+// http.Cookie, mail.Address and regexp.Regexp are left alone for that
+// reason.
+impl crate::fmt::Stringer for Hash {
+    // go: none — goish idiom: see the note above.
+    fn String(&self) -> crate::gostring::string {
+        let v = self;
+        return Hash::String(v);
+    }
 }

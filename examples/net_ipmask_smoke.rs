@@ -193,7 +193,7 @@ fn main() {
     {
         let ip = net::IPv4(192, 168, 1, 42);
         let m = net::CIDRMask(24, 32);
-        let masked = ip.Mask(m);
+        let masked = ip.Mask(&m);
         if masked.bytes.Len() == 4
             && masked.bytes[0] == 192
             && masked.bytes[1] == 168
@@ -211,7 +211,7 @@ fn main() {
     {
         let ip = net::IPv4(10, 20, 30, 40);
         let m = net::CIDRMask(16, 32);
-        let masked = ip.Mask(m);
+        let masked = ip.Mask(&m);
         if masked.bytes[0] == 10
             && masked.bytes[1] == 20
             && masked.bytes[2] == 0
@@ -224,11 +224,15 @@ fn main() {
         }
     }
 
-    // 17. IP.Mask — shape mismatch (4-byte IP, 16-byte mask) → nil.
+    // 17. IP.Mask — shape mismatch → nil. Go reconciles a 4-byte and a
+    //     16-byte operand wherever it can (see case 18), so a genuine
+    //     mismatch needs an address that is IPv6 and NOT v4-mapped: a
+    //     4-byte mask cannot be widened to meet it. Verified against
+    //     Go 1.25.5, which prints "<nil>" here.
     {
-        let ip = net::IPv4(10, 0, 0, 1);
-        let m = net::CIDRMask(64, 128);
-        let masked = ip.Mask(m);
+        let ip = net::ParseIP(string("2001:db8::1"));
+        let m = net::CIDRMask(32, 32);
+        let masked = ip.Mask(&m);
         if masked.bytes.Len() == 0 {
             fmt::Println!("[17] IP.Mask shape mismatch    PASS");
         } else {
@@ -237,9 +241,27 @@ fn main() {
         }
     }
 
-    let total: int = 17;
+    // 18. IP.Mask — a 16-byte mask against the 16-byte v4-mapped form
+    //     that net.IPv4 builds. Both operands are already 16 bytes, so
+    //     neither trim branch fires and the AND runs the full width:
+    //     a /64 clears the v4-mapped prefix along with the address, and
+    //     Go 1.25.5 prints "::" — NOT nil, which is what this case
+    //     asserted while goish's net.IPv4 still returned 4 bytes.
+    {
+        let ip = net::IPv4(10, 0, 0, 1);
+        let m = net::CIDRMask(64, 128);
+        let masked = ip.Mask(&m);
+        if masked.bytes.Len() == 16 && masked.String() == string("::") {
+            fmt::Println!("[18] IP.Mask v4-mapped /64     PASS");
+        } else {
+            fmt::Println!("[18] IP.Mask v4-mapped /64     FAIL");
+            failed += 1;
+        }
+    }
+
+    let total: int = 18;
     if failed == 0 {
-        fmt::Println!("ok 17/17");
+        fmt::Println!("ok 18/18");
         syscall::Exit(0);
     } else {
         fmt::Println!("FAIL", failed, "of", total);

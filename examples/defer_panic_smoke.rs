@@ -103,9 +103,33 @@ fn main() {
         wg.Done();
         wg.Wait();
 
-        // Spin for the panic-recovery path to complete.
-        for _ in 0..10_000 {
-            if sched::G_PANIC_COUNT.load(Ordering::Acquire) >= 1 {
+        // Wait for BOTH halves of the recovery to land: the counter
+        // that says the panicking G was reaped, AND the six trace
+        // entries the defer bodies write.
+        //
+        // Waiting on the counter alone was a race, and waiting on it
+        // for only ten thousand Gosched()s made that race reachable.
+        // Goroutine A's cleanups run in the panic handler on A's own M;
+        // main gets past `wg.Wait()` on the strength of its own
+        // compensating `Done()`, so nothing orders A's recovery against
+        // main's assertions. On a loaded two-core runner main can burn
+        // the whole spin budget before A is scheduled at all, and then
+        // TRACE_LEN is 3 instead of 6.
+        //
+        // That is what made this smoke fail intermittently in CI —
+        // 511/512 on main while the identical tree passed 512/512 on
+        // dev. The FAIL line it printed says "panics=0", and because
+        // the word "panic" appears in it, e2e_runner.sh bucketed a
+        // plain assertion failure as a panic, which is why the summary
+        // read "panic: 1" for a run that never panicked unexpectedly.
+        //
+        // The budget below is large enough that expiring it means
+        // something is genuinely wrong rather than merely slow, and the
+        // checks after it still fail loudly if it does expire.
+        for _ in 0..10_000_000 {
+            if sched::G_PANIC_COUNT.load(Ordering::Acquire) >= 1
+                && TRACE_LEN.load(Ordering::Acquire) >= 6
+            {
                 break;
             }
             sched::Gosched();

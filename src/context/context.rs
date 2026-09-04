@@ -1,9 +1,10 @@
-// go: file context/context.go decls: Canceled, deadlineExceededError.Error, deadlineExceededError.Timeout, deadlineExceededError.Temporary, emptyCtx.Deadline, emptyCtx.Done, emptyCtx.Err, Background, TODO, cancelCtx.cancel, timerCtx.Deadline, cancelCtx.Done, cancelCtx.Err, cancelCtx.Value, WithCancel, WithDeadline, WithTimeout, WithCancelCause, Cause, withoutCancelCtx.Deadline, withoutCancelCtx.Done, withoutCancelCtx.Err, withoutCancelCtx.Value, WithoutCancel, AfterFunc, WithDeadlineCause, WithTimeoutCause, valueCtx.Value, WithValue
+// go: file context/context.go decls: Canceled, deadlineExceededError.Error, deadlineExceededError.Timeout, deadlineExceededError.Temporary, emptyCtx.Deadline, emptyCtx.Done, emptyCtx.Err, backgroundCtx.String, todoCtx.String, cancelCtx.String, withoutCancelCtx.String, valueCtx.String, stringify, Background, TODO, cancelCtx.cancel, timerCtx.Deadline, cancelCtx.Done, cancelCtx.Err, cancelCtx.Value, WithCancel, WithDeadline, WithTimeout, WithCancelCause, Cause, withoutCancelCtx.Deadline, withoutCancelCtx.Done, withoutCancelCtx.Err, withoutCancelCtx.Value, WithoutCancel, AfterFunc, WithDeadlineCause, WithTimeoutCause, valueCtx.Value, WithValue
 //
 // context.go — the Context interface, Background/TODO, the cancel,
 // deadline, value and without-cancel derivations, and AfterFunc.
 //
-// goishlint:ignore GOISH018 String, contextName, stringify, init, propagateCancel, parentCancelCtx, removeChild — `String`/`contextName`/`stringify` render a context for `%v`, and goish's Context is a trait with no Stringer bridge; `init` builds Go's `closedchan`, which goish does not need because a closed `chan` is what `cancel` produces directly; `propagateCancel`, `parentCancelCtx` and `removeChild` serve the parent's `children` map, which goish replaces with a watcher goroutine — see the note on `build_cancel_ctx`.
+// goishlint:ignore GOISH021 emptyCtx — Go embeds `emptyCtx` in `backgroundCtx` and `todoCtx` to share the three no-op methods; Rust has no struct embedding, so the shared body is a macro expanded into each and there is no type left to name.
+// goishlint:ignore GOISH018 contextName, init, propagateCancel, parentCancelCtx, removeChild — `contextName` type-switches over the concrete contexts to find their `String`, which goish reaches through a trait method instead; `init` builds Go's `closedchan`, which goish does not need because a closed `chan` is what `cancel` produces directly; `propagateCancel`, `parentCancelCtx` and `removeChild` serve the parent's `children` map, which goish replaces with a watcher goroutine — see the note on `build_cancel_ctx`.
 // goishlint:ignore GOISH021 backgroundCtx, todoCtx, afterFuncer, afterFuncCtx, stopCtx, goroutines, cancelCtxKey, canceler, closedchan, stringer, timerCtx — `backgroundCtx` and `todoCtx` differ from `emptyCtx` only in their String(), which is not ported; `afterFuncer`/`afterFuncCtx`/`stopCtx`/`canceler`/`timerCtx` are the child-registration machinery the watcher replaces, and `AfterFunc` is written against the watcher instead; `cancelCtxKey` is the unexported key Go's `Cause` walks for, which is a trait method here; `goroutines` is a test-only counter; `closedchan` and `stringer` are covered by the GOISH018 waiver above.
 
 extern crate alloc;
@@ -134,6 +135,18 @@ pub trait Context: Send + Sync {
         return None;
     }
 
+    // go: none — goish idiom: Go has no `String` on the Context
+    //     interface — each concrete context declares its own, and
+    //     `contextName` type-switches to find it. goish cannot type
+    //     switch over a trait object, so the method moves onto the
+    //     trait, which is the same set of implementations reached a
+    //     different way.
+    /// The context's name, built by walking the PARENT CHAIN: each
+    /// wrapper prepends its parent's. So the string records how the
+    /// context was constructed, which is what makes it useful in a log
+    /// line.
+    fn String(&self) -> crate::gostring::string;
+
     // go: none — goish idiom: Go's `Cause(c)` walks up looking for the
     //     unexported `cancelCtxKey`, which only a cancelCtx answers to.
     //     goish has no such key, so the walk is a trait method every
@@ -158,30 +171,54 @@ pub type CancelCauseFunc = Box<dyn Fn(error) + Send + Sync>;
 
 // ─── empty context (Background / TODO) ───────────────────────────
 
-struct EmptyCtx;
+// go: sdk 1.25.5 context/context.go:196-200 backgroundCtx
+/// Go: `type backgroundCtx struct{ emptyCtx }`.
+///
+/// Go declares TWO empty contexts rather than one so that their
+/// `String`s can differ; goish had a single `EmptyCtx` and so could not
+/// have told "context.Background" from "context.TODO".
+struct BackgroundCtx;
 
-impl Context for EmptyCtx {
-    // go: sdk 1.25.5 context/context.go:183-185 emptyCtx.Deadline
-    fn Deadline(&self) -> Option<Time> {
-        return None;
-    }
-    // go: sdk 1.25.5 context/context.go:187-189 emptyCtx.Done
-    fn Done(&self) -> chan<()> {
-        // nil chan: blocks forever, filtered by select!.
-        return chan::<()>::nil();
-    }
-    // go: sdk 1.25.5 context/context.go:191-193 emptyCtx.Err
-    fn Err(&self) -> error {
-        return crate::errors::nil;
-    }
+// go: sdk 1.25.5 context/context.go:205-205 todoCtx
+/// Go: `type todoCtx struct{ emptyCtx }`.
+struct TodoCtx;
+
+// go: none — goish idiom: Go's `emptyCtx` is embedded in both of the
+//     above and supplies the three no-op methods; Rust has no struct
+//     embedding, so the shared body is a macro expanded into each.
+macro_rules! impl_empty_ctx {
+    ($t:ty, $name:literal) => {
+        impl Context for $t {
+            // go: sdk 1.25.5 context/context.go:183-185 emptyCtx.Deadline
+            fn Deadline(&self) -> Option<Time> {
+                return None;
+            }
+            // go: sdk 1.25.5 context/context.go:187-189 emptyCtx.Done
+            fn Done(&self) -> chan<()> {
+                // nil chan: blocks forever, filtered by select!.
+                return chan::<()>::nil();
+            }
+            // go: sdk 1.25.5 context/context.go:191-193 emptyCtx.Err
+            fn Err(&self) -> error {
+                return crate::errors::nil;
+            }
+            // go: sdk 1.25.5 context/context.go:201-203 backgroundCtx.String
+            fn String(&self) -> crate::gostring::string {
+                return crate::gostring::string::from_static($name);
+            }
+        }
+    };
 }
+
+impl_empty_ctx!(BackgroundCtx, "context.Background");
+impl_empty_ctx!(TodoCtx, "context.TODO");
 
 // go: sdk 1.25.5 context/context.go:215-217 Background
 /// `context.Background()` — the root context. Never cancellable,
 /// no deadline. Use as the top-level for main / init / tests.
 /// Mirrors `Background()` (context.go:215).
 pub fn Background() -> Arc<dyn Context> {
-    return Arc::new(EmptyCtx);
+    return Arc::new(BackgroundCtx);
 }
 
 // go: sdk 1.25.5 context/context.go:223-225 TODO
@@ -189,7 +226,7 @@ pub fn Background() -> Arc<dyn Context> {
 /// context to use. Behaves as Background does. Mirrors
 /// `TODO()` (context.go:223).
 pub fn TODO() -> Arc<dyn Context> {
-    return Arc::new(EmptyCtx);
+    return Arc::new(TodoCtx);
 }
 
 // ─── cancel context (WithCancel / WithDeadline / WithTimeout) ────
@@ -270,6 +307,28 @@ impl Context for CancelCtx {
             s.cause.clone()
         };
     }
+    // go: sdk 1.25.5 context/context.go:542-544 cancelCtx.String
+    /// Go splits `cancelCtx` and `timerCtx`, and their Strings differ:
+    /// a plain cancel is ".WithCancel", a deadline-carrying one is
+    /// ".WithDeadline(<when> [<remaining>])". goish has one type with an
+    /// optional deadline, so the branch is on that.
+    fn String(&self) -> crate::gostring::string {
+        let base = self.parent.String();
+        if self.own_deadline.is_none() {
+            return base + crate::gostring::string::from_static(".WithCancel");
+        }
+        let d = self.own_deadline.unwrap();
+        // Go: contextName(parent) + ".WithDeadline(" +
+        //     c.deadline.String() + " [" + time.Until(c.deadline).String() + "])"
+        let until = d.Sub(crate::time::Now());
+        return base
+            + crate::gostring::string::from_static(".WithDeadline(")
+            + d.String()
+            + crate::gostring::string::from_static(" [")
+            + until.String()
+            + crate::gostring::string::from_static("])");
+    }
+
     // go: sdk 1.25.5 context/context.go:441-446 cancelCtx.Value
     fn Value(&self, key: &str) -> Option<Arc<dyn core::any::Any + Send + Sync>> {
         // Go `(*cancelCtx).Value` (context.go:429): everything except
@@ -432,6 +491,11 @@ struct WithoutCancelCtx {
 }
 
 impl Context for WithoutCancelCtx {
+    // go: sdk 1.25.5 context/context.go:612-614 withoutCancelCtx.String
+    fn String(&self) -> crate::gostring::string {
+        return self.c.String() + crate::gostring::string::from_static(".WithoutCancel");
+    }
+
     // go: sdk 1.25.5 context/context.go:596-598 withoutCancelCtx.Deadline
     fn Deadline(&self) -> Option<Time> {
         return None;
@@ -576,6 +640,11 @@ struct ValueCtx {
     parent: Arc<dyn Context>,
     key: alloc::string::String,
     val: Arc<dyn core::any::Any + Send + Sync>,
+    /// Go's `stringify(c.val)` runs at String() time over an `any`;
+    /// goish's value is an `Arc<dyn Any>` with no Go type name
+    /// recoverable from it, so the rendering is captured at
+    /// construction, where the concrete `V` is still in hand.
+    val_str: crate::gostring::string,
 }
 
 impl Context for ValueCtx {
@@ -594,6 +663,16 @@ impl Context for ValueCtx {
     fn Err(&self) -> error {
         return self.parent.Err();
     }
+    // go: sdk 1.25.5 context/context.go:762-766 valueCtx.String
+    fn String(&self) -> crate::gostring::string {
+        return self.parent.String()
+            + crate::gostring::string::from_static(".WithValue(")
+            + crate::gostring::string::from_bytes(self.key.as_bytes())
+            + crate::gostring::string::from_static(", ")
+            + self.val_str.clone()
+            + crate::gostring::string::from_static(")");
+    }
+
     // go: sdk 1.25.5 context/context.go:768-773 valueCtx.Value
     fn Value(&self, key: &str) -> Option<Arc<dyn core::any::Any + Send + Sync>> {
         if self.key == key {
@@ -601,6 +680,52 @@ impl Context for ValueCtx {
         }
         return self.parent.Value(key);
     }
+}
+
+// go: sdk 1.25.5 context/context.go:750-760 stringify
+/// Go: "stringify tries a bit to stringify v, without using fmt, since
+/// we don't want context depending on the unicode tables."
+///
+/// The rule that matters: a STRING prints as its value, and anything
+/// else prints as its TYPE. Go does not put arbitrary values into a
+/// context's String, so a secret stashed under a context key does not
+/// leak into a log line that prints the context. A port that renders
+/// the value would.
+///
+/// goish's fallback differs and is stated here rather than pretended
+/// away: Go names the type with reflect ("int", "*main.T"), and goish
+/// has no Go type name for an arbitrary `V`, so the types goish models
+/// are named as Go names them and anything else gets Rust's
+/// `type_name`.
+fn stringify<V: core::any::Any + 'static>(v: &V) -> crate::gostring::string {
+    let any: &dyn core::any::Any = v;
+    // Go: `case string: return s` — the value, not the type.
+    if let Some(s) = any.downcast_ref::<crate::gostring::string>() {
+        return s.clone();
+    }
+    if let Some(s) = any.downcast_ref::<alloc::string::String>() {
+        return crate::gostring::string::from_bytes(s.as_bytes());
+    }
+    if let Some(s) = any.downcast_ref::<&str>() {
+        return crate::gostring::string::from_bytes(s.as_bytes());
+    }
+    // Go: `return reflectlite.TypeOf(v).String()` — the TYPE.
+    let rust = core::any::type_name::<V>();
+    let go = match rust {
+        "i64" | "isize" => "int",
+        "i32" => "int32",
+        "i16" => "int16",
+        "i8" => "int8",
+        "u64" | "usize" => "uint",
+        "u32" => "uint32",
+        "u16" => "uint16",
+        "u8" => "uint8",
+        "f64" => "float64",
+        "f32" => "float32",
+        "bool" => "bool",
+        other => other,
+    };
+    return crate::gostring::string::from_bytes(go.as_bytes());
 }
 
 // go: sdk 1.25.5 context/context.go:727-738 WithValue
@@ -614,10 +739,12 @@ where
         // Match Go's panic on nil key (Go uses interface{}, nil key panics).
         panic!("nil key");
     }
+    let val_str = stringify(&value);
     return Arc::new(ValueCtx {
         parent,
         key: alloc::string::String::from(key), // goishlint:ignore GOISH010 - `ValueCtx.key` is a Rust String, not a goish string: it is compared with `==` against a `&str` on every lookup, and goish's string has no such impl.
         val: Arc::new(value),
+        val_str,
     });
 }
 
@@ -627,7 +754,8 @@ where
 /// Idempotent; called from `goish::init()`.
 pub fn register_context_impls() {
     __goish_register_Context_impl::<CancelCtx>();
-    __goish_register_Context_impl::<EmptyCtx>();
+    __goish_register_Context_impl::<BackgroundCtx>();
+    __goish_register_Context_impl::<TodoCtx>();
     __goish_register_Context_impl::<ValueCtx>();
     __goish_register_Context_impl::<WithoutCancelCtx>();
     // `DeadlineExceeded` satisfies net.Error in Go, so register both

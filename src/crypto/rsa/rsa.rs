@@ -552,9 +552,21 @@ pub(super) fn checkKeySize(size: int) -> error {
 
 // go: sdk 1.25.5 crypto/rsa/rsa.go:261-266 checkPublicKeySize
 pub(super) fn checkPublicKeySize(k: &PublicKey) -> error {
-    if k.N == nil {
-        return errors::New("crypto/rsa: missing public modulus");
-    }
+    // Go's guard here is `if pub.N == nil`, testing a nil *big.Int —
+    // a state distinct from a big.Int holding zero, which Go falls
+    // through to `checkKeySize(0)` and reports as "0-bit keys are
+    // insecure".
+    //
+    // goish's `Int` is a VALUE, and its polymorphic-nil comparison is
+    // true exactly when it is zero, so the two states are one. The
+    // guard therefore did not port the nil check; it turned Go's
+    // 0-bit answer into "missing public modulus", and a caller who
+    // built a `PublicKey` with an unset N — the reachable mistake —
+    // got a different error than Go gives.
+    //
+    // The nil half of Go's distinction describes a pointer goish
+    // cannot construct, so it is the half to drop: every goish `Int`
+    // is a real integer, and zero is answered as Go answers zero.
     return checkKeySize(k.N.BitLen());
 }
 

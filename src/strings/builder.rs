@@ -28,15 +28,25 @@ use crate::unicode::utf8;
 
 // ─── Builder ──────────────────────────────────────────────────────────
 //
-// Append-only buffer. Single-shot `String(self)` consumes the builder
-// and yields a `string` backed by the same bytes (zero-copy internally).
+// Append-only buffer.
 //
 // Differences from Go's strings.Builder:
 //
-//   * `String` consumes (Q1 = A in wip_strings.md). Calling String twice
-//     is a compile error rather than a runtime alias hazard.
-//   * No `addr` self-pointer / copyCheck — Rust's ownership rules already
-//     prevent accidental copy-then-mutate via the same code paths.
+//   * `String` copies. Go's is zero-copy (`unsafe.String` over the live
+//     buffer), which is why Go needs `copyCheck` and why a Go caller
+//     must not copy a used Builder. goish returns an owned `string`
+//     instead: no alias to the buffer escapes, so there is nothing to
+//     check, at the price of one copy per call.
+//
+//     `String` used to consume the builder, which made calling it twice
+//     a compile error. That is safe, but it is not Go's contract:
+//     `func (b *Builder) String() string` takes a POINTER, so writing
+//     more after reading is ordinary, and code that does
+//     `if b.Len() > 0 { log(b.String()) }` and then keeps building is
+//     idiomatic. Taking `&self` restores that and removes the alias
+//     hazard by copying, so both properties hold at once.
+//   * No `addr` self-pointer / copyCheck — see above; there is no
+//     borrowed buffer to protect.
 
 pub struct Builder {
     buf: Vec<byte>,
@@ -88,10 +98,13 @@ impl Builder {
     }
 
     // go: sdk 1.25.5 strings/builder.go:46-48 Builder.String
-    /// Consume the builder and return the accumulated bytes as a `string`.
-    /// **v1**: this consumes — see module-level docs.
-    pub fn String(self) -> string {
-        return string::__from_vec(self.buf);
+    /// Go: "String returns the accumulated string."
+    ///
+    /// Takes `&self`, as Go's pointer receiver does, so the builder can
+    /// be read and then written to again. See the module note for why
+    /// this copies where Go does not.
+    pub fn String(&self) -> string {
+        return string::from_bytes(&self.buf);
     }
 
     // go: sdk 1.25.5 strings/builder.go:112-116 Builder.WriteString

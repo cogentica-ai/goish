@@ -1,85 +1,47 @@
-// gen_jsonmap_ref — reference generator for examples/jsonmap_ref.txt.
-//
-// Sweeps map[string]string and map[string]int decoding through the REAL
-// encoding/json/v2, including the PARTIAL STATE a failed decode leaves
-// behind: Go stores each key with its zero value before decoding, so a
-// bad value leaves that key present and empty and stops the walk.
-// packagejson's Expected[T] keeps the partially decoded value, so this
-// is observable rather than an internal detail.
-//
-// Regenerate:  GOEXPERIMENT=jsonv2 go run tools/gen_jsonmap_ref.go > examples/jsonmap_ref.txt
-package main
+package json_test
 
 import (
-	"encoding/json/v2"
+	"encoding/json"
 	"fmt"
-	"sort"
-	"strings"
+	"testing"
 )
 
-var corpus = []string{
-	`{}`,
-	`{"a":"x"}`,
-	`{"a":"x","b":"y"}`,
-	`{"b":"y","a":"x"}`,
-	// Failures at each position, so "stops at the first" is pinned.
-	`{"a":1}`,
-	`{"a":"x","b":1}`,
-	`{"a":1,"b":"x"}`,
-	`{"a":"x","b":1,"c":"z"}`,
-	`{"a":[1]}`,
-	`{"a":{}}`,
-	`{"a":null}`,
-	`{"a":true}`,
-	// Non-objects.
-	`null`,
-	`[]`,
-	`"x"`,
-	`1`,
-}
-
-func esc(s string) string {
-	if s == "" {
-		return "-"
+// Go SORTS map keys when marshalling, so the output is deterministic
+// for a given map. That is what makes a marshalled map usable as a
+// cache key, a signature input or a golden test fixture.
+func TestGoishRef(t *testing.T) {
+	m := map[string]int{"zebra": 1, "apple": 2, "Mango": 3, "banana": 4, "": 5, "10": 6, "2": 7}
+	for i := 0; i < 3; i++ {
+		b, _ := json.Marshal(m)
+		fmt.Printf("map-run%d %s\n", i, b)
 	}
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 0x21 && c < 0x7f && c != '\\' {
-			b.WriteByte(c)
-		} else {
-			fmt.Fprintf(&b, `\x%02x`, c)
-		}
-	}
-	return b.String()
-}
 
-func main() {
-	for i, doc := range corpus {
-		ms := map[string]string{}
-		e1 := json.Unmarshal([]byte(doc), &ms)
-		keys := make([]string, 0, len(ms))
-		for k := range ms {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		parts := make([]string, len(keys))
-		for j, k := range keys {
-			parts[j] = esc(k) + "=" + esc(ms[k])
-		}
-		fmt.Printf("M %d %s err=%v {%s}\n", i, doc, e1 != nil, strings.Join(parts, " "))
-
-		mi := map[string]int{}
-		e2 := json.Unmarshal([]byte(doc), &mi)
-		keys = keys[:0]
-		for k := range mi {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		parts = make([]string, len(keys))
-		for j, k := range keys {
-			parts[j] = fmt.Sprintf("%s=%d", esc(k), mi[k])
-		}
-		fmt.Printf("I %d %s err=%v {%s}\n", i, doc, e2 != nil, strings.Join(parts, " "))
+	nested := map[string]any{
+		"b": map[string]int{"y": 1, "x": 2},
+		"a": []int{3, 1, 2},
 	}
+	b, _ := json.Marshal(nested)
+	fmt.Printf("nested %s\n", b)
+
+	// Keys are compared as strings, so ordering is byte-wise: capitals
+	// before lowercase, digits before both.
+	keys := map[string]int{"B": 1, "a": 2, "A": 3, "b": 4, "_": 5, "0": 6}
+	b2, _ := json.Marshal(keys)
+	fmt.Printf("order %s\n", b2)
+
+	// MarshalIndent over a map keeps the same order.
+	b3, _ := json.MarshalIndent(map[string]int{"c": 1, "a": 2, "b": 3}, "", "  ")
+	fmt.Printf("indent %s\n", b3)
+
+	// An empty map is {} and a nil map is null.
+	var nilm map[string]int
+	b4, _ := json.Marshal(nilm)
+	b5, _ := json.Marshal(map[string]int{})
+	fmt.Printf("nilmap %s emptymap %s\n", b4, b5)
+
+	// Same for slices.
+	var nils []int
+	b6, _ := json.Marshal(nils)
+	b7, _ := json.Marshal([]int{})
+	fmt.Printf("nilslice %s emptyslice %s\n", b6, b7)
 }

@@ -39,14 +39,18 @@
 
 extern crate alloc;
 
+mod atoc;
 mod atof;
+mod ctoa;
 mod decimal;
 mod ftoa;
 
 #[path = "isprint.rs"]
 mod isprint;
 
+pub use atoc::ParseComplex;
 pub use atof::ParseFloat;
+pub use ctoa::FormatComplex;
 pub use ftoa::{AppendFloat, FormatFloat};
 
 #[path = "atoi.rs"]

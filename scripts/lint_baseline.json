@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 8596,
+ "total": 8358,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -268,12 +268,12 @@
    "GOISH023": 67
   },
   "src/encoding/json/mod.rs": {
-   "GOISH005": 12,
+   "GOISH005": 11,
    "GOISH010": 2,
-   "GOISH014": 96,
+   "GOISH014": 95,
    "GOISH016": 1,
    "GOISH022": 2,
-   "GOISH023": 81
+   "GOISH023": 80
   },
   "src/encoding/json/v2/mod.rs": {
    "GOISH005": 2,
@@ -310,7 +310,7 @@
    "GOISH021": 6
   },
   "src/fmt/print.rs": {
-   "GOISH018": 41,
+   "GOISH018": 40,
    "GOISH021": 18,
    "GOISH022": 4
   },
@@ -389,11 +389,11 @@
    "GOISH023": 7
   },
   "src/html/mod.rs": {
-   "GOISH005": 46,
+   "GOISH005": 44,
    "GOISH014": 7,
    "GOISH015": 1,
    "GOISH016": 1,
-   "GOISH023": 7
+   "GOISH023": 6
   },
   "src/internal/mod.rs": {
    "GOISH016": 1
@@ -420,20 +420,20 @@
    "GOISH023": 5
   },
   "src/log/slog/mod.rs": {
-   "GOISH014": 18,
+   "GOISH014": 14,
    "GOISH016": 1,
-   "GOISH023": 15
+   "GOISH023": 13
   },
   "src/maps/mod.rs": {
-   "GOISH014": 9,
+   "GOISH014": 6,
    "GOISH016": 1,
-   "GOISH023": 7
+   "GOISH023": 4
   },
   "src/math/big/mod.rs": {
    "GOISH005": 209,
-   "GOISH014": 289,
+   "GOISH014": 287,
    "GOISH016": 1,
-   "GOISH023": 267
+   "GOISH023": 264
   },
   "src/math/bits/bits.rs": {
    "GOISH005": 28
@@ -471,7 +471,12 @@
   "src/mime/multipart/reader.rs": {
    "GOISH005": 2,
    "GOISH014": 11,
-   "GOISH023": 10
+   "GOISH023": 9
+  },
+  "src/net/dial.rs": {
+   "GOISH018": 24,
+   "GOISH019": 1,
+   "GOISH021": 14
   },
   "src/net/dnsclient.rs": {
    "GOISH005": 12,
@@ -584,17 +589,8 @@
    "GOISH021": 6
   },
   "src/net/http/transport.rs": {
-   "GOISH018": 24,
+   "GOISH018": 23,
    "GOISH021": 22
-  },
-  "src/net/http/url.rs": {
-   "GOISH005": 1,
-   "GOISH007": 1,
-   "GOISH014": 28,
-   "GOISH015": 1,
-   "GOISH018": 20,
-   "GOISH021": 10,
-   "GOISH023": 50
   },
   "src/net/lookup.rs": {
    "GOISH014": 23,
@@ -602,22 +598,16 @@
   },
   "src/net/mac.rs": {
    "GOISH005": 7,
-   "GOISH014": 5,
+   "GOISH014": 1,
    "GOISH015": 1,
-   "GOISH023": 5
-  },
-  "src/net/mail/mod.rs": {
-   "GOISH014": 5,
-   "GOISH015": 1,
-   "GOISH016": 1,
-   "GOISH023": 5
+   "GOISH023": 4
   },
   "src/net/mod.rs": {
-   "GOISH005": 34,
-   "GOISH014": 84,
+   "GOISH005": 25,
+   "GOISH014": 51,
    "GOISH016": 1,
    "GOISH022": 1,
-   "GOISH023": 80
+   "GOISH023": 47
   },
   "src/net/parse.rs": {
    "GOISH005": 30,
@@ -651,7 +641,7 @@
    "GOISH005": 2,
    "GOISH014": 25,
    "GOISH016": 1,
-   "GOISH023": 19
+   "GOISH023": 18
   },
   "src/os/mod.rs": {
    "GOISH005": 32,
@@ -921,15 +911,14 @@
    "GOISH016": 1
   },
   "src/sync/mutex.rs": {
-   "GOISH014": 14,
+   "GOISH014": 7,
    "GOISH023": 7
   },
   "src/sync/once.rs": {
-   "GOISH014": 4,
+   "GOISH014": 2,
    "GOISH023": 2
   },
   "src/sync/oncefunc.rs": {
-   "GOISH014": 3,
    "GOISH023": 3
   },
   "src/sync/pool.rs": {
@@ -938,7 +927,7 @@
   },
   "src/sync/rwmutex.rs": {
    "GOISH005": 1,
-   "GOISH014": 10,
+   "GOISH014": 4,
    "GOISH023": 4
   },
   "src/sync/sema.rs": {
@@ -950,13 +939,9 @@
    "GOISH014": 8,
    "GOISH023": 7
   },
-  "src/sync/syncmap.rs": {
-   "GOISH014": 10,
-   "GOISH023": 6
-  },
   "src/sync/waitgroup.rs": {
    "GOISH005": 6,
-   "GOISH014": 10,
+   "GOISH014": 4,
    "GOISH023": 2
   },
   "src/syscall/mod.rs": {
@@ -964,7 +949,7 @@
    "GOISH014": 116,
    "GOISH015": 1,
    "GOISH016": 1,
-   "GOISH023": 112
+   "GOISH023": 111
   },
   "src/term/mod.rs": {
    "GOISH005": 7,
@@ -1001,18 +986,15 @@
    "GOISH021": 5
   },
   "src/time/sleep.rs": {
-   "GOISH018": 7,
+   "GOISH018": 6,
    "GOISH021": 1
   },
-  "src/time/tick.rs": {
-   "GOISH018": 1
-  },
   "src/time/time.rs": {
-   "GOISH018": 31,
+   "GOISH018": 29,
    "GOISH021": 29
   },
   "src/time/zoneinfo.rs": {
-   "GOISH018": 15,
+   "GOISH018": 13,
    "GOISH021": 17
   },
   "src/unicode/norm.rs": {

@@ -271,15 +271,34 @@ impl ServeMux {
         crate::goslice::slice<string>,
     ) {
         let host = stripHostPort(r.Host.clone());
-        let path = cleanPath(r.URL.Path.clone());
+        // Go cleans and matches the ESCAPED path, never the decoded one
+        // (findHandler, server.go:2698-2700). goish used to clean
+        // `r.URL.Path`, which is the decoded form, and that was wrong in
+        // two directions at once.
+        //
+        // Reading down: any request carrying a percent-escape had a
+        // cleaned path that could not equal its escaped path, so the
+        // `path != escapedPath` branch below fired and answered 301 to
+        // the SAME URL — "/v/a%20b/c" redirected to "/v/a%20b/c", an
+        // infinite loop for every escaped path.
+        //
+        // Reading up, and worse: "%2F" decodes to "/", so cleaning the
+        // decoded path treated an encoded slash as a separator.
+        // "/v/%2F/2" became "/v///2" and cleaned to "/v/2" — a request
+        // for a segment whose name is "/" answered with a redirect to a
+        // different resource entirely. An encoded slash is exactly the
+        // character a proxy and an origin must agree not to split on;
+        // splitting on it here is the disagreement.
+        let escapedPath = r.URL.EscapedPath();
+        let path = cleanPath(escapedPath.clone());
         let s = self.state.Lock();
         // Go: if the given path is /tree and its handler is not
         // registered, redirect for /tree/ (findHandler, server.go:2865).
-        if let Some(u) = self.matchOrRedirect(&s, &host, &r.Method, &path, Some(&r.URL)) {
+        if let Some((u, patstr)) = self.matchOrRedirect(&s, &host, &r.Method, &path, Some(&r.URL)) {
             let target = u.String();
             return (
-                RedirectHandler(target.clone(), super::status::StatusMovedPermanently),
-                target,
+                RedirectHandler(target, super::status::StatusMovedPermanently),
+                patstr,
                 None,
                 crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
             );
@@ -299,15 +318,27 @@ impl ServeMux {
         // r.URL.Path saw a different path than the routing decision
         // was made from. That mismatch is the classic shape of a
         // path-based access-control bypass.
-        if path != r.URL.EscapedPath() {
-            let mut u = super::url::URL::empty();
+        if path != escapedPath {
+            // Go reports the pattern the CLEANED path would have hit,
+            // not the redirect target (findHandler, server.go:2712-2717).
+            let (n, _) = s.tree.r#match(&host, &r.Method, &path);
+            let patstr = match n.and_then(|n| n.pattern.as_ref()) {
+                Some(p) => p.str.clone(),
+                None => string::new(),
+            };
+            // Go builds the target from `Path` alone. Leaving `RawPath`
+            // unset is deliberate, not an omission: `URL.String` then
+            // re-escapes the cleaned path, so a surviving "%2F" is
+            // emitted as "%252F". That is Go's answer, quirk included —
+            // and pinning it beats improving on it, since a redirect
+            // target that differs from Go's is a redirect to a
+            // different resource.
+            let mut u = super::url::URL::default();
             u.Path = path.clone();
-            u.RawPath = path.clone();
             u.RawQuery = r.URL.RawQuery.clone();
-            let target = u.String();
             return (
-                RedirectHandler(target.clone(), super::status::StatusMovedPermanently),
-                target,
+                RedirectHandler(u.String(), super::status::StatusMovedPermanently),
+                patstr,
                 None,
                 crate::goslice::slice::<string>::__from_vec(alloc::vec::Vec::new()),
             );
@@ -428,7 +459,7 @@ impl ServeMux {
         method: &string,
         path: &string,
         u: Option<&super::url::URL>,
-    ) -> Option<super::url::URL> {
+    ) -> Option<(super::url::URL, string)> {
         let (n, _matches) = s.tree.r#match(host, method, path);
         // Go: if we have an exact match, or were asked not to try
         // trailing-slash redirection, or the URL already ends in one,
@@ -438,10 +469,19 @@ impl ServeMux {
             let (n2, _) = s.tree.r#match(host, method, &slashed);
             if exactMatch(n2, &slashed) {
                 let uu = u.unwrap();
-                let mut redirect = super::url::URL::empty();
+                let mut redirect = super::url::URL::default();
                 redirect.Path = cleanPath(uu.Path.clone()) + "/";
                 redirect.RawQuery = uu.RawQuery.clone();
-                return Some(redirect);
+                // Go returns n2 here purely so findHandler can name the
+                // pattern that the trailing slash WOULD have matched
+                // (matchOrRedirect, server.go:2760-2764); goish hands
+                // back the pattern string for the same reason, since
+                // the node itself is borrowed from the locked state.
+                let patstr = match n2.and_then(|n| n.pattern.as_ref()) {
+                    Some(p) => p.str.clone(),
+                    None => string::new(),
+                };
+                return Some((redirect, patstr));
             }
         }
         return None;
@@ -499,9 +539,18 @@ impl Handler for ServeMux {
 /// `NotFoundHandler() Handler`, not a struct of the same name).
 struct notFoundHandler;
 impl Handler for notFoundHandler {
-    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request) {
-        w.WriteHeader(404);
-        let _ = w.Write(crate::convert::bytes("404 page not found\n"));
+    fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
+        // Go: `NotFoundHandler` is literally `HandlerFunc(NotFound)`
+        // (server.go:2362), so it goes through `Error` and gets its
+        // headers. Writing the status and body directly, as this used
+        // to, produced the same bytes with neither `Content-Type:
+        // text/plain` nor `X-Content-Type-Options: nosniff` — and the
+        // nosniff is the reason Error sets it: an error body must not
+        // be sniffed as HTML by a browser. The divergence was
+        // invisible from `NotFound` itself, which was correct; it
+        // showed up through StripPrefix's not-matched path and
+        // `NotFoundHandler()`, both of which route here.
+        NotFound(w, r);
     }
 }
 
@@ -550,10 +599,12 @@ pub fn NotFound(w: &(dyn ResponseWriter + Send + Sync + 'static), _r: &Request) 
 /// `MaxBytesReader(None, …)` does not.
 ///
 /// The server buffers an inbound body before the handler runs, so the
-/// wrap TRUNCATES eagerly and reports the same MaxBytesError to the
-/// handler on over-limit, instead of deferring it to the handler's
-/// first Read. Same cap, same 413-shaped outcome, same conn close;
-/// the difference is when the error surfaces.
+/// MaxBytesReader is layered over those bytes rather than over the
+/// connection, and `requestTooLarge` fires as soon as the length is
+/// known instead of at the read that crosses the limit. Same cap,
+/// same MaxBytesError to the handler, same conn close; what differs
+/// is that goish notices the overrun even if the handler never reads
+/// the body, where Go would not.
 pub fn MaxBytesHandler(h: Arc<dyn Handler>, n: crate::types::int) -> Arc<dyn Handler> {
     return Arc::new(HandlerFunc(
         move |w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request| {
@@ -561,12 +612,31 @@ pub fn MaxBytesHandler(h: Arc<dyn Handler>, n: crate::types::int) -> Arc<dyn Han
             let mut r2 = r.clone();
             let (body_bytes, _) = r2.Body.__materialize();
             if body_bytes.Len() > n {
-                // Over the cap: truncate and tell the writer, which is
-                // what forces the connection closed.
-                r2.Body = super::Body::from_bytes(body_bytes.slice(0, n));
+                // Over the cap: tell the writer, which is what forces
+                // the connection closed.
                 if let (rt, true) = crate::cast!(w, super::responsewriter::__RequestTooLarge) {
                     rt.requestTooLarge();
                 }
+                // Go replaces the body with a MaxBytesReader
+                // (server.go:MaxBytesHandler), so the handler reads up
+                // to the limit and then gets a MaxBytesError. goish
+                // used to hand over a plain truncated body instead, so
+                // the handler read short data and saw err == nil — it
+                // could not tell a body that fitted from one that had
+                // been cut, and would go on to parse, verify or store
+                // a fragment as if it were the whole request.
+                //
+                // The body is already materialised here (goish's
+                // server reads it eagerly), so the reader is layered
+                // over those bytes rather than over the connection.
+                // The boundary logic is the real maxBytesReader's,
+                // including the read-one-extra-byte trick that tells
+                // "exactly at the limit" from "one over" — worth
+                // reusing rather than reimplementing, since getting it
+                // wrong silently accepts an oversized body.
+                r2.Body = super::Body::from_reader(alloc::boxed::Box::new(
+                    super::request::__eager_max_bytes_body(body_bytes, n),
+                ));
             }
             h.ServeHTTP(w, &r2);
         },
@@ -582,19 +652,37 @@ pub fn MaxBytesHandler(h: Arc<dyn Handler>, n: crate::types::int) -> Arc<dyn Han
 /// matches on the error TEXT the net package produces, which is the
 /// same substitution header.rs makes for httpguts.
 pub fn isCommonNetReadError(err: crate::errors::error) -> bool {
+    // Go:
+    //   if err == io.EOF { return true }
+    //   if neterr, ok := err.(net.Error); ok && neterr.Timeout() { … }
+    //   if oe, ok := err.(*net.OpError); ok && oe.Op == "read" { … }
+    //
+    // This used to match on the error TEXT — `contains("i/o timeout")`
+    // and `starts_with("read")` — under a comment saying goish had no
+    // typed net.Error/net.OpError to assert on. It has both, and both
+    // are registered; `errors::AsIface` is the assertion.
+    //
+    // The text version was not merely inelegant. `starts_with("read")`
+    // matches ANY error whose message happens to begin with those four
+    // letters, whatever produced it, where Go requires an actual
+    // *net.OpError whose Op is "read". This function decides whether
+    // the serve loop closes the connection in silence or answers the
+    // client, so a false positive there turns a diagnosable 400 into a
+    // bare reset.
     if err.IsNil() {
         return false;
     }
     if crate::errors::Is(err.clone(), crate::io::EOF) {
         return true;
     }
-    let msg = err.Error();
-    let m: &str = msg.as_ref();
-    if m.contains("i/o timeout") {
+    let (ne, ok) = crate::errors::AsIface::<crate::d!(crate::net::net::Error)>(&err);
+    if ok && ne.Timeout() {
         return true;
     }
-    if m.starts_with("read") || m.contains("read:") {
-        return true;
+    if let Some(oe) = crate::errors::AsConcrete::<crate::net::net::OpError>(&err) {
+        if oe.Op == "read" {
+            return true;
+        }
     }
     return false;
 }
@@ -1867,7 +1955,14 @@ pub(crate) fn http1ServerSupportsRequest(req: &Request) -> bool {
 // body, and there is no Content-Length — `Connection: close` is what
 // delimits it.
 pub(crate) fn __status_error_response(code: int, text: string) -> string {
-    let publicErr = super::status::StatusText(code) + ": " + text;
+    // Go appends the statusError's text only when there IS one
+    // (conn.serve, server.go:2069); a plain badRequestError renders as
+    // "400 Bad Request", not "400 Bad Request: ".
+    let publicErr = if text.Len() == 0 {
+        super::status::StatusText(code)
+    } else {
+        super::status::StatusText(code) + ": " + text
+    };
     return string("HTTP/1.1 ")
         + crate::strconv::Itoa(code)
         + string(" ")
@@ -2128,6 +2223,15 @@ struct connReaderState {
         Arc<crate::context::CancelFunc>,
         Arc<super::responsewriter::closeNotifyCell>,
     )>,
+    /// Bytes already read off the socket that belong to a LATER
+    /// request. Go has no equivalent field because it does not need
+    /// one: `c.bufr` is built once per connection (server.go:2017) and
+    /// survives every request on it, so read-ahead is simply still
+    /// there next time round. goish rebuilds its bufio.Reader per
+    /// request — the buffer is pooled, and `putBufioReader` hands it
+    /// back with `r`/`w` reset — so anything read ahead used to be
+    /// dropped on the floor between requests. See `pushback`.
+    pushback: Vec<crate::types::byte>,
 }
 
 impl connReader {
@@ -2141,13 +2245,14 @@ impl connReader {
                 hasByte: false,
                 released: false,
                 hooks: None,
+                pushback: Vec::new(),
             }),
         };
     }
 
     // go: sdk 1.25.5 net/http/server.go:672-677 connReader.lock
     /// Go: acquires `cr.mu` and lazily builds `cr.cond` under it.
-    /// goish has no Cond yet (it arrives with the background reader),
+    /// goish's `sync::Cond` exists but is not wired into this path yet,
     /// so this is the acquire alone — a MANUAL lock, because Go's
     /// callers unlock in a different function than they lock in.
     pub fn lock(&self) {
@@ -2285,6 +2390,27 @@ impl connReader {
         return self.state.Lock().released;
     }
 
+    // go: none — goish-only: stands in for Go's per-CONNECTION
+    // `c.bufr`, which keeps read-ahead across requests for free.
+    /// Hand back bytes that were read off the socket but belong to a
+    /// later request, so the next request on this connection sees them.
+    ///
+    /// Without this, a client that sends request N+1 before reading
+    /// response N lost it: the bytes sat in a bufio.Reader that was
+    /// returned to the pool (and reset) the moment request N finished
+    /// parsing. The connection stayed open advertising keep-alive and
+    /// the second request was silently discarded, so the client waited
+    /// for a response that was never coming. That is not just
+    /// pipelining — any client that writes two requests back to back
+    /// fast enough for them to land in one read hits it.
+    pub(crate) fn __pushback(&self, b: &[crate::types::byte]) {
+        if b.is_empty() {
+            return;
+        }
+        self.state.Lock().pushback.extend_from_slice(b);
+        return;
+    }
+
     // go: sdk 1.25.5 net/http/server.go:755 connReader.setReadLimit
     pub fn setReadLimit(&self, remain: i64) {
         self.state.Lock().remain = remain;
@@ -2317,6 +2443,25 @@ impl connReader {
         rwc: &mut crate::net::TCPConn,
         p: &mut crate::goslice::slice<crate::types::byte>,
     ) -> (crate::types::int, crate::errors::error) {
+        // Bytes carried over from a previous request on this
+        // connection come first, and deliberately BEFORE the read
+        // limit is consulted: they were already counted against the
+        // limit when they came off the socket, and in Go they would be
+        // sitting in c.bufr where connReader's accounting never sees
+        // them at all. Charging them twice would let a pipelined
+        // request trip the header limit that its own bytes did not
+        // exceed.
+        {
+            let mut st = self.state.Lock();
+            if !st.pushback.is_empty() {
+                let n = core::cmp::min(st.pushback.len(), crate::builtin::__make_size(p.Len()));
+                for i in 0..n {
+                    p[i] = st.pushback[i];
+                }
+                st.pushback.drain(0..n);
+                return (n as crate::types::int, crate::errors::nil);
+            }
+        }
         let remain = {
             let st = self.state.Lock();
             // Go: if cr.hitReadLimit() { return 0, io.EOF }
@@ -3286,6 +3431,18 @@ impl Server {
                     conn_fd,
                     Some(&cr),
                 );
+                // Anything the parser read past this request's end
+                // belongs to the next one on this connection. Go keeps
+                // it in c.bufr; goish is about to return that buffer
+                // to the pool, so hand the bytes to the connReader,
+                // which outlives the loop.
+                let ahead = br.Buffered();
+                if ahead > 0 {
+                    let (peeked, perr) = br.Peek(ahead);
+                    if perr.IsNil() {
+                        cr.__pushback(&peeked);
+                    }
+                }
                 putBufioReader(br);
                 out
             };
@@ -3341,9 +3498,66 @@ impl Server {
                     let _ = w.close_conn();
                     return;
                 }
-                // EOF, parse error, or idle timeout — all close the conn.
+                // Go (conn.serve, server.go:2062-2075): an ordinary
+                // end-of-connection read — EOF, a timeout, a reset —
+                // just closes. ANY OTHER parse error gets a response
+                // before the close, defaulting to a plain
+                // "400 Bad Request" and using the statusError's own
+                // code and text when it carries one.
+                //
+                // goish closed on every error alike, so a client that
+                // sent a malformed Content-Length got a reset with
+                // nothing to go on, where Go tells it what was wrong.
+                if isCommonNetReadError(err.clone()) {
+                    let _ = conn.Close();
+                    return;
+                }
+                let _ = crate::io::Writer::Write(
+                    &mut conn,
+                    crate::convert::bytes(__status_error_response(
+                        super::status::StatusBadRequest,
+                        string(""),
+                    )),
+                );
                 let _ = conn.Close();
                 return;
+            }
+            // Go (c.readRequest, server.go:1063-1072) validates the
+            // parsed header map before the request reaches a handler.
+            // This is deliberately NOT in the shared request parser:
+            // `http.ReadRequest` accepts `Host : x` and keeps the key
+            // verbatim, spaces and all, and a smoke pins that against
+            // Go. It is the SERVER that refuses it, because a server
+            // is the hop where a disagreement matters — a header this
+            // server would ignore and a proxy in front of it would
+            // honour is how two hops come to disagree about a
+            // request's shape, which is the shape of a smuggled
+            // request.
+            {
+                let mut bad: Option<&'static str> = None;
+                'outer: for (k, vals) in req.Header.__inner().__iter() {
+                    if !super::http::isToken(&k) {
+                        bad = Some("invalid header name");
+                        break 'outer;
+                    }
+                    for j in 0..vals.Len() {
+                        if !super::http::ValidHeaderFieldValue(&vals[j]) {
+                            bad = Some("invalid header value");
+                            break 'outer;
+                        }
+                    }
+                }
+                if let Some(text) = bad {
+                    let _ = crate::io::Writer::Write(
+                        &mut conn,
+                        crate::convert::bytes(__status_error_response(
+                            super::status::StatusBadRequest,
+                            string(text),
+                        )),
+                    );
+                    let _ = conn.Close();
+                    return;
+                }
             }
             // Go's readRequest rejects anything an HTTP/1 server has
             // no business parsing (server.go:1113), and conn.serve
@@ -3425,6 +3639,8 @@ impl Server {
                 request_keep_alive(&mut req) && !self.__state.in_shutdown.load(Ordering::Acquire);
             let w = response::__new_with_cnc(conn, cnc);
             w.__set_keep_alive(keep_alive);
+            w.__set_proto11(req.ProtoAtLeast(1, 1));
+            w.__set_error_log(self.ErrorLog.clone());
             // HEAD: handler writes are eaten by the response writer
             // (Go's `isHEAD` at server.go:1302, eat-writes at :1339).
             w.__set_head(req.Method == string("HEAD"));
@@ -3861,6 +4077,8 @@ pub fn register_http_impls() {
     super::httputil::register_httputil_impls();
     super::cgi::host::register_cgi_impls();
     super::fcgi::child::register_fcgi_impls();
+    super::cgi::child::register_cgi_impls();
+    super::server_tls::register_server_tls_impls();
     super::client::register_client_impls();
 }
 

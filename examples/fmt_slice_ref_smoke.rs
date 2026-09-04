@@ -365,29 +365,23 @@ fn main() {
         report(&mut failed, ok, " 7", "the marker reaches each element");
     }
 
-    // 8. The one gap that remains, recorded rather than hidden: a WIDTH
-    //    is applied to the bracketed whole, where Go applies it per
-    //    element. Go's `%3d` of []int{1,2,30} is "[  1   2  30]" and
-    //    goish's is "[1 2 30]" — goish's `Format` trait carries the verb
-    //    and the precision but not the width, which `do_format` applies
-    //    over the finished bytes.
+    // 8. A WIDTH is applied per ELEMENT, as Go's `printValue` does when
+    //    it recurses into a compound — not to the bracketed whole.
     //
-    //    Asserted as it IS, so that fixing it fails here.
+    //    This case used to assert the divergence (goish gave "[1 2 30]")
+    //    so that closing the gap would fail here, and it did. The width
+    //    now reaches the compound renderers, so the assertion is Go's
+    //    answer.
     {
         let mut ok = true;
         let ii: slice<int> = goish::slice!([]int{1, 2, 30});
         eq(
             &mut ok,
-            "width (diverges)",
+            "width per element",
             fmt::Sprintf!("%3d", ii),
-            "[1 2 30]",
+            "[  1   2  30]",
         );
-        report(
-            &mut failed,
-            ok,
-            " 8",
-            "width over a composite still diverges",
-        );
+        report(&mut failed, ok, " 8", "a width applies per element");
     }
 
     if failed == 0 {

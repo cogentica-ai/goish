@@ -128,11 +128,16 @@ fn main() {
         }
     }
 
-    // 9. IsTitle: ASCII slim returns false for everything.
+    // 9. IsTitle. Go: false for 'A' and 'a', TRUE for U+01C5 (Dž), which
+    //    is a real titlecase letter. This check asserted false for all
+    //    three — "ASCII slim returns false for everything" — which was
+    //    true of an earlier unicode table and is not true now. The
+    //    example is not declared in Cargo.toml, so e2e never ran it and
+    //    the expectation went stale unnoticed.
     {
         if !unicode::IsTitle(b'A' as rune)
             && !unicode::IsTitle(b'a' as rune)
-            && !unicode::IsTitle(0x01C5)
+            && unicode::IsTitle(0x01C5)
         /* LJ-titlecase */
         {
             fmt::Println!("[ 9] IsTitle ASCII slim        PASS");

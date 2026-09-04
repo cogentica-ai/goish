@@ -215,6 +215,20 @@ fn test_9_concurrent_store_load() {
     });
 
     wg.Wait();
+
+    // Wait for the reader to make progress BEFORE stopping it. Nothing
+    // schedules the reader ahead of the writers, so on a machine with
+    // few Ps it could start only after `stop` was already set, do zero
+    // Loads, and fail a check about whether a concurrent Load works.
+    // That is scheduling luck, not the property under test — the same
+    // shape as the bounded spin in defer_panic_smoke.
+    for _ in 0..10_000_000 {
+        if observed.load(Ordering::Acquire) > 0 {
+            break;
+        }
+        goish::runtime::sched::Gosched();
+    }
+
     stop.store(true, Ordering::Release);
     reader_wg.Wait();
 

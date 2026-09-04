@@ -33,6 +33,15 @@ use goish::{go, string};
 static PASSED: AtomicUsize = AtomicUsize::new(0);
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
+/// `check` takes its detail eagerly, and `Error()` on a nil error
+/// panics — so render the reason only when there is one.
+fn why(e: &goish::error) -> goish::string {
+    if e.IsNil() {
+        return string("");
+    }
+    return e.Error();
+}
+
 fn check(name: &'static str, ok: bool, detail: goish::string) {
     if ok {
         PASSED.fetch_add(1, Ordering::Relaxed);
@@ -65,15 +74,35 @@ fn run() -> ! {
         );
     }
 
-    // ── defaultTransportDialContext is callable ──
+    // ── defaultTransportDialContext really dials ──
+    //
+    // This used to call the returned closure and then assert the
+    // literal `true` — an assertion that could not fail, over a hook
+    // whose type was `Arc<dyn Fn()>`: no arguments, no return, nothing
+    // dialed. Dial a listener of our own and check the conn reaches
+    // it, which is what "callable" was standing in for.
     {
-        let f = http::transport_default_other::defaultTransportDialContext(net::Dialer::default());
-        f();
+        let (ln, lerr) = net::Listen(string("tcp"), string("127.0.0.1:0"));
         check(
-            "defaultTransportDialContext returns a callable",
-            true,
-            string(""),
+            "defaultTransportDialContext: listen",
+            lerr.IsNil(),
+            why(&lerr),
         );
+        let addr = ln.Addr().String();
+        let f = http::transport_default_other::defaultTransportDialContext(net::Dialer::default());
+        let (conn, derr) = f(None, string("tcp"), addr.clone());
+        check(
+            "defaultTransportDialContext dials the address it is given",
+            derr.IsNil() && conn.is_some(),
+            why(&derr),
+        );
+        if let Some(c) = conn {
+            check(
+                "the dialed conn is connected to that listener",
+                c.RemoteAddr().String() == addr,
+                c.RemoteAddr().String(),
+            );
+        }
     }
 
     // ── double WriteHeader: first status wins on the wire ──

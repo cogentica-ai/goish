@@ -616,3 +616,247 @@ pub fn Float64bits(f: f64) -> u64 {
 pub fn Float64frombits(b: u64) -> f64 {
     f64::from_bits(b)
 }
+
+// ─── Functions goish did not have ───────────────────────────────────
+//
+// Found by diffing this package against a running Go (see
+// examples/math_ref_smoke.rs): each of these is a documented Go
+// function with no counterpart here. Like the rest of this file they
+// are UNANCHORED — src/math/mod.rs is one .rs for 61 .go files, and
+// giving it a manifest would demand that split — so they carry the
+// same status as their neighbours and the same reference smoke,
+// examples/math2_ref_smoke.rs, establishes they agree with Go.
+
+// go: sdk 1.25.5 math/cbrt.go:26-31 Cbrt
+/// `math.Cbrt(x) float64` — the cube root. Go: "Cbrt(±0) = ±0,
+/// Cbrt(±Inf) = ±Inf, Cbrt(NaN) = NaN."
+pub fn Cbrt(x: f64) -> f64 {
+    return libm::cbrt(x);
+}
+
+// go: sdk 1.25.5 math/expm1.go:126-131 Expm1
+/// `math.Expm1(x) float64` — e**x - 1, accurate for tiny x where
+/// `Exp(x) - 1` would lose every significant digit to cancellation.
+/// Go: "Expm1(+Inf) = +Inf, Expm1(-Inf) = -1, Expm1(NaN) = NaN."
+pub fn Expm1(x: f64) -> f64 {
+    return libm::expm1(x);
+}
+
+// go: sdk 1.25.5 math/log1p.go:96-101 Log1p
+/// `math.Log1p(x) float64` — log(1 + x), accurate for tiny x for the
+/// same reason. Go: "Log1p(-1) = -Inf, Log1p(x < -1) = NaN."
+pub fn Log1p(x: f64) -> f64 {
+    return libm::log1p(x);
+}
+
+// go: sdk 1.25.5 math/erf.go:189-194 Erf
+/// `math.Erf(x) float64` — the error function.
+pub fn Erf(x: f64) -> f64 {
+    return libm::erf(x);
+}
+
+// go: sdk 1.25.5 math/erf.go:274-279 Erfc
+/// `math.Erfc(x) float64` — the complementary error function, 1 - Erf(x),
+/// computed directly because the subtraction loses precision in the tail.
+pub fn Erfc(x: f64) -> f64 {
+    return libm::erfc(x);
+}
+
+// go: sdk 1.25.5 math/gamma.go:131-214 Gamma
+/// `math.Gamma(x) float64` — the gamma function. Go: "Gamma(+Inf) =
+/// +Inf, Gamma(+0) = +Inf, Gamma(-0) = -Inf, Gamma(x) = NaN for
+/// integer x < 0, Gamma(-Inf) = NaN, Gamma(NaN) = NaN."
+pub fn Gamma(x: f64) -> f64 {
+    return libm::tgamma(x);
+}
+
+// go: sdk 1.25.5 math/lgamma.go:175-322 Lgamma
+/// `math.Lgamma(x) (lgamma float64, sign int)` — the natural logarithm
+/// and SIGN of Gamma(x). The sign is returned separately because the
+/// logarithm cannot carry it.
+pub fn Lgamma(x: f64) -> (f64, crate::types::int) {
+    let (v, sign) = libm::lgamma_r(x);
+    return (v, crate::int64(sign));
+}
+
+// go: sdk 1.25.5 math/logb.go:14-28 Logb
+/// `math.Logb(x) float64` — the binary exponent of x, as a float.
+/// Go: "Logb(±Inf) = +Inf, Logb(0) = -Inf, Logb(NaN) = NaN."
+pub fn Logb(x: f64) -> f64 {
+    if x == 0.0 {
+        return f64::NEG_INFINITY;
+    }
+    if x.is_infinite() {
+        return f64::INFINITY;
+    }
+    if x.is_nan() {
+        return x;
+    }
+    return crate::float64(__ilogb(x));
+}
+
+// go: sdk 1.25.5 math/logb.go:34-48 Ilogb
+/// `math.Ilogb(x) int` — the binary exponent of x, as an int.
+/// Go: "Ilogb(±Inf) = MaxInt32, Ilogb(0) = MinInt32, Ilogb(NaN) =
+/// MaxInt32." Those three are sentinels, not errors, and a caller that
+/// forgets them reads a wildly wrong exponent.
+pub fn Ilogb(x: f64) -> crate::types::int {
+    if x == 0.0 {
+        return crate::int64(i32::MIN);
+    }
+    if x.is_nan() || x.is_infinite() {
+        return crate::int64(i32::MAX);
+    }
+    return __ilogb(x);
+}
+
+// go: none — goish idiom: Go's `ilogb` is the unexported worker both
+//     `Logb` and `Ilogb` call after their own special cases.
+fn __ilogb(x: f64) -> crate::types::int {
+    // Go: normalize, then read the exponent field.
+    let (frac, exp) = __normalize(x);
+    return crate::int64((frac.to_bits() >> 52) & 0x7ff) - 1023 + exp;
+}
+
+// go: none — goish idiom: Go's `normalize` scales a subnormal into the
+//     normal range and reports how far it moved.
+fn __normalize(x: f64) -> (f64, crate::types::int) {
+    // Go: SmallestNormal = 2**-1022
+    const SMALLEST_NORMAL: f64 = 2.2250738585072014e-308;
+    if Abs(x) < SMALLEST_NORMAL {
+        // Go: x * (1 << 52), exp = -52
+        return (x * 4503599627370496.0, -52);
+    }
+    return (x, 0);
+}
+
+// go: sdk 1.25.5 math/floor.go:121-151 RoundToEven
+/// `math.RoundToEven(x) float64` — round half to EVEN, which is what
+/// IEEE-754 arithmetic itself does. `Round` rounds half away from zero,
+/// so the two disagree on exactly the halves: Round(2.5) is 3 and
+/// RoundToEven(2.5) is 2.
+pub fn RoundToEven(x: f64) -> f64 {
+    if x.is_nan() || x.is_infinite() {
+        return x;
+    }
+    // Go: "RoundToEven returns the nearest integer, rounding ties to
+    // even." `no_std` has no `round_ties_even`, so this is the
+    // floor/ceil pair with the tie broken toward the even one.
+    let f = Floor(x);
+    let diff = x - f;
+    let r = if diff > 0.5 {
+        f + 1.0
+    } else if diff < 0.5 {
+        f
+    } else if Mod(f, 2.0) == 0.0 {
+        f
+    } else {
+        f + 1.0
+    };
+    // Go keeps the sign of a zero result — RoundToEven(-0.5) is -0,
+    // not +0 — and the arithmetic above loses it.
+    if r == 0.0 {
+        return Copysign(0.0, x);
+    }
+    return r;
+}
+
+// go: sdk 1.25.5 math/sincos.go:16-73 Sincos
+/// `math.Sincos(x) (sin, cos float64)` — both at once, which is what
+/// the underlying argument reduction produces anyway.
+pub fn Sincos(x: f64) -> (f64, f64) {
+    return (Sin(x), Cos(x));
+}
+
+// go: sdk 1.25.5 math/nextafter.go:37-55 Nextafter
+/// `math.Nextafter(x, y) float64` — the next representable float64
+/// after x in the direction of y. Go: "Nextafter(x, x) = x."
+pub fn Nextafter(x: f64, y: f64) -> f64 {
+    if x.is_nan() || y.is_nan() {
+        return f64::NAN;
+    }
+    if x == y {
+        return x;
+    }
+    if x == 0.0 {
+        return Copysign(f64::from_bits(1), y);
+    }
+    // Go: walk the bit pattern one step, which is what makes the
+    // spacing follow the exponent.
+    let mut b = x.to_bits();
+    if (y > x) == (x > 0.0) {
+        b += 1;
+    } else {
+        b -= 1;
+    }
+    return f64::from_bits(b);
+}
+
+// go: sdk 1.25.5 math/nextafter.go:14-32 Nextafter32
+/// `math.Nextafter32(x, y) float32` — as `Nextafter`, in float32.
+pub fn Nextafter32(x: f32, y: f32) -> f32 {
+    if x.is_nan() || y.is_nan() {
+        return f32::NAN;
+    }
+    if x == y {
+        return x;
+    }
+    if x == 0.0 {
+        return crate::float32(Copysign(
+            crate::float64(f32::from_bits(1)),
+            crate::float64(y),
+        ));
+    }
+    let mut b = x.to_bits();
+    if (y > x) == (x > 0.0) {
+        b += 1;
+    } else {
+        b -= 1;
+    }
+    return f32::from_bits(b);
+}
+
+// go: sdk 1.25.5 math/fma.go:95-182 FMA
+/// `math.FMA(x, y, z) float64` — x*y+z computed with a SINGLE rounding.
+/// That is the point: the intermediate product is not rounded, so the
+/// result can differ from `x*y + z` written out.
+pub fn FMA(x: f64, y: f64, z: f64) -> f64 {
+    return libm::fma(x, y, z);
+}
+
+// go: sdk 1.25.5 math/j0.go:77-146 J0
+/// `math.J0(x) float64` — the order-zero Bessel function of the first kind.
+pub fn J0(x: f64) -> f64 {
+    return libm::j0(x);
+}
+
+// go: sdk 1.25.5 math/j1.go:75-146 J1
+/// `math.J1(x) float64` — order one, first kind.
+pub fn J1(x: f64) -> f64 {
+    return libm::j1(x);
+}
+
+// go: sdk 1.25.5 math/jn.go:54-224 Jn
+/// `math.Jn(n, x) float64` — order n, first kind.
+pub fn Jn(n: crate::types::int, x: f64) -> f64 {
+    return libm::jn(crate::int32(n), x);
+}
+
+// go: sdk 1.25.5 math/j0.go:156-228 Y0
+/// `math.Y0(x) float64` — order zero, SECOND kind. Go: "Y0(x < 0) =
+/// NaN, Y0(0) = -Inf."
+pub fn Y0(x: f64) -> f64 {
+    return libm::y0(x);
+}
+
+// go: sdk 1.25.5 math/j1.go:156-223 Y1
+/// `math.Y1(x) float64` — order one, second kind.
+pub fn Y1(x: f64) -> f64 {
+    return libm::y1(x);
+}
+
+// go: sdk 1.25.5 math/jn.go:235-306 Yn
+/// `math.Yn(n, x) float64` — order n, second kind.
+pub fn Yn(n: crate::types::int, x: f64) -> f64 {
+    return libm::yn(crate::int32(n), x);
+}

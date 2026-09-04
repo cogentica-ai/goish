@@ -81,7 +81,7 @@ fn main() {
     eq(joined(&v, "a"), "3", "Set replaces", &mut bad);
 
     url::ValuesAdd(&mut v, string("b"), string("x"));
-    eq(url::ValuesEncode(v.clone()), "a=3&b=x", "encode", &mut bad);
+    eq(url::ValuesEncode(&v), "a=3&b=x", "encode", &mut bad);
 
     url::ValuesDel(&mut v, string("a"));
     eq(
@@ -96,12 +96,7 @@ fn main() {
         "Has after Del",
         &mut bad,
     );
-    eq(
-        url::ValuesEncode(v.clone()),
-        "b=x",
-        "encode after Del",
-        &mut bad,
-    );
+    eq(url::ValuesEncode(&v), "b=x", "encode after Del", &mut bad);
 
     // present-but-empty: Get is "" but Has is TRUE.
     {

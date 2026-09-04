@@ -1938,17 +1938,19 @@ impl super::conn::Conn {
             .mutualVersion(super::common::roleServer, clientVersions.clone());
         if !ok {
             self.sendAlert(super::alert::alertProtocolVersion);
-            let mut hexVers: alloc::vec::Vec<crate::types::byte> = alloc::vec::Vec::new();
-            for v in clientVersions.iter() {
-                hexVers.push(crate::byte(v >> 8));
-                hexVers.push(crate::byte(*v));
-            }
+            // Go formats the []uint16 itself, so `%x` renders each
+            // version as its own hex number inside brackets: "[304]".
+            // goish used to flatten the versions into BYTES first,
+            // which `%x` then renders as one hex STRING — "0304" — a
+            // different message for the same condition. That predates
+            // fmt handling `%x` on a non-byte slice; it does now, so
+            // the slice goes through as Go's does.
             return (
                 None,
                 None,
                 crate::fmt::Errorf!(
                     "tls: client offered only unsupported versions: %x",
-                    slice::__from_vec(hexVers)
+                    clientVersions.clone()
                 ),
             );
         }

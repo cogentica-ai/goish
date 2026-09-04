@@ -237,6 +237,17 @@ enum FramedBody {
     Piped {
         r: alloc::boxed::Box<dyn crate::io::ReadCloser + Send + Sync>,
     },
+    /// Go's `gzipReader` (transport.go): a body the TRANSPORT asked to
+    /// be gzipped and must therefore un-gzip before the caller sees
+    /// it. `inner` is the original conn-backed body — kept whole, so
+    /// Close still hands the connection back for reuse — and `z` is
+    /// built on the FIRST Read rather than here, because Go's
+    /// gzipReader is lazy: a bad gzip header has to surface from
+    /// Read, not from the call that returned the response.
+    Gzip {
+        inner: Body,
+        z: Option<alloc::boxed::Box<crate::compress::gzip::Reader<Body>>>,
+    },
     /// A 101 Switching Protocols response: the connection itself IS
     /// the body (Go: newReadWriteCloserBody, transport.go:2548).
     /// Reads drain any bytes the peer sent past the head (still in
@@ -315,6 +326,19 @@ fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
         FramedBody::UntilEof { src } => src.Read(p),
         FramedBody::Upgraded { src } => src.Read(p),
         FramedBody::Piped { r } => r.Read(p),
+        FramedBody::Gzip { inner, z } => {
+            if z.is_none() {
+                let (r, e) = crate::compress::gzip::NewReader(inner.clone());
+                if !e.IsNil() {
+                    return (0, e);
+                }
+                *z = Some(alloc::boxed::Box::new(r));
+            }
+            match z.as_mut() {
+                Some(r) => r.Read(p),
+                None => (0, io::EOF.into()),
+            }
+        }
         FramedBody::Closed => (0, errors::New(string("http: read on closed response body"))),
     };
     // A read interrupted by the cancel watcher surfaces as a timeout
@@ -380,6 +404,9 @@ fn close_locked(st: &mut BodyState) -> error {
         | FramedBody::Upgraded { src } => src.close_conn(),
         FramedBody::Chunked { cr } => cr.__bufio_mut().__rd_mut().close_conn(),
         FramedBody::Piped { r } => r.Close(),
+        // Closing the decoder closes the body underneath it, which is
+        // where the reuse bookkeeping lives.
+        FramedBody::Gzip { inner, .. } => inner.__close_shared(),
         _ => errors::nil,
     };
     st.framing = FramedBody::Closed;
@@ -629,7 +656,19 @@ pub(crate) fn read_response_head<R: Reader>(
     // Status line: "HTTP/1.1 200 OK\r\n"
     let line = match read_crlf_line(br) {
         Ok(l) => l,
-        Err(e) => return (resp, BodyKind::Empty, e),
+        Err(e) => {
+            // Go (response.go, ReadResponse): `if err == io.EOF { err =
+            // io.ErrUnexpectedEOF }`. A response that is not there at
+            // all is a TRUNCATED response, not a clean end of stream —
+            // and that is the distinction a client uses to decide
+            // whether the connection died mid-answer or the server
+            // simply finished. goish reported a plain io.EOF, so both
+            // read the same.
+            if crate::errors::Is(e.clone(), crate::io::EOF) {
+                return (resp, BodyKind::Empty, crate::io::ErrUnexpectedEOF.into());
+            }
+            return (resp, BodyKind::Empty, e);
+        }
     };
     let lb = line.as_bytes();
     let sp1 = match lb.iter().position(|&b| b == b' ') {
@@ -638,7 +677,7 @@ pub(crate) fn read_response_head<R: Reader>(
             return (
                 resp,
                 BodyKind::Empty,
-                errors::New(string("http: malformed response status line")),
+                crate::fmt::Errorf!("malformed HTTP response %q", line.clone()),
             )
         }
     };
@@ -650,7 +689,7 @@ pub(crate) fn read_response_head<R: Reader>(
         return (
             resp,
             BodyKind::Empty,
-            errors::New(string("http: malformed HTTP status code")),
+            crate::fmt::Errorf!("malformed HTTP status code %q", string::from_bytes(code_b)),
         );
     }
     let mut code: int = 0;
@@ -659,7 +698,7 @@ pub(crate) fn read_response_head<R: Reader>(
             return (
                 resp,
                 BodyKind::Empty,
-                errors::New(string("http: malformed HTTP status code")),
+                crate::fmt::Errorf!("malformed HTTP status code %q", string::from_bytes(code_b)),
             );
         }
         code = code * 10 + (b - b'0') as int;
@@ -668,10 +707,11 @@ pub(crate) fn read_response_head<R: Reader>(
     resp.Status = string::from_bytes(rest);
     let (major, minor) = parse_http_version(&resp.Proto);
     if major == 0 {
+        let proto = resp.Proto.clone();
         return (
             resp,
             BodyKind::Empty,
-            errors::New(string("http: malformed HTTP version")),
+            crate::fmt::Errorf!("malformed HTTP version %q", proto),
         );
     }
     resp.ProtoMajor = major;
@@ -681,7 +721,16 @@ pub(crate) fn read_response_head<R: Reader>(
     loop {
         let h = match read_crlf_line(br) {
             Ok(l) => l,
-            Err(e) => return (resp, BodyKind::Empty, e),
+            Err(e) => {
+                // Go (ReadResponse, after ReadMIMEHeader): the same
+                // `if err == io.EOF { err = io.ErrUnexpectedEOF }` as
+                // on the status line — a response whose headers stop
+                // partway was cut off, not finished.
+                if crate::errors::Is(e.clone(), crate::io::EOF) {
+                    return (resp, BodyKind::Empty, crate::io::ErrUnexpectedEOF.into());
+                }
+                return (resp, BodyKind::Empty, e);
+            }
         };
         if h.Len() == 0 {
             break;
@@ -874,10 +923,33 @@ pub trait RoundTripper: Send + Sync {
 /// don't need a public URL type in the surface.
 pub type ProxyResolver =
     alloc::sync::Arc<dyn Fn(&Request) -> (super::url::URL, error) + Send + Sync>;
-/// Type alias for the dial-context closure. Same opaque shape as
-/// `ProxyResolver` — the real signature would carry `(Context, network,
-/// addr) -> (Conn, error)` but those are inert in v1.
-pub type DialContextFn = alloc::sync::Arc<dyn Fn() + Send + Sync>;
+/// `Transport.DialContext`'s shape (transport.go:110): dial a plain
+/// connection for `(network, addr)`. Go's is
+/// `func(ctx, network, addr) (net.Conn, error)`.
+///
+/// This used to be `Arc<dyn Fn()>` — no arguments, no return — with a
+/// note that the real signature was "inert in v1". A hook of that
+/// shape cannot dial anything even if it is called, and nothing
+/// called it: `Transport.dial` did not exist and the dial site went
+/// straight to `net::Dial`. It is the real signature now, and the
+/// hook is consulted.
+pub type DialContextFn = alloc::sync::Arc<
+    dyn Fn(
+            Option<alloc::sync::Arc<dyn crate::context::Context>>,
+            string,
+            string,
+        ) -> (Option<alloc::boxed::Box<dyn crate::net::Conn>>, error)
+        + Send
+        + Sync,
+>;
+
+/// `Transport.Dial`'s shape (transport.go:100) — the ctx-less
+/// deprecated form, the plain-conn sibling of `DialTLS`.
+pub type DialFn = alloc::sync::Arc<
+    dyn Fn(string, string) -> (Option<alloc::boxed::Box<dyn crate::net::Conn>>, error)
+        + Send
+        + Sync,
+>;
 
 /// `Transport.DialTLSContext`'s shape (transport.go:120): dial AND
 /// handshake, returning a ready encrypted conn. Go's is
@@ -892,11 +964,13 @@ pub type DialTLSContextFn = alloc::sync::Arc<
         + Sync,
 >;
 
-/// `http.Transport` (transport.go:163). v1: dial-per-request, no idle
-/// pool. Field surface mirrors Go's struct so user ports can configure
-/// or read these slots; only `Timeout` actually drives behaviour
+/// `http.Transport` (transport.go:163).
+///
+/// This doc used to say "only `Timeout` actually drives behaviour
 /// today, the rest are inert metadata until the connection-pool layer
-/// lands.
+/// lands". The pool landed, and so did most of the rest: read each
+/// field's own comment, which says LIVE or names what is missing.
+/// Inert slots still exist — they are the ones whose comment says so.
 pub struct Transport {
     /// The idle-connection pool: Go's `idleMu` + `idleConn` +
     /// `idleLRU` + `closeIdle` (transport.go:270-276), which its own
@@ -926,16 +1000,26 @@ pub struct Transport {
     /// Maximum time `RoundTrip` will spend on the entire request
     /// (dial + write + read). Zero ≡ no timeout.
     pub Timeout: time::Duration,
-    /// Disable transparent gzip request/response. Inert in v1.
+    /// Disable the transparent gzip Accept-Encoding/decode. LIVE — it
+    /// is the first clause of the `requestedGzip` test in roundTrip,
+    /// and gzip_transport_ref_smoke pins the behaviour both ways.
     pub DisableCompression: bool,
     /// Proxy resolver. `Option` so the zero value is None (`nil` in Go).
     pub Proxy: Option<ProxyResolver>,
-    /// Idle-connection eviction timeout. Inert until the connection
-    /// pool lands.
+    /// Idle-connection eviction timeout. LIVE — it is the cutoff
+    /// `closeIdleConnections` compares each pooled conn's idle
+    /// timestamp against, and the duration the per-conn idle timer is
+    /// armed with when a conn is banked.
     pub IdleConnTimeout: time::Duration,
-    /// Per-dial timeout/keepalive callback. `Option` so the zero value
-    /// is None.
+    /// `Transport.DialContext` (transport.go:110) — Go: "specifies the
+    /// dial function for creating unencrypted TCP connections". LIVE —
+    /// `Transport::dial` consults it before falling back to the zero
+    /// Dialer, so the conn it returns is the one the request rides,
+    /// and its error reaches the caller unchanged.
     pub DialContext: Option<DialContextFn>,
+    /// `Transport.Dial` (transport.go:100) — the ctx-less deprecated
+    /// form; DialContext wins when both are set.
+    pub Dial: Option<DialFn>,
     /// `Transport.DialTLSContext` (transport.go:117) — Go: "specifies
     /// an optional dial function for creating TLS connections for
     /// non-proxied HTTPS requests" — the conn arrives already
@@ -950,22 +1034,35 @@ pub struct Transport {
                 + Sync,
         >,
     >,
-    /// Maximum time waiting for the TLS handshake. Inert in v1.
+    /// Maximum time waiting for the TLS handshake. LIVE — armed as a
+    /// deadline on the plaintext conn for the handshake's duration and
+    /// cleared after, with a timed-out handshake reported as such.
     pub TLSHandshakeTimeout: time::Duration,
     /// Maximum time waiting for an Expect: 100-continue response.
     pub ExpectContinueTimeout: time::Duration,
-    /// TLS configuration applied per-connection. Inert in v1 (TLS not
-    /// yet plumbed); the field exists so user ports can store and
-    /// reset it for thread-safety.
+    /// TLS configuration applied per-connection. LIVE — cloned into
+    /// each dial's handshake config (goish's is a VALUE where Go's is
+    /// a pointer, so the clone is also the thread-safety story).
     pub TLSClientConfig: crate::crypto::tls::Config,
-    /// Disable HTTP keep-alive. Inert in v1 (each request dials anew).
+    /// Disable HTTP keep-alive: dial per request, and tell the server
+    /// so with `Connection: close`. LIVE — it gates whether the
+    /// connection is banked for reuse (see the bank-back in roundTrip)
+    /// and is asserted by http_client_reuse_smoke and
+    /// client_wire_ref_smoke.
     pub DisableKeepAlives: bool,
-    /// Idle-connection-pool cap. Inert until the pool lands.
+    /// Idle-connection-pool cap, across all hosts. LIVE — carried into
+    /// the pool config as `max_idle_conns` and enforced when trimming
+    /// the idle LRU.
     pub MaxIdleConns: int,
-    /// Per-host idle-connection cap. Inert until the pool lands.
-    /// Negative values mean "no pool for this host" in Go.
+    /// Per-host idle-connection cap. LIVE — read through
+    /// `maxIdleConnsPerHost()`, which falls back to
+    /// DefaultMaxIdleConnsPerHost only when this is ZERO, so a
+    /// NEGATIVE value passes through and means "no pool for this
+    /// host", as in Go.
     pub MaxIdleConnsPerHost: int,
-    /// Max in-flight connections per host. Inert in v1.
+    /// Max in-flight connections per host. LIVE — `__take_conn_slot`
+    /// refuses a slot past the cap and `decConnsPerHost` hands the
+    /// freed slot to a waiting dial.
     pub MaxConnsPerHost: int,
     /// Prefer HTTP/2 over TLS. Inert in v1 (HTTP/2 not yet plumbed).
     pub ForceAttemptHTTP2: bool,
@@ -985,6 +1082,7 @@ impl Default for Transport {
             Proxy: None,
             IdleConnTimeout: time::Duration(0),
             DialContext: None,
+            Dial: None,
             DialTLSContext: None,
             DialTLS: None,
             TLSHandshakeTimeout: time::Duration(0),
@@ -1014,7 +1112,7 @@ pub fn ProxyFromEnvironment() -> ProxyResolver {
         let (u, err) = f(&r.URL);
         let out = match u {
             Some(u) => u,
-            None => super::url::URL::empty(),
+            None => super::url::URL::default(),
         };
         return (out, err);
     })
@@ -1076,10 +1174,32 @@ impl RoundTripper for Transport {
         }
 
         // Resolve host:port. URL.Host may already include :port.
+        //
+        // Two DIFFERENT values, which goish used to conflate. `host` is
+        // where the connection is dialled: always the URL's, because
+        // that is the only thing that names a peer. `header_host` is
+        // what goes on the Host line, and Go lets `Request.Host`
+        // override it — the field is documented as "For client
+        // requests, Host optionally overrides the Host header to send"
+        // (request.go). goish ignored the field entirely and always
+        // sent the URL's host.
+        //
+        // A caller could therefore not address a virtual host by name
+        // while dialling a chosen address, and — the case that found
+        // this — httputil's reverse proxy could not forward the
+        // INBOUND Host to its backend, which is what Go's proxy does
+        // by default. Its only way to make the URL host win was to
+        // clear Request.Host, so a backend doing name-based routing
+        // saw the proxy's own address instead of the client's.
         let host = if req.URL.Host.Len() > 0 {
             req.URL.Host.clone()
         } else {
             req.Host.clone()
+        };
+        let header_host = if req.Host.Len() > 0 {
+            req.Host.clone()
+        } else {
+            host.clone()
         };
         if host.Len() == 0 {
             return (
@@ -1109,21 +1229,103 @@ impl RoundTripper for Transport {
         // conn after it.
         {
             let dial_addr = ensure_default_port(&host, if is_https { 443 } else { 80 });
-            let cm = super::transport::connectMethod {
-                proxyURL: None,
-                targetScheme: if is_https {
+            // Go (roundTrip): cm, err := t.connectMethodForRequest(treq)
+            //
+            // `proxyURL` used to be hard-coded None here, so
+            // `Transport.Proxy` was resolved by nobody: goish picked
+            // the proxy correctly — ProxyFromEnvironment and its
+            // NO_PROXY matching are pinned in http_proxyenv_smoke —
+            // and then threw the answer away and dialled the target
+            // DIRECTLY, with no error to say so.
+            //
+            // That is the wrong direction to fail in. Where a proxy is
+            // the egress control point, silently going around it is a
+            // bypass, and the caller cannot tell: the request
+            // succeeds. `connectMethodForRequest` is the ported
+            // function that fills this in and was simply not wired to
+            // the request path.
+            //
+            // With the key populated, a proxied request now reaches
+            // dialConn's proxy arm and gets `errDialNotPorted` —
+            // CONNECT tunnelling is still unimplemented. An explicit
+            // "not supported" is the honest answer, and it fails
+            // CLOSED.
+            let (mut cm, cmerr) = self.connectMethodForRequest(req);
+            if !cmerr.IsNil() {
+                return (Response::default(), ctx_err_or(&ctx, cmerr));
+            }
+            if cm.targetAddr.Len() == 0 {
+                cm.targetAddr = dial_addr.clone();
+            }
+            if cm.targetScheme.Len() == 0 {
+                cm.targetScheme = if is_https {
                     string("https")
                 } else {
                     string("http")
-                },
-                targetAddr: dial_addr.clone(),
-                onlyH1: false,
-            };
+                };
+            }
 
             // Go (roundTrip, transport.go:598): req = setupRewindBody(req)
             // — the retry path below must be able to replay a consumed
             // body via GetBody (rewindBody), never resend it empty.
             let mut rt_req = super::transport::setupRewindBody(req);
+            // Go (transport.roundTrip): ask for gzip on the caller's
+            // behalf, and REMEMBER having asked, so the answer can be
+            // unwrapped before the caller sees it.
+            //
+            //   requestedGzip = !t.DisableCompression &&
+            //       req.Header.Get("Accept-Encoding") == "" &&
+            //       req.Header.Get("Range") == "" && req.Method != "HEAD"
+            //
+            // Every clause earns its place. A caller who set
+            // Accept-Encoding themselves gets the ENCODED bytes and the
+            // Content-Encoding header intact — a proxy depends on that,
+            // since it has to relay what the origin sent rather than a
+            // decoded copy whose headers no longer describe it. A Range
+            // request must not be answered with a gzip stream of the
+            // whole resource. A HEAD has no body to decode.
+            //
+            // The header is only ADDED when the key is absent, while
+            // the flag is set whenever Get returns empty. That is not a
+            // subtlety goish invented: Go puts its "Accept-Encoding:
+            // gzip" in `extraHeaders`, which does not displace an
+            // explicit `Accept-Encoding: ""` the caller set — so the
+            // wire carries the caller's empty value AND the response is
+            // still decoded. Pinned in the smoke as caller-ae="".
+            let added_gzip = !self.DisableCompression
+                && rt_req.Header.Get(string("Accept-Encoding")).Len() == 0
+                && rt_req.Header.Get(string("Range")).Len() == 0
+                && rt_req.Method != "HEAD";
+            if added_gzip && !rt_req.Header.has(string("Accept-Encoding")) {
+                rt_req.Header.Set(string("Accept-Encoding"), string("gzip"));
+            }
+            // Go (persistConn.roundTrip, transport.go:2791-2795):
+            //
+            //   if pc.t.DisableKeepAlives && !req.wantsClose() &&
+            //       !isProtocolSwitchHeader(req.Header) {
+            //       req.extraHeaders().Set("Connection", "close")
+            //   }
+            //
+            // goish read DisableKeepAlives only to decide whether to
+            // bank the connection afterwards, and never told the SERVER
+            // anything. So the client hung up while the server kept the
+            // connection open waiting for another request, until its
+            // idle timeout expired — one stranded server-side
+            // connection per request, exactly the cost
+            // DisableKeepAlives is set to avoid.
+            //
+            // The two exclusions are not decoration. A caller that
+            // already asked to close does not need it said twice, and
+            // an upgrade request (WebSocket) must NOT carry
+            // `Connection: close` — its Connection header is what
+            // carries the `Upgrade` token, and overwriting it would
+            // turn a protocol switch into a plain closing request.
+            if self.DisableKeepAlives
+                && !rt_req.wantsClose()
+                && !super::response::isProtocolSwitchHeader(&rt_req.Header)
+            {
+                rt_req.Header.Set(string("Connection"), string("close"));
+            }
             // Go (roundTrip): treq := &transportRequest{Request: req, …}
             // — the error cell mapRoundTripError consults, rebuilt per
             // rewind like Go rebuilds it per retry loop turn.
@@ -1176,7 +1378,7 @@ impl RoundTripper for Transport {
 
                 // Write the request: head, then stream the body (see
                 // the TLS arm above).
-                let (head, mut tw, serr) = serialize_request_head(&rt_req, &host, false);
+                let (head, mut tw, serr) = serialize_request_head(&rt_req, &header_host, false);
                 if !serr.IsNil() {
                     stop_cancel_watch(watch);
                     let _ = src.close_conn();
@@ -1404,11 +1606,57 @@ impl RoundTripper for Transport {
                 } else {
                     None
                 };
+                // Go decides this BEFORE attaching, because `kind` is
+                // moved into the body; the flag is all that is needed.
+                let had_body = !matches!(kind, BodyKind::Empty | BodyKind::Cl(0));
                 attach_stream_body(&mut resp, kind, src, ctx, watch, bank);
+                maybe_gunzip(&mut resp, added_gzip, had_body);
                 return (resp, errors::nil);
             }
         }
     }
+}
+
+// go: none — goish-only. In Go this is four statements inline in
+// `persistConn.readLoop`, whose anchor lives in transport.rs; it is a
+// named function here because the `Body` internals it needs — the
+// framing enum and `from_parts` — are private to this file. The Go
+// text it reproduces:
+//
+//     if addedGzip && ascii.EqualFold(
+//             resp.Header.Get("Content-Encoding"), "gzip") {
+//         resp.Body = &gzipReader{body: body}
+//         resp.Header.Del("Content-Encoding")
+//         resp.Header.Del("Content-Length")
+//         resp.ContentLength = -1
+//         resp.Uncompressed = true
+//     }
+///
+/// The header deletions are not tidiness. A decoded body with a
+/// Content-Length describing the COMPRESSED bytes is a response whose
+/// framing lies about itself, and anything that re-serializes it — a
+/// proxy, a cache, a dump — would write a length that does not match
+/// the body it writes. Removing both is what makes the decoded
+/// response internally consistent, and `Uncompressed` is how a caller
+/// that cared can still tell what happened.
+///
+/// The `had_body` guard matches Go's structure rather than its text:
+/// Go reaches the gzip arm only on the branch that has a body to
+/// stream, so a `Content-Encoding: gzip` with nothing after it is
+/// passed through untouched, header and all. Pinned as `gzip-empty`.
+fn maybe_gunzip(resp: &mut Response, added_gzip: bool, had_body: bool) {
+    if !added_gzip || !had_body {
+        return;
+    }
+    if !strings::EqualFold(resp.Header.Get(string("Content-Encoding")), string("gzip")) {
+        return;
+    }
+    let inner = core::mem::replace(&mut resp.Body, Body::default());
+    resp.Body = Body::from_parts(FramedBody::Gzip { inner, z: None }, None, None);
+    resp.Header.Del(string("Content-Encoding"));
+    resp.Header.Del(string("Content-Length"));
+    resp.ContentLength = -1;
+    resp.Uncompressed = true;
 }
 
 /// Wire a parsed head + owned conn into a streaming `resp.Body`.
@@ -1634,8 +1882,11 @@ pub fn refererForURL(lastReq: &URL, newReq: &URL, explicitRef: string) -> string
     //     auth := lastReq.User.String() + "@"
     //     referer = strings.Replace(referer, auth, "", 1) }
     let referer = lastReq.String();
-    if let Some(u) = &lastReq.User {
-        let auth = u.String() + "@";
+    // Go: `if lastReq.User != nil` — a nil-able *Userinfo. goish's
+    // net/url models the nil with the same `== nil` comparison the rest
+    // of the tree uses, where net/http's own copy used an Option.
+    if lastReq.User != crate::nil {
+        let auth = lastReq.User.String() + "@";
         return crate::strings::Replace(referer, auth, string(""), 1);
     }
     return referer;
@@ -1700,7 +1951,8 @@ pub fn shouldCopyHeaderOnRedirect(initial: &URL, dest: &URL) -> bool {
 /// Redacts the password in a URL for error messages. An EMPTY password
 /// still counts as set: `http://u:@a.com` renders as `http://u:***@a.com`.
 pub fn stripPassword(u: &URL) -> string {
-    if let Some(ui) = &u.User {
+    if u.User != crate::nil {
+        let ui = &u.User;
         let (_, passSet) = ui.Password();
         if passSet {
             return crate::strings::Replace(
@@ -1900,8 +2152,7 @@ impl Drop for __CancelOnDrop {
 /// goish carries only the knownRoundTripperImpl arm — every goish
 /// transport is "known", and the deprecated `Request.Cancel` channel
 /// (whose legacy doCancel machinery is the rest of Go's function) has
-/// no goish field. Go's WithDeadline is spelled WithTimeout(until):
-/// context.WithDeadline is not ported yet.
+/// no goish field.
 pub(crate) fn setRequestCancel(
     req: &mut Request,
     rt: &Arc<dyn RoundTripper>,
@@ -1922,8 +2173,20 @@ pub(crate) fn setRequestCancel(
     if !timeBeforeContextDeadline(deadline.clone(), &oldCtx) {
         return (alloc::boxed::Box::new(super::transport::nop), af);
     }
-    let until = deadline.clone().Sub(crate::time::Now());
-    let (ctx, cancelCtx) = crate::context::WithTimeout(oldCtx, until);
+    // Go: ctx, cancelCtx := context.WithDeadline(oldCtx, deadline)
+    //
+    // This used to convert to a duration — `deadline.Sub(Now())` — and
+    // call WithTimeout, under a comment saying context.WithDeadline was
+    // not ported yet. It has been all along.
+    //
+    // The conversion samples `Now()` here and WithTimeout samples it
+    // again to add the duration back on, so the effective deadline
+    // landed LATER than the caller's by whatever elapsed between the
+    // two reads. Microseconds when idle, and this box has shown
+    // milliseconds under load. A deadline is an absolute instant the
+    // caller chose; handing it through as one costs nothing and is what
+    // `ctx.Deadline()` then reports.
+    let (ctx, cancelCtx) = crate::context::WithDeadline(oldCtx, deadline.clone());
     req.ctx = Some(ctx);
     let dl = deadline;
     return (
@@ -1979,7 +2242,8 @@ pub(crate) fn send(
 
     // Go: if u := req.URL.User; u != nil && req.Header.Get(
     // "Authorization") == "" { … "Basic " + basicAuth(...) }
-    if let Some(u) = req.URL.User.clone() {
+    if req.URL.User != crate::nil {
+        let u = req.URL.User.clone();
         if req.Header.Get(string("Authorization")).Len() == 0 {
             let username = u.Username();
             let (password, _) = u.Password();
@@ -2063,6 +2327,23 @@ impl Client {
         // measured against Go's ten with a self-redirecting server.
         // Requests already made, oldest first — Go's `via`.
         let mut via: Vec<Request> = Vec::new();
+        // Go (client.go:617-634): every error return from `do` goes
+        // through this, so a caller always receives a *url.Error and
+        // can ask WHICH request failed and whether it timed out:
+        //
+        //     if ue, ok := err.(*url.Error); ok && ue.Timeout() { … }
+        //
+        // goish returned the bare inner error, so that assertion never
+        // matched — including for `Client.Timeout`, the one case the
+        // idiom exists for. url.Error.Timeout/Temporary were ported
+        // earlier today onto a type the client never produced.
+        let uerr = |method: string, u: &URL, err: error| -> error {
+            if err.IsNil() {
+                return err;
+            }
+            super::url::Error::new(urlErrorOp(method), stripPassword(u), err)
+        };
+        let uerr_method = req.Method.clone();
         // The caller's own Cookie header, before any jar additions.
         let originalCookies = current.Header.Values(string("Cookie"));
         // Go builds this ONCE from the initial request and calls it on
@@ -2114,7 +2395,7 @@ impl Client {
             // and below this call.
             let (resp, _did_timeout, err) = send(&current, &self.Transport, deadline.clone());
             if !err.IsNil() {
-                return (resp, err);
+                return (resp, uerr(uerr_method.clone(), &current.URL, err));
             }
             // Go (client.go, send): if c.Jar != nil { if rc :=
             // resp.Cookies(); len(rc) > 0 { c.Jar.SetCookies(req.URL, rc) } }
@@ -2194,7 +2475,7 @@ impl Client {
                         if let Some(gb) = &ireqGetBody {
                             let (b, gerr) = gb();
                             if !gerr.IsNil() {
-                                return (resp, gerr);
+                                return (resp, uerr(uerr_method.clone(), &current.URL, gerr));
                             }
                             next.Body = b;
                             next.ContentLength = ireqContentLength;
@@ -2246,7 +2527,7 @@ impl Client {
                             if errors::Is(e.clone(), sentinel) {
                                 return (resp, errors::nil);
                             }
-                            return (resp, e);
+                            return (resp, uerr(uerr_method.clone(), &current.URL, e));
                         }
                     }
                     current = next;
@@ -2497,12 +2778,12 @@ pub fn NewRequest<M: Into<string>, U: Into<string>, B: __RequestBody>(
             errors::New(string("net/http: invalid method \"") + m + string("\"")),
         );
     }
-    // Go uses urlpkg.Parse here, NOT parse_request_uri. The latter is
+    // Go uses urlpkg.Parse here, NOT ParseRequestURI. The latter is
     // for server-side request-line URIs (RFC 9112 origin-form) and
     // differs on two forms NewRequest must handle: a scheme-relative
-    // "//host/path" (Parse splits the authority; parse_request_uri
+    // "//host/path" (Parse splits the authority; ParseRequestURI
     // treats it all as a path) and userinfo (Parse puts "user:pw" in
-    // URL.User, leaving Host clean; parse_request_uri leaves it in
+    // URL.User, leaving Host clean; ParseRequestURI leaves it in
     // Host, which then leaked the credentials into the Host header).
     let (u, perr) = super::url::Parse(url);
     if perr != errors::nil {
@@ -2553,7 +2834,7 @@ fn default_request() -> Request {
         TLS: None,
         RequestURI: string::new(),
         Method: string::new(),
-        URL: URL::empty(),
+        URL: URL::default(),
         Proto: string::new(),
         ProtoMajor: 0,
         ProtoMinor: 0,
@@ -2725,24 +3006,52 @@ pub fn serialize_request_head(
     let mut b = strings::Builder::new();
     b.Grow(256);
 
-    // Go: fmt.Fprintf(&b, "%s %s HTTP/1.1\r\n", req.Method, ruri)
+    // Go: ruri := req.URL.RequestURI() in Request.write, then
+    // fmt.Fprintf(&b, "%s %s HTTP/1.1\r\n", req.Method, ruri)
+    //
+    // goish used to write `req.URL.Path` and `RawQuery` directly, which
+    // is the DECODED path, and that broke the request line three ways:
+    //
+    //   * "%2F" was written back as "/", so a request for "/a%2Fb"
+    //     arrived at the server as "/a/b" — a different resource, and
+    //     precisely the client/server disagreement that path confusion
+    //     is made of.
+    //   * A non-ASCII path went out as raw UTF-8 ("/☃" rather than
+    //     "/%E2%98%83"), which is not a valid request target.
+    //   * A path containing a SPACE — "/a b", or the "/a%20b" that
+    //     decodes to it — put a space in the middle of the request
+    //     line, so the server read a malformed line and closed. Every
+    //     such URL was simply unfetchable, failing with "unexpected
+    //     EOF" rather than anything that named the cause.
+    //
+    // RequestURI() was already correct and already handled Opaque, the
+    // "//"-prefix case and the empty-path "/" default; nothing here
+    // called it.
+    let mut ruri = req.URL.RequestURI();
+    if using_proxy && req.URL.Scheme.Len() != 0 && req.URL.Opaque.Len() == 0 {
+        ruri = req.URL.Scheme.clone() + "://" + host.clone() + ruri;
+    } else if req.Method == "CONNECT" && req.URL.Path.Len() == 0 {
+        // Go: "CONNECT requests normally give just the host and port,
+        // not a full URL."
+        ruri = host.clone();
+        if req.URL.Opaque.Len() != 0 {
+            ruri = req.URL.Opaque.clone();
+        }
+    }
+    // Go refuses a control character here, in Request.write, rather
+    // than writing it. Without the check a CR or LF reaching the URL
+    // ends the request line early and everything after it is read as
+    // headers — request splitting, from whatever built the URL.
+    if super::http::stringContainsCTLByte(&ruri) {
+        return (
+            slice::<byte>::__from_vec(Vec::new()),
+            tw,
+            errors::New("net/http: can't write control character in Request.URL"),
+        );
+    }
     let _ = b.WriteString(req.Method.clone());
     let _ = b.WriteByte(b' ');
-    // Go: when usingProxy, ruri = req.URL.Scheme + "://" + host + path
-    if using_proxy && req.URL.Scheme.Len() != 0 {
-        let _ = b.WriteString(req.URL.Scheme.clone());
-        let _ = b.WriteString("://");
-        let _ = b.WriteString(host.clone());
-    }
-    if req.URL.Path.Len() == 0 {
-        let _ = b.WriteByte(b'/');
-    } else {
-        let _ = b.WriteString(req.URL.Path.clone());
-    }
-    if req.URL.RawQuery.Len() > 0 {
-        let _ = b.WriteByte(b'?');
-        let _ = b.WriteString(req.URL.RawQuery.clone());
-    }
+    let _ = b.WriteString(ruri);
     let _ = b.WriteString(" HTTP/1.1\r\n");
 
     // Go: fmt.Fprintf(&b, "Host: %s\r\n", host)

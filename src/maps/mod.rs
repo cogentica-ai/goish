@@ -11,8 +11,10 @@
 //   c := maps.Clone(m)                   let c = maps::Clone(&m);
 //   maps.Copy(dst, src)                  maps::Copy(&mut dst, &src);
 //
-// Deferred (need an `iter` package):
-//   * Insert, Collect, All — return iter.Seq pairs.
+// `Insert`, `Collect` and `All` were deferred here while goish had no
+// `iter` package. It has one, and all three are ported — `Insert` and
+// `Collect` in `iter.rs`, since they come from Go's `maps/iter.go` and
+// a module root ports no file of its own (GOISH015).
 //
 // In Go 1.21+, `Keys` and `Values` return `iter.Seq[K]`/`iter.Seq[V]`.
 // Goish v1 returns `slice<K>`/`slice<V>` directly (BTreeMap-sorted)
@@ -24,62 +26,10 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
+mod iter;
+pub use iter::{All, Collect, Insert, Keys, Values};
+
 use crate::gomap::map;
-
-/// `maps.Keys(m)` (iter.go:Keys, Go 1.23+) — `iter.Seq` over the
-/// keys. Consumed via `slices::Collect(maps::Keys(&m))` /
-/// `slices::Sorted(maps::Keys(&m))`, exactly like modern Go.
-///
-/// Goish deviation: the seq iterates a snapshot of the keys taken at
-/// call time (Go iterates the live map with undefined interleaving
-/// under mutation; a snapshot is the sound analogue).
-pub fn Keys<K, V>(m: &map<K, V>) -> impl crate::iter::Seq<K>
-where
-    K: crate::gomap::GoHash + PartialEq + Clone + Send + Sync + 'static,
-{
-    let snap: Vec<K> = m.__iter().map(|(k, _)| k.clone()).collect();
-    move |yield_: &mut dyn FnMut(K) -> bool| {
-        for k in &snap {
-            if !yield_(k.clone()) {
-                return;
-            }
-        }
-    }
-}
-
-/// `maps.Values(m)` (iter.go:Values, Go 1.23+) — `iter.Seq` over the
-/// values (snapshot semantics; see `Keys`).
-pub fn Values<K, V>(m: &map<K, V>) -> impl crate::iter::Seq<V>
-where
-    K: crate::gomap::GoHash + PartialEq,
-    V: Clone + Send + Sync + 'static,
-{
-    let snap: Vec<V> = m.__iter().map(|(_, v)| v.clone()).collect();
-    move |yield_: &mut dyn FnMut(V) -> bool| {
-        for v in &snap {
-            if !yield_(v.clone()) {
-                return;
-            }
-        }
-    }
-}
-
-/// `maps.All(m)` (iter.go:All, Go 1.23+) — `iter.Seq2` over
-/// (key, value) pairs (snapshot semantics; see `Keys`).
-pub fn All<K, V>(m: &map<K, V>) -> impl crate::iter::Seq2<K, V>
-where
-    K: crate::gomap::GoHash + PartialEq + Clone + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
-{
-    let snap: Vec<(K, V)> = m.__iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    move |yield_: &mut dyn FnMut(K, V) -> bool| {
-        for (k, v) in &snap {
-            if !yield_(k.clone(), v.clone()) {
-                return;
-            }
-        }
-    }
-}
 
 /// `maps.Equal(m1, m2)` — same keys with equal values.
 pub fn Equal<K, V>(m1: &map<K, V>, m2: &map<K, V>) -> bool

@@ -1,6 +1,20 @@
-// sync::Mutex — Go's `sync.Mutex` (Lock / Unlock / TryLock).
+// go: file sync/mutex.go decls: Mutex.Lock, Mutex.TryLock, Mutex.Unlock
 //
-// Reference: /share/go/src/internal/sync/mutex.go.
+// mutex.go — Go's `sync.Mutex`.
+//
+// This file carried NO provenance anchors, like the rest of src/sync/.
+//
+// goish deviation: Go's Mutex guards nothing — `Lock()` returns
+// nothing and the caller is trusted to pair it with `Unlock()`. goish's
+// `Mutex<T>` OWNS the value it protects and hands back a guard, so the
+// pairing is the borrow checker's job rather than the caller's. The
+// bare Go shape is still available as `LockManual`/`TryLockManual`/
+// `Unlock` for the `Mutex<()>` case, which is what code ported straight
+// from Go uses. The ANSWERS are Go's either way, and that is what
+// examples/sync_prim_ref_smoke.rs pins.
+//
+// goishlint:ignore GOISH021 Locker — Go's `Locker` is the two-method interface `Lock()/Unlock()`; goish has no interface for it and nothing asks for one.
+// goishlint:ignore GOISH020 new, LockManual, TryLockManual, fatal — `new` and the two Manual forms are the goish-only half described above; `fatal` is Go's runtime fatal, raised here rather than imported.
 //
 // Implementation parity with Go (minus the race detector and Go's
 // "starvation mode" tail-latency bound):
@@ -80,6 +94,9 @@ unsafe impl<T: Send> Send for Mutex<T> {}
 unsafe impl<T: Send> Sync for Mutex<T> {}
 
 impl<T> Mutex<T> {
+    // go: none — goish idiom: Go's Mutex guards nothing and its zero value is
+    // go: none — goish idiom:     ready to use; goish's owns the value it protects, so it needs
+    // go: none — goish idiom:     a constructor.
     /// Build an unlocked mutex protecting `data`. For the Go-shape
     /// (no protected data), pass `()`:
     ///
@@ -92,6 +109,7 @@ impl<T> Mutex<T> {
         };
     }
 
+    // go: sdk 1.25.5 sync/mutex.go:45-52 Mutex.Lock
     /// Lock acquires the mutex, blocking until available. Returns
     /// a guard whose drop releases the lock. Deref/DerefMut on the
     /// guard exposes the protected data. Mirrors `Mutex.Lock`
@@ -145,6 +163,7 @@ impl<T> Mutex<T> {
         }
     }
 
+    // go: sdk 1.25.5 sync/mutex.go:54-62 Mutex.TryLock
     /// TryLock attempts to acquire the lock without blocking. On
     /// success returns `Some(guard)`; on failure (already held)
     /// returns `None`. Mirrors `Mutex.TryLock` (mutex.go:54).
@@ -161,6 +180,9 @@ impl<T> Mutex<T> {
         }
     }
 
+    // go: none — goish idiom: the bare Go shape — `Lock()` with no guard —
+    // go: none — goish idiom:     for `Mutex<()>`, which is what code ported straight from Go
+    // go: none — goish idiom:     uses. Go's `Lock` carries the anchor.
     /// Go-shape Lock: acquires the mutex without returning a
     /// guard. Pair with `Unlock`. Useful when lock and unlock must
     /// span different function bodies (e.g., the writer-vs-writer
@@ -177,6 +199,7 @@ impl<T> Mutex<T> {
         }
     }
 
+    // go: none — goish idiom: see the note on `LockManual`.
     /// Go-shape TryLock returning `bool`. Pair with `Unlock` on
     /// success.
     #[inline]
@@ -186,6 +209,7 @@ impl<T> Mutex<T> {
             .is_ok()
     }
 
+    // go: sdk 1.25.5 sync/mutex.go:64-77 Mutex.Unlock
     /// Go-shape explicit Unlock. Pairs with `LockManual` /
     /// `TryLockManual`. Calling this on a Mutex held by a `Lock`
     /// guard is a programming error — the guard's drop will then
@@ -334,6 +358,8 @@ impl<T> Drop for MutexGuard<'_, T> {
 // ours is too — but cross-G transfer requires explicit handoff,
 // not implicit Send.)
 
+// go: none — goish idiom: Go calls `fatal()` from the runtime for an
+// go: none — goish idiom:     unrecoverable lock error; goish raises it here.
 fn fatal(msg: &[u8]) -> ! {
     syscall::Write(syscall::STDERR, msg.as_ptr(), msg.len());
     syscall::Exit(2);

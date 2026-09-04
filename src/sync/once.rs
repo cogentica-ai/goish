@@ -1,4 +1,11 @@
-// sync::Once — Go's `sync.Once` (Do).
+// go: file sync/once.go decls: Once.Do
+//
+// once.go — Go's `sync.Once`.
+//
+// This file carried NO provenance anchors, like the rest of src/sync/;
+// it matched Go by name only. Diffed and anchored now.
+//
+// goishlint:ignore GOISH018 doSlow — Go splits the mutex-held path into `doSlow` so `Do`'s fast path stays inlinable; goish's `Do` is both, with the same ordering: the store to `done` happens under the mutex, after `f` returns.
 //
 // Verbatim port of /share/go/src/sync/once.go: an AtomicBool fast
 // path + a Mutex slow path. Mirrors Go line for line; the slow path
@@ -22,6 +29,10 @@ pub struct Once {
 }
 
 impl Once {
+    // go: none — goish idiom: Go documents that the zero Once is ready
+    //     to use; a Rust struct holding an AtomicBool and a Mutex needs
+    //     a constructor, and this one is `const` so it can still be a
+    //     static.
     /// Build a fresh Once. `const` so `static O: Once = Once::new();`
     /// is allowed.
     pub const fn new() -> Self {
@@ -31,10 +42,11 @@ impl Once {
         }
     }
 
-    /// `Do` calls `f` if and only if `Do` is being called for the
-    /// first time on this `Once`. Concurrent callers all wait for
-    /// the first invocation to complete before returning. Mirrors
-    /// `sync.Once.Do` (once.go:52).
+    // go: sdk 1.25.5 sync/once.go:52-71 Once.Do
+    /// Go: "Do calls the function f if and only if Do is being called
+    /// for the first time for this instance of Once. … Because no call
+    /// to Do returns until the one call to f returns, if f causes Do to
+    /// be called, it will deadlock."
     ///
     /// If `f` panics, the action is still considered to have
     /// returned (matches Go); future `Do` calls will return without

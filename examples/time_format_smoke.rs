@@ -27,8 +27,8 @@ fn main() {
         if y == 2024 && m == 1 && d == 2 {
             fmt::Println!("[ 0] Date round-trip           PASS");
         } else {
-            fmt::Println!(
-                "[ 0] Date round-trip           FAIL y={} m={} d={}",
+            fmt::Printf!(
+                "[ 0] Date round-trip           FAIL y=%d m=%d d=%d\n",
                 y,
                 m,
                 d
@@ -43,7 +43,7 @@ fn main() {
         if s == "2024-01-02T03:04:05Z" {
             fmt::Println!("[ 1] RFC3339                   PASS");
         } else {
-            fmt::Println!("[ 1] RFC3339                   FAIL got={}", s);
+            fmt::Printf!("[ 1] RFC3339                   FAIL got=%q\n", s);
             failed += 1;
         }
     }
@@ -54,7 +54,7 @@ fn main() {
         if s == "2024-01-02 03:04:05" {
             fmt::Println!("[ 2] DateTime                  PASS");
         } else {
-            fmt::Println!("[ 2] DateTime                  FAIL got={}", s);
+            fmt::Printf!("[ 2] DateTime                  FAIL got=%q\n", s);
             failed += 1;
         }
     }
@@ -65,7 +65,7 @@ fn main() {
         if s == "2024-01-02" {
             fmt::Println!("[ 3] DateOnly                  PASS");
         } else {
-            fmt::Println!("[ 3] DateOnly                  FAIL got={}", s);
+            fmt::Printf!("[ 3] DateOnly                  FAIL got=%q\n", s);
             failed += 1;
         }
     }
@@ -76,7 +76,7 @@ fn main() {
         if s == "03:04:05" {
             fmt::Println!("[ 4] TimeOnly                  PASS");
         } else {
-            fmt::Println!("[ 4] TimeOnly                  FAIL got={}", s);
+            fmt::Printf!("[ 4] TimeOnly                  FAIL got=%q\n", s);
             failed += 1;
         }
     }
@@ -84,10 +84,16 @@ fn main() {
     // 5. RFC1123 — Tuesday in Jan 2024.
     {
         let s = t.Format(string(time::RFC1123));
-        if s == "Tue, 02 Jan 2024 03:04:05 GMT" {
+        // Go: RFC1123's `MST` element prints the zone ABBREVIATION, and
+        // for time.UTC that is "UTC". This line expected "GMT" — which
+        // is what a FixedZone NAMED "GMT" would give, not UTC — and was
+        // wrong from the day it was written. Nobody found out because
+        // this example is not declared in Cargo.toml, so the e2e suite
+        // never ran it.
+        if s == "Tue, 02 Jan 2024 03:04:05 UTC" {
             fmt::Println!("[ 5] RFC1123                   PASS");
         } else {
-            fmt::Println!("[ 5] RFC1123                   FAIL got={}", s);
+            fmt::Printf!("[ 5] RFC1123                   FAIL got=%q\n", s);
             failed += 1;
         }
     }
@@ -98,7 +104,7 @@ fn main() {
         if s == "3:04AM" {
             fmt::Println!("[ 6] Kitchen AM                PASS");
         } else {
-            fmt::Println!("[ 6] Kitchen AM                FAIL got={}", s);
+            fmt::Printf!("[ 6] Kitchen AM                FAIL got=%q\n", s);
             failed += 1;
         }
     }
@@ -110,7 +116,7 @@ fn main() {
         if s == "1:00PM" {
             fmt::Println!("[ 7] Kitchen PM                PASS");
         } else {
-            fmt::Println!("[ 7] Kitchen PM                FAIL got={}", s);
+            fmt::Printf!("[ 7] Kitchen PM                FAIL got=%q\n", s);
             failed += 1;
         }
     }
@@ -121,7 +127,7 @@ fn main() {
         if s == "Tue Jan  2 03:04:05 2024" {
             fmt::Println!("[ 8] ANSIC                     PASS");
         } else {
-            fmt::Println!("[ 8] ANSIC                     FAIL got={}", s);
+            fmt::Printf!("[ 8] ANSIC                     FAIL got=%q\n", s);
             failed += 1;
         }
     }
@@ -129,10 +135,11 @@ fn main() {
     // 9. RFC850
     {
         let s = t.Format(string(time::RFC850));
-        if s == "Tuesday, 02-Jan-24 03:04:05 GMT" {
+        // Go: same as RFC1123 above — the zone abbreviation is "UTC".
+        if s == "Tuesday, 02-Jan-24 03:04:05 UTC" {
             fmt::Println!("[ 9] RFC850                    PASS");
         } else {
-            fmt::Println!("[ 9] RFC850                    FAIL got={}", s);
+            fmt::Printf!("[ 9] RFC850                    FAIL got=%q\n", s);
             failed += 1;
         }
     }
@@ -141,7 +148,7 @@ fn main() {
         fmt::Println!("ok 10/10");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL {} of 10", failed);
+        fmt::Printf!("FAIL %d of 10\n", failed);
         syscall::Exit(1);
     }
 }

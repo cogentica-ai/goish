@@ -168,6 +168,27 @@ pub trait Format {
         self.fmt(verb, f);
     }
 
+    // go: none — goish idiom: Go's printer carries the width in its `pp`
+    //     state, so `printValue` applies it to each ELEMENT as it
+    //     recurses into a compound value: `Printf("%8.3f", []float64{…})`
+    //     is `[   1.500    2.500]`, not a padded `[1.500 2.500]`. goish's
+    //     `Format` trait takes no width, so a compound announces itself
+    //     here and pads its own elements; everything else returns false
+    //     and is padded whole by the caller, which is what Go does for a
+    //     scalar and for the string-like renderings of a byte slice.
+    /// Render as a compound with `width` applied per element, returning
+    /// true if this type is one. The default is false: not a compound.
+    fn __fmt_elem_width(
+        &self,
+        _verb: byte,
+        _prec: i64,
+        _width: usize,
+        _left: bool,
+        _f: &mut FmtBuf,
+    ) -> bool {
+        return false;
+    }
+
     // go: none — goish idiom: Go's printer reflects over the operand,
     //     so `%T` and the `%!verb(type=value)` marker both read the
     //     type's name straight off the value. goish's printer has no
@@ -397,6 +418,24 @@ impl<'a> FmtArg<'a> {
             }
         }
     }
+    // go: none — goish idiom: ask the operand whether it is a compound
+    //     that wants the width applied to each ELEMENT. See
+    //     `Format::__fmt_elem_width`.
+    fn try_elem_width(
+        &self,
+        verb: byte,
+        prec: i64,
+        width: usize,
+        left: bool,
+        f: &mut FmtBuf,
+    ) -> bool {
+        let handled = match self {
+            FmtArg::Val(v) => v.__fmt_elem_width(verb, prec, width, left, f),
+            FmtArg::Err(_) => false,
+        };
+        return handled;
+    }
+
     // go: none — goish idiom: Go's `doPrint` reflects on the operand's
     //     kind; goish asks the value, through `Format::__is_string`.
     fn __is_string(&self) -> bool {
@@ -639,13 +678,21 @@ fn write_bytes_with_verb(b: &[byte], verb: byte, f: &mut FmtBuf) {
 //     produces for a slice or an array, with the verb applied to each
 //     ELEMENT. An empty or nil slice is "[]" in Go, not "".
 fn write_byte_list(b: &[byte], verb: byte, f: &mut FmtBuf) {
+    write_byte_list_w(b, verb, 0, false, f);
+}
+
+// go: none — goish idiom: as `write_byte_list`, with a per-element width.
+// Only the LIST rendering takes one: Go's `%x`, `%s` and `%q` over a byte
+// slice produce a single string and are padded whole, which is why this
+// is not reached from those paths.
+fn write_byte_list_w(b: &[byte], verb: byte, width: usize, left: bool, f: &mut FmtBuf) {
     f.push(b'[');
     let mut i = 0usize;
     while i < b.len() {
         if i > 0 {
             f.push(b' ');
         }
-        fmt_one(&b[i], verb, -1, f);
+        write_elem(&b[i], verb, -1, width, left, f);
         i += 1;
     }
     f.push(b']');
@@ -669,6 +716,26 @@ impl Format for slice<byte> {
     fn fmt(&self, verb: byte, f: &mut FmtBuf) {
         // self: &slice<byte>; Deref<Target=[byte]> auto-coerces to &[byte].
         write_bytes_with_verb(self, verb, f);
+    }
+
+    // go: none — goish idiom: see `Format::__fmt_elem_width`. Only the
+    // LIST verbs take a per-element width; `%s`, `%q`, `%x` and `%X`
+    // render the slice as one string and are padded whole, exactly as
+    // Go does.
+    fn __fmt_elem_width(
+        &self,
+        verb: byte,
+        _prec: i64,
+        width: usize,
+        left: bool,
+        f: &mut FmtBuf,
+    ) -> bool {
+        match verb & !SHARP {
+            b's' | b'q' | b'Q' | b'x' | b'X' => return false,
+            _ => {}
+        }
+        write_byte_list_w(self, verb, width, left, f);
+        return true;
     }
 }
 
@@ -768,6 +835,37 @@ where
         }
         f.push(b']');
     }
+
+    // go: none — goish idiom: see `Format::__fmt_elem_width`. Go's
+    // `printValue` recurses into a map's keys AND values, so a width
+    // applies to each of them, not to the `map[…]` as a whole.
+    fn __fmt_elem_width(
+        &self,
+        verb: byte,
+        prec: i64,
+        width: usize,
+        left: bool,
+        f: &mut FmtBuf,
+    ) -> bool {
+        let mut pairs: Vec<(K, V)> = Vec::with_capacity(self.Len() as usize);
+        for (k, v) in self.__iter() {
+            pairs.push((k.clone(), v.clone()));
+        }
+        pairs.sort_by(|a, b| a.0.cmp(&b.0));
+        f.extend(b"map[");
+        let mut i = 0usize;
+        while i < pairs.len() {
+            if i > 0 {
+                f.push(b' ');
+            }
+            write_elem(&pairs[i].0, verb, prec, width, left, f);
+            f.push(b':');
+            write_elem(&pairs[i].1, verb, prec, width, left, f);
+            i += 1;
+        }
+        f.push(b']');
+        return true;
+    }
 }
 
 impl<T: ListElem> Format for slice<T> {
@@ -790,6 +888,28 @@ impl<T: ListElem> Format for slice<T> {
             i += 1;
         }
         f.push(b']');
+    }
+
+    // go: none — goish idiom: see `Format::__fmt_elem_width`.
+    fn __fmt_elem_width(
+        &self,
+        verb: byte,
+        prec: i64,
+        width: usize,
+        left: bool,
+        f: &mut FmtBuf,
+    ) -> bool {
+        f.push(b'[');
+        let mut i = 0usize;
+        while i < self.len() {
+            if i > 0 {
+                f.push(b' ');
+            }
+            write_elem(&self[i], verb, prec, width, left, f);
+            i += 1;
+        }
+        f.push(b']');
+        return true;
     }
 }
 
@@ -1043,6 +1163,103 @@ impl_format_for_unsigned!(u16: "uint16", u32: "uint32", u64: "uint", usize: "uin
 
 // Floats — route through strconv::FormatFloat.
 //
+
+// go: none — goish idiom: the padding half of Go's `(*fmt).pad`, split
+// out so a compound value can apply it to each element.
+fn pad_runes(f: &mut FmtBuf, b: &[u8], width: usize, left: bool) {
+    let padn = width.saturating_sub(rune_count(b));
+    if !left {
+        for _ in 0..padn {
+            f.push(b' ');
+        }
+    }
+    f.extend(b);
+    if left {
+        for _ in 0..padn {
+            f.push(b' ');
+        }
+    }
+}
+
+// go: none — goish idiom: one element of a compound, padded to `width`.
+// A nested compound pads its OWN elements and is not padded again, which
+// is how Go's `printValue` recursion behaves: `%4d` over [][]int{{1},{2,3}}
+// is `[[   1] [   2    3]]`.
+pub(crate) fn write_elem(
+    v: &dyn Format,
+    verb: byte,
+    prec: i64,
+    width: usize,
+    left: bool,
+    f: &mut FmtBuf,
+) {
+    let mut tmp = FmtBuf::new();
+    if v.__fmt_elem_width(verb, prec, width, left, &mut tmp) {
+        let inner = tmp.__into_vec();
+        f.extend(&inner);
+        return;
+    }
+    fmt_one(v, verb, prec, &mut tmp);
+    let mut bytes = tmp.__into_vec();
+    // Go's `#` flag, and the `O` verb, put their base prefix on EACH
+    // element too: `%O` of []byte("ab") is "[0o141 0o142]", not
+    // "0o[141 142]". The prefix goes after the sign, exactly as the
+    // scalar path below does it.
+    // A bad-verb marker is not a number and takes no prefix: Go's
+    // `%O` over a map[string]int gives `map[%!O(string=a):0o10]`, with
+    // the prefix on the value and not on the key's marker.
+    let is_marker = bytes.len() >= 2 && bytes[0] == b'%' && bytes[1] == b'!';
+    if is_integer_verb(verb) && !is_marker {
+        let sign = if !bytes.is_empty() && (bytes[0] == b'-' || bytes[0] == b'+') {
+            1usize
+        } else {
+            0usize
+        };
+        let pre = alt_prefix(verb, &bytes[sign..]);
+        if !pre.is_empty() {
+            let mut with: Vec<byte> = Vec::with_capacity(bytes.len() + pre.len());
+            with.extend_from_slice(&bytes[..sign]);
+            with.extend_from_slice(pre);
+            with.extend_from_slice(&bytes[sign..]);
+            bytes = with;
+        }
+    }
+    pad_runes(f, &bytes, width, left);
+}
+
+// go: none — goish idiom: Go's `(*fmt).pad` counts the
+// field width with `utf8.RuneCount`. goish inlines the same count over
+// `&[u8]` rather than calling `utf8::RuneCount`, which takes an
+// `AsRef<[byte]>` and would have the fmt hot path build a `slice<byte>`
+// for every padded field.
+// Erroneous and short encodings count as one rune each, exactly as
+// Go's does — which is what makes it safe on whatever bytes a verb
+// happened to produce.
+fn rune_count(b: &[u8]) -> usize {
+    let mut n = 0usize;
+    let mut i = 0usize;
+    while i < b.len() {
+        let c = b[i];
+        if c < 0x80 {
+            i += 1;
+        } else {
+            // Width of the encoding, or 1 for an invalid leading byte.
+            let size = if c < 0xC0 {
+                1
+            } else if c < 0xE0 {
+                2
+            } else if c < 0xF0 {
+                3
+            } else {
+                4
+            };
+            i += size;
+        }
+        n += 1;
+    }
+    return n;
+}
+
 // Go: "For floating-point values, width sets the minimum width of the
 // field and precision sets the number of places after the decimal
 // point, if appropriate. For example %6.2f prints 123.45. The default
@@ -1467,8 +1684,25 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
                 || (has_precision && is_integer_verb(verb))
             {
                 let mut tmp = FmtBuf::new();
-                args[arg_idx].write_prec(verb, prec_arg, &mut tmp);
+                // Go's `printValue` carries the width down into a
+                // compound and applies it to each ELEMENT; only a scalar
+                // is padded whole. Ask the operand which it is.
+                // A compound wants the element treatment when there is
+                // a width to distribute OR a base prefix to repeat.
+                let elem_padded = (has_width || prefixed)
+                    && args[arg_idx].try_elem_width(verb, prec_arg, width, left_align, &mut tmp);
+                if !elem_padded {
+                    args[arg_idx].write_prec(verb, prec_arg, &mut tmp);
+                }
                 let mut bytes = tmp.__into_vec();
+                if elem_padded {
+                    // Already padded element by element — padding the
+                    // bracketed whole again would be Go's answer to a
+                    // different question.
+                    f.extend(&bytes);
+                    arg_idx += 1;
+                    continue;
+                }
 
                 // Go: for the INTEGER verbs, precision is the minimum
                 // number of digits — "%.5d" of 42 is "00042" — where
@@ -1541,7 +1775,13 @@ pub(crate) fn do_format(format: &[byte], args: &[FmtArg], f: &mut FmtBuf) -> Opt
                     }
                 }
 
-                let pad_count = width.saturating_sub(bytes.len());
+                // Go's `(*fmt).pad`: `width := f.wid - utf8.RuneCount(b)`.
+                // The field width is counted in RUNES, not bytes — so
+                // "%-8s" of "日本語" pads by five, not by none. goish
+                // subtracted the BYTE length, which silently produced
+                // short fields for every non-ASCII value in every
+                // padded column in the library.
+                let pad_count = width.saturating_sub(rune_count(&bytes));
                 // Go zero-pads only for numeric verbs, and the zeros go
                 // AFTER the sign — "%05d" of -42 is "-0042", not
                 // "00-42". For the INTEGER verbs the padding was just

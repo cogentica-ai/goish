@@ -152,8 +152,31 @@ fn main() {
                 let addr_c = addr.clone();
                 let cd = client_done.clone();
                 go!(move || {
+                    // RETRY on error. The cap REFUSES a connection past
+                    // the limit rather than queueing it, and the client
+                    // used to ignore that: a refused request still
+                    // incremented client_done, so the wait below could
+                    // finish with only two of the four ever served and
+                    // the `done == 4` assertion failing. Alone that
+                    // never happened — the first two finish and free
+                    // their slots long before the others give up — but
+                    // under the load of a full sweep it did.
+                    //
+                    // Retrying is the fix rather than a longer sleep:
+                    // the property under test is that the server never
+                    // runs more than two at once AND eventually serves
+                    // all four, and a refusal is a "come back later",
+                    // not a failure.
                     let url = make_url(&addr_c, "/slow");
-                    let (_resp, _e) = http::Get(url);
+                    let mut attempts = 0;
+                    loop {
+                        let (_resp, e) = http::Get(url.clone());
+                        if e.IsNil() || attempts >= 50 {
+                            break;
+                        }
+                        attempts += 1;
+                        time::Sleep(time::Millisecond * 20);
+                    }
                     cd.fetch_add(1, Ordering::SeqCst);
                 });
             }

@@ -1614,6 +1614,28 @@ fn parse(layout0: &[u8], value0: &[u8], defaultLocation: Location) -> (Time, cra
         // `Format` gave back "2024-01-02T01:04:05Z" — the right instant
         // rendered as the wrong wall clock, which is the difference
         // every RFC 3339 round trip through a JSON API would show.
+        // Go: "Look for local zone with the given offset. If that zone
+        // was in effect at the given time, use it."
+        //
+        // goish has no zone database, so `Local` IS the whole of it —
+        // one entry, UTC, offset zero. That is still a lookup Go
+        // performs and goish must, because it decides the NAME the
+        // parsed Time reports, not just its offset. Skipping it made
+        // `Parse` of "Fri, 21 Nov 1997 09:55:06 +0000" answer an
+        // anonymous zone where Go answers the local one: the offset
+        // agreed and the name did not, which net/mail's ParseDate is
+        // what surfaced.
+        //
+        // Go's answer here depends on the machine's TZ; goish's Local
+        // is UTC because there is no database to say otherwise, so this
+        // matches Go on a UTC machine and is stated rather than
+        // implied.
+        let local = crate::time::Local;
+        if local.__offset() == zoneOffset && (zoneName.is_empty() || local.__abbrev() == zoneName) {
+            return (t.In(local), crate::errors::nil);
+        }
+
+        // Go: "Otherwise create fake zone to record offset."
         return (
             t.In(crate::time::FixedZone(
                 crate::gostring::string::from_bytes(zoneName),

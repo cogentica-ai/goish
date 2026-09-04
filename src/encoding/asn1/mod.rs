@@ -415,6 +415,24 @@ pub fn NullBytes() -> slice<byte> {
 #[derive(Clone, Default, PartialEq)]
 pub struct ObjectIdentifier(pub slice<int>);
 
+// go: none — goish idiom: Go's ObjectIdentifier satisfies `Stringer`
+// (asn1.go: `func (oi ObjectIdentifier) String() string`), so `%v` and
+// `%s` on one print the dotted form through the fmt interface. goish's
+// fmt dispatches on a trait, so the bridge is written out — without it
+// an OID could not be printed at all, and certificate-handling code
+// prints OIDs constantly.
+impl crate::fmt::Format for ObjectIdentifier {
+    // go: none — goish idiom: see the note on the impl above.
+    fn fmt(&self, verb: crate::types::byte, f: &mut crate::fmt::FmtBuf) {
+        match verb {
+            // Go's %d / %x etc. on an ObjectIdentifier fall through to
+            // the underlying []int, since Stringer only covers %v/%s.
+            b'd' | b'b' | b'o' | b'x' | b'X' => self.0.fmt(verb, f),
+            _ => f.extend(self.String().as_bytes()),
+        }
+    }
+}
+
 impl ObjectIdentifier {
     // go: none — goish idiom: Go writes the conversion
     // `ObjectIdentifier(s)`; goish needs a constructor.

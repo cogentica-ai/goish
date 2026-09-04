@@ -267,6 +267,7 @@ fn maxBase64Len() -> usize {
 /// and returns the converted UTF-8 string + error, instead of an
 /// `io.Reader` factory. Default encodings (utf-8, iso-8859-1, us-ascii)
 /// are still handled internally without a CharsetReader.
+#[derive(Clone, Copy)]
 pub struct WordDecoder {
     pub CharsetReader:
         Option<fn(charset: string, input: crate::goslice::slice<byte>) -> (string, error)>,

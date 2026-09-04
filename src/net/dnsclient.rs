@@ -19,6 +19,22 @@
 #![allow(dead_code)]
 #![allow(unused_mut)]
 
+// Resolver diagnostics — gated so production and e2e output stay
+// clean, following crypto/tls's TLS_DEBUG. These three prints used to
+// be unconditional, and two of them sit on paths that are not even
+// failures: falling back to TCP after a truncated UDP answer is
+// ordinary DNS. Go's resolver prints NOTHING — a failed lookup returns
+// an error and says nothing on stdout — so a goish program that
+// resolved a bad name, or got a truncated answer, wrote unsolicited
+// lines into the middle of its own output.
+//
+// Flip DNS_DEBUG to true when diagnosing a resolver problem.
+const DNS_DEBUG: bool = false;
+
+macro_rules! dns_debug {
+    ($($arg:tt)*) => { if DNS_DEBUG { crate::fmt::Println!($($arg)*); } };
+}
+
 extern crate alloc;
 use alloc::string::String;
 use alloc::vec;
@@ -419,7 +435,7 @@ fn dns_stream_round_trip(
             continue;
         } // EINTR — Go auto-retries
         if r <= 0 {
-            crate::fmt::Println!(
+            dns_debug!(
                 crate::gostring::string::from_static(
                     "[dns-debug] tcp: read len failed: read returned "
                 ) + crate::strconv::Itoa(r as i64)
@@ -553,7 +569,7 @@ fn exchange(
     // Try UDP first
     let (mut p, h, e) = dns_packet_round_trip(&ns_addr, id, &q, &udp_req, timeout_secs);
     if e != errors::nil {
-        crate::fmt::Println!(
+        dns_debug!(
             crate::gostring::string::from_static("[dns-debug] UDP failed: ")
                 + e.Error()
                 + crate::gostring::string::from_static(" — trying TCP fallback")
@@ -1031,7 +1047,7 @@ pub fn lookup_a(host: &str) -> Result<[u8; 4], string> {
     let cfg = get_system_dns_config();
     let (addrs, _cname, e) = go_lookup_ip_cname_order(&cfg, "ip4", host);
     if e != errors::nil {
-        crate::fmt::Println!(
+        dns_debug!(
             crate::gostring::string::from_static("[dns-debug] go_lookup_ip_cname_order err=")
                 + e.Error()
                 + crate::gostring::string::from_static(" host=")

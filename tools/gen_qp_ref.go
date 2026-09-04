@@ -1,137 +1,163 @@
-package quotedprintable
+package quotedprintable_test
 
 import (
-	"bytes"
 	"fmt"
 	"io"
+	"mime/quotedprintable"
 	"strings"
 	"testing"
 )
 
-// The reader's four documented deviations from RFC 2045 are all about
-// what it *tolerates*, so the interesting cases are the malformed ones:
-// a bare '=' at end of message, an '=' not followed by two hex digits,
-// trailing whitespace before a soft line break, and a raw control byte.
-// Each has its own error text, and the text is the part a name-only
-// port cannot get right by accident.
+// mime/quotedprintable decodes a transfer encoding that arrives from
+// whoever sent the mail or the multipart part. Its decoder is the one
+// place in the mail path that turns arbitrary text back into arbitrary
+// BYTES, so what it accepts decides what the layer above ever sees.
+//
+// Go's reader is deliberately LENIENT in specific, enumerated ways —
+// it has to be, because real mailers emit malformed quoted-printable
+// constantly — and each leniency is a decision rather than an
+// oversight:
+//
+//   * A lone "=" that is not followed by two hex digits is passed
+//     THROUGH as a literal "=" rather than refused, so a message is
+//     not lost over one bad byte. Which of "=A", "=AZ", "=\n" and "="
+//     at EOF are recoverable, and which are hard errors, is the part
+//     no reasonable person can derive.
+//   * Trailing whitespace before a newline is STRIPPED, because
+//     transports add it. That means "a \n" and "a\n" decode
+//     identically, and a decoder that preserves the space produces
+//     different bytes for a message that hashed the same on the way
+//     in.
+//   * A bare CR, a lone LF and a CRLF must all end a line the same
+//     way.
+//   * A soft line break ("=" then newline) joins lines and produces no
+//     bytes at all.
+//
+// The writer half is measured too, because it must wrap at 76
+// characters INCLUDING the soft break, and it decides per byte whether
+// to encode.
 func TestGoishRef(t *testing.T) {
-	readCases := []string{
-		"",
-		"foo bar",
-		"foo bar=3D",
-		"foo bar=\n",
-		"foo bar\n",
-		"foo bar=0",
-		"foo bar=0D=0A",
-		" A B        \r\n C ",
-		"foo=\r\nbar",
-		"foo=\rbar",
-		"foo=\n\nbar",
-		"foo\r\n",
-		"foo\r\n\r\n",
-		"=0good=1",
-		"=00",
-		"=0",
-		"=",
-		"=A",
-		"=at",
-		"=\r\n",
-		"=\n",
-		"a=b",
-		"a=0\n",
-		"=3D=3D",
-		"foo\x00bar",
-		"foo\x7fbar",
-		"foo\x80bar",
-		"foo bar\r\nbaz\r\n",
-		"foo   \r\nbar",
-		"foo=  \r\nbar",
-		"foo=  x\r\nbar",
-		"foo=\t\r\nbar",
-		"\n\n",
-		"=e1=e2=E3=E4=e5",
-		"Warum ist es t=?",
+	decs := []struct{ name, in string }{
+		{"empty", ""},
+		{"plain", "hello world"},
+		{"hex-upper", "=41=42=43"},
+		{"hex-lower", "=61=62=63"},
+		{"hex-mixed-case", "=aB=Cd"},
+		{"equals-eof", "abc="},
+		{"equals-one-hex-eof", "abc=4"},
+		{"equals-bad-hex", "=ZZ"},
+		{"equals-half-bad", "=4Z"},
+		{"equals-space", "= 41"},
+		{"equals-equals", "=="},
+		{"soft-break-lf", "abc=\ndef"},
+		{"soft-break-crlf", "abc=\r\ndef"},
+		{"soft-break-eof", "abc=\n"},
+		{"soft-break-cr", "abc=\rdef"},
+		{"hard-break-lf", "abc\ndef"},
+		{"hard-break-crlf", "abc\r\ndef"},
+		{"hard-break-cr", "abc\rdef"},
+		{"trailing-space", "abc   \ndef"},
+		{"trailing-tab", "abc\t\t\ndef"},
+		{"trailing-space-eof", "abc   "},
+		{"trailing-space-crlf", "abc \r\ndef"},
+		{"encoded-space-kept", "abc=20\ndef"},
+		{"nul", "=00"},
+		{"high-byte", "=FF=FE"},
+		{"raw-high-byte", "caf\xc3\xa9"},
+		{"crlf-only", "\r\n"},
+		{"lf-only", "\n"},
+		{"cr-only", "\r"},
+		{"many-blank-lines", "a\n\n\nb"},
+		{"long-line", strings.Repeat("x", 200)},
+		{"equals-newline-only", "=\n"},
+		{"equals-at-line-end-then-eof", "a=\r\n"},
+		{"underscore", "a_b"},
+		{"lowercase-hex-sep", "=3d"},
 	}
-	for _, in := range readCases {
-		out, err := io.ReadAll(NewReader(strings.NewReader(in)))
-		fmt.Printf("read %-24q -> %-24q err=%v\n", in, string(out), err)
-	}
-
-	writeCases := []struct {
-		in     string
-		binary bool
-	}{
-		{"", false},
-		{"foo bar", false},
-		{"foo bar\r\n", false},
-		{"foo bar ", false},
-		{"foo bar\t", false},
-		{"=", false},
-		{"\x00\x01\x02", false},
-		{"foo\r\nbar", false},
-		{"foo\rbar", false},
-		{"foo\nbar", false},
-		{"foo\r\nbar", true},
-		{"foo\rbar", true},
-		{"foo\nbar", true},
-		{strings.Repeat("a", 75), false},
-		{strings.Repeat("a", 76), false},
-		{strings.Repeat("a", 77), false},
-		{strings.Repeat("a", 100), false},
-		{strings.Repeat("=", 20), false},
-		{strings.Repeat("é", 10), false},
-		{"a" + strings.Repeat(" ", 80) + "b", false},
-		{"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed feugiat.", false},
-		{"foo \r\nbar", false},
-		{"foo \t\r\nbar", false},
-		{"foo\r\n bar", false},
-	}
-	for _, wc := range writeCases {
-		var buf bytes.Buffer
-		w := NewWriter(&buf)
-		w.Binary = wc.binary
-		w.Write([]byte(wc.in))
-		err := w.Close()
-		label := wc.in
-		if len(label) > 20 {
-			label = label[:17] + "..."
-		}
-		fmt.Printf("write bin=%-5v %-24q -> %q err=%v\n", wc.binary, label, buf.String(), err)
+	for _, c := range decs {
+		r := quotedprintable.NewReader(strings.NewReader(c.in))
+		out, err := io.ReadAll(r)
+		fmt.Printf("dec %-28s in=%-24q -> out=%-24q err=%s\n",
+			c.name, c.in, string(out), errText(err))
 	}
 
-	// Byte-at-a-time writes must give the same result as one Write.
-	for _, wc := range writeCases {
-		var buf bytes.Buffer
-		w := NewWriter(&buf)
-		w.Binary = wc.binary
-		for i := 0; i < len(wc.in); i++ {
-			w.Write([]byte(wc.in[i : i+1]))
-		}
+	// One byte at a time: the reader must not depend on how the input
+	// is chunked.
+	for _, c := range []string{"abc=\ndef", "a=41b", "abc   \ndef", "=4"} {
+		r := quotedprintable.NewReader(&iterReader{s: c})
+		out, err := io.ReadAll(r)
+		fmt.Printf("dec1 %-14q -> out=%-16q err=%s\n", c, string(out), errText(err))
+	}
+
+	encs := []struct{ name, in string }{
+		{"empty", ""},
+		{"plain", "hello world"},
+		{"equals", "a=b"},
+		{"high-bytes", "caf\xc3\xa9"},
+		{"nul", "\x00"},
+		{"tab", "a\tb"},
+		{"trailing-space", "abc "},
+		{"trailing-tab", "abc\t"},
+		{"space-then-newline", "abc \nxyz"},
+		{"newline", "a\nb"},
+		{"crlf", "a\r\nb"},
+		{"cr", "a\rb"},
+		{"exactly-75", strings.Repeat("a", 75)},
+		{"exactly-76", strings.Repeat("a", 76)},
+		{"exactly-77", strings.Repeat("a", 77)},
+		{"long", strings.Repeat("a", 200)},
+		{"long-encoded", strings.Repeat("\xff", 40)},
+		{"boundary-encoded", strings.Repeat("a", 74) + "\xff"},
+		{"all-bytes", allBytes()},
+	}
+	for _, c := range encs {
+		var sb strings.Builder
+		w := quotedprintable.NewWriter(&sb)
+		n, werr := w.Write([]byte(c.in))
+		cerr := w.Close()
+		fmt.Printf("enc %-18s -> n=%-4d out=%-40q werr=%s cerr=%s\n",
+			c.name, n, sb.String(), errText(werr), errText(cerr))
+		// Round trip.
+		out, rerr := io.ReadAll(quotedprintable.NewReader(strings.NewReader(sb.String())))
+		fmt.Printf("rt  %-18s -> same=%-5v err=%s\n",
+			c.name, string(out) == c.in, errText(rerr))
+	}
+	// Binary mode writes bytes without any line wrapping.
+	{
+		var sb strings.Builder
+		w := quotedprintable.NewWriter(&sb)
+		w.Binary = true
+		w.Write([]byte(strings.Repeat("a", 200)))
 		w.Close()
-		label := wc.in
-		if len(label) > 20 {
-			label = label[:17] + "..."
-		}
-		fmt.Printf("write1 bin=%-5v %-24q -> %q\n", wc.binary, label, buf.String())
+		fmt.Printf("enc binary-200 -> len=%d out=%q\n", sb.Len(), sb.String()[:40])
 	}
+}
 
-	// Round-trip: everything the writer emits, the reader must accept.
-	for _, wc := range writeCases {
-		var buf bytes.Buffer
-		w := NewWriter(&buf)
-		w.Binary = wc.binary
-		w.Write([]byte(wc.in))
-		w.Close()
-		out, err := io.ReadAll(NewReader(bytes.NewReader(buf.Bytes())))
-		fmt.Printf("roundtrip bin=%-5v ok=%-5v err=%v\n", wc.binary, string(out) == strings.ReplaceAll(strings.ReplaceAll(wc.in, "\r\n", "\r\n"), "", ""), err)
-		_ = out
+type iterReader struct {
+	s string
+	i int
+}
+
+func (r *iterReader) Read(p []byte) (int, error) {
+	if r.i >= len(r.s) {
+		return 0, io.EOF
 	}
+	p[0] = r.s[r.i]
+	r.i++
+	return 1, nil
+}
 
-	// The exact error texts.
-	_, e1 := fromHex('z')
-	fmt.Printf("fromHex-err %v\n", e1)
-	_, e2 := readHexByte([]byte("a"))
-	fmt.Printf("readHexByte-short %v\n", e2)
-	_, e3 := readHexByte([]byte("zz"))
-	fmt.Printf("readHexByte-bad %v\n", e3)
+func allBytes() string {
+	b := make([]byte, 256)
+	for i := range b {
+		b[i] = byte(i)
+	}
+	return string(b)
+}
+
+func errText(err error) string {
+	if err == nil {
+		return "<nil>"
+	}
+	return err.Error()
 }

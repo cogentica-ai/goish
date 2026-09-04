@@ -51,7 +51,14 @@ pub mod status;
 pub mod transfer;
 pub mod transport;
 pub mod transport_default_other;
-pub mod url;
+// go: none — goish idiom: net/http used to carry its OWN 1504-line URL
+//     parser with 36 anchors and no manifest, shadowing the anchored
+//     port in `crate::net::url`. The two disagreed — the http one never
+//     percent-decoded Path — so `r.URL.Path` in a handler saw different
+//     bytes than `url.Parse` gave anyone else. There is one net/url in
+//     Go and there is one here now; this alias keeps the `http::url`
+//     path that callers already spell.
+pub use crate::net::url;
 
 pub use client::{
     Body, Client, DialContextFn, ErrUseLastResponse, Get, Head, NewRequest, NewRequestWithContext,
@@ -115,8 +122,12 @@ pub use status::{
     StatusUnavailableForLegalReasons, StatusUnprocessableEntity, StatusUnsupportedMediaType,
     StatusUpgradeRequired, StatusUseProxy, StatusVariantAlsoNegotiates,
 };
+// go: none — goish idiom: Go's `resolvePath` is unexported; goish
+//     exposes it because examples/url_resolve_path_smoke.rs pins it
+//     directly, and net/http used to re-export its own copy under this
+//     name.
+pub use crate::net::url::resolvePath as ResolvePath;
 pub use url::{
     JoinPath as JoinURLPath, Parse as ParseURL, ParseRequestURI, PathEscape, PathUnescape,
-    QueryEscape, QueryUnescape, ResolvePath, User, UserPassword, Userinfo, ValuesEncode, ValuesHas,
-    URL,
+    QueryEscape, QueryUnescape, User, UserPassword, Userinfo, ValuesEncode, ValuesHas, URL,
 };

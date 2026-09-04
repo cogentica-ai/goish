@@ -297,39 +297,37 @@ fn main() {
 
     // 7. The gap that remains, recorded rather than hidden. The '#'
     //    flag's base prefix and a WIDTH are both applied by the format
-    //    scanner over the FINISHED bytes, so over a composite they wrap
-    //    the whole rendering instead of distributing to each element:
+    //    scanner over the FINISHED bytes, so over a composite they used
+    //    to wrap the whole rendering instead of distributing to each
+    //    element:
     //
-    //      Go   `%O` of []byte("ab")  ->  "[0o141 0o142]"
-    //      goish                      ->  "0o[141 142]"
-    //      Go   `%3d` of []int{1,2,30} -> "[  1   2  30]"
-    //      goish                       -> "[1 2 30]"
+    //      Go   `%O` of []byte("ab")   ->  "[0o141 0o142]"
+    //      goish (before)              ->  "0o[141 142]"
+    //      Go   `%3d` of []int{1,2,30} ->  "[  1   2  30]"
+    //      goish (before)              ->  "[1 2 30]"
     //
-    //    Both have one root cause: goish's `Format` trait carries the
-    //    verb and the precision but not the flags or the width. Fixing
-    //    it means threading those through, which is its own unit — and
-    //    the day it lands these assertions fail and point here.
+    //    Both had one root cause: goish's `Format` trait carried the
+    //    verb and the precision but neither the width nor the flags.
+    //    Both are fixed — the compound renderers take a width and repeat
+    //    the base prefix per element — so these assert Go's answers now.
+    //    A bad-verb marker takes no prefix, which is why the map case
+    //    below reads `%!O(string=a)` and not `0o%!O(string=a)`.
     {
         let mut ok = true;
         eq(
             &mut ok,
-            "%O over []byte (diverges)",
+            "%O over []byte",
             fmt::Sprintf!("%O", goish::bytes("ab")),
-            "0o[141 142]",
+            "[0o141 0o142]",
         );
         let ii: slice<int> = goish::slice!([]int{1, 2, 30});
         eq(
             &mut ok,
-            "%3d over []int (diverges)",
+            "%3d over []int",
             fmt::Sprintf!("%3d", ii),
-            "[1 2 30]",
+            "[  1   2  30]",
         );
-        report(
-            &mut failed,
-            ok,
-            " 7",
-            "flags over a composite still diverge",
-        );
+        report(&mut failed, ok, " 7", "width and flags reach each element");
     }
 
     if failed == 0 {

@@ -25,7 +25,12 @@
 //     `cmdline`, and `memstats` on `http.DefaultServeMux`) is split:
 //     - `Init()` is exposed as an explicit free function. Calling it
 //       once registers the handler. Idempotent (sync::Once).
-//     - `cmdline` is auto-registered (`os.Args` exists).
+//     - `cmdline` is published BY `Init()`, not automatically. Go
+//       publishes it from `init()`, which runs whether or not anyone
+//       asks; goish has no package init, so a caller that never calls
+//       `Init()` gets a `/debug/vars` without it. ("auto-registered"
+//       is what this line used to say, which reads as "you get it for
+//       free" and is the opposite of true.)
 //     - `memstats` is dropped — `runtime.MemStats` typed struct isn't
 //       ported.
 //

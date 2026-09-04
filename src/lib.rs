@@ -319,6 +319,7 @@ pub fn init() {
         os::register_os_error_impls();
         os::exec::register_exec_impls();
         net::register_net_impls();
+        net::url::register_url_impls();
         net::http::server::register_http_impls();
         crypto::tls::register_tls_impls();
         context::register_context_impls();

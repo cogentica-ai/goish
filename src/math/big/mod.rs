@@ -64,6 +64,8 @@ impl crate::fmt::Stringer for Accuracy {
     }
 }
 
+mod intconv;
+
 /// `big.Int` — signed multi-precision integer. Zero value represents 0.
 #[derive(Clone, Default)]
 pub struct Int {
@@ -243,7 +245,7 @@ impl Rat {
     /// Aliasing-safe.
     pub fn Quo(&mut self, x: &Rat, y: &Rat) -> &mut Self {
         if y.num.Sign() == 0 {
-            panic!("big::Rat::Quo: division by zero");
+            panic!("division by zero");
         }
         let xnum = x.num.clone();
         let xden = x.den.clone();
@@ -280,7 +282,7 @@ impl Rat {
     /// `(*Rat).Inv(x)` — z = 1/x. Panics if x == 0. Aliasing-safe.
     pub fn Inv(&mut self, x: &Rat) -> &mut Self {
         if x.num.Sign() == 0 {
-            panic!("big::Rat::Inv: division by zero");
+            panic!("division by zero");
         }
         // Swap numerator and denominator.
         let new_num = x.den.clone();
@@ -446,12 +448,110 @@ impl Rat {
             self.norm();
             return (self, true);
         }
-        // Decimal / scientific float (or a plain integer).
-        if parse_decimal_into_rat(core::str::from_utf8(bytes).unwrap_or(""), self) {
-            (self, true)
-        } else {
-            (self, false)
+        // Floating-point form. Go scans the mantissa in base 0, so the
+        // 0x / 0b / 0o prefixes and '_' separators are accepted here
+        // exactly as they are in an Int literal, and a hex mantissa may
+        // carry a 'p' binary exponent. goish reuses `float_scan`, the
+        // same scanner Float::Parse uses, so the two cannot drift.
+        //
+        // This replaced a decimal-only parser that began with a
+        // `str::trim()`: it accepted " 1" and "1 ", which Go refuses
+        // because scanSign meets the space and the mantissa scan then
+        // fails on it. Accepting input Go rejects is the worse of the
+        // two directions for a parser to be wrong in.
+        let (neg, mant, base, fcount, exp, ebase, is_inf) = match float_scan(bytes, 0) {
+            Ok(v) => v,
+            Err(_) => return (self, false),
+        };
+        // Go has no ±Inf case here: `nat.scan` finds no digits and the
+        // whole SetString fails.
+        if is_inf {
+            return (self, false);
         }
+
+        let mut num = Int::default();
+        num.abs = mant;
+        let mut den = Int::default();
+        den.SetInt64(1);
+
+        // Go: special-case 0 (see also issue #16176)
+        if num.abs.is_empty() {
+            self.num = num;
+            self.den = den;
+            self.norm();
+            return (self, true);
+        }
+
+        // Go: "determine binary or decimal exponent contribution of
+        // radix point". A radix point is a division by base**(-fcount),
+        // i.e. a multiplication by base**fcount; powers of 10 split
+        // into the same powers of 2 and 5 so the factors stay small.
+        let mut exp2: i64 = 0;
+        let mut exp5: i64 = 0;
+        if fcount < 0 {
+            let d = fcount;
+            match base {
+                10 => {
+                    exp5 = d;
+                    exp2 = d;
+                }
+                2 => exp2 = d,
+                8 => exp2 = d * 3,
+                16 => exp2 = d * 4,
+                _ => return (self, false),
+            }
+        }
+        // Go: take actual exponent into account.
+        match ebase {
+            10 => {
+                exp5 += exp;
+                exp2 += exp;
+            }
+            2 => exp2 += exp,
+            _ => return (self, false),
+        }
+
+        // Go: apply exp5 contributions first, so the numbers to
+        // multiply are smaller.
+        if exp5 != 0 {
+            let n = if exp5 < 0 { -exp5 } else { exp5 };
+            if n < 0 || n > 1_000_000 {
+                // Go: "avoid excessively large exponents" (and the
+                // -(-1<<63) overflow that stays negative).
+                return (self, false);
+            }
+            let mut pow5 = Int::default();
+            let mut five = Int::default();
+            five.SetInt64(5);
+            let mut e = Int::default();
+            e.SetInt64(n);
+            pow5.Exp(&five, &e, &Int::default());
+            if exp5 > 0 {
+                let lhs = num.clone();
+                num.Mul(&lhs, &pow5);
+            } else {
+                den.Set(&pow5);
+            }
+        }
+
+        // Go: apply exp2 contributions.
+        if !(-10_000_000..=10_000_000).contains(&exp2) {
+            return (self, false);
+        }
+        if exp2 > 0 {
+            let lhs = num.clone();
+            num.Lsh(&lhs, exp2 as crate::types::uint);
+        } else if exp2 < 0 {
+            let lhs = den.clone();
+            den.Lsh(&lhs, (-exp2) as crate::types::uint);
+        }
+
+        // Go: z.a.neg = neg && len(z.a.abs) > 0  — 0 has no sign.
+        num.neg = neg && !num.abs.is_empty();
+        self.num = num;
+        self.den = den;
+        self.norm();
+        return (self, true);
     }
 
     /// `(*Rat).Float32()` — nearest f32 to x, plus an exact flag.
@@ -905,7 +1005,10 @@ impl Int {
     ///   * If m == 0 (nil-equivalent), z = x**y unless y <= 0 then z = 1.
     ///   * Otherwise z = x**y mod |m|, normalised to 0 <= z < |m|.
     ///   * For y < 0 with m != 0, z = (x⁻¹ mod |m|)**(-y) mod |m|.
-    ///     Panics with Go's message if x is not coprime to m.
+    ///     Go (int.go:563): "if y < 0, and x and m are not relatively
+    ///     prime, z is unchanged and nil is returned." goish returns
+    ///     `&mut Self`, so it leaves self unchanged — the same
+    ///     convention `ModInverse` uses in this file for Go's nil.
     ///   * For y < 0 with m == 0, z = 1 (matches Go).
     pub fn Exp(&mut self, x: &Int, y: &Int, m: &Int) -> &mut Self {
         let m_zero = m.abs.is_empty();
@@ -926,7 +1029,15 @@ impl Int {
             let mut one = Int::new();
             one.SetInt64(1);
             if g.Cmp(&one) != 0 {
-                panic!("negative exponent and modulus not relatively prime");
+                // Go: inverse := new(Int).ModInverse(x, m)
+                //     if inverse == nil { return nil }
+                // A nil return, NOT a panic: Exp with a negative
+                // exponent is how a caller asks for a modular inverse,
+                // and whether one exists is a property of the operands,
+                // which in crypto can come from the far end of a
+                // connection. Panicking turned "no inverse" into a
+                // crash on attacker-chosen input.
+                return self;
             }
             let mut inv = Int::new();
             inv.ModInverse(&x_red, &m_abs);
@@ -1580,19 +1691,6 @@ impl Int {
         }
     }
 
-    /// `(*Int).Text(base)` — string representation of `self` in `base`.
-    /// `base` must be between 2 and 62 inclusive; lower-case letters
-    /// `a`..`z` cover digit values 10..35 and upper-case `A`..`Z` cover
-    /// 36..61. No `0x`-style prefix is added. Negative values are
-    /// prefixed with `-`.
-    pub fn Text(&self, base: int) -> crate::string {
-        if base < 2 || base > MAX_BASE {
-            panic!("big::Int::Text: invalid base");
-        }
-        let buf = itoa(self.neg, &self.abs, base);
-        crate::string::from_bytes(&buf)
-    }
-
     /// `(*Int).Bytes()` — big-endian byte representation of the absolute
     /// value of `self`. No sign and no leading zero bytes; zero yields
     /// an empty slice. Matches Go's `(*Int).Bytes()`.
@@ -2070,22 +2168,6 @@ impl Int {
             }
             r = m;
         }
-    }
-
-    /// `(*Int).Append(buf, base)` — append the base-`base` text of
-    /// `self` (as produced by `Text`) to `buf` and return the extended
-    /// slice. `base` must be 2..=62.
-    pub fn Append(
-        &self,
-        buf: crate::slice<crate::types::byte>,
-        base: int,
-    ) -> crate::slice<crate::types::byte> {
-        if base < 2 || base > MAX_BASE {
-            panic!("big::Int::Append: invalid base");
-        }
-        let mut out = buf.__into_vec();
-        out.extend_from_slice(&itoa(self.neg, &self.abs, base));
-        crate::slice::<crate::types::byte>::__from_vec(out)
     }
 
     /// `(*Int).AppendText(b)` — append the decimal text of `self` to
@@ -5663,6 +5745,16 @@ impl Float {
     ) -> (&mut Float, int, crate::error) {
         let s = s.into();
         let bytes = s.as_bytes().to_vec();
+        // Go: scanSign is the first thing `scan` does, and on empty
+        // input its ReadByte returns io.EOF, which Parse passes
+        // straight through. It must be that SENTINEL and not a
+        // look-alike message: a caller reading a stream of numbers
+        // distinguishes "done" from "malformed" with errors.Is(err,
+        // io.EOF).
+        if bytes.is_empty() {
+            self.form = form::Zero;
+            return (self, 0, crate::io::EOF.into());
+        }
         match float_scan(&bytes, base) {
             Ok((neg, mant_limbs, b, fcount, exp, ebase, is_inf)) => {
                 if is_inf {
@@ -6276,15 +6368,19 @@ type FloatScan = (bool, Vec<u32>, int, i64, i64, int, bool);
 /// fields, or an error message string. The whole input must be a valid
 /// number (no trailing junk).
 fn float_scan(bytes: &[u8], base: int) -> Result<FloatScan, crate::string> {
-    // ±Inf / ±inf
+    // ±Inf / ±inf — Go handles these in `Parse` BEFORE calling `scan`
+    // (floatconv.go: "scan doesn't handle ±Inf"), so the returned base
+    // is the named return's zero value: 0, not the requested base. A
+    // caller using Parse(s, 0) to learn which base the literal was
+    // written in gets 0 here, meaning "no digits, so no base".
     if bytes == b"Inf" || bytes == b"inf" {
-        return Ok((false, Vec::new(), 10, 0, 0, 10, true));
+        return Ok((false, Vec::new(), 0, 0, 0, 10, true));
     }
     if bytes.len() == 4
         && (bytes[0] == b'+' || bytes[0] == b'-')
         && (&bytes[1..] == b"Inf" || &bytes[1..] == b"inf")
     {
-        return Ok((bytes[0] == b'-', Vec::new(), 10, 0, 0, 10, true));
+        return Ok((bytes[0] == b'-', Vec::new(), 0, 0, 0, 10, true));
     }
 
     if !(base == 0 || base == 2 || base == 8 || base == 10 || base == 16) {
@@ -6445,7 +6541,12 @@ fn float_scan(bytes: &[u8], base: int) -> Result<FloatScan, crate::string> {
 
     // entire string must be consumed
     if i != bytes.len() {
-        return Err(crate::string::from("expected end of string"));
+        // Go: err = fmt.Errorf("expected end of string, found %q", ch)
+        // The offending byte is part of the message: a caller shown
+        // only "expected end of string" cannot tell which character
+        // ended the number.
+        return Err(crate::string::from("expected end of string, found ")
+            + crate::strconv::QuoteRune(bytes[i] as crate::types::rune));
     }
 
     // fcount is the number of fractional digits; pass it negated so a

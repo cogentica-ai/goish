@@ -168,6 +168,14 @@ for name in "${TARGETS[@]}"; do
     # rc=0 wins regardless of stdout content. Tests that intentionally
     # panic + recover (e.g. panic_recovery_smoke) print "panic" to
     # stderr and exit 0; treating them as panic-fails would be wrong.
+    #
+    # For rc!=0 the test below is the runtime's OWN panic banner
+    # (runtime/mod.rs:809), anchored, not the bare word "panic"
+    # anywhere in the output. A smoke that merely PRINTS the word —
+    # defer_panic_smoke's failure line reads "panics=0" — was being
+    # bucketed as a panic, so the summary said "panic: 1" for a run
+    # whose only problem was a failed assertion, and the diagnosis
+    # started in the wrong place.
     if [[ $rc -eq 0 ]]; then
       pass=$((pass+1))
     elif [[ $rc -eq 124 ]]; then
@@ -175,7 +183,7 @@ for name in "${TARGETS[@]}"; do
       if [[ ! -s "$first_log" ]]; then
         { echo "=== iter $i: TIMEOUT after ${TIMEOUT}s ==="; echo "$out"; } > "$first_log"
       fi
-    elif echo "$out" | grep -q 'panic'; then
+    elif echo "$out" | grep -q '^goish: panic$'; then
       panic=$((panic+1))
       if [[ ! -s "$first_log" ]]; then
         { echo "=== iter $i: PANIC (rc=$rc) ==="; echo "$out"; } > "$first_log"

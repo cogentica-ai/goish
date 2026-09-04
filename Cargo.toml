@@ -2142,3 +2142,1003 @@ path = "examples/fmt_star_ref_smoke.rs"
 [[example]]
 name = "range_int_smoke"
 path = "examples/range_int_smoke.rs"
+
+[[example]]
+name = "mail_ref_smoke"
+path = "examples/mail_ref_smoke.rs"
+
+[[example]]
+name = "slog_level_ref_smoke"
+path = "examples/slog_level_ref_smoke.rs"
+
+[[example]]
+name = "slog_value_ref_smoke"
+path = "examples/slog_value_ref_smoke.rs"
+
+[[example]]
+name = "slog_handler_ref_smoke"
+path = "examples/slog_handler_ref_smoke.rs"
+
+[[example]]
+name = "slog_default_ref_smoke"
+path = "examples/slog_default_ref_smoke.rs"
+
+[[example]]
+name = "atomic_pointer_smoke"
+path = "examples/atomic_pointer_smoke.rs"
+
+[[example]]
+name = "bytes_buffer_methods_smoke"
+path = "examples/bytes_buffer_methods_smoke.rs"
+
+[[example]]
+name = "bytes_buffer_more_smoke"
+path = "examples/bytes_buffer_more_smoke.rs"
+
+[[example]]
+name = "bytes_runes_title_smoke"
+path = "examples/bytes_runes_title_smoke.rs"
+
+[[example]]
+name = "bytes_to_valid_utf8_smoke"
+path = "examples/bytes_to_valid_utf8_smoke.rs"
+
+[[example]]
+name = "cast_mut_smoke"
+path = "examples/cast_mut_smoke.rs"
+
+[[example]]
+name = "cmd_stdin_test"
+path = "examples/cmd_stdin_test.rs"
+
+[[example]]
+name = "cmp_smoke"
+path = "examples/cmp_smoke.rs"
+
+[[example]]
+name = "conn_deadline_smoke"
+path = "examples/conn_deadline_smoke.rs"
+
+[[example]]
+name = "conn_drop_no_leak"
+path = "examples/conn_drop_no_leak.rs"
+
+[[example]]
+name = "context_value_smoke"
+path = "examples/context_value_smoke.rs"
+
+[[example]]
+name = "csrf_smoke"
+path = "examples/csrf_smoke.rs"
+
+[[example]]
+name = "deploy_rest_api"
+path = "examples/deploy_rest_api.rs"
+
+[[example]]
+name = "encoding_iface_smoke"
+path = "examples/encoding_iface_smoke.rs"
+
+[[example]]
+name = "errors_as_smoke"
+path = "examples/errors_as_smoke.rs"
+
+[[example]]
+name = "errors_join_smoke"
+path = "examples/errors_join_smoke.rs"
+
+[[example]]
+name = "expvar_smoke"
+path = "examples/expvar_smoke.rs"
+
+[[example]]
+name = "filepath_eval_symlinks_smoke"
+path = "examples/filepath_eval_symlinks_smoke.rs"
+
+[[example]]
+name = "filepath_glob_smoke"
+path = "examples/filepath_glob_smoke.rs"
+
+[[example]]
+name = "filepath_walk_smoke"
+path = "examples/filepath_walk_smoke.rs"
+
+[[example]]
+name = "fmt_sprint_smoke"
+path = "examples/fmt_sprint_smoke.rs"
+
+[[example]]
+name = "gomap_range_smoke"
+path = "examples/gomap_range_smoke.rs"
+
+[[example]]
+name = "gomap_smoke"
+path = "examples/gomap_smoke.rs"
+
+[[example]]
+name = "grow_smoke"
+path = "examples/grow_smoke.rs"
+
+[[example]]
+name = "html_smoke"
+path = "examples/html_smoke.rs"
+
+[[example]]
+name = "http_hammer"
+path = "examples/http_hammer.rs"
+
+[[example]]
+name = "httptest_new_request_smoke"
+path = "examples/httptest_new_request_smoke.rs"
+
+[[example]]
+name = "httptrace_smoke"
+path = "examples/httptrace_smoke.rs"
+
+[[example]]
+name = "io_copy_buffer_smoke"
+path = "examples/io_copy_buffer_smoke.rs"
+
+[[example]]
+name = "io_helpers_smoke"
+path = "examples/io_helpers_smoke.rs"
+
+[[example]]
+name = "io_multi_smoke"
+path = "examples/io_multi_smoke.rs"
+
+[[example]]
+name = "io_offset_writer_smoke"
+path = "examples/io_offset_writer_smoke.rs"
+
+[[example]]
+name = "io_pipe_smoke"
+path = "examples/io_pipe_smoke.rs"
+
+[[example]]
+name = "io_readall_smoke"
+path = "examples/io_readall_smoke.rs"
+
+[[example]]
+name = "io_section_reader_smoke"
+path = "examples/io_section_reader_smoke.rs"
+
+[[example]]
+name = "io_traits_smoke"
+path = "examples/io_traits_smoke.rs"
+
+[[example]]
+name = "iotest_smoke"
+path = "examples/iotest_smoke.rs"
+
+[[example]]
+name = "json_indent_html_escape_smoke"
+path = "examples/json_indent_html_escape_smoke.rs"
+
+[[example]]
+name = "json_token"
+path = "examples/json_token.rs"
+
+[[example]]
+name = "json_valid_compact_smoke"
+path = "examples/json_valid_compact_smoke.rs"
+
+[[example]]
+name = "lazymut_smoke"
+path = "examples/lazymut_smoke.rs"
+
+[[example]]
+name = "log_print_fatalln_smoke"
+path = "examples/log_print_fatalln_smoke.rs"
+
+[[example]]
+name = "mail_message_smoke"
+path = "examples/mail_message_smoke.rs"
+
+[[example]]
+name = "maps_funcs_smoke"
+path = "examples/maps_funcs_smoke.rs"
+
+[[example]]
+name = "math_bits_arith_smoke"
+path = "examples/math_bits_arith_smoke.rs"
+
+[[example]]
+name = "math_bits_smoke"
+path = "examples/math_bits_smoke.rs"
+
+[[example]]
+name = "math_rand_golden"
+path = "examples/math_rand_golden.rs"
+
+[[example]]
+name = "net_hostport_smoke"
+path = "examples/net_hostport_smoke.rs"
+
+[[example]]
+name = "net_ip_global_unicast_smoke"
+path = "examples/net_ip_global_unicast_smoke.rs"
+
+[[example]]
+name = "net_ip_marshal_smoke"
+path = "examples/net_ip_marshal_smoke.rs"
+
+[[example]]
+name = "net_ip_predicates_smoke"
+path = "examples/net_ip_predicates_smoke.rs"
+
+[[example]]
+name = "net_ip_smoke"
+path = "examples/net_ip_smoke.rs"
+
+[[example]]
+name = "net_ipmask_smoke"
+path = "examples/net_ipmask_smoke.rs"
+
+[[example]]
+name = "net_ipnet_smoke"
+path = "examples/net_ipnet_smoke.rs"
+
+[[example]]
+name = "net_smoke"
+path = "examples/net_smoke.rs"
+
+[[example]]
+name = "netpoll_init_smoke"
+path = "examples/netpoll_init_smoke.rs"
+
+[[example]]
+name = "new_smoke"
+path = "examples/new_smoke.rs"
+
+[[example]]
+name = "nilable_conversions"
+path = "examples/nilable_conversions.rs"
+
+[[example]]
+name = "nilable_ref_smoke"
+path = "examples/nilable_ref_smoke.rs"
+
+[[example]]
+name = "nilable_smoke"
+path = "examples/nilable_smoke.rs"
+
+[[example]]
+name = "os_chmod_symlink_smoke"
+path = "examples/os_chmod_symlink_smoke.rs"
+
+[[example]]
+name = "os_chown_smoke"
+path = "examples/os_chown_smoke.rs"
+
+[[example]]
+name = "os_env_smoke"
+path = "examples/os_env_smoke.rs"
+
+[[example]]
+name = "os_environ_clearenv_smoke"
+path = "examples/os_environ_clearenv_smoke.rs"
+
+[[example]]
+name = "os_getgroups_smoke"
+path = "examples/os_getgroups_smoke.rs"
+
+[[example]]
+name = "os_getwd_chdir_smoke"
+path = "examples/os_getwd_chdir_smoke.rs"
+
+[[example]]
+name = "os_mkdir_all_smoke"
+path = "examples/os_mkdir_all_smoke.rs"
+
+[[example]]
+name = "os_pipe_smoke"
+path = "examples/os_pipe_smoke.rs"
+
+[[example]]
+name = "os_proc_identity_smoke"
+path = "examples/os_proc_identity_smoke.rs"
+
+[[example]]
+name = "os_readfile_smoke"
+path = "examples/os_readfile_smoke.rs"
+
+[[example]]
+name = "os_rename_link_truncate_smoke"
+path = "examples/os_rename_link_truncate_smoke.rs"
+
+[[example]]
+name = "os_setenv_unsetenv_smoke"
+path = "examples/os_setenv_unsetenv_smoke.rs"
+
+[[example]]
+name = "os_stat_smoke"
+path = "examples/os_stat_smoke.rs"
+
+[[example]]
+name = "os_user_cache_config_smoke"
+path = "examples/os_user_cache_config_smoke.rs"
+
+[[example]]
+name = "os_user_home_dir_smoke"
+path = "examples/os_user_home_dir_smoke.rs"
+
+[[example]]
+name = "os_user_smoke"
+path = "examples/os_user_smoke.rs"
+
+[[example]]
+name = "parse_mac_smoke"
+path = "examples/parse_mac_smoke.rs"
+
+[[example]]
+name = "rand_v2_smoke"
+path = "examples/rand_v2_smoke.rs"
+
+[[example]]
+name = "reader_byte_rune_smoke"
+path = "examples/reader_byte_rune_smoke.rs"
+
+[[example]]
+name = "reader_writeto_smoke"
+path = "examples/reader_writeto_smoke.rs"
+
+[[example]]
+name = "reflect_anyreflect_smoke"
+path = "examples/reflect_anyreflect_smoke.rs"
+
+[[example]]
+name = "regexp_smoke"
+path = "examples/regexp_smoke.rs"
+
+[[example]]
+name = "runtime_debug_smoke"
+path = "examples/runtime_debug_smoke.rs"
+
+[[example]]
+name = "runtime_goos_goarch_smoke"
+path = "examples/runtime_goos_goarch_smoke.rs"
+
+[[example]]
+name = "runtime_stubs_smoke"
+path = "examples/runtime_stubs_smoke.rs"
+
+[[example]]
+name = "singleflight_smoke"
+path = "examples/singleflight_smoke.rs"
+
+[[example]]
+name = "slices_chunk_smoke"
+path = "examples/slices_chunk_smoke.rs"
+
+[[example]]
+name = "slices_insert_replace_grow_clip_smoke"
+path = "examples/slices_insert_replace_grow_clip_smoke.rs"
+
+[[example]]
+name = "slices_reverse_repeat_smoke"
+path = "examples/slices_reverse_repeat_smoke.rs"
+
+[[example]]
+name = "slices_sorted_smoke"
+path = "examples/slices_sorted_smoke.rs"
+
+[[example]]
+name = "socket_smoke"
+path = "examples/socket_smoke.rs"
+
+[[example]]
+name = "sort_smoke"
+path = "examples/sort_smoke.rs"
+
+[[example]]
+name = "spawn_density"
+path = "examples/spawn_density.rs"
+
+[[example]]
+name = "strconv_append_quote_smoke"
+path = "examples/strconv_append_quote_smoke.rs"
+
+[[example]]
+name = "strconv_isprint_smoke"
+path = "examples/strconv_isprint_smoke.rs"
+
+[[example]]
+name = "strconv_quote_rune_smoke"
+path = "examples/strconv_quote_rune_smoke.rs"
+
+[[example]]
+name = "strconv_quote_smoke"
+path = "examples/strconv_quote_smoke.rs"
+
+[[example]]
+name = "strconv_unquote_char_smoke"
+path = "examples/strconv_unquote_char_smoke.rs"
+
+[[example]]
+name = "strings_bytes_totitle_smoke"
+path = "examples/strings_bytes_totitle_smoke.rs"
+
+[[example]]
+name = "strings_title_smoke"
+path = "examples/strings_title_smoke.rs"
+
+[[example]]
+name = "strings_to_valid_utf8_smoke"
+path = "examples/strings_to_valid_utf8_smoke.rs"
+
+[[example]]
+name = "sync_atomic_smoke"
+path = "examples/sync_atomic_smoke.rs"
+
+[[example]]
+name = "sync_cond_smoke"
+path = "examples/sync_cond_smoke.rs"
+
+[[example]]
+name = "sync_map_smoke"
+path = "examples/sync_map_smoke.rs"
+
+[[example]]
+name = "sync_oncefunc_smoke"
+path = "examples/sync_oncefunc_smoke.rs"
+
+[[example]]
+name = "sync_pool_smoke"
+path = "examples/sync_pool_smoke.rs"
+
+[[example]]
+name = "textproto_pipeline_smoke"
+path = "examples/textproto_pipeline_smoke.rs"
+
+[[example]]
+name = "textproto_reader_smoke"
+path = "examples/textproto_reader_smoke.rs"
+
+[[example]]
+name = "textproto_smoke"
+path = "examples/textproto_smoke.rs"
+
+[[example]]
+name = "time_adddate_yearday_smoke"
+path = "examples/time_adddate_yearday_smoke.rs"
+
+[[example]]
+name = "time_afterfunc_smoke"
+path = "examples/time_afterfunc_smoke.rs"
+
+[[example]]
+name = "time_compare_smoke"
+path = "examples/time_compare_smoke.rs"
+
+[[example]]
+name = "time_duration_methods_smoke"
+path = "examples/time_duration_methods_smoke.rs"
+
+[[example]]
+name = "time_format_smoke"
+path = "examples/time_format_smoke.rs"
+
+[[example]]
+name = "time_isoweek_smoke"
+path = "examples/time_isoweek_smoke.rs"
+
+[[example]]
+name = "time_marshal_binary_smoke"
+path = "examples/time_marshal_binary_smoke.rs"
+
+[[example]]
+name = "time_marshal_json_smoke"
+path = "examples/time_marshal_json_smoke.rs"
+
+[[example]]
+name = "time_month_weekday_smoke"
+path = "examples/time_month_weekday_smoke.rs"
+
+[[example]]
+name = "time_parse_duration_smoke"
+path = "examples/time_parse_duration_smoke.rs"
+
+[[example]]
+name = "time_parse_smoke"
+path = "examples/time_parse_smoke.rs"
+
+[[example]]
+name = "time_rfc3339_nano_smoke"
+path = "examples/time_rfc3339_nano_smoke.rs"
+
+[[example]]
+name = "time_tick_smoke"
+path = "examples/time_tick_smoke.rs"
+
+[[example]]
+name = "time_truncate_round_smoke"
+path = "examples/time_truncate_round_smoke.rs"
+
+[[example]]
+name = "time_unix_milli_micro_smoke"
+path = "examples/time_unix_milli_micro_smoke.rs"
+
+[[example]]
+name = "unicode_predicates_smoke"
+path = "examples/unicode_predicates_smoke.rs"
+
+[[example]]
+name = "url_errors_smoke"
+path = "examples/url_errors_smoke.rs"
+
+[[example]]
+name = "url_escape_smoke"
+path = "examples/url_escape_smoke.rs"
+
+[[example]]
+name = "url_fragment_smoke"
+path = "examples/url_fragment_smoke.rs"
+
+[[example]]
+name = "url_joinpath_smoke"
+path = "examples/url_joinpath_smoke.rs"
+
+[[example]]
+name = "url_marshal_binary_smoke"
+path = "examples/url_marshal_binary_smoke.rs"
+
+[[example]]
+name = "url_methods_smoke"
+path = "examples/url_methods_smoke.rs"
+
+[[example]]
+name = "url_parse_method_smoke"
+path = "examples/url_parse_method_smoke.rs"
+
+[[example]]
+name = "url_parse_smoke"
+path = "examples/url_parse_smoke.rs"
+
+[[example]]
+name = "url_resolve_path_smoke"
+path = "examples/url_resolve_path_smoke.rs"
+
+[[example]]
+name = "url_resolve_reference_smoke"
+path = "examples/url_resolve_reference_smoke.rs"
+
+[[example]]
+name = "url_userinfo_smoke"
+path = "examples/url_userinfo_smoke.rs"
+
+[[example]]
+name = "url_values_encode_smoke"
+path = "examples/url_values_encode_smoke.rs"
+
+[[example]]
+name = "utf16_smoke"
+path = "examples/utf16_smoke.rs"
+
+[[example]]
+name = "var_mut_smoke"
+path = "examples/var_mut_smoke.rs"
+
+[[example]]
+name = "atomic_value_smoke"
+path = "examples/atomic_value_smoke.rs"
+
+[[example]]
+name = "spawn_million"
+path = "examples/spawn_million.rs"
+
+[[example]]
+name = "segv_diagnostic_smoke"
+path = "examples/segv_diagnostic_smoke.rs"
+
+[[example]]
+name = "netip_ref_smoke"
+path = "examples/netip_ref_smoke.rs"
+
+[[example]]
+name = "net_mac_ref_smoke"
+path = "examples/net_mac_ref_smoke.rs"
+
+[[example]]
+name = "sync_map_ref_smoke"
+path = "examples/sync_map_ref_smoke.rs"
+
+[[example]]
+name = "sync_once_ref_smoke"
+path = "examples/sync_once_ref_smoke.rs"
+
+[[example]]
+name = "sync_prim_ref_smoke"
+path = "examples/sync_prim_ref_smoke.rs"
+
+[[example]]
+name = "strconv_complex_ref_smoke"
+path = "examples/strconv_complex_ref_smoke.rs"
+
+[[example]]
+name = "context_string_ref_smoke"
+path = "examples/context_string_ref_smoke.rs"
+
+[[example]]
+name = "math_ref_smoke"
+path = "examples/math_ref_smoke.rs"
+
+[[example]]
+name = "math2_ref_smoke"
+path = "examples/math2_ref_smoke.rs"
+
+[[example]]
+name = "os_samefile_ref_smoke"
+path = "examples/os_samefile_ref_smoke.rs"
+
+[[example]]
+name = "os_copyfs_ref_smoke"
+path = "examples/os_copyfs_ref_smoke.rs"
+
+[[example]]
+name = "json_escape_ref_smoke"
+path = "examples/json_escape_ref_smoke.rs"
+
+[[example]]
+name = "json_struct_ref_smoke"
+path = "examples/json_struct_ref_smoke.rs"
+
+[[example]]
+name = "html_ref_smoke"
+path = "examples/html_ref_smoke.rs"
+
+[[example]]
+name = "net_ip_ref_smoke"
+path = "examples/net_ip_ref_smoke.rs"
+
+[[example]]
+name = "dnsmessage_ref_smoke"
+path = "examples/dnsmessage_ref_smoke.rs"
+
+[[example]]
+name = "big_int_ref_smoke"
+path = "examples/big_int_ref_smoke.rs"
+
+[[example]]
+name = "big_float_ref_smoke"
+path = "examples/big_float_ref_smoke.rs"
+
+[[example]]
+name = "big_rat_ref_smoke"
+path = "examples/big_rat_ref_smoke.rs"
+
+[[example]]
+name = "strings_ref_smoke"
+path = "examples/strings_ref_smoke.rs"
+
+[[example]]
+name = "bytes_ref_smoke"
+path = "examples/bytes_ref_smoke.rs"
+
+[[example]]
+name = "asn1_ref_smoke"
+path = "examples/asn1_ref_smoke.rs"
+
+[[example]]
+name = "json_decode_ref_smoke"
+path = "examples/json_decode_ref_smoke.rs"
+
+[[example]]
+name = "base64_ref_smoke"
+path = "examples/base64_ref_smoke.rs"
+
+[[example]]
+name = "multipart_ref_smoke"
+path = "examples/multipart_ref_smoke.rs"
+
+[[example]]
+name = "readrequest_ref_smoke"
+path = "examples/readrequest_ref_smoke.rs"
+
+[[example]]
+name = "readresponse_ref_smoke"
+path = "examples/readresponse_ref_smoke.rs"
+
+[[example]]
+name = "cookiejar_ref_smoke"
+path = "examples/cookiejar_ref_smoke.rs"
+
+[[example]]
+name = "chacha20_poly1305_ref_smoke"
+path = "examples/chacha20_poly1305_ref_smoke.rs"
+
+[[example]]
+name = "tabwriter_ref_smoke"
+path = "examples/tabwriter_ref_smoke.rs"
+
+[[example]]
+name = "scanner_ref_smoke"
+path = "examples/scanner_ref_smoke.rs"
+
+[[example]]
+name = "osuser_ref_smoke"
+path = "examples/osuser_ref_smoke.rs"
+
+[[example]]
+name = "flate_ref_smoke"
+path = "examples/flate_ref_smoke.rs"
+
+[[example]]
+name = "codecs_ref_smoke"
+path = "examples/codecs_ref_smoke.rs"
+
+[[example]]
+name = "x509_ref_smoke"
+path = "examples/x509_ref_smoke.rs"
+
+[[example]]
+name = "mux_ref_smoke"
+path = "examples/mux_ref_smoke.rs"
+
+[[example]]
+name = "pem_ref_smoke"
+path = "examples/pem_ref_smoke.rs"
+
+[[example]]
+name = "cryptobyte_ref_smoke"
+path = "examples/cryptobyte_ref_smoke.rs"
+
+[[example]]
+name = "quotedprintable_ref_smoke"
+path = "examples/quotedprintable_ref_smoke.rs"
+
+[[example]]
+name = "requesturi_ref_smoke"
+path = "examples/requesturi_ref_smoke.rs"
+
+[[example]]
+name = "reverseproxy_ref_smoke"
+path = "examples/reverseproxy_ref_smoke.rs"
+
+[[example]]
+name = "gzip_transport_ref_smoke"
+path = "examples/gzip_transport_ref_smoke.rs"
+
+[[example]]
+name = "ed25519_ref_smoke"
+path = "examples/ed25519_ref_smoke.rs"
+
+[[example]]
+name = "ecdsa_ref_smoke"
+path = "examples/ecdsa_ref_smoke.rs"
+
+[[example]]
+name = "rsa_ref_smoke"
+path = "examples/rsa_ref_smoke.rs"
+
+[[example]]
+name = "x509verify_ref_smoke"
+path = "examples/x509verify_ref_smoke.rs"
+
+[[example]]
+name = "tls_ref_smoke"
+path = "examples/tls_ref_smoke.rs"
+
+[[example]]
+name = "iofs_ref_smoke"
+path = "examples/iofs_ref_smoke.rs"
+
+[[example]]
+name = "lookpath_ref_smoke"
+path = "examples/lookpath_ref_smoke.rs"
+
+[[example]]
+name = "cgi_ref_smoke"
+path = "examples/cgi_ref_smoke.rs"
+
+[[example]]
+name = "ecdh_ref_smoke"
+path = "examples/ecdh_ref_smoke.rs"
+
+[[example]]
+name = "hkdf_ref_smoke"
+path = "examples/hkdf_ref_smoke.rs"
+
+[[example]]
+name = "structtag_ref_smoke"
+path = "examples/structtag_ref_smoke.rs"
+
+[[example]]
+name = "expvar_ref_smoke"
+path = "examples/expvar_ref_smoke.rs"
+
+[[example]]
+name = "ascii85_ref_smoke"
+path = "examples/ascii85_ref_smoke.rs"
+
+[[example]]
+name = "checksum_ref_smoke"
+path = "examples/checksum_ref_smoke.rs"
+
+[[example]]
+name = "mlkem_ref_smoke"
+path = "examples/mlkem_ref_smoke.rs"
+
+[[example]]
+name = "fcgi_ref_smoke"
+path = "examples/fcgi_ref_smoke.rs"
+
+[[example]]
+name = "container_ref_smoke"
+path = "examples/container_ref_smoke.rs"
+
+[[example]]
+name = "maps_ref_smoke"
+path = "examples/maps_ref_smoke.rs"
+
+[[example]]
+name = "crc64_maphash_ref_smoke"
+path = "examples/crc64_maphash_ref_smoke.rs"
+
+[[example]]
+name = "cmp_ref_smoke"
+path = "examples/cmp_ref_smoke.rs"
+
+[[example]]
+name = "fstest_ref_smoke"
+path = "examples/fstest_ref_smoke.rs"
+
+[[example]]
+name = "rwwrap_ref_smoke"
+path = "examples/rwwrap_ref_smoke.rs"
+
+[[example]]
+name = "dsa_ref_smoke"
+path = "examples/dsa_ref_smoke.rs"
+
+[[example]]
+name = "cgi_child_ref_smoke"
+path = "examples/cgi_child_ref_smoke.rs"
+
+[[example]]
+name = "range_ref_smoke"
+path = "examples/range_ref_smoke.rs"
+
+[[example]]
+name = "iface_wiring_smoke"
+path = "examples/iface_wiring_smoke.rs"
+
+[[example]]
+name = "https_iface_ref_smoke"
+path = "examples/https_iface_ref_smoke.rs"
+
+[[example]]
+name = "sniff_server_ref_smoke"
+path = "examples/sniff_server_ref_smoke.rs"
+
+[[example]]
+name = "keepalive_ref_smoke"
+path = "examples/keepalive_ref_smoke.rs"
+
+[[example]]
+name = "pipeline_body_ref_smoke"
+path = "examples/pipeline_body_ref_smoke.rs"
+
+[[example]]
+name = "request_framing_ref_smoke"
+path = "examples/request_framing_ref_smoke.rs"
+
+[[example]]
+name = "client_wire_ref_smoke"
+path = "examples/client_wire_ref_smoke.rs"
+
+[[example]]
+name = "cookie_ref_smoke"
+path = "examples/cookie_ref_smoke.rs"
+
+[[example]]
+name = "handlers_ref_smoke"
+path = "examples/handlers_ref_smoke.rs"
+
+[[example]]
+name = "io_ref_smoke"
+path = "examples/io_ref_smoke.rs"
+
+[[example]]
+name = "path_ref_smoke"
+path = "examples/path_ref_smoke.rs"
+
+[[example]]
+name = "tar_ref_smoke"
+path = "examples/tar_ref_smoke.rs"
+
+[[example]]
+name = "quoterune_ref_smoke"
+path = "examples/quoterune_ref_smoke.rs"
+
+[[example]]
+name = "time_layouts_ref_smoke"
+path = "examples/time_layouts_ref_smoke.rs"
+
+[[example]]
+name = "json_surrogate_ref_smoke"
+path = "examples/json_surrogate_ref_smoke.rs"
+
+[[example]]
+name = "hex_dump_ref_smoke"
+path = "examples/hex_dump_ref_smoke.rs"
+
+[[example]]
+name = "asn1_time_ref_smoke"
+path = "examples/asn1_time_ref_smoke.rs"
+
+[[example]]
+name = "slog_source_ref_smoke"
+path = "examples/slog_source_ref_smoke.rs"
+
+[[example]]
+name = "preconditions_ref_smoke"
+path = "examples/preconditions_ref_smoke.rs"
+
+[[example]]
+name = "dirlist_ref_smoke"
+path = "examples/dirlist_ref_smoke.rs"
+
+[[example]]
+name = "timer_reset_ref_smoke"
+path = "examples/timer_reset_ref_smoke.rs"
+
+[[example]]
+name = "timeout_iface_ref_smoke"
+path = "examples/timeout_iface_ref_smoke.rs"
+
+[[example]]
+name = "url_error_ref_smoke"
+path = "examples/url_error_ref_smoke.rs"
+
+[[example]]
+name = "common_read_error_ref_smoke"
+path = "examples/common_read_error_ref_smoke.rs"
+
+[[example]]
+name = "proxy_dial_smoke"
+path = "examples/proxy_dial_smoke.rs"
+
+[[example]]
+name = "server_options_ref_smoke"
+path = "examples/server_options_ref_smoke.rs"
+
+[[example]]
+name = "server_hooks_ref_smoke"
+path = "examples/server_hooks_ref_smoke.rs"
+
+[[example]]
+name = "errno_ref_smoke"
+path = "examples/errno_ref_smoke.rs"
+
+[[example]]
+name = "path_error_ref_smoke"
+path = "examples/path_error_ref_smoke.rs"
+
+[[example]]
+name = "client_timeout_ref_smoke"
+path = "examples/client_timeout_ref_smoke.rs"
+
+[[example]]
+name = "responsecontroller_ref_smoke"
+path = "examples/responsecontroller_ref_smoke.rs"
+
+[[example]]
+name = "elliptic_unmarshal_ref_smoke"
+path = "examples/elliptic_unmarshal_ref_smoke.rs"
+
+[[example]]
+name = "net_error_shape_ref_smoke"
+path = "examples/net_error_shape_ref_smoke.rs"
+
+[[example]]
+name = "close_error_shape_ref_smoke"
+path = "examples/close_error_shape_ref_smoke.rs"
+
+[[example]]
+name = "dialcontext_ref_smoke"
+path = "examples/dialcontext_ref_smoke.rs"
+
+[[example]]
+name = "dialtimeout_ref_smoke"
+path = "examples/dialtimeout_ref_smoke.rs"

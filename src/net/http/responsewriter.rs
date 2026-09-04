@@ -1,4 +1,4 @@
-// go: file net/http/server.go decls: response.ReadFrom, conn.hijacked, conn.hijackLocked, response.finishRequest, response.shouldReuseConnection, response.CloseNotify, response.closeNotify, response.Hijack, response.sendExpectationFailed, response.requestTooLarge, response.disableWriteContinue, response.closedRequestBodyEarly, response.declareTrailer, response.finalTrailers, response.bodyAllowed, response.Header, response.Write, response.WriteHeader
+// go: file net/http/server.go decls: response.FlushError, response.SetReadDeadline, response.SetWriteDeadline, response.EnableFullDuplex, response.ReadFrom, conn.hijacked, conn.hijackLocked, response.finishRequest, response.shouldReuseConnection, response.CloseNotify, response.closeNotify, response.Hijack, response.sendExpectationFailed, response.requestTooLarge, response.disableWriteContinue, response.closedRequestBodyEarly, response.declareTrailer, response.finalTrailers, response.bodyAllowed, response.Header, response.Write, response.WriteHeader
 // goishlint:ignore GOISH015 — this file is the `response`/ResponseWriter
 // half of server.go, split out for size the same way server_tls.rs holds
 // its ServeTLS third; the decls manifest above carries the traceability
@@ -40,17 +40,32 @@
 // — backed by the per-trait downcast registry the interface macro
 // emits (see `goish::any`).
 //
-// v1 capability matrix for `response`:
+// Capability matrix for `response` (the PLAINTEXT writer), as
+// measured against Go by examples/https_iface_ref_smoke.rs:
 //   * ResponseWriter — yes.
 //   * Flusher        — yes (chunked streaming, see `promote_chunked`).
-//   * Hijacker       — no. The buffered v1 writer owns its socket for
-//                      its whole lifecycle; raw-socket handoff is
-//                      deferred. `w.(Hijacker)` therefore yields
-//                      `ok == false`.
+//   * Hijacker       — yes (`response::Hijack`), with the slimmed
+//                      return described on the trait below.
+//   * CloseNotifier  — yes (`response::CloseNotify`), driven by the
+//                      netpoll disconnect watcher.
 //   * Pusher         — no. Server push is HTTP/2-only; Go's HTTP/1
 //                      `*response` doesn't implement Pusher either,
 //                      so `w.(Pusher)` yielding `ok == false` is
 //                      Go-faithful.
+//
+// HTTPS does NOT use this writer. goish's serve loop is specialised
+// on net::TCPConn, so `Server.ServeTLS` runs a second loop with a
+// second writer, `server_tls::tlsResponse`, whose matrix is narrower
+// (Flusher only). Go has one writer for both and cannot drift this
+// way; goish can, so both are pinned side by side in that smoke.
+//
+// A concrete writer needs THREE things for `w.(Iface)` to hit: the
+// trait impl, the `__goish_as_dyn_any` hook, and registration in the
+// runtime registry. Go's assertion is structural and has none of
+// these. Two writers have already shipped with the impl and hook but
+// no registration (net/http/cgi's response, and tlsResponse), each
+// silently disabling flushing for every handler on that transport.
+// If you add a writer, register it and add a line to that smoke.
 //
 // Buffered v1 (unchanged from the pre-interface design): handler
 // `Write` calls accumulate into an internal body buffer; `flush`
@@ -160,11 +175,17 @@ pub trait Flusher {
 /// `http.Hijacker` (server.go:150) — implemented by ResponseWriters
 /// that allow an HTTP handler to take over the connection.
 ///
-/// v1 slim: Go's `Hijack() (net.Conn, *bufio.ReadWriter, error)`
-/// drops the buffered-ReadWriter slot (the v1 `response` has no
-/// pending buffered read state to hand off). The v1 `response` does
-/// not implement this trait — see the capability matrix at the top
-/// of this file.
+/// v1 slim, in two ways. Go returns `(net.Conn, *bufio.ReadWriter,
+/// error)`; goish drops the buffered-ReadWriter slot (the v1
+/// `response` has no pending buffered read state to hand off) and
+/// returns a CONCRETE `TCPConn` rather than the `net.Conn` interface.
+///
+/// The concrete return is what keeps `tlsResponse` from implementing
+/// this trait: a hijacked HTTPS connection is a `tls::Conn`, which is
+/// not a `TCPConn`, so the signature cannot express it. Go hijacks
+/// TLS conns fine. Closing that gap means widening this return to an
+/// interface — a breaking change to a public trait, not a wiring fix.
+/// See the KNOWN GAP note in examples/https_iface_ref_smoke.rs.
 #[goish::interface]
 pub trait Hijacker {
     /// `Hijack()` — take over the connection. Returns the raw conn,
@@ -282,6 +303,13 @@ fn register_response_impls() {
         __goish_register_Flusher_impl::<response>();
         __goish_register___RequestTooLarge_impl::<response>();
         __goish_register_CloseNotifier_impl::<response>();
+        // The ResponseController capabilities. Without these four the
+        // controller's probe misses on the server's own writer and
+        // every method answers ErrNotSupported — which is what it did.
+        super::responsecontroller::__goish_register_FlushErrorer_impl::<response>();
+        super::responsecontroller::__goish_register_ReadDeadliner_impl::<response>();
+        super::responsecontroller::__goish_register_WriteDeadliner_impl::<response>();
+        super::responsecontroller::__goish_register_FullDuplexer_impl::<response>();
         __goish_register_Hijacker_impl::<response>();
     });
     let _ = REGISTER.get();
@@ -448,6 +476,25 @@ struct respInner {
     /// never emitted — Go's `chunkWriter.Write` "Eat writes."
     /// (server.go:1339).
     is_head: bool,
+    /// The `Server.ErrorLog` this response should report handler
+    /// misuse through, passed in by the serve loop. Go reaches it as
+    /// `c.server.logf`; goish's response has no server pointer, so the
+    /// logger itself is handed over. None — a response built outside a
+    /// serve loop — falls back to the package logger, which is what
+    /// `Server.logf` does when ErrorLog is nil.
+    error_log: Option<Arc<crate::log::Logger>>,
+    /// Go's `w.req.ProtoAtLeast(1, 1)`, passed in by the server the
+    /// way `is_head` is. Go reads it off the request the response
+    /// holds; goish's writer holds no request, and without it the
+    /// Connection header cannot follow Go's rules — `close` is only
+    /// ever ADDED on HTTP/1.1, and `keep-alive` only on HTTP/1.0.
+    /// Defaults true so a writer built outside the serve loop behaves
+    /// as the common case.
+    proto11: bool,
+    /// Go's `response.written` (server.go:206) — bytes the handler has
+    /// passed to Write, counted whether or not they reached the wire,
+    /// so a declared Content-Length can be enforced against them.
+    written: i64,
     /// Go's `response.closeAfterReply` (server.go:236) — set when the
     /// request or something during the handler decided this connection
     /// must not be reused.
@@ -509,8 +556,12 @@ impl response {
     /// before invoking the handler.
     pub fn new(conn: TCPConn) -> Self {
         register_response_impls();
-        let mut h = Header::new();
-        h.Set(string("Content-Type"), string("text/plain; charset=utf-8"));
+        // Go does NOT seed a Content-Type. It sniffs the body when the
+        // handler set none (see `sniffContentType`); seeding one here
+        // made `haveType` permanently true, so nothing was ever
+        // sniffed and every handler-generated response went out as
+        // text/plain — HTML rendered as source in a browser.
+        let h = Header::new();
         response {
             inner: crate::sync::Mutex::new(respInner {
                 conn,
@@ -521,6 +572,9 @@ impl response {
                 chunked: false,
                 keep_alive: false,
                 is_head: false,
+                proto11: true,
+                written: 0,
+                error_log: None,
                 closeAfterReply: false,
                 requestBodyLimitHit: false,
                 werr: errors::nil,
@@ -670,6 +724,46 @@ impl response {
         self.inner.Lock().keep_alive = keep_alive;
     }
 
+    // go: none — goish-only: Go stores the request on the response; goish passes the protocol version in.
+    /// Server hook: record `w.req.ProtoAtLeast(1, 1)`. Drives the
+    /// Connection header rules in `finalizeHeaders`.
+    pub fn __set_proto11(&self, proto11: bool) {
+        self.inner.Lock().proto11 = proto11;
+    }
+
+    // go: none — goish-only: Go reaches the logger as `c.server.logf`;
+    // goish's response has no server pointer, so the serve loop hands
+    // the logger over instead.
+    /// Server hook: route this response's handler-misuse messages to
+    /// `Server.ErrorLog`.
+    pub fn __set_error_log(&self, l: Option<Arc<crate::log::Logger>>) {
+        self.inner.Lock().error_log = l;
+    }
+
+    // go: none — goish-only: Go reaches the server's logger as
+    // `c.server.logf` (server.go:3459, ported on Server in server.rs);
+    // goish's response has no server pointer, so this forwards to the
+    // logger the serve loop handed it, with Server.logf's own
+    // package-logger fallback.
+    /// The `c.server.logf` every handler-misuse message in this file
+    /// goes through. These used to call `log::Printf!` directly, which
+    /// meant `Server.ErrorLog` was accepted and then ignored for
+    /// exactly the messages a handler provokes — superfluous
+    /// WriteHeader, WriteHeader after Hijack, Content-Length beside a
+    /// Transfer-Encoding. They went to the process logger instead,
+    /// escaping whatever pipeline the application had configured.
+    fn logf(&self, msg: string) {
+        let l = self.inner.Lock().error_log.clone();
+        match l {
+            Some(l) => {
+                let _ = l.Output(2, msg);
+            }
+            None => {
+                crate::log::println_impl(&[crate::fmt::FmtArg::Val(&msg)]);
+            }
+        }
+    }
+
     // go: none — goish-only: Go stores the request on the response; goish passes the HEAD-ness in.
     /// Server hook: mark this response as answering a HEAD request.
     /// Mirrors Go's `isHEAD := w.req.Method == "HEAD"`
@@ -728,14 +822,22 @@ impl response {
         // Content-Length (mutually exclusive per RFC 7230 §3.3.2).
         let head = {
             let mut h = self.header.Lock();
+            // Before the auto `chunked` below: Go's hasTE guard tests a
+            // HANDLER-set Transfer-Encoding, and a flushed response is
+            // still sniffed.
+            finalizeHeaders(
+                &mut h,
+                g.status,
+                &g.body,
+                g.keep_alive,
+                g.proto11,
+                g.is_head,
+            );
             if !suppress_body {
                 h.Del(string("Content-Length"));
                 h.Set(string("Transfer-Encoding"), string("chunked"));
             }
-            if !g.keep_alive && h.Get(string("Connection")).Len() == 0 {
-                h.Set(string("Connection"), string("close"));
-            }
-            build_head(g.status, &h)
+            build_head(g.status, &h, g.proto11)
         };
         let (_, err) = g.conn.Write(slice::<byte>::__from_vec(head));
         if !err.IsNil() {
@@ -898,6 +1000,39 @@ impl response {
         if g.flushed {
             return errors::nil;
         }
+        // Trailers REQUIRE chunked framing: they are sent after the
+        // body, and a Content-Length response has nowhere to put them.
+        // Go arranges this by declining to derive a Content-Length when
+        // the handler declared trailers (chunkWriter.writeHeader's
+        // `!trailers` guard), which drops the response into chunked.
+        //
+        // goish derived the length regardless, so a handler that set
+        // `Trailer: X-Sum` and wrote a short body got a Content-Length
+        // response, the announcement was dropped, and the trailer
+        // itself was never sent — silently, with the body intact. The
+        // case that found it was a reverse proxy relaying a backend's
+        // trailer announcement to a client, which could not work
+        // because there was no announcement left to relay.
+        if !g.chunked && !g.is_head && bodyAllowedForStatus(g.status) {
+            // Same reasoning for a handler-set `Transfer-Encoding:
+            // chunked`: Go sets cw.chunking and frames the body
+            // (server.go:1524-1535). goish used to leave it buffered,
+            // so the response advertised chunked framing and then sent
+            // raw bytes — unparseable to any client that believed the
+            // header.
+            let hdr = self.header.Lock();
+            let declares = hdr.Values(string("Trailer")).Len() > 0
+                || hdr.Get(string("Transfer-Encoding")).as_ref() as &str == "chunked";
+            drop(hdr);
+            if declares {
+                drop(g);
+                let e = self.promote_chunked();
+                if !e.IsNil() {
+                    return e;
+                }
+                g = self.inner.Lock();
+            }
+        }
         g.flushed = true;
         if !g.wrote_header {
             g.wrote_header = true;
@@ -941,13 +1076,25 @@ impl response {
             // HEAD still advertises the GET-equivalent length; 1xx/
             // 204/304 must not carry an auto Content-Length at all
             // (Go omits it for bodyless statuses, server.go:1533).
-            if bodyAllowedForStatus(g.status) && h.Get(string("Content-Length")).Len() == 0 {
+            // Go also declines to derive one when the handler set a
+            // Transfer-Encoding, "because they're generally
+            // incompatible" (server.go:1361).
+            let hasTE = h.Get(string("Transfer-Encoding")).Len() != 0;
+            if bodyAllowedForStatus(g.status)
+                && !hasTE
+                && h.Values(string("Content-Length")).Len() == 0
+            {
                 h.Set(string("Content-Length"), int_to_string(g.body.len() as i64));
             }
-            if !g.keep_alive && h.Get(string("Connection")).Len() == 0 {
-                h.Set(string("Connection"), string("close"));
-            }
-            let mut buf = build_head(g.status, &h);
+            finalizeHeaders(
+                &mut h,
+                g.status,
+                &g.body,
+                g.keep_alive,
+                g.proto11,
+                g.is_head,
+            );
+            let mut buf = build_head(g.status, &h, g.proto11);
             if !suppress_body {
                 buf.reserve(g.body.len());
                 buf.extend_from_slice(&g.body);
@@ -1077,6 +1224,25 @@ impl ResponseWriter for response {
         if p.len() > 0 && !bodyAllowedForStatus(g.status) {
             return (0, super::server::ErrBodyNotAllowed.into());
         }
+        // `(*response).write` (server.go:1694-1700): count the bytes
+        // BEFORE the bound is tested, then reject the write whole —
+        // Go returns (0, ErrContentLength) rather than a short write,
+        // and the counter stays advanced so every later write fails
+        // too. Without this a handler that declared N bytes and wrote
+        // more put all of them on the wire under a Content-Length that
+        // did not cover them.
+        {
+            let declared = self.header.Lock().Get(string("Content-Length"));
+            if declared.Len() != 0 {
+                let (cl, perr) = crate::strconv::ParseInt(declared, 10, 64);
+                if perr.IsNil() && cl >= 0 {
+                    g.written += crate::int64(p.len());
+                    if g.written > cl {
+                        return (0, super::server::ErrContentLength.into());
+                    }
+                }
+            }
+        }
         // HEAD: eat writes (server.go:1339) — report success so the
         // handler proceeds normally. In buffered mode the bytes are
         // kept so `flush` derives the GET-equivalent Content-Length.
@@ -1096,28 +1262,30 @@ impl ResponseWriter for response {
         // (server.go:1186-1194) — the whole point of relevantCaller is
         // that "some handler you wrote called this twice" names the
         // handler, not net/http. Go routes through c.server.logf;
-        // goish's response carries no server pointer, so the package
-        // log fallback (what logf does with no ErrorLog) is used.
+        // goish's response has no server pointer, so the serve loop
+        // hands it the logger — see `__set_error_log`. A response built
+        // outside a serve loop still falls back to the package logger,
+        // which is what Server.logf does with no ErrorLog.
         if self.hijacked() {
             let caller = super::server::relevantCaller();
-            crate::log::Printf!(
+            self.logf(crate::Sprintf!(
                 "http: response.WriteHeader on hijacked connection from %s (%s:%d)",
                 caller.Function,
                 crate::path::Base(caller.File),
                 caller.Line
-            );
+            ));
             return;
         }
         let mut g = self.inner.Lock();
         if g.wrote_header {
             drop(g);
             let caller = super::server::relevantCaller();
-            crate::log::Printf!(
+            self.logf(crate::Sprintf!(
                 "http: superfluous response.WriteHeader call from %s (%s:%d)",
                 caller.Function,
                 crate::path::Base(caller.File),
                 caller.Line
-            );
+            ));
             return;
         }
         g.wrote_header = true;
@@ -1154,6 +1322,78 @@ impl CloseNotifier for response {
     }
 }
 
+// go: sdk 1.25.5 net/http/server.go:1760-1770 response.FlushError
+/// Go: "FlushError is an internal Flush wrapper which differs from
+/// Flush in that it returns an error." `ResponseController.Flush`
+/// prefers it over `Flusher` precisely so a failed flush can be
+/// reported rather than swallowed.
+impl super::responsecontroller::FlushErrorer for response {
+    // go: none — goish idiom: the interface VIEW of promote_chunked,
+    //     which is the anchored flush machinery.
+    fn FlushError(&self) -> error {
+        return self.promote_chunked();
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: sdk 1.25.5 net/http/server.go:499-501 response.SetReadDeadline
+/// Go sets the deadline on the underlying connection, so a handler can
+/// bound how long it will wait for the rest of a request body.
+impl super::responsecontroller::ReadDeadliner for response {
+    // go: none — goish idiom: the conn is the deadline's owner.
+    fn SetReadDeadline(&self, deadline: crate::time::Time) -> error {
+        let g = self.inner.Lock();
+        return g.conn.SetReadDeadline(deadline);
+    }
+    // go: none — goish idiom: as above.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: sdk 1.25.5 net/http/server.go:503-505 response.SetWriteDeadline
+/// The write half of the same, bounding how long a slow client may
+/// take to accept the response.
+impl super::responsecontroller::WriteDeadliner for response {
+    // go: none — goish idiom: as ReadDeadline.
+    fn SetWriteDeadline(&self, deadline: crate::time::Time) -> error {
+        let g = self.inner.Lock();
+        return g.conn.SetWriteDeadline(deadline);
+    }
+    // go: none — goish idiom: as above.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: sdk 1.25.5 net/http/server.go:507-510 response.EnableFullDuplex
+/// Go: "EnableFullDuplex indicates that the request handler will
+/// interleave reads from Request.Body with writes to the
+/// ResponseWriter." Go must be told, because its default is to consume
+/// the request body before replying.
+///
+/// goish reads the body EAGERLY, before the handler runs, so there is
+/// never an unread body for a write to deadlock against — the
+/// behaviour Go's flag buys is already unconditional here. Answering
+/// nil is therefore honest: the caller asked for full duplex and full
+/// duplex is what it gets. Returning ErrNotSupported would say the
+/// opposite of the truth.
+impl super::responsecontroller::FullDuplexer for response {
+    // go: none — goish idiom: see the note above; the eager body read
+    //     makes this unconditional.
+    fn EnableFullDuplex(&self) -> error {
+        return errors::nil;
+    }
+    // go: none — goish idiom: as above.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
 impl Flusher for response {
     // go: none — forwards to FlushError-shaped promote_chunked; the response.Flush anchor lives on the inherent flush machinery (see promote_chunked).
     /// `(*response).Flush()` (server.go:1756) — promote to chunked
@@ -1182,13 +1422,142 @@ fn build_trailer_block(trailers: &Header) -> Vec<u8> {
     return hb.Bytes().as_ref().to_vec();
 }
 
+// go: none — goish-only: the Content-Type sniffing branch of Go's chunkWriter.writeHeader (server.go:1482-1493), extracted so both goish response writers can share it.
+/// Go's Content-Type sniffing branch, lifted out of `writeHeader` so
+/// both goish response writers can call it:
+///
+///     if bodyAllowedForStatus(w.status) {
+///         _, haveType := header["Content-Type"]
+///         hasTE := header.Get("Transfer-Encoding") != ""
+///         if !haveType && !hasTE && len(p) > 0 {
+///             setHeader.contentType = DetectContentType(p)
+///         }
+///     }
+///
+/// Three details this mirrors exactly, each confirmed against a
+/// running Go by examples/sniff_server_ref_smoke.rs:
+///
+///   * `haveType` tests for the KEY, not a non-empty value. A handler
+///     that does `Set("Content-Type", "")` gets an empty Content-Type
+///     on the wire, not a sniffed one — hence `Values(..).Len()`
+///     rather than `Get(..).Len()`.
+///   * `hasTE` is a HANDLER-set Transfer-Encoding. The auto
+///     `chunked` that a `Flush()` adds must not suppress sniffing, so
+///     this has to run BEFORE the writer sets that header.
+///   * An empty body is not sniffed, and the response then carries no
+///     Content-Type at all. Go does not fall back to text/plain.
+pub(crate) fn sniffContentType(h: &mut Header, status: int, body: &[byte]) {
+    if !bodyAllowedForStatus(status) {
+        return;
+    }
+    if h.Values(string("Content-Type")).Len() != 0 {
+        return;
+    }
+    if h.Get(string("Transfer-Encoding")).Len() != 0 {
+        return;
+    }
+    // Go issue 31753: a Content-Encoding means the bytes on the wire
+    // are compressed, so sniffing them reports the container's type
+    // (gzip → application/x-gzip) instead of the payload's. Go
+    // declines to sniff at all rather than guess wrong.
+    if h.Get(string("Content-Encoding")).Len() != 0 {
+        return;
+    }
+    if body.is_empty() {
+        return;
+    }
+    let ct = super::sniff::DetectContentType(slice::<byte>::__from_vec(body.to_vec()));
+    h.Set(string("Content-Type"), ct);
+    return;
+}
+
+// go: none — goish-only: the header-finalising tail of Go's chunkWriter.writeHeader (server.go:1482-1511), extracted so both goish response writers can share it.
+/// The three header adjustments Go makes after the status is known and
+/// before the head is written, shared by both goish response writers:
+///
+///   1. Sniff the Content-Type, or — for a status that allows no body
+///      — drop the headers RFC 7232 §4.1 forbids on it
+///      (`suppressedHeaders`, already ported in transfer.rs but until
+///      now never called from the response path, so a 304 went out
+///      still carrying the handler's Content-Type and Content-Length).
+///   2. Stamp `Date` unless the handler set one. Go sends Date on
+///      EVERY response including 204 and 304; RFC 9110 §6.6.1 makes it
+///      a MUST for an origin server with a clock. goish sent none at
+///      all, which breaks any cache that dates a response by it.
+///   3. Reject a Content-Length that arrives alongside a non-identity
+///      Transfer-Encoding. Go logs and drops the Content-Length.
+///      goish used to send BOTH, which is the response half of a
+///      request-smuggling desync: a proxy honouring Transfer-Encoding
+///      and one honouring Content-Length disagree about where the
+///      body ends.
+pub(crate) fn finalizeHeaders(
+    h: &mut Header,
+    status: int,
+    body: &[byte],
+    keep_alive: bool,
+    proto11: bool,
+    is_head: bool,
+) {
+    if bodyAllowedForStatus(status) {
+        sniffContentType(h, status, body);
+    } else {
+        let sup = super::transfer::suppressedHeaders(status);
+        for i in 0..sup.Len() {
+            h.Del(sup[i].clone());
+        }
+    }
+
+    if h.Values(string("Date")).Len() == 0 {
+        let mut buf = [0u8; 29];
+        let now = crate::time::Now().UTC();
+        let rendered = super::cookie::append_imf_fixdate_into(&mut buf, &now);
+        h.Set(string("Date"), string::from_bytes(rendered));
+    }
+
+    let te = h.Get(string("Transfer-Encoding"));
+    let hasCL = h.Values(string("Content-Length")).Len() != 0;
+    if hasCL && te.Len() != 0 && te.as_ref() as &str != "identity" {
+        crate::log::Printf!(
+            "http: WriteHeader called with both Transfer-Encoding of %q and a Content-Length of %s",
+            te,
+            h.Get(string("Content-Length"))
+        );
+        h.Del(string("Content-Length"));
+    }
+
+    // Go's Connection rules (server.go:1366-1373 and :1557-1565).
+    // A handler that set the header itself is left alone; otherwise:
+    //
+    //   * `close` is only ever ADDED on HTTP/1.1. On HTTP/1.0 the
+    //     absence of `keep-alive` already means "closing", so Go sends
+    //     nothing and just closes. goish sent `Connection: close` to
+    //     every 1.0 client.
+    //   * `keep-alive` is only ever added on HTTP/1.0, and only when
+    //     the response is self-delimiting (a Content-Length, a HEAD,
+    //     or a status that allows no body) — otherwise the client
+    //     cannot find the end of it. goish sent nothing, so a 1.0
+    //     client that asked to keep the connection had no way to learn
+    //     it could, and closed after one request.
+    if h.Values(string("Connection")).Len() == 0 {
+        let hasCL2 = h.Values(string("Content-Length")).Len() != 0;
+        if !proto11 && keep_alive && (is_head || hasCL2 || !bodyAllowedForStatus(status)) {
+            h.Set(string("Connection"), string("keep-alive"));
+        } else if !keep_alive && proto11 {
+            h.Set(string("Connection"), string("close"));
+        }
+    }
+    return;
+}
+
 // go: none — goish-only: renders status line + sorted headers in one buffer; Go streams the same bytes through chunkWriter.writeHeader.
-pub(crate) fn build_head(status: int, header: &Header) -> Vec<u8> {
+pub(crate) fn build_head(status: int, header: &Header, is11: bool) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::with_capacity(256);
     // Go's writeStatusLine (server.go:1596), ported in server.rs.
-    // `is11` is true because goish's server only speaks HTTP/1.1;
-    // Go passes `w.req.ProtoAtLeast(1, 1)`.
-    buf.extend_from_slice(super::server::writeStatusLine(true, status).as_bytes());
+    // Go passes `w.req.ProtoAtLeast(1, 1)`, and so does goish now:
+    // this used to be hard-coded true, so an HTTP/1.0 request got a
+    // status line claiming HTTP/1.1 — a version the client never
+    // offered and may not speak.
+    buf.extend_from_slice(super::server::writeStatusLine(is11, status).as_bytes());
     // Go's chunkWriter.writeHeader ends with
     // `cw.header.WriteSubset(w, excludeHeader)` — the SAME writer the
     // public Header.Write uses.

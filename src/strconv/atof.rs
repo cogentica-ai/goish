@@ -683,7 +683,7 @@ pub fn ParseFloat<S: Into<string>>(s: S, bit_size: int) -> (f64, error) {
 }
 
 // go: sdk 1.25.5 strconv/atof.go:702-708 parseFloatPrefix
-fn parseFloatPrefix(s: &string, bit_size: int) -> (f64, usize, error) {
+pub(crate) fn parseFloatPrefix(s: &string, bit_size: int) -> (f64, usize, error) {
     if bit_size == 32 {
         let (f, n, err) = atof32(s);
         return (f as f64, n, err);

@@ -24,3 +24,9 @@ pub mod child;
 pub mod host;
 
 pub use child::{envMap, response, Request, RequestFromMap, Serve};
+// Go's `Handler` is `cgi.Handler`, not `cgi.host.Handler` — Go has no
+// sub-package here, only a second file. Without this re-export a
+// caller transcribing Go source has to know which FILE a name came
+// from, which is a fact about goish's layout rather than about the
+// package.
+pub use host::Handler;

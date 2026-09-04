@@ -51,7 +51,10 @@ fn main() {
         }
     }
 
-    // 4. ParseIP rejects non-IPv4 / malformed.
+    // 4. ParseIP rejects malformed input. "::1" used to sit in this
+    //    list, on the grounds that goish had no IPv6 form at all —
+    //    which made a valid address indistinguishable from garbage.
+    //    Case 9 now asserts the opposite.
     {
         let cases = [
             "",
@@ -61,7 +64,6 @@ fn main() {
             "1.2.3.4 ",   // trailing space
             "1.2.3.04",   // leading zero in non-zero octet
             "1.2.3.x",    // non-digit
-            "::1",        // IPv6 not supported in slim
             "1234.0.0.0", // 4 digits in an octet
         ];
         let mut all_nil = true;
@@ -78,6 +80,26 @@ fn main() {
             fmt::Println!("[ 4] ParseIP rejects bad       PASS");
         } else {
             fmt::Println!("[ 4] ParseIP rejects bad       FAIL");
+            failed += 1;
+        }
+    }
+
+    // 9. ParseIP accepts IPv6, and round-trips it through the RFC 5952
+    //    form. Verified against Go 1.25.5; net_ip_ref_smoke pins the
+    //    whole surface line for line.
+    {
+        let ip = net::ParseIP(string("::1"));
+        let mapped = net::ParseIP(string("::ffff:1.2.3.4"));
+        if !ip.IsNil()
+            && ip.String() == string("::1")
+            && ip.bytes.Len() == 16
+            && ip.IsLoopback()
+            && mapped.String() == string("1.2.3.4")
+            && mapped.Equal(&net::IPv4(1, 2, 3, 4))
+        {
+            fmt::Println!("[ 9] ParseIP IPv6              PASS");
+        } else {
+            fmt::Println!("[ 9] ParseIP IPv6              FAIL");
             failed += 1;
         }
     }
@@ -128,10 +150,10 @@ fn main() {
     }
 
     if failed == 0 {
-        fmt::Println!("ok 8/8");
+        fmt::Println!("ok 9/9");
         syscall::Exit(0);
     } else {
-        fmt::Println!("FAIL", failed, "of 8");
+        fmt::Println!("FAIL", failed, "of 9");
         syscall::Exit(1);
     }
 }

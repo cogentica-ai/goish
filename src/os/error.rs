@@ -42,14 +42,25 @@ pub use crate::io::fs::PathError;
 /// Go: `type timeout interface { Timeout() bool }` — the private
 /// assertion `SyscallError.Timeout` and [`IsTimeout`] make.
 ///
-/// Go's is satisfied structurally, by any error that has the method.
-/// A goish interface is satisfied by an explicit impl plus a registry
-/// entry, so the two impls below are what Go's linker would have built.
-#[goish::interface] // goishlint:ignore GOISH022 - `goish::interface`, not `goish::int`
-pub trait timeout {
-    /// Reports whether this error represents a timeout.
-    fn Timeout(&self) -> bool;
-}
+/// Go's is satisfied STRUCTURALLY, by any error that has the method,
+/// and Go declares this interface twice — once here and once in `net`
+/// (net.go:535) — with no consequence at all, because the two
+/// anonymous shapes are the same shape.
+///
+/// goish cannot copy that. A goish interface is satisfied by an
+/// explicit impl plus a registry entry keyed on the TRAIT'S identity,
+/// so two identically-shaped traits are two different keys, and a type
+/// registered for one is invisible to the other. os declared its own
+/// and registered the deadline and errno errors against it; net's
+/// `OpError.Timeout` asks net's — and missed every one of them, so a
+/// socket read that hit its deadline reported `Timeout() == false` to
+/// the caller doing the standard `if ne, ok := err.(net.Error); ok &&
+/// ne.Timeout()` retry check.
+///
+/// So there is ONE trait, net's, and this is a re-export of it. Note
+/// that Go does not export either copy; the `pub` here is goish-only
+/// and kept for source compatibility.
+pub use crate::net::net::{temporary, timeout};
 
 // go: none — goish idiom: `syscall.Errno` satisfies Go's `timeout`
 //     structurally, by having `Timeout()`. The impl is written here
@@ -84,13 +95,74 @@ impl timeout for crate::internal::poll::DeadlineExceededError {
     }
 }
 
+// go: none — goish idiom: the `temporary` half of the same structural
+//     satisfaction, for the two types whose Go originals answer it.
+impl temporary for syscall::Errno {
+    // go: none — goish idiom: forwards to Errno's own anchored method.
+    fn Temporary(&self) -> bool {
+        return syscall::Errno::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: none — goish idiom: as above, for the value behind
+//     `ErrDeadlineExceeded`.
+impl temporary for crate::internal::poll::DeadlineExceededError {
+    // go: none — goish idiom: forwards to the anchored method on the
+    //     concrete type in internal/poll.
+    fn Temporary(&self) -> bool {
+        return crate::internal::poll::DeadlineExceededError::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: none — goish idiom: `os.ErrDeadlineExceeded` satisfies Go's
+//     `net.Error` structurally — it has Error, Timeout and Temporary —
+//     and callers assert exactly that on a socket deadline. goish needs
+//     the impl spelled out.
+impl crate::net::net::Error for crate::internal::poll::DeadlineExceededError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method.
+    fn Error(&self) -> crate::gostring::string {
+        return ErrorTrait::Error(self);
+    }
+    // go: none — goish idiom: as above.
+    fn Timeout(&self) -> bool {
+        return crate::internal::poll::DeadlineExceededError::Timeout(self);
+    }
+    // go: none — goish idiom: as above.
+    fn Temporary(&self) -> bool {
+        return crate::internal::poll::DeadlineExceededError::Temporary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
 // go: none — goish idiom: fill the `#[goish::interface]` downcast
 //     registry for the types this package asserts `timeout` on. See
 //     AGENTS.md §9b. Called from `goish::init()`; idempotent.
 pub fn register_os_error_impls() {
+    use crate::net::net::{__goish_register_temporary_impl, __goish_register_timeout_impl};
     __goish_register_timeout_impl::<syscall::Errno>();
     __goish_register_timeout_impl::<crate::internal::poll::DeadlineExceededError>();
     __goish_register_timeout_impl::<SyscallError>();
+    // Go's deadline error answers Temporary() too, and `net.Error`
+    // needs all three methods — without these, `os.ErrDeadlineExceeded`
+    // does not satisfy net.Error at all, where in Go it does.
+    __goish_register_temporary_impl::<syscall::Errno>();
+    __goish_register_temporary_impl::<crate::internal::poll::DeadlineExceededError>();
+    crate::net::net::__goish_register_Error_impl::<crate::internal::poll::DeadlineExceededError>();
 }
 
 // go: sdk 1.25.5 os/error.go:49-52 SyscallError

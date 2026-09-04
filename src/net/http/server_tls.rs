@@ -50,6 +50,7 @@ use crate::types::{byte, int};
 
 use super::header::Header;
 use super::request::{ReadRequestWithLimit, Request};
+use super::responsewriter::{__goish_register_Flusher_impl, __goish_register_ResponseWriter_impl};
 use super::responsewriter::{build_head, push_hex};
 use super::responsewriter::{Flusher, HeaderHandle, ResponseWriter};
 use super::server::request_keep_alive_pub;
@@ -84,8 +85,9 @@ impl tlsResponse {
     // Go builds its `response` inline in `(*conn).readRequest`
     // (server.go:1079); the split serve loop needs a named one.
     fn new(conn: Arc<crate::sync::Mutex<tls::Conn>>) -> Self {
-        let mut h = Header::new();
-        h.Set(string("Content-Type"), string("text/plain; charset=utf-8"));
+        // No seeded Content-Type: Go sniffs. See
+        // responsewriter::sniffContentType.
+        let h = Header::new();
         tlsResponse {
             conn,
             header: Arc::new(crate::sync::Mutex::new(h)),
@@ -142,13 +144,23 @@ impl tlsResponse {
 
         let buf = {
             let mut h = self.header.Lock();
-            if bodyAllowedForStatus(g.status) && h.Get(string("Content-Length")).Len() == 0 {
+            let hasTE = h.Get(string("Transfer-Encoding")).Len() != 0;
+            if bodyAllowedForStatus(g.status)
+                && !hasTE
+                && h.Values(string("Content-Length")).Len() == 0
+            {
                 h.Set(string("Content-Length"), int_to_string(g.body.len() as i64));
             }
-            if !g.keep_alive && h.Get(string("Connection")).Len() == 0 {
-                h.Set(string("Connection"), string("close"));
-            }
-            let mut buf = build_head(g.status, &h);
+            // The HTTPS loop speaks HTTP/1.1 only, so proto11 is true.
+            super::responsewriter::finalizeHeaders(
+                &mut h,
+                g.status,
+                &g.body,
+                g.keep_alive,
+                true,
+                g.is_head,
+            );
+            let mut buf = build_head(g.status, &h, true);
             if !suppress_body {
                 buf.extend_from_slice(&g.body);
             }
@@ -175,14 +187,21 @@ impl tlsResponse {
         let suppress_body = g.is_head || !bodyAllowedForStatus(g.status);
         let head = {
             let mut h = self.header.Lock();
+            // Before the auto `chunked`: Go still sniffs a flushed
+            // response (its hasTE guard means a HANDLER-set TE).
+            super::responsewriter::finalizeHeaders(
+                &mut h,
+                g.status,
+                &g.body,
+                g.keep_alive,
+                true,
+                g.is_head,
+            );
             if !suppress_body {
                 h.Del(string("Content-Length"));
                 h.Set(string("Transfer-Encoding"), string("chunked"));
             }
-            if !g.keep_alive && h.Get(string("Connection")).Len() == 0 {
-                h.Set(string("Connection"), string("close"));
-            }
-            build_head(g.status, &h)
+            build_head(g.status, &h, true)
         };
         let mut c = self.conn.Lock();
         let (_, err) = c.Write(&head);
@@ -269,6 +288,18 @@ impl Flusher for tlsResponse {
     fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
         Some(self)
     }
+}
+
+// go: none — goish-only: Go's `w.(http.Flusher)` is structural, so a
+// type with a Flush method needs no registration and there is nothing
+// to forget. goish resolves the same assertion through a runtime
+// registry, so the impl above is invisible to `cast!` until the
+// concrete type is registered for the trait. Without this call an
+// HTTPS handler's `w.(http.Flusher)` misses and every streaming
+// response over TLS silently buffers to completion.
+pub(super) fn register_server_tls_impls() {
+    __goish_register_ResponseWriter_impl::<tlsResponse>();
+    __goish_register_Flusher_impl::<tlsResponse>();
 }
 
 // ─── serve loop ─────────────────────────────────────────────────────

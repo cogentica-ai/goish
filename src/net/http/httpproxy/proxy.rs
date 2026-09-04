@@ -405,7 +405,7 @@ impl matcher for cidrMatch {
     // spelling is the raw identifier `r#match` (routing_tree precedent).
     fn r#match(&self, _host: &string, _port: &string, ip: Option<&crate::net::IP>) -> bool {
         let out = match ip {
-            Some(ip) => self.cidr.Contains(ip.clone()),
+            Some(ip) => self.cidr.Contains(ip),
             None => false,
         };
         return out;

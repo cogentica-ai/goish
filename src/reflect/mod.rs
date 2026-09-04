@@ -145,6 +145,31 @@ pub const Complex128: Kind = Kind::Complex128;
 /// use the legacy spelling (Go 1.18 renamed it). Same value as `Pointer`.
 pub const Ptr: Kind = Kind::Pointer;
 
+// go: none — goish idiom: Go's `fmt` finds `Kind.String` by structural
+// assertion, so `%v` on a Kind prints "struct". goish's printer
+// dispatches on `Format`, reached through `Stringer`, and nothing
+// implemented it — a Kind could not be printed at all, which is the
+// same gap io/fs's FileMode had.
+impl crate::fmt::Stringer for Kind {
+    // go: none — goish idiom: see the note above this impl.
+    fn String(&self) -> string {
+        // Method-call form, not `Kind::String(self)`: the enum has a
+        // `String` VARIANT, which shadows the method in path position.
+        let k: &Kind = self;
+        return k.String();
+    }
+}
+
+// go: none — goish idiom: as for Kind. Go's `%v` on a reflect.Type
+// prints the type's name through its String method.
+impl crate::fmt::Stringer for Type {
+    // go: none — goish idiom: see the note above this impl.
+    fn String(&self) -> string {
+        let ty: &Type = self;
+        return ty.String();
+    }
+}
+
 impl Kind {
     /// Mirrors Go's `Kind.String()` — lowercase Go type name.
     pub fn String(&self) -> string {
@@ -199,6 +224,16 @@ impl StructTag {
     #[doc(hidden)]
     pub const fn __new(raw: &'static str) -> Self {
         Self { raw }
+    }
+
+    // go: none — goish idiom: Go's `StructTag` IS a string
+    // (`type StructTag string`), so a caller writes `string(f.Tag)` to
+    // read the raw text back — for a log line, or to re-derive
+    // something the accessors do not expose. goish's is a struct with
+    // a private field and offered no way at all, which made the raw
+    // tag unreachable from outside this file.
+    pub fn String(&self) -> string {
+        return string::from_bytes(self.raw.as_bytes());
     }
 
     /// `Get(key)` — value for `key`, empty string if missing.
