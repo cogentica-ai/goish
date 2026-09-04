@@ -1,5 +1,19 @@
 // Port of net/dnsclient.go + net/dnsclient_unix.go @ Go 1.26.0
 //
+// goishlint:ignore GOISH015 — this file covers TWO Go files and carries
+//     ZERO provenance anchors, so the rule is right and the fix is a
+//     split into `dnsclient.rs` and `dnsclient_unix.rs` with anchors on
+//     each declaration, not a waiver. It is waived rather than done
+//     because the split is a separate change from the defects being
+//     fixed here, and doing both at once would make neither reviewable.
+//
+//     Until then, note what "Port of" above does NOT mean: nothing in
+//     this file is anchored, so no coverage, anchor or body-diff tier
+//     can compare any of it to the Go it names. Two defects have come
+//     out of reading it by hand — a xorshift DNS transaction ID
+//     (7a089bc) and a truncated response returned as success — and it
+//     has not been read in full.
+//
 // Provides:
 //   - newRequest        — build a DNS query packet using dnsmessage::Builder
 //   - checkResponse     — validate response header matches request
@@ -618,8 +632,17 @@ fn exchange(
     if h.Truncated {
         let (mut p2, h2, e2) = dns_stream_round_trip(&ns_addr, id, &q, &tcp_req, timeout_secs);
         if e2 != errors::nil {
-            // TCP also failed — return what we got from UDP
-            return (p, h, errors::nil);
+            // Go: dnsclient_unix.go:236 — the TCP attempt's error is
+            // returned. It does NOT fall back to the truncated UDP
+            // answer, and this used to, with a nil error.
+            //
+            // A truncated response is an INCOMPLETE record set that
+            // the caller cannot tell from a complete one. Anyone able
+            // to force truncation — or simply to block the TCP retry —
+            // then chooses which records the resolver sees: drop all
+            // but one A record, or hide one entirely, and the lookup
+            // still reports success.
+            return (dns::Parser::new(), dns::Header::default(), e2);
         }
         let e3 = p2.SkipQuestion();
         if e3 != dns::ErrSectionDone {
