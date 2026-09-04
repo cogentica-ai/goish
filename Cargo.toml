@@ -3226,3 +3226,7 @@ path = "examples/log_flags_ref_smoke.rs"
 [[example]]
 name = "tls_deadline_ref_smoke"
 path = "examples/tls_deadline_ref_smoke.rs"
+
+[[example]]
+name = "bufio_error_ref_smoke"
+path = "examples/bufio_error_ref_smoke.rs"
