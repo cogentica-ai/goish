@@ -3290,3 +3290,7 @@ path = "examples/stringer_verb_ref_smoke.rs"
 [[example]]
 name = "netip_ctor_ref_smoke"
 path = "examples/netip_ctor_ref_smoke.rs"
+
+[[example]]
+name = "cryptobyte_asn1_ref_smoke"
+path = "examples/cryptobyte_asn1_ref_smoke.rs"
