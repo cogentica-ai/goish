@@ -3206,3 +3206,7 @@ path = "examples/cipher_edge_ref_smoke.rs"
 [[example]]
 name = "hash_contract_ref_smoke"
 path = "examples/hash_contract_ref_smoke.rs"
+
+[[example]]
+name = "time_calendar_ref_smoke"
+path = "examples/time_calendar_ref_smoke.rs"
