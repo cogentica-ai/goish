@@ -3210,3 +3210,7 @@ path = "examples/hash_contract_ref_smoke.rs"
 [[example]]
 name = "time_calendar_ref_smoke"
 path = "examples/time_calendar_ref_smoke.rs"
+
+[[example]]
+name = "osfile_offset_ref_smoke"
+path = "examples/osfile_offset_ref_smoke.rs"

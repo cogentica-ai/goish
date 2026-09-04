@@ -1663,7 +1663,12 @@ impl File {
     /// closed" calls).
     pub fn Close(&mut self) -> error {
         if self.fd < 0 {
-            return nil;
+            // Go: a second Close is `&PathError{Op:"close", …,
+            // Err: ErrClosed}` — "close NAME: file already closed" —
+            // not nil. The distinction is what tells a caller it
+            // double-closed rather than that the close succeeded, and
+            // it is the same shape net's TCPConn.Close reports.
+            return self.wrapErr("close", ErrClosed.into());
         }
         let rc = unsafe { syscall::syscall1(syscall::SYS_CLOSE, self.fd as usize) };
         let old_fd = self.fd;
@@ -1696,16 +1701,43 @@ impl File {
         if self.fd < 0 {
             return (0, self.wrapErr("read", ErrClosed.into()));
         }
-        let len = p.len();
-        let ptr = p.as_mut_ptr();
-        let n = syscall::Pread64(self.fd, ptr, len, off);
-        if n < 0 {
-            (0, self.fdErr("read", n))
-        } else if n == 0 {
-            (0, io::EOF.into())
-        } else {
-            (n as int, nil)
+        // Go: a NEGATIVE offset is its own error, not a syscall
+        // failure (os/file.go:157-159).
+        if off < 0 {
+            return (
+                0,
+                errors::Wrap(PathError {
+                    Op: crate::gostring::string::from_static("readat"),
+                    Path: self.name.clone(),
+                    Err: errors::New(crate::gostring::string::from_static("negative offset")),
+                }),
+            );
         }
+        // Go LOOPS until the buffer is full or an error stops it
+        // (os/file.go:161-170), so a SHORT read reports the error that
+        // ended it — io.EOF when the file ran out — alongside the
+        // bytes it did get. Returning nil there, which this did, tells
+        // a caller looping on `n < len(p)` that the buffer is full
+        // when it is not: io.ReaderAt's contract is explicit that
+        // "ReadAt returns a non-nil error when n < len(p)".
+        let total = p.len();
+        let mut n: usize = 0;
+        let mut err = nil;
+        while n < total {
+            let ptr = unsafe { p.as_mut_ptr().add(n) };
+            let at = off + i64::try_from(n).unwrap_or(0);
+            let got = syscall::Pread64(self.fd, ptr, total - n, at);
+            if got < 0 {
+                err = self.fdErr("read", got);
+                break;
+            }
+            if got == 0 {
+                err = io::EOF.into();
+                break;
+            }
+            n += got as usize;
+        }
+        return (n as int, err);
     }
 
     /// `f.WriteAt(buf, off)` — write to file at given offset.
