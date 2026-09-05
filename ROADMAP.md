@@ -158,11 +158,11 @@ Six malformed header shapes went onto the wire verbatim. Fixed in
 
 `scripts/dead_port_check.py` now looks for it. The check that carries
 the signal is TESTED_NOT_WIRED: an anchored fn that `examples/` calls
-and that nothing under `src/` calls. On its own that is 29 + 227
+and that nothing under `src/` calls. On its own that is 28 + 227
 findings, most of them legitimate — `container/list`'s `Front` is API
 for users, and an example is its rightful only caller. So it asks Go's
 own tree the discriminating question: does Go's stdlib call this symbol
-from some other file? That cuts the list to 29, every one worth reading.
+from some other file? That cuts the list to 28, every one worth reading.
 
 Getting there took three corrections, each the same mistake in a
 different place:
@@ -190,6 +190,9 @@ Fixed so far, one per finding read:
     went out unescaped.
   - `Getwd` did not call `SameFile`, so it never honoured `$PWD` and
     returned the physical path where Go returns the symlinked one.
+  - `NewRequest` did not call `removeEmptyPort`, so a URL written
+    `http://example.com:/p` kept its trailing colon onto the wire as
+    `Host: example.com:`.
 
 Read and found NOT defects, which is the other half of the work:
 
@@ -198,6 +201,16 @@ Read and found NOT defects, which is the other half of the work:
     shared. goish's `slice` is a `Vec` and its `map` clones
     element-wise, and `URL`/`Userinfo` are by-value, so `derive(Clone)`
     already deep-copies. Redundant, not missing.
+  - `wantsHttp10KeepAlive`. goish computes the same predicate a
+    different way: `request_keep_alive` is `!shouldClose(...)`, and
+    Go's `shouldClose` on HTTP/1.0 is `hasClose || !hasKeepAlive`, so
+    its negation already IS "the 1.0 client asked to keep the
+    connection". The HTTP/1.0 keep-alive response path exists and
+    mirrors Go's.
+  - `isH2Upgrade`. In Go it does two things, and both are about the
+    HTTP/2 client preface: skip the missing-Host 400, and mark the
+    connection unusable afterwards. goish speaks HTTP/1.x only, so the
+    connection is finished either way.
   - `didEarlyClose` / `bodyRemains` / `registerOnHitEOF`. All three
     serve Go's STREAMING request body. goish materialises the body into
     a `slice<byte>` before the handler runs, so there is no

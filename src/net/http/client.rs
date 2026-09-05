@@ -2814,10 +2814,22 @@ pub fn NewRequest<M: Into<string>, U: Into<string>, B: __RequestBody>(
     // treats it all as a path) and userinfo (Parse puts "user:pw" in
     // URL.User, leaving Host clean; ParseRequestURI leaves it in
     // Host, which then leaked the credentials into the Host header).
-    let (u, perr) = super::url::Parse(url);
+    let (mut u, perr) = super::url::Parse(url);
     if perr != errors::nil {
         return (default_request(), perr);
     }
+    // Go: "The host's colon:port should be normalized. See Issue
+    // 14836." (request.go:910). This is the only caller of
+    // removeEmptyPort in Go's tree, and goish had the function ported,
+    // anchored and smoke-tested while nothing called it, so
+    // "http://example.com:/p" kept its trailing colon onto the wire as
+    // `Host: example.com:`.
+    //
+    // It strips the colon only when the host really has a port
+    // section, which is why an IPv6 literal survives: Go decides with
+    // LastIndex(":") > LastIndex("]"), so `[::1]`'s internal colons do
+    // not make it look ported.
+    u.Host = super::http::removeEmptyPort(u.Host.clone());
     let body_len = body.Len();
     let host = u.Host.clone();
     let gb_data = body.clone();
