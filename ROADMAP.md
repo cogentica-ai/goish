@@ -291,6 +291,9 @@ Read and found NOT defects, which is the other half of the work:
   - `Skipped` / `Helper`. Go calls both from `testing/fuzz.go`.
     goish's `testing/fuzz.rs` carries a GOISH018 waiver saying F and
     the fuzzing engine are not ported, so the callers do not exist.
+  - `removeIdleConn`. Go's only non-HTTP/2 caller is `readLoop`'s
+    deferred cleanup, and goish's readLoop is not wired to anything —
+    see 2h. The inline path's pool hygiene holds without it.
   - `VolumeName`. Go's caller is `path/filepath/symlink_windows.go`.
     goish is Linux-only.
   - `IsPermission`. Go's caller is `os/removeall_noat.go`, the
@@ -407,6 +410,46 @@ STILL OPEN: `DefaultTransport` has no 30-second default dial timeout,
 because Go supplies it through `DialContext` and setting that hook
 costs ctx cancellation (see 2e's note). A caller who sets no timeout at
 all still waits forever.
+
+## 2h. The transport's readLoop/writeLoop are not wired to anything
+
+`persistConn::readLoop` (163 lines) and `writeLoop` (50) are a careful
+port of Go's transport conn loops. `__spawn_loops`, which starts them,
+has exactly one caller in the whole tree:
+`examples/http_transport_loops_smoke.rs`. Nothing under `src/` starts
+them. `Transport::RoundTrip` reads the response head inline and hands
+the conn back through the body's `reuse_fn`.
+
+So goish has TWO implementations of the same responsibilities — the
+response-head read, the 100-continue dance, the body hand-back, the
+conn's death — one of which runs in production and one of which is
+exercised only by a smoke. They can drift, and the smoke will not
+notice, because it tests the one that does not run.
+
+This is the never-called shape at subsystem scale, and it is why
+several entries on the 2e list resolve at once rather than one at a
+time. `removeIdleConn` is the clearest: Go's only non-HTTP/2 caller is
+`readLoop`'s deferred cleanup, so with readLoop unwired there is
+nothing to call it.
+
+That particular gap is NOT a live defect, which took checking rather
+than assuming. The inline path's pool hygiene holds on its own:
+
+  - a conn is banked only when the framing is clean, so a broken or
+    desynced conn never enters the idle pool at all;
+  - a conn the peer closed while idle is caught on the way OUT —
+    `queueForIdleConn` pops anything `isBroken()` or too old; and
+  - `closeConnIfStillIdle` reaps on the IdleConnTimeout.
+
+Go's `removeIdleConn` would remove a dead conn EAGERLY rather than on
+next use. With `MaxIdleConns` now live at Go's 100, that difference is
+worth keeping in mind — dead entries occupy idle slots until someone
+tries that host — but nothing hands out a dead conn.
+
+The real question this raises is which of the two implementations to
+keep. Wiring readLoop up is the Go-faithful answer and is a large
+change; deleting it is the honest alternative if the inline path is the
+one being maintained. Leaving both is the option that guarantees drift.
 
 ## 3. Gaps other packages will hit next
 
