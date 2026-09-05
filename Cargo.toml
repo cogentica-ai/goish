@@ -3346,3 +3346,7 @@ path = "examples/http_newrequest_host_smoke.rs"
 [[example]]
 name = "http_default_proxy_smoke"
 path = "examples/http_default_proxy_smoke.rs"
+
+[[example]]
+name = "http_client_timeout_dial_smoke"
+path = "examples/http_client_timeout_dial_smoke.rs"

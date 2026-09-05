@@ -272,7 +272,7 @@ goish should be making too. Run:
     scripts/dead_port_check.py          # the ranked list
     scripts/dead_port_check.py -v       # including the quiet 227
 
-## 2g. Client.Timeout does not bound a dial that never completes
+## 2g. Client.Timeout did not bound a dial that never completes — FIXED
 
 Found while checking that http_default_proxy_smoke fails without its
 fix. With the fix reverted the example does not fail, it HANGS, and
@@ -295,9 +295,40 @@ Together they mean a goish client can wait forever on an address that
 black-holes packets, with no configuration available to prevent it.
 That is the shape of an outage rather than an error.
 
-Not yet diagnosed: whether the deadline is never armed on the dialling
-socket, or armed and not observed. `effective_deadline` is computed and
-`__set_deadline` exists, so the machinery is there.
+Diagnosed and fixed. Neither guess was right: the deadline was never
+CONSULTED. `dialConn` called `net::Dial`, which takes no deadline at
+all, while `net::DialTimeout` — sharing the same `dial_deadline`
+underneath — bounds the identical connect correctly. Measured on
+192.0.2.1: `net::DialTimeout` returned in 2.008s with `i/o timeout`
+while the Client was still blocked at forty seconds.
+
+`Transport::dialDeadline` now reads `effective_deadline` (which already
+combined `Client.Timeout`'s ctx deadline with `Transport.Timeout`) and
+dials with the remaining time. Both plain-dial sites use it.
+
+The error text needed a second fix to match Go. Go wraps it:
+
+  Go     context deadline exceeded (Client.Timeout exceeded while
+         awaiting headers)
+  goish  context deadline exceeded
+
+net/http's `timeoutError` (transport.go:2716) was not ported, so the
+annotation had nowhere to live, and `Client.Do` bound Go's `didTimeout`
+closure to `_did_timeout` and dropped it. The suffix is how a caller
+tells "my Client.Timeout fired" from "the context I was handed
+expired", and the wrapper is what makes `err.(net.Error).Timeout()`
+answer true. Both are in now, with the interface registration the
+assertion needs.
+
+Go's `errTimeout` singleton is deliberately not ported with it: its
+only Go caller is the ResponseHeaderTimeout path, which goish does not
+implement, and a ported-but-uncalled decl is the shape this work
+exists to remove.
+
+STILL OPEN: `DefaultTransport` has no 30-second default dial timeout,
+because Go supplies it through `DialContext` and setting that hook
+costs ctx cancellation (see 2e's note). A caller who sets no timeout at
+all still waits forever.
 
 ## 3. Gaps other packages will hit next
 

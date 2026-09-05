@@ -4098,6 +4098,7 @@ pub fn register_http_impls() {
     super::cgi::child::register_cgi_impls();
     super::server_tls::register_server_tls_impls();
     super::client::register_client_impls();
+    super::transport::register_transport_error_impls();
 }
 
 // go: sdk 1.25.5 net/http/server.go:1596-1611 writeStatusLine

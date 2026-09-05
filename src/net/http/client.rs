@@ -1753,7 +1753,10 @@ impl Transport {
     /// Effective conn deadline for one roundtrip: `Transport.Timeout`
     /// (if set) tightened by the request ctx's deadline (if any).
     /// Zero Time ⇒ no deadline.
-    fn effective_deadline(&self, ctx: &Option<Arc<dyn crate::context::Context>>) -> time::Time {
+    pub(crate) fn effective_deadline(
+        &self,
+        ctx: &Option<Arc<dyn crate::context::Context>>,
+    ) -> time::Time {
         let mut dl = time::Time::default();
         if self.Timeout.0 > 0 {
             dl = time::Now().Add(self.Timeout);
@@ -2435,8 +2438,26 @@ impl Client {
             // Go: resp, didTimeout, err = c.send(req, deadline) —
             // the jar halves of (*Client).send are the blocks above
             // and below this call.
-            let (resp, _did_timeout, err) = send(&current, &self.Transport, deadline.clone());
+            let (resp, did_timeout, err) = send(&current, &self.Transport, deadline.clone());
             if !err.IsNil() {
+                // Go: if !deadline.IsZero() && didTimeout() { err =
+                // &timeoutError{err.Error() + " (Client.Timeout
+                // exceeded while awaiting headers)"} } (client.go:733)
+                //
+                // `didTimeout` was computed and bound to `_did_timeout`
+                // here, so the annotation never happened. It is how a
+                // caller tells "my Client.Timeout fired" from "the
+                // context I was handed expired" — different bugs with
+                // different fixes — and the wrapper is also what makes
+                // `err.(net.Error).Timeout()` answer true.
+                let err = if !deadline.IsZero() && did_timeout() {
+                    super::transport::newTimeoutError(
+                        err.Error()
+                            + string(" (Client.Timeout exceeded while awaiting headers)"),
+                    )
+                } else {
+                    err
+                };
                 return (resp, uerr(uerr_method.clone(), &current.URL, err));
             }
             // Go (client.go, send): if c.Jar != nil { if rc :=

@@ -2067,10 +2067,11 @@ impl Transport {
             )));
             return (Some(pc), errors::nil);
         }
-        let (conn, derr) = crate::net::Dial(crate::string("tcp"), key.addr.clone());
+        let (conn, derr) = self.dialDeadline(&ctx, crate::string("tcp"), key.addr.clone());
         if !derr.IsNil() {
             return (None, derr);
         }
+        let conn = conn.unwrap();
         let pc = Arc::new(persistConn::__new(key.clone()));
         // The disconnect watch wants the RAW socket's PollDesc —
         // captured before any TLS wrap hides the TCPConn.
@@ -2594,6 +2595,60 @@ impl Transport {
         return self.Dial.is_some() || self.DialContext.is_some();
     }
 
+    // go: none — goish-only: the plain dial, bounded by the roundtrip
+    // deadline.
+    //
+    // Go gets this for free: `t.dial(ctx, ...)` hands the ctx to
+    // net.Dialer, which honours ctx.Deadline on the connect itself.
+    // goish's `net::Dial` takes no deadline at all, so a request whose
+    // ctx had one — which is exactly how `Client.Timeout` is carried,
+    // via context.WithDeadline in setRequestCancel — connected with no
+    // bound. A GET to an address that black-holes packets never
+    // returned: measured against 192.0.2.1 with Client.Timeout set to
+    // two seconds, the call was still blocked when the harness killed
+    // it at forty.
+    //
+    // The capability was already there and unused. `net::DialTimeout`
+    // bounds the same connect correctly — 2.008s and `i/o timeout` on
+    // the same address — and shares `dial_deadline` with `net::Dial`.
+    pub(crate) fn dialDeadline(
+        &self,
+        ctx: &Option<Arc<dyn crate::context::Context>>,
+        network: crate::gostring::string,
+        addr: crate::gostring::string,
+    ) -> (Option<crate::net::TCPConn>, error) {
+        let dl = self.effective_deadline(ctx);
+        if dl.IsZero() {
+            let (c, e) = crate::net::Dial(network, addr);
+            if !e.IsNil() {
+                return (None, e);
+            }
+            return (Some(c), errors::nil);
+        }
+        let left = dl.Sub(crate::time::Now());
+        if left.0 <= 0 {
+            // Already past it: report the ctx's own error, the way Go
+            // surfaces "context deadline exceeded" rather than a dial
+            // error that never happened.
+            let e = ctx
+                .as_ref()
+                .map(|c| c.Err())
+                .unwrap_or(errors::nil);
+            if !e.IsNil() {
+                return (None, e);
+            }
+            return (
+                None,
+                errors::New(crate::string("net/http: dial deadline exceeded")),
+            );
+        }
+        let (c, e) = crate::net::DialTimeout(network, addr, left);
+        if !e.IsNil() {
+            return (None, e);
+        }
+        return (Some(c), errors::nil);
+    }
+
     // go: sdk 1.25.5 net/http/transport.go:1276-1292 Transport.dial
     /// Go: DialContext wins over the deprecated Dial, and a hook
     /// answering (nil, nil) is a hard error naming the hook rather
@@ -2636,11 +2691,11 @@ impl Transport {
             }
             return (conn, err);
         }
-        let (conn, err) = crate::net::Dial(network, addr);
+        let (conn, err) = self.dialDeadline(&ctx, network, addr);
         if !err.IsNil() {
             return (None, err);
         }
-        return (Some(alloc::boxed::Box::new(conn)), errors::nil);
+        return (Some(alloc::boxed::Box::new(conn.unwrap())), errors::nil);
     }
 
     // go: sdk 1.25.5 net/http/transport.go:1471-1481 Transport.customDialTLS
@@ -2885,4 +2940,123 @@ pub fn DefaultTransport() -> alloc::sync::Arc<super::client::Transport> {
         *g = Some(alloc::sync::Arc::new(t));
     }
     return g.as_ref().unwrap().clone();
+}
+
+// go: sdk 1.25.5 net/http/transport.go:2716-2718 timeoutError
+/// Go: "httpTimeoutError represents a timeout. It implements net.Error
+/// and wraps context.DeadlineExceeded."
+///
+/// Distinct from `net`'s `timeoutError`, which carries no message and
+/// always reads "i/o timeout". This one carries the text `Client.Do`
+/// appends when the Client's own deadline is what ended the request:
+///
+///   Go     context deadline exceeded (Client.Timeout exceeded while
+///          awaiting headers)
+///   goish  context deadline exceeded
+///
+/// Neither this type nor `errTimeout` was ported, so the annotation had
+/// nowhere to live and `Client.Do` bound the `didTimeout` closure to
+/// `_did_timeout` and dropped it. The suffix is not decoration: it is
+/// how a caller tells "my Client.Timeout fired" from "the context I was
+/// handed expired", which are different bugs with different fixes. The
+/// `Timeout()` view matters too — `err.(net.Error).Timeout()` is what
+/// Go's own documentation tells callers to ask, and a plain
+/// `errors::New` answers false.
+///
+/// Go's `errTimeout` singleton (transport.go:2725) is deliberately NOT
+/// added with it: its only Go caller is the ResponseHeaderTimeout path,
+/// which goish does not implement, and a ported-but-uncalled decl is
+/// the exact shape this whole line of work exists to remove.
+pub(crate) struct timeoutError {
+    err: crate::gostring::string,
+}
+
+impl crate::errors::ErrorTrait for timeoutError {
+    // go: sdk 1.25.5 net/http/transport.go:2720-2720 timeoutError.Error
+    fn Error(&self) -> crate::gostring::string {
+        return self.err.clone();
+    }
+}
+
+impl timeoutError {
+    // go: none — goish-only: Go writes a composite literal
+    // `&timeoutError{msg}`; goish's errors are Arc-backed.
+    pub(crate) fn __new(err: crate::gostring::string) -> Self {
+        return Self { err };
+    }
+    // go: sdk 1.25.5 net/http/transport.go:2721-2721 timeoutError.Timeout
+    pub(crate) fn Timeout(&self) -> bool {
+        return true;
+    }
+    // go: sdk 1.25.5 net/http/transport.go:2722-2722 timeoutError.Temporary
+    pub(crate) fn Temporary(&self) -> bool {
+        return true;
+    }
+    // go: sdk 1.25.5 net/http/transport.go:2723-2723 timeoutError.Is
+    /// Go: `func (e *timeoutError) Is(err error) bool { return err ==
+    /// context.DeadlineExceeded }`.
+    pub(crate) fn Is(&self, err: &error) -> bool {
+        return errors::Is(err.clone(), crate::context::DeadlineExceeded);
+    }
+}
+
+// go: none — goish idiom: the interface VIEWS of the anchored inherent
+//     methods above. Without them the value carries no type any
+//     assertion can reach, and `err.(net.Error).Timeout()` — the way
+//     Go's docs say to ask — answers false for a real timeout.
+impl crate::net::net::timeout for timeoutError {
+    // go: none — goish idiom: the interface VIEW of the anchored
+    //     inherent method above.
+    fn Timeout(&self) -> bool {
+        return timeoutError::Timeout(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl crate::net::net::temporary for timeoutError {
+    // go: none — goish idiom: as above.
+    fn Temporary(&self) -> bool {
+        return timeoutError::Temporary(self);
+    }
+    // go: none — goish idiom: as above.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl crate::net::net::Error for timeoutError {
+    // go: none — goish idiom: as above.
+    fn Error(&self) -> crate::gostring::string {
+        return crate::errors::ErrorTrait::Error(self);
+    }
+    // go: none — goish idiom: as above.
+    fn Timeout(&self) -> bool {
+        return timeoutError::Timeout(self);
+    }
+    // go: none — goish idiom: as above.
+    fn Temporary(&self) -> bool {
+        return timeoutError::Temporary(self);
+    }
+    // go: none — goish idiom: as above.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: none — goish-only: build the annotated timeout error Client.Do
+// returns when its own deadline is what ended the request.
+pub(crate) fn newTimeoutError(msg: crate::gostring::string) -> error {
+    return errors::Wrap(timeoutError::__new(msg));
+}
+
+// go: none — goish idiom: Go's linker builds the equivalent itabs; see
+//     AGENTS.md §9b. Without these the assertion is a silent miss.
+pub fn register_transport_error_impls() {
+    crate::net::net::__goish_register_Error_impl::<timeoutError>();
+    crate::net::net::__goish_register_timeout_impl::<timeoutError>();
+    crate::net::net::__goish_register_temporary_impl::<timeoutError>();
 }
