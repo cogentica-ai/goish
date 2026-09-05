@@ -578,6 +578,24 @@ Go would have shown it, and cannot answer 408 itself.
 Making goish match means a streaming request body, which is the same
 decision as 2h and 2j rather than a patch.
 
+A third consequence, measured on the wire: the SERVER sends its
+interim `100 Continue` unconditionally, where Go sends it only when the
+handler actually reads the body.
+
+  handler reads the body      Go 100 then 200      goish same
+  handler rejects, unread     Go 401 alone         goish 100, then 401
+  unrecognised Expect         Go 417               goish same
+
+The middle row is the whole point of the mechanism. Go lets a handler
+answer 401 BEFORE the client uploads; goish makes the client send the
+body first, because the request parse reads it before a handler exists
+to reject. On a large upload to an endpoint that would have refused it,
+that is the difference between a wasted round trip and a wasted upload.
+
+http_expect100_server_smoke pins all four rows, with the middle one
+pinned to GOISH's answer and labelled as the divergence — it will start
+failing when the body streams, which is the marker for that work.
+
 The same root produces a second, blunter divergence: request bodies are
 capped at 16 MiB (`MAX_BODY` in request.rs), and a request DECLARING
 more is refused before it sends anything —

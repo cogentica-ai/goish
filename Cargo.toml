@@ -3422,3 +3422,7 @@ path = "examples/multipart_maxheaders_smoke.rs"
 [[example]]
 name = "http_maxheaderbytes_smoke"
 path = "examples/http_maxheaderbytes_smoke.rs"
+
+[[example]]
+name = "http_expect100_server_smoke"
+path = "examples/http_expect100_server_smoke.rs"
