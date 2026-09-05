@@ -1480,6 +1480,19 @@ impl Conn {
         return self.conn.as_deref();
     }
 
+    // go: none — goish-only: the mutable form of NetConn.
+    //
+    // Go reaches the underlying conn through `RecordHeaderError.Conn`,
+    // which goish's record deliberately does not carry (see
+    // newRecordHeaderError below). net/http's "Client sent an HTTP
+    // request to an HTTPS server" reply has to go out on the RAW
+    // connection — writing it through the TLS Conn would try to
+    // encrypt it with a session that never came into being — so the
+    // HTTPS serve loop needs a mutable handle to what is underneath.
+    pub fn __net_conn_mut(&mut self) -> Option<&mut (dyn crate::net::Conn + 'static)> {
+        return self.conn.as_deref_mut();
+    }
+
     // go: sdk 1.25.5 crypto/tls/conn.go:581-586 Conn.newRecordHeaderError
     ///
     /// Deviation: Go's `RecordHeaderError.Conn` field holds the

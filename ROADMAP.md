@@ -291,6 +291,9 @@ Read and found NOT defects, which is the other half of the work:
   - `Skipped` / `Helper`. Go calls both from `testing/fuzz.go`.
     goish's `testing/fuzz.rs` carries a GOISH018 waiver saying F and
     the fuzzing engine are not ported, so the callers do not exist.
+  - `tlsRecordHeaderLooksLikeHTTP` — FIXED. Plaintext HTTP sent to an
+    HTTPS port got the connection dropped with no explanation, where Go
+    answers "Client sent an HTTP request to an HTTPS server."
   - `rangesMIMESize`. Go must precompute the encoded length of a
     multipart/byteranges body because it streams it through an
     io.Pipe; goish builds the body into a buffer and takes its length,

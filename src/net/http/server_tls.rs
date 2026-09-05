@@ -385,7 +385,42 @@ fn serve_tls_conn(
         if hs_ns > 0 {
             let _ = c.SetDeadline(time::Now().Add(time::Duration(hs_ns)));
         }
-        if !c.Handshake().IsNil() {
+        let herr = c.Handshake();
+        if !herr.IsNil() {
+            // Go: if re, ok := err.(tls.RecordHeaderError); ok &&
+            //     re.Conn != nil && tlsRecordHeaderLooksLikeHTTP(
+            //     re.RecordHeader) { io.WriteString(re.Conn,
+            //     "HTTP/1.0 400 Bad Request\r\n\r\nClient sent an HTTP
+            //     request to an HTTPS server.\n") } — at server.go
+            //     lines 1972-1976.
+            //
+            // goish had tlsRecordHeaderLooksLikeHTTP ported and
+            // anchored and called from nowhere, so plaintext HTTP sent
+            // to an HTTPS port got the connection dropped with no
+            // explanation. That is one of the most common mistakes
+            // there is — an `http://` URL against an `https://` port —
+            // and Go answers it in words.
+            //
+            // The check is on the RECORD HEADER, not on the failure:
+            // a genuine TLS record that fails the handshake gets
+            // nothing, which is the third row of the reference.
+            if let Some(re) =
+                crate::errors::As::<crate::crypto::tls::conn::RecordHeaderError>(herr.clone())
+            {
+                if super::server::tlsRecordHeaderLooksLikeHTTP(re.RecordHeader) {
+                    // On the RAW conn, not through the TLS Conn: Go
+                    // writes to `re.Conn` because there is no session
+                    // to encrypt with — the handshake is what failed.
+                    if let Some(raw) = (&mut *c).__net_conn_mut() {
+                        let _ = crate::net::Conn::Write(
+                            raw,
+                            crate::convert::bytes(string::from(
+                                "HTTP/1.0 400 Bad Request\r\n\r\nClient sent an HTTP request to an HTTPS server.\n",
+                            )),
+                        );
+                    }
+                }
+            }
             let _ = c.Close();
             return;
         }

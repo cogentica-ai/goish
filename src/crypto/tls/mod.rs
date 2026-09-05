@@ -610,6 +610,15 @@ impl Conn {
         return self.inner.Handshake();
     }
 
+    // go: none — goish-only: delegates to the verbatim Conn's mutable
+    // NetConn. Go reaches the raw conn through `RecordHeaderError.Conn`,
+    // which goish's record does not carry, so a caller that must write
+    // PLAINTEXT after a failed handshake — net/http's "Client sent an
+    // HTTP request to an HTTPS server" reply — asks the Conn instead.
+    pub fn __net_conn_mut(&mut self) -> Option<&mut (dyn crate::net::Conn + 'static)> {
+        return self.inner.__net_conn_mut();
+    }
+
     // go: none — goish-only: delegates to the verbatim Conn.Read.
     /// `(*tls.Conn).Read(b)` — read application data, driving the
     /// handshake on first use.
