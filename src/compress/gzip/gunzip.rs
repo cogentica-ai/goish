@@ -56,7 +56,7 @@ pub(super) const flagExtra: byte = 1 << 2;
 pub(super) const flagName: byte = 1 << 3;
 pub(super) const flagComment: byte = 1 << 4;
 
-// ─── error sentinels (gzip.go:30, AGENTS.md §8) ────────────────────────
+// ─── error sentinels (gunzip.go:30-35, AGENTS.md §8) ───────────────────
 
 crate::var! {
     /// `gzip.ErrChecksum` — the gzip data has an invalid checksum.

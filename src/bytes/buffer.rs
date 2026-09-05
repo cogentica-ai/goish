@@ -522,6 +522,20 @@ impl Default for Buffer {
 }
 
 impl io::Writer for Buffer {
+    // go: none — goish idiom: the hidden Any-view hooks every
+    // `#[goish::interface]` concrete impl overrides so an assertion on
+    // a `dyn io::Reader` / `dyn io::Writer` can reach this type. Go's
+    // itabs make them unnecessary. Without the MUTABLE one, `io::Copy`
+    // misses `src.(WriterTo)` / `dst.(ReaderFrom)` and the fast-path
+    // impl on this type is unreachable through the interface.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: see `__goish_as_dyn_any`.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+
     // go: sdk 1.25.5 bytes/buffer.go:181-188 Buffer.Write
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
         return Buffer::Write(self, p);
@@ -571,6 +585,20 @@ impl io::WriterTo for Buffer {
 }
 
 impl io::Reader for Buffer {
+    // go: none — goish idiom: the hidden Any-view hooks every
+    // `#[goish::interface]` concrete impl overrides so an assertion on
+    // a `dyn io::Reader` / `dyn io::Writer` can reach this type. Go's
+    // itabs make them unnecessary. Without the MUTABLE one, `io::Copy`
+    // misses `src.(WriterTo)` / `dst.(ReaderFrom)` and the fast-path
+    // impl on this type is unreachable through the interface.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: see `__goish_as_dyn_any`.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+
     // go: sdk 1.25.5 bytes/buffer.go:324-340 Buffer.Read
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         return Buffer::Read(self, p);

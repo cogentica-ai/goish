@@ -1,5 +1,43 @@
 // regexp — Go's `regexp` package, RE2-style subset (backtracking matcher).
 //
+// ─── DIVERGENCE: no linear-time guarantee ────────────────────────────
+//
+// Go's package documentation makes a promise this implementation does
+// NOT keep:
+//
+//   "The regexp implementation provided by this package is guaranteed
+//    to run in time linear in the size of the input."
+//
+// Go keeps it by simulating an NFA (RE2). This is a BACKTRACKING
+// matcher, so a pattern with nested quantifiers is exponential in the
+// input length. Measured 2026-09-05, `(a+)+$` against n 'a's followed
+// by '!' — Go answers every one of these in under a millisecond:
+//
+//     n=10      5 ms          n=20   5,939 ms
+//     n=14     95 ms          n=21  13,124 ms
+//     n=18  1,419 ms          n=22  27,338 ms
+//
+// Each additional character roughly DOUBLES the work. Extrapolating,
+// n=30 is about two hours and n=40 about eighty days. The ANSWER is
+// correct at every size — this is not a wrong result, it is an
+// unbounded one.
+//
+// What that means for a caller: Go's regexp is safe to run against an
+// untrusted pattern or an untrusted subject, and this is not. Roughly
+// twenty-five bytes of input hangs the process indefinitely. Any port
+// of Go code that relies on the linear-time guarantee — a router, a
+// log filter, an input validator — inherits a denial of service here
+// that it did not have in Go.
+//
+// Closing it means the RE2 construction: compile to an instruction
+// program and simulate the NFA with a thread list, which is
+// `regexp/exec.go` plus `regexp/syntax/`. That is a rewrite of the
+// matcher, not a patch to it, and it is recorded in ROADMAP.md rather
+// than attempted here. A step budget was considered and rejected: it
+// would trade an unbounded hang for a WRONG answer on patterns Go
+// answers correctly, which is a worse divergence than the one it
+// fixes.
+//
 // Verified against Go 1.25 `src/regexp/regexp.go` for API shapes and
 // `src/regexp/syntax/parse.go` for parser semantics, and against a
 // running Go by `examples/regexp_ref_smoke.rs`: 70 patterns x 31 inputs,

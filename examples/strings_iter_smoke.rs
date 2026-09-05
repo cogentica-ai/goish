@@ -52,7 +52,7 @@ fn eq(got: &slice<gostring>, want: &[&[u8]]) -> bool {
 }
 
 // (input, sep, SplitSeq output)
-const SPLIT: [(&[u8], &[u8], &[&[u8]]); 14] = [
+const SPLIT: [(&[u8], &[u8], &[&[u8]]); 21] = [
     (b"", b"\x2c", &[b""]),
     (b"\x61", b"\x2c", &[b"\x61"]),
     (
@@ -87,6 +87,29 @@ const SPLIT: [(&[u8], &[u8], &[&[u8]]); 14] = [
     (b"\x61\x62\x63", b"\x61\x62\x63", &[b"", b""]),
     (b"\x61\x62\x63", b"\x61\x62\x63\x64", &[b"\x61\x62\x63"]),
     (b"\xff\xfe", b"", &[b"\xff", b"\xfe"]),
+    // ── Not valid UTF-8. Every case above this line is well-formed,
+    // which is why an empty separator looked settled: a length table
+    // keyed on the leading byte and Go's DecodeRune agree on every
+    // well-formed rune and part company only here. Go splits a
+    // malformed sequence into ONE FRAGMENT PER BYTE (DecodeRune
+    // returns size 1 for anything it cannot decode), so a truncated
+    // 3-byte rune yields two pieces, not one. `explode` behind Split
+    // always did this; SplitSeq did not, and the two are documented to
+    // agree — which check 1 below now actually exercises.
+    // lone-ff
+    (b"\xff", b"", &[b"\xff"]),
+    // bad-middle
+    (b"\x61\xff\x62", b"", &[b"\x61", b"\xff", b"\x62"]),
+    // truncated-3byte
+    (b"\xe4\xb8", b"", &[b"\xe4", b"\xb8"]),
+    // overlong
+    (b"\xc0\xaf", b"", &[b"\xc0", b"\xaf"]),
+    // surrogate
+    (b"\xed\xa0\x80", b"", &[b"\xed", b"\xa0", b"\x80"]),
+    // trunc-4byte
+    (b"\xf0\x9f", b"", &[b"\xf0", b"\x9f"]),
+    // rune-cut
+    (b"\x68\xc3", b"", &[b"\x68", b"\xc3"]),
 ];
 
 // (input, sep, SplitAfterSeq output)

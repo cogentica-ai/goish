@@ -427,6 +427,7 @@ impl<'a, W: io::Writer> DotWriter<'a, W> {
 // ─── Reader (reader.go) ─────────────────────────────────────────────
 
 mod reader;
+pub mod writer;
 pub(crate) use reader::__new_reader_with_scratch;
 pub use reader::{validHeaderFieldByte, validHeaderValueByte, NewReader, Reader};
 

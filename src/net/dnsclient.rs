@@ -1,5 +1,52 @@
 // Port of net/dnsclient.go + net/dnsclient_unix.go @ Go 1.26.0
 //
+// goishlint:ignore GOISH015 — this file covers TWO Go files and carries
+//     ZERO provenance anchors, so the rule is right and the fix is a
+//     split into `dnsclient.rs` and `dnsclient_unix.rs` with anchors on
+//     each declaration, not a waiver. It is waived rather than done
+//     because the split is a separate change from the defects being
+//     fixed here, and doing both at once would make neither reviewable.
+//
+//     Until then, note what "Port of" above does NOT mean: nothing in
+//     this file is anchored, so no coverage, anchor or body-diff tier
+//     can compare any of it to the Go it names.
+//
+// ─── What has been diffed against Go, 2026-09-04 ─────────────────────
+//
+// Read against net/dnsclient.go and net/dnsclient_unix.go function by
+// function. Two defects, each fixed with a smoke or a regression run:
+//
+//   * the transaction ID came from a xorshift64 with a hardcoded seed
+//     under a heading that called it "poor-man's random using clock",
+//     where Go uses the OS-seeded runtime generator. That ID is the
+//     defence against off-path spoofing (7a089bc).
+//   * a UDP response with TC set, whose TCP retry then failed, was
+//     returned as a SUCCESS. Go returns the TCP error. A truncated
+//     answer is an incomplete record set the caller cannot tell from a
+//     complete one.
+//
+// Checked and found to MATCH Go, so the next reader need not redo it:
+//
+//   * checkResponse verifies the Response flag, the ID, and the
+//     question's type, class and case-insensitive name — Go's list
+//     exactly. This is the other half of the spoofing defence.
+//   * dnsPacketRoundTrip IGNORES a non-matching UDP response and keeps
+//     waiting, rather than failing the lookup. Go's comment explains
+//     why (golang.org/issue/13281): a forged packet must not be able
+//     to kill a query. goish continues on all three failure modes.
+//   * checkHeader's five branches, including the lame-referral rule
+//     from golang.org/issue/15434 and the ServerFailure/other split.
+//   * extractExtendedRCode's OPT walk, including `hasAdd` being set
+//     before the type test.
+//   * skipToAnswer's ErrSectionDone-is-NoSuchHost distinction.
+//   * tryOneName's attempt x server loops, and both early returns on
+//     errNoSuchHost — an authoritative negative answer must not be
+//     retried against the remaining servers.
+//   * dnsStreamRoundTrip: the length prefix bounds the allocation at
+//     65535 as Go's does, and a checkResponse mismatch on TCP is an
+//     error rather than a retry, which is right for a stream from a
+//     peer already chosen.
+//
 // Provides:
 //   - newRequest        — build a DNS query packet using dnsmessage::Builder
 //   - checkResponse     — validate response header matches request
@@ -39,7 +86,6 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU64, Ordering};
 
 use super::dnsconfig::{dns_read_config, DnsConfig};
 use super::dnsmessage as dns;
@@ -64,28 +110,41 @@ crate::var! {
 
 const MAX_DNS_PACKET_SIZE: usize = 1232;
 
-// ─── randInt (poor-man's random using clock) ──────────────────────────────
-
-static RAND_STATE: AtomicU64 = AtomicU64::new(0x6c62272e07bb0142);
-
-fn rand_u64() -> u64 {
-    // xorshift64
-    let mut x = RAND_STATE.load(Ordering::Relaxed);
-    // Mix in clock to seed variance across calls
-    let mut ts: [i64; 2] = [0, 0];
-    unsafe {
-        syscall::syscall2(228, 1, ts.as_mut_ptr() as usize);
-    } // CLOCK_GETTIME
-    x ^= (ts[1] as u64).wrapping_add(ts[0] as u64 * 1_000_000_000);
-    x ^= x << 13;
-    x ^= x >> 7;
-    x ^= x << 17;
-    RAND_STATE.store(x, Ordering::Relaxed);
-    x
-}
-
-fn rand_u16() -> u16 {
-    (rand_u64() >> 32) as u16
+// ─── randInt ───────────────────────────────────────────────────────────────
+//
+// Go: dnsclient.go:22 — `func randInt() int { return
+//     int(uint(runtime_rand()) >> 1) }`, where `runtime_rand` is the
+//     runtime's generator, seeded from the OS.
+//
+// This was a xorshift64 with a hardcoded seed, mixed with
+// clock_gettime, under a heading that called it "poor-man's random
+// using clock". It produced the DNS TRANSACTION ID.
+//
+// That ID is the whole of a stub resolver's defence against off-path
+// spoofing: an attacker who can guess it, and the source port, can race
+// a forged answer ahead of the real one and be believed. Sixteen bits
+// is already thin, which is exactly why the value has to be
+// unpredictable rather than merely varying. A xorshift with a known
+// constant seed is recoverable from a few observed IDs, and the clock
+// mixed into it is something an off-path attacker can approximate to
+// within microseconds.
+//
+// goish has a real CSPRNG — the one `crypto/tls` draws record IVs from
+// — so this uses it. The error is checked, though the branch is
+// unreachable: `crypto::rand::Read` calls `fatal` on failure, matching
+// Go's contract that it never returns one. The substantive change here
+// is the SOURCE, not the error handling.
+fn rand_u16() -> (u16, error) {
+    let mut b = crate::goslice::slice::<u8>::__from_vec(vec![0u8; 2]);
+    let (n, err) = crate::crypto::rand::Read(&mut b);
+    if !err.IsNil() {
+        return (0, err);
+    }
+    if n != 2 {
+        return (0, errors::New("net: short read from random source"));
+    }
+    let v = b.__into_vec();
+    return (((v[0] as u16) << 8) | (v[1] as u16), errors::nil);
 }
 
 // ─── newRequest ────────────────────────────────────────────────────────────
@@ -93,7 +152,10 @@ fn rand_u16() -> u16 {
 /// Build a DNS query for `q`. Returns (id, udpReq, tcpReq, err).
 /// udpReq is the bare DNS message; tcpReq has a 2-byte length prefix.
 pub fn new_request(q: dns::Question, ad: bool) -> (u16, Vec<u8>, Vec<u8>, error) {
-    let id = rand_u16();
+    let (id, rerr) = rand_u16();
+    if !rerr.IsNil() {
+        return (0, Vec::new(), Vec::new(), rerr);
+    }
     let mut buf = vec![0u8; 2];
     buf.resize(2, 0); // 2-byte placeholder for TCP len prefix
     let mut b = dns::NewBuilder(
@@ -603,8 +665,17 @@ fn exchange(
     if h.Truncated {
         let (mut p2, h2, e2) = dns_stream_round_trip(&ns_addr, id, &q, &tcp_req, timeout_secs);
         if e2 != errors::nil {
-            // TCP also failed — return what we got from UDP
-            return (p, h, errors::nil);
+            // Go: dnsclient_unix.go:236 — the TCP attempt's error is
+            // returned. It does NOT fall back to the truncated UDP
+            // answer, and this used to, with a nil error.
+            //
+            // A truncated response is an INCOMPLETE record set that
+            // the caller cannot tell from a complete one. Anyone able
+            // to force truncation — or simply to block the TCP retry —
+            // then chooses which records the resolver sees: drop all
+            // but one A record, or hide one entirely, and the lookup
+            // still reports success.
+            return (dns::Parser::new(), dns::Header::default(), e2);
         }
         let e3 = p2.SkipQuestion();
         if e3 != dns::ErrSectionDone {

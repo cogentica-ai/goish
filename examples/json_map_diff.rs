@@ -2,10 +2,11 @@
 // particular the PARTIAL STATE a failed decode leaves behind.
 //
 // goish returned from a bad value without storing anything, so
-// `{"a":1}` into a map<string,string> yielded an EMPTY map. Go stores
-// each key with its zero value before decoding the value, so the same
-// input yields {"a": ""} plus an error, and the walk stops at the first
-// failure rather than skipping past it.
+// `{"a":1}` into a map<string,string> yielded an EMPTY map. Go decodes
+// into the existing value (zero for a new key) and stores it even on
+// error. This primitive failure therefore yields {"a": ""} plus an
+// error, and the walk stops at the first failure. Composite partial
+// state and pre-populated maps are covered by json_map_state_diff.
 //
 // That is observable, not internal: typescript-go's
 // packagejson.Expected[T] DISCARDS the decode error and keeps whatever

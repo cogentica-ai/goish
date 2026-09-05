@@ -89,11 +89,14 @@ pub fn fatalln_impl(args: &[fmt::FmtArg]) -> ! {
 // serializing access through a mutex. The flag bits below control the
 // header prefixed to each line.
 //
-// KNOWN DIVERGENCE: goish has no `runtime.Caller`, so the Lshortfile /
-// Llongfile flags cannot recover the caller's file:line. Output therefore
-// always takes Go's own caller-failure fallback (file = "???", line = 0),
-// rendering "???:0: " when either flag is set. Date/Time/Microseconds and
-// the prefix are fully faithful.
+// The Lshortfile / Llongfile flags report the caller's file and line,
+// resolved through runtime::Caller at the depth `Output` is given.
+//
+// This block used to be a KNOWN DIVERGENCE saying goish had no
+// runtime.Caller and that Output therefore always took Go's
+// caller-failure fallback, rendering "???:0: ". goish has had
+// runtime::Caller for a while; the note was false, and it is why the
+// wrong output looked like a documented limitation.
 
 use crate::errors::error;
 use crate::goslice::slice;
@@ -285,15 +288,54 @@ impl LoggerInner {
 
 impl Logger {
     // go: sdk 1.25.5 log/log.go:193-197 Logger.Output
-    /// Output writes the output for a logging event. (Go: log.go 140.)
-    /// `calldepth` is accepted for API compatibility; goish has no
-    /// runtime.Caller so it is unused.
-    pub fn Output<S: Into<string>>(&self, _calldepth: int, s: S) -> error {
+    /// Output writes the output for a logging event.
+    ///
+    /// `calldepth` names the frame whose file and line the
+    /// `Lshortfile` / `Llongfile` flags report — 2 from a helper like
+    /// `Println`, which is why those pass 2.
+    ///
+    /// This used to say "goish has no runtime.Caller so it is unused"
+    /// and hard-code `???:0`. runtime::Caller has existed for a while
+    /// — net/http's `relevantCaller` walks frames with it — so the
+    /// claim was false and every `log.SetFlags(log.Lshortfile)` in a
+    /// goish program printed `???:0:` where Go prints the file and
+    /// line. Go falls back to exactly that pair, but only when
+    /// runtime.Caller says it could not recover the frame.
+    pub fn Output<S: Into<string>>(&self, calldepth: int, s: S) -> error {
         let s = s.into();
         let now = time::Now();
+        // Go resolves the caller BEFORE taking the lock (log.go:230),
+        // "to avoid holding it while the (relatively expensive) caller
+        // lookup runs". The flag read needs the lock, so this takes a
+        // peek at it and drops it again.
+        let want_caller = { self.inner.Lock().flag & (Lshortfile | Llongfile) != 0 };
+        let mut caller_file = crate::gostring::string::from_static("");
+        let mut caller_line: int = 0;
+        if want_caller {
+            let (_pc, f, l, ok) = crate::runtime::Caller(calldepth);
+            if ok && f.Len() > 0 {
+                caller_file = f;
+                caller_line = l;
+            } else {
+                // Go: `file = "???"; line = 0` when Caller fails.
+                caller_file = crate::gostring::string::from_static("???");
+                caller_line = 0;
+            }
+        }
         let mut g = self.inner.Lock();
-        let (file, line): (&str, int) = if g.flag & (Lshortfile | Llongfile) != 0 {
-            ("???", 0)
+        let short = g.flag & Lshortfile != 0;
+        let rendered: &str = caller_file.as_ref();
+        let rendered = if short && !rendered.is_empty() {
+            // Go: keep only the last path element.
+            match rendered.rfind('/') {
+                Some(i) => &rendered[i + 1..],
+                None => rendered,
+            }
+        } else {
+            rendered
+        };
+        let (file, line): (&str, int) = if want_caller {
+            (rendered, caller_line)
         } else {
             ("", 0)
         };

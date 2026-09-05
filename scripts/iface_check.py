@@ -57,6 +57,21 @@ def rs_files(root):
                 yield os.path.join(dirpath, n)
 
 
+def base_type(name):
+    """The bare type name a registration or impl names.
+
+    A registration can be for a generic instantiation —
+    `__goish_register_unmarshaler_impl::<nistCurve<nistec::P256Point>>()`
+    — and the type being registered is `nistCurve`, not the parameter
+    inside the angle brackets. Splitting on `::` alone yields
+    `P256Point>` and the registration then matches nothing, which is
+    how crypto/elliptic's four nistec curves read as UNREGISTERED after
+    they had been registered.
+    """
+    name = name.split("<")[0]
+    return name.split("::")[-1].strip()
+
+
 def scope_of(path):
     """The module a file belongs to, for telling same-named types apart.
 
@@ -80,7 +95,7 @@ def scan():
         r"AsIface::<(?:crate::)?d!\(([A-Za-z_:]+)\)>"
         r"|cast!\(\s*[^,]+,\s*([A-Za-z_:][A-Za-z0-9_:]*)\s*\)"
     )
-    reg_re = re.compile(r"__goish_register_([A-Za-z_]+)_impl::<\s*([A-Za-z_][A-Za-z0-9_:<>, ]*?)\s*>")
+    reg_re = re.compile(r"__goish_register_([A-Za-z_]+)_impl::<\s*([A-Za-z_][A-Za-z0-9_:<>, ]*?)\s*>\s*\(")
     impl_re = re.compile(
         r"^\s*impl(?:<[^>]*>)?\s+(?:[A-Za-z_][A-Za-z0-9_:]*::)*([A-Za-z_][A-Za-z0-9_]*)"
         r"\s+for\s+([A-Za-z_][A-Za-z0-9_:]*)"
@@ -102,10 +117,10 @@ def scan():
                         targets.setdefault(short, set()).add(f"{path}:{i}")
                     for m in reg_re.finditer(line):
                         registrations[m.group(1)].add(
-                            (scope_of(path), m.group(2).split("::")[-1]))
+                            (scope_of(path), base_type(m.group(2))))
                     m = impl_re.match(line)
                     if m:
-                        impls[m.group(1)].add((scope_of(path), m.group(2).split("::")[-1]))
+                        impls[m.group(1)].add((scope_of(path), base_type(m.group(2))))
     return targets, registrations, impls
 
 

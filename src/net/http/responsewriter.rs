@@ -491,6 +491,18 @@ struct respInner {
     /// Defaults true so a writer built outside the serve loop behaves
     /// as the common case.
     proto11: bool,
+    /// Go's `response.wants10KeepAlive` (server.go:432) — "HTTP/1.0 w/
+    /// Connection \"keep-alive\"", populated in readRequest from
+    /// `Request.wantsHttp10KeepAlive` and read by writeHeader.
+    ///
+    /// Separate from `keep_alive` on purpose, and goish conflated the
+    /// two. Go decides the 1.0 `Connection: keep-alive` header off
+    /// THIS alone, ungated by whether the server will actually reuse
+    /// the connection, while the reuse decision is gated. So a 1.0
+    /// client talking to a server with keep-alives disabled gets the
+    /// header and a closed connection under it. Measured; see
+    /// http_keepalives_enabled_smoke's fourth line.
+    wants10: bool,
     /// Go's `response.written` (server.go:206) — bytes the handler has
     /// passed to Write, counted whether or not they reached the wire,
     /// so a declared Content-Length can be enforced against them.
@@ -573,6 +585,7 @@ impl response {
                 keep_alive: false,
                 is_head: false,
                 proto11: true,
+                wants10: false,
                 written: 0,
                 error_log: None,
                 closeAfterReply: false,
@@ -731,6 +744,14 @@ impl response {
         self.inner.Lock().proto11 = proto11;
     }
 
+    // go: none — goish-only: Go populates response.wants10KeepAlive in
+    // readRequest; goish's serve loop sets it here.
+    /// Server hook: record that this was an HTTP/1.0 request asking to
+    /// keep the connection.
+    pub fn __set_wants10(&self, v: bool) {
+        self.inner.Lock().wants10 = v;
+    }
+
     // go: none — goish-only: Go reaches the logger as `c.server.logf`;
     // goish's response has no server pointer, so the serve loop hands
     // the logger over instead.
@@ -830,6 +851,7 @@ impl response {
                 g.status,
                 &g.body,
                 g.keep_alive,
+                g.wants10,
                 g.proto11,
                 g.is_head,
             );
@@ -1091,6 +1113,7 @@ impl response {
                 g.status,
                 &g.body,
                 g.keep_alive,
+                g.wants10,
                 g.proto11,
                 g.is_head,
             );
@@ -1495,6 +1518,7 @@ pub(crate) fn finalizeHeaders(
     status: int,
     body: &[byte],
     keep_alive: bool,
+    wants10: bool,
     proto11: bool,
     is_head: bool,
 ) {
@@ -1540,7 +1564,12 @@ pub(crate) fn finalizeHeaders(
     //     it could, and closed after one request.
     if h.Values(string("Connection")).Len() == 0 {
         let hasCL2 = h.Values(string("Content-Length")).Len() != 0;
-        if !proto11 && keep_alive && (is_head || hasCL2 || !bodyAllowedForStatus(status)) {
+        // Go: `if w.wants10KeepAlive && (isHEAD || hasCL || ...)`
+        // (server.go:1380) — off wants10KeepAlive ALONE. goish tested
+        // its combined keep_alive flag, which also carries the
+        // server's reuse decision, so a 1.0 client hitting a server
+        // with keep-alives disabled lost a header Go still sends.
+        if wants10 && (is_head || hasCL2 || !bodyAllowedForStatus(status)) {
             h.Set(string("Connection"), string("keep-alive"));
         } else if !keep_alive && proto11 {
             h.Set(string("Connection"), string("close"));

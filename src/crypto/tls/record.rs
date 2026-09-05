@@ -1,5 +1,53 @@
 // crypto/tls/record.rs — TLS 1.2 record layer (encrypt / decrypt).
 //
+// goishlint:ignore GOISH015 — this file is INVENTED, not a port. It
+//     predates `conn.rs`, which is Go's record layer with 55 anchors,
+//     and ROADMAP.md §1 has retiring it as the last of the tls
+//     demolition: `handshake_client.rs` still reaches
+//     `record::read_record` nine times. The `conn.go` citation below is
+//     the RULE this file now enforces, quoted so the two can be
+//     compared — not a claim that record.rs ports conn.go. Renaming it
+//     to conn.rs, which is what this rule asks for, would collide with
+//     the real port.
+//
+// ─── What has been diffed against Go, 2026-09-04 ─────────────────────
+//
+// This file had never been compared to `conn.rs`, the anchored port it
+// stands in for. Four defects came out of doing it, each in its own
+// commit with a smoke:
+//
+//   * no bound on the record length — a u16 was read and that many
+//     bytes allocated, where Go refuses anything over maxCiphertext.
+//   * no bound on the DECRYPTED length, which the first does not
+//     imply: maxCiphertext leaves ~2 KiB of slack over maxPlaintext.
+//   * a padding oracle — three distinguishable errors for bad padding
+//     versus bad MAC, and an early return on the first bad byte. Go's
+//     constant-time `extractPadding` is now ported verbatim and the
+//     two results are folded before either is acted on. The same check
+//     also refused padding over 16 bytes, where TLS permits 255.
+//   * a discarded `rand::Read` result, which on failure left the
+//     per-record IV as zeros.
+//
+// Checked and found to MATCH Go, so the next reader need not redo it:
+//
+//   * the per-record explicit IV is freshly drawn, not reused.
+//   * the AEAD path takes the 8-byte explicit nonce FROM THE WIRE and
+//     prepends the 4-byte fixed IV, which is the TLS 1.2 GCM
+//     construction.
+//   * `compute_mac` covers seq || type || version || length ||
+//     fragment, per RFC 5246 6.2.3.1.
+//   * unencrypted application data cannot be injected mid-handshake:
+//     `handshake_client.rs` rejects any record whose type is not the
+//     one its state machine expects, which is what Go's "Application
+//     Data messages are always protected" check buys.
+//   * sequence-number wraparound is not reachable here — `seq` is a
+//     u64 parameter the caller owns, and `conn.rs` carries Go's
+//     `incSeq` panic.
+//
+// Not established, and worth stating: none of this makes the CBC path
+// constant TIME. The padding scan is Go's, but the MAC is computed
+// over a variable-length payload, which is the other half of Lucky13.
+//
 // Implements the TLS 1.2 record-layer codec for cipher suite
 // TLS_RSA_WITH_AES_128_CBC_SHA (0x002F):
 //
@@ -280,10 +328,37 @@ pub fn encrypt_record(
     }
 
     // 3. Generate random explicit IV (TLS 1.2 per-record)
+    //
+    // Go: conn.go:500 — `if _, err := io.ReadFull(rand, explicitNonce);
+    //     err != nil { return nil, err }`.
+    //
+    // The result is checked, but the branch is UNREACHABLE today and
+    // saying so is the point. goish's `crypto::rand::Read` matches Go's
+    // contract: on a read failure it calls `fatal`, which diverges, so
+    // it can neither return a non-nil error nor short-read. The `let _
+    // =` this replaced was therefore correct, and an earlier version of
+    // this comment claiming it left a zero IV — the BEAST precondition
+    // — was wrong. See the correction in the commit that added this
+    // note.
+    //
+    // Kept because it costs nothing and it is the check Go writes; if
+    // that never-fails contract is ever relaxed, this is already
+    // right.
     let mut iv_buf = [0u8; AES_BLOCK_SIZE];
     {
         let mut iv_slice = slice::<byte>::__from_vec(alloc::vec![0u8; AES_BLOCK_SIZE]);
-        let _ = rand::Read(&mut iv_slice);
+        let (n, rerr) = rand::Read(&mut iv_slice);
+        if !rerr.IsNil() {
+            return (slice::<byte>::__from_vec(Vec::new()), rerr);
+        }
+        // A short read is as dangerous as an error: the untouched tail
+        // stays zero. Go uses ReadFull, which treats it the same way.
+        if n as usize != AES_BLOCK_SIZE {
+            return (
+                slice::<byte>::__from_vec(Vec::new()),
+                errors::New("tls: short read from random source"),
+            );
+        }
         let iv_vec = iv_slice.__into_vec();
         iv_buf.copy_from_slice(&iv_vec[..AES_BLOCK_SIZE]);
     }
@@ -327,6 +402,71 @@ pub fn encrypt_record(
 
 /// Decrypt one TLS record fragment (everything after the 5-byte header).
 /// Returns the decrypted plaintext.
+// go: sdk 1.25.5 crypto/tls/conn.go:281-326 extractPadding
+// goishlint:ignore GOISH014 extract_padding — record.rs is invented
+//     code being retired (see the file header); the anchor cites the
+//     Go function this one is a verbatim port of, which is the only
+//     part of this file that is.
+/// Return, in constant time, the length of the padding to remove from
+/// the end of `payload`, and a mask that is 255 if the padding is valid
+/// and 0 otherwise.
+///
+/// Verbatim from Go, including the two details that matter:
+///   * it examines a FIXED 256 bytes (or the whole payload if shorter)
+///     rather than stopping at the claimed length, so the time taken
+///     does not depend on where the padding went wrong;
+///   * it zeroes the padding length on failure, which keeps the
+///     unchecked bytes inside the MAC. Go's comment: "an attacker that
+///     could distinguish MAC failures from padding failures could mount
+///     an attack similar to POODLE in SSL 3.0".
+fn extract_padding(payload: &[byte]) -> (usize, byte) {
+    if payload.is_empty() {
+        return (0, 0);
+    }
+
+    let mut padding_len = payload[payload.len() - 1];
+    let t = (payload.len() - 1).wrapping_sub(padding_len as usize);  // goishlint:ignore GOISH005 — constant-time sign-bit broadcast; the width is the point
+    // If len(payload)-1 >= paddingLen the MSB of t is zero.
+    let mut good: byte = ((!(t as i64) >> 63) & 0xff) as byte;  // goishlint:ignore GOISH005 — constant-time sign-bit broadcast; the width is the point
+
+    // The maximum possible padding length plus the length field itself.
+    // The length of the padded data is public, so the bound is too.
+    let mut to_check = 256usize;
+    if to_check > payload.len() {
+        to_check = payload.len();
+    }
+
+    for i in 0..to_check {
+        let t = (padding_len as usize).wrapping_sub(i);  // goishlint:ignore GOISH005 — constant-time sign-bit broadcast; the width is the point
+        // If i <= paddingLen the MSB of t is zero.
+        let mask: byte = ((!(t as i64) >> 63) & 0xff) as byte;  // goishlint:ignore GOISH005 — constant-time sign-bit broadcast; the width is the point
+        let b = payload[payload.len() - 1 - i];
+        good &= !(mask & padding_len ^ mask & b);
+    }
+
+    // AND the bits of `good` together and spread the result.
+    good &= good << 4;
+    good &= good << 2;
+    good &= good << 1;
+    good = ((good as i8) >> 7) as byte;  // goishlint:ignore GOISH005 — constant-time sign-bit broadcast; the width is the point
+
+    // Zero the padding length on error, so unchecked bytes stay in the MAC.
+    padding_len &= good;
+
+    return (padding_len as usize + 1, good);  // goishlint:ignore GOISH005 — constant-time sign-bit broadcast; the width is the point
+}
+
+// go: none — goish idiom: Go writes the fold as
+//     `subtle.ConstantTimeCompare(...) & int(paddingGood)`; the MAC
+//     comparison here already produces a difference mask, so this turns
+//     that into the same 255/0 shape without branching on it.
+/// 255 when `a == b`, 0 otherwise, without a branch.
+fn ctEq(a: byte, b: byte) -> byte {
+    let x = a ^ b;
+    // x == 0 -> 255, else 0
+    return ((((x as i32) - 1) >> 31) & 0xff) as byte;  // goishlint:ignore GOISH005 — constant-time sign-bit broadcast; the width is the point
+}
+
 pub fn decrypt_record(
     record_type: byte,
     seq: u64,
@@ -368,37 +508,29 @@ pub fn decrypt_record(
     decrypter.CryptBlocks(&mut dst_slice, src_slice);
     let dst_vec = dst_slice.__into_vec();
 
-    // 2. Strip PKCS7 padding
+    // 2. Strip PKCS7 padding, in constant time.
     if dst_vec.is_empty() {
         return (
             slice::<byte>::__from_vec(Vec::new()),
             errors::New("tls: empty decrypted data"),
         );
     }
-    let pad_byte = *dst_vec.last().unwrap();
-    let pad_len = pad_byte as usize + 1; // goishlint:ignore GOISH005
-    if pad_len > dst_vec.len() || pad_len > AES_BLOCK_SIZE {
+    let (to_remove, padding_good) = extract_padding(&dst_vec);
+    if to_remove > dst_vec.len() {
+        // Cannot happen once `good` is 0 — extract_padding zeroes the
+        // length on failure — but the slice below must not panic.
         return (
             slice::<byte>::__from_vec(Vec::new()),
-            errors::New("tls: bad padding length"),
+            errors::New("tls: bad record MAC"),
         );
     }
-    let pad_start = dst_vec.len() - pad_len;
-    for &b in &dst_vec[pad_start..] {
-        if b != pad_byte {
-            return (
-                slice::<byte>::__from_vec(Vec::new()),
-                errors::New("tls: bad padding bytes"),
-            );
-        }
-    }
-    let without_pad = &dst_vec[..pad_start];
+    let without_pad = &dst_vec[..dst_vec.len() - to_remove];
 
     // 3. Verify and strip MAC
     if without_pad.len() < SHA1_SIZE {
         return (
             slice::<byte>::__from_vec(Vec::new()),
-            errors::New("tls: too short after padding removal"),
+            errors::New("tls: bad record MAC"),
         );
     }
     let mac_start = without_pad.len() - SHA1_SIZE;
@@ -407,15 +539,40 @@ pub fn decrypt_record(
 
     let expected_mac = compute_mac(&dir.mac_key, seq, record_type, plaintext);
 
-    // Constant-time comparison
+    // Go: conn.go:452 — `macAndPaddingGood :=
+    //     subtle.ConstantTimeCompare(localMAC, remoteMAC) & int(paddingGood)`,
+    //     and ONE error for either. Go's own comment says why: "Depending
+    //     on what value of paddingLen was returned on bad padding,
+    //     distinguishing bad MAC from bad padding can lead to an attack."
+    //
+    // This returned three different errors — "bad padding length", "bad
+    // padding bytes", "MAC verification failed" — and left the padding
+    // loop on the first byte that did not match. Both halves of a
+    // padding oracle: a distinguishable answer and a shorter one.
     let mut diff: byte = 0;
     for i in 0..SHA1_SIZE {
         diff |= their_mac[i] ^ expected_mac[i];
     }
-    if diff != 0 {
+    // `diff == 0` and `padding_good == 255` folded into one branch, so
+    // the two failures are indistinguishable to the caller.
+    let mac_ok: byte = ctEq(diff, 0);
+    if (mac_ok & padding_good) != 255 {
         return (
             slice::<byte>::__from_vec(Vec::new()),
-            errors::New("tls: MAC verification failed"),
+            errors::New("tls: bad record MAC"),
+        );
+    }
+
+    // Go: conn.go:82 — `if len(data) > maxPlaintext { ...
+    //     c.sendAlert(alertRecordOverflow) }`, applied to the DECRYPTED
+    //     bytes. The record-length bound in `read_record` caps the
+    //     ciphertext at maxCiphertext (16384+2048); the plaintext that
+    //     comes out of it must still fit maxPlaintext (16384), and the
+    //     ~2 KiB between the two is exactly what this catches.
+    if plaintext.len() > super::common::maxPlaintext as usize {
+        return (
+            slice::<byte>::__from_vec(Vec::new()),
+            errors::New("tls: oversized record received"),
         );
     }
 
@@ -868,6 +1025,19 @@ pub fn decrypt_record_aead(
         return (slice::<byte>::__from_vec(Vec::new()), derr);
     }
 
+    // Go: conn.go:82 — `if len(data) > maxPlaintext { ...
+    //     c.sendAlert(alertRecordOverflow) }`, applied to the DECRYPTED
+    //     bytes. The record-length bound in `read_record` caps the
+    //     ciphertext at maxCiphertext (16384+2048); the plaintext that
+    //     comes out of it must still fit maxPlaintext (16384), and the
+    //     ~2 KiB between the two is exactly what this catches.
+    if pt_s.Len() > super::common::maxPlaintext {
+        return (
+            slice::<byte>::__from_vec(Vec::new()),
+            errors::New("tls: oversized record received"),
+        );
+    }
+
     (pt_s, errors::nil)
 }
 
@@ -902,6 +1072,29 @@ pub fn read_record(conn: &mut dyn crate::io::Reader) -> (byte, slice<byte>, erro
 
     let content_type = hdr[0];
     let payload_len = u16::from_be_bytes([hdr[3], hdr[4]]) as usize; // goishlint:ignore GOISH005
+
+    // Go: conn.go:673 — `if c.vers == VersionTLS13 && n > maxCiphertextTLS13
+    // || n > maxCiphertext { c.sendAlert(alertRecordOverflow); ... }`
+    //
+    // This read no length limit at all: a u16 caps the damage at 64 KiB,
+    // but every record between 18433 and 65535 bytes was accepted and
+    // processed where Go refuses it with alertRecordOverflow. That is a
+    // peer-controlled input deciding how much this client allocates and
+    // parses, on the handshake path, and nothing reported it.
+    //
+    // Go applies a TIGHTER bound once the version is known to be TLS
+    // 1.3 (maxCiphertextTLS13, 16384+256). This function is handed a
+    // bare `io::Reader` and has no connection state, so it enforces the
+    // general bound only. `conn.rs`'s `readRecordOrCCS` — the ported
+    // record layer, which this file exists to be replaced by — does the
+    // version-dependent check properly.
+    if payload_len > super::common::maxCiphertext as usize {
+        return (
+            content_type,
+            empty,
+            errors::New("tls: oversized record received"),
+        );
+    }
 
     if payload_len == 0 {
         return (content_type, empty, errors::nil);

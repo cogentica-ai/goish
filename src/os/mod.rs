@@ -1,5 +1,31 @@
 // os — Go's `os` package, ported.
 //
+// ─── What has been diffed against Go, 2026-09-05 ─────────────────────
+//
+// 61 of this file's exported functions carry no provenance anchor, so
+// no coverage, anchor or body-diff tier compares them to Go. A sample
+// was read by hand against os/file.go, os/file_unix.go and
+// os/file_posix.go. One defect, five confirmed:
+//
+//   FIXED  the FileMode -> syscall conversion dropped setuid, setgid
+//          and sticky. Four call sites shared the bug; `syscallMode`
+//          is now ported and all four use it. See the note there and
+//          examples/os_filemode_bits_smoke.rs.
+//
+//   clean  WriteFile opens O_WRONLY|O_CREATE|O_TRUNC and Create
+//          O_RDWR|O_CREATE|O_TRUNC, so neither leaves a tail of an
+//          older, longer file behind.
+//   clean  Readlink grows its buffer from 128 and returns only when
+//          `n < len`, so a long target is not silently truncated.
+//   clean  Remove tries unlink then rmdir and picks the error Go picks,
+//          ENOTDIR subtlety included.
+//   clean  Chown passes -1 through as "leave unchanged" rather than
+//          converting it to 0; verified against a running Go, where
+//          the no-op succeeds and chowning to root is refused.
+//
+// The rest of the 61 have NOT been read. This note records where the
+// sample stopped, not that the file is clear.
+//
 //   Go                                   goish
 //   ──────────────────────────────────   ──────────────────────────────────
 //   var Stdin, Stdout, Stderr *File      pub fn Stdin/Stdout/Stderr() -> File
@@ -27,6 +53,7 @@ mod dir;
 pub use dir::CopyFS;
 
 pub mod exec;
+pub mod exec_posix;
 pub mod signal;
 pub mod user;
 
@@ -210,12 +237,16 @@ pub struct FileInfoData {
     mod_time: crate::time::Time,
     is_dir: bool,
     /// Go's `fileStat.sys` — the raw `syscall.Stat_t` that `Sys()`
-    /// hands back and that `SameFile` compares. goish used to discard
-    /// it and return `Arc::new(())` from `Sys()`, so a caller asking
-    /// for the underlying stat got an empty tuple and no way to tell.
-    /// `(dev, ino)` is the identifying pair; the rest of the struct is
-    /// already unpacked into the fields above.
-    sys: Option<(u64, u64)>,
+    /// hands back and that `SameFile` compares.
+    ///
+    /// This kept only `(dev, ino)`, the pair `SameFile` needs, on the
+    /// grounds that "the rest of the struct is already unpacked into
+    /// the fields above". It is not: `st_uid`, `st_gid`, `st_rdev` and
+    /// the atime/ctime pairs have no field here, and `Sys()` is the
+    /// only way Go exposes them. `archive/tar`'s `statUnix` reads
+    /// exactly those to fill a header's Uid, Gid, Uname, Gname,
+    /// AccessTime and ChangeTime, all of which came back zero.
+    sys: Option<syscall::Stat_t>,
 }
 
 // Polymorphic-nil per priority #5. Go's `os.FileInfo` is an interface
@@ -259,7 +290,14 @@ impl FileInfo for FileInfoData {
         self.is_dir
     }
     fn Sys(&self) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
-        alloc::sync::Arc::new(())
+        // Forward. This used to return `Arc::new(())` of its own while
+        // the inherent `Sys` below returned the real stat — so the
+        // answer depended on whether the caller held a `FileInfoData`
+        // or an `fs::FileInfo`, and Go's own callers hold the
+        // interface. `archive/tar`'s statUnix is one: it reads the
+        // owner and the atime/ctime through `fi.Sys()` and got an
+        // empty tuple every time.
+        return FileInfoData::Sys(self);
     }
     fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
         Some(self)
@@ -315,7 +353,7 @@ impl FileInfoData {
     /// for a FileInfo that never came from a stat.
     pub fn Sys(&self) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
         match self.sys {
-            Some(id) => return alloc::sync::Arc::new(id),
+            Some(st) => return alloc::sync::Arc::new(st),
             None => return alloc::sync::Arc::new(()),
         }
     }
@@ -335,8 +373,13 @@ impl FileInfoData {
 /// anything, INCLUDING ITSELF — which is why goish keeps `sys: None`
 /// for those and answers false rather than comparing the paths.
 pub fn SameFile(fi1: &FileInfoData, fi2: &FileInfoData) -> bool {
+    // Go compares the whole `*syscall.Stat_t` pair through
+    // `sameFile`, which on Unix is exactly dev+ino — the two fields
+    // that identify a file. The rest of the struct (size, times) can
+    // differ between two stats of the same file, so comparing it all
+    // would be wrong.
     match (fi1.sys, fi2.sys) {
-        (Some(a), Some(b)) => return a == b,
+        (Some(a), Some(b)) => return a.st_dev == b.st_dev && a.st_ino == b.st_ino,
         _ => return false,
     }
 }
@@ -385,7 +428,7 @@ fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfoData {
         mode,
         mod_time: crate::time::Unix(st.st_mtime, st.st_mtime_nsec as int),
         is_dir,
-        sys: Some((st.st_dev, st.st_ino)),
+        sys: Some(*st),
     }
 }
 
@@ -429,7 +472,7 @@ pub fn OpenFile<N: Into<string>, M: Into<FileMode>>(
     let fd = syscall::Open(
         buf.as_ptr(),
         (flag as i32) | syscall::O_CLOEXEC,
-        perm.0 as i32,
+        syscallMode(perm) as i32,
     );
     if fd < 0 {
         // Go: return nil, &PathError{Op: "open", Path: name, Err: e}.
@@ -855,10 +898,56 @@ pub fn UserConfigDir() -> (string, error) {
     (dir, nil)
 }
 
-/// Line-by-line port of `os.Getwd()` (file.go ~ getwd) — return the
-/// current working directory via `getcwd(2)`. The buffer doubles up
-/// to a 4 KiB cap, mirroring Go's exponential growth retry loop.
+// go: sdk 1.25.5 os/getwd.go:26-149 Getwd
+/// `os.Getwd()` — the current working directory. Go documents the
+/// behaviour this way: "On Unix platforms, if the environment variable
+/// PWD provides an absolute name, and it is a name of the current
+/// directory, it is returned."
+///
+/// goish went straight to `getcwd(2)` and never looked at $PWD, so a
+/// process whose cwd was reached THROUGH A SYMLINK got the physical
+/// path where Go gives the symlinked one. Measured against Go 1.25.5
+/// with the cwd inside `wd/link -> wd/real`:
+///
+///   $PWD names the cwd (via the symlink)   Go wd/link   goish wd/real
+///   $PWD set but names another directory   Go wd/real   goish wd/real
+///   $PWD unset                             Go wd/real   goish wd/real
+///
+/// Only the first diverged, and it is the common case: `cd` through a
+/// symlink is how deploy layouts (`releases/current`), home
+/// directories and container mounts are usually arranged, and the
+/// shell exports $PWD as the logical path.
+///
+/// Go calls this "a clumsy but widespread kludge". It is load-bearing:
+/// a program that prints its cwd, or joins it onto a relative path it
+/// then shows a user, is expected to stay in the namespace the user
+/// typed.
+///
+/// The check is dev+ino equality, via `SameFile` — not string
+/// comparison — so a $PWD that merely LOOKS plausible does not win.
+///
+/// Not ported: Go's `getwdCache` fallback, which re-applies the same
+/// kludge to a cached directory when `syscall.Getwd` fails with
+/// ENAMETOOLONG. goish's loop grows its buffer on ERANGE up to 4 KiB
+/// instead of failing, so that branch has nothing to recover from.
 pub fn Getwd() -> (string, error) {
+    // Go: dir = Getenv("PWD"); if len(dir) > 0 && dir[0] == '/' { ... }
+    let dir = crate::os::env::Getenv(string("PWD"));
+    if dir.Len() > 0 && bytes_of(&dir)[0] == b'/' {
+        // Go: dot, err = statNolog("."); if err != nil { return "", err }
+        let (dot, err) = Stat(string("."));
+        if err.IsNil() {
+            // Go: d, err := statNolog(dir)
+            //     if err == nil && SameFile(dot, d) { return dir, nil }
+            let (d, err2) = Stat(dir.clone());
+            if err2.IsNil() && SameFile(&dot, &d) {
+                return (dir, nil);
+            }
+        }
+        // Go falls through to the syscall on any error here, including
+        // a stat of "." that failed, and so do we.
+    }
+
     // Go: var buf [128]byte; for { n, err := syscall.Getcwd(buf[:]); ... }
     let mut size: usize = 128;
     while size <= 4096 {
@@ -906,6 +995,41 @@ pub fn Chdir<N: Into<string>>(name: N) -> error {
 ///
 /// `mode: impl Into<FileMode>` so ports passing a bare integer
 /// literal (Go's untyped-int) flow through `From<i32>`/`From<u32>`.
+// go: sdk 1.25.5 os/file_posix.go:60-73 syscallMode
+/// Convert a `FileMode` to the bits a `chmod`/`open`/`mkdir` syscall
+/// wants.
+///
+/// The permission bits are the low nine and pass straight through. The
+/// other three do NOT: Go's `FileMode` keeps setuid at 1<<23, setgid at
+/// 1<<22 and sticky at 1<<20, while the kernel wants them at 0o4000,
+/// 0o2000 and 0o1000. Masking the FileMode with 0o7777 — which is what
+/// this file did, under a comment saying the conversion "collapses to
+/// perm bits only" — keeps nine meaningful bits and three meaningless
+/// ones, and silently drops all three special bits.
+///
+/// Measured before the fix: `Chmod(dir, 0o777|ModeSticky)` produced
+/// 0777 with no sticky bit and a nil error. On a shared directory that
+/// is the difference between "only the owner may delete their files"
+/// and "anyone may delete anyone's".
+fn syscallMode(i: FileMode) -> u32 {
+    let mut o: u32 = i.Perm().0;
+    if (i & ModeSetuid) != FileMode(0) {
+        o |= syscall::S_ISUID;
+    }
+    if (i & ModeSetgid) != FileMode(0) {
+        o |= syscall::S_ISGID;
+    }
+    if (i & ModeSticky) != FileMode(0) {
+        o |= syscall::S_ISVTX;
+    }
+    // Go: "No mapping for Go's ModeTemporary (plan9 only)."
+    return o;
+}
+
+// go: sdk 1.25.5 os/file.go:647-647 Chmod
+/// `os.Chmod(name, mode)` — change a named file's mode. The three
+/// special bits go through `syscallMode` above; passing the FileMode
+/// straight to the syscall drops them.
 pub fn Chmod<N: Into<string>, M: Into<FileMode>>(name: N, mode: M) -> error {
     let name: string = name.into();
     let mode: FileMode = mode.into();
@@ -914,8 +1038,7 @@ pub fn Chmod<N: Into<string>, M: Into<FileMode>>(name: N, mode: M) -> error {
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     buf.extend_from_slice(bytes_of(&name));
     buf.push(0);
-    // syscallMode(mode) for slim FileMode collapses to perm bits only.
-    let rc = syscall::Chmod(buf.as_ptr(), mode.0 & 0o7777);
+    let rc = syscall::Chmod(buf.as_ptr(), syscallMode(mode));
     if rc < 0 {
         // Go: return &PathError{Op: "chmod", Path: name, Err: e}
         return pathErr("chmod", name, rc);
@@ -1262,7 +1385,8 @@ pub fn Mkdir<N: Into<string>, M: Into<FileMode>>(name: N, perm: M) -> error {
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     buf.extend_from_slice(bytes_of(&name));
     buf.push(0);
-    let rc = syscall::Mkdir(buf.as_ptr(), perm.0);
+    // Go: syscall.Mkdir(longName, syscallMode(perm))
+    let rc = syscall::Mkdir(buf.as_ptr(), syscallMode(perm));
     if rc < 0 {
         // Go: &PathError{Op: "mkdir", Path: name, Err: e}. goish
         // returned a bare `errors.New("mkdir failed")`, which names
@@ -1662,7 +1786,12 @@ impl File {
     /// closed" calls).
     pub fn Close(&mut self) -> error {
         if self.fd < 0 {
-            return nil;
+            // Go: a second Close is `&PathError{Op:"close", …,
+            // Err: ErrClosed}` — "close NAME: file already closed" —
+            // not nil. The distinction is what tells a caller it
+            // double-closed rather than that the close succeeded, and
+            // it is the same shape net's TCPConn.Close reports.
+            return self.wrapErr("close", ErrClosed.into());
         }
         let rc = unsafe { syscall::syscall1(syscall::SYS_CLOSE, self.fd as usize) };
         let old_fd = self.fd;
@@ -1695,16 +1824,43 @@ impl File {
         if self.fd < 0 {
             return (0, self.wrapErr("read", ErrClosed.into()));
         }
-        let len = p.len();
-        let ptr = p.as_mut_ptr();
-        let n = syscall::Pread64(self.fd, ptr, len, off);
-        if n < 0 {
-            (0, self.fdErr("read", n))
-        } else if n == 0 {
-            (0, io::EOF.into())
-        } else {
-            (n as int, nil)
+        // Go: a NEGATIVE offset is its own error, not a syscall
+        // failure (os/file.go:157-159).
+        if off < 0 {
+            return (
+                0,
+                errors::Wrap(PathError {
+                    Op: crate::gostring::string::from_static("readat"),
+                    Path: self.name.clone(),
+                    Err: errors::New(crate::gostring::string::from_static("negative offset")),
+                }),
+            );
         }
+        // Go LOOPS until the buffer is full or an error stops it
+        // (os/file.go:161-170), so a SHORT read reports the error that
+        // ended it — io.EOF when the file ran out — alongside the
+        // bytes it did get. Returning nil there, which this did, tells
+        // a caller looping on `n < len(p)` that the buffer is full
+        // when it is not: io.ReaderAt's contract is explicit that
+        // "ReadAt returns a non-nil error when n < len(p)".
+        let total = p.len();
+        let mut n: usize = 0;
+        let mut err = nil;
+        while n < total {
+            let ptr = unsafe { p.as_mut_ptr().add(n) };
+            let at = off + i64::try_from(n).unwrap_or(0);
+            let got = syscall::Pread64(self.fd, ptr, total - n, at);
+            if got < 0 {
+                err = self.fdErr("read", got);
+                break;
+            }
+            if got == 0 {
+                err = io::EOF.into();
+                break;
+            }
+            n += got as usize;
+        }
+        return (n as int, err);
     }
 
     /// `f.WriteAt(buf, off)` — write to file at given offset.
@@ -1749,7 +1905,7 @@ impl File {
             return self.wrapErr("chmod", ErrClosed.into());
         }
         let mode: FileMode = mode.into();
-        let rc = syscall::Fchmod(self.fd, mode.0 & 0o7777);
+        let rc = syscall::Fchmod(self.fd, syscallMode(mode));
         if rc < 0 {
             self.fdErr("chmod", rc)
         } else {
@@ -1780,12 +1936,28 @@ impl File {
     }
 
     pub fn Write(&self, p: slice<byte>) -> (int, error) {
-        let n = syscall::Write(self.fd, p.as_ptr(), p.len());
-        if n < 0 {
-            (0, self.fdErr("write", n))
-        } else {
-            (n as int, nil)
+        // Go's `poll.FD.Write` LOOPS until every byte is written or a
+        // syscall fails, which is what lets os.File satisfy io.Writer:
+        // "Write must return a non-nil error if it returns n < len(p)".
+        // A single write(2) does not — a pipe or socket-backed File
+        // takes what fits and reports success, and the caller loses
+        // the rest silently.
+        let total = p.len();
+        let mut n: usize = 0;
+        while n < total {
+            let ptr = unsafe { p.as_ptr().add(n) };
+            let got = syscall::Write(self.fd, ptr, total - n);
+            if got < 0 {
+                return (n as int, self.fdErr("write", got));
+            }
+            if got == 0 {
+                // Linux write(2) returning 0 for a non-empty buffer is
+                // not expected; treat it as a stall rather than spin.
+                return (n as int, self.fdErr("write", -5i64));
+            }
+            n += got as usize;
         }
+        return (n as int, nil);
     }
 
     /// `(*File).Read(p)` (os/file.go:118) — inherent forwarder, see
@@ -1805,30 +1977,27 @@ impl File {
 }
 
 impl io::Writer for File {
+    // go: none — goish idiom: Go's *File IS an io.Writer, so there is
+    // one implementation. Rust needs the trait impl separately, and
+    // this one used to be a SECOND implementation that called write(2)
+    // itself and reported `errors.New("write failed")` — no path, no
+    // errno, no closed-file detection.
+    //
+    // Everything generic goes through here: io::Copy, fmt::Fprintf,
+    // any `dyn io::Writer`. So `io.Copy(f, r)` onto a full disk said
+    // "write failed" while `f.Write(…)` on the same file said
+    // "write /path: no space left on device". It forwards now, and
+    // there is one implementation again.
     fn Write(&mut self, p: slice<byte>) -> (int, error) {
-        let n = syscall::Write(self.fd, p.as_ptr(), p.len());
-        if n < 0 {
-            (0, errors::New("write failed"))
-        } else {
-            (n as int, nil)
-        }
+        return File::Write(self, p);
     }
 }
 
 impl io::Reader for File {
+    // go: none — goish idiom: see the note on the Writer impl. This
+    // reported `errors.New("read failed")` for every failure.
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
-        // p.len() is from Deref<[T]>. p.as_mut_ptr() needs DerefMut → [T].
-        let len = p.len();
-        let ptr = p.as_mut_ptr();
-        let n = syscall::Read(self.fd, ptr, len);
-        if n < 0 {
-            (0, errors::New("read failed"))
-        } else if n == 0 {
-            // Convention: Read returns (0, EOF) on end-of-input.
-            (0, io::EOF.into())
-        } else {
-            (n as int, nil)
-        }
+        return File::Read(self, p);
     }
 }
 

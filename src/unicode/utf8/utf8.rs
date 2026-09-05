@@ -153,8 +153,8 @@ pub fn DecodeRune(p: &[byte]) -> (rune, int) {
 // go: sdk 1.25.5 unicode/utf8/utf8.go:205-243 DecodeRuneInString
 /// Decode the first rune in `s`. Same semantics as `DecodeRune`.
 #[allow(non_snake_case)]
-pub fn DecodeRuneInString<S: AsRef<str>>(s: S) -> (rune, int) {
-    return DecodeRune(s.as_ref().as_bytes());
+pub fn DecodeRuneInString<S: AsRef<[byte]>>(s: S) -> (rune, int) {
+    return DecodeRune(s.as_ref());
 }
 
 // go: sdk 1.25.5 unicode/utf8/utf8.go:253-280 DecodeLastRune
@@ -188,8 +188,8 @@ pub fn DecodeLastRune(p: &[byte]) -> (rune, int) {
 
 // go: sdk 1.25.5 unicode/utf8/utf8.go:290-317 DecodeLastRuneInString
 #[allow(non_snake_case)]
-pub fn DecodeLastRuneInString<S: AsRef<str>>(s: S) -> (rune, int) {
-    return DecodeLastRune(s.as_ref().as_bytes());
+pub fn DecodeLastRuneInString<S: AsRef<[byte]>>(s: S) -> (rune, int) {
+    return DecodeLastRune(s.as_ref());
 }
 
 // ─── Encode ────────────────────────────────────────────────────────────
@@ -323,8 +323,8 @@ pub fn RuneCount<P: AsRef<[byte]>>(p: P) -> int {
 
 // go: sdk 1.25.5 unicode/utf8/utf8.go:421-426 RuneCountInString
 #[allow(non_snake_case)]
-pub fn RuneCountInString<S: AsRef<str>>(s: S) -> int {
-    return RuneCount(s.as_ref().as_bytes());
+pub fn RuneCountInString<S: AsRef<[byte]>>(s: S) -> int {
+    return RuneCount(s.as_ref());
 }
 
 // go: sdk 1.25.5 unicode/utf8/utf8.go:431-431 RuneStart
@@ -355,8 +355,8 @@ pub fn Valid(p: &[byte]) -> bool {
 
 // go: sdk 1.25.5 unicode/utf8/utf8.go:485-528 ValidString
 #[allow(non_snake_case)]
-pub fn ValidString<S: AsRef<str>>(s: S) -> bool {
-    return Valid(s.as_ref().as_bytes());
+pub fn ValidString<S: AsRef<[byte]>>(s: S) -> bool {
+    return Valid(s.as_ref());
 }
 
 // go: sdk 1.25.5 unicode/utf8/utf8.go:532-540 ValidRune
@@ -393,6 +393,6 @@ pub fn FullRune(p: &[byte]) -> bool {
 
 // go: sdk 1.25.5 unicode/utf8/utf8.go:130-147 FullRuneInString
 #[allow(non_snake_case)]
-pub fn FullRuneInString<S: AsRef<str>>(s: S) -> bool {
-    return FullRune(s.as_ref().as_bytes());
+pub fn FullRuneInString<S: AsRef<[byte]>>(s: S) -> bool {
+    return FullRune(s.as_ref());
 }

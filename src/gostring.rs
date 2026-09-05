@@ -188,18 +188,50 @@ impl core::borrow::Borrow<[u8]> for string {
 }
 
 // AsRef<str> — lets functions taking `impl AsRef<str>` accept Goish
-// `string` values without caller-side ceremony. Goish's string is
-// guaranteed-UTF-8 by construction (every From<&str> path validates),
-// so the unchecked conversion is safe. Used by stdlib helpers like
-// `utf8::RuneCountInString`, `reflect::StructTag::Get`, etc., that
-// were narrowed to `&str` and now widen via AsRef.
+// `string` values without caller-side ceremony.
+//
+// A Go string is a byte sequence, NOT guaranteed UTF-8: `string(b)`
+// for any `[]byte` is legal, and so is a byte-offset slice that cuts a
+// multi-byte rune in half. Both are reachable here — `from_bytes`,
+// `__from_vec` and `slice` all build a `string` from arbitrary bytes
+// with no validation — so this conversion cannot be unchecked. It was,
+// until 2026-09-04, on the stated grounds that "goish doesn't expose a
+// raw-bytes constructor"; `from_bytes` is exactly that constructor and
+// is how `string(b)` is implemented.
+//
+// Rust's `&str` has no way to represent those bytes, so the conversion
+// is lossy by necessity: it yields the longest valid UTF-8 prefix.
+// That is a defined, truncating answer rather than undefined
+// behaviour, but it is still not Go's answer, which is why the
+// functions whose contract is specifically about invalid input —
+// utf8's five `*InString` entry points — now take `AsRef<[byte]>` and
+// never come through here. See utf8bad_ref_smoke.
+//
+// The truncation is now confined to three text parsers —
+// locale::Parse, text/language::Parse/MustParse and dnsmessage's
+// nested_err — which match structured ASCII (BCP-47 tags, locale
+// names) where a non-UTF-8 input has no valid parse either way, so a
+// truncated prefix and the raw bytes fail alike.
+//
+// Everything that treats a string as DATA rather than as text now
+// takes `AsRef<[byte]>` and never reaches this impl. That distinction
+// is load-bearing: xxh3's `HashString` laundered through here, and
+// once the conversion became checked, truncation made every string
+// with a leading invalid byte hash equal to "" — real collisions
+// (`HashString("a\xffb") == HashString("a")`). Hashing is not parsing;
+// it must see the bytes. See xxh3_bytes_smoke.
 impl AsRef<str> for string {
     #[inline]
     fn as_ref(&self) -> &str {
-        // SAFETY: every constructor path through `From<&str>` /
-        // `from_bytes` ensures the byte buffer is valid UTF-8. Goish
-        // doesn't expose a raw-bytes constructor that bypasses this.
-        unsafe { core::str::from_utf8_unchecked(&self.bytes) }
+        return match core::str::from_utf8(&self.bytes) {
+            Ok(s) => s,
+            Err(e) => {
+                // SAFETY: `valid_up_to()` is by definition the length
+                // of a prefix that already passed UTF-8 validation.
+                let n = e.valid_up_to();
+                unsafe { core::str::from_utf8_unchecked(&self.bytes[..n]) }
+            }
+        };
     }
 }
 

@@ -158,8 +158,8 @@ pub fn Hash(b: impl AsRef<[byte]>) -> u64 {
 
 /// `xxh3.HashString(s)` (hash64.go:11) — one-shot 64-bit hash of a
 /// string (accepts goish `string`, `&str`, `String`).
-pub fn HashString<S: AsRef<str>>(s: S) -> u64 {
-    hash_any_64(s.as_ref().as_bytes())
+pub fn HashString<S: AsRef<[byte]>>(s: S) -> u64 {
+    hash_any_64(s.as_ref())
 }
 
 // hash64.go hashAny — the size-class dispatch. Mirrors hash_any_128
@@ -311,8 +311,8 @@ pub fn Hash128(b: impl AsRef<[byte]>) -> Uint128 {
 
 /// `xxh3.HashString128(s)` (hash128.go:13) — one-shot 128-bit hash
 /// of a string (accepts goish `string`, `&str`, `String`).
-pub fn HashString128<S: AsRef<str>>(s: S) -> Uint128 {
-    hash_any_128(s.as_ref().as_bytes())
+pub fn HashString128<S: AsRef<[byte]>>(s: S) -> Uint128 {
+    hash_any_128(s.as_ref())
 }
 
 // hash128.go hashAny128 — the size-class dispatch.
@@ -699,8 +699,8 @@ impl Hasher {
     }
 
     /// `Hasher.WriteString(buf)` (hasher.go:96) — never errors.
-    pub fn WriteString<S: AsRef<str>>(&mut self, buf: S) -> (int, error) {
-        let b = buf.as_ref().as_bytes();
+    pub fn WriteString<S: AsRef<[byte]>>(&mut self, buf: S) -> (int, error) {
+        let b = buf.as_ref();
         self.update(b);
         (b.len() as int, nil)
     }

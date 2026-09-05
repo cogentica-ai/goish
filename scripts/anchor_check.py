@@ -17,6 +17,9 @@ method; only this rule catches that.
 
 Checks per anchor:
   NOT_FOUND    no declaration of Symbol anywhere in that Go file
+  UNVERIFIABLE the anchor names a non-.go source (e.g. the compiler's
+               SSA .rules), which this script cannot parse. Counted,
+               listed, and NOT a failure.
   RANGE_WRONG  the range holds no declaration of Symbol
   RANGE_FAT    the range holds Symbol plus other declarations
   END_SHORT    the range stops more than one line before the closing
@@ -360,6 +363,24 @@ def main():
                         stats["MISSING_FILE"] += 1
                         problems.append(("MISSING_FILE", p, idx + 1, sym, gofile, a, b, None))
                         continue
+                    # A non-.go source cannot be parsed for Go
+                    # declarations, so there is nothing to verify and a
+                    # NOT_FOUND here says only that this script cannot
+                    # read the file. The compiler's SSA lowering rules
+                    # are the case: convert.rs anchors
+                    # `cmd/compile/internal/ssa/_gen/AMD64.rules:168`
+                    # for `Cvt64Fto64`, which is a real and useful
+                    # provenance line — line 168 of that file is
+                    # `(Cvt64Fto64 ...) => (CVTTSD2SQ ...)` — and is
+                    # not a Go func declaration in any file this
+                    # checker knows how to read.
+                    #
+                    # Counted and listed so it stays visible, but it
+                    # does not fail the run: the alternative is either
+                    # a false failure or deleting accurate provenance.
+                    if not gofile.endswith(".go"):
+                        stats["UNVERIFIABLE"] += 1
+                        continue
                     free = "." not in sym and enclosing_impl(lines, idx) is None
                     hits, bare = decl_hits(gopath, sym, free_only=free)
                     if hits is None:
@@ -416,7 +437,7 @@ def main():
                     open(p, "w").write("\n".join(lines))
 
     print(f"anchor_check: {stats['total']} anchors under {', '.join(roots)}")
-    for k in ("ok", "RANGE_WRONG", "RANGE_FAT", "END_SHORT", "NOT_FOUND",
+    for k in ("ok", "UNVERIFIABLE", "RANGE_WRONG", "RANGE_FAT", "END_SHORT", "NOT_FOUND",
               "MISSING_FILE", "BARE", "fixed", "UNFIXABLE"):
         if stats[k]:
             print(f"  {k:12s} {stats[k]}")

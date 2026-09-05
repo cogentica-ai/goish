@@ -52,6 +52,7 @@ replaces an in-flight run rather than queueing behind it.
 | `cargo build --examples` | build all e2e examples |
 | `make lint` | **goishlint ratchet - run before every commit**; also runs `anchors` and `ifaces` |
 | `make ifaces` | interfaces asserted on with no registered implementor |
+| `make split-brain` | a trait impl and an inherent method that are two implementations |
 | `make e2e` | **tiered**: each example at its own loop count |
 | `make e2e-full` | everything x50 - required for runtime-core changes |
 | `make e2e LOOPS=1` | force one run each (uniform; overrides tiers) |
@@ -74,6 +75,38 @@ all. `scripts/iface_check.py` reports both shapes. It reports rather
 than fails, because a zero-implementor interface is sometimes correct:
 Go's own `rwUnwrapper` has none either, being a hook for user
 middleware. Use `--strict` for a gate.
+
+#### `make split-brain` - one operation, two implementations
+
+Go has one method set: a `*File` IS an `io.Writer`, so there is exactly
+one `Write`. Rust needs the trait impl written separately, and the
+honest shape is for one side to forward:
+
+    impl io::Writer for File {
+        fn Write(&mut self, p: slice<byte>) -> (int, error) {
+            return File::Write(self, p);
+        }
+    }
+
+When neither side forwards, the type has two implementations of one
+operation and they drift. `io::Writer for File` did: it called write(2)
+itself and reported `errors.New("write failed")` — no path, no errno,
+no closed-file detection — while the inherent `File::Write` on the same
+file reported "write /path: no space left on device". Everything
+generic goes through the trait, so `io.Copy(f, r)` onto a full disk got
+the useless message and a direct `f.Write` got the real one. Nothing
+failed. The two answers were just different, and only the worse one
+reached most callers.
+
+Forwarding in EITHER direction is fine — crypto/md5 puts the real
+implementation in the trait and forwards the inherent method, which is
+equally single-sourced. The check only reports a pair where neither
+side calls the other and both bodies are substantial.
+
+It reports rather than fails, because a divergence can be deliberate:
+crypto/ecdsa's `Signer::Sign` cannot thread the caller's reader through
+and says so in twelve lines above the impl. That is the bar — a
+divergence is fine when the next reader is told.
 
 #### `make lint` - the backlog may shrink, never grow
 

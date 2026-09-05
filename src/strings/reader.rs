@@ -198,6 +198,20 @@ impl Reader {
 }
 
 impl io::Reader for Reader {
+    // go: none — goish idiom: the hidden Any-view hooks every
+    // `#[goish::interface]` concrete impl overrides so an assertion on
+    // a `dyn io::Reader` can reach this type. Go's itabs make them
+    // unnecessary. Without the MUTABLE one, `io::Copy` misses
+    // `src.(WriterTo)` and the WriteTo impl below is unreachable
+    // through the interface.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: see `__goish_as_dyn_any`.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+
     // go: sdk 1.25.5 strings/reader.go:39-47 Reader.Read
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         return Reader::Read(self, p);

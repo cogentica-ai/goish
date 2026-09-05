@@ -1064,9 +1064,23 @@ pub fn Redirect<U: Into<string>>(
     }
 
     // Go: h := w.Header()
-    let had_ct = w.Header().Get(string("Content-Type")).Len() > 0;
+    //
+    // Go tests KEY PRESENCE — `_, hadCT := h["Content-Type"]` — not a
+    // non-empty value. goish asked whether the value was non-empty, so
+    // a handler that set `Content-Type: ""` before redirecting got a
+    // Content-Type overwritten and an HTML body appended, where Go
+    // leaves the header alone and writes no body at all.
+    let had_ct = w.Header().has(string("Content-Type"));
     // Go: h.Set("Location", hexEscapeNonASCII(url))
-    w.Header().Set(string("Location"), url.clone());
+    //
+    // The escape was written out in this comment and not performed:
+    // `hexEscapeNonASCII` was ported, anchored, and covered by
+    // http_helpers_smoke, and Redirect — its only caller in Go — sent
+    // the raw url. Every byte >= 0x80 in a redirect target went onto
+    // the wire unencoded, so a Location built from a UTF-8 path
+    // differed from Go's on the first non-ASCII byte.
+    w.Header()
+        .Set(string("Location"), super::http::hexEscapeNonASCII(url.clone()));
     // Go: if !hadCT && (r.Method == "GET" || r.Method == "HEAD") { h.Set("Content-Type", "text/html; charset=utf-8") }
     if !had_ct && (r.Method == "GET" || r.Method == "HEAD") {
         w.Header()
@@ -3635,10 +3649,20 @@ impl Server {
                 cr.startBackgroundRead(watch_pd);
             }
 
-            let keep_alive =
-                request_keep_alive(&mut req) && !self.__state.in_shutdown.load(Ordering::Acquire);
+            // Go consults doKeepAlives twice per request — writeHeader
+            // (server.go:1301) for the Connection header, conn.serve
+            // (server.go:2127) for whether to loop again. goish read
+            // the shutdown flag directly and never asked, so
+            // SetKeepAlivesEnabled(false) stored a value that NOTHING
+            // read: an operator draining a server got connections
+            // reused anyway, with no indication the setting had been
+            // ignored. doKeepAlives is `!disabled && !shuttingDown`,
+            // so it subsumes the check it replaces.
+            let keep_alive = request_keep_alive(&mut req) && self.doKeepAlives();
+            let wants10 = req.wantsHttp10KeepAlive();
             let w = response::__new_with_cnc(conn, cnc);
             w.__set_keep_alive(keep_alive);
+            w.__set_wants10(wants10);
             w.__set_proto11(req.ProtoAtLeast(1, 1));
             w.__set_error_log(self.ErrorLog.clone());
             // HEAD: handler writes are eaten by the response writer
@@ -4024,7 +4048,11 @@ pub fn Serve(ln: net::Listener, handler: Arc<dyn Handler>) -> error {
 }
 
 /// Decide whether to keep the connection alive after this request.
-/// Mirrors Go's `Request.shouldClose()` (request.go:1450) inverted.
+/// Mirrors Go's `shouldClose` INVERTED — and that function is a
+/// package-level one in transfer.go:748, not a method on Request.
+/// This used to cite it as a Request method in request.go, at a line
+/// that holds a MultipartForm check — neither the right file nor the
+/// right kind of declaration.
 ///
 /// HTTP/1.1: keep-alive default; `Connection: close` opts out.
 /// HTTP/1.0: close default; `Connection: keep-alive` opts in.
@@ -4080,6 +4108,7 @@ pub fn register_http_impls() {
     super::cgi::child::register_cgi_impls();
     super::server_tls::register_server_tls_impls();
     super::client::register_client_impls();
+    super::transport::register_transport_error_impls();
 }
 
 // go: sdk 1.25.5 net/http/server.go:1596-1611 writeStatusLine

@@ -15,10 +15,27 @@ same-named method and report a false block.
   scripts/port_next.py crypto/tls
   scripts/port_next.py crypto/tls --exclude QUIC
 """
-import os, re, sys, subprocess, collections
+import os
+import sys, re, sys, subprocess, collections
 
 GOROOT = os.environ.get("GOROOT") or \
     "/nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src"
+
+# `go env GOROOT` prints the INSTALL root (/usr/local/go); the sources
+# live under its `src`. Accept either spelling, because the failure
+# mode of guessing wrong is silent: every anchored file resolves to a
+# path that does not exist, every Go body reads as empty, and the
+# script reports "0 anchored fns, 0 with a deficit" — which looks
+# exactly like a clean sweep.
+if not os.path.isdir(os.path.join(GOROOT, "crypto", "tls")):
+    _alt = os.path.join(GOROOT, "src")
+    if os.path.isdir(os.path.join(_alt, "crypto", "tls")):
+        GOROOT = _alt
+    else:
+        sys.exit("port_next: no Go sources under %r (tried it and %r).\n"
+                 "Set GOROOT to the Go install root or its src directory."
+                 % (GOROOT, _alt))
+
 
 
 def go_bodies(pkgdir):

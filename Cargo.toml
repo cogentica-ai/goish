@@ -8,7 +8,7 @@ name = "goish"
 # crates.io. .github/workflows/publish.yml refuses to publish when the two
 # disagree, so a mismatched tag fails loudly instead of shipping the wrong
 # version. Bump this and goish-macros together — they are published as a pair.
-version = "1.0.0-alpha.9"
+version = "1.0.0-alpha.10"
 edition = "2021"
 rust-version = "1.86"
 authors = ["Chanwit Kaewkasi <chanwit@gmail.com>"]
@@ -47,7 +47,7 @@ default = []
 ffi-system-tls = []
 
 [dependencies]
-goish-macros = { path = "goish-macros", version = "=1.0.0-alpha.9" }
+goish-macros = { path = "goish-macros", version = "=1.0.0-alpha.10" }
 libm = { version = "0.2", default-features = false }
 
 [profile.dev]
@@ -1191,6 +1191,26 @@ path = "examples/json_int_diff.rs"
 [[example]]
 name = "json_map_diff"
 path = "examples/json_map_diff.rs"
+
+[[example]]
+name = "base64_decode_diff"
+path = "examples/base64_decode_diff.rs"
+
+[[example]]
+name = "json_separator_diff"
+path = "examples/json_separator_diff.rs"
+
+[[example]]
+name = "json_array_diff"
+path = "examples/json_array_diff.rs"
+
+[[example]]
+name = "json_raw_duplicate_diff"
+path = "examples/json_raw_duplicate_diff.rs"
+
+[[example]]
+name = "json_slice_diff"
+path = "examples/json_slice_diff.rs"
 
 [[example]]
 name = "term_pty_smoke"
@@ -3124,10 +3144,6 @@ name = "responsecontroller_ref_smoke"
 path = "examples/responsecontroller_ref_smoke.rs"
 
 [[example]]
-name = "elliptic_unmarshal_ref_smoke"
-path = "examples/elliptic_unmarshal_ref_smoke.rs"
-
-[[example]]
 name = "net_error_shape_ref_smoke"
 path = "examples/net_error_shape_ref_smoke.rs"
 
@@ -3142,3 +3158,239 @@ path = "examples/dialcontext_ref_smoke.rs"
 [[example]]
 name = "dialtimeout_ref_smoke"
 path = "examples/dialtimeout_ref_smoke.rs"
+
+[[example]]
+name = "halfclose_error_shape_ref_smoke"
+path = "examples/halfclose_error_shape_ref_smoke.rs"
+
+[[example]]
+name = "sockopt_ref_smoke"
+path = "examples/sockopt_ref_smoke.rs"
+
+[[example]]
+name = "lookupport_ref_smoke"
+path = "examples/lookupport_ref_smoke.rs"
+
+[[example]]
+name = "resolvetcpaddr_ref_smoke"
+path = "examples/resolvetcpaddr_ref_smoke.rs"
+
+[[example]]
+name = "tcpsock_ctor_ref_smoke"
+path = "examples/tcpsock_ctor_ref_smoke.rs"
+
+[[example]]
+name = "textproto_code_ref_smoke"
+path = "examples/textproto_code_ref_smoke.rs"
+
+[[example]]
+name = "textproto_dot_ref_smoke"
+path = "examples/textproto_dot_ref_smoke.rs"
+
+[[example]]
+name = "exitstatus_ref_smoke"
+path = "examples/exitstatus_ref_smoke.rs"
+
+[[example]]
+name = "process_ref_smoke"
+path = "examples/process_ref_smoke.rs"
+
+[[example]]
+name = "signal_notify_ref_smoke"
+path = "examples/signal_notify_ref_smoke.rs"
+
+[[example]]
+name = "signal_ignore_ref_smoke"
+path = "examples/signal_ignore_ref_smoke.rs"
+
+[[example]]
+name = "textproto_writer_ref_smoke"
+path = "examples/textproto_writer_ref_smoke.rs"
+
+[[example]]
+name = "atomic_ref_smoke"
+path = "examples/atomic_ref_smoke.rs"
+
+[[example]]
+name = "errors_ref_smoke"
+path = "examples/errors_ref_smoke.rs"
+
+[[example]]
+name = "cipher_edge_ref_smoke"
+path = "examples/cipher_edge_ref_smoke.rs"
+
+[[example]]
+name = "hash_contract_ref_smoke"
+path = "examples/hash_contract_ref_smoke.rs"
+
+[[example]]
+name = "time_calendar_ref_smoke"
+path = "examples/time_calendar_ref_smoke.rs"
+
+[[example]]
+name = "osfile_offset_ref_smoke"
+path = "examples/osfile_offset_ref_smoke.rs"
+
+[[example]]
+name = "osfile_error_ref_smoke"
+path = "examples/osfile_error_ref_smoke.rs"
+
+[[example]]
+name = "log_flags_ref_smoke"
+path = "examples/log_flags_ref_smoke.rs"
+
+[[example]]
+name = "tls_deadline_ref_smoke"
+path = "examples/tls_deadline_ref_smoke.rs"
+
+[[example]]
+name = "bufio_error_ref_smoke"
+path = "examples/bufio_error_ref_smoke.rs"
+
+[[example]]
+name = "http_body_close_ref_smoke"
+path = "examples/http_body_close_ref_smoke.rs"
+
+[[example]]
+name = "chan_close_ref_smoke"
+path = "examples/chan_close_ref_smoke.rs"
+
+[[example]]
+name = "slice_alias_ref_smoke"
+path = "examples/slice_alias_ref_smoke.rs"
+
+[[example]]
+name = "map_semantics_ref_smoke"
+path = "examples/map_semantics_ref_smoke.rs"
+
+[[example]]
+name = "utf8bad_ref_smoke"
+path = "examples/utf8bad_ref_smoke.rs"
+
+[[example]]
+name = "xxh3_bytes_smoke"
+path = "examples/xxh3_bytes_smoke.rs"
+
+[[example]]
+name = "runeconv_ref_smoke"
+path = "examples/runeconv_ref_smoke.rs"
+
+[[example]]
+name = "badutf8_ref_smoke"
+path = "examples/badutf8_ref_smoke.rs"
+
+[[example]]
+name = "tar_sparse_ref_smoke"
+path = "examples/tar_sparse_ref_smoke.rs"
+
+[[example]]
+name = "io_copy_ref_smoke"
+path = "examples/io_copy_ref_smoke.rs"
+
+[[example]]
+name = "tar_fileinfo_stat_smoke"
+path = "examples/tar_fileinfo_stat_smoke.rs"
+
+[[example]]
+name = "elliptic_unmarshal_ref_smoke"
+path = "examples/elliptic_unmarshal_ref_smoke.rs"
+
+[[example]]
+name = "httpproxy_ref_smoke"
+path = "examples/httpproxy_ref_smoke.rs"
+
+[[example]]
+name = "ioutil_ref_smoke"
+path = "examples/ioutil_ref_smoke.rs"
+
+[[example]]
+name = "stringer_verb_ref_smoke"
+path = "examples/stringer_verb_ref_smoke.rs"
+
+[[example]]
+name = "netip_ctor_ref_smoke"
+path = "examples/netip_ctor_ref_smoke.rs"
+
+[[example]]
+name = "cryptobyte_asn1_ref_smoke"
+path = "examples/cryptobyte_asn1_ref_smoke.rs"
+
+[[example]]
+name = "asn1_string_ref_smoke"
+path = "examples/asn1_string_ref_smoke.rs"
+
+[[example]]
+name = "tls_record_overflow_smoke"
+path = "examples/tls_record_overflow_smoke.rs"
+
+[[example]]
+name = "tls_padding_oracle_smoke"
+path = "examples/tls_padding_oracle_smoke.rs"
+
+[[example]]
+name = "tls_record_iv_smoke"
+path = "examples/tls_record_iv_smoke.rs"
+
+[[example]]
+name = "tls_session_expiry_smoke"
+path = "examples/tls_session_expiry_smoke.rs"
+
+[[example]]
+name = "dns_txid_smoke"
+path = "examples/dns_txid_smoke.rs"
+
+[[example]]
+name = "json_depth_limit_smoke"
+path = "examples/json_depth_limit_smoke.rs"
+
+[[example]]
+name = "regexp_backtrack_smoke"
+path = "examples/regexp_backtrack_smoke.rs"
+
+[[example]]
+name = "os_filemode_bits_smoke"
+path = "examples/os_filemode_bits_smoke.rs"
+
+[[example]]
+name = "http_request_header_injection_smoke"
+path = "examples/http_request_header_injection_smoke.rs"
+
+[[example]]
+name = "os_getwd_pwd_smoke"
+path = "examples/os_getwd_pwd_smoke.rs"
+
+[[example]]
+name = "http_newrequest_host_smoke"
+path = "examples/http_newrequest_host_smoke.rs"
+
+[[example]]
+name = "http_default_proxy_smoke"
+path = "examples/http_default_proxy_smoke.rs"
+
+[[example]]
+name = "http_client_timeout_dial_smoke"
+path = "examples/http_client_timeout_dial_smoke.rs"
+
+[[example]]
+name = "http_keepalives_enabled_smoke"
+path = "examples/http_keepalives_enabled_smoke.rs"
+
+[[example]]
+name = "http_maxrespheader_smoke"
+path = "examples/http_maxrespheader_smoke.rs"
+
+[[example]]
+name = "floatint_diff"
+path = "examples/floatint_diff.rs"
+
+[[example]]
+name = "json_float_diff"
+path = "examples/json_float_diff.rs"
+
+[[example]]
+name = "json_map_state_diff"
+path = "examples/json_map_state_diff.rs"
+
+[[example]]
+name = "json_scalar_diff"
+path = "examples/json_scalar_diff.rs"

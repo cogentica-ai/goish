@@ -31,12 +31,35 @@
 //   `NotFoundHandler()` and StripPrefix's not-matched path, both of
 //   which route through the other one.
 //
-// Redirect was already right, including the part that matters most:
-// the target URL is HTML-escaped into the `<a href>` body, so a
-// redirect to a URL containing a quote and a <script> tag renders as
-// entities rather than markup. The Location HEADER keeps the raw
-// value, CRLF included — that is Go's behaviour too, because it is
-// the header writer, not Redirect, that neutralises CR and LF.
+// Redirect's HTML escaping was already right: the target URL is
+// HTML-escaped into the `<a href>` body, so a redirect to a URL
+// containing a quote and a <script> tag renders as entities rather
+// than markup. The Location HEADER keeps CR and LF raw — that is Go's
+// behaviour too, because it is the header writer, not Redirect, that
+// neutralises them.
+//
+// "Redirect was already right" is what this header used to say, and
+// it was wrong twice, in ways the nine cases above could not reach
+// because every one of them was ASCII with no Content-Type set:
+//
+//   THE LOCATION HEADER WAS NOT ESCAPED. Go writes
+//   hexEscapeNonASCII(url), percent-encoding every byte >= 0x80.
+//   goish wrote the raw url, so a redirect to a UTF-8 path differed
+//   from Go on its first non-ASCII byte. `hexEscapeNonASCII` was ported,
+//   anchored, and covered by http_helpers_smoke — and Redirect, its
+//   only caller in Go, did not call it. The intended call was even
+//   written out in a comment at the site.
+//
+//   hadCT TESTED THE VALUE, NOT THE KEY. Go uses
+//   `_, hadCT := h["Content-Type"]`. A handler that set an empty
+//   Content-Type before redirecting had it overwritten and got an
+//   HTML body appended, where Go leaves both alone. `Header::has`
+//   already existed for exactly this distinction; Redirect used
+//   `Get(...).Len() > 0`.
+//
+// Note what the escaping rule is not: space and DEL stay raw. The
+// boundary is 0x80, not "non-printable", which is why redirect-space
+// and redirect-del are pinned next to the ones that do change.
 
 #![no_std]
 #![no_main]
@@ -50,7 +73,7 @@ use goish::net::http::httptest;
 use goish::string;
 
 // Go's verbatim output.
-const GO: [&str; 21] = [
+const GO: [&str; 29] = [
     "error-plain                code=500 ct=\"text/plain; charset=utf-8\" loc=\"\" nosniff=\"nosniff\" body=\"boom\\n\"",
     "error-html                 code=400 ct=\"text/plain; charset=utf-8\" loc=\"\" nosniff=\"nosniff\" body=\"<script>x</script>\\n\"",
     "error-empty                code=404 ct=\"text/plain; charset=utf-8\" loc=\"\" nosniff=\"nosniff\" body=\"\\n\"",
@@ -64,6 +87,14 @@ const GO: [&str; 21] = [
     "redirect-empty             code=302 ct=\"text/html; charset=utf-8\" loc=\"/dir/\" nosniff=\"\" body=\"<a href=\\\"/dir/\\\">Found</a>.\\n\\n\"",
     "redirect-rel-dots          code=302 ct=\"text/html; charset=utf-8\" loc=\"/x\" nosniff=\"\" body=\"<a href=\\\"/x\\\">Found</a>.\\n\\n\"",
     "redirect-newline           code=302 ct=\"text/html; charset=utf-8\" loc=\"/x\\r\\nSet-Cookie: a=b\" nosniff=\"\" body=\"<a href=\\\"/x\\r\\nSet-Cookie: a=b\\\">Found</a>.\\n\\n\"",
+    "redirect-utf8              code=302 ct=\"text/html; charset=utf-8\" loc=\"/caf%c3%a9\" nosniff=\"\" body=\"<a href=\\\"/café\\\">Found</a>.\\n\\n\"",
+    "redirect-utf8-query        code=302 ct=\"text/html; charset=utf-8\" loc=\"/s?q=%c3%a9t%c3%a9\" nosniff=\"\" body=\"<a href=\\\"/s?q=été\\\">Found</a>.\\n\\n\"",
+    "redirect-raw-high          code=302 ct=\"text/html; charset=utf-8\" loc=\"/%ff%fe\" nosniff=\"\" body=\"<a href=\\\"/\\xff\\xfe\\\">Found</a>.\\n\\n\"",
+    "redirect-space             code=302 ct=\"text/html; charset=utf-8\" loc=\"/a b\" nosniff=\"\" body=\"<a href=\\\"/a b\\\">Found</a>.\\n\\n\"",
+    "redirect-del               code=302 ct=\"text/html; charset=utf-8\" loc=\"/a\\x7fb\" nosniff=\"\" body=\"<a href=\\\"/a\\x7fb\\\">Found</a>.\\n\\n\"",
+    "redirect-abs-utf8          code=302 ct=\"text/html; charset=utf-8\" loc=\"https://example.com/%c3%bc\" nosniff=\"\" body=\"<a href=\\\"https://example.com/ü\\\">Found</a>.\\n\\n\"",
+    "redirect-pct-already       code=302 ct=\"text/html; charset=utf-8\" loc=\"/caf%C3%A9\" nosniff=\"\" body=\"<a href=\\\"/caf%C3%A9\\\">Found</a>.\\n\\n\"",
+    "redirect-empty-ct          code=302 ct=\"\" loc=\"/x\" nosniff=\"\" body=\"\"",
     "notfound                   code=404 ct=\"text/plain; charset=utf-8\" loc=\"\" nosniff=\"nosniff\" body=\"404 page not found\\n\"",
     "strip-match                code=200 ct=\"text/plain; charset=utf-8\" loc=\"\" nosniff=\"\" body=\"path=\\\"/v1/x\\\" rawpath=\\\"\\\"\"",
     "strip-nomatch              code=404 ct=\"text/plain; charset=utf-8\" loc=\"\" nosniff=\"nosniff\" body=\"404 page not found\\n\"",
@@ -153,6 +184,41 @@ fn main() {
         );
         http::Redirect(&rec, &req, goish::string::from_bytes(url.as_bytes()), *code);
         dump(name, &rec);
+    }
+
+    // ── Redirect with non-ASCII in the target ──
+    //
+    // Byte strings, not &str: `redirect-raw-high` is deliberately
+    // invalid UTF-8, which is the case that separates "escape bytes
+    // >= 0x80" from "escape non-ASCII characters".
+    let hi: [(&'static str, &'static [u8]); 7] = [
+        ("redirect-utf8", "/caf\u{e9}".as_bytes()),
+        ("redirect-utf8-query", "/s?q=\u{e9}t\u{e9}".as_bytes()),
+        ("redirect-raw-high", b"/\xff\xfe"),
+        ("redirect-space", b"/a b"),
+        ("redirect-del", b"/a\x7fb"),
+        ("redirect-abs-utf8", "https://example.com/\u{fc}".as_bytes()),
+        ("redirect-pct-already", b"/caf%C3%A9"),
+    ];
+    for (name, url) in hi.iter() {
+        let rec = httptest::NewRecorder();
+        let req = httptest::NewRequest(string("GET"), string("/dir/page"), goish::nil);
+        http::Redirect(&rec, &req, goish::string::from_bytes(url), 302);
+        dump(name, &rec);
+    }
+
+    // Content-Type present but EMPTY. Go tests key presence, so it
+    // leaves the header alone and writes no body; asking whether the
+    // value is non-empty gets both wrong at once.
+    {
+        let rec = httptest::NewRecorder();
+        // Through the ResponseWriter handle, not HeaderMap(): the
+        // latter hands back a snapshot, so a Set on it goes into a
+        // copy and the case silently tests nothing.
+        http::ResponseWriter::Header(&rec).Set(string("Content-Type"), string(""));
+        let req = httptest::NewRequest(string("GET"), string("/dir/page"), goish::nil);
+        http::Redirect(&rec, &req, string("/x"), 302);
+        dump("redirect-empty-ct", &rec);
     }
 
     // ── NotFound ──

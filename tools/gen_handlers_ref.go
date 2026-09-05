@@ -56,6 +56,35 @@ func TestGoishRef(t *testing.T) {
 		dump(tc.name, rec)
 	}
 
+	// ── Redirect with non-ASCII in the target ──
+	//
+	// Go escapes every byte >= 0x80 in the Location HEADER
+	// (hexEscapeNonASCII) and leaves the <a href> body unescaped apart
+	// from HTML entities, so the two disagree on purpose. Space and
+	// DEL stay raw in both — the rule is >= 0x80, not "non-printable".
+	for _, tc := range []struct{ name, url string }{
+		{"redirect-utf8", "/café"},
+		{"redirect-utf8-query", "/s?q=été"},
+		{"redirect-raw-high", "/\xff\xfe"},
+		{"redirect-space", "/a b"},
+		{"redirect-del", "/a\x7fb"},
+		{"redirect-abs-utf8", "https://example.com/ü"},
+		{"redirect-pct-already", "/caf%C3%A9"},
+	} {
+		rec := httptest.NewRecorder()
+		http.Redirect(rec, httptest.NewRequest("GET", "/dir/page", nil), tc.url, 302)
+		dump(tc.name, rec)
+	}
+
+	// Content-Type PRESENT but empty: Go tests key presence, so it
+	// neither overwrites the header nor writes the HTML body.
+	{
+		rec := httptest.NewRecorder()
+		rec.Header().Set("Content-Type", "")
+		http.Redirect(rec, httptest.NewRequest("GET", "/dir/page", nil), "/x", 302)
+		dump("redirect-empty-ct", rec)
+	}
+
 	// ── NotFound ──
 	rec := httptest.NewRecorder()
 	http.NotFound(rec, httptest.NewRequest("GET", "/nope", nil))

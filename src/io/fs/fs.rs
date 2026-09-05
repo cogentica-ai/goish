@@ -41,12 +41,32 @@ impl FileMode {
 // structural assertion, so `%s` and `%v` on a mode just work. goish's
 // printer dispatches on the `Format` trait, which a type reaches
 // through `Stringer` — and nothing implemented it here, so a
-// `FileMode` could not be printed at all. The method it forwards to
-// has been present all along.
-impl crate::fmt::Stringer for FileMode {
+// `FileMode` could not be printed at all.
+//
+// It implements `Format` DIRECTLY rather than `Stringer`, because the
+// `impl<T: Stringer> Format for T` blanket sends every verb through
+// the string. Go does not: `handleMethods` consults a Stringer only
+// for %v, %s, %q, %x and %X, and formats the underlying value for the
+// numeric verbs. A mode is a uint32, so Go prints
+//
+//     %v -rw-r-----   %o 640   %04o 0640   %d 416
+//
+// and goish printed `-rw-r-----` for all four — which makes
+// `Printf("%o", mode)`, the ordinary way to log a file mode, produce
+// a symbolic string with no digits in it.
+//
+// %x stays the hex of the STRING, not of the number: that is Go's
+// behaviour too, because %x is one of the verbs a Stringer serves.
+// The verb split itself lives in `fmt::__stringer_serves`, shared with
+// time's Duration, Month and Weekday — the other three types in this
+// tree that are both a Stringer and a number.
+impl crate::fmt::Format for FileMode {
     // go: none — goish idiom: see the note above this impl.
-    fn String(&self) -> string {
-        return FileMode::String(self);
+    fn fmt(&self, verb: crate::types::byte, f: &mut crate::fmt::FmtBuf) {
+        if crate::fmt::__stringer_serves(verb) {
+            return crate::fmt::Format::fmt(&FileMode::String(self), verb, f);
+        }
+        return crate::fmt::Format::fmt(&self.0, verb, f);
     }
 }
 

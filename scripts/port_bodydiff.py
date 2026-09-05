@@ -28,11 +28,71 @@ positive rate, all from legitimate differences:
           Those have no operator or helper equivalent, so a deficit is
           nearly always either a dropped field or an obvious refactor.
           This is the mode worth running routinely.
+
+Last full triage: 2026-09-04, 1844 anchored fns, 12 deficits, all 12
+checked by hand and all 12 false positives. Written down so the next
+reader does not re-derive it:
+
+  clientHelloMsg.unmarshal     -10. Uses the real cryptobyte String's
+                               METHODS (`s.ReadUint8LengthPrefixed()`)
+                               where Go uses this file's free functions.
+                               clientHello is ported against real
+                               cryptobyte; the other messages use the
+                               older `builder` mini-port.
+  buildCertExtensions          -4. The AddBytes are in
+                               `serialiseConstraints`, a helper goish
+                               extracts and Go inlines.
+  certificateRequestMsgTLS13   -4. goish merges Go's two identical arms
+    .unmarshal                 for SignatureAlgorithms and
+                               SignatureAlgorithmsCert and splits them
+                               after; the deficit is the duplicate.
+  encryptedExtensionsMsg       -2. `extData.0.clone().__into_vec()`
+    .unmarshal                 where Go writes make() + CopyBytes. Both
+                               extensions ARE handled.
+  Sign (ecdsa_legacy)          -2. Both `Empty()` checks are in
+                               `parseSignature`, extracted into
+                               ecdsa.rs.
+  parseNameConstraintsExtension -1. The third `Empty()` is in
+                               `nameConstraintValues`, the extracted
+                               form of Go's `getValues` closure.
+  serverHelloMsg.marshal       -1. `AddBytes` where Go writes
+                               `addBytesWithLength(b, m.random, 32)`.
+                               The mini-port builder has no `AddValue`,
+                               so the LENGTH CHECK is not enforced on
+                               this path — noted at the `builder` block.
+                               No observable difference: unmarshal reads
+                               the random with `ReadBytes(&random, 32)`
+                               on both sides, so a wrong length cannot
+                               reach it.
+  serverHelloMsg.unmarshal     -1. Reads the ECH extension into a local
+                               and assigns, where Go uses CopyBytes.
+  Builder.AddUintNLengthPrefixed  -1 each. Go's method calls the shared
+                               `addLengthPrefixed`; the tool counts the
+                               method's own name against it.
+
+So the class this exists to catch — a dropped field under a valid
+anchor — currently has no instances.
 """
 import os, re, sys, collections
 
 GOROOT = os.environ.get("GOROOT") or \
     "/nix/store/60z37432vmgkg54krwr1z057bqwp7583-go-1.25.5/share/go/src"
+
+# `go env GOROOT` prints the INSTALL root (/usr/local/go); the sources
+# live under its `src`. Accept either spelling, because the failure
+# mode of guessing wrong is silent: every anchored file resolves to a
+# path that does not exist, every Go body reads as empty, and the
+# script reports "0 anchored fns, 0 with a deficit" — which looks
+# exactly like a clean sweep.
+if not os.path.isdir(os.path.join(GOROOT, "crypto", "tls")):
+    _alt = os.path.join(GOROOT, "src")
+    if os.path.isdir(os.path.join(_alt, "crypto", "tls")):
+        GOROOT = _alt
+    else:
+        sys.exit("port_bodydiff: no Go sources under %r (tried it and %r).\n"
+                 "Set GOROOT to the Go install root or its src directory."
+                 % (GOROOT, _alt))
+
 ANCHOR = re.compile(r"//\s*go:\s*sdk\s+\S+\s+(\S+):(\d+)-(\d+)\s+(\S+)")
 CALL = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 EMIT = re.compile(r"^(AddUint\d+|AddBytes|AddUint\d+LengthPrefixed|addBytesWithLength|"

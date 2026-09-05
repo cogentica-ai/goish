@@ -393,6 +393,26 @@ fn number_to_int(n: crate::types::float64, lo: f64, hi: f64, ty: &str) -> (i64, 
             ),
         );
     }
+    // The upper bound is 2^63 as an f64, which is what the max int64
+    // LITERAL rounds to — 9223372036854775807 is not representable, and
+    // `Value::Number` is an f64, so the digits are gone by the time we
+    // get here. Go never has this problem: its decoder parses the
+    // digits with ParseInt and answers 9223372036854775807 exactly.
+    //
+    // Falling through to `convert::int64` would answer i64::MIN, since
+    // that now implements amd64's CVTTSD2SQ — the integer-indefinite
+    // result for anything >= 2^63 — rather than Rust's saturation.
+    // That conversion is right, and this boundary is the one place the
+    // v1 decoder must not use it. json_decode_ref_smoke pins Go's
+    // answer for exactly this input.
+    //
+    // The proper fix is for Value::Number to keep the literal so an
+    // integer target can parse the digits; that is a change to the
+    // Value type and is recorded in the ROADMAP rather than smuggled
+    // in here.
+    if n >= 9223372036854775808.0 {
+        return (i64::MAX, nil);
+    }
     return (crate::convert::int64(n), nil);
 }
 
@@ -1216,7 +1236,7 @@ fn unexpected_end() -> error {
 }
 
 fn parse_to_value(data: &[byte]) -> (Value, error) {
-    let mut p = Parser { data, pos: 0 };
+    let mut p = Parser { data, pos: 0, depth: 0 };
     p.skip_ws();
     let (v, err) = p.parse_value();
     if err != nil {
@@ -1233,9 +1253,55 @@ fn parse_to_value(data: &[byte]) -> (Value, error) {
     (v, nil)
 }
 
+// go: sdk 1.25.5 encoding/json/scanner.go:148 maxNestingDepth
+/// Go: "This limits the max nesting depth to prevent stack overflow.
+/// This is permitted by RFC 7159 section 9." Go's value is 10000.
+///
+/// DIVERGENCE: goish's is 2000, and the reason is the sentence Go
+/// wrote. Go's v1 scanner keeps an explicit `parseState` stack and
+/// does not recurse, so 10000 costs it nothing; this is a recursive
+/// descent, so each level is two stack frames.
+///
+/// Measured in a DEBUG build — which is what `make e2e` runs — on an
+/// 8 MiB goroutine stack:
+///
+///   * without a stack pivot at the recursion site, depth 8000
+///     SIGSEGVs;
+///   * with one, 8000 survives and 8500 does not;
+///   * so the implementation's own ceiling is near 8200, BELOW Go's
+///     limit. Setting the limit to Go's number would mean a document
+///     Go accepts crashes the process — which is exactly what
+///     RFC 7159 section 9 permits a parser to refuse instead.
+///
+/// 2000 leaves roughly a 4x margin against that ceiling, which matters
+/// because a goroutine spawned with a smaller stack than the main
+/// one's 8 MiB has less room still. Real documents do not approach it:
+/// nesting past a few dozen is already pathological.
+///
+/// The honest fix is Go's design — an explicit state stack instead of
+/// recursion — and it is recorded in ROADMAP.md rather than attempted
+/// at the end of a session. Until then a REFUSAL is the right failure:
+/// rejecting a document Go accepts is a divergence, and crashing on
+/// one is a denial of service.
+const maxNestingDepth: usize = 2000;
+
 struct Parser<'a> {
     data: &'a [byte],
     pos: usize,
+    /// Nesting depth of the composite currently being parsed.
+    ///
+    /// Go: encoding/json/scanner.go:148 —
+    ///   `// This limits the max nesting depth to prevent stack
+    ///    overflow. This is permitted by RFC 7159 section 9.
+    ///    const maxNestingDepth = 10000`
+    ///
+    /// Go's v1 scanner keeps an explicit parseState stack and checks
+    /// its length; this parser recurses, so the same bound is not an
+    /// optimisation but the only thing standing between a document and
+    /// the stack. Measured without it: depth 10001 parsed where Go
+    /// refuses, and 500000 printed "goish: runtime error: stack
+    /// overflow".
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -1275,9 +1341,54 @@ impl<'a> Parser<'a> {
 
     fn parse_value(&mut self) -> (Value, error) {
         self.skip_ws();
+        // Go: scanner.go pushes onto parseState and refuses past
+        // maxNestingDepth. Only the two COMPOSITE arms recurse, so the
+        // check belongs on them and a scalar at any depth is fine.
         match self.peek() {
-            Some(b'{') => self.parse_object(),
-            Some(b'[') => self.parse_array(),
+            Some(b'{') | Some(b'[') => {
+                if self.depth >= maxNestingDepth {
+                    let b = self.peek().unwrap_or(b'[');
+                    return (Value::Null, syntax_err(b, "exceeded max depth"));
+                }
+                self.depth += 1;
+                // `maybe_grow_step` because this descent RECURSES where
+                // Go's v1 scanner keeps an explicit parseState stack and
+                // does not. Go can afford maxNestingDepth = 10000 with
+                // no stack cost; here 10000 frames is more than an 8 MiB
+                // goroutine stack holds in a debug build — measured, it
+                // SIGSEGVs — so the limit alone is not enough to make
+                // the bound safe. This pivots to a fresh stack when the
+                // current one runs low, which is what the runtime's own
+                // stack-overflow diagnostic recommends.
+                // This descent RECURSES where Go's v1 scanner keeps an
+                // explicit parseState stack and does not, so Go can
+                // afford maxNestingDepth = 10000 at no stack cost and
+                // this cannot. Measured in a DEBUG build (which is what
+                // `make e2e` runs) on an 8 MiB goroutine stack: without
+                // a pivot, depth 8000 SIGSEGVs; with one, 8000 survives
+                // and 8500 does not. Ten thousand levels of debug frames
+                // is roughly 60-80 MiB, so the pivot stack is sized for
+                // that — it is mmap'd and commits lazily, and only a
+                // document that actually nests deeply ever touches it.
+                //
+                // The 64 KiB red zone is the runtime diagnostic's own
+                // suggested shape. `maybe_grow_step`'s tier-1 zone is
+                // 1 KiB, which `parse_array`'s debug frame overruns
+                // between checks — measured, it still faulted.
+                let r = crate::runtime::sched::maybe_grow(
+                    64 * 1024,
+                    256 * 1024 * 1024,
+                    || {
+                        if self.peek() == Some(b'{') {
+                            self.parse_object()
+                        } else {
+                            self.parse_array()
+                        }
+                    },
+                );
+                self.depth -= 1;
+                return r;
+            }
             Some(b'"') => self.parse_string_value(),
             Some(b't') | Some(b'f') => self.parse_bool(),
             Some(b'n') => self.parse_null(),

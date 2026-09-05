@@ -20,6 +20,42 @@ fn main() {
     schedule();
 }
 
+
+/// Spin until `n` goroutines have registered with the Cond, using the
+/// mutex as the barrier rather than a fixed number of `Gosched` calls.
+///
+/// `Cond::Wait` increments its waiter count and only THEN unlocks the
+/// mutex, so if this can take the mutex and see `ready == n`, all `n`
+/// goroutines are registered and a following Signal or Broadcast
+/// cannot miss them. Go's Cond has the same ordering
+/// (`runtime_notifyListAdd` before `c.L.Unlock()`), so a goroutine
+/// that has not reached Wait is not woken there either — which is why
+/// the barrier has to be here and not in Cond.
+///
+/// This replaces `for _ in 0..200 { Gosched() }`, which was a guess.
+/// On 2026-09-05 that guess lost on a loaded CI runner: Broadcast ran
+/// while fewer than five waiters had registered, swapped a count of
+/// less than five, released that many credits, and the stragglers
+/// parked forever. The example did not fail, it HUNG, and e2e reported
+/// it as a 15s timeout. Locally the same binary passed five for five
+/// in 1.6s, which is what a fixed spin buys you: it works until the
+/// machine is busy.
+///
+/// Bounded, so a genuinely broken Cond fails the example quickly
+/// instead of hanging until the harness kills it.
+fn await_registered(mu: &Mutex<()>, ready: &AtomicI64, n: i64) -> bool {
+    for _ in 0..500_000 {
+        mu.LockManual();
+        let r = ready.load(Ordering::Acquire);
+        mu.Unlock();
+        if r >= n {
+            return true;
+        }
+        goish::runtime::sched::Gosched();
+    }
+    return false;
+}
+
 fn run_tests() {
     let mut failed = 0;
 
@@ -30,16 +66,20 @@ fn run_tests() {
         let woke = AtomicI64::new(0);
 
         let wg = WaitGroup::new();
+        let ready = AtomicI64::new(0);
         wg.GoStack(64 * KB, || {
             mu.LockManual();
+            ready.fetch_add(1, Ordering::Release);
             cond.Wait();
             woke.fetch_add(1, Ordering::Release);
             mu.Unlock();
         });
 
-        // Give the waiter a chance to enter Wait.
-        for _ in 0..100 {
-            goish::runtime::sched::Gosched();
+        // Signal only once the waiter is registered; a Signal that
+        // arrives first is a no-op and the waiter parks forever.
+        if !await_registered(&mu, &ready, 1) {
+            fmt::Println!("[ 1] Signal one waiter        FAIL waiter never registered");
+            failed += 1;
         }
         cond.Signal();
         wg.Wait();
@@ -58,18 +98,23 @@ fn run_tests() {
         let woke = AtomicI64::new(0);
         let wg = WaitGroup::new();
 
+        let ready = AtomicI64::new(0);
         for _ in 0..5 {
             wg.GoStack(64 * KB, || {
                 mu.LockManual();
+                ready.fetch_add(1, Ordering::Release);
                 cond.Wait();
                 woke.fetch_add(1, Ordering::Release);
                 mu.Unlock();
             });
         }
 
-        // Wait for all 5 to be parked.
-        for _ in 0..200 {
-            goish::runtime::sched::Gosched();
+        // All five must be registered before Broadcast: it swaps the
+        // waiter count to zero and releases exactly that many credits,
+        // so a straggler gets nothing and never wakes.
+        if !await_registered(&mu, &ready, 5) {
+            fmt::Println!("[ 2] Broadcast 5 waiters      FAIL waiters never registered");
+            failed += 1;
         }
         cond.Broadcast();
         wg.Wait();
@@ -96,15 +141,23 @@ fn run_tests() {
 
         let woke = AtomicI64::new(0);
         let wg = WaitGroup::new();
+        let ready = AtomicI64::new(0);
         wg.GoStack(64 * KB, || {
             mu.LockManual();
+            ready.fetch_add(1, Ordering::Release);
             cond.Wait();
             woke.fetch_add(1, Ordering::Release);
             mu.Unlock();
         });
 
-        for _ in 0..100 {
-            goish::runtime::sched::Gosched();
+        // Registration is the right barrier for the NEGATIVE check
+        // too. Once the waiter is registered and no Signal has been
+        // issued since, `woke == 0` is a fact rather than a race: the
+        // three earlier Signals found no waiter and must have stored
+        // nothing.
+        if !await_registered(&mu, &ready, 1) {
+            fmt::Println!("[ 3] Signal no-op when empty  FAIL waiter never registered");
+            failed += 1;
         }
         // Waiter should still be parked.
         if woke.load(Ordering::Acquire) != 0 {

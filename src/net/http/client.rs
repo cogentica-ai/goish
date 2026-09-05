@@ -647,6 +647,44 @@ pub(crate) fn read_response_head<R: Reader>(
     br: &mut bufio::Reader<R>,
     req: Option<Request>,
 ) -> (Response, BodyKind, error) {
+    // No budget: this is the `ReadResponse` shape, which Go does not
+    // bound either — the limit belongs to the Transport.
+    return read_response_head_limited(br, req, 0);
+}
+
+// go: none — goish-only: Go bounds the response head by installing
+// `pc.readLimit = pc.maxHeaderResponseSize()` on the persistConn's
+// reader (transport.go:2277). goish has no limit reader, so the budget
+// is spent line by line here.
+//
+// `MaxResponseHeaderBytes` was a public field that only Clone and
+// `maxHeaderResponseSize` ever read, and nothing called
+// `maxHeaderResponseSize`, so the limit did not exist. Go's default
+// when the field is unset is 10 MiB — "conservative default; same as
+// http2" — so goish was not merely ignoring a user setting, it had no
+// bound at all where Go always has one.
+//
+// A single header LINE was already bounded, by bufio's buffer through
+// ReadSlice. The total was not: a server answering with many SHORT
+// headers grows the Header map without limit, and no line ever trips
+// the per-line check. That is the shape this budget catches.
+//
+// `limit <= 0` means unbounded, which is what ReadResponse passes.
+pub(crate) fn read_response_head_limited<R: Reader>(
+    br: &mut bufio::Reader<R>,
+    req: Option<Request>,
+    limit: i64,
+) -> (Response, BodyKind, error) {
+    let mut spent: i64 = 0;
+    // Go's message, verbatim: the wrapper naming the broken transport
+    // connection is added by the read loop above this.
+    let over = |n: i64| -> error {
+        errors::New(
+            string("net/http: server response headers exceeded ")
+                + crate::strconv::FormatInt(n, 10)
+                + string(" bytes; aborted"),
+        )
+    };
     let mut resp = Response::default();
     resp.Request = match req {
         Some(r) => nilable::new(r),
@@ -670,6 +708,12 @@ pub(crate) fn read_response_head<R: Reader>(
             return (resp, BodyKind::Empty, e);
         }
     };
+    if limit > 0 {
+        spent += line.Len() as i64 + 2;
+        if spent > limit {
+            return (Response::default(), BodyKind::Empty, over(limit));
+        }
+    }
     let lb = line.as_bytes();
     let sp1 = match lb.iter().position(|&b| b == b' ') {
         Some(i) => i,
@@ -732,6 +776,12 @@ pub(crate) fn read_response_head<R: Reader>(
                 return (resp, BodyKind::Empty, e);
             }
         };
+        if limit > 0 {
+            spent += h.Len() as i64 + 2;
+            if spent > limit {
+                return (resp, BodyKind::Empty, over(limit));
+            }
+        }
         if h.Len() == 0 {
             break;
         }
@@ -1097,11 +1147,17 @@ impl Default for Transport {
     }
 }
 
-/// `http.ProxyFromEnvironment` — Go's default proxy resolver. v1
-/// returns a no-op closure (env-var inspection deferred). Goish ports
-/// reference this as `http::ProxyFromEnvironment` (a function call is
-/// what produces the resolver value in goish; Go callers assigning the
-/// bare identifier go through `From<>` under the hood).
+/// `http.ProxyFromEnvironment` — Go's default proxy resolver. It reads
+/// HTTP_PROXY / HTTPS_PROXY / NO_PROXY (and the lowercase spellings)
+/// through the httpproxy port; http_proxyenv_smoke pins the matching
+/// rules case by case against Go. Goish ports reference this as
+/// `http::ProxyFromEnvironment` (a function call is what produces the
+/// resolver value in goish; Go callers assigning the bare identifier
+/// go through `From<>` under the hood).
+///
+/// The line above used to say "v1 returns a no-op closure (env-var
+/// inspection deferred)", which stopped being true and then read as a
+/// reason not to call it.
 pub fn ProxyFromEnvironment() -> ProxyResolver {
     // Mirrors Go's `return envProxyFunc()(req.URL)` — transport.go
     // lines 499-501. The
@@ -1164,12 +1220,82 @@ impl RoundTripper for Transport {
         let scheme = req.URL.Scheme.clone();
         let is_https = scheme.as_bytes() == b"https";
         let is_http = scheme.Len() == 0 || scheme.as_bytes() == b"http";
+        // The unsupported-scheme rejection is NOT here. Go computes
+        // isHTTP at the top and does not act on it until after the
+        // alternate RoundTripper has had the request (transport.go:624)
+        // — which is the whole point of RegisterProtocol, since every
+        // scheme it exists to serve is one this test would reject.
+        // goish rejected first, so `RegisterProtocol("file", …)` — the
+        // example in filetransport.go's own doc comment — registered a
+        // transport that could never be reached through a Client.
+
+        // Go validates the outgoing headers in Transport.roundTrip (see
+        // transport.go:597, "Validate the outgoing headers"),
+        // then the trailers, both before anything is dialled.
+        //
+        // `validateHeaders` was ported into transport.rs and anchored
+        // to that exact Go function, and then CALLED NOWHERE — so a
+        // header value carrying a raw CR or LF went onto the wire
+        // verbatim. That is request smuggling: a caller that
+        // puts attacker-controlled text in a header value lets the
+        // attacker end the header block and start a second request
+        // inside the first. Measured against Go, which refuses five of
+        // six malformed shapes before dialling and refused none here.
+        if is_http || is_https {
+            let bad = super::transport::validateHeaders(&req.Header);
+            if bad.Len() != 0 {
+                return (
+                    Response::default(),
+                    errors::New(string("net/http: invalid header ") + bad),
+                );
+            }
+            let bad = super::transport::validateHeaders(&req.Trailer);
+            if bad.Len() != 0 {
+                return (
+                    Response::default(),
+                    errors::New(string("net/http: invalid trailer ") + bad),
+                );
+            }
+        }
+
+        // Go: if altRT := t.alternateRoundTripper(req); altRT != nil {
+        //         if resp, err := altRT.RoundTrip(req); err !=
+        //         ErrSkipAltProtocol { return resp, err }
+        //         req, err = rewindBody(req) … } (transport.go:614-623)
+        //
+        // `alternateRoundTripper` and `RegisterProtocol` were both
+        // ported, and the scheme check above returned before either
+        // could matter. Measured against Go with the doc comment's own
+        // example — RegisterProtocol("file", NewFileTransport(Dir(d)))
+        // then Client.Get("file:///a.txt") — Go serves the file and
+        // goish answered "only scheme=http and scheme=https are
+        // supported" for all four cases.
+        let mut req_owned;
+        let mut req = req;
+        if let Some(alt) = self.alternateRoundTripper(req) {
+            let (resp, err) = alt.RoundTrip(req);
+            if !errors::Is(err.clone(), super::transport::ErrSkipAltProtocol) {
+                return (resp, err);
+            }
+            // Declined: Go rewinds the body before the normal path
+            // retries it, since the alternate may have consumed it.
+            let (rb, rerr) = super::transport::rewindBody(req);
+            if !rerr.IsNil() {
+                return (Response::default(), rerr);
+            }
+            req_owned = rb;
+            req = &mut req_owned;
+        }
+
+        // Go: if !isHTTP { req.closeBody(); return
+        // badStringError("unsupported protocol scheme", scheme) }
+        // (transport.go:624-626). badStringError formats with %q.
         if !is_http && !is_https {
             return (
                 Response::default(),
-                errors::New(string(
-                    "http: only scheme=http and scheme=https are supported",
-                )),
+                errors::New(
+                    string("unsupported protocol scheme \"") + scheme.clone() + string("\""),
+                ),
             );
         }
 
@@ -1501,10 +1627,16 @@ impl RoundTripper for Transport {
 
                 // Read the response head; the src moves onward into
                 // resp.Body, which streams until the caller Closes it.
+                //
+                // Bounded by Transport.MaxResponseHeaderBytes, or Go's
+                // 10 MiB default when it is unset. This is the path
+                // Client.Do takes; readLoop has the same budget stamped
+                // on its persistConn at dial.
+                let hdr_budget = super::transport::persistConn::maxHeaderResponseSize(self);
                 let (mut resp, kind, rerr) = match &mut src {
-                    ConnSrc::Tcp(br) => read_response_head(br, Some(rt_req.clone())),
-                    ConnSrc::Tls(br) => read_response_head(br, Some(rt_req.clone())),
-                    ConnSrc::Dyn(br) => read_response_head(br, Some(rt_req.clone())),
+                    ConnSrc::Tcp(br) => read_response_head_limited(br, Some(rt_req.clone()), hdr_budget),
+                    ConnSrc::Tls(br) => read_response_head_limited(br, Some(rt_req.clone()), hdr_budget),
+                    ConnSrc::Dyn(br) => read_response_head_limited(br, Some(rt_req.clone()), hdr_budget),
                 };
                 if !rerr.IsNil() {
                     stop_cancel_watch(watch);
@@ -1718,7 +1850,10 @@ impl Transport {
     /// Effective conn deadline for one roundtrip: `Transport.Timeout`
     /// (if set) tightened by the request ctx's deadline (if any).
     /// Zero Time ⇒ no deadline.
-    fn effective_deadline(&self, ctx: &Option<Arc<dyn crate::context::Context>>) -> time::Time {
+    pub(crate) fn effective_deadline(
+        &self,
+        ctx: &Option<Arc<dyn crate::context::Context>>,
+    ) -> time::Time {
         let mut dl = time::Time::default();
         if self.Timeout.0 > 0 {
             dl = time::Now().Add(self.Timeout);
@@ -1851,7 +1986,14 @@ pub struct Client {
 impl Default for Client {
     fn default() -> Self {
         Client {
-            Transport: Arc::new(Transport::default()) as Arc<dyn RoundTripper>,
+            // Go's `DefaultClient = &Client{}` has a nil Transport and
+            // `Client.transport()` falls back to DefaultTransport.
+            // goish's field is non-optional, so the fallback is made
+            // here — but it has to BE DefaultTransport, not a bare
+            // zero-valued one. It was the latter, which is how
+            // `http::Get` came to ignore HTTP_PROXY and to dial with
+            // no timeout at all. See transport::DefaultTransport.
+            Transport: super::transport::DefaultTransport() as Arc<dyn RoundTripper>,
             Jar: None,
             CheckRedirect: None,
             Timeout: time::Duration(0),
@@ -2393,8 +2535,26 @@ impl Client {
             // Go: resp, didTimeout, err = c.send(req, deadline) —
             // the jar halves of (*Client).send are the blocks above
             // and below this call.
-            let (resp, _did_timeout, err) = send(&current, &self.Transport, deadline.clone());
+            let (resp, did_timeout, err) = send(&current, &self.Transport, deadline.clone());
             if !err.IsNil() {
+                // Go: if !deadline.IsZero() && didTimeout() { err =
+                // &timeoutError{err.Error() + " (Client.Timeout
+                // exceeded while awaiting headers)"} } (client.go:733)
+                //
+                // `didTimeout` was computed and bound to `_did_timeout`
+                // here, so the annotation never happened. It is how a
+                // caller tells "my Client.Timeout fired" from "the
+                // context I was handed expired" — different bugs with
+                // different fixes — and the wrapper is also what makes
+                // `err.(net.Error).Timeout()` answer true.
+                let err = if !deadline.IsZero() && did_timeout() {
+                    super::transport::newTimeoutError(
+                        err.Error()
+                            + string(" (Client.Timeout exceeded while awaiting headers)"),
+                    )
+                } else {
+                    err
+                };
                 return (resp, uerr(uerr_method.clone(), &current.URL, err));
             }
             // Go (client.go, send): if c.Jar != nil { if rc :=
@@ -2411,12 +2571,54 @@ impl Client {
             // Decide whether to follow.
             match resp.StatusCode {
                 301 | 302 | 303 | 307 | 308 => {
-                    let (loc, lerr) = resp.Location();
-                    if !lerr.IsNil() {
-                        // No Location → return as-is (the deadline
-                        // release already rides in the Body).
+                    // Go: `loc := resp.Header.Get("Location")` then
+                    // `u, err := req.URL.Parse(loc)` (client.go:638-645)
+                    // — resolved against the CURRENT REQUEST's URL, not
+                    // through `resp.Location()`.
+                    //
+                    // goish used resp.Location(), which resolves against
+                    // `resp.Request` and falls back to parsing the
+                    // header on its own when that is unset. Only the
+                    // wire path sets resp.Request (read_response_head),
+                    // so a response from an alternate RoundTripper —
+                    // anything registered with RegisterProtocol — had a
+                    // relative Location parsed with no base at all. The
+                    // file transport's directory redirect to "sub/"
+                    // became the URL "sub/", and the next hop failed
+                    // with "http: no Host in request" instead of
+                    // fetching file:///sub/.
+                    let loc = resp.Header.Get(string("Location"));
+                    if loc.Len() == 0 {
+                        // Go: "While most 3xx responses include a
+                        // Location, it is not required" — return as-is
+                        // (the deadline release rides in the Body).
                         return (resp, errors::nil);
                     }
+                    let (loc_url, lerr) = current.URL.Parse(loc.clone());
+                    if !lerr.IsNil() {
+                        // Go: closeBody, then
+                        // `uerr(fmt.Errorf("failed to parse Location
+                        // header %q: %v", loc, err))` (client.go:648).
+                        // goish returned the 3xx as if it were the
+                        // final response, so a caller following a
+                        // malformed Location saw a 302 with no error
+                        // and no redirect.
+                        let _ = resp.Body.__close_shared();
+                        return (
+                            Response::default(),
+                            uerr(
+                                uerr_method.clone(),
+                                &current.URL,
+                                errors::New(
+                                    string("failed to parse Location header ")
+                                        + crate::strconv::Quote(loc)
+                                        + string(": ")
+                                        + lerr.Error(),
+                                ),
+                            ),
+                        );
+                    }
+                    let loc = loc_url;
                     // Go: the hop's body is closed before following.
                     let _ = resp.Body.__close_shared();
                     // Go's redirectBehavior (client.go):
@@ -2785,10 +2987,22 @@ pub fn NewRequest<M: Into<string>, U: Into<string>, B: __RequestBody>(
     // treats it all as a path) and userinfo (Parse puts "user:pw" in
     // URL.User, leaving Host clean; ParseRequestURI leaves it in
     // Host, which then leaked the credentials into the Host header).
-    let (u, perr) = super::url::Parse(url);
+    let (mut u, perr) = super::url::Parse(url);
     if perr != errors::nil {
         return (default_request(), perr);
     }
+    // Go: "The host's colon:port should be normalized. See Issue
+    // 14836." (request.go:910). This is the only caller of
+    // removeEmptyPort in Go's tree, and goish had the function ported,
+    // anchored and smoke-tested while nothing called it, so
+    // "http://example.com:/p" kept its trailing colon onto the wire as
+    // `Host: example.com:`.
+    //
+    // It strips the colon only when the host really has a port
+    // section, which is why an IPv6 literal survives: Go decides with
+    // LastIndex(":") > LastIndex("]"), so `[::1]`'s internal colons do
+    // not make it look ported.
+    u.Host = super::http::removeEmptyPort(u.Host.clone());
     let body_len = body.Len();
     let host = u.Host.clone();
     let gb_data = body.clone();
@@ -2959,7 +3173,7 @@ fn has_port(host: &string) -> bool {
 /// ready to write to the underlying conn — head plus fully-encoded
 /// body (chunked framing included when the transferWriter chose it).
 ///
-/// Loose port of `(*Request).write` (request.go:603). The Client's
+/// Loose port of `(*Request).write` (request.go:582). The Client's
 /// send path avoids this buffered form: it writes the head, then
 /// STREAMS the body with `transferWriter::writeBody` directly onto
 /// the conn.
@@ -3100,7 +3314,7 @@ pub fn serialize_request_head(
         let _ = b.WriteString(string::from_bytes(&hb.Bytes()));
     }
 
-    // Go (request.go:707): err = r.Header.writeSubset(w,
+    // Go (header.go:190, called from request.go): err = r.Header.writeSubset(w,
     //     reqWriteExcludeHeader, trace)
     //
     // This used to be a hand-rolled loop that skipped only Host and

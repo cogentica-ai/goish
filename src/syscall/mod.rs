@@ -398,7 +398,11 @@ impl Errno {
         // of them rendered as the bare word "errno": a refused
         // connection, a reset peer, an address already in use and a
         // broken pipe all produced the same useless message. They are
-        // the errnos `net` hands back most often.
+        // the errnos `net` hands back most often, plus every errno a
+        // FILE, DIRECTORY or PROCESS operation produces — measured
+        // against Go rather than transcribed, because "errno 28" for a
+        // full disk is exactly as useless as the bare "errno" this
+        // table replaced.
         //
         // The fallback carries the NUMBER, as Go's does — Go renders
         // an unknown errno as "errno 0", not "errno", and without the
@@ -429,6 +433,55 @@ impl Errno {
             105 => "no buffer space available",
             110 => "connection timed out",
             111 => "connection refused",
+            3 => "no such process",
+            5 => "input/output error",
+            6 => "no such device or address",
+            7 => "argument list too long",
+            8 => "exec format error",
+            10 => "no child processes",
+            14 => "bad address",
+            16 => "device or resource busy",
+            18 => "invalid cross-device link",
+            19 => "no such device",
+            25 => "inappropriate ioctl for device",
+            26 => "text file busy",
+            27 => "file too large",
+            28 => "no space left on device",
+            29 => "illegal seek",
+            30 => "read-only file system",
+            31 => "too many links",
+            33 => "numerical argument out of domain",
+            34 => "numerical result out of range",
+            36 => "file name too long",
+            40 => "too many levels of symbolic links",
+            61 => "no data available",
+            62 => "timer expired",
+            71 => "protocol error",
+            75 => "value too large for defined data type",
+            84 => "invalid or incomplete multibyte or wide character",
+            88 => "socket operation on non-socket",
+            89 => "destination address required",
+            90 => "message too long",
+            91 => "protocol wrong type for socket",
+            92 => "protocol not available",
+            93 => "protocol not supported",
+            94 => "socket type not supported",
+            96 => "protocol family not supported",
+            97 => "address family not supported by protocol",
+            100 => "network is down",
+            101 => "network is unreachable",
+            102 => "network dropped connection on reset",
+            106 => "transport endpoint is already connected",
+            107 => "transport endpoint is not connected",
+            108 => "cannot send after transport endpoint shutdown",
+            109 => "too many references: cannot splice",
+            112 => "host is down",
+            113 => "no route to host",
+            114 => "operation already in progress",
+            115 => "operation now in progress",
+            116 => "stale file handle",
+            122 => "disk quota exceeded",
+            125 => "operation canceled",
             _ => "",
         };
         if !msg.is_empty() {

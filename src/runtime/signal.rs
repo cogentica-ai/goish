@@ -122,6 +122,25 @@ static REGISTRY: SpinLock<Vec<Registration>> = SpinLock::new(Vec::new());
 /// (signal_unix.go).
 pub fn register(c: &chan<i32>, sigs: &[i32]) {
     let mut bitmap: u64 = 0;
+    if sigs.is_empty() {
+        // Go: "If no signals are provided, all incoming signals will
+        // be relayed to c" (os/signal/signal.go, Notify). An empty
+        // list used to build an EMPTY bitmap here, so `Notify(c)`
+        // registered the channel for nothing at all and installed no
+        // handler — the exact opposite of what it asks for.
+        //
+        // SIGKILL (9) and SIGSTOP (19) cannot be caught; asking for
+        // them is not an error, they simply never arrive, and
+        // rt_sigaction would fail on them anyway.
+        let max_sig = MAX_SIG as i32; // goishlint:ignore GOISH005 - a signal-table bound, not a Go value
+        for s in 1..max_sig {
+            if s == 9 || s == 19 {
+                continue;
+            }
+            bitmap |= 1u64 << s;
+            install_handler(s);
+        }
+    }
     for &s in sigs {
         if (s as u32) < 64 {
             bitmap |= 1u64 << s;
@@ -140,6 +159,83 @@ pub fn register(c: &chan<i32>, sigs: &[i32]) {
         target: c.clone(),
         sigs: bitmap,
     });
+}
+
+// go: none — goish-only: Go's `ignoreSignal` is a runtime
+// intrinsic (runtime/sigqueue.go) reaching into sigtable. goish
+// changes the kernel disposition directly.
+/// Set `sig` to SIG_IGN. Mirrors the runtime side of
+/// `signal.Ignore`.
+///
+/// Go's `ignoreSignal` changes the DISPOSITION, which is what
+/// `signal.Ignored` reports and what survives a later `Reset` — see
+/// `is_ignored` and the note on `signal::Reset`.
+pub fn ignore_signal(sig: i32) {
+    let idx = sig as u32; // goishlint:ignore GOISH005 - a table index bound, not a Go value
+    if idx >= 64 || sig == 9 || sig == 19 {
+        return;
+    }
+    let sa = syscall::Sigaction {
+        sa_handler: 1, // SIG_IGN
+        sa_flags: syscall::SA_RESTORER | syscall::SA_RESTART,
+        sa_restorer: syscall::SigreturnTrampoline as *const () as usize,
+        sa_mask: 0,
+    };
+    unsafe {
+        syscall::RtSigaction(sig, &sa as *const _, core::ptr::null_mut());
+    }
+}
+
+// go: none — goish-only: Go's `signalIgnored` is a runtime
+// intrinsic. goish asks the kernel.
+/// Whether `sig`'s current disposition is SIG_IGN. Mirrors Go's
+/// `signalIgnored`.
+///
+/// Asks the kernel rather than tracking a shadow flag: a disposition
+/// can also be inherited across exec, and a shadow flag would answer
+/// for goish's own calls only.
+pub fn is_ignored(sig: i32) -> bool {
+    let idx = sig as u32; // goishlint:ignore GOISH005 - a table index bound, not a Go value
+    if idx >= 64 {
+        return false;
+    }
+    let mut old = syscall::Sigaction {
+        sa_handler: 0,
+        sa_flags: 0,
+        sa_restorer: 0,
+        sa_mask: 0,
+    };
+    let r = unsafe { syscall::RtSigaction(sig, core::ptr::null(), &mut old as *mut _) };
+    if r < 0 {
+        return false;
+    }
+    return old.sa_handler == 1; // SIG_IGN
+}
+
+// go: none — goish-only: the registry half of Go's `cancel`
+// (os/signal/signal.go:141-170), which lives in the os/signal
+// package there because the handler map does too.
+/// Drop `sigs` from every registration. Mirrors the registry half of
+/// Go's `cancel`, which both `signal.Ignore` and `signal.Reset` run.
+/// An empty list means every signal, as Go's does.
+pub fn unregister_sigs(sigs: &[i32]) {
+    let mut bitmap: u64 = 0;
+    if sigs.is_empty() {
+        bitmap = u64::MAX;
+    } else {
+        for &s in sigs {
+            let i = s as u32; // goishlint:ignore GOISH005 - a table index bound, not a Go value
+            if i < 64 {
+                bitmap |= 1u64 << s;
+            }
+        }
+    }
+    let mut reg = REGISTRY.lock();
+    for entry in reg.iter_mut() {
+        entry.sigs &= !bitmap;
+    }
+    // Go deletes the handler entry once its mask is empty.
+    reg.retain(|e| e.sigs != 0);
 }
 
 /// Unregister `c` from all signals. Mirrors `signal.Stop`.

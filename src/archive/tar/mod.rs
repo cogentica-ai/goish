@@ -29,6 +29,8 @@ pub use common::*;
 
 #[path = "format.rs"]
 mod format;
+mod stat_actime1;
+mod stat_unix;
 pub use format::*;
 
 // strconv.go declares nothing exported — every codec in it is

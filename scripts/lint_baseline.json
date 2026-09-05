@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 8358,
+ "total": 8252,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -263,7 +263,7 @@
    "GOISH005": 8,
    "GOISH008": 1,
    "GOISH012": 1,
-   "GOISH014": 78,
+   "GOISH014": 77,
    "GOISH016": 1,
    "GOISH023": 67
   },
@@ -277,9 +277,9 @@
   },
   "src/encoding/json/v2/mod.rs": {
    "GOISH005": 2,
-   "GOISH014": 42,
+   "GOISH014": 40,
    "GOISH016": 1,
-   "GOISH023": 42
+   "GOISH023": 40
   },
   "src/encoding/mod.rs": {
    "GOISH015": 1,
@@ -301,9 +301,6 @@
    "GOISH014": 11,
    "GOISH016": 1,
    "GOISH023": 11
-  },
-  "src/fmt/errors.rs": {
-   "GOISH021": 1
   },
   "src/fmt/format.rs": {
    "GOISH018": 18,
@@ -372,7 +369,7 @@
    "GOISH005": 3,
    "GOISH008": 1,
    "GOISH014": 32,
-   "GOISH023": 29
+   "GOISH023": 28
   },
   "src/hash/hash.rs": {
    "GOISH022": 2
@@ -479,12 +476,12 @@
    "GOISH021": 14
   },
   "src/net/dnsclient.rs": {
-   "GOISH005": 12,
+   "GOISH005": 11,
    "GOISH006": 1,
    "GOISH007": 1,
    "GOISH010": 12,
-   "GOISH014": 26,
-   "GOISH023": 26
+   "GOISH014": 25,
+   "GOISH023": 24
   },
   "src/net/dnsconfig.rs": {
    "GOISH005": 1,
@@ -589,11 +586,13 @@
    "GOISH021": 6
   },
   "src/net/http/transport.rs": {
-   "GOISH018": 23,
-   "GOISH021": 22
+   "GOISH018": 22,
+   "GOISH021": 19
   },
   "src/net/lookup.rs": {
    "GOISH014": 23,
+   "GOISH018": 34,
+   "GOISH021": 5,
    "GOISH023": 23
   },
   "src/net/mac.rs": {
@@ -607,13 +606,20 @@
    "GOISH014": 51,
    "GOISH016": 1,
    "GOISH022": 1,
-   "GOISH023": 47
+   "GOISH023": 45
   },
   "src/net/parse.rs": {
    "GOISH005": 30,
    "GOISH007": 2,
    "GOISH014": 10,
    "GOISH023": 9
+  },
+  "src/net/port_unix.rs": {
+   "GOISH021": 1
+  },
+  "src/net/tcpsock.rs": {
+   "GOISH018": 19,
+   "GOISH021": 4
   },
   "src/net/textproto/mod.rs": {
    "GOISH005": 10,
@@ -633,6 +639,10 @@
    "GOISH015": 1,
    "GOISH023": 19
   },
+  "src/net/textproto/writer.rs": {
+   "GOISH018": 1,
+   "GOISH021": 1
+  },
   "src/nilval.rs": {
    "GOISH014": 8,
    "GOISH023": 8
@@ -641,19 +651,24 @@
    "GOISH005": 2,
    "GOISH014": 25,
    "GOISH016": 1,
-   "GOISH023": 18
+   "GOISH023": 17
+  },
+  "src/os/exec_posix.rs": {
+   "GOISH018": 7
   },
   "src/os/mod.rs": {
    "GOISH005": 32,
-   "GOISH014": 105,
+   "GOISH014": 102,
    "GOISH015": 1,
    "GOISH016": 1,
-   "GOISH023": 102
+   "GOISH023": 97
   },
   "src/os/signal/mod.rs": {
-   "GOISH014": 3,
-   "GOISH016": 1,
-   "GOISH023": 1
+   "GOISH016": 1
+  },
+  "src/os/signal/signal.rs": {
+   "GOISH018": 7,
+   "GOISH021": 5
   },
   "src/os/user/mod.rs": {
    "GOISH005": 2,
@@ -892,11 +907,19 @@
   "src/select_macro.rs": {
    "GOISH005": 3
   },
+  "src/sync/atomic/doc.rs": {
+   "GOISH018": 10
+  },
   "src/sync/atomic/mod.rs": {
-   "GOISH014": 95,
-   "GOISH015": 1,
-   "GOISH016": 1,
-   "GOISH023": 83
+   "GOISH016": 1
+  },
+  "src/sync/atomic/type.rs": {
+   "GOISH018": 3,
+   "GOISH021": 2
+  },
+  "src/sync/atomic/value.rs": {
+   "GOISH018": 2,
+   "GOISH021": 2
   },
   "src/sync/cond.rs": {
    "GOISH014": 6,

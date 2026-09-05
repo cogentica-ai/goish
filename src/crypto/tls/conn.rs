@@ -12,12 +12,12 @@
 // goishlint:ignore GOISH019  — same.
 // goishlint:ignore GOISH021 maxUselessBytes, tlsunsafeekm, outBufPool — same; the last three are the dynamic record-sizing knobs and a godebug var, all of which belong to Conn.write; outBufPool is a sync.Pool whose only purpose is to avoid one allocation per record, which goish does not model.
 //
-// One deviation: `setErrorLocked` asserts `err.(net.Error)` in Go, to
-// wrap a transient network error as permanent. goish's `net` exposes no
-// `Error` interface to assert against, so that arm is unreachable and
-// the error is stored as-is. `permanentError` is ported regardless —
-// it is a declared type with four methods, and the wrap becomes live the
-// moment `net.Error` does.
+// `setErrorLocked` asserts `err.(net.Error)` to wrap a transient
+// network error as permanent. This file used to say goish's `net`
+// exposed no `Error` interface to assert against, so that arm was
+// unreachable and the error was stored as-is — "the wrap becomes live
+// the moment net.Error does". It did; the note outlived it. Both the
+// wrap and `permanentError.Timeout`'s forward are live now.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
 
@@ -63,13 +63,18 @@ impl permanentError {
     }
 
     // go: sdk 1.25.5 crypto/tls/conn.go:193-193 permanentError.Timeout
+    /// Go: `return e.err.Timeout()` — forward to the wrapped
+    /// `net.Error`.
     ///
-    /// Deviation: Go forwards to `e.err.Timeout()` on the wrapped
-    /// `net.Error`. goish has no `net.Error` interface to forward
-    /// through, so this reports false until one exists.
+    /// This used to return false unconditionally, on a note saying
+    /// goish had no `net.Error` interface to forward through. It has
+    /// one (net/net.rs:72), so the note was stale and the answer was
+    /// wrong: a TLS read that timed out reported Timeout() == false,
+    /// which is the question `if ne, ok := err.(net.Error); ok &&
+    /// ne.Timeout()` exists to ask before retrying.
     pub(crate) fn Timeout(&self) -> bool {
-        // Go: return e.err.Timeout()
-        return false;
+        let (ne, ok) = crate::errors::AsIface::<crate::d!(crate::net::net::Error)>(&self.err);
+        return ok && ne.Timeout();
     }
 
     // go: sdk 1.25.5 crypto/tls/conn.go:194-194 permanentError.Temporary
@@ -183,7 +188,19 @@ impl halfConn {
     pub(crate) fn setErrorLocked(&mut self, err: error) -> error {
         // Go: if e, ok := err.(net.Error); ok { hc.err = &permanentError{err: e} }
         //     else { hc.err = err }
-        self.err = err;
+        //
+        // The wrap makes a TRANSIENT network error permanent for this
+        // connection: once a TLS stream has faulted, retrying reads
+        // the wrong bytes, so Go removes the caller's ability to treat
+        // it as temporary. goish stored the error as-is on a note that
+        // it had no `net.Error` to assert against; it has one, so the
+        // arm is live.
+        let (_ne, is_net) = crate::errors::AsIface::<crate::d!(crate::net::net::Error)>(&err);
+        if is_net {
+            self.err = crate::errors::Wrap(permanentError { err });
+        } else {
+            self.err = err;
+        }
         // Go: return hc.err
         return self.err.clone();
     }
@@ -2003,7 +2020,20 @@ impl Conn {
             if err == crate::io::ErrUnexpectedEOF && self.rawInput.len() == 0 {
                 err = crate::io::EOF.into();
             }
-            self.in_.setErrorLocked(err.clone());
+            // Go: if e, ok := err.(net.Error); !ok || !e.Temporary() {
+            //         c.in.setErrorLocked(err) }
+            //
+            // The condition is the whole point and goish dropped it:
+            // storing the error LATCHES it, so every later read on this
+            // connection returns it. A read DEADLINE is a temporary
+            // net.Error, so Go does not latch it — which is what lets a
+            // caller poll with a deadline, clear it and carry on, the
+            // standard "wait a bit, then wait properly" idiom. Without
+            // the guard the first timeout killed the connection.
+            let (ne, is_net) = crate::errors::AsIface::<crate::d!(crate::net::net::Error)>(&err);
+            if !is_net || !ne.Temporary() {
+                self.in_.setErrorLocked(err.clone());
+            }
             return err;
         }
         // Go: hdr := c.rawInput.Bytes()[:recordHeaderLen]

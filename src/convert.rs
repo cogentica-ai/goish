@@ -281,13 +281,13 @@ macro_rules! __num_conv {
         impl $trait for f32 {
             #[inline]
             fn __conv(self) -> $target {
-                self as $target
+                <$target as NumCast>::from_f32(self)
             }
         }
         impl $trait for f64 {
             #[inline]
             fn __conv(self) -> $target {
-                self as $target
+                <$target as NumCast>::from_f64(self)
             }
         }
     };
@@ -343,6 +343,9 @@ impl __ByteConv for char {
 // those primitives (see `types.rs`), so the alias set is covered too.
 pub trait NumCast: Sized + Copy {
     #[doc(hidden)]
+    // goishlint:ignore GOISH014 — intrinsic adapter; float targets override to preserve identity casts without a widening round trip.
+    fn from_f32(v: f32) -> Self { return Self::from_f64(v as f64); }
+    #[doc(hidden)]
     fn from_f64(v: f64) -> Self;
     #[doc(hidden)]
     fn from_i64(v: i64) -> Self;
@@ -371,7 +374,51 @@ macro_rules! __num_cast_impl {
     };
 }
 
-__num_cast_impl!(u8, i8, u16, i16, u32, i32, u64, i64, usize, isize, f32, f64);
+__num_cast_impl!(u8, i8, u16, i16, u32, i32, u64, usize, isize);
+
+// go: sdk 1.25.5 cmd/compile/internal/ssa/_gen/AMD64.rules:168-168 Cvt64Fto64
+// DEVIATION: Go permits implementation-dependent out-of-range conversion.
+// Match the Go 1.25.5 linux/amd64 runtime target, including NaN and infinities:
+// CVTTSD2SQ returns the integer-indefinite value, not Rust's saturation.
+// This fixes int/int64 (Goish int is i64); other integer widths retain their
+// existing conversion policy and are not claimed to have overflow parity.
+// goishlint:ignore GOISH014 — compiler lowering rule, not an SDK function; exact source anchor is above.
+fn float_to_go_int64(value: f64) -> i64 {
+    if !(value >= -9223372036854775808.0 && value < 9223372036854775808.0) {
+        return i64::MIN;
+    }
+    return value as i64; // goishlint:ignore GOISH005 — checked primitive behind int64(); the call-cast here would recurse.
+}
+
+impl NumCast for i64 {
+    // goishlint:ignore GOISH014 — compiler-intrinsic adapter; Go source provenance is on float_to_go_int64.
+    #[inline] fn from_f64(v: f64) -> Self { return float_to_go_int64(v); }
+    // goishlint:ignore GOISH014 — identity conversion adapter, not a Go function.
+    #[inline] fn from_i64(v: i64) -> Self { return v; }
+    // goishlint:ignore GOISH014 — integer conversion adapter, not a Go function.
+    #[inline] fn from_u64(v: u64) -> Self { return int64(v); }
+    // goishlint:ignore GOISH014 — integer conversion adapter, not a Go function.
+    #[inline] fn to_f64(self) -> f64 { return float64(self); }
+    // goishlint:ignore GOISH014 — identity conversion adapter, not a Go function.
+    #[inline] fn to_i64(self) -> i64 { return self; }
+    // goishlint:ignore GOISH014 — integer conversion adapter, not a Go function.
+    #[inline] fn to_u64(self) -> u64 { return uint64(self); }
+}
+
+macro_rules! __num_cast_float_impl {
+    ($($t:ty),*) => {$(
+        impl NumCast for $t {
+            #[inline] fn from_f32(v: f32) -> Self { return v as $t; }
+            #[inline] fn from_f64(v: f64) -> Self { v as $t }
+            #[inline] fn from_i64(v: i64) -> Self { v as $t }
+            #[inline] fn from_u64(v: u64) -> Self { v as $t }
+            #[inline] fn to_f64(self) -> f64 { self as f64 }
+            #[inline] fn to_i64(self) -> i64 { return float_to_go_int64(self as f64); }
+            #[inline] fn to_u64(self) -> u64 { return self as u64; } // goishlint:ignore GOISH005 — existing float-to-unsigned primitive; call-cast would recurse.
+        }
+    )*};
+}
+__num_cast_float_impl!(f32, f64);
 
 // ─── __SliceIndex — accept any integer type as a Go-style index ─────
 //

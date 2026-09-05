@@ -6,36 +6,68 @@ than merely counted. Numbers are regenerated with
 the `compress` row refreshed 2026-08-17 and the `hash` and `encoding`
 rows 2026-08-30.
 
+> **Subtree table re-measured 2026-09-05.** The per-package sections
+> further down were NOT regenerated and still date from 2026-08-15, so
+> read a number in those as a floor. The whole-tree total in the
+> heading below is also from that refresh and has not been recomputed —
+> it would need a pass over every subtree, and the ones measured here
+> have all moved up, so treat it as a floor too.
+
 ## The whole tree — 4452 / 11061 functions (40.3%)
 
 Across the 169 packages of the Go 1.25.5 standard library that have a
-goish port: **89 are at 100%**, and there are **5477 `// go:`
-provenance lines**, 3484 of them `sdk` anchors citing the exact Go
-file and line range.
+goish port: **89 are at 100%**. The provenance-line counts were
+re-counted on 2026-09-05: **9602 `// go:` lines**, **6299** of them
+`sdk` anchors citing the exact Go file and line range — up from 5477
+and 3484 at the last refresh.
 
-The anchors are not spread evenly, and that is the single most important
-thing on this page. **`crypto/`, `net/` and `testing/` together hold
-92% of them.** Coverage says a name exists; an anchor is what lets
-goishlint diff the port against the Go file it came from.
+The package count and the 100% figure are from 2026-08-15 and were not
+recomputed.
+
+The anchors are not spread evenly, and that is the single most
+important thing on this page. `crypto/`, `net/` and `testing/` together
+held **92%** of them at the last refresh; on 2026-09-05 they hold
+**58%** (3627 of 6299). The concentration has broken up because the
+rest of the tree gained anchors, not because those three lost any.
+
+Coverage says a name exists; an anchor is what lets goishlint diff the
+port against the Go file it came from. The corollary is the one
+ROADMAP.md 2b is about: a file with NO anchor is not merely unmeasured,
+it is invisible to every tier here, and reading three such files
+against their Go on 2026-09-04 produced eight defects across four
+packages.
 
 | subtree | ported | % | anchors |
 |---|--:|--:|--:|
-| `crypto` | 1431/1447 | 98.9% | **3041** |
-| `net` | 788/1413 | 55.8% | **1570** |
-| `math` | 307/661 | 46.4% | 5 |
-| `testing` | 217/247 | 87.9% | 402 |
-| `encoding` | 230/1018 | 22.6% | 301 |
+| `crypto` | 1431/1447 | 98.9% | **3059** |
+| `net` | 966/1413 | 68.4% | **2071** |
+| `math` | 333/661 | 50.4% | 155 |
+| `testing` | 217/247 | 87.9% | 449 |
+| `encoding` | 234/999 | 23.4% | 407 |
 | `compress` | 150/150 | 100.0% | 303 |
-| `os` | 112/366 | 30.6% | 3 |
-| `bytes` | 107/107 | 100.0% | 91 |
-| `strings` | 98/98 | 100.0% | 153 |
-| `archive` | 71/182 | 39.0% | 0 |
-| `time` | 71/184 | 38.6% | 4 |
-| `sync` | 66/126 | 52.4% | 3 |
+| `os` | 148/366 | 40.4% | 127 |
+| `bytes` | 107/107 | 100.0% | 149 |
+| `strings` | 98/98 | 100.0% | 154 |
+| `archive` | 79/182 | 43.4% | 160 |
+| `time` | 107/184 | 58.2% | 234 |
+| `sync` | 68/126 | 54.0% | 148 |
 | `hash` | 98/114 | 86.0% | 338 |
-| `mime` | 73/89 | 82.0% | 106 |
+| `mime` | 73/89 | 82.0% | 113 |
 | `bufio` | 48/48 | 100.0% | 81 |
 | `unicode` | 52/52 | 100.0% | 131 |
+| `io` | 74/79 | 93.7% | 206 |
+| `text` | 47/271 | 17.3% | 82 |
+| `runtime` | 88/2722 | 3.2% | 40 |
+
+Every row above was regenerated with `scripts/port_coverage.py` on
+2026-09-05. Four rows carried figures that were not merely stale but
+misleading: `net` was recorded at 55.8% and is 68.4%, `os` at 30.6% and
+is 40.4%, `time` at 38.6% and is 58.2%, and `archive` at 39.0% with
+**0 anchors** where it now has 160 — archive/tar's sparse half landed
+in between.
+
+`io`, `text` and `runtime` are new rows; they were large enough to
+matter and were simply absent.
 
 Within `net`, the entire jump since the last refresh is **`net/http`,
 now complete: 639/639 functions (100.0%) across all twelve of its

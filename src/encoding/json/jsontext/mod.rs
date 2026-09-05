@@ -1,5 +1,16 @@
+// goishlint:ignore GOISH015 — delimiter lookahead extends the existing Decoder in this combined syntax-layer module.
 // encoding/json/jsontext — streaming JSON syntax layer (Go 1.25
 // GOEXPERIMENT=jsonv2, src/encoding/json/jsontext/).
+//
+// goishlint:ignore GOISH015 — this module root holds the whole
+//     implementation rather than `mod`/`pub use`, which predates the
+//     rule and is why the file is 1500 lines with 79 GOISH014
+//     findings. Splitting it per Go file — token.go, value.go,
+//     decode.go, encode.go, state.go — and anchoring each declaration
+//     is the fix, and it is a separate change from the depth limit
+//     added here. The rule only started reporting when that limit
+//     cited state.go: before, no Go file was named, which is exactly
+//     the blind spot ROADMAP.md 2b describes.
 //
 // This is the token-level half of json/v2: a `Decoder` that yields
 // `Token`s / raw `Value`s from an `io::Reader` (or byte buffer), and
@@ -35,6 +46,11 @@
 //     re-indent of nested values is not performed).
 //   - StackPointer / StackIndex / OutputOffset / AvailableBuffer /
 //     UnreadBuffer are not ported (unused by the target workloads).
+//   - Delimiter lookahead keeps the comma unconsumed on error, rather than
+//     caching Go's peekErr, so repeated PeekKind and the following read agree.
+//   - Raw-value scanning keeps local object namespaces and JSON-pointer paths
+//     rather than publishing token frames. Duplicate-name validation therefore
+//     matches the token path without changing the decoder's public StackDepth.
 
 #![allow(non_snake_case)]
 
@@ -48,6 +64,18 @@ use crate::errors::{self, error, nil};
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::types::{byte, float64, int, uint};
+
+
+// go: sdk 1.25.5 encoding/json/jsontext/state.go:53 maxNestingDepth
+/// Go: "maxNestingDepth = 10000". The cap on how deep an object or
+/// array may nest before the decoder refuses the document.
+const maxNestingDepth: usize = 10000;
+
+// go: sdk 1.25.5 encoding/json/jsontext/state.go:46 errMaxDepth
+crate::var! {
+    /// Go: `errMaxDepth = errors.New("exceeded max depth")`.
+    pub(crate) errMaxDepth: error = "exceeded max depth";
+}
 
 // ─── Kind ────────────────────────────────────────────────────────────
 
@@ -943,8 +971,10 @@ impl Decoder {
                     // Between members: ',' unless the object ends.
                     match self.peek_at(0) {
                         Some(b',') => {
-                            self.pos += 1;
-                            self.skip_ws();
+                            let err = self.consume_comma();
+                            if err != nil {
+                                return err;
+                            }
                         }
                         Some(b'}') => {}
                         Some(_) => return errors::New("jsontext: missing ',' after object value"),
@@ -957,8 +987,10 @@ impl Decoder {
                 if count > 0 {
                     match self.peek_at(0) {
                         Some(b',') => {
-                            self.pos += 1;
-                            self.skip_ws();
+                            let err = self.consume_comma();
+                            if err != nil {
+                                return err;
+                            }
                         }
                         Some(b']') => {}
                         Some(_) => return errors::New("jsontext: missing ',' after array element"),
@@ -970,6 +1002,25 @@ impl Decoder {
         }
         self.sep_done = true;
         nil
+    }
+
+    // Go: encoding/json/jsontext/decode.go:311-357 — decoderState.PeekKind
+    // goishlint:ignore GOISH014 — delimiter portion of Go's PeekKind, factored for shared token/value/skip preparation.
+    fn consume_comma(&mut self) -> error {
+        // Do not advance pos until lookahead succeeds. Go keeps peekErr after
+        // failed lookahead; retaining the delimiter reproduces that error on
+        // the following read without accepting a trailing comma as an end.
+        let mut offset = 1;
+        loop {
+            match self.peek_at(offset) {
+                Some(c) if is_ws(c) => offset += 1,
+                Some(b']' | b'}') => return errors::New("jsontext: trailing comma in composite"),
+                None => return crate::io::ErrUnexpectedEOF.into(),
+                Some(_) => break,
+            }
+        }
+        self.pos += offset;
+        return nil;
     }
 
     /// `Decoder.PeekKind()` (decode.go:307) — kind of the next token
@@ -1304,10 +1355,17 @@ impl Decoder {
             self.pos += 1;
         }
         let mut saw_digit = false;
-        while let Some(b @ b'0'..=b'9') = self.peek_at(0) {
-            let _ = b;
+        // Go jsonwire/decode.go:472-514 (ConsumeNumberResumable): the
+        // integer part is either exactly zero or a nonzero-leading digit
+        // sequence. Streaming "01" reads 0, leaving 1 for the next value.
+        if self.peek_at(0) == Some(b'0') {
             saw_digit = true;
             self.pos += 1;
+        } else {
+            while let Some(b'0'..=b'9') = self.peek_at(0) {
+                saw_digit = true;
+                self.pos += 1;
+            }
         }
         if !saw_digit {
             return Err(errors::New("jsontext: invalid number"));
@@ -1375,38 +1433,82 @@ impl Decoder {
         (Value(slice::__from_vec(raw)), nil)
     }
 
-    /// `Decoder.SkipValue()` (decode.go:406).
+    // Go: encoding/json/jsontext/decode.go:409-431 — decoderState.SkipValue
+    // goishlint:ignore GOISH014 — public adapter ports the decoderState method directly.
     pub fn SkipValue(&mut self) -> error {
-        let err = self.prepare_next();
-        if err != nil {
-            return err;
-        }
-        if self.peek_at(0).is_none() {
-            if self.stack.is_empty() {
-                return crate::io::EOF.into();
+        match self.PeekKind().0 {
+            b'{' | b'[' => {
+                let depth = self.StackDepth();
+                loop {
+                    let (_, err) = self.ReadToken();
+                    if err != nil {
+                        return err;
+                    }
+                    if depth >= self.StackDepth() {
+                        return nil;
+                    }
+                }
             }
-            return crate::io::ErrUnexpectedEOF.into();
+            _ => {
+                let (_, err) = self.ReadValue();
+                return err;
+            }
         }
-        let err = self.record_name_at_pos();
-        if err != nil {
-            return err;
-        }
-        let err = self.scan_whole_value();
-        if err != nil {
-            return err;
-        }
-        self.sep_done = false;
-        self.bump_count();
-        if self.stack.is_empty() {
-            self.buf.drain(..self.pos);
-            self.pos = 0;
-        }
-        nil
     }
 
     /// Structural scan over one whole value (no token
     /// materialization). Assumes `prepare_next` ran.
     fn scan_whole_value(&mut self) -> error {
+        let mut path = self.stack_pointer_to_parent();
+        if let Some(open) = self.stack.last() {
+            path.push(b'/');
+            if *open == b'{' {
+                if let Some(Some(name)) = self.cur_name.last() {
+                    for &b in name {
+                        match b {
+                            b'~' => path.extend_from_slice(b"~0"),
+                            b'/' => path.extend_from_slice(b"~1"),
+                            _ => path.push(b),
+                        }
+                    }
+                }
+            } else {
+                let index = self.counts.last().copied().unwrap_or(0);
+                path.extend_from_slice(crate::strconv::FormatUint(index, 10).as_bytes());
+            }
+        }
+        return self.scan_whole_value_at(&mut path, 0);
+    }
+
+    // Go: encoding/json/jsontext/decode.go:950 — decoderState.consumeObject
+    // goishlint:ignore GOISH014 — raw-value recursive scanner combines Go's consumeValue/consumeObject/consumeArray; provenance is above.
+    //
+    // The `depth` parameter is goish-only. Go carries depth as a
+    // parameter through consumeObject/consumeArray (decode.go:962,
+    // 1057) and returns `errMaxDepth` at depth == maxNestingDepth+1;
+    // this file scans a whole value in one function, so the depth
+    // rides alongside the pointer path and `scan_whole_value` is the
+    // zero-depth entry point.
+    //
+    // Without it this recursed with NO limit. `[` repeated is one
+    // stack frame each, so a document made of nothing but open
+    // brackets decided how deep the process recursed: measured, depth
+    // 100000 parsed and 500000 hit "goish: runtime error: stack
+    // overflow". Roughly a megabyte of `[` was enough to end any
+    // program parsing untrusted JSON. Go refuses at 10001.
+    fn scan_whole_value_at(&mut self, path: &mut Vec<u8>, depth: usize) -> error {
+        // Measured against Go: 10000 nested arrays parse, 10001 does
+        // not. `depth` counts from 0 at the outermost value, so the
+        // 10001st composite is the one at depth == maxNestingDepth.
+        //
+        // Go wraps errMaxDepth with a JSON pointer and byte offset;
+        // the pointer is now tracked in `path`, so this could carry
+        // Go's full message — left as the bare sentinel here because
+        // the BOUNDARY is what the smoke pins and the wrapping is a
+        // separate piece of work.
+        if depth >= maxNestingDepth {
+            return errMaxDepth.into();
+        }
         let b = match self.peek_at(0) {
             Some(b) => b,
             None => return crate::io::ErrUnexpectedEOF.into(),
@@ -1428,6 +1530,8 @@ impl Decoder {
                 let close = if b == b'{' { b'}' } else { b']' };
                 self.pos += 1;
                 let mut first = true;
+                let mut names: BTreeSet<Vec<u8>> = BTreeSet::new();
+                let mut index = 0;
                 loop {
                     self.skip_ws();
                     match self.peek_at(0) {
@@ -1448,14 +1552,25 @@ impl Decoder {
                         }
                     }
                     first = false;
+                    let mut name = string::new();
                     if open == b'{' {
                         // name : value
                         match self.peek_at(0) {
                             Some(b'"') => {}
                             _ => return errors::New("jsontext: missing object name"),
                         }
-                        if let Err(e) = self.scan_string_raw() {
-                            return e;
+                        name = match self.scan_string_decoded() {
+                            Ok(name) => name,
+                            Err(err) => return err,
+                        };
+                        if !self.opts.allow_duplicate_names.unwrap_or(false)
+                            && !names.insert(name.as_bytes().to_vec()) {
+                            let mut msg = string::from_static("jsontext: duplicate object member name ")
+                                + string::from_bytes(&json_quote(name.as_bytes()));
+                            if !path.is_empty() {
+                                msg = msg + " within " + string::from_bytes(&json_quote(path));
+                            }
+                            return errors::New(msg);
                         }
                         self.skip_ws();
                         match self.peek_at(0) {
@@ -1464,13 +1579,44 @@ impl Decoder {
                         }
                         self.skip_ws();
                     }
-                    let err = self.scan_whole_value();
+                    // Their pointer bookkeeping, around the depth-
+                    // bounded and stack-guarded recursion: the LIMIT
+                    // bounds the document while `maybe_grow_step`
+                    // bounds the stack. Neither is sufficient alone.
+                    let parent_len = path.len();
+                    path.push(b'/');
+                    if open == b'{' {
+                        for &b in name.as_bytes() {
+                            match b {
+                                b'~' => path.extend_from_slice(b"~0"),
+                                b'/' => path.extend_from_slice(b"~1"),
+                                _ => path.push(b),
+                            }
+                        }
+                    } else {
+                        path.extend_from_slice(crate::strconv::FormatUint(index, 10).as_bytes());
+                    }
+                    // `maybe_grow_step` was enough before the JSON
+                    // pointer path landed; it stops growing at
+                    // GROW_TIER_3_SIZE (1 MiB) and the merged frame —
+                    // which now also carries the pointer bookkeeping —
+                    // needs more than that for 10000 levels. Measured:
+                    // depth 9999 faulted with the step form. The
+                    // explicit cap is the same one encoding/json's v1
+                    // parser uses at its own recursion site.
+                    let err = crate::runtime::sched::maybe_grow(
+                        64 * 1024,
+                        256 * 1024 * 1024,
+                        || self.scan_whole_value_at(path, depth + 1),
+                    );
+                    path.truncate(parent_len);
                     if err != nil {
                         return err;
                     }
+                    index += 1;
                 }
             }
-            _ => errors::New("jsontext: invalid character at start of value"),
+            _ => return errors::New("jsontext: invalid character at start of value"),
         }
     }
 

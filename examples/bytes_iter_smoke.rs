@@ -54,7 +54,7 @@ fn eq(got: &slice<slice<byte>>, want: &[&[u8]]) -> bool {
 }
 
 // (input, sep, SplitSeq output)
-const SPLIT: [(&[u8], &[u8], &[&[u8]]); 14] = [
+const SPLIT: [(&[u8], &[u8], &[&[u8]]); 19] = [
     (b"", b"\x2c", &[b""]),
     (b"\x61", b"\x2c", &[b"\x61"]),
     (
@@ -89,10 +89,28 @@ const SPLIT: [(&[u8], &[u8], &[&[u8]]); 14] = [
     (b"\x61\x62\x63", b"\x61\x62\x63", &[b"", b""]),
     (b"\x61\x62\x63", b"\x61\x62\x63\x64", &[b"\x61\x62\x63"]),
     (b"\xff\xfe", b"", &[b"\xff", b"\xfe"]),
+    // ── Malformed UTF-8 sequences, not just lone bad bytes. `\xff\xfe`
+    // above does not discriminate: 0xff cannot begin a sequence, so a
+    // length table keyed on the leading byte and Go's DecodeRune both
+    // yield one byte at a time. These do discriminate — a valid
+    // LEADING byte followed by wrong continuation bytes. Go splits
+    // them one fragment per byte; a table would hand back "\xe4\xb8"
+    // whole. strings' splitSeq had exactly that table (see dd7ad51);
+    // this package always used DecodeRune, and these cases pin it.
+    // truncated-3byte
+    (b"\xe4\xb8", b"", &[b"\xe4", b"\xb8"]),
+    // overlong
+    (b"\xc0\xaf", b"", &[b"\xc0", b"\xaf"]),
+    // surrogate
+    (b"\xed\xa0\x80", b"", &[b"\xed", b"\xa0", b"\x80"]),
+    // trunc-4byte
+    (b"\xf0\x9f", b"", &[b"\xf0", b"\x9f"]),
+    // rune-cut
+    (b"\x68\xc3", b"", &[b"\x68", b"\xc3"]),
 ];
 
 // (input, sep, SplitAfterSeq output)
-const AFTER: [(&[u8], &[u8], &[&[u8]]); 14] = [
+const AFTER: [(&[u8], &[u8], &[&[u8]]); 15] = [
     (b"", b"\x2c", &[b""]),
     (b"\x61", b"\x2c", &[b"\x61"]),
     (
@@ -131,6 +149,8 @@ const AFTER: [(&[u8], &[u8], &[&[u8]]); 14] = [
     (b"\x61\x62\x63", b"\x61\x62\x63", &[b"\x61\x62\x63", b""]),
     (b"\x61\x62\x63", b"\x61\x62\x63\x64", &[b"\x61\x62\x63"]),
     (b"\xff\xfe", b"", &[b"\xff", b"\xfe"]),
+    // after-trunc
+    (b"\xe4\xb8", b"", &[b"\xe4", b"\xb8"]),
 ];
 
 // (input, Lines output — terminators kept)

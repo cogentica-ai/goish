@@ -680,13 +680,37 @@ pub fn LookupHost<S: Into<string>>(host: S) -> (slice<string>, error) {
 
     let (raw_strs, e) = dnsclient::lookup_host(h);
     if e != errors::nil {
-        return (slice::<string>::new(), e);
+        return (slice::<string>::new(), as_dns_error(h, e));
     }
     let mut out = slice::<string>::new();
     for s in &raw_strs {
         out = crate::append!(out, string::from_bytes(s.as_bytes()));
     }
     (out, errors::nil)
+}
+
+// go: none — goish-only: Go's resolver builds `*DNSError` at the point
+// of failure (newDNSError, net.go), so every lookup error already
+// carries the name looked for. goish's dnsclient answers with bare
+// sentinels — `errNoSuchHost` renders "no such host" — so the name is
+// attached here instead.
+/// Give a lookup failure Go's shape: `lookup <name>: <err>`.
+///
+/// An error that is already a DNSError passes through untouched, so a
+/// failure that DID name a server keeps it.
+fn as_dns_error(host: &str, e: error) -> error {
+    if errors::AsConcrete::<super::net::DNSError>(&e).is_some() {
+        return e;
+    }
+    return errors::Wrap(super::net::DNSError {
+        UnwrapErr: errors::nil,
+        Err: e.Error(),
+        Name: string::from_bytes(host.as_bytes()),
+        Server: string::from_static(""),
+        IsTimeout: false,
+        IsTemporary: false,
+        IsNotFound: true,
+    });
 }
 
 /// `net.LookupIP` — resolves host to a list of IPv4 and IPv6 addresses.
@@ -782,4 +806,174 @@ pub fn LookupSRV<Svc: Into<string>, Proto: Into<string>, N: Into<string>>(
 ) -> (string, slice<nilable<SRV>>, error) {
     let ctx = crate::context::Background();
     DEFAULT_RESOLVER.LookupSRV(&ctx, service, proto, name)
+}
+
+// go: sdk 1.25.5 net/lookup.go:40-60 services
+/// Go's built-in port map, consulted alongside /etc/services.
+///
+/// Go declares it as a package variable that `readServices` MUTATES,
+/// merging the system file into these defaults. goish keeps the two
+/// apart — this table is constant, and `port_unix::readServices`
+/// returns the file's rows — which is the same lookup with no shared
+/// mutable state. Go's gopher entry keeps its comment: ʕ◔ϖ◔ʔ
+const services: [(&str, &str, i64); 15] = [
+    ("udp", "domain", 53),
+    ("tcp", "ftp", 21),
+    ("tcp", "ftps", 990),
+    ("tcp", "gopher", 70),
+    ("tcp", "http", 80),
+    ("tcp", "https", 443),
+    ("tcp", "imap2", 143),
+    ("tcp", "imap3", 220),
+    ("tcp", "imaps", 993),
+    ("tcp", "pop3", 110),
+    ("tcp", "pop3s", 995),
+    ("tcp", "smtp", 25),
+    ("tcp", "submissions", 465),
+    ("tcp", "ssh", 22),
+    ("tcp", "telnet", 23),
+];
+
+// go: sdk 1.25.5 net/lookup.go:79-84 maxPortBufSize
+/// Go: "the longest reasonable name of a service … Currently the
+/// longest known IANA-unregistered name is 'mobility-header', so we
+/// use that length, plus some slop."
+///
+/// It is a real behavioural limit, not a buffer detail: a service name
+/// longer than this cannot match, because Go lowercases into a fixed
+/// array and then requires the copy to have been complete.
+const maxPortBufSize: usize = "mobility-header".len() + 10;
+
+// go: sdk 1.25.5 net/lookup.go:86-99 lookupPortMap
+/// Go: resolve a service name for `network`. "ip" tries tcp first and
+/// then udp; the 4/6 suffixes fold onto their base.
+pub(crate) fn lookupPortMap(network: &str, service: &str) -> (crate::types::int, error) {
+    match network {
+        "ip" => {
+            // Go: "no hints" — try tcp, then udp.
+            let (p, err) = lookupPortMapWithNetwork("tcp", "ip", service);
+            if err.IsNil() {
+                return (p, errors::nil);
+            }
+            return lookupPortMapWithNetwork("udp", "ip", service);
+        }
+        "tcp" | "tcp4" | "tcp6" => return lookupPortMapWithNetwork("tcp", "tcp", service),
+        "udp" | "udp4" | "udp6" => return lookupPortMapWithNetwork("udp", "udp", service),
+        _ => {}
+    }
+    return (
+        crate::types::int::from(0),
+        unknown_network_dns_error(network, service),
+    );
+}
+
+// go: sdk 1.25.5 net/lookup.go:101-112 lookupPortMapWithNetwork
+/// Go lowercases the service into a fixed buffer and then requires
+/// `n == len(service)`, so a name longer than `maxPortBufSize` never
+/// matches however it is spelled. That is why "HTTP" resolves and a
+/// 30-character name does not.
+fn lookupPortMapWithNetwork(
+    network: &str,
+    errNetwork: &str,
+    service: &str,
+) -> (crate::types::int, error) {
+    if service.len() <= maxPortBufSize {
+        let lower = service.to_ascii_lowercase();
+        // The system table wins where it disagrees, as it does in Go:
+        // readServices writes into the same map these defaults live in.
+        if let Some(port) = super::port_unix::systemPort(network, &lower) {
+            return (port, errors::nil);
+        }
+        for (netw, name, port) in services.iter() {
+            if *netw == network && *name == lower {
+                return (crate::types::int::from(*port), errors::nil);
+            }
+        }
+    }
+    return (
+        crate::types::int::from(0),
+        unknown_port_dns_error(errNetwork, service),
+    );
+}
+
+// go: none — goish-only: Go writes `newDNSError(errUnknownPort, …)`
+// and `&DNSError{Err: "unknown network", …}` inline; this names the
+// two compositions once. `lookup <net>/<service>: <err>` is how
+// DNSError.Error renders them.
+fn unknown_port_dns_error(network: &str, service: &str) -> error {
+    return errors::Wrap(super::net::DNSError {
+        UnwrapErr: errors::nil,
+        Err: string::from_static("unknown port"),
+        Name: string::from_bytes(network.as_bytes())
+            + string::from_static("/")
+            + string::from_bytes(service.as_bytes()),
+        Server: string::from_static(""),
+        IsTimeout: false,
+        IsTemporary: false,
+        IsNotFound: false,
+    });
+}
+
+// go: none — goish-only: see unknown_port_dns_error.
+fn unknown_network_dns_error(network: &str, service: &str) -> error {
+    return errors::Wrap(super::net::DNSError {
+        UnwrapErr: errors::nil,
+        Err: string::from_static("unknown network"),
+        Name: string::from_bytes(network.as_bytes())
+            + string::from_static("/")
+            + string::from_bytes(service.as_bytes()),
+        Server: string::from_static(""),
+        IsTimeout: false,
+        IsTemporary: false,
+        IsNotFound: false,
+    });
+}
+
+// go: sdk 1.25.5 net/lookup.go:415-434 Resolver.LookupPort
+/// Go: "LookupPort looks up the port for the given network and
+/// service."
+///
+/// The network is validated ONLY when a lookup is actually needed —
+/// `LookupPort("bogus", "80")` answers 80, because a numeric service
+/// never reaches the switch. Measured.
+pub fn LookupPort<N: Into<string>, S: Into<string>>(
+    network: N,
+    service: S,
+) -> (crate::types::int, error) {
+    let network: string = network.into();
+    let service: string = service.into();
+    let svc: &str = service.as_ref();
+    let (mut port, needs_lookup) = super::port::parsePort(svc);
+    if needs_lookup {
+        let mut netw: &str = network.as_ref();
+        match netw {
+            "tcp" | "tcp4" | "tcp6" | "udp" | "udp4" | "udp6" | "ip" => {}
+            // Go: "" is a hint wildcard meaning "ip".
+            "" => netw = "ip",
+            _ => {
+                return (
+                    crate::types::int::from(0),
+                    errors::Wrap(super::net::AddrError {
+                        Err: string::from_static("unknown network"),
+                        Addr: network.clone(),
+                    }),
+                );
+            }
+        }
+        let (p, err) = super::port_unix::goLookupPort(netw, svc);
+        if !err.IsNil() {
+            return (crate::types::int::from(0), err);
+        }
+        port = p;
+    }
+    if port < 0 || port > 65535 {
+        return (
+            crate::types::int::from(0),
+            errors::Wrap(super::net::AddrError {
+                Err: string::from_static("invalid port"),
+                Addr: service.clone(),
+            }),
+        );
+    }
+    return (port, errors::nil);
 }
