@@ -3430,3 +3430,7 @@ path = "examples/http_expect100_server_smoke.rs"
 [[example]]
 name = "exec_cmd_ref_smoke"
 path = "examples/exec_cmd_ref_smoke.rs"
+
+[[example]]
+name = "http_jar_cross_host_smoke"
+path = "examples/http_jar_cross_host_smoke.rs"
