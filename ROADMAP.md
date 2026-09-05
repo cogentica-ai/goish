@@ -847,3 +847,54 @@ in a way that cost a session:
 Anything a tool asserts should be re-checked against Go before it
 changes a plan. Five wrong-leverage calls this cycle came from trusting
 a number; the fifth was produced by the tooling itself.
+
+## 2m. httputil.ReverseProxy cannot serve — it is not a Handler
+
+**Found 2026-09-05**, following `dead_port_check`'s report that
+`copyHeader`, `modifyResponse` and `copyResponse` are called only from
+smokes. Those three are the core of Go's `ReverseProxy.ServeHTTP`, so
+nothing calling them is a strong signal, and it points at something
+larger than three functions.
+
+goish has two unrelated reverse proxies:
+
+  `reverseProxyHandler` — unexported, returned by
+  `NewSingleHostReverseProxy`, and the only one that can actually
+  serve. Its `ServeHTTP` inlines the header copy and has no hooks. Its
+  own doc comment is honest about this: "No Director, ModifyResponse,
+  ErrorHandler, or Transport hooks […] not a drop-in for Go's hardened
+  httputil.ReverseProxy."
+
+  `ReverseProxy` — the exported struct, with `Rewrite`, `Director`,
+  `FlushInterval`, `ErrorLog`, `ModifyResponse`, `BufferPool` and
+  `ErrorHandler`, and with `modifyResponse`, `copyResponse`,
+  `handleError`, `handleUpgradeResponse`, `getErrorHandler`,
+  `flushInterval` and `copyBuffer` implemented as methods.
+
+The second one has no `ServeHTTP` and no `impl Handler`. Measured by
+the compiler, not by reading:
+
+    the trait bound `ReverseProxy: net::http::Handler` is not satisfied
+
+So the whole exported API is unreachable. A caller cannot mount a
+`ReverseProxy` on a mux or pass it to a `Server`; and because
+`NewSingleHostReverseProxy` returns the slim handler rather than a
+`*ReverseProxy` as Go does, there is no path to one that serves. Every
+hook on it — `ModifyResponse` above all — is inert not because it is
+unwired but because nothing can invoke the type at all.
+
+This is the ResponseController and CGI-Flusher shape one level up: a
+complete, documented public API where each piece is individually
+correct and tested, and the assembly is missing. `http_proxyrequest_smoke`
+and `http_maxlatency_smoke` pass because they call the methods
+directly.
+
+Also missing from the struct: Go's `Transport http.RoundTripper`
+field, which `ServeHTTP` reads first.
+
+The fix is to port `ReverseProxy.ServeHTTP` (reverseproxy.go:345-563)
+and register the Handler impl — assembly of pieces that already exist,
+plus the `Transport` field. The open question that should be settled
+with it: whether `NewSingleHostReverseProxy` should return a
+`ReverseProxy` as Go's does, which would retire `reverseProxyHandler`
+but changes an exported signature every existing caller uses.
