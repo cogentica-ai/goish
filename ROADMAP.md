@@ -141,6 +141,56 @@ the Makefile, so `make e2e` builds DEBUG. A `cargo build --release`
 check passes at depths the debug build faults on — which is how the
 first version of this limit reached CI.
 
+## 2e. Ported, anchored, correct — and never called
+
+The defect shape every tier passes. `anchor_check` sees a well-formed
+anchor. `port_coverage` counts the Go declaration as ported.
+`port_bodydiff` compares the body against Go's and finds it faithful.
+goishlint has nothing to say. An example may even test the function
+directly and find it right. The function is a correct port of the right
+Go code, and nothing in the library ever calls it.
+
+`net/http/transport.rs`'s `validateHeaders` was this: anchored to
+`transport.go:565-579`, covered by `http_transport_opts_smoke`, and
+called from nowhere, while Go calls it twice in `Transport.roundTrip`.
+Six malformed header shapes went onto the wire verbatim. Fixed in
+"net/http: the client never validated the headers it sent".
+
+`scripts/dead_port_check.py` now looks for it. The check that carries
+the signal is TESTED_NOT_WIRED: an anchored fn that `examples/` calls
+and that nothing under `src/` calls. On its own that is 30 + 227
+findings, most of them legitimate — `container/list`'s `Front` is API
+for users, and an example is its rightful only caller. So it asks Go's
+own tree the discriminating question: does Go's stdlib call this symbol
+from some other file? That cuts the list to 30, every one worth reading.
+
+Getting there took three corrections, each the same mistake in a
+different place:
+
+  - keying on `pub` missed it — `validateHeaders` is `pub` in a `pub
+    mod`, so visibility says nothing about whether the library uses it;
+  - counting name mentions missed it — a GOISH waiver comment in
+    `net/http/internal/httpcommon` names `validateHeaders` in prose, and
+    that comment alone made it look wired;
+  - asking Go the same way missed it — `fmt/doc.go` names `Sscanf` in
+    package docs and `math/bits/make_examples.go` is a `//go:build
+    ignore` generator that calls everything, which between them made 21
+    of the first 53 findings noise.
+
+Each was caught only by running the checker against the tree as it
+stood BEFORE the known defect was fixed and demanding that it name
+`validateHeaders`. A checker that cannot find the bug that motivated it
+is worse than none, because it reports OK.
+
+### Working through the 30
+
+`Redirect` not calling `hexEscapeNonASCII` is fixed. The rest are
+unread. They are not all defects — the question to ask of each is
+whether Go's call is one goish should be making too. Run:
+
+    scripts/dead_port_check.py          # the ranked list
+    scripts/dead_port_check.py -v       # including the quiet 227
+
 ## 3. Gaps other packages will hit next
 
 Re-measured 2026-09-04; four of the five entries this section used to
