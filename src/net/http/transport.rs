@@ -1131,8 +1131,13 @@ impl persistConn {
             return herr;
         }
         let _ = tls_conn.SetDeadline(crate::time::Time::default());
-        self.__put_src(super::client::ConnSrc::Tls(crate::bufio::NewReader(
+        // Go: pconn.br = bufio.NewReaderSize(pconn, t.readBufferSize())
+        // (transport.go:1944). Sized from the Transport, not the bufio
+        // default, or Transport.ReadBufferSize is a field that does
+        // nothing.
+        self.__put_src(super::client::ConnSrc::Tls(crate::bufio::NewReaderSize(
             tls_conn,
+            t.readBufferSize(),
         )));
         return errors::nil;
     }
@@ -2060,8 +2065,9 @@ impl Transport {
                 return (None, derr);
             }
             let pc = Arc::new(persistConn::__new(key.clone()));
-            pc.__put_src(super::client::ConnSrc::Dyn(crate::bufio::NewReader(
+            pc.__put_src(super::client::ConnSrc::Dyn(crate::bufio::NewReaderSize(
                 super::client::DynConn(conn.unwrap()),
+                self.readBufferSize(),
             )));
             return (Some(pc), errors::nil);
         }
@@ -2095,8 +2101,9 @@ impl Transport {
                 }
                 return (Some(pc), errors::nil);
             }
-            pc.__put_src(super::client::ConnSrc::Dyn(crate::bufio::NewReader(
+            pc.__put_src(super::client::ConnSrc::Dyn(crate::bufio::NewReaderSize(
                 super::client::DynConn(conn),
+                self.readBufferSize(),
             )));
             return (Some(pc), errors::nil);
         }
@@ -2136,7 +2143,10 @@ impl Transport {
             }
             return (Some(pc), errors::nil);
         }
-        pc.__put_src(super::client::ConnSrc::Tcp(crate::bufio::NewReader(conn)));
+        pc.__put_src(super::client::ConnSrc::Tcp(crate::bufio::NewReaderSize(
+            conn,
+            self.readBufferSize(),
+        )));
         return (Some(pc), errors::nil);
     }
 

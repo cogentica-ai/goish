@@ -1038,8 +1038,24 @@ pub struct Transport {
     pub MaxResponseHeaderBytes: i64,
     /// Go's `WriteBufferSize` (transport.go:298) — bytes of write
     /// buffer per connection. Zero means 4 KiB.
+    ///
+    /// INERT in goish, and it cannot be otherwise yet: Go applies this
+    /// at `pconn.bw = bufio.NewWriterSize(persistConnWriter{pconn}, …)`
+    /// (transport.go:1945), and goish's persistConn has no buffered
+    /// writer to size — requests go to the conn unbuffered. The field
+    /// is kept because `Transport.Clone` must carry it and
+    /// `writeBufferSize()` is diffed against Go, but setting it
+    /// changes nothing until a write-buffering layer exists.
     pub WriteBufferSize: int,
     /// Go's `ReadBufferSize` (transport.go:304). Zero means 4 KiB.
+    ///
+    /// Honoured since the persistConn's reader is built with
+    /// `bufio::NewReaderSize(conn, t.readBufferSize())`, matching
+    /// transport.go:1944. It used to be built with `NewReader`, so
+    /// this field was read by nothing and every connection got the
+    /// bufio default — which is also 4 KiB, so the default case was
+    /// indistinguishable and only a caller that set the field was
+    /// affected.
     pub ReadBufferSize: int,
     /// Go's `altProto atomic.Value` holding `map[string]RoundTripper`
     /// (transport.go:307), populated by `RegisterProtocol`. goish uses
