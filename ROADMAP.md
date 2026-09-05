@@ -500,6 +500,57 @@ every pinned smoke that records a response head currently encodes
 goish's order. Doing it means re-measuring all of them in one pass,
 which is a job on its own rather than a rider on a range test.
 
+## 2j. httptrace is inert — not one hook fires
+
+`httptrace.ClientTrace` is a complete, documented public API in goish:
+every field Go has, `WithClientTrace`, `ContextClientTrace`, `compose`
+with Go's ordering policy, and `hasNetHooks`. A caller can build a
+trace, put it in a request's context, and receive NOTHING. Counted
+across the whole tree, the call sites outside `httptrace/trace.rs` are:
+
+  ConnectStart 0   ConnectDone 0   DNSStart 0
+  DNSDone      0   GetConn     0   GotConn  0
+
+`httptrace_smoke` passes. It exercises `compose`, the context
+round-trip, and the hook types by invoking them itself — the struct,
+not the wiring. Nothing checks that a REQUEST fires anything, which is
+the same shape as validateHeaders and Redirect.
+
+The file's own header explains part of it: `WithClientTrace` does not
+install an `internal/nettrace.Trace`, because that package is not
+ported, so the connect and DNS hooks have no path. That note is
+accurate and covers four hooks. It does not cover the rest — Go's
+transport calls `GetConn`, `GotConn`, `WroteHeaders`, `WroteRequest`,
+`GotFirstResponseByte` and `PutIdleConn` DIRECTLY, with no nettrace
+involved, and those are unimplemented for no recorded reason.
+
+Measured against Go 1.25.5, an ordinary plaintext GET
+(tools/gen_httptrace_ref.go):
+
+  reuse=false  GetConn GotConn(reused=false) WroteHeaders WroteRequest
+               GotFirstResponseByte PutIdleConn
+  reuse=true   GetConn GotConn(reused=true)  WroteHeaders WroteRequest
+               GotFirstResponseByte PutIdleConn
+
+Six hooks, in that order, with `Reused` the only difference between a
+fresh conn and a pooled one — which is exactly what most callers of
+this API are measuring.
+
+Five of the six are straightforward: their hook types take a string, a
+`WroteRequestInfo`, an `error`, or nothing, and every call site exists
+in the inline RoundTrip path already.
+
+`GotConn` is the one that needs a decision, not a patch.
+`GotConnInfo.Conn` is `Arc<dyn Conn>`, and the client path has no such
+value: the conn is a `TCPConn` owned inside a `ConnSrc`, and it owns
+its fd, so it cannot be handed out behind an Arc without either
+double-close hazards or sharing the conn through the whole transport.
+The options are to give `GotConnInfo.Conn` a non-owning handle — a
+deliberate divergence from Go's field — or to move the transport to a
+shared conn. Wiring the other five and leaving GotConn out would mean
+pinning a hook order that is not Go's, so it is recorded whole rather
+than done by halves.
+
 ## 3. Gaps other packages will hit next
 
 Re-measured 2026-09-04; four of the five entries this section used to
