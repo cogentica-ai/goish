@@ -5,9 +5,18 @@
 // This is the decoder — the half that reads bytes somebody else wrote.
 // The lines in GO below are the verbatim output of
 // `tools/gen_jsondec_ref.go` run in `package json_test` by
-// `scripts/goref.sh`, EXCEPT for sixteen marked KNOWN GAP, which hold
+// `scripts/goref.sh`, EXCEPT for the TWO marked KNOWN GAP, which hold
 // goish's current answer with Go's quoted above it so neither can drift
-// unnoticed.
+// unnoticed. (This said "sixteen" long after the count was two; the
+// others were closed and the header was not updated.)
+//
+// Both remaining gaps are one root, recorded in ROADMAP 2l: a JSON
+// number reaches an integer target as an f64, so the LITERAL is gone
+// by then. Go rejects "1.0" and "1e2" into an int because the literal
+// carried a fraction or an exponent, not because the value is
+// non-integral — 1.0 and 100 both are. goish cannot see the
+// difference, and the same blindness is why the maximum int64 literal
+// needs a clamp in number_to_int.
 //
 // Two real defects were found and fixed here:
 //

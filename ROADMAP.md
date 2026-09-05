@@ -652,6 +652,32 @@ slow-body row read `handler_runs=1 read=10` immediately. The
 prompt-body row is the control and DOES match Go exactly, so a "fix"
 that refused every request carrying a body could not pass.
 
+## 2l. encoding/json's Value loses the number literal
+
+`Value::Number(float64)` keeps the VALUE and drops the text it was
+parsed from, and three separate symptoms come out of that one fact:
+
+  - `Unmarshal("1.0", &mut int)` succeeds where Go errors with "json:
+    cannot unmarshal number 1.0 into Go value of type int". Go rejects
+    it because the literal carried a fraction, not because the value is
+    non-integral — 1.0 is. Same for "1e2".
+  - `number_to_int` needs a clamp at 2^63, because the maximum int64
+    literal has already rounded to 2^63 as an f64 by the time an
+    integer target sees it. Go parses the digits with ParseInt and
+    answers 9223372036854775807 exactly.
+  - json_decode_ref_smoke carries both as KNOWN GAP rows with Go's
+    answers quoted beside goish's.
+
+The fix is for the parser to keep the literal — a second field, or an
+Int variant beside Number — and for integer targets to parse digits
+rather than convert a float.
+
+It is a DECISION rather than a patch because `Value` is public API: the
+module's own doc advertises `pub enum Value { … Number(f64) … }`, so
+every user pattern match on it is affected, and `FromValue` would want
+a way to see the raw text. That is a deliberate API change to make at a
+version boundary, not a rider on a bug fix.
+
 ## 3. Gaps other packages will hit next
 
 Re-measured 2026-09-04; four of the five entries this section used to
