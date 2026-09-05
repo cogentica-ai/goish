@@ -1265,7 +1265,17 @@ pub struct Server {
     /// Reset whenever a new request's headers are read. Zero or
     /// negative = no timeout.
     pub WriteTimeout: time::Duration,
-    /// Idle keep-alive timeout. Zero falls back to `ReadHeaderTimeout`.
+    /// Idle keep-alive timeout — how long a conn may sit between
+    /// requests. Zero falls back to `ReadTimeout`, as Go's
+    /// `Server.idleTimeout()` does (server.go:3636); only when BOTH
+    /// are zero does goish fall back again to the effective
+    /// read-header timeout, the same v1 safety net documented on
+    /// `ReadHeaderTimeout`. Go leaves an idle conn unbounded there.
+    ///
+    /// This used to say the fallback was `ReadHeaderTimeout`, which
+    /// skipped the `ReadTimeout` step both implementations actually
+    /// take — so a server setting only `ReadTimeout` was documented as
+    /// getting the 5s default when it really gets its own value.
     pub IdleTimeout: time::Duration,
     /// Cap on bytes per request line / per header line, in bytes.
     /// `<= 0` falls back to the parser default (8 KiB). Mirrors
@@ -3251,10 +3261,17 @@ impl Server {
 
     // go: sdk 1.25.5 net/http/server.go:3636-3641 Server.idleTimeout
     //
-    // Go falls back to ReadTimeout, NOT to ReadHeaderTimeout. goish's
-    // own accept loop uses a separate v1 fallback documented on the
-    // IdleTimeout field; this method is the Go-faithful one and is not
-    // wired into that path.
+    // Go falls back to ReadTimeout, NOT to ReadHeaderTimeout. The
+    // serve loops call `idle_timeout_ns` instead, which takes the same
+    // two steps and then adds goish's v1 safety net when both are
+    // zero; this method is the Go-faithful one and is not wired in.
+    //
+    // Before unifying them, note they disagree on NEGATIVE durations:
+    // Go tests `!= 0`, so a negative IdleTimeout is returned as-is,
+    // while `idle_timeout_ns` tests `> 0` and treats a negative value
+    // as unset and falls through. Collapsing one into the other
+    // changes behaviour for that input, which is why the duplication
+    // is recorded rather than quietly removed.
     pub fn idleTimeout(&self) -> time::Duration {
         if self.IdleTimeout != time::Duration(0) {
             return self.IdleTimeout;
