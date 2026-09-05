@@ -158,11 +158,11 @@ Six malformed header shapes went onto the wire verbatim. Fixed in
 
 `scripts/dead_port_check.py` now looks for it. The check that carries
 the signal is TESTED_NOT_WIRED: an anchored fn that `examples/` calls
-and that nothing under `src/` calls. On its own that is 30 + 227
+and that nothing under `src/` calls. On its own that is 29 + 227
 findings, most of them legitimate — `container/list`'s `Front` is API
 for users, and an example is its rightful only caller. So it asks Go's
 own tree the discriminating question: does Go's stdlib call this symbol
-from some other file? That cuts the list to 30, every one worth reading.
+from some other file? That cuts the list to 29, every one worth reading.
 
 Getting there took three corrections, each the same mistake in a
 different place:
@@ -182,11 +182,32 @@ stood BEFORE the known defect was fixed and demanding that it name
 `validateHeaders`. A checker that cannot find the bug that motivated it
 is worse than none, because it reports OK.
 
-### Working through the 30
+### Working through the list
 
-`Redirect` not calling `hexEscapeNonASCII` is fixed. The rest are
-unread. They are not all defects — the question to ask of each is
-whether Go's call is one goish should be making too. Run:
+Fixed so far, one per finding read:
+
+  - `Redirect` did not call `hexEscapeNonASCII`, so the Location header
+    went out unescaped.
+  - `Getwd` did not call `SameFile`, so it never honoured `$PWD` and
+    returned the physical path where Go returns the symlinked one.
+
+Read and found NOT defects, which is the other half of the work:
+
+  - `cloneURL` / `cloneMultipartForm`. Go's `Request.Clone` needs them
+    because Go copies a struct by value and the pointers inside stay
+    shared. goish's `slice` is a `Vec` and its `map` clones
+    element-wise, and `URL`/`Userinfo` are by-value, so `derive(Clone)`
+    already deep-copies. Redundant, not missing.
+  - `didEarlyClose` / `bodyRemains` / `registerOnHitEOF`. All three
+    serve Go's STREAMING request body. goish materialises the body into
+    a `slice<byte>` before the handler runs, so there is no
+    early-closed stream to get out of sync with — `closedRequestBodyEarly`
+    is documented as always-false for that reason, and it is right.
+
+The count drops by one each time a call is added, so it is a worklist
+that measures its own progress. What is left is unread. They are not
+all defects — the question to ask of each is whether Go's call is one
+goish should be making too. Run:
 
     scripts/dead_port_check.py          # the ranked list
     scripts/dead_port_check.py -v       # including the quiet 227

@@ -898,10 +898,56 @@ pub fn UserConfigDir() -> (string, error) {
     (dir, nil)
 }
 
-/// Line-by-line port of `os.Getwd()` (file.go ~ getwd) — return the
-/// current working directory via `getcwd(2)`. The buffer doubles up
-/// to a 4 KiB cap, mirroring Go's exponential growth retry loop.
+// go: sdk 1.25.5 os/getwd.go:26-89 Getwd
+/// `os.Getwd()` — the current working directory. Go documents the
+/// behaviour this way: "On Unix platforms, if the environment variable
+/// PWD provides an absolute name, and it is a name of the current
+/// directory, it is returned."
+///
+/// goish went straight to `getcwd(2)` and never looked at $PWD, so a
+/// process whose cwd was reached THROUGH A SYMLINK got the physical
+/// path where Go gives the symlinked one. Measured against Go 1.25.5
+/// with the cwd inside `wd/link -> wd/real`:
+///
+///   $PWD names the cwd (via the symlink)   Go wd/link   goish wd/real
+///   $PWD set but names another directory   Go wd/real   goish wd/real
+///   $PWD unset                             Go wd/real   goish wd/real
+///
+/// Only the first diverged, and it is the common case: `cd` through a
+/// symlink is how deploy layouts (`releases/current`), home
+/// directories and container mounts are usually arranged, and the
+/// shell exports $PWD as the logical path.
+///
+/// Go calls this "a clumsy but widespread kludge". It is load-bearing:
+/// a program that prints its cwd, or joins it onto a relative path it
+/// then shows a user, is expected to stay in the namespace the user
+/// typed.
+///
+/// The check is dev+ino equality, via `SameFile` — not string
+/// comparison — so a $PWD that merely LOOKS plausible does not win.
+///
+/// Not ported: Go's `getwdCache` fallback, which re-applies the same
+/// kludge to a cached directory when `syscall.Getwd` fails with
+/// ENAMETOOLONG. goish's loop grows its buffer on ERANGE up to 4 KiB
+/// instead of failing, so that branch has nothing to recover from.
 pub fn Getwd() -> (string, error) {
+    // Go: dir = Getenv("PWD"); if len(dir) > 0 && dir[0] == '/' { ... }
+    let dir = crate::os::env::Getenv(string("PWD"));
+    if dir.Len() > 0 && bytes_of(&dir)[0] == b'/' {
+        // Go: dot, err = statNolog("."); if err != nil { return "", err }
+        let (dot, err) = Stat(string("."));
+        if err.IsNil() {
+            // Go: d, err := statNolog(dir)
+            //     if err == nil && SameFile(dot, d) { return dir, nil }
+            let (d, err2) = Stat(dir.clone());
+            if err2.IsNil() && SameFile(&dot, &d) {
+                return (dir, nil);
+            }
+        }
+        // Go falls through to the syscall on any error here, including
+        // a stat of "." that failed, and so do we.
+    }
+
     // Go: var buf [128]byte; for { n, err := syscall.Getcwd(buf[:]); ... }
     let mut size: usize = 128;
     while size <= 4096 {

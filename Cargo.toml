@@ -3334,3 +3334,7 @@ path = "examples/os_filemode_bits_smoke.rs"
 [[example]]
 name = "http_request_header_injection_smoke"
 path = "examples/http_request_header_injection_smoke.rs"
+
+[[example]]
+name = "os_getwd_pwd_smoke"
+path = "examples/os_getwd_pwd_smoke.rs"
