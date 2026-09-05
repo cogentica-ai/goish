@@ -1064,9 +1064,23 @@ pub fn Redirect<U: Into<string>>(
     }
 
     // Go: h := w.Header()
-    let had_ct = w.Header().Get(string("Content-Type")).Len() > 0;
+    //
+    // Go tests KEY PRESENCE — `_, hadCT := h["Content-Type"]` — not a
+    // non-empty value. goish asked whether the value was non-empty, so
+    // a handler that set `Content-Type: ""` before redirecting got a
+    // Content-Type overwritten and an HTML body appended, where Go
+    // leaves the header alone and writes no body at all.
+    let had_ct = w.Header().has(string("Content-Type"));
     // Go: h.Set("Location", hexEscapeNonASCII(url))
-    w.Header().Set(string("Location"), url.clone());
+    //
+    // The escape was written out in this comment and not performed:
+    // `hexEscapeNonASCII` was ported, anchored, and covered by
+    // http_helpers_smoke, and Redirect — its only caller in Go — sent
+    // the raw url. Every byte >= 0x80 in a redirect target went onto
+    // the wire unencoded, so a Location built from a UTF-8 path
+    // differed from Go's on the first non-ASCII byte.
+    w.Header()
+        .Set(string("Location"), super::http::hexEscapeNonASCII(url.clone()));
     // Go: if !hadCT && (r.Method == "GET" || r.Method == "HEAD") { h.Set("Content-Type", "text/html; charset=utf-8") }
     if !had_ct && (r.Method == "GET" || r.Method == "HEAD") {
         w.Header()
