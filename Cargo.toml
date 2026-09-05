@@ -2170,3 +2170,7 @@ path = "examples/floatint_diff.rs"
 [[example]]
 name = "json_float_diff"
 path = "examples/json_float_diff.rs"
+
+[[example]]
+name = "json_map_state_diff"
+path = "examples/json_map_state_diff.rs"

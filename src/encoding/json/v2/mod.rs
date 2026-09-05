@@ -43,6 +43,10 @@
 //   - Default float decode consumes raw values and clamps overflow to the
 //     finite maximum before returning an error (jsonwire.ParseFloat). Legacy
 //     stringify/non-finite format options are not implemented by this codec.
+//   - Builtin maps merge existing values and store partial decoded values
+//     before returning errors. Null replaces the map with an empty owned
+//     representation; the pre-existing map type has no distinct nil header
+//     or shared backing-map aliases, so this does not add those semantics.
 
 #![allow(non_snake_case)]
 
@@ -695,6 +699,7 @@ where
     }
 }
 
+// Go: encoding/json/v2/arshal_default.go:700 — func makeMapArshaler(t reflect.Type) *arshaler
 impl<V> UnmarshalerFrom for crate::gomap::map<string, V>
 where
     V: UnmarshalerFrom + Default + Clone,
@@ -702,6 +707,8 @@ where
     fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
         if dec.PeekKind() == 'n' {
             let (_, err) = dec.ReadToken();
+            if err != nil { return err; }
+            *self = crate::gomap::map::new();
             return err;
         }
         let (t, err) = dec.ReadToken();
@@ -719,20 +726,16 @@ where
             if err != nil {
                 return err;
             }
-            // Go stores the key with its ZERO value before decoding,
-            // so a failed value decode leaves the key PRESENT and empty
-            // and the walk stops there — `{"a":1}` into a
-            // map[string]string yields {"a": ""} plus an error, not an
-            // empty map. packagejson's Expected[T] keeps the partially
-            // decoded value, so this is observable, not just internal.
+            // Go arshal_default.go:963-985 copies an existing value (or
+            // zero for a new key), decodes, then stores EVEN ON ERROR.
+            // An error may leave a partially decoded composite, not zero.
             let key = name.String();
-            self.Set(key.clone(), V::default());
-            let mut val = V::default();
+            let (mut val, _) = self.Get(key.clone());
             let err = val.UnmarshalJSONFrom(dec);
+            self.Set(key, val);
             if err != nil {
                 return err;
             }
-            self.Set(key, val);
         }
         let (_, err) = dec.ReadToken(); // consume '}'
         err
