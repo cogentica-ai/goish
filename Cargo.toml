@@ -3410,3 +3410,7 @@ path = "examples/http_multirange_smoke.rs"
 [[example]]
 name = "https_http_on_https_smoke"
 path = "examples/https_http_on_https_smoke.rs"
+
+[[example]]
+name = "http_readtimeout_body_smoke"
+path = "examples/http_readtimeout_body_smoke.rs"

@@ -551,6 +551,39 @@ shared conn. Wiring the other five and leaving GotConn out would mean
 pinning a hook order that is not Go's, so it is recorded whole rather
 than done by halves.
 
+## 2k. ReadTimeout bounds a slow body, but not the way Go does
+
+Go documents `Server.ReadTimeout` as "the maximum duration for reading
+the entire request, including the body", and the slow-BODY form of
+slowloris is the case that needs it: headers arrive inside every header
+timeout, and only a bound on the whole request stops the connection
+being held open.
+
+goish bounds it. Measured with ReadTimeout 500ms against a body
+dribbled over 1.5s:
+
+  Go     handler RUNS, its ReadAll returns read=2 and an i/o timeout
+  goish  handler NEVER RUNS, and nothing is written back
+
+Neither is a hole — the connection is bounded either way. The
+difference follows from the eager body: Go calls the handler as soon as
+the headers parse and lets it discover the truncation, while goish
+reads the body inside the request parse, so the read fails before a
+handler exists to be told.
+
+What that costs is observability, not safety. A handler that logs or
+meters every request it is given sees nothing in goish for a request
+Go would have shown it, and cannot answer 408 itself.
+
+Making goish match means a streaming request body, which is the same
+decision as 2h and 2j rather than a patch.
+
+http_readtimeout_body_smoke pins both rows and is verified to fail if
+the bound stops working: raising ReadTimeout above the stall makes the
+slow-body row read `handler_runs=1 read=10` immediately. The
+prompt-body row is the control and DOES match Go exactly, so a "fix"
+that refused every request carrying a body could not pass.
+
 ## 3. Gaps other packages will hit next
 
 Re-measured 2026-09-04; four of the five entries this section used to
