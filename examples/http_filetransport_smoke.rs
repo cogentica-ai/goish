@@ -165,11 +165,71 @@ fn run() {
         );
     }
 
-    // Go's test would also register it on a Transport
-    // (`t.RegisterProtocol("file", …)`, filetransport.go's doc
-    // comment). `Transport.RegisterProtocol` lives in transport.go,
-    // which is not ported — see the transport.go worklist. Nothing to
-    // assert here yet.
+    // ── the end-to-end path from filetransport.go's own doc comment ──
+    //
+    // `t.RegisterProtocol("file", NewFileTransport(Dir(dir)))` and then
+    // an ordinary `Client.Get` of a file:// URL. This block used to say
+    // "`Transport.RegisterProtocol` lives in transport.go, which is not
+    // ported […] Nothing to assert here yet." Both halves have been
+    // ported for some time — `RegisterProtocol` at transport.rs and
+    // `alternateRoundTripper`, which is what consults the registration,
+    // wired into `RoundTrip` — so the note had stopped being true and
+    // was reading as a reason not to test the path.
+    //
+    // The path is worth asserting on its own: RoundTrip working says
+    // nothing about whether a Client ever reaches it. Every value below
+    // is Go 1.25.5's, via tools/gen_filetransport_client_ref.go.
+    {
+        let subdir = fmt::Sprintf!("%s/sub", dir.clone());
+        let _ = os::MkdirAll(subdir, 0o755);
+        let apath = fmt::Sprintf!("%s/a.txt", dir.clone());
+        let _ = os::WriteFile(
+            apath,
+            slice::<goish::byte>::__from_vec(alloc::vec![b'h', b'e', b'l', b'l', b'o', b'\n']),
+            0o644,
+        );
+
+        let mut t2 = http::Transport::default();
+        t2.RegisterProtocol(
+            string("file"),
+            NewFileTransport(Arc::new(goish::net::http::fs::NewDir(dir.clone()))
+                as Arc<dyn goish::net::http::fs::FileSystem + Send + Sync>),
+        );
+        let mut c = http::Client::default();
+        c.Transport = Arc::new(t2) as Arc<dyn http::RoundTripper>;
+
+        // The traversal case is the one that must not be taken on
+        // trust: a file:// transport that resolved "/../etc/passwd"
+        // relative to the real filesystem would serve it. Go answers
+        // 404, and so must this.
+        let cases: [(&str, goish::int, &str); 4] = [
+            ("file:///a.txt", 200, "hello\n"),
+            ("file:///missing.txt", 404, "404 page not found\n"),
+            ("file:///sub", 200, "<!doctype html>"),
+            ("file:///../etc/passwd", 404, "404 page not found\n"),
+        ];
+        for (u, want_status, want_body) in cases.iter() {
+            let (req, e) = http::NewRequest(string("GET"), string::from(*u), slice::new());
+            if !e.IsNil() {
+                check("client NewRequest", false, fmt::Sprintf!("%v", e));
+                continue;
+            }
+            let (mut resp, rerr) = c.Do(&req);
+            if !rerr.IsNil() {
+                check("Client.Get over RegisterProtocol", false,
+                    fmt::Sprintf!("%s: %v", string::from(*u), rerr));
+                continue;
+            }
+            let body = drain(&mut resp.Body);
+            let ok = resp.StatusCode == *want_status
+                && goish::strings::HasPrefix(body.clone(), string::from(*want_body));
+            check(
+                "Client.Get over RegisterProtocol",
+                ok,
+                fmt::Sprintf!("%s: status=%d body=%q", string::from(*u), resp.StatusCode, body),
+            );
+        }
+    }
 
     let _ = os::RemoveAll(dir);
     finish();

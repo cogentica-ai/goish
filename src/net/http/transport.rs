@@ -874,6 +874,11 @@ crate::var! {
     pub errKeepAlivesDisabled: error = "http: putIdleConn: keep alives disabled";
     // go: sdk 1.25.5 net/http/transport.go:999-1015 errConnBroken
     pub errConnBroken: error = "http: putIdleConn: connection is in bad state";
+    // go: sdk 1.25.5 net/http/transport.go:855-856 ErrSkipAltProtocol
+    /// Go: "ErrSkipAltProtocol is a sentinel error value defined by
+    /// Transport.RegisterProtocol." An alternate RoundTripper returns
+    /// it to decline a request and hand it back to the normal path.
+    pub ErrSkipAltProtocol: error = "net/http: skip alternate protocol";
     // go: sdk 1.25.5 net/http/transport.go:999-1015 errCloseIdle
     pub errCloseIdle: error = "http: putIdleConn: CloseIdleConnections was called";
     // go: sdk 1.25.5 net/http/transport.go:999-1015 errTooManyIdle

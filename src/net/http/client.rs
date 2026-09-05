@@ -1170,14 +1170,14 @@ impl RoundTripper for Transport {
         let scheme = req.URL.Scheme.clone();
         let is_https = scheme.as_bytes() == b"https";
         let is_http = scheme.Len() == 0 || scheme.as_bytes() == b"http";
-        if !is_http && !is_https {
-            return (
-                Response::default(),
-                errors::New(string(
-                    "http: only scheme=http and scheme=https are supported",
-                )),
-            );
-        }
+        // The unsupported-scheme rejection is NOT here. Go computes
+        // isHTTP at the top and does not act on it until after the
+        // alternate RoundTripper has had the request (transport.go:624)
+        // — which is the whole point of RegisterProtocol, since every
+        // scheme it exists to serve is one this test would reject.
+        // goish rejected first, so `RegisterProtocol("file", …)` — the
+        // example in filetransport.go's own doc comment — registered a
+        // transport that could never be reached through a Client.
 
         // Go validates the outgoing headers in Transport.roundTrip (see
         // transport.go:597, "Validate the outgoing headers"),
@@ -1206,6 +1206,47 @@ impl RoundTripper for Transport {
                     errors::New(string("net/http: invalid trailer ") + bad),
                 );
             }
+        }
+
+        // Go: if altRT := t.alternateRoundTripper(req); altRT != nil {
+        //         if resp, err := altRT.RoundTrip(req); err !=
+        //         ErrSkipAltProtocol { return resp, err }
+        //         req, err = rewindBody(req) … } (transport.go:614-623)
+        //
+        // `alternateRoundTripper` and `RegisterProtocol` were both
+        // ported, and the scheme check above returned before either
+        // could matter. Measured against Go with the doc comment's own
+        // example — RegisterProtocol("file", NewFileTransport(Dir(d)))
+        // then Client.Get("file:///a.txt") — Go serves the file and
+        // goish answered "only scheme=http and scheme=https are
+        // supported" for all four cases.
+        let mut req_owned;
+        let mut req = req;
+        if let Some(alt) = self.alternateRoundTripper(req) {
+            let (resp, err) = alt.RoundTrip(req);
+            if !errors::Is(err.clone(), super::transport::ErrSkipAltProtocol) {
+                return (resp, err);
+            }
+            // Declined: Go rewinds the body before the normal path
+            // retries it, since the alternate may have consumed it.
+            let (rb, rerr) = super::transport::rewindBody(req);
+            if !rerr.IsNil() {
+                return (Response::default(), rerr);
+            }
+            req_owned = rb;
+            req = &mut req_owned;
+        }
+
+        // Go: if !isHTTP { req.closeBody(); return
+        // badStringError("unsupported protocol scheme", scheme) }
+        // (transport.go:624-626). badStringError formats with %q.
+        if !is_http && !is_https {
+            return (
+                Response::default(),
+                errors::New(
+                    string("unsupported protocol scheme \"") + scheme.clone() + string("\""),
+                ),
+            );
         }
 
         // Resolve host:port. URL.Host may already include :port.
@@ -2474,12 +2515,54 @@ impl Client {
             // Decide whether to follow.
             match resp.StatusCode {
                 301 | 302 | 303 | 307 | 308 => {
-                    let (loc, lerr) = resp.Location();
-                    if !lerr.IsNil() {
-                        // No Location → return as-is (the deadline
-                        // release already rides in the Body).
+                    // Go: `loc := resp.Header.Get("Location")` then
+                    // `u, err := req.URL.Parse(loc)` (client.go:638-645)
+                    // — resolved against the CURRENT REQUEST's URL, not
+                    // through `resp.Location()`.
+                    //
+                    // goish used resp.Location(), which resolves against
+                    // `resp.Request` and falls back to parsing the
+                    // header on its own when that is unset. Only the
+                    // wire path sets resp.Request (read_response_head),
+                    // so a response from an alternate RoundTripper —
+                    // anything registered with RegisterProtocol — had a
+                    // relative Location parsed with no base at all. The
+                    // file transport's directory redirect to "sub/"
+                    // became the URL "sub/", and the next hop failed
+                    // with "http: no Host in request" instead of
+                    // fetching file:///sub/.
+                    let loc = resp.Header.Get(string("Location"));
+                    if loc.Len() == 0 {
+                        // Go: "While most 3xx responses include a
+                        // Location, it is not required" — return as-is
+                        // (the deadline release rides in the Body).
                         return (resp, errors::nil);
                     }
+                    let (loc_url, lerr) = current.URL.Parse(loc.clone());
+                    if !lerr.IsNil() {
+                        // Go: closeBody, then
+                        // `uerr(fmt.Errorf("failed to parse Location
+                        // header %q: %v", loc, err))` (client.go:648).
+                        // goish returned the 3xx as if it were the
+                        // final response, so a caller following a
+                        // malformed Location saw a 302 with no error
+                        // and no redirect.
+                        let _ = resp.Body.__close_shared();
+                        return (
+                            Response::default(),
+                            uerr(
+                                uerr_method.clone(),
+                                &current.URL,
+                                errors::New(
+                                    string("failed to parse Location header ")
+                                        + crate::strconv::Quote(loc)
+                                        + string(": ")
+                                        + lerr.Error(),
+                                ),
+                            ),
+                        );
+                    }
+                    let loc = loc_url;
                     // Go: the hop's body is closed before following.
                     let _ = resp.Body.__close_shared();
                     // Go's redirectBehavior (client.go):

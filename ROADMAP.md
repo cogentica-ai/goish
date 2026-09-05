@@ -198,6 +198,15 @@ Fixed so far, one per finding read:
     ignored HTTP_PROXY entirely.
   - `dialConn` did not consult the roundtrip deadline, so
     `Client.Timeout` never bounded a connect (2g).
+  - `RoundTrip` rejected every non-http scheme BEFORE consulting
+    `alternateRoundTripper`, so `RegisterProtocol` could not serve any
+    of the schemes it exists for — including the `file` example in
+    filetransport.go's own doc comment. Two more defects fell out of
+    testing that path end to end: the redirect loop resolved Location
+    through `resp.Location()` (which needs `resp.Request`, set only on
+    the wire path) instead of against the current request's URL, and a
+    malformed Location returned the 3xx as though it were the final
+    response.
   - The serve loops did not call `doKeepAlives`, so
     `SetKeepAlivesEnabled(false)` set a flag nothing read, and
     `wantsHttp10KeepAlive` — which I had wrongly triaged as
