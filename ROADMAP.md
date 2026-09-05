@@ -219,6 +219,14 @@ Fixed so far, one per finding read:
     default when it is unset is 10 MiB — goish had NO bound on a
     response head at all. A server answering with many short headers
     could grow a client's Header map until the process died.
+  - Nothing called `readBufferSize`/`writeBufferSize`, so
+    `Transport.ReadBufferSize` and `.WriteBufferSize` do nothing —
+    goish always uses bufio's 4096 default, which is also Go's default,
+    so the fields are inert rather than wrong. STILL OPEN. Chasing
+    them, though, turned up a real defect next door: the client read
+    header lines with a single `ReadSlice` and failed the whole
+    response with "bufio: buffer full" on any line over ~4 KiB, where
+    Go's textproto accumulates. Fixed.
   - The serve loops did not call `doKeepAlives`, so
     `SetKeepAlivesEnabled(false)` set a flag nothing read, and
     `wantsHttp10KeepAlive` — which I had wrongly triaged as

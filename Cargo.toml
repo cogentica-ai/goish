@@ -3394,3 +3394,7 @@ path = "examples/json_map_state_diff.rs"
 [[example]]
 name = "json_scalar_diff"
 path = "examples/json_scalar_diff.rs"
+
+[[example]]
+name = "http_long_header_line_smoke"
+path = "examples/http_long_header_line_smoke.rs"

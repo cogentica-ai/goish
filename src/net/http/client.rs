@@ -3083,21 +3083,44 @@ impl<'a, R: Reader> Reader for BufioPassthrough<'a, R> {
 }
 
 /// Read a CRLF-terminated line, returning the line without CRLF.
+///
+/// Go reads response header lines through textproto, whose
+/// `readLineSlice` loops on `bufio.ReadLine`'s `more` flag and
+/// ACCUMULATES a line longer than the reader's buffer (reader.go).
+///
+/// This called `ReadSlice` once and surfaced its `ErrBufferFull`, so a
+/// response carrying a single header line over ~4 KiB failed the whole
+/// request with "bufio: buffer full" where Go returns it intact.
+/// Measured against Go with an 8000-byte `X-Long` header: Go answers
+/// 200 with all 8000 bytes, goish errored.
+///
+/// Not an edge case — a large `Set-Cookie`, a CSP policy or a
+/// `Server-Timing` list all exceed 4 KiB routinely, and the whole
+/// response was lost, not just the header.
+///
+/// `Transport.ReadBufferSize` does NOT bound this in Go either: it
+/// sizes the buffer for efficiency, and measured at 0 and 16384 Go
+/// accepts the same 8000-byte line both ways. So this is the line
+/// reader's job, not the buffer's.
 fn read_crlf_line<R: Reader>(br: &mut bufio::Reader<R>) -> Result<string, error> {
-    // Go: line, err := br.ReadSlice('\n')
-    let (line, err) = br.ReadSlice(b'\n');
-    if !err.IsNil() {
-        return Err(err);
+    // Go (textproto.readLineSlice): loop until `more` is false.
+    let mut acc: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+    loop {
+        let (l, more, err) = br.ReadLine();
+        if !err.IsNil() {
+            return Err(err);
+        }
+        // Go avoids the copy when the first read produced a whole
+        // line, which is every ordinary header.
+        if acc.is_empty() && !more {
+            return Ok(crate::convert::string(l));
+        }
+        acc.extend_from_slice(l.as_ref());
+        if !more {
+            break;
+        }
     }
-    // Go: trim trailing CRLF
-    let mut end = line.Len();
-    if end > 0 && line[end - 1] == b'\n' {
-        end -= 1;
-    }
-    if end > 0 && line[end - 1] == b'\r' {
-        end -= 1;
-    }
-    Ok(crate::convert::string(line.slice(0, end)))
+    Ok(string::from_bytes(&acc))
 }
 
 /// Line-by-line port of `ParseHTTPVersion` (request.go:1390 in Go's source).
