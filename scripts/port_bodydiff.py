@@ -72,6 +72,35 @@ reader does not re-derive it:
 
 So the class this exists to catch — a dropped field under a valid
 anchor — currently has no instances.
+
+General mode, `src/net/http`, triaged 2026-09-05: 1047 anchored fns,
+502 deficits. Only the top few were checked; the rest is UNTRIAGED and
+the count is dominated by the legitimate differences listed above.
+What the top of that list means, so it is not re-derived:
+
+  ReverseProxy.ServeHTTP    -51. REAL, and already recorded as ROADMAP
+                            2m. The anchor is claimed by the slim
+                            `reverseProxyHandler`, which has no hooks;
+                            the exported `ReverseProxy` has no
+                            ServeHTTP at all. The missing calls name
+                            exactly what is absent — getErrorHandler,
+                            copyHeader, the Rewrite-path Header.Del.
+  ReverseProxy              -33. Same finding: getErrorHandler 0/7 and
+    .handleUpgradeResponse  Errorf 0/7 are the error reporting the
+                            slim path replaces with a bare status.
+  persistConn.readLoop      -32. goish has no readLoop — ROADMAP 2h.
+  Transport.dialConn        -59. Mostly `Close` in Go's error paths,
+                            where goish's Drop handles the conn.
+  ServeMux.findHandler      -18. FALSE POSITIVE. goish reaches the
+                            same behaviour with a different call
+                            structure. Diffed against Go across nine
+                            routing probes — trailing-slash redirect,
+                            /a/../x, //x, /./x, host:port stripping,
+                            405-with-Allow, 404, and /x/.. — and all
+                            nine agree. Already pinned: mux_ref_smoke
+                            covers 405-with-Allow and the /a/../admin
+                            redirect, http_mux_routing_smoke covers
+                            //double.
 """
 import os, re, sys, collections
 
