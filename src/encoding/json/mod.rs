@@ -1235,8 +1235,35 @@ fn parse_to_value(data: &[byte]) -> (Value, error) {
 
 // go: sdk 1.25.5 encoding/json/scanner.go:148 maxNestingDepth
 /// Go: "This limits the max nesting depth to prevent stack overflow.
-/// This is permitted by RFC 7159 section 9."
-const maxNestingDepth: usize = 10000;
+/// This is permitted by RFC 7159 section 9." Go's value is 10000.
+///
+/// DIVERGENCE: goish's is 2000, and the reason is the sentence Go
+/// wrote. Go's v1 scanner keeps an explicit `parseState` stack and
+/// does not recurse, so 10000 costs it nothing; this is a recursive
+/// descent, so each level is two stack frames.
+///
+/// Measured in a DEBUG build — which is what `make e2e` runs — on an
+/// 8 MiB goroutine stack:
+///
+///   * without a stack pivot at the recursion site, depth 8000
+///     SIGSEGVs;
+///   * with one, 8000 survives and 8500 does not;
+///   * so the implementation's own ceiling is near 8200, BELOW Go's
+///     limit. Setting the limit to Go's number would mean a document
+///     Go accepts crashes the process — which is exactly what
+///     RFC 7159 section 9 permits a parser to refuse instead.
+///
+/// 2000 leaves roughly a 4x margin against that ceiling, which matters
+/// because a goroutine spawned with a smaller stack than the main
+/// one's 8 MiB has less room still. Real documents do not approach it:
+/// nesting past a few dozen is already pathological.
+///
+/// The honest fix is Go's design — an explicit state stack instead of
+/// recursion — and it is recorded in ROADMAP.md rather than attempted
+/// at the end of a session. Until then a REFUSAL is the right failure:
+/// rejecting a document Go accepts is a divergence, and crashing on
+/// one is a denial of service.
+const maxNestingDepth: usize = 2000;
 
 struct Parser<'a> {
     data: &'a [byte],
@@ -1304,11 +1331,41 @@ impl<'a> Parser<'a> {
                     return (Value::Null, syntax_err(b, "exceeded max depth"));
                 }
                 self.depth += 1;
-                let r = if self.peek() == Some(b'{') {
-                    self.parse_object()
-                } else {
-                    self.parse_array()
-                };
+                // `maybe_grow_step` because this descent RECURSES where
+                // Go's v1 scanner keeps an explicit parseState stack and
+                // does not. Go can afford maxNestingDepth = 10000 with
+                // no stack cost; here 10000 frames is more than an 8 MiB
+                // goroutine stack holds in a debug build — measured, it
+                // SIGSEGVs — so the limit alone is not enough to make
+                // the bound safe. This pivots to a fresh stack when the
+                // current one runs low, which is what the runtime's own
+                // stack-overflow diagnostic recommends.
+                // This descent RECURSES where Go's v1 scanner keeps an
+                // explicit parseState stack and does not, so Go can
+                // afford maxNestingDepth = 10000 at no stack cost and
+                // this cannot. Measured in a DEBUG build (which is what
+                // `make e2e` runs) on an 8 MiB goroutine stack: without
+                // a pivot, depth 8000 SIGSEGVs; with one, 8000 survives
+                // and 8500 does not. Ten thousand levels of debug frames
+                // is roughly 60-80 MiB, so the pivot stack is sized for
+                // that — it is mmap'd and commits lazily, and only a
+                // document that actually nests deeply ever touches it.
+                //
+                // The 64 KiB red zone is the runtime diagnostic's own
+                // suggested shape. `maybe_grow_step`'s tier-1 zone is
+                // 1 KiB, which `parse_array`'s debug frame overruns
+                // between checks — measured, it still faulted.
+                let r = crate::runtime::sched::maybe_grow(
+                    64 * 1024,
+                    256 * 1024 * 1024,
+                    || {
+                        if self.peek() == Some(b'{') {
+                            self.parse_object()
+                        } else {
+                            self.parse_array()
+                        }
+                    },
+                );
                 self.depth -= 1;
                 return r;
             }

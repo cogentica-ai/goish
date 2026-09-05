@@ -1521,7 +1521,13 @@ impl Decoder {
                         }
                         self.skip_ws();
                     }
-                    let err = self.scan_whole_value_at(depth + 1);
+                    // See the note in encoding/json's parse_value: this
+                    // recurses where Go's scanner does not, so the depth
+                    // LIMIT bounds the document while `maybe_grow_step`
+                    // bounds the stack. Neither is sufficient alone.
+                    let err = crate::runtime::sched::maybe_grow_step(|| {
+                        self.scan_whole_value_at(depth + 1)
+                    });
                     if err != nil {
                         return err;
                     }

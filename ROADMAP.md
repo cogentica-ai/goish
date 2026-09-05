@@ -116,6 +116,31 @@ simulate the NFA with a thread list (`regexp/exec.go` plus
 to it. A step budget was considered and rejected — it trades an
 unbounded hang for a wrong answer on patterns Go answers correctly.
 
+## 2d. The JSON parsers recurse where Go's do not
+
+`encoding/json`'s v1 scanner keeps an explicit `parseState` stack; both
+goish JSON parsers are recursive descent. Go can therefore afford
+`maxNestingDepth = 10000` at no stack cost, and goish cannot.
+
+Measured 2026-09-05 in a DEBUG build — the profile `make e2e` uses — on
+an 8 MiB goroutine stack: without a pivot at the recursion site, depth
+8000 SIGSEGVs; with `maybe_grow`, 8000 survives and 8500 does not. The
+implementation ceiling is near 8200, below Go's limit.
+
+`encoding/json` therefore refuses past **2000**, roughly a 4x margin,
+and that divergence is deliberate: rejecting a document Go accepts is a
+divergence, crashing on one is a denial of service. `jsontext` keeps Go's
+10000 — its frames are leaner and 10000 was measured safe there.
+
+The fix is Go's design: replace the recursion with an explicit state
+stack, after which both can carry Go's number. That is a rewrite of the
+parser loop rather than a patch.
+
+Worth noting for anyone verifying a change here: `PROFILE ?= debug` in
+the Makefile, so `make e2e` builds DEBUG. A `cargo build --release`
+check passes at depths the debug build faults on — which is how the
+first version of this limit reached CI.
+
 ## 3. Gaps other packages will hit next
 
 Re-measured 2026-09-04; four of the five entries this section used to

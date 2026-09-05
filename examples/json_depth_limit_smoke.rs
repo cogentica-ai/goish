@@ -1,11 +1,20 @@
 // json_depth_limit_smoke — a JSON document may not decide how deep
 // this process recurses.
 //
-// TWO parsers, two limits. `jsontext` is the token layer and
+// TWO parsers, two limits, and they are DIFFERENT NUMBERS on purpose. `jsontext` is the token layer and
 // `encoding/json` the semantic one, each with its own recursive
 // descent and each unbounded before this. Fixing one said nothing
 // about the other, which is why both are pinned here: the second was
 // found by asking whether the first was the only place.
+//
+// jsontext refuses past 10000, which is Go's number for it. The v1
+// parser refuses past 2000, which is NOT Go's 10000, and the reason is
+// measured rather than chosen: Go's v1 scanner keeps an explicit
+// parseState stack and does not recurse, while this one does, so its
+// own ceiling in a debug build on an 8 MiB stack is near 8200 — below
+// Go's limit. A limit of 10000 there would mean a document Go accepts
+// crashes the process. See the constant in encoding/json/mod.rs for
+// the measurements and ROADMAP.md for the real fix.
 //
 // `jsontext`'s `scan_whole_value` recursed once per nested composite
 // with NO limit, so a document made of nothing but `[` chose the stack
@@ -64,9 +73,9 @@ const GO: [&str; 11] = [
     "depth=10001  len=0 err=exceeded max depth",
     "depth=500000 len=0 err=exceeded max depth",
     "v1 depth=10     err=<nil>",
-    "v1 depth=9999   err=<nil>",
-    "v1 depth=10000  err=<nil>",
-    "v1 depth=10001  err=invalid character '[' exceeded max depth",
+    "v1 depth=1999   err=<nil>",
+    "v1 depth=2000   err=<nil>",
+    "v1 depth=2001   err=invalid character '[' exceeded max depth",
     "v1 depth=500000 err=invalid character '[' exceeded max depth",
 ];
 
@@ -97,7 +106,7 @@ fn main() {
     }
     // The v1 semantic layer has its OWN parser and its own limit
     // (encoding/json/scanner.go:148), and it recursed unbounded too.
-    for n in [10usize, 9999, 10000, 10001, 500000].iter() {
+    for n in [10usize, 1999, 2000, 2001, 500000].iter() {
         let data = nested(*n);
         let mut v = goish::encoding::json::Value::default();
         let err = goish::encoding::json::Unmarshal(&data, &mut v);
