@@ -214,6 +214,11 @@ Fixed so far, one per finding read:
     the advertisement is built from `protocols()` with HTTP/2 forced
     off. That is a deliberate divergence from the literal port and is
     documented at the call site.
+  - Nothing called `maxHeaderResponseSize`, so
+    `Transport.MaxResponseHeaderBytes` did nothing and — since Go's
+    default when it is unset is 10 MiB — goish had NO bound on a
+    response head at all. A server answering with many short headers
+    could grow a client's Header map until the process died.
   - The serve loops did not call `doKeepAlives`, so
     `SetKeepAlivesEnabled(false)` set a flag nothing read, and
     `wantsHttp10KeepAlive` — which I had wrongly triaged as
@@ -235,6 +240,16 @@ client talking to a server with keep-alives disabled.
 The lesson is that "goish computes the same predicate a different way"
 is not sufficient. The question is whether it computes the same NUMBER
 of predicates.
+
+`net/http/httputil`'s `ReverseProxy` is a third category again. Its
+`modifyResponse`, `copyResponse`, `copyHeader` and `handleError` are
+all uncalled because the type has NO `ServeHTTP` — it is not a Handler
+at all. That is recorded on the type itself as STAGED: ServeHTTP needs
+the streaming response copy, which needs Body as io.ReadCloser. The
+working proxy is `NewSingleHostReverseProxy`'s `reverseProxyHandler`,
+which has none of the hooks. So `ReverseProxy.ModifyResponse` and
+`.ErrorHandler` cannot be reached — not silently ignored at runtime,
+but not usable either.
 
 Read and found NOT defects, which is the other half of the work:
 

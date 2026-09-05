@@ -647,6 +647,44 @@ pub(crate) fn read_response_head<R: Reader>(
     br: &mut bufio::Reader<R>,
     req: Option<Request>,
 ) -> (Response, BodyKind, error) {
+    // No budget: this is the `ReadResponse` shape, which Go does not
+    // bound either — the limit belongs to the Transport.
+    return read_response_head_limited(br, req, 0);
+}
+
+// go: none — goish-only: Go bounds the response head by installing
+// `pc.readLimit = pc.maxHeaderResponseSize()` on the persistConn's
+// reader (transport.go:2277). goish has no limit reader, so the budget
+// is spent line by line here.
+//
+// `MaxResponseHeaderBytes` was a public field that only Clone and
+// `maxHeaderResponseSize` ever read, and nothing called
+// `maxHeaderResponseSize`, so the limit did not exist. Go's default
+// when the field is unset is 10 MiB — "conservative default; same as
+// http2" — so goish was not merely ignoring a user setting, it had no
+// bound at all where Go always has one.
+//
+// A single header LINE was already bounded, by bufio's buffer through
+// ReadSlice. The total was not: a server answering with many SHORT
+// headers grows the Header map without limit, and no line ever trips
+// the per-line check. That is the shape this budget catches.
+//
+// `limit <= 0` means unbounded, which is what ReadResponse passes.
+pub(crate) fn read_response_head_limited<R: Reader>(
+    br: &mut bufio::Reader<R>,
+    req: Option<Request>,
+    limit: i64,
+) -> (Response, BodyKind, error) {
+    let mut spent: i64 = 0;
+    // Go's message, verbatim: the wrapper naming the broken transport
+    // connection is added by the read loop above this.
+    let over = |n: i64| -> error {
+        errors::New(
+            string("net/http: server response headers exceeded ")
+                + crate::strconv::FormatInt(n, 10)
+                + string(" bytes; aborted"),
+        )
+    };
     let mut resp = Response::default();
     resp.Request = match req {
         Some(r) => nilable::new(r),
@@ -670,6 +708,12 @@ pub(crate) fn read_response_head<R: Reader>(
             return (resp, BodyKind::Empty, e);
         }
     };
+    if limit > 0 {
+        spent += line.Len() as i64 + 2;
+        if spent > limit {
+            return (Response::default(), BodyKind::Empty, over(limit));
+        }
+    }
     let lb = line.as_bytes();
     let sp1 = match lb.iter().position(|&b| b == b' ') {
         Some(i) => i,
@@ -732,6 +776,12 @@ pub(crate) fn read_response_head<R: Reader>(
                 return (resp, BodyKind::Empty, e);
             }
         };
+        if limit > 0 {
+            spent += h.Len() as i64 + 2;
+            if spent > limit {
+                return (resp, BodyKind::Empty, over(limit));
+            }
+        }
         if h.Len() == 0 {
             break;
         }
@@ -1577,10 +1627,16 @@ impl RoundTripper for Transport {
 
                 // Read the response head; the src moves onward into
                 // resp.Body, which streams until the caller Closes it.
+                //
+                // Bounded by Transport.MaxResponseHeaderBytes, or Go's
+                // 10 MiB default when it is unset. This is the path
+                // Client.Do takes; readLoop has the same budget stamped
+                // on its persistConn at dial.
+                let hdr_budget = super::transport::persistConn::maxHeaderResponseSize(self);
                 let (mut resp, kind, rerr) = match &mut src {
-                    ConnSrc::Tcp(br) => read_response_head(br, Some(rt_req.clone())),
-                    ConnSrc::Tls(br) => read_response_head(br, Some(rt_req.clone())),
-                    ConnSrc::Dyn(br) => read_response_head(br, Some(rt_req.clone())),
+                    ConnSrc::Tcp(br) => read_response_head_limited(br, Some(rt_req.clone()), hdr_budget),
+                    ConnSrc::Tls(br) => read_response_head_limited(br, Some(rt_req.clone()), hdr_budget),
+                    ConnSrc::Dyn(br) => read_response_head_limited(br, Some(rt_req.clone()), hdr_budget),
                 };
                 if !rerr.IsNil() {
                     stop_cancel_watch(watch);

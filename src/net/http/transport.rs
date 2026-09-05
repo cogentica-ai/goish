@@ -970,6 +970,12 @@ pub struct persistConn {
     /// Go: `idleTimer *time.Timer` — the IdleConnTimeout reaper for
     /// the CURRENT idle cycle; stopped when the conn is taken.
     idleTimer: crate::sync::Mutex<Option<crate::time::Timer>>,
+    /// goish-only: `maxHeaderResponseSize(t)` resolved at dial, because
+    /// goish's persistConn carries no Transport pointer to ask later.
+    /// Go bounds the response head through `pc.readLimit`; goish has no
+    /// limit reader, so the budget is spent line by line in
+    /// `read_response_head_limited`.
+    max_header_bytes: core::sync::atomic::AtomicI64,
     /// goish-only: the raw socket's netpoll watch target, captured at
     /// dial time BEFORE any TLS wrap (the tls.Conn hides the TCPConn,
     /// and the disconnect watch wants the PollDesc underneath).
@@ -1016,6 +1022,7 @@ impl persistConn {
             cacheKey,
             src: crate::sync::Mutex::new(None),
             idleTimer: crate::sync::Mutex::new(None),
+            max_header_bytes: core::sync::atomic::AtomicI64::new(0),
             watch_parts: crate::sync::Mutex::new((0, 0)),
             state: crate::sync::Mutex::new(pcState {
                 reused: false,
@@ -1030,6 +1037,21 @@ impl persistConn {
     // go: sdk 1.25.5 net/http/transport.go:2134-2139 persistConn.isBroken
     pub fn isBroken(&self) -> bool {
         return !self.state.Lock().closed.IsNil();
+    }
+
+    // go: none — goish-only: Go reads pc.t.MaxResponseHeaderBytes on
+    // demand; goish's persistConn has no Transport pointer, so the
+    // resolved budget is stamped on at dial.
+    pub(crate) fn __set_max_header_bytes(&self, v: i64) {
+        self.max_header_bytes
+            .store(v, core::sync::atomic::Ordering::Release);
+    }
+
+    // go: none — goish-only: see __set_max_header_bytes.
+    pub(crate) fn __max_header_bytes(&self) -> i64 {
+        return self
+            .max_header_bytes
+            .load(core::sync::atomic::Ordering::Acquire);
     }
 
     // go: none — goish-only: Go's pc.conn/pc.br live as bare fields
@@ -1240,15 +1262,21 @@ impl persistConn {
             // a 100 releases the writeLoop's held body via continueCh.
             let (resp, kind) = loop {
                 let (resp, kind, rerr) = match &mut src {
-                    super::client::ConnSrc::Tcp(br) => {
-                        super::client::read_response_head(br, rc.req.clone())
-                    }
-                    super::client::ConnSrc::Tls(br) => {
-                        super::client::read_response_head(br, rc.req.clone())
-                    }
-                    super::client::ConnSrc::Dyn(br) => {
-                        super::client::read_response_head(br, rc.req.clone())
-                    }
+                    super::client::ConnSrc::Tcp(br) => super::client::read_response_head_limited(
+                        br,
+                        rc.req.clone(),
+                        self.__max_header_bytes(),
+                    ),
+                    super::client::ConnSrc::Tls(br) => super::client::read_response_head_limited(
+                        br,
+                        rc.req.clone(),
+                        self.__max_header_bytes(),
+                    ),
+                    super::client::ConnSrc::Dyn(br) => super::client::read_response_head_limited(
+                        br,
+                        rc.req.clone(),
+                        self.__max_header_bytes(),
+                    ),
                 };
                 if !rerr.IsNil() {
                     close_err = rerr.clone();
@@ -2078,6 +2106,7 @@ impl Transport {
         }
         let conn = conn.unwrap();
         let pc = Arc::new(persistConn::__new(key.clone()));
+        pc.__set_max_header_bytes(persistConn::maxHeaderResponseSize(self));
         // The disconnect watch wants the RAW socket's PollDesc —
         // captured before any TLS wrap hides the TCPConn.
         {
