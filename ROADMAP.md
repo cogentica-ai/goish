@@ -578,6 +578,30 @@ Go would have shown it, and cannot answer 408 itself.
 Making goish match means a streaming request body, which is the same
 decision as 2h and 2j rather than a patch.
 
+The same root produces a second, blunter divergence: request bodies are
+capped at 16 MiB (`MAX_BODY` in request.rs), and a request DECLARING
+more is refused before it sends anything —
+
+  Content-Length: 17000000, zero body bytes sent
+    Go     accepts the request; the handler decides what to read
+    goish  HTTP/1.1 400 Bad Request, immediately
+
+So an upload over 16 MiB does not work at all. Go has no default body
+limit; it leaves the bound to the handler, via MaxBytesReader. goish
+cannot, because it buffers the body before the handler exists, and the
+cap is the honest mitigation for that — 16 MiB is a guess, and any
+other number would be too until the body streams.
+
+One hypothesis about that cap was tested and DISPROVED, which is worth
+recording so nobody re-derives it: the read path calls
+`Vec::with_capacity(want)` on the CLIENT-DECLARED length before any
+bytes arrive, which looks like a cheap amplification — a hundred-byte
+request buying a multi-megabyte allocation. It does not measure that
+way. Ten connections each declaring 4 MiB and sending no body moved
+VmRSS by 432 kB and VmSize by 680 kB, not by 40 MiB, on two runs. The
+reservation does not become resident or even mapped, so the cap's
+rationale holds without that hazard behind it.
+
 http_readtimeout_body_smoke pins both rows and is verified to fail if
 the bound stops working: raising ReadTimeout above the stall makes the
 slow-body row read `handler_runs=1 read=10` immediately. The
