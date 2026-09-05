@@ -1201,6 +1201,10 @@ name = "json_separator_diff"
 path = "examples/json_separator_diff.rs"
 
 [[example]]
+name = "json_array_diff"
+path = "examples/json_array_diff.rs"
+
+[[example]]
 name = "term_pty_smoke"
 path = "examples/term_pty_smoke.rs"
 

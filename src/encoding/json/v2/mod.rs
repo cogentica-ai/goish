@@ -1,3 +1,4 @@
+// goishlint:ignore GOISH015 — builtin codecs share this existing semantic-layer module; array codecs extend the same reflection-to-trait dispatch.
 // encoding/json/v2 — semantic JSON layer (Go 1.25 GOEXPERIMENT=
 // jsonv2, src/encoding/json/v2/).
 //
@@ -27,6 +28,11 @@
 //     its stable outputs, and stable-by-default costs little here).
 //   - `null` unmarshals to the target's `Default` zero value
 //     (matching Go's zero-ing behavior for non-pointer targets).
+//   - Fixed arrays use const-generic codecs instead of reflection. `Any`
+//     identifies the built-in byte array (base64 in v2); named byte types
+//     retain their element codecs. This requires 'static array elements.
+//     Array errors retain Go's state/consumption order but omit reflected
+//     Go type names and JSON-pointer context, like the other builtin codecs.
 
 #![allow(non_snake_case)]
 
@@ -35,6 +41,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use crate::errors::{self, error, nil};
+use crate::goarray::array;
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::types::{byte, int};
@@ -108,6 +115,19 @@ impl<T: Clone> JsonOmit for slice<T> {
     }
     fn __json_zero(&self) -> bool {
         self.as_ref().is_empty()
+    }
+}
+
+// Go: encoding/json/v2/arshal_default.go:1529 — makeArrayArshaler;
+// omitzero checks the array's elements, not merely its fixed length.
+impl<T: JsonOmit, const N: usize> JsonOmit for array<T, N> {
+    // goishlint:ignore GOISH014 — Rust trait hook for Go's JSON-empty array check; provenance is on the impl.
+    fn __json_empty(&self) -> bool {
+        return N == 0;
+    }
+    // goishlint:ignore GOISH014 — Rust trait hook for Go's reflected array zero-value check; provenance is on the impl.
+    fn __json_zero(&self) -> bool {
+        return self.iter().all(JsonOmit::__json_zero);
     }
 }
 
@@ -492,6 +512,138 @@ impl<T: UnmarshalerFrom + Default + Clone> UnmarshalerFrom for slice<T> {
         }
         *self = slice::__from_vec(out);
         nil
+    }
+}
+
+// Go: encoding/json/v2/arshal_default.go:1529 — func makeArrayArshaler(t reflect.Type) *arshaler
+// Byte dispatch ports makeBytesArshaler at arshal_default.go:298.
+impl<T: MarshalerTo + 'static, const N: usize> MarshalerTo for array<T, N> {
+    // goishlint:ignore GOISH014 — trait implementation of the marshal closure inside makeArrayArshaler (anchor on impl).
+    fn MarshalJSONTo(&self, enc: &mut jsontext::Encoder) -> error {
+        // Reflection's exact byte-type dispatch, without inspecting or cloning
+        // user elements (which could have side-effecting custom codecs).
+        if let Some(bytes) = (self as &dyn ::core::any::Any).downcast_ref::<array<byte, N>>() {
+            let value = crate::encoding::base64::StdEncoding.EncodeToString(bytes);
+            return enc.WriteToken(jsontext::String(value));
+        }
+        let err = enc.WriteToken(jsontext::BeginArray);
+        if err != nil {
+            return err;
+        }
+        for value in self.iter() {
+            let err = value.MarshalJSONTo(enc);
+            if err != nil {
+                return err;
+            }
+        }
+        return enc.WriteToken(jsontext::EndArray);
+    }
+}
+
+// Go: encoding/json/v2/arshal_default.go:1563 — makeArrayArshaler unmarshal closure
+impl<T: UnmarshalerFrom + Default + 'static, const N: usize> UnmarshalerFrom for array<T, N> {
+    // goishlint:ignore GOISH014 — trait implementation of the unmarshal closure inside makeArrayArshaler (anchor on impl).
+    fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
+        // Byte arrays are JSON strings, not JSON arrays (Go v2 default).
+        if let Some(bytes) = (self as &mut dyn ::core::any::Any).downcast_mut::<array<byte, N>>() {
+            // Go: arshal_default.go:375-427 — makeBytesArshaler unmarshal.
+            let (value, err) = dec.ReadValue();
+            if err != nil {
+                return err;
+            }
+            if value.Kind() == 'n' {
+                *bytes = array::default();
+                return nil;
+            }
+            if value.Kind() != '"' {
+                return errors::New("json: cannot unmarshal non-string into byte array");
+            }
+            let mut encoded = string::new();
+            let err = Unmarshal(&value.0, &mut encoded, []);
+            if err != nil {
+                return err;
+            }
+            // Go decodes into the old array's backing storage if it fits,
+            // including a partial prefix on failure. If capacity is too small,
+            // AppendDecode allocates instead; failure then leaves it untouched.
+            // base64.go:412-423 grows using decodedLen after trimming padding.
+            let mut unpadded = encoded.as_bytes().len();
+            while unpadded > 0 && encoded.as_bytes()[unpadded - 1] == b'=' {
+                unpadded -= 1;
+            }
+            let max_len = unpadded / 4 * 3 + unpadded % 4 * 6 / 8;
+            let fits = max_len <= N;
+            // Goish subslicing copies. Decode into that view, then publish ALL
+            // writes before checking the error, including wide-store bytes past
+            // n. Go base64.go:555-565 writes four bytes while advancing by three.
+            let mut decoded = if fits {
+                bytes.slice(0, crate::int(max_len))
+            } else {
+                crate::make!([]byte, crate::int(max_len))
+            };
+            let (n, err) = crate::encoding::base64::StdEncoding.Decode(
+                &mut decoded, crate::convert::bytes(encoded.clone()),
+            );
+            if fits {
+                for i in 0..max_len {
+                    bytes[i] = decoded[i];
+                }
+            }
+            if err != nil {
+                return err;
+            }
+            if crate::int(encoded.as_bytes().len()) != crate::encoding::base64::StdEncoding.EncodedLen(n) {
+                return errors::New("json: illegal character in base64 string");
+            }
+            for i in 0..N {
+                bytes[i] = if crate::int(i) < n { decoded[i] } else { 0 };
+            }
+            if n != crate::int(N) {
+                return errors::New("json: decoded length mismatches array length");
+            }
+            return nil;
+        }
+        let (token, err) = dec.ReadToken();
+        if err != nil {
+            return err;
+        }
+        if token.Kind() == 'n' {
+            *self = array::default();
+            return nil;
+        }
+        if token.Kind() != '[' {
+            return errors::New("json: cannot unmarshal non-array into array");
+        }
+        let mut i = 0;
+        let mut length_error = nil;
+        while dec.PeekKind() != ']' {
+            if i >= N {
+                let err = dec.SkipValue();
+                if err != nil {
+                    return err;
+                }
+                length_error = errors::New("json: too many array elements");
+                continue;
+            }
+            // Go resets each visited element BEFORE calling its codec and
+            // stops on failure. Unvisited elements keep their previous state.
+            self[i] = T::default();
+            let err = self[i].UnmarshalJSONFrom(dec);
+            if err != nil {
+                return err;
+            }
+            i += 1;
+        }
+        while i < N {
+            self[i] = T::default();
+            length_error = errors::New("json: too few array elements");
+            i += 1;
+        }
+        let (_, err) = dec.ReadToken();
+        if err != nil {
+            return err;
+        }
+        return length_error;
     }
 }
 
