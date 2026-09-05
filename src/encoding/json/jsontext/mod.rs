@@ -1,3 +1,4 @@
+// goishlint:ignore GOISH015 — delimiter lookahead extends the existing Decoder in this combined syntax-layer module.
 // encoding/json/jsontext — streaming JSON syntax layer (Go 1.25
 // GOEXPERIMENT=jsonv2, src/encoding/json/jsontext/).
 //
@@ -35,6 +36,8 @@
 //     re-indent of nested values is not performed).
 //   - StackPointer / StackIndex / OutputOffset / AvailableBuffer /
 //     UnreadBuffer are not ported (unused by the target workloads).
+//   - Delimiter lookahead keeps the comma unconsumed on error, rather than
+//     caching Go's peekErr, so repeated PeekKind and the following read agree.
 
 #![allow(non_snake_case)]
 
@@ -943,8 +946,10 @@ impl Decoder {
                     // Between members: ',' unless the object ends.
                     match self.peek_at(0) {
                         Some(b',') => {
-                            self.pos += 1;
-                            self.skip_ws();
+                            let err = self.consume_comma();
+                            if err != nil {
+                                return err;
+                            }
                         }
                         Some(b'}') => {}
                         Some(_) => return errors::New("jsontext: missing ',' after object value"),
@@ -957,8 +962,10 @@ impl Decoder {
                 if count > 0 {
                     match self.peek_at(0) {
                         Some(b',') => {
-                            self.pos += 1;
-                            self.skip_ws();
+                            let err = self.consume_comma();
+                            if err != nil {
+                                return err;
+                            }
                         }
                         Some(b']') => {}
                         Some(_) => return errors::New("jsontext: missing ',' after array element"),
@@ -970,6 +977,25 @@ impl Decoder {
         }
         self.sep_done = true;
         nil
+    }
+
+    // Go: encoding/json/jsontext/decode.go:311-357 — decoderState.PeekKind
+    // goishlint:ignore GOISH014 — delimiter portion of Go's PeekKind, factored for shared token/value/skip preparation.
+    fn consume_comma(&mut self) -> error {
+        // Do not advance pos until lookahead succeeds. Go keeps peekErr after
+        // failed lookahead; retaining the delimiter reproduces that error on
+        // the following read without accepting a trailing comma as an end.
+        let mut offset = 1;
+        loop {
+            match self.peek_at(offset) {
+                Some(c) if is_ws(c) => offset += 1,
+                Some(b']' | b'}') => return errors::New("jsontext: trailing comma in composite"),
+                None => return crate::io::ErrUnexpectedEOF.into(),
+                Some(_) => break,
+            }
+        }
+        self.pos += offset;
+        return nil;
     }
 
     /// `Decoder.PeekKind()` (decode.go:307) — kind of the next token

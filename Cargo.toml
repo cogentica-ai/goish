@@ -1197,6 +1197,10 @@ name = "base64_decode_diff"
 path = "examples/base64_decode_diff.rs"
 
 [[example]]
+name = "json_separator_diff"
+path = "examples/json_separator_diff.rs"
+
+[[example]]
 name = "term_pty_smoke"
 path = "examples/term_pty_smoke.rs"
 
