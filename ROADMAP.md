@@ -326,8 +326,23 @@ transport.go itself — the script skipped the whole declaring file to
 avoid matching the declaration, so it missed same-file callers and
 matched an unrelated same-named method elsewhere in the package. It now
 skips only the declaration's own line range, which the anchor already
-names. The hot list went from 26 to 88: sixty-two findings had been
-hidden behind that exclusion.
+names.
+
+That first attempt reported 88 hot findings, and 15 of those were the
+script reading a declaration as its own caller. `strip_go_comments`
+dropped the newlines inside `/* */`, so every line number after a block
+comment shifted and the declaration-span exclusion missed. Newlines are
+kept now, and the honest numbers are 73 hot and 177 cold — still
+forty-seven more than the 26 the whole-file exclusion allowed through.
+
+The dominant pattern among the hot findings, once the false ones are
+gone, is same-package COMPOSITION rather than a missing edge: Go builds
+`LeadingZeros32` out of `Len32`, `PushBackList` out of `Front`,
+`Asinh` out of `Log1p`, and goish implements each entry point directly
+— with a Rust intrinsic, with libm, or over its own internals. Those
+are pinned against Go by the ref smokes and are not defects. It still
+has to be read one at a time, because `validateHeaders` was same-file
+too, and it was real.
 
 ## 2f. Two thirds of the FIPS CASTs are not ported
 

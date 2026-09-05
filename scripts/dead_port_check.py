@@ -146,8 +146,17 @@ def strip_go_comments(text):
                 i += 1
             continue
         if c == "/" and i + 1 < n and text[i + 1] == "*":
+            # Keep the newlines. Dropping them shifts every line number
+            # after the comment, which makes the caller's
+            # declaration-span exclusion miss — and then the
+            # DECLARATION ITSELF matches as a call, so a function with
+            # no callers at all is reported as one Go calls. That is
+            # how this script came to claim 88 hot findings where the
+            # real number is smaller.
             i += 2
             while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+                if text[i] == "\n":
+                    out.append("\n")
                 i += 1
             i += 2
             continue
