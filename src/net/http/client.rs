@@ -1173,6 +1173,35 @@ impl RoundTripper for Transport {
             );
         }
 
+        // Go validates the outgoing headers in Transport.roundTrip (see
+        // transport.go:597, "Validate the outgoing headers"),
+        // then the trailers, both before anything is dialled.
+        //
+        // `validateHeaders` was ported into transport.rs and anchored
+        // to that exact Go function, and then CALLED NOWHERE — so a
+        // header value carrying a raw CR or LF went onto the wire
+        // verbatim. That is request smuggling: a caller that
+        // puts attacker-controlled text in a header value lets the
+        // attacker end the header block and start a second request
+        // inside the first. Measured against Go, which refuses five of
+        // six malformed shapes before dialling and refused none here.
+        if is_http || is_https {
+            let bad = super::transport::validateHeaders(&req.Header);
+            if bad.Len() != 0 {
+                return (
+                    Response::default(),
+                    errors::New(string("net/http: invalid header ") + bad),
+                );
+            }
+            let bad = super::transport::validateHeaders(&req.Trailer);
+            if bad.Len() != 0 {
+                return (
+                    Response::default(),
+                    errors::New(string("net/http: invalid trailer ") + bad),
+                );
+            }
+        }
+
         // Resolve host:port. URL.Host may already include :port.
         //
         // Two DIFFERENT values, which goish used to conflate. `host` is

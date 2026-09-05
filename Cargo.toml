@@ -3330,3 +3330,7 @@ path = "examples/regexp_backtrack_smoke.rs"
 [[example]]
 name = "os_filemode_bits_smoke"
 path = "examples/os_filemode_bits_smoke.rs"
+
+[[example]]
+name = "http_request_header_injection_smoke"
+path = "examples/http_request_header_injection_smoke.rs"
