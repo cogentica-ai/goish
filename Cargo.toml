@@ -2166,3 +2166,7 @@ path = "examples/range_int_smoke.rs"
 [[example]]
 name = "floatint_diff"
 path = "examples/floatint_diff.rs"
+
+[[example]]
+name = "json_float_diff"
+path = "examples/json_float_diff.rs"

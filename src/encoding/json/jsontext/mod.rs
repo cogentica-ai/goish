@@ -1333,10 +1333,17 @@ impl Decoder {
             self.pos += 1;
         }
         let mut saw_digit = false;
-        while let Some(b @ b'0'..=b'9') = self.peek_at(0) {
-            let _ = b;
+        // Go jsonwire/decode.go:472-514 (ConsumeNumberResumable): the
+        // integer part is either exactly zero or a nonzero-leading digit
+        // sequence. Streaming "01" reads 0, leaving 1 for the next value.
+        if self.peek_at(0) == Some(b'0') {
             saw_digit = true;
             self.pos += 1;
+        } else {
+            while let Some(b'0'..=b'9') = self.peek_at(0) {
+                saw_digit = true;
+                self.pos += 1;
+            }
         }
         if !saw_digit {
             return Err(errors::New("jsontext: invalid number"));

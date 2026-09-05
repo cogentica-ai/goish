@@ -40,6 +40,9 @@
 //     decoding, merge into existing pointees, and retain partial mutations.
 //     Box provides the owned non-null indirection for recursive decode trees;
 //     Option<Box<T>> uses the same nullable-pointer codec without copying T.
+//   - Default float decode consumes raw values and clamps overflow to the
+//     finite maximum before returning an error (jsonwire.ParseFloat). Legacy
+//     stringify/non-finite format options are not implemented by this codec.
 
 #![allow(non_snake_case)]
 
@@ -440,8 +443,9 @@ impl UnmarshalerFrom for u64 {
     }
 }
 
+// go: sdk 1.25.5 encoding/json/v2/arshal_default.go:595-701 makeFloatArshaler
 macro_rules! impl_json_float {
-    ($($t:ty),*) => {$(
+    ($($t:ty => $bits:expr),*) => {$(
         impl MarshalerTo for $t {
             fn MarshalJSONTo(&self, enc: &mut jsontext::Encoder) -> error {
                 enc.WriteToken(jsontext::Float(*self as f64))
@@ -449,12 +453,21 @@ macro_rules! impl_json_float {
         }
         impl UnmarshalerFrom for $t {
             fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
-                let (t, err) = dec.ReadToken();
+                let (value, err) = dec.ReadValue();
                 if err != nil {
                     return err;
                 }
-                match t.Kind().0 {
-                    b'0' => *self = t.Float() as $t,
+                match value.Kind().0 {
+                    b'0' => {
+                        let (mut number, err) = crate::strconv::ParseFloat(string::from_bytes(&value.0), $bits);
+                        // Go jsonwire/decode.go:614-630 clamps +/-Inf to
+                        // +/-MaxFloat, retaining the range error. The v2
+                        // decoder assigns this value BEFORE returning it.
+                        if number == f64::INFINITY { number = <$t>::MAX as f64; }
+                        if number == f64::NEG_INFINITY { number = -(<$t>::MAX as f64); }
+                        *self = number as $t;
+                        if err != nil { return err; }
+                    }
                     b'n' => *self = 0.0,
                     _ => {
                         return errors::New(
@@ -467,7 +480,7 @@ macro_rules! impl_json_float {
         }
     )*};
 }
-impl_json_float!(f32, f64);
+impl_json_float!(f32 => 32, f64 => 64);
 
 /// `slice<T>` ⇄ JSON array.
 impl<T: MarshalerTo + Clone> MarshalerTo for slice<T> {
