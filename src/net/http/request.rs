@@ -950,12 +950,31 @@ pub fn putTextprotoReader<R: io::Reader>(r: crate::net::textproto::Reader<R>) ->
     return br;
 }
 
-const DEFAULT_MAX_LINE: usize = 8 * 1024;
-const MAX_HEADERS: usize = 100;
+/// The cap on ONE header line when no `MaxHeaderBytes` is given.
+///
+/// This was 8 KiB, which is a goish-only restriction: Go has no
+/// per-line cap below the total. Its server bounds the whole head at
+/// `DefaultMaxHeaderBytes` (1 MiB) through the connReader's read limit,
+/// and textproto accumulates a line longer than the buffer rather than
+/// refusing it, so Go answers 200 to a single 100 KiB header where
+/// goish answered 400.
+///
+/// That is not a corner case. A JWT in an Authorization header, a fat
+/// cookie jar, a long Referer — 8 KiB is routinely exceeded by real
+/// traffic that Go serves.
+///
+/// The TOTAL is still bounded, and by the same value Go uses: the
+/// serve loop arms `initialReadLimitSize()` (MaxHeaderBytes + 4096) on
+/// the connReader, which is what produces 431 for an oversize head.
+/// Raising the per-line cap to the same number cannot admit a head the
+/// total bound would refuse.
+const DEFAULT_MAX_LINE: usize = super::server::DefaultMaxHeaderBytes as usize;
 const MAX_BODY: usize = 16 * 1024 * 1024; // 16 MiB safety cap
 
 /// `http.ReadRequest(b *bufio.Reader)` — parse an HTTP/1.x request
-/// using the default 8 KiB max-header-line. Mirrors
+/// bounded by `DefaultMaxHeaderBytes`, the same default Go's server
+/// uses. (The line said "8 KiB" while the constant said so too; both
+/// were a goish-only restriction Go does not have.) Mirrors
 /// `func ReadRequest(b *bufio.Reader) (*Request, error)`
 /// (request.go:1058).
 ///
@@ -1148,9 +1167,20 @@ pub(crate) fn __read_request_server<R: io::Reader>(
             }
             HeaderLine::Field(name, value) => {
                 count += 1;
-                if count > MAX_HEADERS {
-                    return (req, errors::New(string("net/http: too many headers")));
-                }
+                // No count cap. Go has none: the request head is bounded
+                // by MaxHeaderBytes and nothing else, so a request with
+                // 5000 headers is served — measured. goish refused past
+                // 100, which real traffic exceeds (many cookies, a CDN's
+                // forwarded and tracing headers), and answered 400 where
+                // Go answers 200.
+                //
+                // The byte bound is what limits the count, exactly as in
+                // Go: the serve loop arms initialReadLimitSize()
+                // (MaxHeaderBytes + 4096) on the connReader, and each
+                // header costs at least four bytes on the wire, so the
+                // 1 MiB default caps this at a couple of hundred
+                // thousand. That is Go's guarantee, and taking a
+                // tighter one was a divergence rather than a hardening.
                 // Special-case Host: into req.Host, not into Header.
                 if name.as_bytes() == b"Host" {
                     // Go (request.go:1138): `if len(req.Header["Host"]) > 1
