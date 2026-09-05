@@ -898,7 +898,7 @@ pub fn UserConfigDir() -> (string, error) {
     (dir, nil)
 }
 
-// go: sdk 1.25.5 os/getwd.go:26-89 Getwd
+// go: sdk 1.25.5 os/getwd.go:26-149 Getwd
 /// `os.Getwd()` — the current working directory. Go documents the
 /// behaviour this way: "On Unix platforms, if the environment variable
 /// PWD provides an absolute name, and it is a name of the current
