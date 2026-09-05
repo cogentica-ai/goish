@@ -1205,6 +1205,10 @@ name = "json_array_diff"
 path = "examples/json_array_diff.rs"
 
 [[example]]
+name = "json_raw_duplicate_diff"
+path = "examples/json_raw_duplicate_diff.rs"
+
+[[example]]
 name = "term_pty_smoke"
 path = "examples/term_pty_smoke.rs"
 

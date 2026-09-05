@@ -38,6 +38,9 @@
 //     UnreadBuffer are not ported (unused by the target workloads).
 //   - Delimiter lookahead keeps the comma unconsumed on error, rather than
 //     caching Go's peekErr, so repeated PeekKind and the following read agree.
+//   - Raw-value scanning keeps local object namespaces and JSON-pointer paths
+//     rather than publishing token frames. Duplicate-name validation therefore
+//     matches the token path without changing the decoder's public StackDepth.
 
 #![allow(non_snake_case)]
 
@@ -1401,38 +1404,56 @@ impl Decoder {
         (Value(slice::__from_vec(raw)), nil)
     }
 
-    /// `Decoder.SkipValue()` (decode.go:406).
+    // Go: encoding/json/jsontext/decode.go:409-431 — decoderState.SkipValue
+    // goishlint:ignore GOISH014 — public adapter ports the decoderState method directly.
     pub fn SkipValue(&mut self) -> error {
-        let err = self.prepare_next();
-        if err != nil {
-            return err;
-        }
-        if self.peek_at(0).is_none() {
-            if self.stack.is_empty() {
-                return crate::io::EOF.into();
+        match self.PeekKind().0 {
+            b'{' | b'[' => {
+                let depth = self.StackDepth();
+                loop {
+                    let (_, err) = self.ReadToken();
+                    if err != nil {
+                        return err;
+                    }
+                    if depth >= self.StackDepth() {
+                        return nil;
+                    }
+                }
             }
-            return crate::io::ErrUnexpectedEOF.into();
+            _ => {
+                let (_, err) = self.ReadValue();
+                return err;
+            }
         }
-        let err = self.record_name_at_pos();
-        if err != nil {
-            return err;
-        }
-        let err = self.scan_whole_value();
-        if err != nil {
-            return err;
-        }
-        self.sep_done = false;
-        self.bump_count();
-        if self.stack.is_empty() {
-            self.buf.drain(..self.pos);
-            self.pos = 0;
-        }
-        nil
     }
 
     /// Structural scan over one whole value (no token
     /// materialization). Assumes `prepare_next` ran.
     fn scan_whole_value(&mut self) -> error {
+        let mut path = self.stack_pointer_to_parent();
+        if let Some(open) = self.stack.last() {
+            path.push(b'/');
+            if *open == b'{' {
+                if let Some(Some(name)) = self.cur_name.last() {
+                    for &b in name {
+                        match b {
+                            b'~' => path.extend_from_slice(b"~0"),
+                            b'/' => path.extend_from_slice(b"~1"),
+                            _ => path.push(b),
+                        }
+                    }
+                }
+            } else {
+                let index = self.counts.last().copied().unwrap_or(0);
+                path.extend_from_slice(crate::strconv::FormatUint(index, 10).as_bytes());
+            }
+        }
+        return self.scan_whole_value_at(&mut path);
+    }
+
+    // Go: encoding/json/jsontext/decode.go:950 — decoderState.consumeObject
+    // goishlint:ignore GOISH014 — raw-value recursive scanner combines Go's consumeValue/consumeObject/consumeArray; provenance is above.
+    fn scan_whole_value_at(&mut self, path: &mut Vec<u8>) -> error {
         let b = match self.peek_at(0) {
             Some(b) => b,
             None => return crate::io::ErrUnexpectedEOF.into(),
@@ -1454,6 +1475,8 @@ impl Decoder {
                 let close = if b == b'{' { b'}' } else { b']' };
                 self.pos += 1;
                 let mut first = true;
+                let mut names: BTreeSet<Vec<u8>> = BTreeSet::new();
+                let mut index = 0;
                 loop {
                     self.skip_ws();
                     match self.peek_at(0) {
@@ -1474,14 +1497,25 @@ impl Decoder {
                         }
                     }
                     first = false;
+                    let mut name = string::new();
                     if open == b'{' {
                         // name : value
                         match self.peek_at(0) {
                             Some(b'"') => {}
                             _ => return errors::New("jsontext: missing object name"),
                         }
-                        if let Err(e) = self.scan_string_raw() {
-                            return e;
+                        name = match self.scan_string_decoded() {
+                            Ok(name) => name,
+                            Err(err) => return err,
+                        };
+                        if !self.opts.allow_duplicate_names.unwrap_or(false)
+                            && !names.insert(name.as_bytes().to_vec()) {
+                            let mut msg = string::from_static("jsontext: duplicate object member name ")
+                                + string::from_bytes(&json_quote(name.as_bytes()));
+                            if !path.is_empty() {
+                                msg = msg + " within " + string::from_bytes(&json_quote(path));
+                            }
+                            return errors::New(msg);
                         }
                         self.skip_ws();
                         match self.peek_at(0) {
@@ -1490,13 +1524,28 @@ impl Decoder {
                         }
                         self.skip_ws();
                     }
-                    let err = self.scan_whole_value();
+                    let parent_len = path.len();
+                    path.push(b'/');
+                    if open == b'{' {
+                        for &b in name.as_bytes() {
+                            match b {
+                                b'~' => path.extend_from_slice(b"~0"),
+                                b'/' => path.extend_from_slice(b"~1"),
+                                _ => path.push(b),
+                            }
+                        }
+                    } else {
+                        path.extend_from_slice(crate::strconv::FormatUint(index, 10).as_bytes());
+                    }
+                    let err = self.scan_whole_value_at(path);
+                    path.truncate(parent_len);
                     if err != nil {
                         return err;
                     }
+                    index += 1;
                 }
             }
-            _ => errors::New("jsontext: invalid character at start of value"),
+            _ => return errors::New("jsontext: invalid character at start of value"),
         }
     }
 
