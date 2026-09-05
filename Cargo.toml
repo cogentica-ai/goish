@@ -3322,3 +3322,7 @@ path = "examples/dns_txid_smoke.rs"
 [[example]]
 name = "json_depth_limit_smoke"
 path = "examples/json_depth_limit_smoke.rs"
+
+[[example]]
+name = "regexp_backtrack_smoke"
+path = "examples/regexp_backtrack_smoke.rs"

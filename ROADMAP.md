@@ -82,6 +82,40 @@ with zero `go: sdk` anchors — and the remaining candidates are
 (1112). `crypto/ssh/mod.rs` (1235) was read and is invented with no Go
 counterpart at all; its header says what that means.
 
+## 2c. `regexp` does not keep Go's linear-time guarantee
+
+Go's regexp documents that it "is guaranteed to run in time linear in
+the size of the input", and keeps it by simulating an NFA (RE2).
+goish's is a BACKTRACKING matcher — its own header says so — and is
+therefore exponential on nested quantifiers.
+
+Measured 2026-09-05, `(a+)+$` against n 'a's then '!', where Go answers
+each in under a millisecond:
+
+| n | goish |
+|--:|--:|
+| 10 | 5 ms |
+| 14 | 95 ms |
+| 18 | 1,419 ms |
+| 20 | 5,939 ms |
+| 22 | 27,338 ms |
+
+Each character roughly doubles the work: n=30 is about two hours. The
+answer is correct at every size — this is an unbounded result, not a
+wrong one.
+
+The consequence is a caller-visible one. Go's regexp is safe against an
+untrusted pattern or subject; this is not, and about twenty-five bytes
+hangs the process. Any port that relies on the guarantee — a router, a
+log filter, an input validator — inherits a denial of service it did
+not have in Go.
+
+The fix is the RE2 construction: compile to an instruction program and
+simulate the NFA with a thread list (`regexp/exec.go` plus
+`regexp/syntax/`). That is a rewrite of the matcher rather than a patch
+to it. A step budget was considered and rejected — it trades an
+unbounded hang for a wrong answer on patterns Go answers correctly.
+
 ## 3. Gaps other packages will hit next
 
 Re-measured 2026-09-04; four of the five entries this section used to
