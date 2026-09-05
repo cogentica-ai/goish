@@ -3402,3 +3402,7 @@ path = "examples/http_long_header_line_smoke.rs"
 [[example]]
 name = "http_leading_crlf_smoke"
 path = "examples/http_leading_crlf_smoke.rs"
+
+[[example]]
+name = "http_multirange_smoke"
+path = "examples/http_multirange_smoke.rs"

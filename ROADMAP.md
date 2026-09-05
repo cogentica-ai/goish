@@ -291,6 +291,14 @@ Read and found NOT defects, which is the other half of the work:
   - `Skipped` / `Helper`. Go calls both from `testing/fuzz.go`.
     goish's `testing/fuzz.rs` carries a GOISH018 waiver saying F and
     the fuzzing engine are not ported, so the callers do not exist.
+  - `rangesMIMESize`. Go must precompute the encoded length of a
+    multipart/byteranges body because it streams it through an
+    io.Pipe; goish builds the body into a buffer and takes its length,
+    which is exact by construction. Measured end to end rather than
+    assumed: `http_multirange_smoke` now compares the whole response
+    against Go for two multi-range requests and one single-range
+    control, and the bodies are BYTE-IDENTICAL — Content-Length 364,
+    485 and 10, the part headers, and the boundary delimiters.
   - `removeIdleConn`. Go's only non-HTTP/2 caller is `readLoop`'s
     deferred cleanup, and goish's readLoop is not wired to anything —
     see 2h. The inline path's pool hygiene holds without it.
@@ -450,6 +458,29 @@ The real question this raises is which of the two implementations to
 keep. Wiring readLoop up is the Go-faithful answer and is a large
 change; deleting it is the honest alternative if the inline path is the
 one being maintained. Leaving both is the option that guarantees drift.
+
+## 2i. Response header ORDER differs from Go
+
+Found while diffing multipart range responses byte for byte. goish
+sorts every response header, including `Connection`, into one block:
+
+  Go     Accept-Ranges, Content-Length, Content-Type, Date, Connection
+  goish  Accept-Ranges, Connection, Content-Length, Content-Type, Date
+
+Go writes the user's headers sorted and then appends Date and
+Connection through `extraHeader`, so those two land last. goish puts
+Connection in the header map, where it sorts alphabetically.
+
+Header order is not significant in HTTP, so this is cosmetic — but it
+is a real difference, and anything doing a byte comparison of a
+response (a cache key, a recorded fixture, a proxy test) sees it.
+http_multirange_smoke normalises the order on BOTH sides and says so,
+rather than pretending the responses match exactly.
+
+Not fixed here because the change is in the shared header writer, and
+every pinned smoke that records a response head currently encodes
+goish's order. Doing it means re-measuring all of them in one pass,
+which is a job on its own rather than a rider on a range test.
 
 ## 3. Gaps other packages will hit next
 
