@@ -216,6 +216,53 @@ Read and found NOT defects, which is the other half of the work:
     a `slice<byte>` before the handler runs, so there is no
     early-closed stream to get out of sync with — `closedRequestBodyEarly`
     is documented as always-false for that reason, and it is right.
+  - `Log1p`, `Sincos`, `J0`, `J1`, `Y0`. Go composes `Asinh`, `Acosh`,
+    `Atanh`, `Jn` and `Yn` out of these; goish delegates each of those
+    to `libm` instead, so the internal edges do not exist here. That is
+    only acceptable if libm agrees with Go, and it does: math_ref_smoke
+    and math2_ref_smoke pin all of them as raw IEEE-754 BIT PATTERNS
+    against Go 1.25.5, and both pass. Bit-for-bit, not near enough.
+  - `LoadOrStore` / `LoadAndDelete` / `CompareAndDelete`. Go's only
+    internal caller is `sync/hashtriemap.go`, which goish does not
+    port. They are `sync.Map` API and an example is their rightful
+    caller.
+  - `Skipped` / `Helper`. Go calls both from `testing/fuzz.go`.
+    goish's `testing/fuzz.rs` carries a GOISH018 waiver saying F and
+    the fuzzing engine are not ported, so the callers do not exist.
+  - `VolumeName`. Go's caller is `path/filepath/symlink_windows.go`.
+    goish is Linux-only.
+  - `IsPermission`. Go's caller is `os/removeall_noat.go`, the
+    fallback for systems without `openat`. goish does not port it.
+
+That leaves `DeriveKey`, which is not a false positive but is not a
+missing call either — see 2f.
+
+## 2f. Two thirds of the FIPS CASTs are not ported
+
+`dead_port_check` flagged `crypto/internal/fips140/aes/gcm`'s
+`DeriveKey` because Go's only non-test caller of it is that package's
+`cast.go`. Following that up turns out to name something larger than
+one call: Go has 18 `cast.go` files under `crypto/internal/fips140`
+and goish ports 6.
+
+Present: the root `cast.go`, `ecdh`, `rsa`, `nistec/fiat`, `ed25519`,
+`ecdsa`.
+
+Missing: `pbkdf2`, `sha512`, `tls12`, `tls13`, `sha3`, `hmac`,
+`mlkem`, `drbg`, `hkdf`, `aes`, `aes/gcm`, `sha256`.
+
+A CAST is a known-answer self-test that FIPS 140-3 requires an
+algorithm to pass before it is used. The port has the mechanism —
+`fips140::CAST` exists and six modules call it — so this is not a
+design gap, it is twelve unported files. Whether it matters depends on
+whether the fips140 tree is meant to be structurally faithful or
+merely to compute the right answers, which is a decision that has not
+been written down anywhere.
+
+Note what this is NOT: evidence that the twelve algorithms are wrong.
+Their outputs are diffed against Go elsewhere. It means goish would
+not NOTICE if they became wrong, which is the entire point of a CAST.
+
 
 The count drops by one each time a call is added, so it is a worklist
 that measures its own progress. What is left is unread. They are not
