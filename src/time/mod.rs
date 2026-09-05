@@ -36,6 +36,9 @@ pub use time_go::*;
 mod format;
 pub use format::*;
 
+#[path = "format_rfc3339.rs"]
+mod format_rfc3339;
+
 #[path = "sleep.rs"]
 mod sleep;
 pub use sleep::*;

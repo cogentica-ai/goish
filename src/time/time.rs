@@ -1,4 +1,4 @@
-// go: file time/time.go decls: Time.addSec, daysBefore, daysIn, isLeap, subMono, Month.String, Weekday.String, Duration.Nanoseconds, Duration.Microseconds, Duration.Milliseconds, Duration.Seconds, Duration.Minutes, Duration.Hours, Duration.Truncate, Duration.Round, Duration.Abs, Duration.String, fmtFrac, fmtInt, lessThanHalf, div, Time.IsZero, Time.Unix, Time.UnixMilli, Time.UnixMicro, Time.UnixNano, Time.After, Time.Before, Time.Equal, Time.Compare, Time.Sub, Time.Add, Time.Date, Time.Year, Time.Month, Time.Day, Time.Clock, Time.Hour, Time.Minute, Time.Second, Time.Nanosecond, Time.Weekday, Time.YearDay, Time.ISOWeek, Time.AddDate, Time.UTC, Time.Local, Time.Truncate, Time.Round, Time.Zone, Time.In, Time.Location, Time.IsDST, Time.MarshalText, Time.UnmarshalText, Time.MarshalJSON, Time.UnmarshalJSON, Time.AppendBinary, Time.MarshalBinary, Time.UnmarshalBinary, Time.GobEncode, Time.GobDecode, Now, Since, Until, Unix, UnixMilli, UnixMicro, Date
+// go: file time/time.go decls: Time.addSec, daysBefore, daysIn, isLeap, subMono, Month.String, Weekday.String, Duration.Nanoseconds, Duration.Microseconds, Duration.Milliseconds, Duration.Seconds, Duration.Minutes, Duration.Hours, Duration.Truncate, Duration.Round, Duration.Abs, Duration.String, fmtFrac, fmtInt, lessThanHalf, div, Time.IsZero, Time.Unix, Time.UnixMilli, Time.UnixMicro, Time.UnixNano, Time.After, Time.Before, Time.Equal, Time.Compare, Time.Sub, Time.Add, Time.Date, Time.Year, Time.Month, Time.Day, Time.Clock, Time.Hour, Time.Minute, Time.Second, Time.Nanosecond, Time.Weekday, Time.YearDay, Time.ISOWeek, Time.AddDate, Time.UTC, Time.Local, Time.Truncate, Time.Round, Time.Zone, Time.In, Time.Location, Time.IsDST, Time.appendTo, Time.AppendText, Time.MarshalText, Time.UnmarshalText, Time.MarshalJSON, Time.UnmarshalJSON, Time.AppendBinary, Time.MarshalBinary, Time.UnmarshalBinary, Time.GobEncode, Time.GobDecode, Now, Since, Until, Unix, UnixMilli, UnixMicro, Date
 //
 // time.go — Time and Duration themselves, Month and Weekday, the
 // constructors (Now, Unix, Date) and the calendar arithmetic they all
@@ -1040,15 +1040,47 @@ impl Time {
         return false;
     }
 
-    // go: sdk 1.25.5 time/time.go:1634-1636 Time.MarshalText
-    /// `t.MarshalText()` (time.go:1634) — encode as RFC3339 bytes.
-    /// Implements `encoding.TextMarshaler`. Slim deviation: emits
-    /// RFC3339 (no fractional seconds) rather than RFC3339Nano —
-    /// the slim Format helper doesn't recognise RFC3339Nano. Parse
-    /// pairs cleanly with this output via UnmarshalText.
+    // go: sdk 1.25.5 time/time.go:1613-1620 Time.appendTo
+    /// Shared by AppendText and MarshalText; Go passes the prefix so
+    /// the two report the same failure under their own names.
+    fn appendTo(
+        self,
+        mut b: alloc::vec::Vec<crate::types::byte>,
+        errPrefix: &str,
+    ) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
+        let err = self.appendStrictRFC3339(&mut b);
+        if !err.IsNil() {
+            let msg = crate::gostring::string::from(errPrefix) + err.Error();
+            return (crate::goslice::slice::new(), crate::errors::New(msg));
+        }
+        return (crate::goslice::slice::__from_vec(b), crate::errors::nil);
+    }
+
+    // go: sdk 1.25.5 time/time.go:1622-1628 Time.AppendText
+    /// `t.AppendText(b)` — append RFC3339 with sub-second precision.
+    /// Implements `encoding.TextAppender`.
+    pub fn AppendText(
+        self,
+        b: crate::goslice::slice<crate::types::byte>,
+    ) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
+        return self.appendTo(b.__into_vec(), "Time.AppendText: ");
+    }
+
+    // go: sdk 1.25.5 time/time.go:1630-1636 Time.MarshalText
+    /// `t.MarshalText()` (time.go:1630) — encode as RFC3339 bytes with
+    /// sub-second precision. Implements `encoding.TextMarshaler`.
+    ///
+    /// This used to emit RFC3339 rather than RFC3339Nano, on the stated
+    /// grounds that "the slim Format helper doesn't recognise
+    /// RFC3339Nano". That stopped being true once appendFormat became
+    /// the general layout walk: RFC3339Nano now matches Go on every
+    /// case measured. Until this was fixed, marshalling silently
+    /// discarded sub-second precision, so a Time carrying nanoseconds
+    /// did not survive a round trip through text or JSON.
     pub fn MarshalText(self) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
-        let s = self.Format(crate::gostring::string::from(RFC3339));
-        return (crate::convert::bytes(s), crate::errors::nil);
+        let b: alloc::vec::Vec<crate::types::byte> =
+            alloc::vec::Vec::with_capacity(RFC3339Nano.len());
+        return self.appendTo(b, "Time.MarshalText: ");
     }
 
     // go: sdk 1.25.5 time/time.go:1640-1644 Time.UnmarshalText
@@ -1069,18 +1101,23 @@ impl Time {
 
     // go: sdk 1.25.5 time/time.go:1587-1596 Time.MarshalJSON
     /// `t.MarshalJSON()` (time.go:1587) — encode as a JSON-quoted
-    /// RFC3339 string. Slim deviation: emits RFC3339 (no fractional
-    /// seconds) instead of RFC3339Nano, mirroring MarshalText.
+    /// RFC3339 string with sub-second precision. Reports an error when
+    /// the time cannot be represented as valid RFC 3339 (a year outside
+    /// [0,9999]); it used to emit the invalid string with a nil error,
+    /// so `"10000-01-01T00:00:00Z"` reached the JSON output.
     pub fn MarshalJSON(self) -> (crate::goslice::slice<crate::types::byte>, crate::error) {
         // b := make([]byte, 0, len(RFC3339Nano)+len(`""`))
         let mut b: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(RFC3339Nano.len() + 2);
         // b = append(b, '"')
         b.push(b'"');
-        // appendStrictRFC3339 — slim version: just Format(RFC3339).
-        let s = self.Format(crate::gostring::string::from(RFC3339));
-        b.extend_from_slice(s.as_bytes());
+        // b, err := t.appendStrictRFC3339(b)
+        let err = self.appendStrictRFC3339(&mut b);
         // b = append(b, '"')
         b.push(b'"');
+        if !err.IsNil() {
+            let msg = crate::gostring::string::from("Time.MarshalJSON: ") + err.Error();
+            return (crate::goslice::slice::new(), crate::errors::New(msg));
+        }
         return (crate::goslice::slice::__from_vec(b), crate::errors::nil);
     }
 
