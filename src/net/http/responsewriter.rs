@@ -1102,9 +1102,27 @@ impl response {
             // Transfer-Encoding, "because they're generally
             // incompatible" (server.go:1361).
             let hasTE = h.Get(string("Transfer-Encoding")).Len() != 0;
+            // Go's condition carries one more clause: `(!isHEAD ||
+            // len(p) > 0)` (server.go:1363). Its comment says why —
+            // zero bytes on a HEAD is ambiguous between "the resource
+            // really is empty" and "the handler noticed the method and
+            // wrote nothing", and Go refuses to guess: "If it's
+            // actually 0 bytes and the handler never looked at the
+            // Request.Method, we just don't send a Content-Length
+            // header."
+            //
+            // goish sent `Content-Length: 0`, which is not a refusal to
+            // answer but a claim that the GET would be empty. The
+            // common shape `if r.Method == "HEAD" { return }` therefore
+            // told every client the resource had no content, and a
+            // client that believes it has no reason to fetch it.
+            //
+            // A HEAD that DID write still advertises the GET-equivalent
+            // length, which is the head-writes-body row.
             if bodyAllowedForStatus(g.status)
                 && !hasTE
                 && h.Values(string("Content-Length")).Len() == 0
+                && (!g.is_head || g.body.len() > 0)
             {
                 h.Set(string("Content-Length"), int_to_string(g.body.len() as i64));
             }
