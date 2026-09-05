@@ -1209,6 +1209,10 @@ name = "json_raw_duplicate_diff"
 path = "examples/json_raw_duplicate_diff.rs"
 
 [[example]]
+name = "json_slice_diff"
+path = "examples/json_slice_diff.rs"
+
+[[example]]
 name = "term_pty_smoke"
 path = "examples/term_pty_smoke.rs"
 

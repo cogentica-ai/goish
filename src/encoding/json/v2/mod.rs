@@ -33,6 +33,11 @@
 //     retain their element codecs. This requires 'static array elements.
 //     Array errors retain Go's state/consumption order but omit reflected
 //     Go type names and JSON-pointer context, like the other builtin codecs.
+//   - Slice decoding retains the decoded prefix on failure, including the
+//     failing element's partial value. Goish slices own their storage, so
+//     unused capacity/backing-array aliases are not exposed by this codec.
+//   - Option is the exclusive nullable-pointer representation: allocate before
+//     decoding, merge into existing pointees, and retain partial mutations.
 
 #![allow(non_snake_case)]
 
@@ -330,7 +335,9 @@ macro_rules! impl_json_int {
         }
         impl UnmarshalerFrom for $t {
             fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
-                let (t, err) = dec.ReadToken();
+                // Go: arshal_default.go:461 — makeIntArshaler reads a complete
+                // raw value, even when rejecting a composite type.
+                let (t, err) = dec.ReadValue();
                 if err != nil {
                     return err;
                 }
@@ -342,7 +349,7 @@ macro_rules! impl_json_int {
                         // one past the target's width as "value out of
                         // range". Parsing a float and truncating, which
                         // this used to do, silently accepted both.
-                        let raw = t.__number_text();
+                        let raw = string::from_bytes(&t.0);
                         let e = if $signed {
                             let (v, e) = crate::strconv::ParseInt(raw.clone(), 10, $bits);
                             if e == nil { *self = v as $t; }
@@ -477,41 +484,38 @@ impl<T: MarshalerTo + Clone> MarshalerTo for slice<T> {
     }
 }
 
+// Go: encoding/json/v2/arshal_default.go:1388 — func makeSliceArshaler(t reflect.Type) *arshaler
 impl<T: UnmarshalerFrom + Default + Clone> UnmarshalerFrom for slice<T> {
+    // goishlint:ignore GOISH014 — trait body ports makeSliceArshaler's unmarshal closure; provenance is on the impl.
     fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
-        if dec.PeekKind() == 'n' {
-            let (_, err) = dec.ReadToken();
-            if err != nil {
-                return err;
-            }
-            *self = slice::__from_vec(Vec::new());
-            return nil;
-        }
         let (t, err) = dec.ReadToken();
         if err != nil {
             return err;
         }
+        if t.Kind() == 'n' {
+            *self = slice::new();
+            return nil;
+        }
         if t.Kind() != '[' {
             return errors::New("json: cannot unmarshal non-array into slice");
         }
+        // Go zeroes each slot before decode and sets Len(i) even when the
+        // element decoder fails (arshal_default.go:1490-1508). An owned
+        // output vector represents that visible prefix; there are no shared
+        // backing-array views in Goish's current slice representation.
         let mut out: Vec<T> = Vec::new();
         while dec.PeekKind() != ']' {
-            if dec.PeekKind() == jsontext::Kind(0) {
-                return crate::io::ErrUnexpectedEOF.into();
-            }
             let mut elem = T::default();
             let err = elem.UnmarshalJSONFrom(dec);
+            out.push(elem);
             if err != nil {
+                *self = slice::__from_vec(out);
                 return err;
             }
-            out.push(elem);
-        }
-        let (_, err) = dec.ReadToken(); // consume ']'
-        if err != nil {
-            return err;
         }
         *self = slice::__from_vec(out);
-        nil
+        let (_, err) = dec.ReadToken(); // consume ']'
+        return err;
     }
 }
 
@@ -730,20 +734,19 @@ impl<T: MarshalerTo> MarshalerTo for Option<T> {
     }
 }
 
+// Go: encoding/json/v2/arshal_default.go:1624 — func makePointerArshaler(t reflect.Type) *arshaler
 impl<T: UnmarshalerFrom + Default> UnmarshalerFrom for Option<T> {
+    // goishlint:ignore GOISH014 — trait body ports makePointerArshaler's unmarshal closure; provenance is on the impl.
     fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
         if dec.PeekKind() == 'n' {
             let (_, err) = dec.ReadToken();
+            if err != nil { return err; }
             *self = None;
-            return err;
+            return nil;
         }
-        let mut v = T::default();
-        let err = v.UnmarshalJSONFrom(dec);
-        if err != nil {
-            return err;
-        }
-        *self = Some(v);
-        nil
+        // Go installs a newly allocated pointee before invoking its decoder,
+        // and reuses a non-nil pointee (arshal_default.go:1669-1674).
+        return self.get_or_insert_with(T::default).UnmarshalJSONFrom(dec);
     }
 }
 
