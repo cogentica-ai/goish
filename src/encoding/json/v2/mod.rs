@@ -47,6 +47,10 @@
 //     before returning errors. Null replaces the map with an empty owned
 //     representation; the pre-existing map type has no distinct nil header
 //     or shared backing-map aliases, so this does not add those semantics.
+//   - GetOption uses typed bool/string dispatch for the existing supported
+//     setters instead of reflection, calling the setter once with zero.
+//     Marshal preserves partial output on error; legacy error modes remain
+//     unimplemented. Non-finite floats fail before writing their delimiter.
 
 #![allow(non_snake_case)]
 
@@ -63,6 +67,40 @@ use crate::types::{byte, int};
 use super::jsontext;
 
 pub use super::jsontext::Options;
+
+// go: sdk 1.25.5 encoding/json/v2/options.go:95-97 GetOption
+// DEVIATION: typed dispatch covers the bool/string setters supported by the
+// existing Options representation. The setter is called once with zero, as
+// internal/jsonopts/options.go:70-110 requires; no function-address matching.
+pub fn GetOption<T: __JSONOptionValue, F: FnOnce(T) -> Options>(opts: Options, setter: F) -> (T, bool) {
+    let marker = setter(T::default());
+    return T::__get_option(&opts, &marker);
+}
+
+// Reflection replacement for the supported option-value types; not a Go item.
+#[doc(hidden)]
+pub trait __JSONOptionValue: Default {
+    fn __get_option(opts: &Options, marker: &Options) -> (Self, bool);
+}
+impl __JSONOptionValue for bool {
+    // goishlint:ignore GOISH014 — typed reflection adapter for GetOption, anchored above.
+    fn __get_option(opts: &Options, marker: &Options) -> (Self, bool) {
+        let values = [marker.allow_duplicate_names, marker.allow_invalid_utf8, marker.deterministic];
+        if values.iter().filter(|v| v.is_some()).count() != 1 || marker.indent.is_some() || marker.indent_prefix.is_some() { panic!("unknown JSON option"); }
+        if marker.allow_duplicate_names.is_some() { return (opts.allow_duplicate_names.unwrap_or(false), opts.allow_duplicate_names.is_some()); }
+        if marker.allow_invalid_utf8.is_some() { return (opts.allow_invalid_utf8.unwrap_or(false), opts.allow_invalid_utf8.is_some()); }
+        return (opts.deterministic.unwrap_or(false), opts.deterministic.is_some());
+    }
+}
+impl __JSONOptionValue for string {
+    // goishlint:ignore GOISH014 — typed reflection adapter for GetOption, anchored above.
+    fn __get_option(opts: &Options, marker: &Options) -> (Self, bool) {
+        if marker.allow_duplicate_names.is_some() || marker.allow_invalid_utf8.is_some() || marker.deterministic.is_some()
+            || marker.indent.is_some() == marker.indent_prefix.is_some() { panic!("unknown JSON option"); }
+        if marker.indent.is_some() { return (opts.indent.clone().unwrap_or_default(), opts.indent.is_some()); }
+        return (opts.indent_prefix.clone().unwrap_or_default(), opts.indent_prefix.is_some());
+    }
+}
 
 /// `json.Deterministic(v)` (v2/options.go) — request deterministic
 /// output. Goish map marshaling is already deterministic (see module
@@ -189,16 +227,16 @@ impl_json_omit_num!(i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
 // ─── Entry points (arshal.go) ────────────────────────────────────────
 
 /// `json.Marshal(in, opts...)` (arshal.go) — encode to bytes.
+// go: sdk 1.25.5 encoding/json/v2/arshal.go:173-183 Marshal
 pub fn Marshal<T: MarshalerTo + ?Sized>(
     v: &T,
     opts: impl AsRef<[Options]>,
 ) -> (slice<byte>, error) {
     let mut enc = jsontext::Encoder::__buffered(Options::__merged(opts.as_ref()));
     let err = v.MarshalJSONTo(&mut enc);
-    if err != nil {
-        return (slice::__from_vec(Vec::new()), err);
-    }
-    (slice::__from_vec(enc.__take_buf()), nil)
+    // The v2 entry point returns the bytes written before an error, too.
+    // Only the unimplemented legacy-error mode discards that prefix in Go.
+    (slice::__from_vec(enc.__take_buf()), err)
 }
 
 /// `json.MarshalWrite(out, in, opts...)` (arshal.go) — encode to an
@@ -320,6 +358,14 @@ impl MarshalerTo for string {
 
 impl UnmarshalerFrom for string {
     fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
+        // Go makeStringArshaler (arshal_default.go:198) reads a whole value,
+        // even for rejected composites. Strings/null retain the equivalent
+        // token path so the existing JSON unquote implementation is reused.
+        if dec.PeekKind() != '"' && dec.PeekKind() != 'n' {
+            let (_, err) = dec.ReadValue();
+            if err != nil { return err; }
+            return errors::New("json: cannot unmarshal non-string into string");
+        }
         let (t, err) = dec.ReadToken();
         if err != nil {
             return err;
@@ -452,6 +498,9 @@ macro_rules! impl_json_float {
     ($($t:ty => $bits:expr),*) => {$(
         impl MarshalerTo for $t {
             fn MarshalJSONTo(&self, enc: &mut jsontext::Encoder) -> error {
+                // makeFloatArshaler rejects non-finite values before writing
+                // a token/delimiter; preserve the preceding partial output.
+                if !self.is_finite() { return errors::New("json: cannot marshal non-finite float"); }
                 enc.WriteToken(jsontext::Float(*self as f64))
             }
         }
