@@ -3414,3 +3414,7 @@ path = "examples/https_http_on_https_smoke.rs"
 [[example]]
 name = "http_readtimeout_body_smoke"
 path = "examples/http_readtimeout_body_smoke.rs"
+
+[[example]]
+name = "multipart_maxheaders_smoke"
+path = "examples/multipart_maxheaders_smoke.rs"

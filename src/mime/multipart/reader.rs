@@ -211,6 +211,24 @@ impl Reader {
 
         // 4. Parse headers until blank line.
         let mut header = Header::new();
+        // Go bounds a part's headers at maxMIMEHeaders (multipart.go:355,
+        // default 10000) and answers ErrMessageTooLarge past it. goish's
+        // loop had no bound at all, so one part could carry as many
+        // headers as the body had room for — and each becomes a Header
+        // map entry, which is a large multiple of the four bytes
+        // "a:b\r\n" costs on the wire. Combined with maxParts, Go's
+        // ceiling is 1000 parts x 10000 headers; goish had 1000 x
+        // unbounded.
+        //
+        // Go's GODEBUG override (multipartmaxheaders) has nothing to
+        // read here: goish has no internal/godebug, so the default is
+        // the value. Recorded in ROADMAP section 3 with the other
+        // GODEBUG branches.
+        //
+        // Counted down exactly as Go counts: 10000 headers are allowed
+        // and the 10001st fails, which is what the pinned 9998/10001
+        // rows in multipart_maxheaders_smoke straddle.
+        let mut maxHeaders: i64 = 10000;
         loop {
             // Find next CRLF.
             let line_start = p;
@@ -254,6 +272,10 @@ impl Reader {
                 v_start += 1;
             }
             let value = string::from_bytes(&line[v_start..]);
+            maxHeaders -= 1;
+            if maxHeaders < 0 {
+                return (empty_part(), super::formdata::ErrMessageTooLarge.into());
+            }
             header.Add(key, value);
         }
 
