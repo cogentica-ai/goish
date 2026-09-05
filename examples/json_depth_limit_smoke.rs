@@ -1,6 +1,12 @@
 // json_depth_limit_smoke — a JSON document may not decide how deep
 // this process recurses.
 //
+// TWO parsers, two limits. `jsontext` is the token layer and
+// `encoding/json` the semantic one, each with its own recursive
+// descent and each unbounded before this. Fixing one said nothing
+// about the other, which is why both are pinned here: the second was
+// found by asking whether the first was the only place.
+//
 // `jsontext`'s `scan_whole_value` recursed once per nested composite
 // with NO limit, so a document made of nothing but `[` chose the stack
 // depth. Measured before the fix: 100000 parsed fine, 500000 printed
@@ -50,13 +56,18 @@ fn nested(n: usize) -> Vec<byte> {
     return v;
 }
 
-const GO: [&str; 6] = [
+const GO: [&str; 11] = [
     "depth=10     len=20 err=<nil>",
     "depth=1000   len=2000 err=<nil>",
     "depth=9999   len=19998 err=<nil>",
     "depth=10000  len=20000 err=<nil>",
     "depth=10001  len=0 err=exceeded max depth",
     "depth=500000 len=0 err=exceeded max depth",
+    "v1 depth=10     err=<nil>",
+    "v1 depth=9999   err=<nil>",
+    "v1 depth=10000  err=<nil>",
+    "v1 depth=10001  err=invalid character '[' exceeded max depth",
+    "v1 depth=500000 err=invalid character '[' exceeded max depth",
 ];
 
 fn chk(ln: &mut usize, got: &string) {
@@ -84,6 +95,15 @@ fn main() {
         let (v, err) = d.ReadValue();
         chk(&mut ln, &fmt::Sprintf!("depth=%-6d len=%d err=%v", *n as int, v.Len() as int, err));
     }
+    // The v1 semantic layer has its OWN parser and its own limit
+    // (encoding/json/scanner.go:148), and it recursed unbounded too.
+    for n in [10usize, 9999, 10000, 10001, 500000].iter() {
+        let data = nested(*n);
+        let mut v = goish::encoding::json::Value::default();
+        let err = goish::encoding::json::Unmarshal(&data, &mut v);
+        chk(&mut ln, &fmt::Sprintf!("v1 depth=%-6d err=%v", *n as int, err));
+    }
+
     if ln != GO.len() {
         fmt::Printf!("[!!] produced %d lines, pinned %d\n", ln as int, GO.len() as int);
     }

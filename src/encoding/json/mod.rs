@@ -1216,7 +1216,7 @@ fn unexpected_end() -> error {
 }
 
 fn parse_to_value(data: &[byte]) -> (Value, error) {
-    let mut p = Parser { data, pos: 0 };
+    let mut p = Parser { data, pos: 0, depth: 0 };
     p.skip_ws();
     let (v, err) = p.parse_value();
     if err != nil {
@@ -1233,9 +1233,28 @@ fn parse_to_value(data: &[byte]) -> (Value, error) {
     (v, nil)
 }
 
+// go: sdk 1.25.5 encoding/json/scanner.go:148 maxNestingDepth
+/// Go: "This limits the max nesting depth to prevent stack overflow.
+/// This is permitted by RFC 7159 section 9."
+const maxNestingDepth: usize = 10000;
+
 struct Parser<'a> {
     data: &'a [byte],
     pos: usize,
+    /// Nesting depth of the composite currently being parsed.
+    ///
+    /// Go: encoding/json/scanner.go:148 —
+    ///   `// This limits the max nesting depth to prevent stack
+    ///    overflow. This is permitted by RFC 7159 section 9.
+    ///    const maxNestingDepth = 10000`
+    ///
+    /// Go's v1 scanner keeps an explicit parseState stack and checks
+    /// its length; this parser recurses, so the same bound is not an
+    /// optimisation but the only thing standing between a document and
+    /// the stack. Measured without it: depth 10001 parsed where Go
+    /// refuses, and 500000 printed "goish: runtime error: stack
+    /// overflow".
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -1275,9 +1294,24 @@ impl<'a> Parser<'a> {
 
     fn parse_value(&mut self) -> (Value, error) {
         self.skip_ws();
+        // Go: scanner.go pushes onto parseState and refuses past
+        // maxNestingDepth. Only the two COMPOSITE arms recurse, so the
+        // check belongs on them and a scalar at any depth is fine.
         match self.peek() {
-            Some(b'{') => self.parse_object(),
-            Some(b'[') => self.parse_array(),
+            Some(b'{') | Some(b'[') => {
+                if self.depth >= maxNestingDepth {
+                    let b = self.peek().unwrap_or(b'[');
+                    return (Value::Null, syntax_err(b, "exceeded max depth"));
+                }
+                self.depth += 1;
+                let r = if self.peek() == Some(b'{') {
+                    self.parse_object()
+                } else {
+                    self.parse_array()
+                };
+                self.depth -= 1;
+                return r;
+            }
             Some(b'"') => self.parse_string_value(),
             Some(b't') | Some(b'f') => self.parse_bool(),
             Some(b'n') => self.parse_null(),
