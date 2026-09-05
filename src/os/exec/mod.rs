@@ -9,7 +9,7 @@
 //       Path   string
 //       Args   []string
 //       Env    []string                 // KEY=VALUE; nil means inherit
-//       Dir    string                   // not yet honored (v2: cwd inherited)
+//       Dir    string                   // honored: chdir in the child
 //       Stdin  io.Reader                // honored: piped to child fd 0
 //       Stdout io.Writer                // captured via pipe + drained synchronously
 //       Stderr io.Writer                // captured via pipe + drained synchronously
