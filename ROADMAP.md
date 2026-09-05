@@ -4,6 +4,71 @@ What is left, in the order it makes sense to do it. Current state lives
 in [PROGRESS.md](PROGRESS.md); conventions and the rules a port must
 follow live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## 0. Four decisions, and what each one closes
+
+Sections 2b onward grew one finding at a time, and a reader cannot see
+from them that most of what is open traces back to four choices. This
+is that view. Nothing here is new; it is the same items, grouped by
+what would settle them.
+
+### A. The request body is read eagerly (biggest)
+
+`__read_request_server` reads the whole body during the parse, before a
+handler exists. Go hands the handler a stream. Everything below is that
+one fact:
+
+  - a slow body is cut off, but the handler NEVER RUNS, where Go runs it
+    and lets its ReadAll see the truncation (2k). Costs observability,
+    not safety.
+  - request bodies are capped at 16 MiB and a request DECLARING more is
+    refused with a 400 before it sends anything (2k). Go has no default
+    limit. An upload over 16 MiB simply does not work.
+  - the server sends `100 Continue` unconditionally, so a handler that
+    would reject cannot do so before the client uploads (2k,
+    http_expect100_server_smoke's second row).
+  - a client request body is always Content-Length framed, never
+    chunked, so a goish client cannot upload something it is still
+    producing (client_wire_ref_smoke's KNOWN GAP).
+
+Deciding to stream request bodies closes all four. Deciding NOT to is
+also fine — but then the 16 MiB number wants choosing deliberately
+rather than inheriting.
+
+### B. The transport keeps two implementations
+
+`readLoop`/`writeLoop` are a faithful port that nothing starts —
+`__spawn_loops`'s only caller is an example — while `RoundTrip` reads
+inline (2h). Wiring the loops up is the Go-faithful answer and a large
+change; deleting them is honest if the inline path is the maintained
+one; keeping both guarantees drift. `removeIdleConn` being uncalled is
+a symptom, not a separate item.
+
+### C. The conn is not shareable
+
+`GotConnInfo.Conn` is `Arc<dyn Conn>` and the client path has no such
+value — the conn is a `TCPConn` owned inside a `ConnSrc` that owns its
+fd. That blocks the last of httptrace's six hooks, and five of them are
+straightforward once it is settled (2j). Either the field takes a
+non-owning handle — a deliberate divergence from Go — or the transport
+moves to a shared conn.
+
+### D. Two public API shapes predate what they now have to express
+
+  - `Value::Number(f64)` drops the number literal, which is why "1.0"
+    decodes into an int where Go refuses and why the max int64 needs a
+    clamp (2l).
+  - `Hijacker` returns a concrete `(TCPConn, error)` where Go returns
+    an interface, so an HTTPS handler cannot hijack — no wss:// upgrade
+    from goish (https_iface_ref_smoke).
+
+Both are version-boundary changes rather than bug fixes.
+
+### Not blocked on anything
+
+2i (response header ORDER differs from Go) is a re-measuring pass over
+the smokes that record a response head, not a decision. 2f (twelve
+unported FIPS CASTs) is twelve files. 2c and 2d are their own work.
+
 ## 1. `crypto/tls` — the record layer is the last invented code
 
 **Re-measured 2026-09-04.** Everything this section used to describe as
