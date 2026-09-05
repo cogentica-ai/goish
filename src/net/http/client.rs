@@ -2563,6 +2563,56 @@ impl Client {
                 // context I was handed expired" — different bugs with
                 // different fixes — and the wrapper is also what makes
                 // `err.(net.Error).Timeout()` answer true.
+                // Go's transport does not surface the raw I/O failure
+                // when the request's context ended it: readLoop and
+                // roundTrip both call
+                // `pc.cancelRequest(context.Cause(rc.treq.ctx))`
+                // (transport.go:2410, :2883), so the error the caller
+                // sees is the context's CAUSE.
+                //
+                // goish cancels by expiring the conn's netpoll deadline
+                // instead (arm_cancel_watch), which unblocks the I/O
+                // but reports whatever that I/O returned. Measured
+                // against Go: a `WithTimeout` request failed with
+                // `read tcp …: i/o timeout` where Go gives `context
+                // deadline exceeded`, so `errors.Is(err,
+                // context.DeadlineExceeded)` — the standard way to ask
+                // — answered false. A `WithCancelCause` request lost
+                // the cause entirely and reported plain "context
+                // canceled", which is the one thing WithCancelCause
+                // exists to prevent.
+                //
+                // Mapping here rather than in the transport keeps the
+                // one choke point every `do` error already passes
+                // through, and preserves Go's ORDER: the cause
+                // replaces the error first, then the Client.Timeout
+                // annotation below may wrap it.
+                let err = {
+                    let ctx = current.Context();
+                    if !ctx.Err().IsNil() {
+                        crate::context::Cause(&ctx)
+                    } else if ctx
+                        .Deadline()
+                        .map(|d| !d.After(time::Now()))
+                        .unwrap_or(false)
+                    {
+                        // The context's deadline has passed but its own
+                        // timer has not run yet. goish learns about
+                        // expiry from the CONN deadline, which the
+                        // transport sets from ctx.Deadline() and which
+                        // fires independently — so the I/O error can
+                        // arrive first and `ctx.Err()` still read nil.
+                        // Checking only Err() made this smoke flaky:
+                        // three runs green, one reporting `read tcp …:
+                        // i/o timeout`. A ctx whose deadline has passed
+                        // is going to report DeadlineExceeded, and that
+                        // is Go's cause for a WithTimeout context.
+                        let de: crate::errors::error = crate::context::DeadlineExceeded.into();
+                        de
+                    } else {
+                        err
+                    }
+                };
                 let err = if !deadline.IsZero() && did_timeout() {
                     super::transport::newTimeoutError(
                         err.Error()

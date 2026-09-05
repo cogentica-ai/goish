@@ -3458,3 +3458,7 @@ path = "examples/time_rfc3339_marshal_ref_smoke.rs"
 [[example]]
 name = "time_rfc3339_unmarshal_ref_smoke"
 path = "examples/time_rfc3339_unmarshal_ref_smoke.rs"
+
+[[example]]
+name = "http_ctx_cause_ref_smoke"
+path = "examples/http_ctx_cause_ref_smoke.rs"
