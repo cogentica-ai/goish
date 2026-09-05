@@ -499,6 +499,12 @@ fn privateKeyBytes<P: fipsec::Point>(
 // Signatures stay randomised — the security property is unchanged —
 // but a caller supplying a deterministic reader here does not get a
 // deterministic signature. Go would.
+//
+// split-brain-ok: the two Sign bodies differ on purpose, and the
+// reason is the paragraph above — SignASN1's reader bounds cannot be
+// met from the trait, so this impl cannot forward to the inherent
+// Sign. Marked so split_brain_check reports zero and the NEXT pair
+// stands out instead of being lost in a permanent count of one.
 impl crypto::Signer for PrivateKey {
     // go: none — goish idiom: Go's `*PrivateKey` satisfies
     // `crypto.Signer` structurally; this forwards and widens the

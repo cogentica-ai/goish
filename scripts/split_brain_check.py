@@ -106,6 +106,35 @@ def same_inner_target(a, b, meth):
     return bool(ta) and ta == tb
 
 
+def documented_ok(lines, impl_idx):
+    """Does a `split-brain-ok:` marker sit above this impl?
+
+    The report told readers a deliberate divergence was fine if they
+    said so above the impl — and then counted it anyway, because
+    nothing looked. crypto/ecdsa's Signer is the case the message
+    itself cites as well documented, and it kept the count at one
+    forever, so a genuinely NEW pair would have had to be noticed as
+    "2" rather than against a clean zero. That is the ratchet
+    port_lint already gets right with its baseline.
+
+    The marker must carry a reason: `split-brain-ok: <why>`. A bare
+    marker is not accepted, so this cannot become a silent mute.
+    """
+    j = impl_idx - 1
+    while j >= 0:
+        t = lines[j].strip()
+        if not t.startswith("//") and t != "":
+            break
+        m = RE_OK.search(t)
+        if m and m.group(1).strip():
+            return True
+        j -= 1
+    return False
+
+
+RE_OK = re.compile(r"split-brain-ok:(.*)$")
+
+
 def scan_file(path):
     """[(ty, meth, trait, inherent_lines, trait_lines)] for this file."""
     lines = open(path, errors="replace").read().split("\n")
@@ -116,6 +145,8 @@ def scan_file(path):
         m = RE_IMPL.match(lines[i])
         if m:
             cur_trait, cur_ty = m.group(1), m.group(2)
+            if documented_ok(lines, i):
+                cur_trait = cur_ty = None
             i += 1
             continue
         if lines[i].startswith("}"):
@@ -177,8 +208,10 @@ def main():
         print("    %s: %s::%s" % (p, ty, meth))
         print("      inherent %d lines, `%s` impl %d lines, neither forwards"
               % (ni, tr, nt))
-    print("      (a DELIBERATE divergence is fine — say so above the impl,")
-    print("       as crypto/ecdsa's Signer does, so the next reader knows.)")
+    print("      (a DELIBERATE divergence is fine — say WHY above the impl")
+    print("       and mark it `split-brain-ok: <reason>`, as crypto/ecdsa's")
+    print("       Signer does, so this report can reach zero and the next")
+    print("       pair stands out. A marker with no reason is not accepted.)")
     return 1 if args.strict else 0
 
 
