@@ -227,6 +227,9 @@ Fixed so far, one per finding read:
     header lines with a single `ReadSlice` and failed the whole
     response with "bufio: buffer full" on any line over ~4 KiB, where
     Go's textproto accumulates. Fixed.
+  - Neither serve loop called `numLeadingCRorLF`, and neither tracked
+    a last method to gate it on, so stray CR/LF before a request line
+    after a POST got a 400 where Go serves the request.
   - The serve loops did not call `doKeepAlives`, so
     `SetKeepAlivesEnabled(false)` set a flag nothing read, and
     `wantsHttp10KeepAlive` — which I had wrongly triaged as

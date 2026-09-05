@@ -3384,6 +3384,12 @@ impl Server {
         let idle_ns = self.idle_timeout_ns();
         let write_timeout_ns = self.write_timeout_ns();
         let mut first_request = true;
+        // Go: `c.lastMethod`, at server.go line 1053, set by readRequest and
+        // read on the NEXT request to decide whether to tolerate stray
+        // CR/LF before the request line. goish tracked no last method,
+        // so numLeadingCRorLF — ported and anchored — had nothing to
+        // gate on and was never called.
+        let mut last_method = string::new();
         // Go stamps `c.remoteAddr` ONCE at conn.serve entry
         // (server.go:2076); readRequest copies it onto every request
         // (:1120). Formatting it per request cost an alloc each.
@@ -3433,6 +3439,28 @@ impl Server {
                     cr: &cr,
                     rwc: &mut conn,
                 });
+                // Go: if c.lastMethod == "POST" { peek, _ :=
+                // c.bufr.Peek(4); c.bufr.Discard(numLeadingCRorLF(peek)) }
+                // — "RFC 7230 section 3 tolerance for old buggy
+                // clients", at server.go lines 1035-1039.
+                //
+                // The shape: an old client sends a POST whose body is
+                // followed by a CRLF that is not part of it, and the
+                // next request on the keep-alive connection starts
+                // with those bytes. Go serves it; goish answered 400.
+                //
+                // Gated on POST exactly as Go gates it. Skipping
+                // leading blank lines unconditionally would be a
+                // request-smuggling primitive: a proxy that skips them
+                // and an origin that does not disagree about where one
+                // request ends and the next begins.
+                if last_method == "POST" {
+                    let (peek, _) = br.Peek(4);
+                    let n = numLeadingCRorLF(peek);
+                    if n > 0 {
+                        let _ = br.Discard(n);
+                    }
+                }
                 // Server variant: carries the fd so the parser can
                 // emit `100 Continue` before the eager body read, and
                 // the connReader so the header limit lifts before the
@@ -3658,6 +3686,9 @@ impl Server {
             // reused anyway, with no indication the setting had been
             // ignored. doKeepAlives is `!disabled && !shuttingDown`,
             // so it subsumes the check it replaces.
+            // Go: `c.lastMethod = req.Method`, at server.go line 1053, set
+            // once the request parses and read on the next one.
+            last_method = req.Method.clone();
             let keep_alive = request_keep_alive(&mut req) && self.doKeepAlives();
             let wants10 = req.wantsHttp10KeepAlive();
             let w = response::__new_with_cnc(conn, cnc);

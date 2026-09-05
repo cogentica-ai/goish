@@ -422,6 +422,8 @@ fn serve_tls_conn(
     let idle_ns = srv.idle_timeout_ns();
     let write_timeout_ns = srv.write_timeout_ns();
     let mut first_request = true;
+    // Go's `c.lastMethod`, at server.go line 1053 — see the plaintext loop.
+    let mut last_method = string::new();
     loop {
         if srv.__state_in_shutdown() {
             let mut c = conn.Lock();
@@ -452,6 +454,18 @@ fn serve_tls_conn(
             // Pooled backing buffer — Go's c.bufr (newBufioReader),
             // same wiring as the plaintext loop.
             let mut br = super::server::newBufioReader(&mut *c);
+            // The same RFC 7230 §3 tolerance the plaintext loop
+            // applies, at server.go lines 1035-1039: after a POST only, drop
+            // stray CR/LF before the request line. Gated on POST
+            // exactly as Go gates it — skipping blank lines
+            // unconditionally is a request-smuggling primitive.
+            if last_method == "POST" {
+                let (peek, _) = br.Peek(4);
+                let n = super::server::numLeadingCRorLF(peek);
+                if n > 0 {
+                    let _ = br.Discard(n);
+                }
+            }
             let out = ReadRequestWithLimit(&mut br, max_header_bytes);
             super::server::putBufioReader(br);
             out
@@ -461,6 +475,7 @@ fn serve_tls_conn(
             let _ = c.Close();
             return;
         }
+        last_method = req.Method.clone();
         // Same HTTP/1-only gate the plaintext loop applies
         // (server.go:1113 / :2069). A TLS conn is exactly where an
         // HTTP/2 preface arrives, so leaving it out here is the half
