@@ -27,8 +27,11 @@
 //                      because on a HEAD the handler is declaring what
 //                      a GET would return, and only the handler knows.
 //
-// Date is normalised and the header block sorted on both sides: goish
-// orders Connection differently (ROADMAP 2i) and that is not what this
+// Date is normalised and the header block sorted on both sides.
+// Since ROADMAP 2i goish's wire order matches Go's — pinned by
+// http_header_order_ref_smoke — that sort is now redundant rather
+// than load-bearing. It is kept only because this smoke's
+// reference was transcribed sorted, and order is not what it
 // measures.
 #![no_std]
 #![no_main]

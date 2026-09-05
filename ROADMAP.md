@@ -65,9 +65,8 @@ Both are version-boundary changes rather than bug fixes.
 
 ### Not blocked on anything
 
-2i (response header ORDER differs from Go) is a re-measuring pass over
-the smokes that record a response head, not a decision. 2f (twelve
-unported FIPS CASTs) is twelve files. 2c and 2d are their own work.
+2f (twelve unported FIPS CASTs) is twelve files. 2c and 2d are their
+own work. (2i, response header order, is fixed — see below.)
 
 ## 1. `crypto/tls` — the record layer is the last invented code
 
@@ -568,28 +567,50 @@ This closed a gap the tree had already identified and pinned to goish's
 answer: sniff_server_ref_smoke's `ct-after-write` row now carries Go's
 line rather than a documented divergence.
 
-## 2i. Response header ORDER differs from Go
+## 2i-fixed. Response header ORDER now matches Go
 
-Found while diffing multipart range responses byte for byte. goish
-sorts every response header, including `Connection`, into one block:
+**Fixed 2026-09-05.** Found while diffing multipart range responses
+byte for byte. goish sorted every response header, including
+`Connection`, into one block:
 
   Go     Accept-Ranges, Content-Length, Content-Type, Date, Connection
   goish  Accept-Ranges, Connection, Content-Length, Content-Type, Date
 
-Go writes the user's headers sorted and then appends Date and
-Connection through `extraHeader`, so those two land last. goish puts
-Connection in the header map, where it sorts alphabetically.
+Go writes the handler's own headers sorted through `WriteSubset`, then
+appends the ones the SERVER derived through `extraHeader.Write` in one
+fixed order — Date, Content-Length, Content-Type, Connection,
+Transfer-Encoding (server.go:1265).
 
-Header order is not significant in HTTP, so this is cosmetic — but it
-is a real difference, and anything doing a byte comparison of a
-response (a cache key, a recorded fixture, a proxy test) sees it.
-http_multirange_smoke normalises the order on BOTH sides and says so,
-rather than pretending the responses match exactly.
+The subtlety that makes this more than a sort order: Go's wire order is
+not one fixed sequence. A header the HANDLER set stays in the sorted
+block; only a server-derived one moves to the extra block. So a
+ServeContent response puts Content-Type BEFORE Date and a sniffed one
+AFTER, from the same code.
 
-Not fixed here because the change is in the shared header writer, and
-every pinned smoke that records a response head currently encodes
-goish's order. Doing it means re-measuring all of them in one pass,
-which is a job on its own rather than a rider on a range test.
+goish can now make that distinction because of the header-commit
+snapshot added in 2i-fixed above: whatever `finalizeHeaders` adds after
+the snapshot is derived. `derived_extras` diffs the two and
+`build_head` renders sorted-then-extra.
+
+Wired at all four head-build sites — two in `responsewriter.rs` and,
+less obviously, two more in `server_tls.rs`, which builds its own heads
+and does not share the plain server's. Fixing only the plain pair left
+HTTPS diverging and no existing smoke could see it, because nothing
+pinned an HTTPS response head.
+
+`http_header_order_ref_smoke` pins six rows against Go 1.25.5: three
+response shapes over plain HTTP and the same three over TLS. The TLS
+rows were not redundant — they caught the auto Content-Length being
+snapshotted on the handler-set side, which made a bodied HTTPS response
+lead with Content-Length instead of Date.
+
+`http_multirange_smoke` and its generator no longer sort the header
+block on either side; it now compares the whole response byte for byte,
+which is what its own header comment always claimed. Three other smokes
+(`http_head_framing_smoke`, `http_bodyless_status_smoke`,
+`http_trailer_ref_smoke`) still sort, but only because their references
+were transcribed sorted — their comments used to cite this divergence
+as the reason and now say so plainly.
 
 ## 2j. httptrace is inert — not one hook fires
 

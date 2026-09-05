@@ -20,8 +20,11 @@
 //   announced-no-flush   the same as the first: an explicit Flush is
 //                        not what makes trailers work
 //
-// The header block is sorted on both sides (goish orders it
-// differently, ROADMAP 2i) and the Date normalised, but the BODY —
+// The header block is sorted on both sides and the Date normalised.
+// Since ROADMAP 2i goish's wire order matches Go's — pinned by
+// http_header_order_ref_smoke — that sort is redundant rather than
+// load-bearing; it is kept because this reference was transcribed
+// sorted. The BODY —
 // chunk sizes, the terminating 0, and the trailer lines after it — is
 // compared verbatim, because that is the framing under test.
 #![no_std]

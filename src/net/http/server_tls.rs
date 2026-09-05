@@ -51,7 +51,7 @@ use crate::types::{byte, int};
 use super::header::Header;
 use super::request::{ReadRequestWithLimit, Request};
 use super::responsewriter::{__goish_register_Flusher_impl, __goish_register_ResponseWriter_impl};
-use super::responsewriter::{build_head, push_hex};
+use super::responsewriter::{build_head, derived_extras, push_hex};
 use super::responsewriter::{Flusher, HeaderHandle, ResponseWriter};
 use super::server::request_keep_alive_pub;
 use super::server::{Handler, Server};
@@ -144,6 +144,16 @@ impl tlsResponse {
 
         let buf = {
             let mut h = self.header.Lock();
+            // Snapshot the handler's own header BEFORE anything the
+            // server derives; the difference is exactly Go's
+            // extraHeader set, and decides the wire order.
+            //
+            // The auto Content-Length below has to fall on the derived
+            // side: Go emits a length it computed itself through
+            // extraHeader, after Date. Taking this snapshot one
+            // statement later put it in the sorted block instead and
+            // a bodied HTTPS response led with Content-Length.
+            let handler_set = h.Clone();
             let hasTE = h.Get(string("Transfer-Encoding")).Len() != 0;
             if bodyAllowedForStatus(g.status)
                 && !hasTE
@@ -163,7 +173,8 @@ impl tlsResponse {
                 true,
                 g.is_head,
             );
-            let mut buf = build_head(g.status, &h, true);
+            let derived = derived_extras(Some(&handler_set), &h);
+            let mut buf = build_head(g.status, &h, true, &derived);
             if !suppress_body {
                 buf.extend_from_slice(&g.body);
             }
@@ -190,6 +201,9 @@ impl tlsResponse {
         let suppress_body = g.is_head || !bodyAllowedForStatus(g.status);
         let head = {
             let mut h = self.header.Lock();
+            // Same snapshot as the buffered path: what the handler set
+            // itself sorts, what finalizeHeaders adds is extraHeader.
+            let handler_set2 = h.Clone();
             // Before the auto `chunked`: Go still sniffs a flushed
             // response (its hasTE guard means a HANDLER-set TE).
             super::responsewriter::finalizeHeaders(
@@ -207,7 +221,8 @@ impl tlsResponse {
                 h.Del(string("Content-Length"));
                 h.Set(string("Transfer-Encoding"), string("chunked"));
             }
-            build_head(g.status, &h, true)
+            let derived = derived_extras(Some(&handler_set2), &h);
+            build_head(g.status, &h, true, &derived)
         };
         let mut c = self.conn.Lock();
         let (_, err) = c.Write(&head);

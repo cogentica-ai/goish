@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -45,16 +44,6 @@ func TestGoishRef(t *testing.T) {
 		s = regexp.MustCompile(`[0-9a-f]{40,}`).ReplaceAllString(s, "BOUNDARY")
 		// Date varies.
 		s = regexp.MustCompile(`Date: [^\r\n]+`).ReplaceAllString(s, "Date: DATE")
-		// Sort the response header block. goish emits Connection
-		// inside its sorted header map; Go appends it last through
-		// extraHeader. Header order is not significant in HTTP, and
-		// the point of this reference is the multipart BODY, so the
-		// order is normalised on both sides rather than compared.
-		if i := strings.Index(s, "\r\n\r\n"); i >= 0 {
-			head := strings.Split(s[:i], "\r\n")
-			sort.Strings(head[1:])
-			s = strings.Join(head, "\r\n") + s[i:]
-		}
 		s = strings.ReplaceAll(s, "\r\n", "\\r\\n")
 		fmt.Printf("range=%-20s %s\n", rng, s)
 	}

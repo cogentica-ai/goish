@@ -888,7 +888,8 @@ impl response {
                 h.Del(string("Content-Length"));
                 h.Set(string("Transfer-Encoding"), string("chunked"));
             }
-            build_head(g.status, &h, g.proto11)
+            let derived = derived_extras(g.committed.as_ref(), &h);
+            build_head(g.status, &h, g.proto11, &derived)
         };
         let (_, err) = g.conn.Write(slice::<byte>::__from_vec(head));
         if !err.IsNil() {
@@ -1170,7 +1171,8 @@ impl response {
                 g.proto11,
                 g.is_head,
             );
-            let mut buf = build_head(g.status, &h, g.proto11);
+            let derived = derived_extras(g.committed.as_ref(), &h);
+            let mut buf = build_head(g.status, &h, g.proto11, &derived);
             if !suppress_body {
                 buf.reserve(g.body.len());
                 buf.extend_from_slice(&g.body);
@@ -1640,8 +1642,61 @@ pub(crate) fn finalizeHeaders(
     return;
 }
 
-// go: none — goish-only: renders status line + sorted headers in one buffer; Go streams the same bytes through chunkWriter.writeHeader.
-pub(crate) fn build_head(status: int, header: &Header, is11: bool) -> Vec<u8> {
+// go: sdk 1.25.5 net/http/server.go:1265-1290 extraHeader.Write
+/// The five headers Go writes through `extraHeader` rather than the
+/// sorted map, in the order `extraHeader.Write` emits them
+/// (server.go:1265): Date, Content-Length, Content-Type, Connection,
+/// Transfer-Encoding.
+///
+/// Only when the SERVER derived them. A handler-set Content-Type stays
+/// in `cw.header` and sorts with everything else, which is why Go's
+/// wire order is not one fixed sequence: a ServeContent response puts
+/// Content-Type before Date, and a sniffed one after.
+const EXTRA_ORDER: [&str; 5] = [
+    "Date",
+    "Content-Length",
+    "Content-Type",
+    "Connection",
+    "Transfer-Encoding",
+];
+
+// go: none — goish-only: which of the five extraHeader names the
+// SERVER derived, by diffing the header before and after finalizeHeaders.
+/// `before` is the header as the handler left it — the commit-time
+/// snapshot on the plain path, or the pre-finalizeHeaders copy on the
+/// TLS one. `None` means no snapshot was taken, in which case every
+/// EXTRA_ORDER name present is treated as derived; that is Go's shape
+/// for a handler that sets no headers of its own.
+pub(crate) fn derived_extras(
+    before: Option<&Header>,
+    after: &Header,
+) -> crate::gomap::map<string, bool> {
+    let mut derived = crate::gomap::map::<string, bool>::new();
+    for k in EXTRA_ORDER.iter() {
+        let key = string::from(*k);
+        if after.Values(key.clone()).Len() == 0 {
+            continue;
+        }
+        let was_set = match before {
+            Some(b) => b.Values(key.clone()).Len() != 0,
+            None => false,
+        };
+        if !was_set {
+            derived.Set(key, true);
+        }
+    }
+    return derived;
+}
+
+// go: none — goish-only: renders status line + sorted headers + the
+// extraHeader block in one buffer; Go streams the same bytes through
+// chunkWriter.writeHeader.
+pub(crate) fn build_head(
+    status: int,
+    header: &Header,
+    is11: bool,
+    derived: &crate::gomap::map<string, bool>,
+) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::with_capacity(256);
     // Go's writeStatusLine (server.go:1596), ported in server.rs.
     // Go passes `w.req.ProtoAtLeast(1, 1)`, and so does goish now:
@@ -1663,11 +1718,26 @@ pub(crate) fn build_head(status: int, header: &Header, is11: bool) -> Vec<u8> {
     // bypassed it.
     //
     // Routing through writeSubset also sorts the keys, which Go does
-    // here too.
+    // here too — but only over the handler's own headers. The ones the
+    // server derived are excluded here and re-emitted below in
+    // extraHeader order, which is what makes the wire bytes match Go.
     {
         let mut hb = crate::bytes::Buffer::new();
-        let _ = header.WriteSubset(&mut hb, &crate::gomap::map::<string, bool>::new());
+        let _ = header.WriteSubset(&mut hb, derived);
         buf.extend_from_slice(hb.Bytes().as_ref());
+        for k in EXTRA_ORDER.iter() {
+            let key = string::from(*k);
+            if derived.Get(key.clone()).1 {
+                let vals = header.Values(key.clone());
+                for i in 0..vals.Len() {
+                    let mut one = Header::new();
+                    one.Set(key.clone(), vals[i].clone());
+                    let mut hb = crate::bytes::Buffer::new();
+                    let _ = one.WriteSubset(&mut hb, &crate::gomap::map::<string, bool>::new());
+                    buf.extend_from_slice(hb.Bytes().as_ref());
+                }
+            }
+        }
     }
     buf.extend_from_slice(b"\r\n");
     return buf;

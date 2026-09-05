@@ -1,8 +1,11 @@
 // http_multirange_smoke — a multi-range request over the wire.
 //
 // Reference: Go 1.25.5 net/http, tools/gen_multirange_ref.go — the
-// whole response, byte for byte, with the random boundary and the Date
-// normalised.
+// whole response, byte for byte, with only the random boundary and
+// the Date normalised. The header block used to be sorted on both
+// sides because goish emitted Connection inside its sorted map
+// while Go appends it last through extraHeader; since ROADMAP 2i
+// the wire order matches, so nothing is reordered here any more.
 //
 // `rangesMIMESize` is on the never-called list and is NOT a defect:
 // Go must precompute the encoded length because it streams the
@@ -40,9 +43,9 @@ use goish::types::{byte, int};
 use goish::{fmt, go, time};
 
 const GO: [&str; 3] = [
-    "range=bytes=0-9,20-29      HTTP/1.1 206 Partial Content\\r\\nAccept-Ranges: bytes\\r\\nConnection: close\\r\\nContent-Length: 364\\r\\nContent-Type: multipart/byteranges; boundary=BOUNDARY\\r\\nDate: DATE\\r\\n\\r\\n--BOUNDARY\\r\\nContent-Range: bytes 0-9/36\\r\\nContent-Type: text/plain; charset=utf-8\\r\\n\\r\\n0123456789\\r\\n--BOUNDARY\\r\\nContent-Range: bytes 20-29/36\\r\\nContent-Type: text/plain; charset=utf-8\\r\\n\\r\\nklmnopqrst\\r\\n--BOUNDARY--\\r\\n",
-    "range=bytes=0-0,5-5,10-10  HTTP/1.1 206 Partial Content\\r\\nAccept-Ranges: bytes\\r\\nConnection: close\\r\\nContent-Length: 485\\r\\nContent-Type: multipart/byteranges; boundary=BOUNDARY\\r\\nDate: DATE\\r\\n\\r\\n--BOUNDARY\\r\\nContent-Range: bytes 0-0/36\\r\\nContent-Type: text/plain; charset=utf-8\\r\\n\\r\\n0\\r\\n--BOUNDARY\\r\\nContent-Range: bytes 5-5/36\\r\\nContent-Type: text/plain; charset=utf-8\\r\\n\\r\\n5\\r\\n--BOUNDARY\\r\\nContent-Range: bytes 10-10/36\\r\\nContent-Type: text/plain; charset=utf-8\\r\\n\\r\\na\\r\\n--BOUNDARY--\\r\\n",
-    "range=bytes=0-9            HTTP/1.1 206 Partial Content\\r\\nAccept-Ranges: bytes\\r\\nConnection: close\\r\\nContent-Length: 10\\r\\nContent-Range: bytes 0-9/36\\r\\nContent-Type: text/plain; charset=utf-8\\r\\nDate: DATE\\r\\n\\r\\n0123456789",
+    "range=bytes=0-9,20-29      HTTP/1.1 206 Partial Content\\r\\nAccept-Ranges: bytes\\r\\nContent-Length: 364\\r\\nContent-Type: multipart/byteranges; boundary=BOUNDARY\\r\\nDate: DATE\\r\\nConnection: close\\r\\n\\r\\n--BOUNDARY\\r\\nContent-Range: bytes 0-9/36\\r\\nContent-Type: text/plain; charset=utf-8\\r\\n\\r\\n0123456789\\r\\n--BOUNDARY\\r\\nContent-Range: bytes 20-29/36\\r\\nContent-Type: text/plain; charset=utf-8\\r\\n\\r\\nklmnopqrst\\r\\n--BOUNDARY--\\r\\n",
+    "range=bytes=0-0,5-5,10-10  HTTP/1.1 206 Partial Content\\r\\nAccept-Ranges: bytes\\r\\nContent-Length: 485\\r\\nContent-Type: multipart/byteranges; boundary=BOUNDARY\\r\\nDate: DATE\\r\\nConnection: close\\r\\n\\r\\n--BOUNDARY\\r\\nContent-Range: bytes 0-0/36\\r\\nContent-Type: text/plain; charset=utf-8\\r\\n\\r\\n0\\r\\n--BOUNDARY\\r\\nContent-Range: bytes 5-5/36\\r\\nContent-Type: text/plain; charset=utf-8\\r\\n\\r\\n5\\r\\n--BOUNDARY\\r\\nContent-Range: bytes 10-10/36\\r\\nContent-Type: text/plain; charset=utf-8\\r\\n\\r\\na\\r\\n--BOUNDARY--\\r\\n",
+    "range=bytes=0-9            HTTP/1.1 206 Partial Content\\r\\nAccept-Ranges: bytes\\r\\nContent-Length: 10\\r\\nContent-Range: bytes 0-9/36\\r\\nContent-Type: text/plain; charset=utf-8\\r\\nDate: DATE\\r\\nConnection: close\\r\\n\\r\\n0123456789",
 ];
 
 fn chk(ln: &mut usize, got: &string) {
@@ -57,10 +60,6 @@ fn chk(ln: &mut usize, got: &string) {
         fmt::Printf!("[!!] line %d\n  got  %q\n  want %q\n", *ln as int + 1, got, GO[*ln]);
     }
     *ln += 1;
-}
-
-fn crate_cmp(a: &string, b: &string) -> core::cmp::Ordering {
-    return goish::strings::Compare(a.clone(), b.clone()).cmp(&0);
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -171,20 +170,6 @@ fn run() {
             }
         }
         // The head ends at the first empty element (the blank line).
-        let mut head_end = outv.len();
-        for (i, p) in outv.iter().enumerate() {
-            if p.Len() == 0 {
-                head_end = i;
-                break;
-            }
-        }
-        if head_end > 1 {
-            let mut hdrs: Vec<string> = outv[1..head_end].to_vec();
-            hdrs.sort_by(|a, b| crate_cmp(a, b));
-            for (i, h) in hdrs.iter().enumerate() {
-                outv[1 + i] = h.clone();
-            }
-        }
         let mut joined = string::new();
         for (i, p) in outv.iter().enumerate() {
             if i > 0 {

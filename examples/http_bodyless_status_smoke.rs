@@ -24,8 +24,12 @@
 // Content-Length everywhere from looking correct: the line between
 // "bodyless" and "allowed but empty" runs between 304 and 205.
 //
-// Date is normalised and the header block sorted on both sides; goish
-// orders Connection differently (ROADMAP 2i).
+// Date is normalised and the header block sorted on both sides.
+// Since ROADMAP 2i goish's wire order matches Go's — pinned by
+// http_header_order_ref_smoke — that sort is now redundant rather
+// than load-bearing. It is kept only because this smoke's
+// reference was transcribed sorted, and order is not what it
+// measures.
 #![no_std]
 #![no_main]
 #![allow(non_snake_case)]
