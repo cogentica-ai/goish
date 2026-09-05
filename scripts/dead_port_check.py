@@ -118,7 +118,7 @@ def body_end(lines, start):
     return len(lines) - 1
 
 
-GOSYM = re.compile(r"//\s*go:\s*sdk\s+\S+\s+(?P<gofile>\S+\.go):\S+\s+(?P<sym>[A-Za-z_][A-Za-z0-9_.]*)")
+GOSYM = re.compile(r"//\s*go:\s*sdk\s+\S+\s+(?P<gofile>\S+\.go):(?P<span>\S+)\s+(?P<sym>[A-Za-z_][A-Za-z0-9_.]*)")
 
 
 def strip_go_comments(text):
@@ -156,6 +156,17 @@ def strip_go_comments(text):
     return "".join(out)
 
 
+def decl_lines(span):
+    """The (lo, hi) line range an anchor's `NNN-MMM` (or `NNN`) names."""
+    parts = span.split("-")
+    try:
+        lo = int(parts[0])
+        hi = int(parts[1]) if len(parts) > 1 else lo
+    except ValueError:
+        return (0, 0)
+    return (lo, hi)
+
+
 def go_calls_it(goroot, anchor):
     """Does Go's own stdlib call this symbol from some OTHER file?
 
@@ -174,6 +185,7 @@ def go_calls_it(goroot, anchor):
     if not m:
         return None
     gofile, sym = m.group("gofile"), m.group("sym").split(".")[-1]
+    span = m.group("span")
     pkgdir = os.path.join(goroot, "src", os.path.dirname(gofile))
     if not os.path.isdir(pkgdir):
         return None
@@ -185,8 +197,6 @@ def go_calls_it(goroot, anchor):
                 continue
             fp = os.path.join(dirpath, n)
             rel = os.path.relpath(fp, os.path.join(goroot, "src"))
-            if rel == gofile:
-                continue
             try:
                 text = open(fp, encoding="utf-8", errors="replace").read()
             except OSError:
@@ -201,6 +211,20 @@ def go_calls_it(goroot, anchor):
             # reason the Rust side strips them: fmt/doc.go NAMES Sscanf
             # in package documentation and calls nothing at all.
             text = strip_go_comments(text)
+            if rel == gofile:
+                # The declaring file is searched too, minus the
+                # declaration's own lines. Skipping the whole file —
+                # which this did — makes a symbol whose real callers
+                # live beside it look uncalled, or picks up an
+                # unrelated same-named method elsewhere in the package
+                # and reports THAT as the call site. persistConn's
+                # `cancelRequest` is called twice from transport.go and
+                # was reported as "called from h2_bundle.go", which is
+                # a different type's method of the same name.
+                lo, hi = decl_lines(span)
+                lines = text.split("\n")
+                text = "\n".join(
+                    l for n, l in enumerate(lines, 1) if not (lo <= n <= hi))
             if rx.search(text):
                 hits.append(rel)
     return sorted(hits)

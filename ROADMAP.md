@@ -273,6 +273,22 @@ Read and found NOT defects, which is the other half of the work:
 That leaves `DeriveKey`, which is not a false positive but is not a
 missing call either — see 2f.
 
+`cancelRequest`, `handleFunc`/`findHandler` and `socksNewDialer` close
+out the original list. goish tears an in-flight request down by arming
+a netpoll cancel watch on the raw socket rather than through a per-conn
+`cancelRequest`, and http_complex_api's two ctx-cancel cases prove that
+path works. `servemux121`'s own header already records that `use121()`
+is always false because goish has no `internal/godebug`.
+
+`cancelRequest` is also what exposed a flaw in the checker. It reported
+"Go: called from h2_bundle.go" when Go's real callers are two lines in
+transport.go itself — the script skipped the whole declaring file to
+avoid matching the declaration, so it missed same-file callers and
+matched an unrelated same-named method elsewhere in the package. It now
+skips only the declaration's own line range, which the anchor already
+names. The hot list went from 26 to 88: sixty-two findings had been
+hidden behind that exclusion.
+
 ## 2f. Two thirds of the FIPS CASTs are not ported
 
 `dead_port_check` flagged `crypto/internal/fips140/aes/gcm`'s
