@@ -65,8 +65,10 @@ Both are version-boundary changes rather than bug fixes.
 
 ### Not blocked on anything
 
-2f (twelve unported FIPS CASTs) is twelve files. 2c and 2d are their
-own work. (2i, response header order, is fixed — see below.)
+2c and 2d are their own work. (2i, response header order, is fixed —
+see below.) 2f is no longer a worklist: every FIPS CAST is inert
+because `Enabled_` is a `const false`, so the twelve unported files are
+a structural-fidelity decision, not twelve fixes.
 
 ## 1. `crypto/tls` — the record layer is the last invented code
 
@@ -408,40 +410,63 @@ are pinned against Go by the ref smokes and are not defects. It still
 has to be read one at a time, because `validateHeaders` was same-file
 too, and it was real.
 
-## 2f. Two thirds of the FIPS CASTs are not ported
+## 2f. Every FIPS CAST in the tree is inert, ported or not
 
-`dead_port_check` flagged `crypto/internal/fips140/aes/gcm`'s
-`DeriveKey` because Go's only non-test caller of it is that package's
-`cast.go`. Following that up turns out to name something larger than
-one call: Go has 18 `cast.go` files under `crypto/internal/fips140`
-and goish ports 6.
+**Re-measured 2026-09-05.** This section used to say "twelve unported
+`cast.go` files" and treat it as a worklist. Measuring the mechanism
+first changes what the worklist is worth.
 
-Present: the root `cast.go`, `ecdh`, `rsa`, `nistec/fiat`, `ed25519`,
-`ecdsa`.
+`fips140::CAST` opens with Go's own guard:
 
-Missing: `pbkdf2`, `sha512`, `tls12`, `tls13`, `sha3`, `hmac`,
-`mlkem`, `drbg`, `hkdf`, `aes`, `aes/gcm`, `sha256`.
+    if !Enabled_ { return; }
 
-A CAST is a known-answer self-test that FIPS 140-3 requires an
-algorithm to pass before it is used. The port has the mechanism —
-`fips140::CAST` exists and six modules call it — so this is not a
-design gap, it is twelve unported files. Whether it matters depends on
-whether the fips140 tree is meant to be structurally faithful or
-merely to compute the right answers, which is a decision that has not
-been written down anywhere.
+and `Enabled_` is `const false` in `fips140.rs` — not a runtime flag.
+The early return precedes the closure call, so the self-test body is
+never entered. Measured, not read: a probe calling `fips140::CAST`
+with a closure that sets an `AtomicBool` reports the body did NOT run.
+That applies to all six CASTs already ported.
 
-Note what this is NOT: evidence that the twelve algorithms are wrong.
-Their outputs are diffed against Go elsewhere. It means goish would
-not NOTICE if they became wrong, which is the entire point of a CAST.
+**This is not a divergence from Go.** Go's `CAST` has the same
+`if !Enabled { return }`, and Go's `Enabled` is off unless
+`GODEBUG=fips140=on`. `crypto/internal/fips140test` runs the CASTs by
+re-exec'ing itself with that variable set (check_test.go:39). Default
+Go does not run them either.
 
+The difference is switchability: Go's is a `var` set from GODEBUG,
+goish's is a `const`, and goish has no GODEBUG by an explicit earlier
+decision (see `crypto/internal/fips140only`). So there is no
+configuration goish can reach in which any CAST executes.
 
-The count drops by one each time a call is added, so it is a worklist
-that measures its own progress. What is left is unread. They are not
-all defects — the question to ask of each is whether Go's call is one
-goish should be making too. Run:
+That corrects the claim this section used to make — that goish "would
+not NOTICE if the algorithms became wrong, which is the entire point
+of a CAST". With FIPS mode off, neither implementation notices. The
+algorithms' outputs are diffed against Go elsewhere, and that is what
+is actually guarding them.
 
-    scripts/dead_port_check.py          # the ranked list
-    scripts/dead_port_check.py -v       # including the quiet 227
+So the twelve missing files are a **structural-fidelity** question, not
+a correctness one:
+
+  Present: root `cast.go`, `ecdh`, `rsa`, `nistec/fiat`, `ed25519`,
+           `ecdsa`.
+  Missing: `pbkdf2`, `sha512`, `tls12`, `tls13`, `sha3`, `hmac`,
+           `mlkem`, `drbg`, `hkdf`, `aes`, `aes/gcm`, `sha256`.
+
+They are small — 32 to 58 lines each, about 486 in total — and porting
+them costs little. But porting them adds twelve more files that cannot
+run, and it is worth deciding the upstream question first:
+
+  **Should `Enabled_` become switchable?** If yes, the twelve are worth
+  porting because they would then do something, and the six existing
+  ones would start earning their keep. If no, the whole fips140 CAST
+  tree is structurally faithful decoration, which is a legitimate
+  choice for this port but should be written down rather than
+  rediscovered.
+
+Note the wiring trap either way: Go calls most of these from `init()`,
+which goish has no equivalent of. The ported ones use an `AtomicBool`
+latch invoked from the algorithm's own entry points. Twelve new files
+with no caller would be twelve TESTED_NOT_WIRED findings, so
+`dead_port_check.py` should be re-run after any such port.
 
 ## 2g. Client.Timeout did not bound a dial that never completes — FIXED
 
