@@ -59,10 +59,11 @@ fn main() {
     {
         let enc_bytes = b"SGVsbG8=".to_vec();
         let enc_slice: slice<byte> = goish::slice::__from_vec(enc_bytes);
-        let mut dst: slice<byte> = slice::new();
+        // Go Decode requires caller-provided storage and preserves its length.
+        let mut dst: slice<byte> = goish::make!([]byte, base64::StdEncoding.DecodedLen(enc_slice.Len()));
         let (n, err) = base64::StdEncoding.Decode(&mut dst, enc_slice);
         let want_dec: goish::string = "Hello".into();
-        if err.IsNil() && n == 5 && goish::string::from_bytes(&dst) == want_dec {
+        if err.IsNil() && n == 5 && dst.Len() == 6 && goish::string::from_bytes(&dst.slice(0, n)) == want_dec {
             fmt::Println!("[ 3] Decode in-place            PASS");
         } else {
             fmt::Println!("[ 3] Decode in-place            FAIL n=", n);

@@ -393,6 +393,26 @@ fn number_to_int(n: crate::types::float64, lo: f64, hi: f64, ty: &str) -> (i64, 
             ),
         );
     }
+    // The upper bound is 2^63 as an f64, which is what the max int64
+    // LITERAL rounds to — 9223372036854775807 is not representable, and
+    // `Value::Number` is an f64, so the digits are gone by the time we
+    // get here. Go never has this problem: its decoder parses the
+    // digits with ParseInt and answers 9223372036854775807 exactly.
+    //
+    // Falling through to `convert::int64` would answer i64::MIN, since
+    // that now implements amd64's CVTTSD2SQ — the integer-indefinite
+    // result for anything >= 2^63 — rather than Rust's saturation.
+    // That conversion is right, and this boundary is the one place the
+    // v1 decoder must not use it. json_decode_ref_smoke pins Go's
+    // answer for exactly this input.
+    //
+    // The proper fix is for Value::Number to keep the literal so an
+    // integer target can parse the digits; that is a change to the
+    // Value type and is recorded in the ROADMAP rather than smuggled
+    // in here.
+    if n >= 9223372036854775808.0 {
+        return (i64::MAX, nil);
+    }
     return (crate::convert::int64(n), nil);
 }
 

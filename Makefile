@@ -57,8 +57,15 @@ help:
 	@echo "  make e2e FILTER='^chan_'"
 	@echo "  make e2e LOOPS=10 TIMEOUT=30 FILTER='^http_'"
 
-build e2e-build:
+build:
 	$(CARGO) build --examples
+
+# FILTER already chooses which examples the runner executes. Apply the same
+# selection before compilation so focused package checks do not build hundreds
+# of unrelated static binaries. With no FILTER, the full build is unchanged.
+e2e-build:
+	@bash scripts/e2e_build_test.sh
+	@FILTER='$(FILTER)' bash scripts/e2e_build.sh $(CARGO)
 
 e2e: e2e-build
 	@$(if $(LOOPS),LOOPS=$(LOOPS),) \

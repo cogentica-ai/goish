@@ -1193,6 +1193,26 @@ name = "json_map_diff"
 path = "examples/json_map_diff.rs"
 
 [[example]]
+name = "base64_decode_diff"
+path = "examples/base64_decode_diff.rs"
+
+[[example]]
+name = "json_separator_diff"
+path = "examples/json_separator_diff.rs"
+
+[[example]]
+name = "json_array_diff"
+path = "examples/json_array_diff.rs"
+
+[[example]]
+name = "json_raw_duplicate_diff"
+path = "examples/json_raw_duplicate_diff.rs"
+
+[[example]]
+name = "json_slice_diff"
+path = "examples/json_slice_diff.rs"
+
+[[example]]
 name = "term_pty_smoke"
 path = "examples/term_pty_smoke.rs"
 
@@ -3358,3 +3378,19 @@ path = "examples/http_keepalives_enabled_smoke.rs"
 [[example]]
 name = "http_maxrespheader_smoke"
 path = "examples/http_maxrespheader_smoke.rs"
+
+[[example]]
+name = "floatint_diff"
+path = "examples/floatint_diff.rs"
+
+[[example]]
+name = "json_float_diff"
+path = "examples/json_float_diff.rs"
+
+[[example]]
+name = "json_map_state_diff"
+path = "examples/json_map_state_diff.rs"
+
+[[example]]
+name = "json_scalar_diff"
+path = "examples/json_scalar_diff.rs"

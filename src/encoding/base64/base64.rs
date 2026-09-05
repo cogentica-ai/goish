@@ -28,6 +28,11 @@
 // newlines skipped mid-quantum, padding that must be complete, trailing
 // garbage after the padding, and strict mode's requirement that the
 // discarded low bits of the final byte be zero.
+//
+// Decode borrows the caller's slice in place: it neither allocates a larger
+// destination nor truncates its length. Bytes beyond the returned count can
+// be touched by Go's wide stores, including before an error; callers retain
+// those writes exactly as in base64.go:518-584.
 
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 
@@ -585,16 +590,7 @@ impl Encoding {
     // Go: base64.go:518
     //   func (enc *Encoding) Decode(dst, src []byte) (n int, err error)
     pub fn Decode(&self, dst: &mut slice<byte>, src: slice<byte>) -> (int, error) {
-        let mut dv: Vec<byte> = dst.clone().__into_vec();
-        let max_len = self.DecodedLen(src.Len()) as usize + 3;
-        if dv.len() < max_len {
-            dv.resize(max_len, 0);
-        }
-        let src_raw: &[byte] = &src;
-        let (n, err) = self.decode_into(&mut dv, src_raw);
-        dv.truncate(n as usize);
-        *dst = slice::__from_vec(dv);
-        return (n, err);
+        return self.decode_into(dst, &src);
     }
 
     // go: sdk 1.25.5 encoding/base64/base64.go:413-424 Encoding.AppendDecode

@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 8262,
+ "total": 8252,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -263,7 +263,7 @@
    "GOISH005": 8,
    "GOISH008": 1,
    "GOISH012": 1,
-   "GOISH014": 78,
+   "GOISH014": 77,
    "GOISH016": 1,
    "GOISH023": 67
   },
@@ -277,9 +277,9 @@
   },
   "src/encoding/json/v2/mod.rs": {
    "GOISH005": 2,
-   "GOISH014": 42,
+   "GOISH014": 40,
    "GOISH016": 1,
-   "GOISH023": 42
+   "GOISH023": 40
   },
   "src/encoding/mod.rs": {
    "GOISH015": 1,
@@ -586,8 +586,8 @@
    "GOISH021": 6
   },
   "src/net/http/transport.rs": {
-   "GOISH018": 23,
-   "GOISH021": 22
+   "GOISH018": 22,
+   "GOISH021": 19
   },
   "src/net/lookup.rs": {
    "GOISH014": 23,
@@ -658,7 +658,7 @@
   },
   "src/os/mod.rs": {
    "GOISH005": 32,
-   "GOISH014": 103,
+   "GOISH014": 102,
    "GOISH015": 1,
    "GOISH016": 1,
    "GOISH023": 97
