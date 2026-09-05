@@ -157,6 +157,9 @@ impl tlsResponse {
                 g.status,
                 &g.body,
                 g.keep_alive,
+                // wants10: the HTTPS loop speaks HTTP/1.1 only, so no
+                // request here can be the HTTP/1.0 keep-alive case.
+                false,
                 true,
                 g.is_head,
             );
@@ -194,6 +197,9 @@ impl tlsResponse {
                 g.status,
                 &g.body,
                 g.keep_alive,
+                // wants10: the HTTPS loop speaks HTTP/1.1 only, so no
+                // request here can be the HTTP/1.0 keep-alive case.
+                false,
                 true,
                 g.is_head,
             );
@@ -497,7 +503,10 @@ fn serve_tls_conn(
         // shouldPanicOnCopyError silently takes the pre-1.11 branch.
         req = req.WithContext(conn_ctx.clone());
 
-        let keep_alive = request_keep_alive_pub(&mut req) && !srv.__state_in_shutdown();
+        // Same as the plaintext loop: Go's doKeepAlives, not the
+        // shutdown flag alone. An operator disabling keep-alives on an
+        // HTTPS server had it ignored exactly as on an HTTP one.
+        let keep_alive = request_keep_alive_pub(&mut req) && srv.doKeepAlives();
         let w = tlsResponse::new(conn.clone());
         w.set_keep_alive(keep_alive);
         w.set_head(req.Method == string("HEAD"));

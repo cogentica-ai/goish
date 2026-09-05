@@ -3350,3 +3350,7 @@ path = "examples/http_default_proxy_smoke.rs"
 [[example]]
 name = "http_client_timeout_dial_smoke"
 path = "examples/http_client_timeout_dial_smoke.rs"
+
+[[example]]
+name = "http_keepalives_enabled_smoke"
+path = "examples/http_keepalives_enabled_smoke.rs"

@@ -193,6 +193,32 @@ Fixed so far, one per finding read:
   - `NewRequest` did not call `removeEmptyPort`, so a URL written
     `http://example.com:/p` kept its trailing colon onto the wire as
     `Host: example.com:`.
+  - The default client did not call `ProxyFromEnvironment`, because
+    there was no `DefaultTransport` for it to live in — `http::Get`
+    ignored HTTP_PROXY entirely.
+  - `dialConn` did not consult the roundtrip deadline, so
+    `Client.Timeout` never bounded a connect (2g).
+  - The serve loops did not call `doKeepAlives`, so
+    `SetKeepAlivesEnabled(false)` set a flag nothing read, and
+    `wantsHttp10KeepAlive` — which I had wrongly triaged as
+    redundant, below — turned out to be the thing that distinguishes
+    the two signals goish had conflated.
+
+One entry that WAS on this list was triaged wrong, and it is worth
+recording how. `wantsHttp10KeepAlive` was dismissed on the grounds that
+`request_keep_alive` is `!shouldClose(...)` and Go's `shouldClose` on
+HTTP/1.0 is `hasClose || !hasKeepAlive`, so its negation already means
+"the 1.0 client asked to keep the connection". That much is true. What
+it missed is that Go needs the request-side answer SEPARATELY from the
+server-side reuse decision: `writeHeader` sets the 1.0
+`Connection: keep-alive` header off `wants10KeepAlive` alone, ungated,
+while `closeAfterReply` is gated on `keepAlivesEnabled`. goish had one
+flag doing both jobs, so it could not produce Go's answer for a 1.0
+client talking to a server with keep-alives disabled.
+
+The lesson is that "goish computes the same predicate a different way"
+is not sufficient. The question is whether it computes the same NUMBER
+of predicates.
 
 Read and found NOT defects, which is the other half of the work:
 
@@ -201,12 +227,6 @@ Read and found NOT defects, which is the other half of the work:
     shared. goish's `slice` is a `Vec` and its `map` clones
     element-wise, and `URL`/`Userinfo` are by-value, so `derive(Clone)`
     already deep-copies. Redundant, not missing.
-  - `wantsHttp10KeepAlive`. goish computes the same predicate a
-    different way: `request_keep_alive` is `!shouldClose(...)`, and
-    Go's `shouldClose` on HTTP/1.0 is `hasClose || !hasKeepAlive`, so
-    its negation already IS "the 1.0 client asked to keep the
-    connection". The HTTP/1.0 keep-alive response path exists and
-    mirrors Go's.
   - `isH2Upgrade`. In Go it does two things, and both are about the
     HTTP/2 client preface: skip the missing-Host 400, and mark the
     connection unusable afterwards. goish speaks HTTP/1.x only, so the

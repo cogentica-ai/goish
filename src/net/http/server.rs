@@ -3649,10 +3649,20 @@ impl Server {
                 cr.startBackgroundRead(watch_pd);
             }
 
-            let keep_alive =
-                request_keep_alive(&mut req) && !self.__state.in_shutdown.load(Ordering::Acquire);
+            // Go consults doKeepAlives twice per request — writeHeader
+            // (server.go:1301) for the Connection header, conn.serve
+            // (server.go:2127) for whether to loop again. goish read
+            // the shutdown flag directly and never asked, so
+            // SetKeepAlivesEnabled(false) stored a value that NOTHING
+            // read: an operator draining a server got connections
+            // reused anyway, with no indication the setting had been
+            // ignored. doKeepAlives is `!disabled && !shuttingDown`,
+            // so it subsumes the check it replaces.
+            let keep_alive = request_keep_alive(&mut req) && self.doKeepAlives();
+            let wants10 = req.wantsHttp10KeepAlive();
             let w = response::__new_with_cnc(conn, cnc);
             w.__set_keep_alive(keep_alive);
+            w.__set_wants10(wants10);
             w.__set_proto11(req.ProtoAtLeast(1, 1));
             w.__set_error_log(self.ErrorLog.clone());
             // HEAD: handler writes are eaten by the response writer
