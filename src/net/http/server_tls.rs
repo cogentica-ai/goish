@@ -678,6 +678,39 @@ impl Server {
         key_file: string,
     ) -> Result<tls::Config, error> {
         let mut cfg = self.TLSConfig.clone().unwrap_or_default();
+        // Go: `config.NextProtos = adjustNextProtos(config.NextProtos,
+        // s.protocols())` (server.go:3519), immediately after the
+        // clone and before the cert logic — so both exits carry it.
+        //
+        // goish had adjustNextProtos ported and anchored and called
+        // from nowhere, and set NextProtos nowhere else, so its HTTPS
+        // server advertised NO ALPN. Measured: a client offering
+        // http/1.1 got negotiated="" where Go gives "http/1.1", and a
+        // client offering h2 first got the same. The function is what
+        // drops "h2" from the offer for an HTTP/1-only server rather
+        // than negotiating a protocol goish cannot speak.
+        //
+        // The protocol set passed in is `protocols()` with HTTP/2
+        // FORCED OFF, and that is a deliberate divergence from the
+        // literal port. `Server::protocols()` mirrors Go and defaults
+        // to HTTP1|HTTP2; feeding that straight in made goish
+        // advertise "h2" and, against a client offering h2 first,
+        // NEGOTIATE it — agreeing to speak a protocol it has no
+        // implementation of. The smoke caught exactly that:
+        // negotiated="h2" on a server that would then parse the h2
+        // preface with an HTTP/1 parser.
+        //
+        // Go's own nethttpomithttp2 build has this footgun — it stops
+        // registering the h2 handler but still advertises h2, so a
+        // client that picks it gets the connection closed. There is no
+        // reason to copy that. Advertising only what can be served
+        // leaves such a client with a working http/1.1 instead of a
+        // hangup, and it is what the reference in
+        // https_server_smoke pins (a Go server configured HTTP/1-only,
+        // which is what goish is).
+        let mut protos = self.protocols();
+        protos.SetHTTP2(false);
+        cfg.NextProtos = super::server::adjustNextProtos(cfg.NextProtos.clone(), protos);
         let config_has_cert = cfg.Certificates.Len() > 0;
         if !config_has_cert || cert_file.Len() > 0 || key_file.Len() > 0 {
             if cert_file.Len() == 0 || key_file.Len() == 0 {

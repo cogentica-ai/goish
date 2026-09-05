@@ -207,6 +207,13 @@ Fixed so far, one per finding read:
     the wire path) instead of against the current request's URL, and a
     malformed Location returned the 3xx as though it were the final
     response.
+  - `ServeTLS` did not call `adjustNextProtos`, and set `NextProtos`
+    nowhere else, so goish's HTTPS server advertised no ALPN at all
+    where Go negotiates `http/1.1`. Wiring it up naively then made
+    goish advertise — and negotiate — `h2`, which it cannot speak, so
+    the advertisement is built from `protocols()` with HTTP/2 forced
+    off. That is a deliberate divergence from the literal port and is
+    documented at the call site.
   - The serve loops did not call `doKeepAlives`, so
     `SetKeepAlivesEnabled(false)` set a flag nothing read, and
     `wantsHttp10KeepAlive` — which I had wrongly triaged as

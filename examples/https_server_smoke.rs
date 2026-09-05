@@ -149,6 +149,54 @@ fn tls_request(port: goish::int, req: &[u8], limit: usize) -> (goish::string, bo
     (goish::string::from_bytes(&out), eof)
 }
 
+/// `tls_request` with an ALPN list. Go's ServeTLS runs its config
+/// through `adjustNextProtos`, so an HTTP/1-only server answers
+/// "http/1.1" to any client that offers it — and filters "h2" out
+/// rather than negotiating a protocol it cannot speak.
+fn tls_request_alpn(
+    port: goish::int,
+    req: &[u8],
+    limit: usize,
+    protos: &[&'static str],
+) -> (goish::string, bool) {
+    let addr = fmt::Sprintf!("127.0.0.1:%d", port as i64);
+    let mut np = goish::slice::<goish::string>::new();
+    for p in protos.iter() {
+        np = goish::append!(np, string(*p));
+    }
+    let cfg = tls::Config {
+        InsecureSkipVerify: true,
+        ServerName: string("localhost"),
+        NextProtos: np,
+        ..Default::default()
+    };
+    let (mut c, e) = tls::Dial(string("tcp"), addr, &cfg);
+    if !e.IsNil() {
+        fmt::Printf!("   dial error: %v\n", e);
+        return (string(""), false);
+    }
+    let (_, we) = c.Write(goish::slice::<goish::byte>::__from_vec(req.to_vec()));
+    if !we.IsNil() {
+        let _ = c.Close();
+        return (string(""), false);
+    }
+    let mut out: Vec<u8> = Vec::new();
+    let mut buf = goish::make!([]goish::byte, 4096);
+    while out.len() < limit {
+        let (n, re) = c.Read(&mut buf);
+        if n > 0 {
+            for i in 0..n {
+                out.push(buf[i]);
+            }
+        }
+        if n <= 0 || !re.IsNil() {
+            break;
+        }
+    }
+    let _ = c.Close();
+    return (goish::string::from_bytes(&out), true);
+}
+
 #[goish::main]
 fn main() {
     goish::go!(stack(1024 * 1024), move || {
@@ -168,6 +216,13 @@ fn run() {
 
     // A handler that reports what it can see about the connection.
     let mux = http::ServeMux::new();
+    mux.HandleFunc("/alpn", |w, r| {
+        let body = match r.TLS.as_ref() {
+            None => string("tls=absent"),
+            Some(st) => fmt::Sprintf!("negotiated=%q", st.NegotiatedProtocol),
+        };
+        let _ = w.Write(goish::convert::bytes(body));
+    });
     mux.HandleFunc("/tlsinfo", |w, r| {
         let body = match r.TLS.as_ref() {
             None => string("tls=absent"),
@@ -237,6 +292,52 @@ fn run() {
     }
     // Let the accept loop park.
     time::Sleep(time::Duration(100 * 1_000_000));
+
+    // ── 0. ALPN: the server must offer http/1.1 ──
+    //
+    // Go's ServeTLS runs its TLS config through `adjustNextProtos`
+    // (server.go:3519) before the listener is wrapped. goish had that
+    // function ported and anchored and called from nowhere, and never
+    // set NextProtos at all, so its HTTPS server advertised no ALPN:
+    // every line below came back negotiated="" where Go negotiates
+    // http/1.1. A client that inspects ConnectionState, or a peer that
+    // requires an ALPN match, sees a different server.
+    //
+    // The h2 line is the one that matters, and it caught a second
+    // defect in the fix itself. `Server::protocols()` faithfully
+    // mirrors Go and defaults to HTTP1|HTTP2, so feeding it straight
+    // into adjustNextProtos made goish advertise "h2" and NEGOTIATE
+    // it — agreeing to speak a protocol it has no implementation of,
+    // then parsing the h2 preface with an HTTP/1 parser. This line
+    // read negotiated="h2" for one build. Advertising nothing was bad;
+    // advertising h2 was worse.
+    //
+    // The reference is a Go server configured HTTP/1-only, because
+    // that is what goish is. Go's default build serves h2 for real and
+    // its nethttpomithttp2 build advertises h2 and then hangs up on
+    // whoever picks it; neither is a behaviour to copy here.
+    {
+        let cases: [(&str, &[&'static str], &str); 3] = [
+            ("http/1.1 only", &["http/1.1"], "negotiated=\"http/1.1\""),
+            ("h2 then http/1.1", &["h2", "http/1.1"], "negotiated=\"http/1.1\""),
+            ("no ALPN offered", &[], "negotiated=\"\""),
+        ];
+        for (name, protos, want) in cases.iter() {
+            let (resp, _) = tls_request_alpn(
+                port,
+                b"GET /alpn HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                8192,
+                protos,
+            );
+            let s: &str = resp.as_ref();
+            if s.contains(*want) {
+                PASSED.fetch_add(1, Ordering::Relaxed);
+                fmt::Printf!("PASS: ALPN %s -> %s\n", string(*name), string(*want));
+            } else {
+                fail(fmt::Sprintf!("ALPN %s: want %s got %s", string(*name), string(*want), resp));
+            }
+        }
+    }
 
     // ── 1. Request.TLS is populated ──
     {
