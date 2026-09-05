@@ -1,5 +1,31 @@
 // os — Go's `os` package, ported.
 //
+// ─── What has been diffed against Go, 2026-09-05 ─────────────────────
+//
+// 61 of this file's exported functions carry no provenance anchor, so
+// no coverage, anchor or body-diff tier compares them to Go. A sample
+// was read by hand against os/file.go, os/file_unix.go and
+// os/file_posix.go. One defect, five confirmed:
+//
+//   FIXED  the FileMode -> syscall conversion dropped setuid, setgid
+//          and sticky. Four call sites shared the bug; `syscallMode`
+//          is now ported and all four use it. See the note there and
+//          examples/os_filemode_bits_smoke.rs.
+//
+//   clean  WriteFile opens O_WRONLY|O_CREATE|O_TRUNC and Create
+//          O_RDWR|O_CREATE|O_TRUNC, so neither leaves a tail of an
+//          older, longer file behind.
+//   clean  Readlink grows its buffer from 128 and returns only when
+//          `n < len`, so a long target is not silently truncated.
+//   clean  Remove tries unlink then rmdir and picks the error Go picks,
+//          ENOTDIR subtlety included.
+//   clean  Chown passes -1 through as "leave unchanged" rather than
+//          converting it to 0; verified against a running Go, where
+//          the no-op succeeds and chowning to root is refused.
+//
+// The rest of the 61 have NOT been read. This note records where the
+// sample stopped, not that the file is clear.
+//
 //   Go                                   goish
 //   ──────────────────────────────────   ──────────────────────────────────
 //   var Stdin, Stdout, Stderr *File      pub fn Stdin/Stdout/Stderr() -> File
