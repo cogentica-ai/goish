@@ -3326,3 +3326,7 @@ path = "examples/json_depth_limit_smoke.rs"
 [[example]]
 name = "regexp_backtrack_smoke"
 path = "examples/regexp_backtrack_smoke.rs"
+
+[[example]]
+name = "os_filemode_bits_smoke"
+path = "examples/os_filemode_bits_smoke.rs"

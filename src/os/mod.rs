@@ -446,7 +446,7 @@ pub fn OpenFile<N: Into<string>, M: Into<FileMode>>(
     let fd = syscall::Open(
         buf.as_ptr(),
         (flag as i32) | syscall::O_CLOEXEC,
-        perm.0 as i32,
+        syscallMode(perm) as i32,
     );
     if fd < 0 {
         // Go: return nil, &PathError{Op: "open", Path: name, Err: e}.
@@ -923,6 +923,41 @@ pub fn Chdir<N: Into<string>>(name: N) -> error {
 ///
 /// `mode: impl Into<FileMode>` so ports passing a bare integer
 /// literal (Go's untyped-int) flow through `From<i32>`/`From<u32>`.
+// go: sdk 1.25.5 os/file_posix.go:60-73 syscallMode
+/// Convert a `FileMode` to the bits a `chmod`/`open`/`mkdir` syscall
+/// wants.
+///
+/// The permission bits are the low nine and pass straight through. The
+/// other three do NOT: Go's `FileMode` keeps setuid at 1<<23, setgid at
+/// 1<<22 and sticky at 1<<20, while the kernel wants them at 0o4000,
+/// 0o2000 and 0o1000. Masking the FileMode with 0o7777 — which is what
+/// this file did, under a comment saying the conversion "collapses to
+/// perm bits only" — keeps nine meaningful bits and three meaningless
+/// ones, and silently drops all three special bits.
+///
+/// Measured before the fix: `Chmod(dir, 0o777|ModeSticky)` produced
+/// 0777 with no sticky bit and a nil error. On a shared directory that
+/// is the difference between "only the owner may delete their files"
+/// and "anyone may delete anyone's".
+fn syscallMode(i: FileMode) -> u32 {
+    let mut o: u32 = i.Perm().0;
+    if (i & ModeSetuid) != FileMode(0) {
+        o |= syscall::S_ISUID;
+    }
+    if (i & ModeSetgid) != FileMode(0) {
+        o |= syscall::S_ISGID;
+    }
+    if (i & ModeSticky) != FileMode(0) {
+        o |= syscall::S_ISVTX;
+    }
+    // Go: "No mapping for Go's ModeTemporary (plan9 only)."
+    return o;
+}
+
+// go: sdk 1.25.5 os/file.go:647-647 Chmod
+/// `os.Chmod(name, mode)` — change a named file's mode. The three
+/// special bits go through `syscallMode` above; passing the FileMode
+/// straight to the syscall drops them.
 pub fn Chmod<N: Into<string>, M: Into<FileMode>>(name: N, mode: M) -> error {
     let name: string = name.into();
     let mode: FileMode = mode.into();
@@ -931,8 +966,7 @@ pub fn Chmod<N: Into<string>, M: Into<FileMode>>(name: N, mode: M) -> error {
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     buf.extend_from_slice(bytes_of(&name));
     buf.push(0);
-    // syscallMode(mode) for slim FileMode collapses to perm bits only.
-    let rc = syscall::Chmod(buf.as_ptr(), mode.0 & 0o7777);
+    let rc = syscall::Chmod(buf.as_ptr(), syscallMode(mode));
     if rc < 0 {
         // Go: return &PathError{Op: "chmod", Path: name, Err: e}
         return pathErr("chmod", name, rc);
@@ -1279,7 +1313,8 @@ pub fn Mkdir<N: Into<string>, M: Into<FileMode>>(name: N, perm: M) -> error {
     let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
     buf.extend_from_slice(bytes_of(&name));
     buf.push(0);
-    let rc = syscall::Mkdir(buf.as_ptr(), perm.0);
+    // Go: syscall.Mkdir(longName, syscallMode(perm))
+    let rc = syscall::Mkdir(buf.as_ptr(), syscallMode(perm));
     if rc < 0 {
         // Go: &PathError{Op: "mkdir", Path: name, Err: e}. goish
         // returned a bare `errors.New("mkdir failed")`, which names
@@ -1798,7 +1833,7 @@ impl File {
             return self.wrapErr("chmod", ErrClosed.into());
         }
         let mode: FileMode = mode.into();
-        let rc = syscall::Fchmod(self.fd, mode.0 & 0o7777);
+        let rc = syscall::Fchmod(self.fd, syscallMode(mode));
         if rc < 0 {
             self.fdErr("chmod", rc)
         } else {
