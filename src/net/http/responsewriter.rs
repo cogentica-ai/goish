@@ -459,6 +459,22 @@ struct respInner {
     status: int,
     /// `true` once `WriteHeader` was called explicitly or implicitly.
     wrote_header: bool,
+    /// The header map as it stood when the head was COMMITTED.
+    ///
+    /// Go clones the handler's header at that moment
+    /// (`cw.header = w.handlerHeader.Clone()`, server.go:1216) and
+    /// writes the head from the clone, so a `Header().Set` after the
+    /// handler's first write is ignored. goish rendered the head from
+    /// the LIVE map at flush time, which honoured those late sets —
+    /// measured: a header set after the first Write reached the wire
+    /// where Go drops it.
+    ///
+    /// The visible cost was trailers. A handler that announces
+    /// `Trailer: X-Sum` and sets X-Sum after writing the body, without
+    /// an explicit Flush, had the value emitted BOTH in the head and
+    /// after the last chunk. `finalTrailers` still reads the live map,
+    /// which is what Go does too, so the trailer half stays correct.
+    committed: Option<Header>,
     /// `true` once `flush` has emitted bytes onto the wire.
     flushed: bool,
     /// Buffered body. In streaming mode it only holds bytes written
@@ -579,6 +595,7 @@ impl response {
                 conn,
                 status: 200,
                 wrote_header: false,
+                committed: None,
                 flushed: false,
                 body: Vec::new(),
                 chunked: false,
@@ -814,6 +831,9 @@ impl response {
         let mut g = self.inner.Lock();
         if !g.wrote_header {
             g.wrote_header = true;
+            if g.committed.is_none() {
+                g.committed = Some(self.header.Lock().Clone());
+            }
         }
         if g.chunked {
             // Already streaming — nothing to flush at the writer level.
@@ -842,7 +862,16 @@ impl response {
         // Build the head: set Transfer-Encoding, clear any user-set
         // Content-Length (mutually exclusive per RFC 7230 §3.3.2).
         let head = {
-            let mut h = self.header.Lock();
+            // The COMMITTED header, as in the buffered path — see
+            // respInner's `committed`. The chunked path needs it too:
+            // a handler that announces a trailer and sets its value
+            // after writing the body, with no explicit Flush, reaches
+            // HERE with the value already in the live map, and emitted
+            // it in the head as well as after the last chunk.
+            let mut h: Header = match &g.committed {
+                Some(c) => c.clone(),
+                None => self.header.Lock().Clone(),
+            };
             // Before the auto `chunked` below: Go's hasTE guard tests a
             // HANDLER-set Transfer-Encoding, and a flushed response is
             // still sniffed.
@@ -1094,7 +1123,13 @@ impl response {
 
         // Buffered mode: emit Content-Length derived from buffered body.
         let buf = {
-            let mut h = self.header.Lock();
+            // The COMMITTED header, not the live one — see respInner's
+            // `committed`. Falls back to the live map for a response
+            // that never wrote anything.
+            let mut h: Header = match &g.committed {
+                Some(c) => c.clone(),
+                None => self.header.Lock().Clone(),
+            };
             // HEAD still advertises the GET-equivalent length; 1xx/
             // 204/304 must not carry an auto Content-Length at all
             // (Go omits it for bodyless statuses, server.go:1533).
@@ -1259,6 +1294,9 @@ impl ResponseWriter for response {
         let mut g = self.inner.Lock();
         if !g.wrote_header {
             g.wrote_header = true;
+            if g.committed.is_none() {
+                g.committed = Some(self.header.Lock().Clone());
+            }
         }
         // `(*response).write` (server.go:1686): a status that forbids
         // a body rejects handler writes with ErrBodyNotAllowed.
@@ -1331,6 +1369,12 @@ impl ResponseWriter for response {
         }
         g.wrote_header = true;
         g.status = statusCode;
+        // Go clones the handler header at WriteHeader as well as at the
+        // implicit one on first Write (server.go:1216), so a Set after
+        // an explicit WriteHeader is ignored just the same.
+        if g.committed.is_none() {
+            g.committed = Some(self.header.Lock().Clone());
+        }
     }
 
     // go: none — goish-only interface-registry hook emitted for cast! support.

@@ -477,6 +477,32 @@ keep. Wiring readLoop up is the Go-faithful answer and is a large
 change; deleting it is the honest alternative if the inline path is the
 one being maintained. Leaving both is the option that guarantees drift.
 
+## 2i-fixed. The response head had no "headers are frozen" moment
+
+Recorded here because sniff_server_ref_smoke called this "the
+eager-vs-deferred difference behind the other structural gaps in this
+port" and named the fix: goish's writer had no moment at which the
+header map stopped mattering.
+
+Go clones the handler's header when the head is committed
+(`cw.header = w.handlerHeader.Clone()`), so a `Header().Set` after the
+handler's first write is ignored. goish rendered the head from the LIVE
+map at flush time and honoured those late sets. Measured two ways:
+
+  a plain header set after the first Write reached the wire; Go drops it
+  a trailer announced and set without an explicit Flush was emitted
+    BOTH in the head and after the last chunk; Go emits it once, as a
+    trailer
+
+`respInner.committed` is that moment now — snapshot on WriteHeader, on
+the implicit one at the first Write, and on the promotion to chunked.
+`finalTrailers` still reads the LIVE map, which is what Go does, so the
+trailer half stays correct.
+
+This closed a gap the tree had already identified and pinned to goish's
+answer: sniff_server_ref_smoke's `ct-after-write` row now carries Go's
+line rather than a documented divergence.
+
 ## 2i. Response header ORDER differs from Go
 
 Found while diffing multipart range responses byte for byte. goish

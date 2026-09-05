@@ -3442,3 +3442,7 @@ path = "examples/http_head_framing_smoke.rs"
 [[example]]
 name = "http_bodyless_status_smoke"
 path = "examples/http_bodyless_status_smoke.rs"
+
+[[example]]
+name = "http_trailer_ref_smoke"
+path = "examples/http_trailer_ref_smoke.rs"
