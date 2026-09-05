@@ -898,3 +898,48 @@ plus the `Transport` field. The open question that should be settled
 with it: whether `NewSingleHostReverseProxy` should return a
 `ReverseProxy` as Go's does, which would retire `reverseProxyHandler`
 but changes an exported signature every existing caller uses.
+
+### 2m addendum: why this is not just assembly
+
+Attempting the port turned up a second, harder problem. `copyResponse`
+— the method that gives `FlushInterval` its meaning — takes
+
+    dst: Arc<dyn ResponseWriter + Send + Sync + 'static>
+
+but `Handler::ServeHTTP` receives
+
+    w: &(dyn ResponseWriter + Send + Sync + 'static)
+
+and there is no way from the second to the first. The server builds its
+writer as a stack local (`let w = response::__new_with_cnc(conn, cnc)`,
+server.go's serve loop) and passes `&w`; nothing owns it in an `Arc`.
+
+The `Arc` is not incidental. `maxLatencyWriter` arms its flush through
+`time::AfterFunc`, whose closure must be `'static`, so the writer has
+to be shared-owned rather than borrowed. `copyResponse` is therefore
+not merely uncalled — it is UNCALLABLE from the one place Go calls it,
+and `http_maxlatency_smoke` passes only because it constructs an
+`Arc::new(counting)` writer of its own.
+
+That is why the slim `reverseProxyHandler` flushes after every write
+instead: it is the only thing a `&dyn` writer can do. Its comment says
+so ("Go gets the same effect via ReverseProxy.FlushInterval / the
+periodicFlusher") without noting that the Go route is closed here.
+
+Three ways out, none of them local:
+
+  1. `Handler::ServeHTTP` takes an `Arc<dyn ResponseWriter>`. Matches
+     what the proxy needs; changes the signature every handler in the
+     tree implements.
+  2. The serve loop allocates its `response` into an `Arc` and hands
+     out a clone. Contained to the server, costs an allocation per
+     request, and needs the same change in `server_tls.rs`, which
+     builds its own.
+  3. Restructure `maxLatencyWriter` so the timer does not outlive the
+     call and can borrow. Closest to Go, whose `rw` is an interface
+     value copied freely, but needs a cancellation story `AfterFunc`
+     does not give.
+
+This belongs with the §0 decisions rather than in a port commit: it is
+the same class as "shareable conn for httptrace", and probably the
+same answer.
