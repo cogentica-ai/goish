@@ -288,6 +288,19 @@ impl ResponseWriter for tlsResponse {
     }
 
     fn WriteHeader(&self, statusCode: int) {
+        {
+            let g = self.inner.Lock();
+            if g.wrote_header {
+                return;
+            }
+        }
+        // Go has ONE `response` type serving both http and https, so
+        // its checkWriteHeaderCode (server.go:1195) covers TLS too.
+        // goish's HTTPS writer is a separate type and needs the check
+        // spelled out, or an invalid code reaches the wire over TLS
+        // while the plain path panics — the same split that let the
+        // header-order fix land on one path and not the other.
+        super::server::checkWriteHeaderCode(statusCode);
         let mut g = self.inner.Lock();
         if g.wrote_header {
             return;

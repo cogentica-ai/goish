@@ -1369,6 +1369,25 @@ impl ResponseWriter for response {
             ));
             return;
         }
+        // Go: checkWriteHeaderCode(code) (server.go:1195), AFTER the
+        // hijacked and wroteHeader guards — so a superfluous
+        // WriteHeader with a bad code logs rather than panics, exactly
+        // as Go does.
+        //
+        // This was ported and anchored and called only from
+        // httptest's recorder, so the real server put whatever it was
+        // handed on the wire. Measured against Go: WriteHeader(-1)
+        // emitted the status line `HTTP/1.1 00-1 status code -1`,
+        // which is not merely a wrong code but a syntactically invalid
+        // one; 42 emitted `042`, 1000 emitted a four-digit field. Go
+        // panics for all of them, deliberately — "we'll consistently
+        // panic instead and help people find their bugs early".
+        drop(g);
+        super::server::checkWriteHeaderCode(statusCode);
+        let mut g = self.inner.Lock();
+        if g.wrote_header {
+            return;
+        }
         g.wrote_header = true;
         g.status = statusCode;
         // Go clones the handler header at WriteHeader as well as at the
