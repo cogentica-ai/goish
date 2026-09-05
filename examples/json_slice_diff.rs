@@ -4,6 +4,9 @@
 #![no_std]
 #![no_main]
 
+extern crate alloc;
+use alloc::boxed::Box;
+
 use goish::encoding::json::{jsontext, v2 as json};
 use goish::goslice::slice;
 use goish::gostring::string;
@@ -31,6 +34,7 @@ fn check<T: json::UnmarshalerFrom + json::MarshalerTo>(line: &str, input: &str, 
 #[goish::main]
 fn main() {
     let mut count = 0;
+    let mut boxed = 0;
     for line in include_str!("jsonslice_ref.txt").lines() {
         let mut fields = line.split('|');
         let label = fields.next().unwrap();
@@ -50,9 +54,26 @@ fn main() {
             "record-slice" => check(line, input, ok, expected, depth, goish::slice!([]Record{Record { Count: 91, Other: 92 }})),
             _ => syscall::Exit(1),
         }
+        // The same Go pointer oracle also applies to an owned recursive
+        // pointee behind Box: decoding must not replace or clone that pointee.
+        match label {
+            "p-nil" => check(line, input, ok, expected, depth, None::<Box<slice<int>>>),
+            "p-old" => check(line, input, ok, expected, depth, Some(Box::new(goish::slice!([]int{91,92,93})))),
+            "record-nil" => check(line, input, ok, expected, depth, None::<Box<Record>>),
+            "record-old" => check(line, input, ok, expected, depth, Some(Box::new(Record { Count: 91, Other: 92 }))),
+            _ => { count += 1; continue; }
+        }
+        boxed += 1;
         count += 1;
     }
-    if count != 1731 { syscall::Exit(1); }
-    let msg = b"JSON_SLICE_OK 1731 real-Go rows: status, partial state, decoder depth\n";
+    if count != 1731 || boxed != 862 { syscall::Exit(1); }
+    let mut value = Some(Box::new(Record { Count: 91, Other: 92 }));
+    let address = &**value.as_ref().unwrap() as *const Record;
+    let err = json::Unmarshal(br#"{"Count":1,"Other":true}"#, &mut value, []);
+    if err == nil || &**value.as_ref().unwrap() as *const Record != address
+        || value.as_ref().unwrap().Count != 1 || value.as_ref().unwrap().Other != 92 {
+        syscall::Exit(1);
+    }
+    let msg = b"JSON_SLICE_OK 1731 real-Go rows + 862 boxed pointers: status, partial state, decoder depth; pointee identity retained\n";
     syscall::Write(syscall::STDOUT, msg.as_ptr(), msg.len());
 }

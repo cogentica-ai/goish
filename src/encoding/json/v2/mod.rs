@@ -38,6 +38,8 @@
 //     unused capacity/backing-array aliases are not exposed by this codec.
 //   - Option is the exclusive nullable-pointer representation: allocate before
 //     decoding, merge into existing pointees, and retain partial mutations.
+//     Box provides the owned non-null indirection for recursive decode trees;
+//     Option<Box<T>> uses the same nullable-pointer codec without copying T.
 
 #![allow(non_snake_case)]
 
@@ -747,6 +749,23 @@ impl<T: UnmarshalerFrom + Default> UnmarshalerFrom for Option<T> {
         // Go installs a newly allocated pointee before invoking its decoder,
         // and reuses a non-nil pointee (arshal_default.go:1669-1674).
         return self.get_or_insert_with(T::default).UnmarshalJSONFrom(dec);
+    }
+}
+
+// Go: encoding/json/v2/arshal_default.go:1624 — func makePointerArshaler(t reflect.Type) *arshaler
+// DEVIATION: Box owns a non-null pointee; Option<Box<T>> supplies Go's nil slot.
+impl<T: MarshalerTo + ?Sized> MarshalerTo for alloc::boxed::Box<T> {
+    // goishlint:ignore GOISH014 — dereference dispatch from makePointerArshaler's marshal closure, anchored on impl.
+    fn MarshalJSONTo(&self, enc: &mut jsontext::Encoder) -> error {
+        return (**self).MarshalJSONTo(enc);
+    }
+}
+
+// Go: encoding/json/v2/arshal_default.go:1672-1674 — decode the existing pointee in place.
+impl<T: UnmarshalerFrom + ?Sized> UnmarshalerFrom for alloc::boxed::Box<T> {
+    // goishlint:ignore GOISH014 — dereference dispatch from makePointerArshaler's unmarshal closure, anchored on impl.
+    fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
+        return (**self).UnmarshalJSONFrom(dec);
     }
 }
 
