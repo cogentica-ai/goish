@@ -4,30 +4,26 @@
 // deliberately absent, for two different reasons.
 //
 // `appendFormatRFC3339` and `parseRFC3339` are hand-rolled fast paths
-// for the one layout the standard library sees most; they produce the
+// for the one layout the standard library sees most. They produce the
 // same bytes as the general `appendFormat`/`Parse` walk, which goish
-// has. Porting them would add a second formatter to keep in sync for
-// no observable behaviour.
+// has, so porting them would add a second formatter to keep in sync
+// for no observable behaviour.
 //
-// `parseStrictRFC3339` is different: it REJECTS inputs Go's own Parse
-// accepts, so it is real behaviour, and it is deferred rather than
-// dismissed. goish's UnmarshalText/UnmarshalJSON still go through
-// Parse, which closes the round trip against what the marshallers
-// emit but is more permissive than Go on input. That needs its own
-// measurement.
+// `parseStrictRFC3339` reads like real behaviour — it appears to
+// reject inputs Go's own Parse accepts: a one-digit hour, a comma
+// before the sub-second, a zone hour past 23, a zone minute past 59.
+// Every one of those checks sits behind `case true: return t, nil`,
+// disabled pending go.dev/issue/54580. Go's live contract for
+// UnmarshalText/UnmarshalJSON is therefore plain `Parse(RFC3339, …)`,
+// which is what goish already does; porting the disabled checks would
+// DIVERGE from Go rather than match it.
 //
-// Deviation: Go's `appendFormatRFC3339` and `parseRFC3339` in this file
-// are hand-rolled fast paths for the layout the standard library sees
-// most, producing the same bytes as the general
-// `appendFormat`/`Parse` walk. goish has the general walk and no
-// measured need for the fast path, so only the part with OBSERVABLE
-// behaviour is ported: `appendStrictRFC3339`, whose validation is not
-// an optimisation and has no equivalent anywhere else.
+// That is measured, not assumed: time_rfc3339_unmarshal_ref_smoke pins
+// all 21 rows against Go, the four inputs named above among them.
 //
-// `parseStrictRFC3339` is not ported yet. goish's Parse already accepts
-// exactly the fractional-second forms this file's marshallers emit, so
-// the round trip closes; what is missing is Go's REJECTION of inputs
-// its own Parse would accept, which is its own measurement.
+// What IS ported is the half with observable behaviour —
+// `appendStrictRFC3339`, whose validation is live and has no
+// equivalent elsewhere in the tree.
 
 #![allow(non_snake_case)]
 
