@@ -3438,3 +3438,7 @@ path = "examples/http_jar_cross_host_smoke.rs"
 [[example]]
 name = "http_head_framing_smoke"
 path = "examples/http_head_framing_smoke.rs"
+
+[[example]]
+name = "http_bodyless_status_smoke"
+path = "examples/http_bodyless_status_smoke.rs"
