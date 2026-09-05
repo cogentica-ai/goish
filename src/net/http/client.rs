@@ -1097,11 +1097,17 @@ impl Default for Transport {
     }
 }
 
-/// `http.ProxyFromEnvironment` — Go's default proxy resolver. v1
-/// returns a no-op closure (env-var inspection deferred). Goish ports
-/// reference this as `http::ProxyFromEnvironment` (a function call is
-/// what produces the resolver value in goish; Go callers assigning the
-/// bare identifier go through `From<>` under the hood).
+/// `http.ProxyFromEnvironment` — Go's default proxy resolver. It reads
+/// HTTP_PROXY / HTTPS_PROXY / NO_PROXY (and the lowercase spellings)
+/// through the httpproxy port; http_proxyenv_smoke pins the matching
+/// rules case by case against Go. Goish ports reference this as
+/// `http::ProxyFromEnvironment` (a function call is what produces the
+/// resolver value in goish; Go callers assigning the bare identifier
+/// go through `From<>` under the hood).
+///
+/// The line above used to say "v1 returns a no-op closure (env-var
+/// inspection deferred)", which stopped being true and then read as a
+/// reason not to call it.
 pub fn ProxyFromEnvironment() -> ProxyResolver {
     // Mirrors Go's `return envProxyFunc()(req.URL)` — transport.go
     // lines 499-501. The
@@ -1880,7 +1886,14 @@ pub struct Client {
 impl Default for Client {
     fn default() -> Self {
         Client {
-            Transport: Arc::new(Transport::default()) as Arc<dyn RoundTripper>,
+            // Go's `DefaultClient = &Client{}` has a nil Transport and
+            // `Client.transport()` falls back to DefaultTransport.
+            // goish's field is non-optional, so the fallback is made
+            // here — but it has to BE DefaultTransport, not a bare
+            // zero-valued one. It was the latter, which is how
+            // `http::Get` came to ignore HTTP_PROXY and to dial with
+            // no timeout at all. See transport::DefaultTransport.
+            Transport: super::transport::DefaultTransport() as Arc<dyn RoundTripper>,
             Jar: None,
             CheckRedirect: None,
             Timeout: time::Duration(0),

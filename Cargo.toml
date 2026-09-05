@@ -3342,3 +3342,7 @@ path = "examples/os_getwd_pwd_smoke.rs"
 [[example]]
 name = "http_newrequest_host_smoke"
 path = "examples/http_newrequest_host_smoke.rs"
+
+[[example]]
+name = "http_default_proxy_smoke"
+path = "examples/http_default_proxy_smoke.rs"

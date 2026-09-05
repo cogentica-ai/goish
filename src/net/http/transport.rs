@@ -2819,3 +2819,70 @@ pub(crate) fn newReadWriteCloserBody(src: super::client::ConnSrc) -> super::clie
 fn __unused() -> slice<string> {
     return slice::<string>::new();
 }
+
+// go: sdk 1.25.5 net/http/transport.go:45-56 DefaultTransport
+/// Go: "DefaultTransport is the default implementation of Transport
+/// and is used by DefaultClient. It establishes network connections as
+/// needed and caches them for reuse by subsequent calls. It uses HTTP
+/// proxies as directed by the environment variables HTTP_PROXY,
+/// HTTPS_PROXY and NO_PROXY (or the lowercase versions thereof)."
+///
+/// That last sentence is why this exists. goish had no DefaultTransport
+/// at all: `Client::default()` built a bare `Transport::default()`,
+/// which is all zeros, so `http::Get(url)` IGNORED HTTP_PROXY. The
+/// resolver was ported and correct — `ProxyFromEnvironment` and its
+/// NO_PROXY matching are pinned case by case in http_proxyenv_smoke —
+/// and the default client never called it.
+///
+/// Where a proxy is the egress control point, going around it is a
+/// bypass the caller cannot see: the request just succeeds.
+/// proxy_dial_smoke already guarded that for an explicitly configured
+/// `Transport.Proxy`, which is the case a user has thought about. The
+/// unguarded one was the default, which is the case nobody configures
+/// because Go configures it for them.
+///
+/// The four timeouts came with it. Every zero means "no limit" in
+/// goish's own code (`if t.TLSHandshakeTimeout.0 > 0`), so the port was
+/// strictly more permissive than Go on all of them.
+///
+/// NOT ported, and this is a real gap rather than a simplification:
+/// Go's `DialContext: defaultTransportDialContext(&net.Dialer{Timeout:
+/// 30s, KeepAlive: 30s})`. So `http::Get` to a black-holed address
+/// still waits forever where Go gives up after 30 seconds.
+///
+/// Setting it was tried and reverted, because in goish a Transport
+/// with a `DialContext` takes the generic hook path instead of the
+/// native one, and that path is LESS capable: it loses ctx
+/// cancellation of an in-flight dial and handshake (the conn arrives
+/// without a PollDesc, so the disconnect watch stays disarmed) and it
+/// loses the full-duplex carrier an HTTP upgrade needs. Measured:
+/// http_complex_api's "ctx cancel interrupts in-flight request" and
+/// "ctx cancel interrupts TLS handshake" both broke, and
+/// http_proxy_upgrade_smoke's tunnel stopped carrying bytes.
+///
+/// Trading working cancellation for a dial timeout is the wrong trade,
+/// so the timeout waits on the hook path learning to keep the PollDesc.
+/// `Transport.Timeout` is not a substitute — it is goish's
+/// whole-request bound, not Go's dial-only one.
+///
+/// Also not ported: `ForceAttemptHTTP2: true`. goish speaks HTTP/1.x,
+/// so there is no h2 to attempt.
+///
+/// Shared, like Go's package-level var: one connection pool behind
+/// every `Client::default()`, not a fresh pool per client.
+pub fn DefaultTransport() -> alloc::sync::Arc<super::client::Transport> {
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<alloc::sync::Arc<super::client::Transport>>> =
+        SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        let mut t = super::client::Transport::default();
+        t.Proxy = Some(super::client::ProxyFromEnvironment());
+        t.MaxIdleConns = 100;
+        t.IdleConnTimeout = crate::time::Second * 90;
+        t.TLSHandshakeTimeout = crate::time::Second * 10;
+        t.ExpectContinueTimeout = crate::time::Second * 1;
+        *g = Some(alloc::sync::Arc::new(t));
+    }
+    return g.as_ref().unwrap().clone();
+}

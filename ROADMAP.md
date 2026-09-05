@@ -272,6 +272,33 @@ goish should be making too. Run:
     scripts/dead_port_check.py          # the ranked list
     scripts/dead_port_check.py -v       # including the quiet 227
 
+## 2g. Client.Timeout does not bound a dial that never completes
+
+Found while checking that http_default_proxy_smoke fails without its
+fix. With the fix reverted the example does not fail, it HANGS, and
+the harness kills it at the e2e timeout — while `c.Timeout` is set to
+three seconds.
+
+The request is a GET to 192.0.2.1 (TEST-NET-1, never routed), so the
+connect syscall never completes and never errors. Go's `Client.Timeout`
+covers "the time limit for requests made by this Client... including
+connection time"; goish's does not reach a dial that is stuck.
+
+Two things follow, and they compound:
+
+  - `DefaultTransport` has no `DialContext`, so there is no 30-second
+    dial timeout (see the note on that function — setting the hook
+    costs ctx cancellation, so it is not a one-line fix); and
+  - `Client.Timeout` does not rescue the caller from that.
+
+Together they mean a goish client can wait forever on an address that
+black-holes packets, with no configuration available to prevent it.
+That is the shape of an outage rather than an error.
+
+Not yet diagnosed: whether the deadline is never armed on the dialling
+socket, or armed and not observed. `effective_deadline` is computed and
+`__set_deadline` exists, so the machinery is there.
+
 ## 3. Gaps other packages will hit next
 
 Re-measured 2026-09-04; four of the five entries this section used to
