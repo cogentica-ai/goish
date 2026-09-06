@@ -2430,16 +2430,6 @@ pub(crate) fn send(
 }
 
 impl Client {
-    // go: sdk 1.25.5 net/http/client.go:586-588 Client.Do
-    //
-    /// `(*Client).Do(req)` — execute the request, following up to 10
-    /// redirects on 301/302/303/307/308. Mirrors client.go:565.
-    ///
-    /// `Client.Timeout` bounds the entire exchange (all redirect hops
-    /// included) — implemented the way Go's `setRequestCancel`
-    /// (client.go:394) does it: the request is re-parented under
-    /// `context.WithTimeout`, and the transport folds the context
-    /// deadline into its connection deadlines.
     // go: sdk 1.25.5 net/http/client.go:192-197 Client.deadline
     /// Go: the absolute deadline for the whole request, or the zero
     /// Time when `Timeout` is unset.
@@ -2472,6 +2462,21 @@ impl Client {
         }
     }
 
+    // go: sdk 1.25.5 net/http/client.go:586-588 Client.Do
+    /// `(*Client).Do(req)` — execute the request, following up to 10
+    /// redirects on 301/302/303/307/308.
+    ///
+    /// `Client.Timeout` bounds the entire exchange (all redirect hops
+    /// included) — implemented the way Go's `setRequestCancel` does it:
+    /// the request is re-parented under `context.WithTimeout`, and the
+    /// transport folds the context deadline into its connection
+    /// deadlines.
+    ///
+    /// This anchor sat above `deadline` until 2026-09-06, six methods
+    /// away from the function it names. anchor_check passed it — the
+    /// RANGE was right, and that check reads the range, not what the
+    /// anchor is attached to — so the client's main entry point had no
+    /// provenance of its own and nothing said so.
     pub fn Do(&self, req: &Request) -> (Response, error) {
         let mut current = req.clone();
         // Go: deadline := c.deadline() — one wall-clock bound for the

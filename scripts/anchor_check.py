@@ -26,6 +26,19 @@ Checks per anchor:
                brace. One line short is the house convention (anchor
                the body, not the brace). Bodyless decls
                (//go:linkname stubs) end on their own line.
+  UNATTACHED   the anchor is not directly above a declaration whose name
+               matches Symbol. This script's other checks all read the
+               GO side — they confirm the range holds that declaration —
+               and none of them reads what the anchor sits on in the
+               RUST file. So an anchor stranded above an unrelated
+               function passes every one of them. `Client.Do`'s anchor
+               sat six methods away, above `Client.deadline`, and
+               net/http's client entry point had no provenance while
+               this script reported 1059/1059 ok. Counted and listed,
+               NOT a failure: 124 of 6333 do not match, and most are
+               deliberate Rust renames (`hexDigit` -> `HEX_DIGIT`,
+               `_P` -> `PUNCT`, `HardwareAddr.String` ->
+               `HardwareAddrString`). Read the list; do not gate on it.
   BARE         Symbol names a method without its receiver, so it cannot
                be told apart from same-named methods on other types
                (reported by --strict only; 80% of the tree is like this)
@@ -145,6 +158,32 @@ def go_src(gofile):
             if os.path.exists(fp) else None
         )
     return _src_cache[gofile]
+
+
+ITEM = re.compile(r"\b(?:fn|struct|trait|enum|type|const|static)\s+(?:r#)?(\w+)")
+
+
+def attached(lines, idx, sym):
+    """Does the declaration under this anchor carry the name it claims?
+
+    Walks past the rest of the comment block and any attributes to the
+    first real item, then compares its name with the anchor's symbol
+    (last component). A rename is allowed in the two shapes this tree
+    sanctions: snake_case, and a case-only difference.
+    """
+    base = re.sub(r"^\(\*?(\w+)\)$", r"\1", sym).split(".")[-1]
+    j = idx + 1
+    while j < len(lines) and (lines[j].lstrip().startswith(("//", "#["))
+                              or not lines[j].strip()):
+        j += 1
+    if j >= len(lines):
+        return True
+    m = ITEM.search(lines[j])
+    if not m:
+        return True
+    got = m.group(1)
+    snake = re.sub(r"(?<!^)(?=[A-Z])", "_", base).lower()
+    return got == base or got == snake or got.lower() == base.lower()
 
 
 def decl_hits(gofile, sym, free_only=False):
@@ -334,6 +373,7 @@ def main():
 
     stats = collections.Counter()
     problems = []
+    unattached = []
 
     for root in roots:
         for dp, _, names in os.walk(root):
@@ -389,6 +429,13 @@ def main():
                         continue
                     if bare:
                         stats["BARE"] += 1
+                    if not attached(lines, idx, sym):
+                        # Counted and listed, never a failure — same
+                        # footing as UNVERIFIABLE. Most of these are
+                        # deliberate Rust renames, so gating would mean
+                        # 122 false failures.
+                        stats["UNATTACHED"] += 1
+                        unattached.append((p, idx + 1, sym))
                     if not hits:
                         stats["NOT_FOUND"] += 1
                         problems.append(("NOT_FOUND", p, idx + 1, sym, gofile, a, b, None))
@@ -438,9 +485,19 @@ def main():
 
     print(f"anchor_check: {stats['total']} anchors under {', '.join(roots)}")
     for k in ("ok", "UNVERIFIABLE", "RANGE_WRONG", "RANGE_FAT", "END_SHORT", "NOT_FOUND",
-              "MISSING_FILE", "BARE", "fixed", "UNFIXABLE"):
+              "MISSING_FILE", "BARE", "UNATTACHED", "fixed", "UNFIXABLE"):
         if stats[k]:
             print(f"  {k:12s} {stats[k]}")
+    if unattached:
+        print(f"\n  UNATTACHED — anchor not directly above a matching "
+              f"declaration ({len(unattached)}). Most are deliberate Rust "
+              f"renames; a few are anchors stranded by a function inserted "
+              f"above the one they name, which every other check here "
+              f"passes because they all read the GO side:")
+        for pth, ln, sym in unattached[:20]:
+            print(f"    {pth}:{ln}  {sym}")
+        if len(unattached) > 20:
+            print(f"    ... and {len(unattached) - 20} more")
 
     hard = [x for x in problems if x[0] != "END_SHORT"]
     if problems and not fix:
