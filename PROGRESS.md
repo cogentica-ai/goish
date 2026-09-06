@@ -6,29 +6,39 @@ than merely counted. Numbers are regenerated with
 the `compress` row refreshed 2026-08-17 and the `hash` and `encoding`
 rows 2026-08-30.
 
-> **Subtree table re-measured 2026-09-05.** The per-package sections
-> further down were NOT regenerated and still date from 2026-08-15, so
-> read a number in those as a floor. The whole-tree total in the
-> heading below is also from that refresh and has not been recomputed —
-> it would need a pass over every subtree, and the ones measured here
-> have all moved up, so treat it as a floor too.
+> **Whole-tree total recomputed 2026-09-06** — the pass over every
+> subtree this note used to say was needed. The per-package SECTIONS
+> further down were still not regenerated and date from 2026-08-15, so
+> read a number in those as a floor.
 
-## The whole tree — 4452 / 11061 functions (40.3%)
+## The whole tree — 5102 / 11142 functions (45.8%)
 
-Across the 169 packages of the Go 1.25.5 standard library that have a
-goish port: **89 are at 100%**. The provenance-line counts were
-re-counted on 2026-09-05: **9602 `// go:` lines**, **6299** of them
-`sdk` anchors citing the exact Go file and line range — up from 5477
-and 3484 at the last refresh.
+Across the 165 packages of the Go 1.25.5 standard library that have a
+goish port: **110 are at 100%**. Was 4452 / 11061 (40.3%) across 169
+packages with 89 at 100% on 2026-08-15.
 
-The package count and the 100% figure are from 2026-08-15 and were not
-recomputed.
+**Two denominators, and they are not interchangeable.** The figure
+above counts only packages that HAVE a port, which is what the older
+number counted and the only basis on which the two can be compared.
+Counting every package `port_coverage.py` can see, ported or not, the
+same 5102 functions are **5102 / 14699 = 34.7% across 314 packages** —
+a lower percentage from a larger denominator, not a regression. Quoting
+one against the other would say coverage fell in a month when it rose.
+
+Reproduce both rather than citing these: run
+`scripts/port_coverage.py <subtree> --json` over the entries in `src/`
+and sum, filtering on `ported > 0` for the first figure and not for the
+second.
 
 The anchors are not spread evenly, and that is the single most
 important thing on this page. `crypto/`, `net/` and `testing/` together
-held **92%** of them at the last refresh; on 2026-09-05 they hold
-**58%** (3627 of 6299). The concentration has broken up because the
+held **92%** of them at the last refresh; on 2026-09-06 they hold
+**58%** (3638 of 6284). The concentration has broken up because the
 rest of the tree gained anchors, not because those three lost any.
+
+The ratio is the durable fact; the two counts drift with every commit
+that touches an anchored file, so re-count them rather than quoting
+these — `grep -rc "// go: sdk" src/` does it.
 
 Coverage says a name exists; an anchor is what lets goishlint diff the
 port against the Go file it came from. The corollary is the one
