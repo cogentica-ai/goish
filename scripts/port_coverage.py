@@ -468,6 +468,58 @@ def anchored_decl_keys(src):
     return {re.sub(r"^\(\*?(\w+)\)", r"\1", s) for s in syms}
 
 
+# An anchor line, with its symbol, for the attachment test below.
+ANCHOR_LINE_SYM = re.compile(
+    r"//\s*go:\s*sdk\s+\S+\s+\S+\.go:\d+(?:-\d+)?\s+(\S+)")
+# The first real item under an anchor — same shape anchor_check.py uses.
+RS_ITEM = re.compile(r"\b(?:fn|struct|trait|enum|type|const|static)\s+(?:r#)?(\w+)")
+
+
+def anchored_attached_keys(src):
+    """`Recv.Method` keys whose anchor sits directly above a declaration.
+
+    The exact-name and snake_case rules above credit an anchored method
+    only when a fn spelled that way exists. Some renames cannot be
+    derived from the Go name at all, and they are not sloppiness — Rust
+    refuses the original: `archive/tar`'s `Format.String` is
+    `impl Display::fmt`, because Go's String() satisfies fmt.Stringer
+    structurally and the Rust equivalent "cannot be called String"; its
+    `headerGNU.accessTime` is `gnu_accessTime`, because Go reaches those
+    views by casting *block to *headerV7 and Rust will not reinterpret
+    one array type as another.
+
+    Attachment is the evidence, and it is checked twice elsewhere before
+    it reaches here. `anchor_check.py` re-opens the anchor's line range
+    against the Go tree and confirms it names that declaration, and
+    `make lint` gates on it. GOISH014 then requires the Rust item under
+    the anchor to carry the same name, a snake_case fold of it, or an
+    explicit `goishlint:ignore GOISH014 - <reason>` — so a rename is
+    never silent. What is NOT sound is guessing from the name: a rule
+    crediting any fn whose name merely starts with the method would let
+    `write` claim `writeBytes`.
+
+    Only `Recv.Method` keys are returned. Bare names already have their
+    own snake_case rule, and widening this to them would credit a free
+    function from an anchor that happens to precede an unrelated one.
+    """
+    lines = src.split("\n")
+    out = set()
+    for i, line in enumerate(lines):
+        m = ANCHOR_LINE_SYM.search(line)
+        if not m:
+            continue
+        sym = re.sub(r"^\(\*?(\w+)\)", r"\1", m.group(1))
+        if "." not in sym:
+            continue
+        j = i + 1
+        while j < len(lines) and (lines[j].lstrip().startswith(("//", "#["))
+                                  or not lines[j].strip()):
+            j += 1
+        if j < len(lines) and RS_ITEM.search(lines[j]):
+            out.add(sym)
+    return out
+
+
 def draft_syms(src):
     """Every declaration `src` marks as an unreviewed goishc draft.
 
@@ -596,6 +648,11 @@ def _facts(paths):
                      and k.split(".", 1)[1] not in fns
                      and re.sub(r"(?<!^)(?=[A-Z])", "_",
                                 k.split(".", 1)[1]).lower() in fns}
+            # Last: a method whose Rust name neither matches nor folds,
+            # credited on the ANCHOR'S ATTACHMENT rather than on its
+            # name. See anchored_attached_keys for why that is evidence
+            # and not a guess.
+            mine |= anchored_attached_keys(src)
         idents |= mine
         anchored |= anchored_decl_keys(src)
         # The draft line is itself a `// go:` comment, so it would

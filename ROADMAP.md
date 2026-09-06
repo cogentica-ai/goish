@@ -883,18 +883,37 @@ style — they are forced, and the files say so:
 that method name is in the file, so every one of these loses its
 credit. Waiving them would be wrong — they are ported, not absent.
 
-**The sound fix is the rule port_coverage already applies one case
-over.** For a BARE anchored name it credits a snake_case fn, and the
-comment there gives the reason: "the anchor is the evidence:
+**Fixed 2026-09-06, with the rule port_coverage already applied one
+case over.** For a BARE anchored name it credits a snake_case fn, and
+the comment there gives the reason: "the anchor is the evidence:
 anchor_check re-opens its line range against the Go tree and `make
 lint` gates on it, so the declaration named is the declaration that
-exists. The fn-exists check still keeps a stray anchor from crediting
-nothing." The same argument licenses crediting an anchored
-`Recv.Method` whose anchor is ATTACHED to a fn, whatever that fn is
-called — attachment is what `anchor_check.py`'s UNATTACHED report
-already computes. What must not be done is a name-similarity rule:
-crediting any fn whose name starts with the method would let `write`
-claim `writeBytes`.
+exists." The same argument licenses crediting an anchored `Recv.Method`
+whose anchor is ATTACHED to a declaration, whatever that declaration is
+called, and `anchored_attached_keys` now does exactly that.
+
+The evidence chain is two-sided, which is what makes it sound rather
+than trusting. `anchor_check.py` re-opens the anchor's range against
+the Go tree and confirms it names that declaration; GOISH014 then
+requires the Rust item under the anchor to carry the same name, a
+snake_case fold of it, or an explicit `goishlint:ignore GOISH014 -
+<reason>`. A rename is therefore never silent, and the reasons read
+like reasons: `errors`' `joinError.Unwrap` is `UnwrapMulti` because Go
+has two optional unwrap methods of the same name and different
+signatures and one Rust trait cannot carry both.
+
+**110 anchored-yet-missing declarations became 5.** Tree-wide +45 with
+the denominator unchanged and UNVERIFIED still 79 — every credit rests
+on an anchor, none on a name. archive/tar alone gained 33.
+
+The five left are all BARE names, and the rule excludes those
+deliberately: `poly1305`'s `newMACGeneric` and `shiftRightBy2`,
+`encoding/json`'s `appendString`, `json/v2`'s `makeFloatArshaler`,
+`time`'s `match`. Widening the attachment rule to bare names would
+credit a free function from an anchor that merely precedes an unrelated
+one, and there is no receiver to constrain the match. What must not be
+done either way is a name-similarity rule: crediting any fn whose name
+starts with the method would let `write` claim `writeBytes`.
 
 `testing/iotest` was a third of this list and is fixed: its five
 `Read` methods were real trait impls under goish's `*Impl` receiver
