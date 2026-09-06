@@ -1,12 +1,25 @@
 // Port of vendor/golang.org/x/net/dns/dnsmessage@go1.26.0
 //
-// PROVENANCE WARNING (recorded 2026-09-06): the tree pins 1.25.5 and
-// goref.sh diffs against 1.25.5, so this version claim is uncheckable
-// here. Unlike its two siblings this file IS pinned by comparison —
-// examples/dnsmessage_ref_smoke.rs diffs it against a running Go — so
-// the wire format is checked even though the file carries no anchors.
-// It is the version line, not the behaviour, that is unverified. See
-// ROADMAP.md §2b.
+// PROVENANCE (investigated 2026-09-06): the version line above is
+// ACCURATE, and that is the problem. Go 1.25.5 — the SDK this tree
+// pins and the only one goref.sh can diff against — vendors a
+// dnsmessage of one file, message.go, with no svcb.go and no SVCB at
+// all. This port has `SVCBResource`, `TypeSVCB` = 64 and `TypeHTTPS` =
+// 65, so it demonstrably came from a newer x/net, exactly as the line
+// says.
+//
+// The consequence is that this file CANNOT be anchored against the
+// pinned SDK: half the declarations have no counterpart in 1.25.5, and
+// the other half would carry line ranges from a source that is not the
+// one they were ported from. It is the only one of the four relocated
+// packages in that position — term, chacha20poly1305 and poly1305 were
+// all anchored on 2026-09-06.
+//
+// What does check it: examples/dnsmessage_ref_smoke.rs diffs the wire
+// format against a running Go, so the behaviour is pinned even with
+// zero anchors. Resolving the provenance means either pinning the
+// x/net version this was taken from, or re-porting against 1.25.5 and
+// losing SVCB. See ROADMAP.md §2b.
 // (message.go + svcb.go combined)
 #![allow(non_snake_case)]
 #![allow(dead_code)]

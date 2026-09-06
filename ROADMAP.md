@@ -676,10 +676,10 @@ Four are real, and their headers say so outright:
 |---|---|--:|--:|---|
 | `cmd/vendor/golang.org/x/term` | `term` | 144 | 8 | **anchored 2026-09-06**, in RELOCATED, 10/44 |
 | `vendor/golang.org/x/crypto/chacha20poly1305` | `crypto/chacha20poly1305` | 210 | 12 | **anchored 2026-09-06**, in RELOCATED, 9/18 |
-| `vendor/golang.org/x/crypto/internal/poly1305` | `crypto/poly1305` | 344 | 0 | to do — needs the same two-file split |
-| `vendor/golang.org/x/net/dns/dnsmessage` | `net/dnsmessage` | 1995 | 0 | to do — largest, and see the version note below |
+| `vendor/golang.org/x/crypto/internal/poly1305` | `crypto/poly1305` | 344 | 23 | **anchored 2026-09-06**, in RELOCATED, 15/20 |
+| `vendor/golang.org/x/net/dns/dnsmessage` | `net/dnsmessage` | 1995 | 0 | **cannot be anchored against 1.25.5** — see below |
 
-Two of the four are done, and both took the same shape: split the file
+Three of the four are done, and each took the same shape: split the file
 the way Go splits it (GOISH015 allows one Go file per `.rs`, and both
 ports had two Go files in one `mod.rs`), anchor each declaration, then
 fix whatever goishlint could suddenly see — tail expressions and casts
@@ -733,8 +733,32 @@ Note the asymmetry that makes the map safe to extend correctly: `grep
 which are precisely the ones eligible. A relocated package the grep
 cannot see is a relocated package with nothing to credit.
 
-**A provenance defect fell out of this.** Three of those files claim a
-Go version this tree does not have:
+**dnsmessage is the fourth, and it cannot be done.** Investigated
+2026-09-06 by trying to anchor it. Go 1.25.5 — the SDK this tree pins,
+and the only one `goref.sh` can diff against — vendors a dnsmessage of
+ONE file, `message.go`, with no `svcb.go` and no SVCB at all. goish's
+port has `SVCBResource`, `TypeSVCB` = 64 and `TypeHTTPS` = 65. So its
+`@go1.26.0` header is not sloppiness: it is accurate, and it is
+evidence that the code came from a newer x/net than this tree can open.
+
+That makes anchoring impossible rather than merely unfinished. Half the
+declarations have no counterpart in 1.25.5, and the other half would
+carry line ranges from a source that is not the one they were ported
+from — an anchor that `anchor_check.py` would happily validate against
+the wrong file. The work is to pin the x/net version this was taken
+from, or to re-port against 1.25.5 and lose SVCB. Until then
+`dnsmessage_ref_smoke` is what checks it, and it checks the wire
+format, which is the part that matters most.
+
+**The same version claim on two more files, with no such evidence
+either way.** `dnsclient.rs` and `dnsconfig.rs` also say 1.26.0, and
+unlike dnsmessage nothing in them settles it: Go 1.25.5 has both
+`net/dnsclient_unix.go` and `net/dnsconfig.go`, and goish's `DnsConfig`
+carries 10 of Go's 14 fields — `single_request`, `use_tcp`, `trust_ad`,
+`no_reload` among them — all of which exist in 1.25.5 too. So the claim
+is neither corroborated nor contradicted; it is simply unchecked, which
+is the whole point. Three files in total claim a Go version this tree
+does not have:
 
     src/net/dnsclient.rs        @ Go 1.26.0
     src/net/dnsconfig.rs        @ Go 1.26.0
