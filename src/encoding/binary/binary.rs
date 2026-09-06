@@ -732,3 +732,53 @@ pub fn Decode<O: ByteOrder, T: Fixed + ?Sized>(
     data.__get(&order, &buf[..n]);
     return (toint(n), nil);
 }
+
+// The reflective walk, waived out of the coverage denominator rather
+// than left to read as 28 missing declarations.
+//
+// Go decides a value's wire size at RUN time from its reflect.Value
+// (`dataSize`, `sizeof`, `intDataSize`) and moves the bytes with the
+// `encoder`/`decoder` structs and their per-width methods. goish decides
+// at COMPILE time through the `Fixed` trait above, so an unsupported
+// type is a build error where Go's is a run-time
+// `errors.New("binary.Write: some values are not fixed-sized in type …")`.
+// There is no goish counterpart for any of these and there will not be
+// one while `Fixed` is the mechanism.
+//
+// This is already stated in the GOISH018 ignore at the top of the file.
+// It is repeated as waivers because port_coverage.py reads `go: waived`
+// and not goishlint ignores, so without them encoding/binary reads
+// 14/42 = 33.3% and looks like the most tractable gap in encoding/ —
+// which is how it was picked as one on 2026-09-06, before the header
+// was read. Waived declarations leave the denominator but are printed
+// on their own line, so the substitution stays visible.
+//
+// If the reflective path is ever added, delete these.
+// go: waived dataSize — Go sizes a value from its reflect.Value at run time; goish's `Fixed` trait sizes it at compile time.
+// go: waived sizeof — the recursive half of dataSize, same reason.
+// go: waived intDataSize — the fast path of dataSize for the fixed-width scalars, same reason.
+// go: waived decodeFast — reflect-free fast path Go takes before the generic walk; goish's generic path IS the fast path.
+// go: waived encodeFast — as decodeFast.
+// go: waived ensure — grows the coder's buffer during the reflective walk; goish's Fixed impls size exactly up front.
+// go: waived decoder.value — the reflective decode walk itself.
+// go: waived encoder.value — the reflective encode walk itself.
+// go: waived decoder.skip — skips a field the walk cannot decode; a compile-time trait has no such case.
+// go: waived encoder.skip — as decoder.skip.
+// go: waived decoder.bool — per-width decode method of the reflective walk.
+// go: waived decoder.int8 — per-width decode method of the reflective walk.
+// go: waived decoder.uint8 — per-width decode method of the reflective walk.
+// go: waived decoder.int16 — per-width decode method of the reflective walk.
+// go: waived decoder.uint16 — per-width decode method of the reflective walk.
+// go: waived decoder.int32 — per-width decode method of the reflective walk.
+// go: waived decoder.uint32 — per-width decode method of the reflective walk.
+// go: waived decoder.int64 — per-width decode method of the reflective walk.
+// go: waived decoder.uint64 — per-width decode method of the reflective walk.
+// go: waived encoder.bool — per-width encode method of the reflective walk.
+// go: waived encoder.int8 — per-width encode method of the reflective walk.
+// go: waived encoder.uint8 — per-width encode method of the reflective walk.
+// go: waived encoder.int16 — per-width encode method of the reflective walk.
+// go: waived encoder.uint16 — per-width encode method of the reflective walk.
+// go: waived encoder.int32 — per-width encode method of the reflective walk.
+// go: waived encoder.uint32 — per-width encode method of the reflective walk.
+// go: waived encoder.int64 — per-width encode method of the reflective walk.
+// go: waived encoder.uint64 — per-width encode method of the reflective walk.
