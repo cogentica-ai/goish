@@ -38,6 +38,17 @@
 // answers correctly, which is a worse divergence than the one it
 // fixes.
 //
+// Memoizing this backtracker does not work either, and the reason is
+// structural rather than a matter of effort. Go's own `backtrack.go`
+// bounds itself with a visited bitmap keyed on `pc*(end+1) + pos` —
+// two small integers, because compiling to a program makes the
+// continuation implicit in the pc. The matcher below is
+// continuation-passing over the AST: `try_match(node, text, pos, caps,
+// cont)`, where `cont` is the remaining node slice. Its state is
+// (node, pos, caps, continuation) and the continuation varies, so
+// there is no bounded pair to key on. Obtaining one means compiling to
+// a program, which is the rewrite this note is about.
+//
 // Verified against Go 1.25 `src/regexp/regexp.go` for API shapes and
 // `src/regexp/syntax/parse.go` for parser semantics, and against a
 // running Go by `examples/regexp_ref_smoke.rs`: 70 patterns x 31 inputs,

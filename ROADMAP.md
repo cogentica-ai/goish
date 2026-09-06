@@ -210,11 +210,36 @@ hangs the process. Any port that relies on the guarantee — a router, a
 log filter, an input validator — inherits a denial of service it did
 not have in Go.
 
+Re-measured 2026-09-06 in a RELEASE build, which the first table did
+not state: n=14 90 ms, n=16 367 ms, n=18 1,467 ms, n=20 6,194 ms.
+Same doubling, so the numbers above are not a debug-build artifact.
+
 The fix is the RE2 construction: compile to an instruction program and
 simulate the NFA with a thread list (`regexp/exec.go` plus
 `regexp/syntax/`). That is a rewrite of the matcher rather than a patch
-to it. A step budget was considered and rejected — it trades an
-unbounded hang for a wrong answer on patterns Go answers correctly.
+to it — goish's regexp is one 2,129-line file against Go's ~10,400
+across `syntax/` and three exec engines.
+
+Two cheaper fixes have been considered and neither works:
+
+  A step budget trades an unbounded hang for a WRONG answer on
+  patterns Go answers correctly, which is a worse divergence than the
+  one it fixes.
+
+  Memoizing the backtracker — what Go's own `backtrack.go` does — does
+  not port. Go keys a visited bitmap on `pc*(end+1) + pos`
+  (backtrack.go:118-123): two small integers, because compiling to a
+  program makes the continuation implicit in the pc. goish's matcher is
+  continuation-passing over the AST — `try_match(node, text, pos, caps,
+  cont)` where `cont` is the remaining node slice — so the state to key
+  on is (node, pos, caps, continuation), and the continuation varies.
+  There is no bounded pair to memoize. Getting one means compiling to a
+  program, which IS the rewrite.
+
+  Worth knowing either way: Go uses its bounded backtracker only for
+  small programs and falls back to the NFA beyond `maxBacktrackVector`,
+  so even Go does not treat memoized backtracking as the general
+  answer.
 
 ## 2d. The JSON parsers recurse where Go's do not
 
