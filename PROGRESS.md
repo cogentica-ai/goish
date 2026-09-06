@@ -1056,9 +1056,25 @@ which is the hazard of keeping the same fact in two documents.)
 
 ## CI
 
-Two workflows: `e2e.yml` on every push (`make e2e LOOPS=1`) and
-`e2e-race.yml` nightly (stress families ×50). Dispatch the full sweep by
-hand after any scheduler, allocator or `runtime/` change:
+Four workflows, and **two of them gate every push**:
+
+- `e2e.yml` — every declared example, once each (`make e2e LOOPS=1`).
+- `provenance.yml` — re-opens every `// go: sdk` anchor against a real
+  Go 1.25.5 tree. This is what makes the README's provenance claim
+  machine-checked rather than asserted, and it fails independently of
+  e2e: a commit can be green on behaviour and red here for citing a
+  line range that does not hold.
+- `e2e-race.yml` — nightly, stress families ×50.
+- `publish.yml` — crates.io release on a `vX.Y.Z` tag, with guards
+  that refuse a tag disagreeing with `Cargo.toml`.
+
+This section said "two workflows" and named the e2e pair until
+2026-09-06. Missing `provenance.yml` mattered most: it is a gate a
+contributor's push has to pass, and a reader would not have known it
+existed.
+
+Dispatch the full sweep by hand after any scheduler, allocator or
+`runtime/` change:
 
 ```bash
 gh workflow run e2e-race.yml --repo cogentica-ai/goish -f mode=full --ref <branch>
