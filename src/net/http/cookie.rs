@@ -585,9 +585,9 @@ fn validCookiePathByte(b: byte) -> bool {
     0x20 <= b && b < 0x7f && b != b';'
 }
 
+// go: sdk 1.25.5 net/http/cookie.go:489-489 cookieNameSanitizer
 /// RFC 7230 token char — used for cookie *names*. Allows alnum and
 /// `!#$%&'*+-.^_` `\`` `|~`.
-// go: sdk 1.25.5 net/http/cookie.go:489-489 cookieNameSanitizer
 /// Go: `strings.NewReplacer("\n", "-", "\r", "-")`.
 ///
 /// A `var` in Go, built once. goish rebuilds it per call; Replacer is

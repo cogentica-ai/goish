@@ -1871,10 +1871,10 @@ impl Regexp {
         };
     }
 
+    // go: sdk 1.25.5 regexp/regexp.go:337-339 Regexp.NumSubexp
     /// Go: `func (re *Regexp) ReplaceAllString(src, repl string) string`
     /// (regexp.go:822). Replacement is treated as literal text — `$1`
     /// group expansion isn't supported in the v1 subset (extend when a
-    // go: sdk 1.25.5 regexp/regexp.go:337-339 Regexp.NumSubexp
     /// Go: "NumSubexp returns the number of parenthesized subexpressions
     /// in this Regexp."
     pub fn NumSubexp(&self) -> int {

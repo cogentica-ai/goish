@@ -1882,6 +1882,7 @@ impl io::Closer for eagerMaxBytesBody {
     }
 }
 
+// go: sdk 1.25.5 net/http/request.go:1194-1196 MaxBytesError
 /// `http.MaxBytesError` (request.go:1193) — typed error returned by
 /// MaxBytesReader when its read limit is exceeded. Carries the
 /// configured byte limit so callers can introspect it. Mirrors:
@@ -1890,7 +1891,6 @@ impl io::Closer for eagerMaxBytesBody {
 /// type MaxBytesError struct { Limit int64 }
 /// func (e *MaxBytesError) Error() string { return "http: request body too large" }
 /// ```
-// go: sdk 1.25.5 net/http/request.go:1194-1196 MaxBytesError
 #[derive(Clone)]
 pub struct MaxBytesError {
     pub Limit: int,

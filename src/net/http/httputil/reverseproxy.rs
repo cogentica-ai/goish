@@ -58,10 +58,10 @@ struct reverseProxyHandler {
     client: alloc::sync::Arc<super::super::client::Client>,
 }
 
+// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:307-317 hopHeaders
 /// Hop-by-hop headers (RFC 7230). Stripped before forwarding the
 /// request and before relaying the response back to the original
 /// client. Mirrors Go's `hopHeaders` (reverseproxy.go:307).
-// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:307-317 hopHeaders
 //
 // Go: "Hop-by-hop headers. These are removed when sent to the backend.
 // As of RFC 7230, hop-by-hop headers are required to appear in the

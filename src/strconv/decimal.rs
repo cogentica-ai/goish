@@ -301,11 +301,11 @@ fn rightShift(a: &mut decimal, k: u32) {
     trim(a);
 }
 
+// go: sdk 1.25.5 strconv/decimal.go:172-176 leftCheat
 // Cheat sheet for left shift: indexed by shift count giving number of
 // new digits introduced by that shift. Each entry is `(delta, cutoff)`.
 // `cutoff` is the leading-digits string; if a's prefix is < cutoff,
 // `delta - 1` new digits are introduced instead of `delta`.
-// go: sdk 1.25.5 strconv/decimal.go:172-176 leftCheat
 struct leftCheat {
     delta: i32,
     cutoff: &'static [u8],

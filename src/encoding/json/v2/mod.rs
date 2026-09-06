@@ -226,8 +226,8 @@ impl_json_omit_num!(i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
 
 // ─── Entry points (arshal.go) ────────────────────────────────────────
 
-/// `json.Marshal(in, opts...)` (arshal.go) — encode to bytes.
 // go: sdk 1.25.5 encoding/json/v2/arshal.go:173-183 Marshal
+/// `json.Marshal(in, opts...)` (arshal.go) — encode to bytes.
 pub fn Marshal<T: MarshalerTo + ?Sized>(
     v: &T,
     opts: impl AsRef<[Options]>,

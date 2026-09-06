@@ -188,10 +188,10 @@ impl Header {
         out
     }
 
+    // go: sdk 1.25.5 net/http/header.go:84-87 Header.Write
     /// `h.Write(w)` — write the header in HTTP wire format
     /// (`Key: value\r\n` per line). Mirrors `Header.Write`
     /// (header.go:85).
-    // go: sdk 1.25.5 net/http/header.go:84-87 Header.Write
     /// Write a header in wire format.
     pub fn Write<W: crate::io::Writer>(&self, w: &mut W) -> crate::error {
         return self.write(w);
@@ -206,9 +206,9 @@ impl Header {
         return self.writeSubset(w, &map::<string, bool>::new());
     }
 
+    // go: sdk 1.25.5 net/http/header.go:182-188 Header.WriteSubset
     /// `h.WriteSubset(w, exclude)` — like `Write` but skips keys
     /// where `exclude[key] == true`. Mirrors header.go:186.
-    // go: sdk 1.25.5 net/http/header.go:182-188 Header.WriteSubset
     /// Write a header in wire format, omitting keys for which
     /// `exclude[key]` is true. Keys are NOT canonicalized before the
     /// exclude lookup, matching Go.

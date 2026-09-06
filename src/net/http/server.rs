@@ -160,10 +160,10 @@ impl ServeMux {
         self.handle_arc(pattern.into(), Arc::new(h));
     }
 
+    // go: sdk 1.25.5 net/http/server.go:2915-2956 ServeMux.registerErr
     /// Internal: stores an already-arced handler. Used by `Handle`,
     /// `HandleFunc`, and other internal callers that already hold an
     /// `Arc<dyn Handler>`.
-    // go: sdk 1.25.5 net/http/server.go:2915-2956 ServeMux.registerErr
     //
     /// Register `handler` for `pattern`, or return the reason it
     /// cannot be.
@@ -237,10 +237,10 @@ impl ServeMux {
         self.handle_arc(pattern.into(), Arc::new(HandlerFunc(f)));
     }
 
+    // go: sdk 1.25.5 net/http/server.go:2695-2749 ServeMux.findHandler
     /// Internal: pick the handler for `r`. Returns the chosen handler
     /// and (for wildcard hits) any path-value bindings, or a 404
     /// stub with empty bindings.
-    // go: sdk 1.25.5 net/http/server.go:2695-2749 ServeMux.findHandler
     //
     // Go strips the port from the Host, cleans the path, then asks the
     // tree.
@@ -844,8 +844,8 @@ pub fn TimeoutHandler<H: Handler + 'static, S: Into<string>>(
     })
 }
 
-/// Go's unexported `timeoutHandler` (server.go:3808).
 // go: sdk 1.25.5 net/http/server.go:3828-3836 timeoutHandler
+/// Go's unexported `timeoutHandler` (server.go:3808).
 struct timeoutHandler {
     handler: Arc<dyn Handler>,
     body: string,
@@ -853,8 +853,8 @@ struct timeoutHandler {
 }
 
 impl timeoutHandler {
-    /// `(h *timeoutHandler).errorBody()` (server.go:3821).
     // go: sdk 1.25.5 net/http/server.go:3838-3843 timeoutHandler.errorBody
+    /// `(h *timeoutHandler).errorBody()` (server.go:3821).
     fn errorBody(&self) -> string {
         if self.body.Len() > 0 {
             return self.body.clone();
@@ -3857,6 +3857,7 @@ impl Server {
         self.__state.in_shutdown.load(Ordering::Acquire)
     }
 
+    // go: sdk 1.25.5 net/http/server.go:3604-3621 Server.trackListener
     /// Install a listener into the shutdown-tracked set — the same
     /// critical section `Serve` runs at entry, factored out so the
     /// HTTPS serve loop (server_tls.rs ServeTLS) gets identical
@@ -3865,7 +3866,6 @@ impl Server {
     /// Returns `false` if shutdown already began (caller must return
     /// `ErrServerClosed` without accepting). Go: `trackListener(ln,
     /// true)` (server.go:3253).
-    // go: sdk 1.25.5 net/http/server.go:3604-3621 Server.trackListener
     /// Go: "trackListener adds or removes a net.Listener to the set of
     /// tracked listeners. Returns false if the server is shutting down."
     ///

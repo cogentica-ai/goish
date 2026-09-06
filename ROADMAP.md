@@ -442,6 +442,42 @@ genuinely bodyless declarations. `net` read `635 portable + 20 assembly`
 and is `652 portable + 3 assembly`. If a package's assembly column ever
 looks implausibly large, that was why.
 
+**`src/io/pipe.rs` — 360 lines, zero anchors. Anchored 2026-09-06.**
+
+The file called itself a "line-by-line port of io/pipe.go" and carried
+no `// go: sdk` anchor and no `decls:` manifest, so no tier compared it
+to Go. Its six `pipe.*` methods read as MISSING in port_coverage, which
+is what surfaced it. All fifteen of io/pipe.go's functions were present
+in a clean 1:1 mapping, with renamed receivers (`pipe` -> `PipeData`,
+`onceError` -> `OnceError`).
+
+Anchoring it took two attempts, and the first failure is the lesson.
+Adding fifteen anchors made goishlint report GOISH018 0 -> 13 —
+"Go function `Close` in pipe.go has no anchored Rust counterpart" for
+functions that were anchored. Three hypotheses were wrong: it was not
+the missing manifest, not receiver-qualified vs bare symbols, and not
+unanchored Go declarations (pipe.go has exactly fifteen `func`s and all
+fifteen carried an anchor).
+
+The answer was in goishlint's source, which is a sibling repo — out of
+scope to MODIFY, but reading it is what solved this.
+`find_comment_block_top` walks up over CONTIGUOUS comment lines and
+returns the topmost, then `validate_anchor_line` runs on THAT line. An
+anchor placed anywhere but the very top of the block is invisible: the
+function is skipped entirely and its anchor never counted. Thirteen of
+the fifteen had a `// Go: func (p *pipe) read(…)` prose line or a `///`
+doc line directly above, because the insertion stopped when it saw
+"go:" in the line above — and `// Go:` matched that test.
+
+Re-anchored at the true block top: GOISH018 zero, anchor_check 149/149
+ok under src/io with nothing UNATTACHED, io/ 87/98 -> 93/98 with io
+itself at 46/46, and port_lint findings 8100 -> 8085 because fifteen
+GOISH014 "unanchored fn" findings resolved at the same time.
+
+The general rule, which GOISH014 states and this proves the cost of: an
+anchor is only an anchor when it is the FIRST line of the comment block
+above the declaration. Anywhere else it is a comment.
+
 **The one-liner does not generalise, and the failure is worth keeping**
 so nobody rebuilds it. Run against everything over 250 lines it
 returns about 70 files and the sampled ones were all false positives:

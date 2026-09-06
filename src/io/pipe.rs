@@ -56,6 +56,7 @@ impl OnceError {
             inner: Mutex::new(nil),
         }
     }
+    // go: sdk 1.25.5 io/pipe.go:21-28 onceError.Store
     // Go: func (a *onceError) Store(err error)
     fn Store(&self, err: error) {
         // Go: a.Lock(); defer a.Unlock()
@@ -67,6 +68,7 @@ impl OnceError {
         // Go: a.err = err
         *g = err;
     }
+    // go: sdk 1.25.5 io/pipe.go:29-33 onceError.Load
     // Go: func (a *onceError) Load() error
     fn Load(&self) -> error {
         // Go: a.Lock(); defer a.Unlock(); return a.err
@@ -97,6 +99,7 @@ struct PipeData {
 }
 
 impl PipeData {
+    // go: sdk 1.25.5 io/pipe.go:50-65 pipe.read
     // Go: func (p *pipe) read(b []byte) (n int, err error) — pipe.go:50
     fn read(&self, b: &mut slice<byte>) -> (int, error) {
         // select! requires bare-ident chan operands; clone the chan
@@ -133,6 +136,7 @@ impl PipeData {
         (nr, nil)
     }
 
+    // go: sdk 1.25.5 io/pipe.go:67-74 pipe.closeRead
     // Go: func (p *pipe) closeRead(err error) error — pipe.go:67
     fn closeRead(&self, mut err: error) -> error {
         // Go: if err == nil { err = ErrClosedPipe }
@@ -149,6 +153,7 @@ impl PipeData {
         nil
     }
 
+    // go: sdk 1.25.5 io/pipe.go:76-96 pipe.write
     // Go: func (p *pipe) write(b []byte) (n int, err error) — pipe.go:76
     fn write(&self, mut b: slice<byte>) -> (int, error) {
         // select! requires bare-ident chan operands; clone the chan
@@ -195,6 +200,7 @@ impl PipeData {
         (n, nil)
     }
 
+    // go: sdk 1.25.5 io/pipe.go:98-105 pipe.closeWrite
     // Go: func (p *pipe) closeWrite(err error) error — pipe.go:98
     fn closeWrite(&self, mut err: error) -> error {
         // Go: if err == nil { err = EOF }
@@ -211,6 +217,7 @@ impl PipeData {
         nil
     }
 
+    // go: sdk 1.25.5 io/pipe.go:108-114 pipe.readCloseError
     // Go: func (p *pipe) readCloseError() error — pipe.go:108
     fn readCloseError(&self) -> error {
         // Go: rerr := p.rerr.Load()
@@ -224,6 +231,7 @@ impl PipeData {
         ErrClosedPipe.into()
     }
 
+    // go: sdk 1.25.5 io/pipe.go:117-123 pipe.writeCloseError
     // Go: func (p *pipe) writeCloseError() error — pipe.go:117
     fn writeCloseError(&self) -> error {
         // Go: werr := p.werr.Load()
@@ -251,18 +259,21 @@ pub struct PipeReader {
 }
 
 impl PipeReader {
+    // go: sdk 1.25.5 io/pipe.go:133-135 PipeReader.Read
     /// `(*PipeReader).Read(data)` (pipe.go:133).
     pub fn Read(&mut self, data: &mut slice<byte>) -> (int, error) {
         // Go: return r.pipe.read(data)
         self.p.read(data)
     }
 
+    // go: sdk 1.25.5 io/pipe.go:139-141 PipeReader.Close
     /// `(*PipeReader).Close()` (pipe.go:139).
     pub fn Close(&self) -> error {
         // Go: return r.CloseWithError(nil)
         self.CloseWithError(nil)
     }
 
+    // go: sdk 1.25.5 io/pipe.go:148-150 PipeReader.CloseWithError
     /// `(*PipeReader).CloseWithError(err)` (pipe.go:148). Subsequent
     /// Writes return `err` (or `ErrClosedPipe` if `err == nil`).
     /// Never overwrites a previous error and always returns nil.
@@ -296,12 +307,14 @@ pub struct PipeWriter {
 }
 
 impl PipeWriter {
+    // go: sdk 1.25.5 io/pipe.go:160-162 PipeWriter.Write
     /// `(*PipeWriter).Write(data)` (pipe.go:160).
     pub fn Write(&mut self, data: slice<byte>) -> (int, error) {
         // Go: return w.r.pipe.write(data)
         self.p.write(data)
     }
 
+    // go: sdk 1.25.5 io/pipe.go:166-168 PipeWriter.Close
     /// `(*PipeWriter).Close()` (pipe.go:166). Subsequent Reads return
     /// `(0, EOF)`.
     pub fn Close(&self) -> error {
@@ -309,6 +322,7 @@ impl PipeWriter {
         self.CloseWithError(nil)
     }
 
+    // go: sdk 1.25.5 io/pipe.go:176-178 PipeWriter.CloseWithError
     /// `(*PipeWriter).CloseWithError(err)` (pipe.go:176). Subsequent
     /// Reads return `(0, err)` (or `(0, EOF)` if `err == nil`). Never
     /// overwrites a previous error and always returns nil.
@@ -332,6 +346,7 @@ impl Closer for PipeWriter {
 
 // ─── Pipe (pipe.go:195) ───────────────────────────────────────────────
 
+// go: sdk 1.25.5 io/pipe.go:195-202 Pipe
 /// `io.Pipe()` (pipe.go:195) — synchronous in-memory pipe. Returns the
 /// read half and the write half. Reads and Writes are matched
 /// one-to-one (a single Write may satisfy multiple Reads, but the Write

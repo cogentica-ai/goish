@@ -59,9 +59,9 @@ pub const DateTime: &str = "2006-01-02 15:04:05";
 pub const DateOnly: &str = "2006-01-02";
 pub const TimeOnly: &str = "15:04:05";
 
+// go: sdk 1.25.5 time/format.go:372-385 longMonthNames
 // Long-name lookup tables used by Month::String / Weekday::String.
 // Mirrors Go's longMonthNames + longDayNames in time/format.go.
-// go: sdk 1.25.5 time/format.go:372-385 longMonthNames
 pub(crate) const longMonthNames: [&str; 12] = [
     "January",
     "February",

@@ -226,3 +226,5 @@ pub fn Dir<S: Into<string>>(p: S) -> string {
     let (dir, _) = Split(p);
     return Clean(dir);
 }
+
+// go: waived lazybuf.string — ported as `fn finish` a few lines above, under a GOISH014 ignore: Go's method is named `string`, which is the name of goish's string TYPE, so the port cannot carry Go's spelling. port_coverage credits an anchored Recv.Method key only when the method name exists as a fn, and deliberately so — loosening that guard would let a stray anchor credit a declaration nobody wrote.

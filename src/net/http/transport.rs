@@ -598,10 +598,10 @@ impl Waiter for Arc<wantConn> {
     }
 }
 
+// go: sdk 1.25.5 net/http/transport.go:1384-1398 wantConnQueue
 // Go's map holds wantConnQueue BY VALUE — its own comment says "q is
 // a value (like a slice), so we have to store the updated q back into
 // the map". Clone + Default give goish the same get-modify-put shape.
-// go: sdk 1.25.5 net/http/transport.go:1384-1398 wantConnQueue
 /// Go: "a queue of wantConns", implemented as a head slice consumed
 /// from `headPos` plus a tail slice, so pushes amortise and the front
 /// pops without shifting.
