@@ -838,6 +838,28 @@ fn test_handshake_canned_server(t: &mut testing::T) {
     };
 
     // ── Drive the handshake ───────────────────────────────────────
+    // skip_verify=false must be REFUSED, not silently honoured: this
+    // handshake does no certificate verification at all, and the
+    // parameter used to be accepted and ignored.
+    {
+        let mut probe = MockConn {
+            reads: core::cell::UnsafeCell::new(VecDeque::new()),
+            read_pos: core::cell::UnsafeCell::new(0),
+            writes: client_writes.clone(),
+        };
+        let (_, verr) = goish::crypto::tls::do_client_handshake(
+            &mut probe,
+            "example.com",
+            false,
+        );
+        if verr.IsNil() {
+            t.Fatal(string::from_static(
+                "do_client_handshake(skip_verify=false) returned nil — it cannot verify",
+            ));
+            return;
+        }
+    }
+
     let (_, herr) = goish::crypto::tls::do_client_handshake(
         &mut conn,
         "example.com",

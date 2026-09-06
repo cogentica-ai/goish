@@ -111,8 +111,33 @@ impl<'a> crate::io::Reader for ConnReader<'a> {
 pub fn do_client_handshake(
     conn: &mut dyn crate::net::Conn,
     _server_name: &str,
-    _skip_verify: bool,
+    skip_verify: bool,
 ) -> (KeyMaterial, error) {
+    // This handshake performs NO certificate verification: it does not
+    // build a chain, does not check the hostname, and does not consult
+    // roots. `_server_name` is unused for that reason and `skip_verify`
+    // used to be too — the parameter was accepted and ignored, so a
+    // caller passing `false` to ASK for verification got an
+    // unauthenticated channel and no indication of it.
+    //
+    // Encryption without authentication is the MITM case, so the
+    // parameter is now honoured in the only way this function can
+    // honour it: by refusing. Callers that want a verified connection
+    // want `tls::Dial`, which runs the ported clientHandshake and does
+    // check (Conn.verifyServerCertificate).
+    //
+    // Retiring this function is ROADMAP §1's plan. Until then it is at
+    // least honest about what it does not do.
+    if !skip_verify {
+        return (
+            KeyMaterial::default(),
+            errors::New(
+                "tls: this handshake cannot verify the server certificate — \
+                 use tls::Dial for a verified connection, or pass \
+                 skip_verify=true to accept an unauthenticated one",
+            ),
+        );
+    }
     tls_debug!(
         "[tls-debug] do_client_handshake: start server_name=%s\n",
         _server_name
@@ -2537,8 +2562,33 @@ fn build_client_hello_chacha20_only(
 pub fn do_client_handshake_chacha20_only(
     conn: &mut dyn crate::net::Conn,
     _server_name: &str,
-    _skip_verify: bool,
+    skip_verify: bool,
 ) -> (KeyMaterial, error) {
+    // This handshake performs NO certificate verification: it does not
+    // build a chain, does not check the hostname, and does not consult
+    // roots. `_server_name` is unused for that reason and `skip_verify`
+    // used to be too — the parameter was accepted and ignored, so a
+    // caller passing `false` to ASK for verification got an
+    // unauthenticated channel and no indication of it.
+    //
+    // Encryption without authentication is the MITM case, so the
+    // parameter is now honoured in the only way this function can
+    // honour it: by refusing. Callers that want a verified connection
+    // want `tls::Dial`, which runs the ported clientHandshake and does
+    // check (Conn.verifyServerCertificate).
+    //
+    // Retiring this function is ROADMAP §1's plan. Until then it is at
+    // least honest about what it does not do.
+    if !skip_verify {
+        return (
+            KeyMaterial::default(),
+            errors::New(
+                "tls: this handshake cannot verify the server certificate — \
+                 use tls::Dial for a verified connection, or pass \
+                 skip_verify=true to accept an unauthenticated one",
+            ),
+        );
+    }
     tls_debug!(
         "[tls-debug] do_client_handshake_chacha20_only: start server_name=%s\n",
         _server_name
