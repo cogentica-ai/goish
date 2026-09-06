@@ -25,7 +25,12 @@ one fact:
     limit. An upload over 16 MiB simply does not work.
   - the server sends `100 Continue` unconditionally, so a handler that
     would reject cannot do so before the client uploads (2k,
-    http_expect100_server_smoke's second row).
+    http_expect100_server_smoke's second row). **Re-measured
+    2026-09-06 and still exactly true:** `write_interim_100` fires from
+    `__read_request_server` for any HTTP/1.1-or-later request with a
+    body, between header parse and the eager body read, where Go defers
+    it to the first `Read` through `expectContinueReader`
+    (server.go:1022). The handler has not run when goish sends it.
   - a client request body is always Content-Length framed, never
     chunked, so a goish client cannot upload something it is still
     producing (client_wire_ref_smoke's KNOWN GAP).
@@ -68,12 +73,21 @@ an inline path over Go's looped one:
 | `idleConnWait` | written by queueForIdleConn, read only by Go's tryPutIdleConn, which readLoop calls |
 | `startDialConnForLocked` | Go's queueForDial spawns through it; goish's calls `dialConnFor` inline, and its own comment says "the goroutine form stays available" |
 | `cleanFrontCanceled` | Go's caller is the dialsInProgress bookkeeping the inline dial does not carry |
+| `persistConn.cancelRequest` | Go calls it from readLoop (transport.go:2410) AND roundTrip (:2883); goish's cancellation expires the conn's netpoll deadline instead |
 
 Every one is a faithful port with a verified anchor, and every one is
 unreachable. That is the drift this decision exists to stop: the cost
 is not the dead code, it is that a reader cannot tell which path is
 the maintained one, and a change to the live path leaves the ported
 one silently stale.
+
+`cancelRequest` is the one with two causes, and it is the more
+interesting entry. Its readLoop call site does not exist because the
+loop does not run; its roundTrip call site was replaced deliberately,
+because goish cancels by expiring the conn's netpoll deadline rather
+than by cancelling the request — a divergence documented at length in
+client.rs, and the reason the context CAUSE has to be mapped back at
+the error choke point. Deciding B does not settle that half.
 
 ### C. The conn is not shareable
 

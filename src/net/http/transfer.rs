@@ -1126,10 +1126,19 @@ impl body {
     }
 
     // go: sdk 1.25.5 net/http/transfer.go:1012-1016 body.didEarlyClose
-    /// Whether Close was called before the source was drained. This is
-    /// what `response.closedRequestBodyEarly` consults to refuse
-    /// connection reuse — an undrained body would desync the next
-    /// keep-alive request.
+    /// Whether Close was called before the source was drained. In Go
+    /// this is what `response.closedRequestBodyEarly` consults to
+    /// refuse connection reuse, because an undrained body desyncs the
+    /// next keep-alive request.
+    ///
+    /// NOT consulted here, and this line used to say it was. goish's
+    /// `closedRequestBodyEarly` returns false unconditionally — not a
+    /// stub but a consequence of the design, since a goish Request owns
+    /// its body as a `slice<byte>`, so there is no `*body` to assert on
+    /// and no early close to detect; the note above that function
+    /// explains it and names MaxBytesReader as what prevents the same
+    /// desync from the other end. This field grows a consumer when
+    /// Request.Body becomes an io.ReadCloser (ROADMAP section 0 A).
     pub fn didEarlyClose(&self) -> bool {
         return self.state.Lock().earlyClose;
     }
