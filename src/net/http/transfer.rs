@@ -81,9 +81,15 @@ impl crate::io::Reader for byteReader {
 // ─── transferReader ─────────────────────────────────────────────────
 
 // go: sdk 1.25.5 net/http/transfer.go:440-453 transferReader
-/// The inputs and outputs of reading a message's framing. Only the
-/// header-derived half is populated today: `Body` waits on the Body
-/// redesign, so `readTransfer` (which fills it) is not ported.
+/// The inputs and outputs of reading a message's framing.
+///
+/// This said "Only the header-derived half is populated today: `Body`
+/// waits on the Body redesign, so `readTransfer` (which fills it) is
+/// not ported" until 2026-09-06. `readTransfer` is ported — 147 lines
+/// at the next declaration but one — and is called from both sides,
+/// client.rs and request.rs, on every message read. The struct still
+/// carries `Body` as an `Option<Box<dyn ReadCloser>>`; what changed is
+/// that the function said to be absent is the one doing the work.
 pub struct transferReader {
     // Input
     pub Header: Header,
