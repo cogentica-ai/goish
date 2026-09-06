@@ -13,6 +13,11 @@
 
 #![allow(non_snake_case)]
 
+// go: waived getBuffer — Go pools the header buffer through a sync.Pool (bufferPool, getBuffer, putBuffer); goish allocates one per Output call, the same output at a different cost. Writer hands the destination io.Writer back out; goish holds it behind a Mutex and handing it out would escape that.
+// go: waived putBuffer — Go pools the header buffer through a sync.Pool (bufferPool, getBuffer, putBuffer); goish allocates one per Output call, the same output at a different cost. Writer hands the destination io.Writer back out; goish holds it behind a Mutex and handing it out would escape that.
+// go: waived Writer — Go pools the header buffer through a sync.Pool (bufferPool, getBuffer, putBuffer); goish allocates one per Output call, the same output at a different cost. Writer hands the destination io.Writer back out; goish holds it behind a Mutex and handing it out would escape that.
+// go: waived Logger.Writer — Go pools the header buffer through a sync.Pool (bufferPool, getBuffer, putBuffer); goish allocates one per Output call, the same output at a different cost. Writer hands the destination io.Writer back out; goish holds it behind a Mutex and handing it out would escape that.
+
 extern crate alloc;
 use alloc::vec::Vec;
 

@@ -2,6 +2,12 @@
 //
 // fs.go — FS, File, FileInfo, DirEntry, ReadDirFile, FileMode,
 // ValidPath, PathError and the sentinel errors.
+// go: waived errInvalid — Go declares five one-line accessors because the values live in internal/oserror and io/fs only re-exports them; goish declares the sentinels directly in the var! block here, so there is no accessor to name.
+// go: waived errPermission — Go declares five one-line accessors because the values live in internal/oserror and io/fs only re-exports them; goish declares the sentinels directly in the var! block here, so there is no accessor to name.
+// go: waived errExist — Go declares five one-line accessors because the values live in internal/oserror and io/fs only re-exports them; goish declares the sentinels directly in the var! block here, so there is no accessor to name.
+// go: waived errNotExist — Go declares five one-line accessors because the values live in internal/oserror and io/fs only re-exports them; goish declares the sentinels directly in the var! block here, so there is no accessor to name.
+// go: waived errClosed — Go declares five one-line accessors because the values live in internal/oserror and io/fs only re-exports them; goish declares the sentinels directly in the var! block here, so there is no accessor to name.
+
 extern crate alloc;
 use alloc::sync::Arc;
 use alloc::vec::Vec;

@@ -1048,6 +1048,37 @@ GOISH018, because that rule keys off the anchor attaching by NAME —
 which is the same gap `anchored_attached_keys` closed on the coverage
 side in §2b-ii, still open on the lint side.
 
+**io/fs, context and log: thirteen more, all case 1, all with the
+reason already written in the file.** The pattern by now is that the
+package told me the answer and nobody had transcribed it into the form
+port_coverage reads.
+
+  - `io/fs` — Go declares five one-line accessors (`errInvalid`,
+    `errPermission`, `errExist`, `errNotExist`, `errClosed`) because
+    the values live in `internal/oserror` and io/fs only re-exports
+    them; goish declares the sentinels directly in its `var!` block.
+    **40/45 to 40/40.**
+  - `context` — `contextName` type-switches over the concrete contexts
+    to find their `String`, which goish reaches through a trait method;
+    `propagateCancel`, `parentCancelCtx` and `removeChild` serve the
+    parent's `children` map, which goish replaces with a watcher
+    goroutine. 25/32 to 25/28.
+  - `log` — Go pools the header buffer through a `sync.Pool`
+    (`bufferPool`/`getBuffer`/`putBuffer`); goish allocates one per
+    Output call, the same output at a different cost. `Writer` and
+    `Logger.Writer` hand the destination `io.Writer` back out, which
+    goish refuses because it holds that behind a Mutex and handing it
+    out would escape the lock. Root 35/39 to 35/35.
+
+Ref smokes after: context_ref_smoke 10/10, context_string_ref_smoke ok,
+iofs_ref_smoke 91/91, log_flags_ref_smoke 9/9.
+
+One care point worth repeating from §2b's own text: waive the EXACT
+missing set, not the ignore list. `io/fs`'s ignore names five and all
+five are missing, but `context`'s names five where only four are, and
+waiving a ported declaration pulls it out of the numerator as well —
+which is how `strings` once read 108/113 instead of 110/115.
+
 What this does NOT resolve is the rest of the triage. `flag` keeps 43 names
 and they are ROADMAP case 4, blocked work rather than case 1: the
 package is a hand-written v1 FlagSet, and Go's `Var`/`Value` surface —
