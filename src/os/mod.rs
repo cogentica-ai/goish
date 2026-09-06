@@ -73,6 +73,22 @@
 //   clean  Pipe uses pipe2 with O_CLOEXEC and keeps the errno.
 //   clean  TempDir honours TMPDIR and falls back to /tmp.
 //
+//   FIXED  four error paths named the syscall and threw the errno away
+//          — Getwd, Getgroups (both call sites) and Hostname returned
+//          `errors.New("<call> failed")` where Go returns
+//          NewSyscallError. A caller could not tell ENOENT from EACCES.
+//          Same shape the Pipe path was already fixed for.
+//   FIXED  Getwd fell through to the syscall when stat(".") failed. Go
+//          returns that error. The comment beside it asserted Go "falls
+//          through ... including a stat of '.' that failed", which is
+//          not what Go does — with $PWD set and the working directory
+//          unlinked Go reports "stat .: no such file or directory" and
+//          goish reported a bare "getwd failed".
+//
+//   clean  Truncate and Chdir wrap the errno in a PathError.
+//   clean  Getwd implements Go's $PWD kludge, including the SameFile
+//          comparison that makes it return the symlinked path.
+//
 //   NOTE   Hostname calls uname and stops there. Go tries uname first
 //          and falls back to reading /proc/sys/kernel/hostname when the
 //          name is absent or 64 bytes (possibly truncated, since
@@ -508,6 +524,7 @@ pub fn Create<N: Into<string>>(name: N) -> (nilable<File>, error) {
     OpenFile(name, O_RDWR | O_CREATE | O_TRUNC, FileMode(0o666))
 }
 
+// go: sdk 1.25.5 os/file.go:410-419 OpenFile
 /// `os.OpenFile(name, flag, perm)` (os/file.go:412).
 ///
 /// `perm: impl Into<FileMode>` so ports that pass a bare `0666` /
@@ -889,6 +906,7 @@ pub fn ReadFile<N: Into<string>>(name: N) -> (slice<byte>, error) {
 mod env;
 pub use env::*;
 
+// go: sdk 1.25.5 os/file.go:490-492 TempDir
 /// `os.TempDir()` (file.go:490) — TMPDIR if set, else "/tmp".
 pub fn TempDir() -> string {
     let (v, ok) = LookupEnv(string("TMPDIR"));
@@ -898,6 +916,7 @@ pub fn TempDir() -> string {
     string("/tmp")
 }
 
+// go: sdk 1.25.5 os/file.go:608-627 UserHomeDir
 /// `os.UserHomeDir()` (os/file.go:608) — return the current user's home
 /// directory.
 ///
@@ -921,6 +940,7 @@ pub fn UserHomeDir() -> (string, error) {
     (string::new(), errors::New(b.String()))
 }
 
+// go: sdk 1.25.5 os/file.go:507-545 UserCacheDir
 /// Line-by-line port of `os.UserCacheDir()` (file.go:507) — return the
 /// default root directory for user-specific cached data.
 ///
@@ -955,6 +975,7 @@ pub fn UserCacheDir() -> (string, error) {
     (dir, nil)
 }
 
+// go: sdk 1.25.5 os/file.go:560-598 UserConfigDir
 /// Line-by-line port of `os.UserConfigDir()` (file.go:560) — return the
 /// default root directory for user-specific configuration data.
 ///
@@ -1027,16 +1048,24 @@ pub fn Getwd() -> (string, error) {
     if dir.Len() > 0 && bytes_of(&dir)[0] == b'/' {
         // Go: dot, err = statNolog("."); if err != nil { return "", err }
         let (dot, err) = Stat(string("."));
-        if err.IsNil() {
-            // Go: d, err := statNolog(dir)
-            //     if err == nil && SameFile(dot, d) { return dir, nil }
-            let (d, err2) = Stat(dir.clone());
-            if err2.IsNil() && SameFile(&dot, &d) {
-                return (dir, nil);
-            }
+        // Go RETURNS here — `if err != nil { return "", err }` — it does
+        // not fall through. This comment used to claim the opposite,
+        // which is why the early return was missing: with $PWD set and
+        // the working directory unlinked, Go reports
+        // "stat .: no such file or directory" and goish reported a bare
+        // "getwd failed" from the syscall it went on to make.
+        if !err.IsNil() {
+            return (string::new(), err);
         }
-        // Go falls through to the syscall on any error here, including
-        // a stat of "." that failed, and so do we.
+        // Go: d, err := statNolog(dir)
+        //     if err == nil && SameFile(dot, d) { return dir, nil }
+        //
+        // A failure to stat $PWD is NOT fatal: Go notes that the slow
+        // path below would fail the same way but is worth trying.
+        let (d, err2) = Stat(dir.clone());
+        if err2.IsNil() && SameFile(&dot, &d) {
+            return (dir, nil);
+        }
     }
 
     // Go: var buf [128]byte; for { n, err := syscall.Getcwd(buf[:]); ... }
@@ -1055,7 +1084,13 @@ pub fn Getwd() -> (string, error) {
         // Go: if err != ERANGE { return "", err } — bigger buffer otherwise.
         // Slim: -ERANGE is -34 on Linux. Anything else is fatal.
         if n != -34 {
-            return (string::new(), errors::New(string("getwd failed")));
+            // Go: return dir, NewSyscallError("getwd", err) — the errno
+            // is what lets a caller tell ENOENT (the cwd was removed)
+            // from EACCES (a parent became unreadable).
+            return (
+                string::new(),
+                NewSyscallError("getwd", syscall::Errno(-n.rc()).into()),
+            );
         }
         size *= 2;
     }
@@ -1065,6 +1100,7 @@ pub fn Getwd() -> (string, error) {
     )
 }
 
+// go: sdk 1.25.5 os/file.go:361-383 Chdir
 /// Line-by-line port of `os.Chdir(name)` (file.go) — change the
 /// current working directory to `name`. Returns `nil` on success.
 pub fn Chdir<N: Into<string>>(name: N) -> error {
@@ -1137,6 +1173,7 @@ pub fn Chmod<N: Into<string>, M: Into<FileMode>>(name: N, mode: M) -> error {
     nil
 }
 
+// go: sdk 1.25.5 os/file_unix.go:417-425 Symlink
 /// Line-by-line port of `os.Symlink(oldname, newname)` (file_unix.go:417).
 /// Slim: no LinkError wrapping, no EINTR retry.
 pub fn Symlink<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> error {
@@ -1197,6 +1234,7 @@ pub fn Readlink<N: Into<string>>(name: N) -> (string, error) {
     }
 }
 
+// go: sdk 1.25.5 os/executable.go:18-20 Executable
 /// `os.Executable()` (executable.go:19 → executable_procfs.go:15) —
 /// path name for the executable that started the current process, via
 /// `Readlink("/proc/self/exe")`. When the executable has been deleted,
@@ -1354,6 +1392,7 @@ pub fn Rename<O: Into<string>, N: Into<string>>(oldpath: O, newpath: N) -> error
     nil
 }
 
+// go: sdk 1.25.5 os/file_unix.go:403-411 Link
 /// Line-by-line port of `os.Link(oldname, newname)` (file_unix.go:403)
 /// — create `newname` as a hard link to `oldname`.
 pub fn Link<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> error {
@@ -1373,6 +1412,7 @@ pub fn Link<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> error {
     nil
 }
 
+// go: sdk 1.25.5 os/file_unix.go:344-352 Truncate
 /// Line-by-line port of `os.Truncate(name, size)` (file_unix.go:344)
 /// — change the size of the named file. Follows symlinks (per Go).
 pub fn Truncate<N: Into<string>>(name: N, size: int) -> error {
@@ -1449,6 +1489,7 @@ pub fn Getppid() -> int {
     syscall::Getppid() as int
 }
 
+// go: sdk 1.25.5 os/proc.go:52-55 Getgroups
 /// `os.Getgroups()` (proc.go:51) — list of the numeric IDs of the
 /// supplementary groups for the calling process.
 ///
@@ -1462,9 +1503,10 @@ pub fn Getgroups() -> (slice<int>, error) {
     let n = syscall::Getgroups(0, core::ptr::null_mut());
     // Go: if err != nil { return nil, err }
     if n < 0 {
+        // Go: return gids, NewSyscallError("getgroups", e)
         return (
             slice::<int>::__from_vec(Vec::new()),
-            errors::New(string("getgroups failed")),
+            NewSyscallError("getgroups", syscall::Errno(-n.rc()).into()),
         );
     }
     // Go: if n == 0 { return nil, nil }
@@ -1482,7 +1524,7 @@ pub fn Getgroups() -> (slice<int>, error) {
     if n2 < 0 {
         return (
             slice::<int>::__from_vec(Vec::new()),
-            errors::New(string("getgroups failed")),
+            NewSyscallError("getgroups", syscall::Errno(-n2.rc()).into()),
         );
     }
 
@@ -1495,6 +1537,7 @@ pub fn Getgroups() -> (slice<int>, error) {
     (slice::<int>::__from_vec(gids), errors::nil)
 }
 
+// go: sdk 1.25.5 os/pipe2_unix.go:13-22 Pipe
 /// Line-by-line port of `os.Pipe()` (pipe2_unix.go:13) — create a
 /// connected pair of Files; reads from `r` return bytes written to
 /// `w`. Both ends are O_CLOEXEC by default, mirroring upstream.
@@ -1521,13 +1564,17 @@ pub fn Pipe() -> (File, File, error) {
     )
 }
 
+// go: sdk 1.25.5 os/sys.go:8-10 Hostname
 /// `os.Hostname()` (sys.go:8) — return the kernel's nodename via
 /// uname(2).
 pub fn Hostname() -> (string, error) {
     let mut u = syscall::Utsname::default();
     let rc = syscall::Uname(&mut u);
     if rc < 0 {
-        return (string::new(), errors::New(string("uname failed")));
+        return (
+            string::new(),
+            NewSyscallError("uname", syscall::Errno(-rc).into()),
+        );
     }
     let mut n: usize = 0;
     while n < u.nodename.len() && u.nodename[n] != 0 {
@@ -1667,6 +1714,7 @@ fn register_os_fs_impls() {
     crate::io::fs::__goish_register_DirEntry_impl::<unixDirent>();
 }
 
+// go: sdk 1.25.5 os/dir.go:114-126 ReadDir
 /// `os.ReadDir(name)` (os/dir.go:114) — read directory entries from
 /// `name`, returning them sorted by filename. Slim port: relies on
 /// the Linux `getdents64(2)` syscall. Like Go, the return type is a
@@ -2458,6 +2506,7 @@ fn register_dirfs_impls() {
     crate::io::fs::__goish_register_File_impl::<dirFSFile>();
 }
 
+// go: sdk 1.25.5 os/file.go:746-748 DirFS
 /// `os.DirFS(dir)` (os/file.go:717) — an `fs::FS` for the tree of
 /// files rooted at the directory `dir`. Implements the optimized
 /// `StatFS` / `ReadFileFS` / `ReadDirFS` paths, so `fs::Stat`,
