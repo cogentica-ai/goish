@@ -1007,25 +1007,34 @@ fixing file A cannot pay for a regression in file B. Current total:
 
 ## Known defects, open
 
-Each is reproduced and recorded rather than worked around. Both need
-`make e2e-full` to validate, so neither is bundled into a port.
-(A third, `Timer::Stop()` leaving its sleeper goroutine pinned, was
-fixed in `3b97cc5` — one goroutine per timer, zero post-Stop lifetime,
-tripwired by `time_stop_no_pin_smoke`.)
+Reproduced and recorded rather than worked around. **One is left**,
+and it needs `make e2e-full` to validate, so it is not bundled into a
+port.
+
+Two of the three this list carried are fixed. `Timer::Stop()` leaving
+its sleeper goroutine pinned went in `3b97cc5` — one goroutine per
+timer, zero post-Stop lifetime, tripwired by `time_stop_no_pin_smoke`;
+its memory ordering was re-verified 2026-09-06 (ROADMAP.md 2).
 
 - **`goish::cast!` cannot succeed on a `goany::Any` carrier.** It
   resolves through the blanket `HasDynAny for T`, probing the wrapper's
   `TypeId` and never the payload's. Silent — a comma-ok assertion
   reports `false`. Use `.As::<dyn Trait + Send + Sync>()`. See
   CONTRIBUTING.md §9b.
-- **`crypto/ecdsa::PrivateKey` does not implement `crypto::Signer`**
-  (Go's does), so an ECDSA key cannot yet sign an X.509 certificate.
+(A second, `crypto/ecdsa::PrivateKey` not implementing
+`crypto::Signer`, is also fixed: `impl crypto::Signer for PrivateKey`
+is at `crypto/ecdsa/ecdsa.rs:508`, and ROADMAP.md 2 has recorded it as
+done for some time. It was still listed here as open on 2026-09-06,
+which is the hazard of keeping the same fact in two documents.)
 
 ### Structural divergences, pinned by assertions
 
-- `time::Parse` rejects a numeric zone offset where Go accepts one —
-  `time::Time` carries no `Location`. RFC 5280 requires `Z` in
-  certificates, so certificate parsing is unaffected.
+- ~~`time::Parse` rejects a numeric zone offset~~ — **no longer true,
+  checked 2026-09-06.** `time::Time` carries a `Location` now, and both
+  directions round-trip: `2024-03-01T12:34:56-07:00` and
+  `…+05:30` parse without error and format back byte-identically.
+  `time_rfc3339_marshal_ref_smoke` and
+  `time_rfc3339_unmarshal_ref_smoke` pin the offset cases against Go.
 - goish value types collapse two Go states into one: `big::Int` (nil vs
   present-and-zero) and `time::Time` (year 1 vs Unix epoch). The common
   case is correct in both; the rare one is documented at the symptom and
