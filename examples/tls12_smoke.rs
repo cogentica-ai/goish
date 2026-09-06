@@ -429,8 +429,15 @@ fn test_client_hello_bytes(t: &mut testing::T) {
         ));
         return;
     }
-    // cipher_suites: the 6 suites the client offers, TLS 1.3 first.
-    let want_suites: [u16; 6] = [0x1301, 0x1302, 0x1303, 0xC02B, 0xC02F, 0x002F];
+    // cipher_suites: the 5 suites the client offers, TLS 1.3 first.
+    //
+    // 0x002F RSA_AES128_CBC_SHA used to be here as a "fallback". Go
+    // puts it in InsecureCipherSuites() and never proposes it, goish's
+    // own server drops it with the other RSA-kex suites, and it is the
+    // only way to reach record.rs's CBC path — the one whose header
+    // says the Lucky13 MAC half is not established. Its absence is
+    // asserted, not incidental.
+    let want_suites: [u16; 5] = [0x1301, 0x1302, 0x1303, 0xC02B, 0xC02F];
     if l.cs_len != want_suites.len() * 2 {
         t.Fatal(fmt::Sprintf!(
             "ClientHello: cipher_suites_len = %d, want %d",
@@ -1268,9 +1275,16 @@ fn test_client_hello_offers_ecdhe(t: &mut testing::T) {
             "ClientHello: 0xC02F (ECDHE-RSA-AES128-GCM-SHA256) not offered",
         ));
     }
-    if !found_002f {
+    // The sense of this one is INVERTED, deliberately. It used to
+    // require 0x002F to be present. Go puts that suite in
+    // InsecureCipherSuites() and never proposes it; goish's own server
+    // drops it with the other RSA-kex suites; and it is the only route
+    // to record.rs's CBC path, whose header states the Lucky13 MAC
+    // half is not established. Offering it must stay a regression, not
+    // become one again quietly.
+    if found_002f {
         t.Fatal(string::from_static(
-            "ClientHello: 0x002F (RSA-AES128-CBC-SHA) not offered",
+            "ClientHello: 0x002F (RSA-AES128-CBC-SHA) offered — Go marks it insecure",
         ));
     }
 }

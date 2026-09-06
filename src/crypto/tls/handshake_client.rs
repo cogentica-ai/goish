@@ -1573,21 +1573,34 @@ fn build_client_hello_inner(
     }
     body.push(32u8); // session_id length
     body.extend_from_slice(&session_id);
-    // cipher_suites: 6 suites (TLS 1.3 first, then TLS 1.2)
+    // cipher_suites: 5 suites (TLS 1.3 first, then TLS 1.2)
     // 0x1301 TLS_AES_128_GCM_SHA256
     // 0x1302 TLS_AES_256_GCM_SHA384
     // 0x1303 TLS_CHACHA20_POLY1305_SHA256
     // 0xC02B ECDHE_ECDSA_AES128_GCM_SHA256
     // 0xC02F ECDHE_RSA_AES128_GCM_SHA256
-    // 0x002F RSA_AES128_CBC_SHA
+    //
+    // 0x002F RSA_AES128_CBC_SHA is NOT offered, and its absence is the
+    // point. Go classifies it under `InsecureCipherSuites()` and
+    // `defaultCipherSuites` drops every RSA-kex suite unless
+    // GODEBUG=tlsrsakex=1 (defaults.rs, ported). goish's SERVER goes
+    // through that path and does not offer it; this list is hardcoded
+    // and bypasses the config, so the client offered a suite its own
+    // server would refuse and Go would never propose.
+    //
+    // Two costs, not one. RSA key exchange has no forward secrecy. And
+    // it is the only suite that routes decryption through record.rs's
+    // CBC path, whose header states plainly that the padding scan is
+    // Go's but the MAC is computed over a variable-length payload —
+    // the other half of Lucky13, and the one thing that file lists as
+    // NOT established.
     body.push(0);
-    body.push(12); // 6 suites * 2 bytes
+    body.push(10); // 5 suites * 2 bytes
     body.extend_from_slice(&CIPHER_TLS13_AES128_GCM_SHA256.to_be_bytes());
     body.extend_from_slice(&CIPHER_TLS13_AES256_GCM_SHA384.to_be_bytes());
     body.extend_from_slice(&CIPHER_TLS13_CHACHA20_POLY1305_SHA256.to_be_bytes());
     body.extend_from_slice(&CIPHER_SUITE_ECDHE_ECDSA_AES128_GCM_SHA256.to_be_bytes());
     body.extend_from_slice(&CIPHER_SUITE_ECDHE_RSA_AES128_GCM_SHA256.to_be_bytes());
-    body.extend_from_slice(&CIPHER_SUITE_RSA_AES128_CBC_SHA.to_be_bytes());
     // compression_methods: length(1) + null(1)
     body.push(1);
     body.push(0);
