@@ -63,8 +63,43 @@ const GO: [&str; 7] = [
 
 static mut FAILED: i64 = 0;
 static mut LINE: usize = 0;
+/// Wait for the delivered set to go QUIET, then drain it.
+///
+/// This used to be a flat `Sleep(ms)` and then a drain of whatever had
+/// arrived. That encodes an assumption about how fast the kernel
+/// redelivers a signal and how soon this goroutine is scheduled after
+/// it, and the assumption does not hold on a loaded machine: the e2e
+/// run on 2026-09-06 failed here on CI while passing five times out of
+/// five locally, with 841 examples competing for the same cores.
+///
+/// Polling until the first signal arrives would be wrong in the other
+/// direction — `notify-all` expects THREE and would return after one,
+/// and `stop-one-channel` expects an empty channel and must not
+/// return early at all. So the wait is for the buffered count to stop
+/// CHANGING for `ms`, with ten times that as a ceiling. A row
+/// expecting nothing still waits the full quiet window; a row
+/// expecting three waits until all three have landed and no more
+/// follow. Same comparison, no timing assumption.
 fn drain(c: &goish::gochan::chan<i32>, ms: i64) -> string {
-    time::Sleep(time::Duration(ms * 1_000_000));
+    let quiet_ticks = if ms / 5 > 1 { ms / 5 } else { 1 };
+    let max_ticks = quiet_ticks * 10;
+    let mut last = c.Len();
+    let mut stable: i64 = 0;
+    let mut ticks: i64 = 0;
+    while ticks < max_ticks {
+        time::Sleep(time::Duration(5_000_000));
+        ticks += 1;
+        let n = c.Len();
+        if n != last {
+            last = n;
+            stable = 0;
+        } else {
+            stable += 1;
+        }
+        if stable >= quiet_ticks {
+            break;
+        }
+    }
     let mut names: Vec<string> = Vec::new();
     // Len() is the buffered count; drain exactly that many so the
     // probe never blocks on an empty channel.
