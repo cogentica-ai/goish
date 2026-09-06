@@ -375,8 +375,17 @@ impl Handler for fileHandler {
         // used locally and the request is not rewritten. serveFile
         // reads r.URL.Path again for its redirect decisions, which is
         // the one place the difference could show — only for a request
-        // whose path did not start with '/', which ReadRequest does
-        // not produce.
+        // whose path does not start with '/'.
+        //
+        // That last clause used to read "which ReadRequest does not
+        // produce". Unverified, and probably wrong: Go reaches such a
+        // request through CONNECT, where request.go:1118 sets
+        // `justAuthority` and parses the target as an authority rather
+        // than a path, leaving URL.Path empty. goish does not implement
+        // justAuthority at all, so its own CONNECT parse is a separate
+        // question — but either way the premise that no request can
+        // arrive with a non-'/' path is not established, and a comment
+        // asserting it made this divergence look unreachable.
         let mut upath = r.URL.Path.clone();
         if !strings::HasPrefix(upath.clone(), string("/")) {
             upath = string("/") + upath;

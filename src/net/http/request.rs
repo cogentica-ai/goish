@@ -1109,6 +1109,19 @@ pub(crate) fn __read_request_server<R: io::Reader>(
     // target do not survive it (readRequest, request.go:1105).
     req.RequestURI = target.clone();
 
+    // NOT PORTED, noted 2026-09-06: Go's authority-form handling.
+    // request.go:1118 computes
+    //     justAuthority := req.Method == "CONNECT" && !strings.HasPrefix(rawurl, "/")
+    // and, for a CONNECT target like "example.com:443", parses it as an
+    // AUTHORITY rather than a path — the result has Host set and Path
+    // empty. goish parses every target the same way, so a CONNECT
+    // request's URL here is whatever the general parser makes of
+    // "host:port", which is not what Go produces.
+    //
+    // ServeMux's CONNECT special case is separately unported and is
+    // noted at server.rs's match_handler. Both matter to the same
+    // request, and neither is faked.
+
     if !validMethod(method.clone()) {
         // Go: `badStringError("invalid method", req.Method)`.
         return (
