@@ -200,7 +200,28 @@ for name in "${TARGETS[@]}"; do
     # bucketed as a panic, so the summary said "panic: 1" for a run
     # whose only problem was a failed assertion, and the diagnosis
     # started in the wrong place.
-    if [[ $rc -eq 0 ]]; then
+    # ...with ONE exception. A panic inside main is caught by the
+    # scheduler ("goroutine recovered from panic, scheduler
+    # continuing"), main never reaches its exit check, and the process
+    # still returns 0 — so a panicking regression is invisible to this
+    # runner. It cost a real one: asn1's parseBitString shifted a u32 by
+    # 32 or more for any BIT STRING whose padding byte was >= 32, which
+    # panics in a debug build (and e2e builds debug). Its own ref smoke
+    # would have reported rc=0 with the output simply stopping early.
+    #
+    # Narrowed to *_ref_smoke deliberately. Those are pure Go
+    # comparisons: none of the 200 panics on purpose — checked, the 19
+    # that mention "panic" all do so in prose. The intentional
+    # panic+recover tests this rule would otherwise break
+    # (panic_recovery_smoke, defer_panic_smoke, http_panic_demo) are
+    # not ref smokes, so they keep the rc=0-wins behaviour above.
+    if [[ $rc -eq 0 && "$name" == *_ref_smoke ]] \
+       && echo "$out" | grep -q '^goish: panic$'; then
+      panic=$((panic+1))
+      if [[ ! -s "$first_log" ]]; then
+        { echo "=== iter $i: PANIC (rc=0, ref smoke) ==="; echo "$out"; } > "$first_log"
+      fi
+    elif [[ $rc -eq 0 ]]; then
       pass=$((pass+1))
     elif [[ $rc -eq 124 ]]; then
       tout=$((tout+1))
