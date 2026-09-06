@@ -82,6 +82,10 @@ def decl_key(recv, name):
 # invisible to coverage no matter how faithfully they were ported.
 # `pub use <path> as <Name>;` — a declaration published under a Go name.
 ALIAS = re.compile(r"^pub use [\w:]+ as ([A-Za-z_]\w*);", re.M)
+# `pub use super::{Base, Clean, …};` — a declaration this package
+# PROVIDES under Go's name, sourced from a sibling. filepath does this
+# for the nine slash-only functions it shares with `path`.
+REEXPORT = re.compile(r"^pub use [\w:]+::\{([^}]*)\};", re.M)
 
 RSFN = re.compile(
     r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:default\s+)?(?:const\s+)?(?:async\s+)?"
@@ -543,6 +547,9 @@ def _facts(paths):
         # such aliases tree-wide, all deliberate: slices' four sort
         # macros, log's Fatal family, http's ResolvePath.
         mine |= set(ALIAS.findall(src))
+        for grp in REEXPORT.findall(src):
+            mine |= {x.strip() for x in grp.split(",")
+                     if re.fullmatch(r"[A-Za-z_]\w*", x.strip())}
         if BY_DECL:
             # Credit anchored Recv.Method keys whose method exists in this
             # file as a fn under any receiver shape — see anchored_decl_keys.
