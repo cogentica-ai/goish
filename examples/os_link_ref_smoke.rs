@@ -74,7 +74,7 @@ fn strip(msg: &string, root: &string) -> string {
 // (tag, want_text, want_notexist, want_exist) — Go 1.25.5 verbatim,
 // with the scratch root replaced by <root>. An empty want means Go
 // returned nil.
-const CASES: [(&str, &str, bool, bool); 19] = [
+const CASES: [(&str, &str, bool, bool); 20] = [
     (
         "chdir/missing",
         "chdir <root>/nope: no such file or directory",
@@ -167,6 +167,17 @@ const CASES: [(&str, &str, bool, bool); 19] = [
         false,
         true,
     ),
+    // newname is an existing dir AND oldname does not exist. Go re-stats
+    // oldname and reports THAT error, not EEXIST — "prioritize returning
+    // the oldname error because that's what we did historically"
+    // (os/file_unix.go). Returning EEXIST as soon as a directory is seen
+    // at newname passes rename/dirover above and fails this.
+    (
+        "rename/missingoverdir",
+        "rename <root>/nope <root>/d: no such file or directory",
+        true,
+        false,
+    ),
     ("rename/ok", "", false, false),
     (
         "remove/missing",
@@ -226,6 +237,7 @@ fn main() {
     push("link/exists", os::Link(j("f"), j("f")));
     push("rename/missing", os::Rename(j("nope"), j("f2")));
     push("rename/dirover", os::Rename(j("f"), j("d")));
+    push("rename/missingoverdir", os::Rename(j("nope"), j("d")));
     push("rename/ok", os::Rename(j("f"), j("f2")));
     push("remove/missing", os::Remove(j("nope")));
 

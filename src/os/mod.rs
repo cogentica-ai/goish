@@ -1208,24 +1208,66 @@ pub fn Chtimes<N: Into<string>>(
     nil
 }
 
-/// Line-by-line port of `os.Rename(oldpath, newpath)` (file.go:440 →
-/// file_unix.go:26 rename). Slim: drops the SameFile case-only-rename
-/// gymnastics (Linux is always case-sensitive) but preserves the
-/// "newname is a directory" prelude check so `Rename(file, dir)` errors
-/// before clobbering anything.
+// go: sdk 1.25.5 os/file.go:440-442 Rename
+// goishlint:ignore GOISH018 rename — Go's Rename is a one-line
+//     forward to the platform `rename` (os/file_unix.go:26-53),
+//     whose body is inlined below: the Lstat-of-newname check, the
+//     oldname-error priority, the SameFile fall-through for a
+//     case-only rename, and the LinkError wrap.
+/// Line-by-line port of `os.Rename(oldpath, newpath)`.
+///
+/// This note used to read "Slim: drops the SameFile case-only-rename
+/// gymnastics (Linux is always case-sensitive)". That reasoning covers
+/// the SameFile comparison, but the block it dropped also held Go's
+/// oldname-error PRIORITY, which is not about case at all — so
+/// `Rename(missing, existingDir)` answered "file exists" where Go
+/// answers "no such file or directory", and the note made the omission
+/// read as a deliberate trade-off. Both are implemented now, and the
+/// case-only fall-through matters on a case-insensitive mount even
+/// though ext4 is not one.
 pub fn Rename<O: Into<string>, N: Into<string>>(oldpath: O, newpath: N) -> error {
     let oldpath: string = oldpath.into();
     let newpath: string = newpath.into();
-    // Go: fi, err := Lstat(newname); if err == nil && fi.IsDir() { return &LinkError{...EEXIST} }
+    // Go: fi, err := Lstat(newname); if err == nil && fi.IsDir() { ... }
     let (fi, e) = Lstat(newpath.clone());
     if e.IsNil() && fi.IsDir() {
-        // Go: return &LinkError{"rename", oldname, newname, syscall.EEXIST}
-        return errors::Wrap(LinkError {
-            Op: string::from_static("rename"),
-            Old: oldpath,
-            New: newpath,
-            Err: syscall::EEXIST.into(),
-        });
+        // Two independent errors are possible here — a bad oldname and a
+        // bad newname — and Go PRIORITISES the oldname one: "prioritize
+        // returning the oldname error because that's what we did
+        // historically" (os/file_unix.go). Returning EEXIST as soon as a
+        // directory is seen at newname gets the common case right and
+        // `Rename(missing, existingDir)` wrong, reporting "file exists"
+        // where Go reports "no such file or directory".
+        let (ofi, oerr) = Lstat(oldpath.clone());
+        if !oerr.IsNil() {
+            // Go: if pe, ok := err.(*PathError); ok { err = pe.Err } —
+            // the LinkError already carries both paths, so the inner
+            // error is unwrapped to the bare errno rather than nesting a
+            // PathError's path inside it.
+            let inner = match errors::As::<PathError>(oerr.clone()) {
+                Some(pe) => pe.Err.clone(),
+                None => oerr,
+            };
+            return errors::Wrap(LinkError {
+                Op: string::from_static("rename"),
+                Old: oldpath,
+                New: newpath,
+                Err: inner,
+            });
+        }
+        // Go: else if newname == oldname || !SameFile(fi, ofi) { EEXIST }
+        //
+        // Falling through when they ARE the same file is deliberate in
+        // Go: it is the case-only rename on a case-insensitive
+        // filesystem, which must be allowed to reach the syscall.
+        if newpath == oldpath || !SameFile(&fi, &ofi) {
+            return errors::Wrap(LinkError {
+                Op: string::from_static("rename"),
+                Old: oldpath,
+                New: newpath,
+                Err: syscall::EEXIST.into(),
+            });
+        }
     }
     // Go: err = ignoringEINTR(func() error { return syscall.Rename(oldname, newname) })
     let mut old_buf: Vec<u8> = Vec::with_capacity(oldpath.Len() as usize + 1);

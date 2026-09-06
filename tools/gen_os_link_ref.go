@@ -57,6 +57,12 @@ func TestGoishRef(t *testing.T) {
 	show("link/exists", os.Link(j("f"), j("f")))
 	show("rename/missing", os.Rename(j("nope"), j("f2")))
 	show("rename/dirover", os.Rename(j("f"), j("d")))
+	// newname is an existing dir AND oldname does not exist. Go re-stats
+	// oldname here and reports THAT error rather than EEXIST — "prioritize
+	// returning the oldname error because that's what we did historically"
+	// (os/file_unix.go). A port that returns EEXIST on seeing a directory
+	// at newname gets rename/dirover right and this one wrong.
+	show("rename/missingoverdir", os.Rename(j("nope"), j("d")))
 	show("rename/ok", os.Rename(j("f"), j("f2")))
 	show("remove/missing", os.Remove(j("nope")))
 
