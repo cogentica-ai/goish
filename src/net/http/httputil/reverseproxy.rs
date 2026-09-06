@@ -85,31 +85,16 @@ fn isHopHeader(name: &string) -> bool {
     return false;
 }
 
-// go: sdk 1.25.5 net/http/httputil/reverseproxy.go:234-253 joinURLPath
-/// Appends
-/// req's path to target's, gluing with a single '/'.
-fn join_url_path(target_path: &string, req_path: &string) -> string {
-    let a = target_path.clone();
-    let b = req_path.clone();
-    let a_slash = crate::strings::HasSuffix(a.clone(), string("/"));
-    let b_slash = crate::strings::HasPrefix(b.clone(), string("/"));
-    let mut out = strings::Builder::new();
-    if a_slash && b_slash {
-        let _ = out.WriteString(a.clone());
-        let trimmed = crate::strings::TrimPrefix(b, string("/"));
-        let _ = out.WriteString(trimmed);
-    } else if !a_slash && !b_slash {
-        let _ = out.WriteString(a.clone());
-        if a.Len() > 0 && b.Len() > 0 {
-            let _ = out.WriteByte(b'/');
-        }
-        let _ = out.WriteString(b);
-    } else {
-        let _ = out.WriteString(a);
-        let _ = out.WriteString(b);
-    }
-    return out.String();
-}
+// `joinURLPath` lives at its full form further down this file, taking
+// two *url.URL and returning (path, rawpath) as Go does. A second,
+// string-only port stood here until 2026-09-06: it implemented the
+// slash-gluing half and nothing else, had no caller, and carried its
+// own anchor for the same Go range — so the file claimed one Go
+// declaration twice, with the incomplete copy indistinguishable from
+// the real one to every check. Deleted rather than wired up: it drops
+// the RawPath branch, which is what keeps an encoded slash in the
+// inbound path from being glued into a different upstream path.
+// Found by scripts/dead_port_check.py's PRIVATE_DEAD list.
 
 impl super::super::server::Handler for reverseProxyHandler {
     // go: none — goish-only: the slim single-host proxy behind

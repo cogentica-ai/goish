@@ -13,12 +13,23 @@
 // (CreateCertificate, CreateRevocationList, Certificate.CreateCRL,
 // MarshalPKIXPublicKey and the extension builders behind them).
 //
-// What is still absent: the CSR and CRL *parsing* entry points —
-// `ParseCRL`, `ParseDERCRL`, `ParseRevocationList`,
-// `ParseCertificateRequest`, `parseCertificateRequest`,
-// `parseRawAttributes` and `parseCSRExtensions`. They are the read side
-// of the shapes declared here, and belong with `parser.go`'s half rather
-// than this one. They are absent, not stubbed.
+// This block said, until 2026-09-06: "What is still absent: the CSR and
+// CRL *parsing* entry points — ParseCRL, ParseDERCRL,
+// ParseRevocationList, ParseCertificateRequest, parseCertificateRequest,
+// parseRawAttributes and parseCSRExtensions … They are absent, not
+// stubbed."
+//
+// All seven are present, in THIS file, and they are implementations
+// rather than stubs — parseCertificateRequest is 71 lines,
+// parseCSRExtensions 50, and parseCertificateRequest populates
+// Attributes through parseRawAttributes exactly as Go does at
+// x509.go:2223. A reader taking that paragraph at face value would
+// conclude goish cannot parse a CSR or a CRL, which has not been true
+// for some time.
+//
+// The GOISH018 ignore further down still lists the same seven names.
+// That is now belt-and-braces rather than a statement about the file:
+// they are ported here, so the rule has nothing to fire on.
 //
 // Deviations from x509[go] @ Go 1.25.5:
 //
