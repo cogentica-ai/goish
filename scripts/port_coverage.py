@@ -80,6 +80,9 @@ def decl_key(recv, name):
 # sniffSig.match methods, `fn r#loop` for testing's B.Loop. Without
 # it the name captured is the bare `r`, so those declarations were
 # invisible to coverage no matter how faithfully they were ported.
+# `pub use <path> as <Name>;` — a declaration published under a Go name.
+ALIAS = re.compile(r"^pub use [\w:]+ as ([A-Za-z_]\w*);", re.M)
+
 RSFN = re.compile(
     r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:default\s+)?(?:const\s+)?(?:async\s+)?"
     r"(?:unsafe\s+)?(?:extern\s+\"[^\"]*\"\s+)?fn\s+(?:r#)?([A-Za-z_]\w*)",
@@ -278,7 +281,18 @@ def asm_decls(paths):
                     break
                 j += 1
             m = FUNC.match(text)
-            if m and not text.rstrip().endswith("{"):
+            # Bodyless means NO brace at all — `func addOne(x uint64) uint64`.
+            # Testing "does not end with {" instead counted every ONE-LINE
+            # Go function as an assembly stub, because those end with `}`:
+            #
+            #     func errInvalid() error    { return oserror.ErrInvalid }
+            #
+            # 3937 of those in the Go tree against 2915 genuinely bodyless
+            # declarations, so the test was wrong more often than right. It
+            # inflated the assembly share of every gap and understated the
+            # portable remainder — which is the wrong-leverage failure this
+            # function was written to prevent, in the function itself.
+            if m and "{" not in text:
                 out.add(m.group(1))
             i = j + 1
     return out
@@ -519,6 +533,16 @@ def _facts(paths):
         waived |= set(WAIVED.findall(src))
         drafts |= draft_syms(src)
         mine = rust_decl_idents(src) if BY_DECL else set(RSFN.findall(src))
+        # A declaration re-exported under Go's name IS that declaration,
+        # even when the item behind it is not an `fn`. goish spells
+        # `slices.Sort` as a MACRO — Go's Sort mutates in place, which a
+        # Rust fn taking `&mut` cannot express at the call site — and
+        # publishes it as `pub use crate::__goish_slices_sort as Sort;`.
+        # Counting only `fn` items read those as MISSING and made
+        # slices/ look like unported work when the API is there. Fifteen
+        # such aliases tree-wide, all deliberate: slices' four sort
+        # macros, log's Fatal family, http's ResolvePath.
+        mine |= set(ALIAS.findall(src))
         if BY_DECL:
             # Credit anchored Recv.Method keys whose method exists in this
             # file as a fn under any receiver shape — see anchored_decl_keys.

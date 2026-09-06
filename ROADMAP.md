@@ -384,6 +384,64 @@ one-liner's 0 of 70, and still mostly false positives. The signal is
 worth running once and reading; it is not worth automating into a gate.
 The 7 above do NOT need re-walking, which is the point of listing them.
 
+**A coverage percentage is a claim about the DENOMINATOR too.**
+Recorded 2026-09-06 after losing the start of a session to it.
+
+`encoding/binary` read 14/42 = 33.3% and looked like the most tractable
+gap in `encoding/`. It was picked as one on that basis. The file header
+says the opposite: Go sizes values from `reflect.Value` at RUN time and
+moves bytes through `encoder`/`decoder` structs, while goish decides at
+COMPILE time through a `Fixed` trait, so those 28 declarations have no
+counterpart and will not get one. That was already written in a
+GOISH018 ignore — which `port_coverage.py` does not read. It reads
+`// go: waived`. The same fact recorded in a form one tool understands
+and the other does not.
+
+Three distinct things look identical in a MISSING list, and only the
+first should be waived:
+
+1. **The design replaces it.** binary's reflective walk; `slices`'
+   pdqsort engine, delegated to Rust's `sort_unstable`; its
+   `overlaps`/`startIdx` aliasing helpers, unnecessary because goish's
+   Insert/Delete/Replace take `slice<T>` by value and return a new one.
+   Waive, with a reason.
+2. **Ported elsewhere in the package.** `net/net.rs`'s Close/Read/Write
+   live on TCPConn; `flag`'s Args/NArg are in mod.rs. port_coverage
+   searches the package directory and already counts them.
+3. **Ported under a non-`fn` item.** `slices.Sort` is a MACRO — Go's
+   Sort mutates in place, which a Rust fn taking `&mut` cannot express
+   at the call site — published as
+   `pub use crate::__goish_slices_sort as Sort;`. Fixed in the TOOL, not
+   waived: port_coverage now credits `pub use … as <Name>`, 15 such
+   aliases tree-wide.
+
+There is a fourth that must NOT be waived: **blocked work.**
+`testing/quick`'s seven need reflect over function and composite types
+and goish's `reflect::Value` is a data-only tree with a no-op `Call`.
+That is a real gap waiting on a real capability, and waiving it would
+launder it into 100%.
+
+Cross-referencing GOISH018 ignores against MISSING lists gives 81
+declarations across 12 packages in this shape — flag 25, filepath 17,
+quick 7, slog 6, textproto 5. Each needs its REASON read to sort case 1
+from case 4. binary (28) and slices (41) are done; the rest are not, and
+a bulk waive would be wrong.
+
+There is already one guard against over-waiving, and it is worth knowing
+about before adding more: `provenance.yml` asserts a DENOMINATOR FLOOR
+for crypto — `if want < 1709: exit`, with the comment "declarations
+stopped being counted". Waiving enough of crypto would trip it. No other
+package has that floor, so `binary`, `slices` and anything waived next
+rely on the printed WAIVED line and on the reason text being read.
+
+A related trap in the same script, fixed 2026-09-06: `asm_decls` split
+the gap into portable and assembly by testing whether a joined signature
+ENDS WITH `{`, so every ONE-LINE Go function — which ends with `}` —
+counted as an assembly stub. 3937 of those in the Go tree against 2915
+genuinely bodyless declarations. `net` read `635 portable + 20 assembly`
+and is `652 portable + 3 assembly`. If a package's assembly column ever
+looks implausibly large, that was why.
+
 **The one-liner does not generalise, and the failure is worth keeping**
 so nobody rebuilds it. Run against everything over 250 lines it
 returns about 70 files and the sampled ones were all false positives:

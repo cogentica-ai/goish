@@ -803,12 +803,20 @@ surface. There is no unported non-QUIC function left.
 
 | | |
 |---|--:|
-| ported (by declaration) | 1722 |
+| ported (by declaration) | 1720 |
 | remaining, portable | 0 |
 | remaining, assembly stubs | 0 |
-| waived (resolved elsewhere by design) | 26 |
-| provenance anchors | 3041 |
+| waived (resolved elsewhere by design) | 28 |
+| provenance anchors | 3083 |
 | unverified names (see below) | 0 |
+
+Re-measured 2026-09-06. The denominator moved because ed25519's
+`newKeyFromSeed` and `sign` were waived that day — Go's three-layer
+call exists to fill a caller-provided buffer, and goish's exported
+functions reach `fips::` directly — so 1722/1722 became 1720/1720 with
+the waived count going 26 -> 28. Nothing was unported; two declarations
+left the denominator, which is the distinction this table has to keep
+visible.
 
 Complete and byte-checked against Go: `tls` (the full client and
 server handshakes — `handshake_loopback` runs the ported client and
@@ -825,6 +833,25 @@ is not something you port by reading Go. That column is now **zero** —
 `crypto/sha1`, `sha256` and `sha512` read as small gaps for a while and
 turned out to be measurement, not assembly (see the `--by-decl` note
 below).
+
+That sentence states the criterion correctly and the tool did not
+implement it, which was found on 2026-09-06. `asm_decls` tested whether
+a joined signature ENDS WITH `{` and treated anything else as bodyless —
+but a one-line Go function ends with `}`:
+
+    func errInvalid() error    { return oserror.ErrInvalid }
+
+3937 such functions in the Go tree against 2915 genuinely bodyless
+declarations, so the test was wrong more often than right, and every gap
+column overstated its assembly share. `net` read `635 portable + 20
+assembly` and is `652 portable + 3 assembly`; `io/fs` read `0 portable +
+5 assembly` for five one-line error accessors and is now `5 portable`.
+Seventeen declarations in `net` alone were being written off as needing
+assembly work.
+
+The irony is worth keeping: `asm_decls`'s own docstring says it exists
+because the raw gap column "has produced a wrong leverage claim three
+times in this repo", and it contained a fourth.
 
 ## net/http — 639 / 639 functions (100.0%)
 
