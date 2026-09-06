@@ -3,13 +3,22 @@
 // The cryptobyte-based DER parser for X.509 certificates.
 //
 // parser.go uses `cryptobyte` exclusively and contains zero
-// `asn1.Unmarshal` calls, which is why it is the reachable half of
-// crypto/x509: goish has `crypto/cryptobyte` and does not have
-// `encoding/asn1.Unmarshal`.
+// `asn1.Unmarshal` calls.
 //
-// **What is not here:** `ParseRevocationList` and the `x509v2Version`
-// const it uses. A CRL parse needs `RevocationList` and
-// `RevocationListEntry`, whose home is x509.go's unported CRL half.
+// The sentence that followed — "which is why it is the reachable half
+// of crypto/x509: goish has `crypto/cryptobyte` and does not have
+// `encoding/asn1.Unmarshal`" — was the file's stated reason for its own
+// scope, and it is false as of 2026-09-06. goish HAS
+// `encoding/asn1.Unmarshal` (asn1.rs:854, with UnmarshalWithParams
+// beside it), and this very package calls it: pkcs8.rs does, at three
+// sites. Whatever decided parser.go's boundary, it was not that.
+//
+// **What is not here:** the `x509v2Version` const. That is still true.
+// `ParseRevocationList` was listed here too and is NOT missing — it is
+// at line 1747 of this file, and the CRL types it needs are ported.
+// The GOISH021 ignore below still says the version const "lands with
+// ParseRevocationList"; ParseRevocationList landed and the const did
+// not, so that reasoning is spent as well.
 // Everything on the certificate path is here.
 //
 // Deviations from parser[go] @ Go 1.25.5:
