@@ -182,7 +182,7 @@ a subtest spares its siblings.
 Three things to know before relying on it:
 
 - **What is ported.** The `testing` root package sits at 150/164 declarations (91.5%), with
-  449 `// go:` anchors across the tree; `testing.B`, the `testing.M` type and `t.Parallel()`
+  459 `// go:` anchors across the tree; `testing.B`, the `testing.M` type and `t.Parallel()`
   are all there. The fourteen missing root declarations are the fuzzing entry points
   (`testing.F` is not ported, so `F.Add`/`F.Fuzz` and `fRunner`/`runFuzzTests`/`runFuzzing`
   are absent), `M.writeProfiles`, the synctest bridge, and `M.Run` with its `M.before`/
@@ -247,13 +247,13 @@ new `runtime/pprof` user-registry with real captured stacks.
 | `crypto` | **1429/1445 (98.9%)** — 100% by declaration | 3083 |
 | `net` | 967/1413 (68.4%) — `net/http` at 100% | 2126 |
 | `math` | 333/661 (50.4%) | 155 |
-| `testing` | 217/247 (87.9%) | 449 |
+| `testing` | 217/247 (87.9%) | 459 |
 | `encoding` | 234/992 (23.6%) | 462 |
 | `compress` | **150/150 (100.0%)** | 303 |
 | `os` | 151/366 (41.3%) | 182 |
 
 The right-hand column counts *all* `// go:` lines, which is what
-`port_coverage.py` reports. It mixes the 6,437 `sdk` anchors with the
+`port_coverage.py` reports. It mixes the 6,442 `sdk` anchors with the
 2,666 `none` markers and the file/package manifests, so it runs larger
 than the number of functions actually traced to Go.
 
@@ -484,7 +484,7 @@ The book in `doc/` walks through the implementation chapter by chapter - bootstr
 | Standalone binary      | ✅ no glibc, no ld.so     | ✅ static linkable       | needs `std`           |
 | GC                     | none (manual mheap)       | concurrent mark+sweep    | none                  |
 | Memory safety          | Rust ownership            | GC + runtime checks      | Rust ownership        |
-| Per-function provenance to upstream source | ✅ CI-checked, 6,437 anchors | n/a (is upstream) | ✗ |
+| Per-function provenance to upstream source | ✅ CI-checked, 6,442 anchors | n/a (is upstream) | ✗ |
 | Freestanding (`no_std`) | ✅                       | ✗ (needs the Go runtime) | ✅ with `no_std` crates |
 
 Goish is **not** a clone of Go - it ports the runtime *idioms* into a Rust ownership model. Go's `morestack` (grow by copying the stack) is impossible here - relocating a Rust stack would require fixing up raw pointers the runtime cannot see - so goish grows the other way: bare `go!()` reserves 1 MiB of virtual address space per goroutine and lets the kernel commit physical pages on touch. Depth is transparent up to the reservation; physical cost tracks actual use; overflow faults into a guard page with a spawn-site diagnostic. `go!(stack(N), …)` remains the opt-in for sub-page density (the 1M-goroutine demo) or for goroutines needing more than 1 MiB. No GC either way.

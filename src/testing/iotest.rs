@@ -51,6 +51,10 @@ pub struct OneByteReaderImpl<R: io::Reader> {
 }
 
 impl<R: io::Reader> io::Reader for OneByteReaderImpl<R> {
+    // go: sdk 1.25.5 testing/iotest/reader.go:23-28 oneByteReader.Read
+    /// Go reads straight into `p[0:1]`; goish reads into a one-byte
+    /// scratch and copies, because a goish `slice<byte>` reslice is not
+    /// a view the callee can write through. Same observable result.
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         // Go: reader.go:24 — if len(p) == 0 { return 0, nil }
         if p.len() == 0 {
@@ -79,6 +83,8 @@ pub struct HalfReaderImpl<R: io::Reader> {
 }
 
 impl<R: io::Reader> io::Reader for HalfReaderImpl<R> {
+    // go: sdk 1.25.5 testing/iotest/reader.go:38-40 halfReader.Read
+    /// Same scratch-and-copy as OneByteReader, for the same reason.
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         // Go: reader.go:39 — return r.r.Read(p[0 : (len(p)+1)/2])
         let want = (p.len() + 1) / 2;
@@ -113,6 +119,15 @@ pub struct DataErrReaderImpl<R: io::Reader> {
 }
 
 impl<R: io::Reader> io::Reader for DataErrReaderImpl<R> {
+    // go: sdk 1.25.5 testing/iotest/reader.go:55-71 dataErrReader.Read
+    /// Deviation worth knowing: Go's `err` is a NAMED RETURN, fresh nil
+    /// at every call, so once it has reported EOF it calls the wrapped
+    /// reader again on the next Read. goish keeps `err` in the struct,
+    /// so after the first error it returns that error without touching
+    /// the wrapped reader again. For a reader that reports EOF stably —
+    /// which is every well-behaved one — both yield `(0, EOF)` forever.
+    /// They differ only for a reader that returns an error and then more
+    /// data.
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         // Go: reader.go:55-71 — first call needs two reads.
         let mut n: int = 0;
@@ -153,6 +168,7 @@ pub struct TimeoutReaderImpl<R: io::Reader> {
 }
 
 impl<R: io::Reader> io::Reader for TimeoutReaderImpl<R> {
+    // go: sdk 1.25.5 testing/iotest/reader.go:85-91 timeoutReader.Read
     fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
         // Go: reader.go:85-91
         self.count += 1;
@@ -176,6 +192,7 @@ pub struct ErrReaderImpl {
 }
 
 impl io::Reader for ErrReaderImpl {
+    // go: sdk 1.25.5 testing/iotest/reader.go:102-104 errReader.Read
     fn Read(&mut self, _p: &mut slice<byte>) -> (int, error) {
         // Go: reader.go:102-104
         (0, self.err.clone())

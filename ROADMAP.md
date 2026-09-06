@@ -691,6 +691,74 @@ the pattern worth carrying forward: when the REASON for a limitation
 goes stale, the limitation stops being re-examined, and it is the
 limitations that matter most that acquire the longest-lived excuses.
 
+## 2b-ii. 110 declarations are ported AND anchored AND counted missing
+
+Measured 2026-09-06. For each Go package, take its MISSING list and
+keep only the names that a `// go: sdk` anchor in the tree already
+cites AGAINST THAT SAME GO PACKAGE. That is 110 declarations in 15
+packages — code that exists, carries provenance `anchor_check.py`
+validates, and still reads as unported.
+
+Do the same check without the same-package restriction and it gives 855
+across 280 packages, nearly all noise: `Close`, `Open`, `Clean` and
+`Base` are anchored somewhere in every tree. The restriction is what
+makes it a signal, and it is the third time today a detector needed a
+name match against the right Go package to stop being useless.
+
+Two distinct causes, and they want different fixes:
+
+**The package is not where the tool looks (85 of the 110).**
+`vendor/golang.org/x/crypto/cryptobyte` reports `0/85`, with
+`rs_files=0` and `anchors=0`. goish ports it at
+`src/crypto/cryptobyte` — four files, 22 anchors in `builder.rs` alone,
+`AddUint16`/`AddUint24`/`AddBytes` all present. `build()` joins Go
+packages to goish directories positionally, `scan_go(GOROOT/src/X)`
+against `scan_rs(src/X)`, with no alias table, so a package goish
+placed at a different path is invisible in BOTH directions: it is
+absent from the `vendor` scan and its files are ignored by the `crypto`
+scan, which has no Go package of that name to match them to. The fix is
+a small alias map in `port_coverage.py`; it only works for the `.`
+subtree, since the keys are subtree-relative.
+
+**The method is ported under a name Rust will not let it share (the
+rest).** `archive/tar` (35) and `compress/flate`'s
+`huffmanBitWriter.write` are this shape, and in tar the renames are not
+style — they are forced, and the files say so:
+
+  - `Format.String` is `impl Display::fmt`. Go's `String()` satisfies
+    `fmt.Stringer` structurally; the Rust equivalent is `Display::fmt`,
+    "which cannot be called `String`".
+  - `headerGNU.accessTime` is `gnu_accessTime`. Go reaches these by
+    casting `*block` to `*headerV7` and slicing; Rust will not
+    reinterpret one array type as another, so the four views are
+    flattened onto `block` with a prefix per view, and "the Rust name
+    therefore cannot equal the Go one."
+  - flate's `write` splits into `write_buf` and `write_slice`, because
+    Go passes `w.bytes[:n]`, a view, and a goish `slice<byte>` owns its
+    buffer.
+
+`--by-decl` credits an anchored `Recv.Method` only when a fn of exactly
+that method name is in the file, so every one of these loses its
+credit. Waiving them would be wrong — they are ported, not absent.
+
+**The sound fix is the rule port_coverage already applies one case
+over.** For a BARE anchored name it credits a snake_case fn, and the
+comment there gives the reason: "the anchor is the evidence:
+anchor_check re-opens its line range against the Go tree and `make
+lint` gates on it, so the declaration named is the declaration that
+exists. The fn-exists check still keeps a stray anchor from crediting
+nothing." The same argument licenses crediting an anchored
+`Recv.Method` whose anchor is ATTACHED to a fn, whatever that fn is
+called — attachment is what `anchor_check.py`'s UNATTACHED report
+already computes. What must not be done is a name-similarity rule:
+crediting any fn whose name starts with the method would let `write`
+claim `writeBytes`.
+
+`testing/iotest` was a third of this list and is fixed: its five
+`Read` methods were real trait impls under goish's `*Impl` receiver
+names, and five anchors naming Go's receivers took the package from
+13/18 to 18/18.
+
 ## 2c. `regexp` does not keep Go's linear-time guarantee
 
 Go's regexp documents that it "is guaranteed to run in time linear in
