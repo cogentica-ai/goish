@@ -2685,8 +2685,6 @@ impl Client {
                         );
                     }
                     let loc = loc_url;
-                    // Go: the hop's body is closed before following.
-                    let _ = resp.Body.__close_shared();
                     // Go's redirectBehavior (client.go):
                     //
                     //   301, 302, 303: redirectMethod = reqMethod, but
@@ -2798,6 +2796,22 @@ impl Client {
                             return (resp, uerr(uerr_method.clone(), &current.URL, e));
                         }
                     }
+                    // Go closes the previous hop's body at the TOP of
+                    // the next iteration, which is to say only once it
+                    // is actually going to follow — not before
+                    // checkRedirect runs. The distinction is the whole
+                    // contract of ErrUseLastResponse, which Go
+                    // documents as returning "the most recent response
+                    // […] with its body unclosed", and which the
+                    // branch above relies on.
+                    //
+                    // This close used to sit before the redirect was
+                    // even decided, so a caller that stopped the chain
+                    // got a response whose Location and ContentLength
+                    // were intact and whose body was empty. Measured
+                    // against Go on a 302: cl=48 either way, body 48
+                    // bytes in Go and 0 here.
+                    let _ = resp.Body.__close_shared();
                     current = next;
                     continue;
                 }

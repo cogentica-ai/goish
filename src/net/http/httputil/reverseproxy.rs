@@ -112,7 +112,11 @@ fn join_url_path(target_path: &string, req_path: &string) -> string {
 }
 
 impl super::super::server::Handler for reverseProxyHandler {
-    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:345-565 ReverseProxy.ServeHTTP
+    // go: none — goish-only: the slim single-host proxy behind
+    // NewSingleHostReverseProxy. It used to carry the anchor for
+    // ReverseProxy.ServeHTTP, which is why nothing reported that the
+    // real one was missing; the anchor now sits on the port above,
+    // and this stays as the hookless handler its own doc describes.
     fn ServeHTTP(
         &self,
         w: &(dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static),
@@ -309,10 +313,198 @@ impl super::super::server::Handler for reverseProxyHandler {
     }
 }
 
+impl super::super::server::Handler for ReverseProxy {
+    // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:345-565 ReverseProxy.ServeHTTP
+    /// Go's proxy request path, assembled from the pieces this file
+    /// already had. Deviations, all stated:
+    ///
+    ///   - `FlushInterval`/`copyResponse` are not used; the body is
+    ///     flushed after every write. See ROADMAP 2m — copyResponse
+    ///     wants an owned writer and a Handler is handed a borrowed
+    ///     one.
+    ///   - Go installs an httptrace `Got1xxResponse` hook to relay
+    ///     informational responses. goish's httptrace fires no hooks
+    ///     (ROADMAP 2j), so there is nothing to install.
+    ///   - Go consults `CloseNotifier` when the request context has no
+    ///     Done channel; goish's requests always carry a context.
+    fn ServeHTTP(
+        &self,
+        rw: &(dyn super::super::responsewriter::ResponseWriter + Send + Sync + 'static),
+        req: &super::super::request::Request,
+    ) {
+        // Go: transport := p.Transport; if nil { http.DefaultTransport }
+        let transport: alloc::sync::Arc<dyn super::super::client::RoundTripper> =
+            match self.Transport.as_ref() {
+                Some(t) => t.clone(),
+                None => super::super::transport::DefaultTransport(),
+            };
+
+        // Go: outreq := req.Clone(ctx). The inbound request carries the
+        // server-stamped RequestURI; an outgoing one must not.
+        let mut outreq = req.clone();
+        outreq.RequestURI = string::new();
+
+        // Go: if (p.Director != nil) == (p.Rewrite != nil) { error }
+        if self.Director.is_some() == self.Rewrite.is_some() {
+            self.handleError(
+                rw,
+                req,
+                crate::errors::New("ReverseProxy must have exactly one of Director or Rewrite set"),
+            );
+            return;
+        }
+
+        if let Some(d) = self.Director.as_ref() {
+            d(&mut outreq);
+        }
+        // Go: outreq.Close = false
+        outreq.Close = false;
+
+        // Go captures the upgrade type BEFORE the hop-by-hop strip
+        // removes Connection/Upgrade, then adds both back.
+        let reqUpType = upgradeType(&outreq.Header);
+        let teTrailers = headerValuesContainToken(&outreq.Header, "Te", "trailers");
+        removeHopByHopHeaders(&mut outreq.Header);
+        // Go: trailers are negotiated end-to-end even though Te is
+        // hop-by-hop.
+        if teTrailers {
+            outreq.Header.Set(string("Te"), string("trailers"));
+        }
+        if reqUpType.Len() != 0 {
+            outreq.Header.Set(string("Connection"), string("Upgrade"));
+            outreq.Header.Set(string("Upgrade"), reqUpType);
+        }
+
+        if let Some(rwf) = self.Rewrite.as_ref() {
+            // Go: "Strip client-provided forwarding headers. The
+            // Rewrite func may use SetXForwarded to set new values."
+            outreq.Header.Del(string("Forwarded"));
+            outreq.Header.Del(string("X-Forwarded-For"));
+            outreq.Header.Del(string("X-Forwarded-Host"));
+            outreq.Header.Del(string("X-Forwarded-Proto"));
+            outreq.URL.RawQuery = cleanQueryParams(outreq.URL.RawQuery.clone());
+            {
+                let mut pr = ProxyRequest {
+                    In: req,
+                    Out: &mut outreq,
+                };
+                rwf(&mut pr);
+            }
+        } else {
+            // Go's Director path appends the real peer address, which
+            // is what makes the LAST entry trustworthy no matter what
+            // the client claimed.
+            let (clientIP, _, sperr) = crate::net::SplitHostPort(req.RemoteAddr.clone());
+            if sperr.IsNil() {
+                let prior = outreq.Header.Values(string("X-Forwarded-For"));
+                let mut v = clientIP;
+                if prior.len() > 0 {
+                    let mut joined = string::new();
+                    for i in 0..prior.len() {
+                        if i > 0 {
+                            joined = joined + string(", ");
+                        }
+                        joined = joined + prior[i].clone();
+                    }
+                    v = joined + string(", ") + v;
+                }
+                outreq.Header.Set(string("X-Forwarded-For"), v);
+            }
+        }
+
+        // Go: "If the outbound request doesn't have a User-Agent header
+        // set, don't send the default Go HTTP client User-Agent."
+        if !outreq.Header.has(string("User-Agent")) {
+            outreq.Header.Set(string("User-Agent"), string::new());
+        }
+
+        // Go: res, err := transport.RoundTrip(outreq) — exactly ONE
+        // exchange, so a 3xx is relayed rather than followed.
+        let (mut res, err) = transport.RoundTrip(&outreq);
+        if !err.IsNil() {
+            self.handleError(rw, &outreq, err);
+            return;
+        }
+
+        // Go: "Deal with 101 Switching Protocols responses."
+        if res.StatusCode == super::super::status::StatusSwitchingProtocols {
+            if !self.modifyResponse(rw, &mut res, &outreq) {
+                return;
+            }
+            self.handleUpgradeResponse(rw, &outreq, &mut res);
+            return;
+        }
+
+        removeHopByHopHeaders(&mut res.Header);
+
+        if !self.modifyResponse(rw, &mut res, &outreq) {
+            return;
+        }
+
+        // Go: copyHeader(rw.Header(), res.Header). `rw.Header()` hands
+        // back a handle rather than a `&mut Header`, so the loop is
+        // inline; the rule it implements is copyHeader's — Add, not
+        // Set, so a key present in both keeps BOTH sets of values.
+        {
+            let inner = res.Header.__inner();
+            for (k, vs) in inner.__iter() {
+                for i in 0..vs.Len() {
+                    rw.Header().Add(k.clone(), vs[i].clone());
+                }
+            }
+        }
+
+        // Go: "The Trailer header isn't included in the Transport's
+        // response […] Build it up from Trailer."
+        let announced = res.Trailer.__inner().Len();
+        if announced > 0 {
+            let mut keys: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+            for (k, _) in res.Trailer.__inner().__iter() {
+                keys.push(k.clone());
+            }
+            keys.sort_by(|a, b| crate::strings::Compare(a.clone(), b.clone()).cmp(&0));
+            let mut joined = string::new();
+            for (i, k) in keys.iter().enumerate() {
+                if i > 0 {
+                    joined = joined + string(", ");
+                }
+                joined = joined + k.clone();
+            }
+            rw.Header().Add(string("Trailer"), joined);
+        }
+
+        rw.WriteHeader(res.StatusCode);
+
+        // Go: p.copyResponse(rw, res.Body, p.flushInterval(res)). See
+        // the deviation note on the struct: flush every write.
+        let (fl, has_fl) = crate::cast!(rw, super::super::responsewriter::Flusher);
+        loop {
+            let mut buf = crate::make!([]byte, 32 * 1024);
+            let (n, rerr) = crate::io::Reader::Read(&mut res.Body, &mut buf);
+            if n > 0 {
+                let _ = rw.Write(buf.slice(0, n));
+                if has_fl {
+                    fl.Flush();
+                }
+            }
+            if !rerr.IsNil() {
+                break;
+            }
+        }
+        let _ = crate::io::Closer::Close(&mut res.Body);
+    }
+
+    // go: none — goish-only interface-registry hook.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
 // go: none — goish idiom: `reverseProxyHandler` is unexported, so only
 // this module can register it. See AGENTS.md §9b.
 pub(crate) fn register_httputil_impls() {
     super::super::server::__goish_register_Handler_impl::<reverseProxyHandler>();
+    super::super::server::__goish_register_Handler_impl::<ReverseProxy>();
 }
 
 // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:222-232 singleJoiningSlash
@@ -828,10 +1020,20 @@ crate::var! {
 /// and sends it to another server, proxying the response back to the
 /// client."
 ///
-/// STAGED: `ServeHTTP` is not ported — it needs the streaming response
-/// copy, which needs Body as io.ReadCloser. goish's working proxy is
-/// still `NewSingleHostReverseProxy`. What lands here is the POLICY
-/// that handler consults, which is testable on its own.
+/// `ServeHTTP` is ported below, and this type is a Handler. It used to
+/// carry a note saying ServeHTTP was staged because it "needs the
+/// streaming response copy, which needs Body as io.ReadCloser" — that
+/// reason had gone stale: `Response.Body` is an `io::Reader` and the
+/// slim `reverseProxyHandler` had been streaming through it for some
+/// time. Until this landed, every hook on this struct was unreachable,
+/// because nothing could invoke the type at all.
+///
+/// One deviation remains, stated rather than silent: `FlushInterval`
+/// is NOT honoured. Go applies it through `copyResponse`, which takes
+/// an `Arc<dyn ResponseWriter>` while `Handler::ServeHTTP` is handed a
+/// `&dyn` — see ROADMAP 2m. The body is instead flushed after every
+/// write, which is what `reverseProxyHandler` does and the only thing
+/// a borrowed writer can do.
 #[derive(Default)]
 pub struct ReverseProxy {
     /// Go: "Rewrite must be a function which modifies the request into
@@ -859,6 +1061,14 @@ pub struct ReverseProxy {
     /// Go: "optionally specifies a buffer pool to get byte slices for
     /// use by [io.CopyBuffer] when copying HTTP response bodies."
     pub BufferPool: Option<alloc::sync::Arc<dyn BufferPool + Send + Sync + 'static>>,
+    /// Go: "The transport used to perform proxy requests. If nil,
+    /// http.DefaultTransport is used."
+    ///
+    /// Go calls `Transport.RoundTrip` directly rather than going
+    /// through a Client, which is what makes a proxy perform exactly
+    /// ONE exchange: a 3xx from the backend is relayed to the client
+    /// instead of being followed by the proxy.
+    pub Transport: Option<alloc::sync::Arc<dyn super::super::client::RoundTripper>>,
     /// Go: "an optional function that handles errors reaching the
     /// backend or errors from ModifyResponse."
     pub ErrorHandler: Option<
