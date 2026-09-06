@@ -5,9 +5,13 @@
 // Source: go1.25.5/src/net/textproto/reader.go
 //
 // Slim deviations:
-//   * `dotReader`, `ReadCodeLine`, `ReadResponse`, `ReadDotBytes`, `ReadDotLines`
-//     are NOT ported in v1: SMTP/NNTP framing is out of scope. HTTP server
-//     parsing only needs ReadLine and ReadMIMEHeader.
+//   * This line said `dotReader`, `ReadCodeLine`, `ReadResponse`,
+//     `ReadDotBytes` and `ReadDotLines` "are NOT ported in v1: SMTP/NNTP
+//     framing is out of scope" until 2026-09-06. All five are ported —
+//     `dotReader` with two impl blocks, ReadResponse 28 lines,
+//     ReadDotLines 27 — and the dot-encoding pair is pinned against Go
+//     by examples/textproto_dot_ref_smoke.rs. The scope note outlived
+//     the scope.
 //   * `commonHeader` interning table is omitted — the canonicalizer always
 //     allocates a fresh string. This costs a tiny allocation per header but
 //     keeps the port table-free.

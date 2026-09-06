@@ -243,9 +243,19 @@ impl ServeMux {
     // go: sdk 1.25.5 net/http/server.go:2695-2749 ServeMux.findHandler
     //
     // Go strips the port from the Host, cleans the path, then asks the
-    // tree. The trailing-slash redirect (`matchOrRedirect`) and the
-    // CONNECT special case are NOT yet implemented — noted rather than
-    // faked, since both change which handler runs.
+    // tree.
+    //
+    // This said the trailing-slash redirect (`matchOrRedirect`) and the
+    // CONNECT special case were both "NOT yet implemented" until
+    // 2026-09-06. Half of that had stopped being true: `matchOrRedirect`
+    // is ported below, anchored to server.go:2757-2777, and called from
+    // this function — the `/tree` -> `/tree/` redirect works.
+    //
+    // The CONNECT special case is still absent, and still matters: Go
+    // does NOT canonicalize the path for a CONNECT request, so goish
+    // cleans one Go leaves alone. Its sibling gap is in readRequest,
+    // which does not implement Go's `justAuthority` parse either; the
+    // note there points back here.
     fn match_handler(
         &self,
         r: &Request,
