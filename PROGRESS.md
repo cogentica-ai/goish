@@ -7,9 +7,15 @@ the `compress` row refreshed 2026-08-17 and the `hash` and `encoding`
 rows 2026-08-30.
 
 > **Whole-tree total recomputed 2026-09-06** — the pass over every
-> subtree this note used to say was needed. The per-package SECTIONS
-> further down were still not regenerated and date from 2026-08-15, so
-> read a number in those as a floor.
+> subtree this note used to say was needed.
+>
+> The per-package sections further down were written 2026-08-15 and
+> spot-checked 2026-09-06. Their COVERAGE figures are exact, not
+> floors: crypto 1722/1722, net/http 639/639 across twelve packages,
+> testing 217/247, all reproduced to the digit. Their ANCHOR counts
+> had drifted and are corrected — those move with every commit
+> touching an anchored file, which is why a ratio is worth quoting and
+> a count is not.
 
 ## The whole tree — 5102 / 11142 functions (45.8%)
 
@@ -822,8 +828,9 @@ below).
 
 ## net/http — 639 / 639 functions (100.0%)
 
-**All twelve packages are at 100.0%**, with 1476 `// go:` lines (the
-root package alone carries 1085) and 33 declarations waived on in-tree
+**All twelve packages are at 100.0%**, with 1534 `// go:` lines (the
+root package alone carries 1107; both were 1476 and 1085 on
+2026-08-15 and drift upward with ordinary work) and 33 declarations waived on in-tree
 justifications. This is an anchored port, not a name match: request
 and response bodies stream both directions through the ported
 `transfer.go` machinery, the client pools connections through Go's
@@ -848,7 +855,7 @@ output.
 ## testing/ — 217 / 247 functions (87.9%)
 
 The root package is at **141/149 (94.6%)**, and `fstest` (38/38),
-`iotest` (11/11) and `slogtest` (10/10) are complete; 402 `// go:`
+`iotest` (11/11) and `slogtest` (10/10) are complete; 431 `// go:`
 lines across the tree. `testing.B`, `testing.M` and `t.Parallel()` are
 ported. The root's eight missing functions are the fuzzing entry
 points (`testing.F` is not ported), the profiling hooks
