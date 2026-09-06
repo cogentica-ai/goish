@@ -93,7 +93,7 @@ pub(crate) fn openGeneric(
     let a = slice::__from_vec(expectedTag[..g.tagSize as usize].to_vec());
     let b = slice::__from_vec(tag.to_vec());
     if crate::crypto::subtle::ConstantTimeCompare(&a, &b) != 1 {
-        return errOpen();
+        return errOpen.into();
     }
 
     // Go: gcmCounterCryptGeneric(&g.cipher, out, ciphertext, &counter)

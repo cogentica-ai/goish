@@ -57,7 +57,7 @@ impl<W: io::Writer> Writer<W> {
     /// `(*Writer).Write(record)` (writer.go:50).
     pub fn Write(&mut self, record: &[string]) -> error {
         if !validDelim(self.Comma) {
-            return errInvalidDelim();
+            return errInvalidDelim.into();
         }
         for n in 0..record.len() {
             if n > 0 {

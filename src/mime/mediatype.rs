@@ -1,4 +1,4 @@
-// go: file mime/mediatype.go decls: FormatMediaType, checkMediaTypeDisposition, ErrInvalidMediaParameter, ParseMediaType, decode2231Enc, consumeToken, consumeValue, consumeMediaParam, percentHexUnescape, ishex, unhex
+// go: file mime/mediatype.go decls: FormatMediaType, checkMediaTypeDisposition, ParseMediaType, decode2231Enc, consumeToken, consumeValue, consumeMediaParam, percentHexUnescape, ishex, unhex
 //
 // `ErrInvalidMediaParameter` is a package-level `var` in Go, not a
 // func. It is listed in the manifest anyway because goish spells it as
@@ -178,10 +178,15 @@ fn checkMediaTypeDisposition(s: string) -> error {
 /// Returned by [`ParseMediaType`] when the media type value was found
 /// but its optional parameters would not parse.
 ///
-/// Go declares this as a package-level `var`; goish spells it as a
-/// function because `errors::New` is not `const`.
-pub fn ErrInvalidMediaParameter() -> error {
-    return errors::New(string::from_static("mime: invalid media parameter"));
+// Go declares this a package-level `var`, so `errors.Is(err,
+// mime.ErrInvalidMediaParameter)` works there. The note here used to
+// say goish "spells it as a function because `errors::New` is not
+// `const`" — true of `errors::New`, but `var!` exists for exactly this
+// and caches the value behind a lazy slot. As a per-call function it
+// returned a fresh Arc, and goish's `error` compares by Arc::ptr_eq, so
+// the comparison this sentinel exists for was always false.
+crate::var! {
+    pub ErrInvalidMediaParameter: error = "mime: invalid media parameter";
 }
 
 // go: sdk 1.25.5 mime/mediatype.go:134-228 ParseMediaType
@@ -223,7 +228,7 @@ pub fn ParseMediaType<V: Into<string>>(v: V) -> (string, map<string, string>, er
                 break;
             }
             // Parse error.
-            return (mediatype, map::new(), ErrInvalidMediaParameter());
+            return (mediatype, map::new(), ErrInvalidMediaParameter.into());
         }
 
         // Go: pmap := params; if baseName, _, ok := strings.Cut(key, "*"); ok { … }

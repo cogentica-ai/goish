@@ -218,13 +218,13 @@ impl GCM {
 
         // Go: if len(ciphertext) < g.tagSize { return nil, errOpen }
         if ciphertext.Len() < self.tagSize {
-            return (slice::__from_vec(Vec::new()), errOpen());
+            return (slice::__from_vec(Vec::new()), errOpen.into());
         }
         // Go: if uint64(len(ciphertext)) > uint64((1<<32)-2)*gcmBlockSize+uint64(g.tagSize) { … }
         if (ciphertext.Len() as uint64)
             > ((1u64 << 32) - 2) * (gcmBlockSize as uint64) + (self.tagSize as uint64)
         {
-            return (slice::__from_vec(Vec::new()), errOpen());
+            return (slice::__from_vec(Vec::new()), errOpen.into());
         }
 
         // Go: ret, out := sliceForAppend(dst, len(ciphertext)-g.tagSize)
@@ -271,20 +271,8 @@ impl GCM {
 // package-level sentinel. goish builds it on demand; `errors::Is` on the
 // result is not meaningful either way because Go's GCM never wraps it.
 /// Go: `var errOpen = errors.New("cipher: message authentication failed")`
-pub(crate) fn errOpen() -> error {
-    // Go declares this as a package-level `var` (gcm.go:273), so it is
-    // ONE value and `errors.Is` against it compares identity. goish's
-    // `error` compares by Arc::ptr_eq, so a fresh `errors::New` per call
-    // can never match — which is what this did until 2026-09-06, while
-    // the comment above the sibling in crypto/cipher/gcm.rs asserted
-    // that both ports cached it. Only that one did.
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(crate::errors::New("cipher: message authentication failed"));
-    }
-    return g.as_ref().unwrap().clone();
+crate::var! {
+    pub(crate) errOpen: error = "cipher: message authentication failed";
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:134-143 sliceForAppend

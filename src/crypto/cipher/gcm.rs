@@ -247,7 +247,7 @@ impl AEAD for gcmWithRandomNonce {
         }
         // Go: if len(ciphertext) < gcmStandardNonceSize+gcmTagSize { return nil, errOpen }
         if ciphertext.Len() < gcmStandardNonceSize + gcmTagSize {
-            return (slice::__from_vec(Vec::new()), errOpen());
+            return (slice::__from_vec(Vec::new()), errOpen.into());
         }
 
         // Go: nonce = ciphertext[:gcmStandardNonceSize]
@@ -400,14 +400,14 @@ impl<B: Block> AEAD for GCM<B> {
 
         // Go: if len(ciphertext) < g.tagSize { return nil, errOpen }
         if ct_v.len() < ts {
-            return (slice::__from_vec(Vec::new()), errOpen());
+            return (slice::__from_vec(Vec::new()), errOpen.into());
         }
         // Go: if uint64(len(ciphertext)) > uint64((1<<32)-2)*gcmBlockSize+uint64(g.tagSize) {
         //         return nil, errOpen
         //     }
         let max_ct = uint64((1u64 << 32) - 2) * uint64(gcmBlockSize) + uint64(self.tagSize);
         if uint64(ct_v.len()) > max_ct {
-            return (slice::__from_vec(Vec::new()), errOpen());
+            return (slice::__from_vec(Vec::new()), errOpen.into());
         }
 
         // Go: ret, out := sliceForAppend(dst, len(ciphertext)-g.tagSize)
@@ -453,7 +453,7 @@ impl<B: Block> AEAD for GCM<B> {
                 ret_v[head_off + i] = 0;
                 i += 1;
             }
-            return (slice::__from_vec(Vec::new()), errOpen());
+            return (slice::__from_vec(Vec::new()), errOpen.into());
         }
 
         // Go: gcmCounterCryptGeneric(g.cipher, out, ciphertext, &counter)
@@ -678,17 +678,17 @@ fn block_encrypt<B: Block>(b: &B, dst: &mut [byte; 16], src: &[byte; 16]) {
 }
 
 // go: none — goish idiom: Go declares `var errOpen = errors.New(…)` as a
-// package-level sentinel (gcm.go:273). goish caches it behind a lazy slot
-// so `errors::Is(err, errOpen())` compares by Arc identity, matching the
-// sibling port in crypto/internal/fips140/aes/gcm/gcm.rs.
+// package-level sentinel (gcm.go:273), so it is ONE value and
+// `errors.Is` against it compares identity. goish's `error` compares by
+// Arc::ptr_eq, so the port must be one value too.
 //
-/// Go: `var errOpen = errors.New("cipher: message authentication failed")`
-fn errOpen() -> error {
-    use crate::runtime::spin::SpinLock;
-    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
-    let mut g = SLOT.lock();
-    if g.is_none() {
-        *g = Some(ErrNew("cipher: message authentication failed"));
-    }
-    return g.as_ref().unwrap().clone();
+// This was a hand-rolled `fn` over a lazy SpinLock until 2026-09-06 —
+// which CONTRIBUTING.md's "When adding a sentinel" names as the thing
+// NOT to write ("Don't write hand-rolled `pub fn ErrFoo() -> error
+// { ... lazy SpinLock ... }`. Use `goish::var!` instead."). Its comment
+// also claimed the sibling in crypto/internal/fips140/aes/gcm cached
+// the same way; that one was rebuilding per call, so the two ports
+// disagreed in the direction the comment ruled out.
+crate::var! {
+    errOpen: error = "cipher: message authentication failed";
 }

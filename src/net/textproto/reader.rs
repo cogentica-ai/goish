@@ -39,8 +39,8 @@ use super::{MIMEHeader, ProtocolError};
 
 // Go: reader.go:22
 //   var errMessageTooLarge = errors.New("message too large")
-fn errMessageTooLarge() -> error {
-    errors::New(string::from_static("message too large"))
+crate::var! {
+    errMessageTooLarge: error = "message too large";
 }
 
 // Go: reader.go:26-30
@@ -139,7 +139,7 @@ impl<R: io::Reader> Reader<R> {
             }
             // Go: if lim >= 0 && int64(len(line))+int64(len(l)) > lim
             if lim >= 0 && (line.len() as int) + l.Len() > lim {
-                return (slice::__from_vec(Vec::new()), errMessageTooLarge());
+                return (slice::__from_vec(Vec::new()), errMessageTooLarge.into());
             }
             // Go: if line == nil && !more { return l, nil }
             if line.is_empty() && !more {
@@ -240,7 +240,7 @@ impl<R: io::Reader> Reader<R> {
             // Go: r.buf = append(r.buf, ' ')
             self.buf.push(b' ');
             if (self.buf.len() as int) >= lim {
-                return (slice::__from_vec(Vec::new()), errMessageTooLarge());
+                return (slice::__from_vec(Vec::new()), errMessageTooLarge.into());
             }
             let (line2, err2) = self.readLineSlice(lim - self.buf.len() as int);
             if err2 != nil {
@@ -487,7 +487,7 @@ fn readMIMEHeader<R: io::Reader>(
 
         max_headers -= 1;
         if max_headers < 0 {
-            return (map::new(), errMessageTooLarge());
+            return (map::new(), errMessageTooLarge.into());
         }
 
         // Go: value := string(bytes.TrimLeft(v, " \t"))
@@ -502,7 +502,7 @@ fn readMIMEHeader<R: io::Reader>(
         }
         max_memory -= value.Len();
         if max_memory < 0 {
-            return (m, errMessageTooLarge());
+            return (m, errMessageTooLarge.into());
         }
 
         // Go: m[key] = append(vv, value)

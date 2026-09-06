@@ -1,4 +1,4 @@
-// go: file flag/flag.go decls: FlagSet.Int64, FlagSet.Uint, FlagSet.Duration, Parsed, Bool, Int, Int64, Uint, String, Duration, Parse, Set, FlagSet.Lookup, FlagSet.VisitAll, errParse, numError, ErrHelp, UnquoteUsage, isZeroValue, FlagSet.Parse, FlagSet.parseOne, FlagSet.usage, FlagSet.NFlag, FlagSet.Visit, FlagSet.set, FlagSet.PrintDefaults, FlagSet.SetOutput
+// go: file flag/flag.go decls: FlagSet.Int64, FlagSet.Uint, FlagSet.Duration, Parsed, Bool, Int, Int64, Uint, String, Duration, Parse, Set, FlagSet.Lookup, FlagSet.VisitAll, numError, UnquoteUsage, isZeroValue, FlagSet.Parse, FlagSet.parseOne, FlagSet.usage, FlagSet.NFlag, FlagSet.Visit, FlagSet.set, FlagSet.PrintDefaults, FlagSet.SetOutput
 //
 // flag — the package-level CommandLine set, and the flag types goish's
 // hand-written FlagSet did not have.
@@ -414,8 +414,8 @@ impl FlagSet {
 // go: sdk 1.25.5 flag/flag.go:104-107 errParse
 /// Go's sentinel for "the value did not parse", used where the
 /// underlying error text is not worth showing.
-fn errParse() -> error {
-    return errors::New("parse error");
+crate::var! {
+    errParse: error = "parse error";
 }
 
 // go: sdk 1.25.5 flag/flag.go:111-123 numError
@@ -433,10 +433,17 @@ fn numError(err: error) -> string {
 }
 
 // go: sdk 1.25.5 flag/flag.go:101-101 ErrHelp
-/// The error returned when the `-help` or `-h` flag is invoked but no
-/// such flag is defined.
-pub fn ErrHelp() -> error {
-    return errors::New("flag: help requested");
+// The error returned when the `-help` or `-h` flag is invoked but no
+// such flag is defined.
+//
+// Go declares this a package-level `var`, and checking for it after
+// Parse is a documented idiom — flag.go:1168 does it itself, `if err ==
+// ErrHelp { os.Exit(0) }`. goish's `error` compares by Arc::ptr_eq, so
+// the sentinel has to be ONE value; `var!` caches it behind a lazy
+// slot. This was a fn returning a fresh `errors::New` until 2026-09-06,
+// so every such comparison was false, and the type is exported.
+crate::var! {
+    pub ErrHelp: error = "flag: help requested";
 }
 
 // go: none — goish idiom: Go's `failf` formats with Printf, prints to
@@ -606,7 +613,7 @@ impl FlagSet {
                 // Go's special case for a nice help message.
                 if name == b"help" || name == b"h" {
                     self.usage();
-                    return (false, ErrHelp());
+                    return (false, ErrHelp.into());
                 }
                 return (false, failf2(b"flag provided but not defined: -", &name));
             }
@@ -773,7 +780,7 @@ impl FlagSet {
                 if err != nil {
                     // Go: `err = errParse` — the ParseDuration message
                     // is discarded.
-                    return errParse();
+                    return errParse.into();
                 }
                 return nil;
             }

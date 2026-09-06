@@ -1,4 +1,4 @@
-// go: file mime/encodedword.go decls: WordEncoder.Encode, needsEncoding, WordEncoder.encodeWord, maxBase64Len, WordEncoder.bEncode, WordEncoder.qEncode, writeQString, WordEncoder.openWord, closeWord, WordEncoder.splitWord, isUTF8, WordDecoder.Decode, WordDecoder.DecodeHeader, decode, WordDecoder.convert, hasNonWhitespace, qDecode, readHexByte, fromHex, errInvalidWord
+// go: file mime/encodedword.go decls: WordEncoder.Encode, needsEncoding, WordEncoder.encodeWord, maxBase64Len, WordEncoder.bEncode, WordEncoder.qEncode, writeQString, WordEncoder.openWord, closeWord, WordEncoder.splitWord, isUTF8, WordDecoder.Decode, WordDecoder.DecodeHeader, decode, WordDecoder.convert, hasNonWhitespace, qDecode, readHexByte, fromHex
 //
 // `errInvalidWord` is a package-level `var` in Go and `maxBase64Len`
 // is one too; both are listed in the manifest because goish spells
@@ -54,8 +54,8 @@ pub const BEncoding: WordEncoder = WordEncoder(b'b');
 pub const QEncoding: WordEncoder = WordEncoder(b'q');
 
 // go: sdk 1.25.5 mime/encodedword.go:28-30 errInvalidWord
-fn errInvalidWord() -> error {
-    return errors::New(string::from_static("mime: invalid RFC 2047 encoded-word"));
+crate::var! {
+    errInvalidWord: error = "mime: invalid RFC 2047 encoded-word";
 }
 
 impl WordEncoder {
@@ -296,7 +296,7 @@ impl WordDecoder {
             || !strings::HasSuffix(word.clone(), string::from_static("?="))
             || strings::Count(word.clone(), string::from_static("?")) != 4
         {
-            return (string::new(), errInvalidWord());
+            return (string::new(), errInvalidWord.into());
         }
         // Go: word = word[2 : len(word)-2]
         let raw = word.as_bytes();
@@ -306,12 +306,12 @@ impl WordDecoder {
         // Go: charset, text, _ := strings.Cut(word, "?")
         let (charset, text, _) = strings::Cut(inner, string::from_static("?"));
         if charset.Len() == 0 {
-            return (string::new(), errInvalidWord());
+            return (string::new(), errInvalidWord.into());
         }
         // Go: encoding, text, _ := strings.Cut(text, "?")
         let (encoding, text, _) = strings::Cut(text, string::from_static("?"));
         if encoding.Len() != 1 {
-            return (string::new(), errInvalidWord());
+            return (string::new(), errInvalidWord.into());
         }
 
         // Go: content, err := decode(encoding[0], text)
@@ -499,7 +499,7 @@ fn decode(encoding: byte, text: &string) -> (Vec<byte>, error) {
             (slc.__into_vec(), err)
         }
         b'Q' | b'q' => qDecode(text),
-        _ => (Vec::new(), errInvalidWord()),
+        _ => (Vec::new(), errInvalidWord.into()),
     };
 }
 
@@ -540,7 +540,7 @@ fn qDecode(s: &string) -> (Vec<byte>, error) {
         } else if c == b'=' {
             // Go: if i+2 >= len(s) { return nil, errInvalidWord }
             if i + 2 >= raw.len() {
-                return (Vec::new(), errInvalidWord());
+                return (Vec::new(), errInvalidWord.into());
             }
             let (b, err) = readHexByte(raw[i + 1], raw[i + 2]);
             if !err.IsNil() {
@@ -551,7 +551,7 @@ fn qDecode(s: &string) -> (Vec<byte>, error) {
         } else if (c <= b'~' && c >= b' ') || c == b'\n' || c == b'\r' || c == b'\t' {
             dec[n] = c;
         } else {
-            return (Vec::new(), errInvalidWord());
+            return (Vec::new(), errInvalidWord.into());
         }
         n += 1;
         i += 1;
