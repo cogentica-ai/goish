@@ -12,8 +12,17 @@ translating it function by function, keeping Go's names, field layouts,
 control flow and comments. That makes those parts **derivative works of
 the Go standard library**.
 
-As of 2026-08-12: **876 provenance anchors across 176 files**, each
-naming the Go file and line range its code came from.
+As of 2026-09-06: **6,283 provenance anchors across 436 files**, citing
+468 distinct Go source files, each naming the Go file and line range
+its code came from.
+
+That figure was **876 anchors across 176 files** when this document was
+written on 2026-08-12. It is recorded here rather than simply replaced
+because the direction matters for anyone reviewing licensing: the
+derivative-work footprint is roughly seven times what this file
+previously stated, not smaller. Re-measure it rather than cite it —
+`scripts/anchor_check.py` counts the anchors and verifies each one
+against the Go file it names.
 
 | upstream | license | ported into |
 |---|---|---|
