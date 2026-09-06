@@ -732,12 +732,38 @@ def scan_rs(root):
     return out
 
 
+# Go packages goish ports at a path of its own. `build` joins the two
+# trees positionally — `scan_go(GOROOT/src/X)` against `scan_rs(src/X)`
+# — so a package goish deliberately relocated is invisible in BOTH
+# directions: absent from the scan that looks for it, and ignored by
+# the scan that holds it, which has no Go package of that name to match
+# its files to. `vendor/golang.org/x/crypto/cryptobyte` read 0/85 with
+# rs_files=0 while `src/crypto/cryptobyte` held four files and 22
+# anchors in `builder.rs` alone.
+#
+# The three entries are not guessed: they are what the anchors say.
+# `grep '// go: sdk .*vendor/' src/` gives, for each goish directory,
+# the Go package its own anchors cite. Re-run that grep before adding
+# a fourth.
+#
+# Keys are subtree-relative, so this only takes effect for the whole
+# tree (`port_coverage.py .`). Running the `vendor` subtree directly
+# still reports zero, because `src/vendor` does not exist.
+RELOCATED = {
+    "vendor/golang.org/x/crypto/cryptobyte": "crypto/cryptobyte",
+    "vendor/golang.org/x/crypto/cryptobyte/asn1": "crypto/cryptobyte/asn1",
+    "vendor/golang.org/x/net/http/httpproxy": "net/http/httpproxy",
+}
+
+
 def build(subtree, gr):
     gp = scan_go(os.path.join(gr, "src", subtree))
     rp = scan_rs(os.path.join("src", subtree))
     rows = []
     for pkg, g in sorted(gp.items()):
         r = rp.get(pkg)
+        if r is None and pkg in RELOCATED:
+            r = rp.get(RELOCATED[pkg])
         have = r["idents"] if r else set()
         # Functions belonging to a build-tag route goish did not take are
         # not remaining work — see other_route.

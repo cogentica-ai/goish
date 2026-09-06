@@ -695,8 +695,8 @@ limitations that matter most that acquire the longest-lived excuses.
 
 Measured 2026-09-06. For each Go package, take its MISSING list and
 keep only the names that a `// go: sdk` anchor in the tree already
-cites AGAINST THAT SAME GO PACKAGE. That is 110 declarations in 15
-packages — code that exists, carries provenance `anchor_check.py`
+cites AGAINST THAT SAME GO PACKAGE. That was 110 declarations in 15
+packages, and is 51 in 12 now that the first cause below is fixed — code that exists, carries provenance `anchor_check.py`
 validates, and still reads as unported.
 
 Do the same check without the same-package restriction and it gives 855
@@ -707,18 +707,41 @@ name match against the right Go package to stop being useless.
 
 Two distinct causes, and they want different fixes:
 
-**The package is not where the tool looks (85 of the 110).**
-`vendor/golang.org/x/crypto/cryptobyte` reports `0/85`, with
-`rs_files=0` and `anchors=0`. goish ports it at
-`src/crypto/cryptobyte` — four files, 22 anchors in `builder.rs` alone,
-`AddUint16`/`AddUint24`/`AddBytes` all present. `build()` joins Go
+**The package is not where the tool looks — FIXED.**
+`vendor/golang.org/x/crypto/cryptobyte` reported `0/85` with
+`rs_files=0` and `anchors=0`, while `src/crypto/cryptobyte` held four
+files and 22 anchors in `builder.rs` alone. `build()` joined Go
 packages to goish directories positionally, `scan_go(GOROOT/src/X)`
 against `scan_rs(src/X)`, with no alias table, so a package goish
-placed at a different path is invisible in BOTH directions: it is
-absent from the `vendor` scan and its files are ignored by the `crypto`
-scan, which has no Go package of that name to match them to. The fix is
-a small alias map in `port_coverage.py`; it only works for the `.`
-subtree, since the keys are subtree-relative.
+placed at a path of its own was invisible in BOTH directions: absent
+from the scan looking for it, and ignored by the scan holding it, which
+had no Go package of that name to match its files to.
+
+`port_coverage.py` now carries a `RELOCATED` map, and its three entries
+are not guessed — they are what the anchors say. `grep '// go: sdk
+.*vendor/' src/` reports, for each goish directory, the Go package its
+own anchors cite, and gives exactly three:
+
+| Go package | goish |
+|---|---|
+| `vendor/golang.org/x/crypto/cryptobyte` | `crypto/cryptobyte` |
+| `vendor/golang.org/x/crypto/cryptobyte/asn1` | `crypto/cryptobyte/asn1` |
+| `vendor/golang.org/x/net/http/httpproxy` | `net/http/httpproxy` |
+
+Tree-wide that is **+86 ported with the denominator unchanged** (5,831
+to 5,917 of 37,808) — none of it new code, all of it credit for work
+that was already written and already anchored. cryptobyte goes 0/85 to
+**69/85**, its asn1 to 2/2, httpproxy to 15/15. The sixteen cryptobyte
+declarations still missing are real remaining work, visible for the
+first time.
+
+The subtree runs are unaffected, which is the point to check before
+touching this file: `crypto --by-decl` is still 1720/1720 = 100%, so
+`provenance.yml`'s floor is untouched, and `net`, `net/http` and the
+name-mode figures are all unchanged. The keys are subtree-relative, so
+the map only takes effect for the whole tree — running the `vendor`
+subtree directly still reports zero, because `src/vendor` does not
+exist.
 
 **The method is ported under a name Rust will not let it share (the
 rest).** `archive/tar` (35) and `compress/flate`'s
