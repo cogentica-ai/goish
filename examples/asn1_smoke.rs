@@ -482,9 +482,16 @@ fn test_13_parse_pkcs8_rsa_key() {
     der_vec.extend_from_slice(rsa_body);
 
     let der = from_bytes(&der_vec);
-    let (key, err) = x509::goishParsePKCS8RSAPrivateKey(der);
+    // Was x509::goishParsePKCS8RSAPrivateKey, a hand-written RSA-only
+    // DER walk retired on 2026-09-06 in favour of the real port.
+    let (any, err) = x509::ParsePKCS8PrivateKey(der);
+    let key = any
+        .as_any()
+        .downcast_ref::<goish::crypto::rsa::PrivateKey>()
+        .cloned()
+        .unwrap_or_default();
     if !err.IsNil() {
-        write_result(13, b"goishParsePKCS8RSAPrivateKey ", false);
+        write_result(13, b"ParsePKCS8PrivateKey        ", false);
         fail();
         return;
     }
@@ -498,7 +505,7 @@ fn test_13_parse_pkcs8_rsa_key() {
     pq.Mul(&p, &q);
     let pq_ok = pq.Int64() == 143;
     let ok = n_ok && e_ok && pq_ok;
-    write_result(13, b"goishParsePKCS8RSAPrivateKey ", ok);
+    write_result(13, b"ParsePKCS8PrivateKey        ", ok);
     if !ok {
         fail();
     }

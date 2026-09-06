@@ -5,7 +5,6 @@
 pub mod pkix;
 
 mod cert_pool;
-mod goish_rsa_der;
 mod oid;
 mod parser;
 mod pem_decrypt;
@@ -18,7 +17,6 @@ mod verify;
 mod x509;
 
 pub use cert_pool::{CertPool, NewCertPool, SystemCertPool};
-pub use goish_rsa_der::{goishParsePKCS1RSAPrivateKey, goishParsePKCS8RSAPrivateKey};
 pub use oid::{OIDFromInts, ParseOID, OID};
 pub use parser::{ParseCertificate, ParseCertificates, ParseRevocationList};
 pub use pem_decrypt::{

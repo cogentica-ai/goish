@@ -1668,20 +1668,31 @@ as its reason, and believing the fact because the reason was checkable
 nearly put a fictional limitation in this file. No smoke pins an ECDSA
 handshake, so "nothing excludes it" is as far as the evidence goes.
 
-**A third instance, and this one is a deletion.**
-`crypto/x509/goish_rsa_der.rs` is a hand-written RSA-only DER walk
-whose banner says goish "has `asn1.Marshal` but not `asn1.Unmarshal`
-... so none of those three can be ported today", and states its own
+**A third instance — DONE 2026-09-06, and it was a deletion.**
+`crypto/x509/goish_rsa_der.rs` was a hand-written RSA-only DER walk
+whose banner said goish "has `asn1.Marshal` but not `asn1.Unmarshal`
+... so none of those three can be ported today", and stated its own
 exit condition: "when `asn1.Unmarshal` lands, pkcs1.go and pkcs8.go get
-real ports and this file is deleted". `asn1::Unmarshal` is in
-`encoding/asn1`, and `pkcs1.rs`, `pkcs8.rs` and `sec1.rs` are all real
-ports. The file was not deleted, and `crypto/tls`'s `parsePrivateKey`
-still tries its two functions first, so an RSA private key never
-reaches a ported parser — hand-rolled ASN.1 stays on the TLS key path
-for the commonest key type. The EC arms below it already go through the
-real parsers. The work is to point those two arms at
-`x509::ParsePKCS1PrivateKey` / `ParsePKCS8PrivateKey`, delete both
-`goish*` functions and the re-export, and let the file go.
+real ports and this file is deleted". `asn1::Unmarshal` had landed and
+`pkcs1.rs`, `pkcs8.rs` and `sec1.rs` were all real ports; only the
+deletion had not happened, so hand-rolled ASN.1 stayed on the TLS key
+path for the commonest key type.
+
+`parsePrivateKey` is now the port rather than something near it:
+PKCS#1, then PKCS#8 with a type switch, then SEC 1, matching Go's
+tls.go line for line. That fixed a divergence beyond the deletion — Go's type switch
+has a `default` arm returning "tls: found unknown private key type in
+PKCS#8 wrapping", and goish had none, so a PKCS#8 key of a type it did
+not accept (an X25519 ecdh key, which `ParsePKCS8PrivateKey` does
+return) fell through to SEC 1 and surfaced as "failed to parse private
+key". The bespoke `parse_pkcs8_ed25519` went too: `ParsePKCS8PrivateKey`
+handles RFC 8410, and `x509_keys_smoke` pins that with an Ed25519
+PKCS#8 vector.
+
+Validated by running the smokes, not by reading: asn1_smoke 13/13,
+x509_keys_smoke 91 checks / 0 failures, tls_common_smoke 1473 checks /
+0 failed, tls_ref_smoke 70/70, https_server_smoke OK. crypto --by-decl
+still 1720/1720; crypto/x509 176/176.
 
 **The work:** point the four call sites (`keygen.rs` twice,
 `pkcs1v22.rs` twice) at the real package and delete the shims. The

@@ -1022,84 +1022,53 @@ where
 /// serve a handshake. The stale comment here said "no ECDSA signer
 /// yet"; there is one, and `crypto::Signer` is implemented for it.
 fn parsePrivateKey(der: slice<byte>) -> (crate::crypto::PrivateKey, error) {
-    // PKCS#1.
-    let (k, err) = crate::crypto::x509::goishParsePKCS1RSAPrivateKey(der.clone());
+    // Go: if key, err := x509.ParsePKCS1PrivateKey(der); err == nil {
+    //         return key, nil }
+    let (k, err) = crate::crypto::x509::ParsePKCS1PrivateKey(der.clone());
     if err.IsNil() {
         return (Arc::new(k), errors::nil);
     }
-    // PKCS#8, RSA algorithm OID.
-    let (k, err) = crate::crypto::x509::goishParsePKCS8RSAPrivateKey(der.clone());
-    if err.IsNil() {
-        return (Arc::new(k), errors::nil);
-    }
-    // PKCS#8, Ed25519 (RFC 8410) — goish's goishParsePKCS8RSAPrivateKey
-    // handles the rsaEncryption OID only, so the Ed25519 shape is
-    // parsed here.
-    if let Some(k) = parse_pkcs8_ed25519(&der) {
-        return (Arc::new(k), errors::nil);
-    }
-    // PKCS#8, ecPublicKey OID. Go reaches this through
-    // x509.ParsePKCS8PrivateKey's type switch; goish's returns an `Any`,
-    // so the ECDSA arm is a downcast.
+    // Go: if key, err := x509.ParsePKCS8PrivateKey(der); err == nil {
+    //         switch key := key.(type) {
+    //         case *rsa.PrivateKey, *ecdsa.PrivateKey, ed25519.PrivateKey:
+    //             return key, nil
+    //         default:
+    //             return nil, errors.New("tls: found unknown private key
+    //                 type in PKCS#8 wrapping") } }
+    //
+    // Go's type switch is a downcast chain here, because goish's
+    // ParsePKCS8PrivateKey returns the `Any` carrier rather than an
+    // interface value. The default arm matters and used to be missing:
+    // a PKCS#8 key of a type this does not accept — an X25519 ecdh key,
+    // say, which that parser does return — fell through to SEC 1 and
+    // came back as "failed to parse private key".
     let (any, err) = crate::crypto::x509::ParsePKCS8PrivateKey(der.clone());
     if err.IsNil() {
-        if let Some(k) = any
-            .as_any()
-            .downcast_ref::<crate::crypto::ecdsa::PrivateKey>()
-        {
+        let a = any.as_any();
+        if let Some(k) = a.downcast_ref::<crate::crypto::rsa::PrivateKey>() {
             return (Arc::new(k.clone()), errors::nil);
         }
+        if let Some(k) = a.downcast_ref::<crate::crypto::ecdsa::PrivateKey>() {
+            return (Arc::new(k.clone()), errors::nil);
+        }
+        if let Some(k) = a.downcast_ref::<crate::crypto::ed25519::PrivateKey>() {
+            return (Arc::new(k.clone()), errors::nil);
+        }
+        return (
+            Arc::new(()),
+            errors::New("tls: found unknown private key type in PKCS#8 wrapping"),
+        );
     }
-    // SEC 1, the "EC PRIVATE KEY" PEM shape.
+    // Go: if key, err := x509.ParseECPrivateKey(der); err == nil {
+    //         return key, nil }
     let (k, err) = crate::crypto::x509::ParseECPrivateKey(der.clone());
     if err.IsNil() {
         return (Arc::new(k), errors::nil);
     }
-    (
+    return (
         Arc::new(()),
         errors::New("tls: failed to parse private key"),
-    )
-}
-
-/// Parse a PKCS#8 PrivateKeyInfo carrying an Ed25519 key (RFC 8410):
-///   SEQUENCE { INTEGER 0, SEQUENCE { OID 1.3.101.112 },
-///              OCTET STRING { OCTET STRING seed[32] } }
-fn parse_pkcs8_ed25519(der: &slice<byte>) -> Option<crate::crypto::ed25519::PrivateKey> {
-    use crate::encoding::asn1;
-    const OID_ED25519: &[u8] = &[0x2b, 0x65, 0x70];
-
-    let (outer, _, err) = asn1::ParseRaw(der.clone());
-    if !err.IsNil() || outer.Tag != asn1::TagSequence {
-        return None;
-    }
-    // version INTEGER (0)
-    let (ver, rest1, err) = asn1::ParseRaw(outer.Bytes.clone());
-    if !err.IsNil() || ver.Tag != asn1::TagInteger {
-        return None;
-    }
-    // AlgorithmIdentifier SEQUENCE { OID }
-    let (alg, rest2, err) = asn1::ParseRaw(rest1.clone());
-    if !err.IsNil() || alg.Tag != asn1::TagSequence {
-        return None;
-    }
-    let (oid, _, err) = asn1::ParseRaw(alg.Bytes.clone());
-    if !err.IsNil() || oid.Tag != asn1::TagOID {
-        return None;
-    }
-    let oid_raw: &[byte] = &oid.Bytes;
-    if oid_raw != OID_ED25519 {
-        return None;
-    }
-    // privateKey OCTET STRING wrapping "04 20 <seed>"
-    let (pk, _, err) = asn1::ParseRaw(rest2.clone());
-    if !err.IsNil() || pk.Tag != asn1::TagOctetString {
-        return None;
-    }
-    let (inner, _, err) = asn1::ParseRaw(pk.Bytes.clone());
-    if !err.IsNil() || inner.Tag != asn1::TagOctetString || inner.Bytes.Len() != 32 {
-        return None;
-    }
-    Some(crate::crypto::ed25519::NewKeyFromSeed(inner.Bytes.clone()))
+    );
 }
 
 // ─── listener / NewListener / Listen (tls.go:70) ──────────────────────
