@@ -551,6 +551,23 @@ def _facts(paths):
             fns = set(RSFN.findall(src))
             mine |= {k for k in anchored_decl_keys(src)
                      if "." in k and k.split(".", 1)[1] in fns}
+            # Same rule for a BARE anchored name whose fn is spelled
+            # snake_case: `// go: sdk … path/match.go:90-135 scanChunk`
+            # over `fn scan_chunk`. 19 tree-wide.
+            #
+            # This is NOT the underscore-folding that `norm` deliberately
+            # refuses. That folded EVERY name and credited crypto/tls's
+            # hand-written `read_record` as a port of Go's `readRecord`
+            # in a file carrying no anchors at all — 15 of tls's 37
+            # "ported" names were that. Here the anchor is the evidence:
+            # anchor_check re-opens its line range against the Go tree
+            # and `make lint` gates on it, so the declaration named is
+            # the declaration that exists. The fn-exists check still
+            # keeps a stray anchor from crediting nothing.
+            mine |= {k for k in anchored_decl_keys(src)
+                     if "." not in k
+                     and k not in fns
+                     and re.sub(r"(?<!^)(?=[A-Z])", "_", k).lower() in fns}
         idents |= mine
         anchored |= anchored_decl_keys(src)
         # The draft line is itself a `// go:` comment, so it would
