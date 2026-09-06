@@ -719,8 +719,32 @@ pub fn tls13_decrypt_record_suite(
         pt_s.__into_vec()
     };
 
+    // Go refuses a decrypted record over maxPlaintext, at conn.go
+    // line 82: `if len(data) > maxPlaintext { sendAlert(
+    // alertRecordOverflow) }`, applied to the DECRYPTED bytes.
+    //
+    // record.rs applies this at both of its decrypt sites and this
+    // file, which carries the TLS 1.3 path, did not — the earlier
+    // record.rs-versus-conn.rs audit did not reach here. `read_record`
+    // caps the ciphertext at maxCiphertext, so the exposure is the
+    // ~2 KiB of slack between the two rather than anything unbounded:
+    // a spec deviation and an inconsistency with the sibling paths,
+    // not a denial of service. Stated that way rather than implied,
+    // because the same sentence guards a real bound in record.rs.
+    if pt_v.len() > super::common::maxPlaintext as usize {
+        return (
+            Vec::new(),
+            0,
+            errors::New("tls13: oversized record received"),
+        );
+    }
+
     let mut inner = pt_v;
-    // Strip trailing zeros (padding) then inner_content_type byte
+    // Strip trailing zeros (padding) then inner_content_type byte.
+    //
+    // Safe to do in variable time: these bytes are already
+    // AEAD-authenticated, so the padding length is not attacker-chosen
+    // in the way CBC's is.
     while inner.last() == Some(&0) {
         inner.pop();
     }
