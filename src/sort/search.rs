@@ -1,9 +1,8 @@
-// go: file sort/search.go decls: Search, Find, SearchInts, SearchFloat64s, SearchStrings
+// go: file sort/search.go decls: Search, Find, SearchInts, SearchFloat64s, SearchStrings, IntSlice.Search, Float64Slice.Search, StringSlice.Search
 //
 // search.go — Search, Find, SearchInts, SearchFloat64s,
 // SearchStrings.
 //
-// goishlint:ignore GOISH018 Search — the three `SearchXxx` helpers are Go's `IntSlice.Search`, `Float64Slice.Search` and `StringSlice.Search` methods as well as free functions, and goishlint counts each method separately. The free functions ARE ported, right here; the methods are not, because goish's convenience types carry no Search — a caller writes `sort::SearchInts(a, x)`, which is what Go's method forwards to anyway.
 
 extern crate alloc;
 
@@ -89,4 +88,42 @@ pub fn SearchStrings<X: Into<string>>(a: &slice<string>, x: X) -> int {
     let x: string = x.into();
     let raw: &[string] = a;
     return Search(toint(raw.len()), |i| raw[i as usize] >= x);
+}
+
+// The three convenience-type methods Go declares in this file. They are
+// one-line forwards to the free functions above, and goish carries the
+// types they hang off — `IntSlice`, `Float64Slice` and `StringSlice`
+// are in sort.rs. A note here used to say goish's "convenience types
+// carry no Search", which was true and is the reason it was worth
+// three lines rather than a waiver: a caller holding an IntSlice can
+// now write `p.Search(x)` as in Go.
+
+#[allow(non_snake_case)]
+impl crate::sort::IntSlice {
+    // go: sdk 1.25.5 sort/search.go:144-144 IntSlice.Search
+    /// Go: "Search returns the result of applying SearchInts to the
+    /// receiver and x."
+    pub fn Search(&self, x: int) -> int {
+        return SearchInts(&self.0, x);
+    }
+}
+
+#[allow(non_snake_case)]
+impl crate::sort::Float64Slice {
+    // go: sdk 1.25.5 sort/search.go:147-147 Float64Slice.Search
+    /// Go: "Search returns the result of applying SearchFloat64s to the
+    /// receiver and x."
+    pub fn Search(&self, x: crate::types::float64) -> int {
+        return SearchFloat64s(&self.0, x);
+    }
+}
+
+#[allow(non_snake_case)]
+impl crate::sort::StringSlice {
+    // go: sdk 1.25.5 sort/search.go:150-150 StringSlice.Search
+    /// Go: "Search returns the result of applying SearchStrings to the
+    /// receiver and x."
+    pub fn Search<X: Into<string>>(&self, x: X) -> int {
+        return SearchStrings(&self.0, x);
+    }
 }

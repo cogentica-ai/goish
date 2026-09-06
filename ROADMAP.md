@@ -993,7 +993,35 @@ anchored to sort.go. `textproto/reader.rs`'s list had already been
 corrected in its prose earlier the same day while the waiver kept the
 names.
 
-What this does NOT resolve is the triage itself. `flag` keeps 43 names
+**The triage set, re-measured after that cleanup: 109 declarations
+across 22 packages** that are both waived by their OWN package's
+GOISH018 and still MISSING. That same-package constraint matters —
+without it the query says 364 across 207 packages, because a name
+waived in goish's syscall matches a missing declaration in
+`cmd/vendor/golang.org/x/sys/unix`. Third time this session a detector
+needed it to be worth anything.
+
+    flag 25   sort 12   internal/poll 9   os/user 7   testing/quick 7
+    log/slog 6   os 6   net/textproto 5   io/fs 4   testing 4   …
+
+**`sort` is done: 38/71 to 41/41.** Thirty of its thirty-three missing
+declarations are Go's pdqsort engine and the zsortfunc/zsortinterface
+copies its generator emits of each piece — `pdqsort`, `choosePivot`,
+`partialInsertionSort`, `breakPatterns`, `median`, `order2`,
+`partition`, `heapSort`, `xorshift.Next` and the rest. goish's `Sort`
+is a heapsort, so there is no counterpart to name: case 1, waived with
+that reason, the same shape as `slices`' 41.
+
+The other three were not case 1 and are now ported rather than waived.
+`IntSlice.Search`, `Float64Slice.Search` and `StringSlice.Search` are
+one-line forwards to `SearchInts`/`SearchFloat64s`/`SearchStrings`,
+which goish already had, onto types goish already had. `search.rs`
+carried a waiver saying goish's "convenience types carry no Search" —
+true, and precisely the reason to spend three lines instead of a
+waiver, so a caller holding an `IntSlice` can write `p.Search(x)` as in
+Go. sort_ref_smoke 7/7, sort_smoke 11/11, sort_nan_ref_smoke 8/8.
+
+What this does NOT resolve is the rest of the triage. `flag` keeps 43 names
 and they are ROADMAP case 4, blocked work rather than case 1: the
 package is a hand-written v1 FlagSet, and Go's `Var`/`Value` surface —
 `newBoolValue` and the ten other `newXValue` constructors, `BoolVar`
