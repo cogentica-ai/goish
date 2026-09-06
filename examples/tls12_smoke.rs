@@ -845,7 +845,7 @@ fn test_handshake_canned_server(t: &mut testing::T) {
     );
     // We expect an error (server closed connection before sending CCS+Finished),
     // but the client should have completed writes 1-4 before that.
-    let _ = herr; // Don't fail on error — we only check writes
+    // `herr` is now load-bearing: the refusal below asserts on it.
 
     // ── Verify client writes ──────────────────────────────────────
     let writes = client_writes.Lock();
@@ -875,88 +875,33 @@ fn test_handshake_canned_server(t: &mut testing::T) {
         }
     }
 
-    if write_count < 2 {
-        t.Fatal(string::from_static(
-            "canned handshake: only 1 write; expected ClientKeyExchange",
+    // The canned server selects TLS_RSA_WITH_AES_128_CBC_SHA, and the
+    // client must now REFUSE it: that suite is no longer offered, Go
+    // classifies it under InsecureCipherSuites(), and accepting a
+    // suite one did not propose is what let a server steer the client
+    // onto record.rs's CBC path.
+    //
+    // This test used to drive the RSA ClientKeyExchange through to a
+    // well-formed encrypted premaster. That path is unreachable now —
+    // 0x002F was goish's only RSA-kex suite — so asserting on it would
+    // be asserting on dead code. What is checked instead is the
+    // refusal, which is the property that made it dead.
+    //
+    // Coverage honestly lost: the RSA ClientKeyExchange body layout is
+    // no longer exercised anywhere. It is unreachable from the client,
+    // so that is a statement about scope rather than a gap.
+    if write_count != 1 {
+        t.Fatal(fmt::Sprintf!(
+            "canned handshake: {} writes; expected exactly 1 (ClientHello, then refusal)",
+            int64(write_count)
         ));
         return;
     }
-
-    // Write 2: ClientKeyExchange (record type=22, handshake type=16)
-    {
-        let w = &writes[1];
-        if w.is_empty() || w[0] != 22 {
-            t.Fatal(fmt::Sprintf!(
-                "Write[1]: expected TLS record type 22 (Handshake), got {}",
-                if w.is_empty() { 0i64 } else { int64(w[0]) }
-            ));
-            return;
-        }
-        if w.len() < 6 || w[5] != 16 {
-            t.Fatal(string::from_static(
-                "Write[1]: expected ClientKeyExchange (msg_type=16)",
-            ));
-            return;
-        }
-        // Parse the ClientKeyExchange body:
-        // w[5]=16 (type), w[6..8]=3-byte length, then:
-        //   2-byte encrypted_premaster_secret length, then the encrypted bytes
-        if w.len() < 11 {
-            t.Fatal(string::from_static(
-                "Write[1]: ClientKeyExchange too short for 2-byte-length-prefixed PMS",
-            ));
-            return;
-        }
-        // The EncryptedPreMasterSecret length is at w[9..11] (after 4-byte HS header, at start of body)
-        let pms_len = ((w[9] as usize) << 8) | (w[10] as usize);
-        if pms_len == 0 {
-            t.Fatal(string::from_static(
-                "Write[1]: ClientKeyExchange: encrypted PMS length is 0",
-            ));
-            return;
-        }
-        // RSA encryption with n=143 key should produce at most 2 bytes ciphertext
-        // (but PKCS1v15 might produce larger; just verify > 0)
-        if w.len() < 11 + pms_len {
-            t.Fatal(fmt::Sprintf!(
-                "Write[1]: ClientKeyExchange body too short: says pms_len=%d but only %d bytes follow",
-                int64(pms_len), int64(w.len() - 11)
-            ));
-        }
-    }
-
-    if write_count < 3 {
-        // ChangeCipherSpec and Finished might not arrive if RSA encryption failed;
-        // just log and pass since we verified CKE.
+    if herr.IsNil() {
+        t.Fatal(string::from_static(
+            "canned handshake: server chose 0x002F and the client accepted it",
+        ));
         return;
-    }
-
-    // Write 3: ChangeCipherSpec (record type=20, body=0x01)
-    {
-        let w = &writes[2];
-        if w.is_empty() || w[0] != 20 {
-            t.Fatal(fmt::Sprintf!(
-                "Write[2]: expected TLS record type 20 (ChangeCipherSpec), got {}",
-                if w.is_empty() { 0i64 } else { int64(w[0]) }
-            ));
-            return;
-        }
-        if w.len() < 6 || w[5] != 1 {
-            t.Fatal(string::from_static(
-                "Write[2]: ChangeCipherSpec body should be [0x01]",
-            ));
-        }
-    }
-
-    if write_count >= 4 {
-        // Write 4: Encrypted Finished (record type=22, encrypted)
-        let w = &writes[3];
-        if w.is_empty() || w[0] != 22 {
-            t.Fatal(fmt::Sprintf!(
-                "Write[3]: expected TLS record type 22 (encrypted Finished), got {}",
-                if w.is_empty() { 0i64 } else { int64(w[0]) }
-            ));
-        }
     }
 }
 

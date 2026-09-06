@@ -450,9 +450,22 @@ pub fn do_client_handshake(
             // TLS 1.3 path — cipher_suite and server key share already captured
             negotiated_suite = cs;
         } else {
-            // TLS 1.2 path
-            if cs != CIPHER_SUITE_RSA_AES128_CBC_SHA
-                && cs != CIPHER_SUITE_ECDHE_RSA_AES128_GCM_SHA256
+            // TLS 1.2 path.
+            //
+            // This allowlist must match what the ClientHello OFFERED.
+            // It listed RSA_AES128_CBC_SHA after that suite was dropped
+            // from the offer, which meant a server could select a suite
+            // the client never proposed and be believed — and that
+            // suite is the only route into record.rs's CBC path, whose
+            // Lucky13 MAC half its own header lists as not established.
+            // Not offering a suite is not the same as refusing it.
+            //
+            // Go states the rule for both versions: the server "chose
+            // an unconfigured cipher suite" is an error, checked
+            // against the suites the client actually sent
+            // (handshake_client.go, mutualCipherSuite over
+            // hello.cipherSuites).
+            if cs != CIPHER_SUITE_ECDHE_RSA_AES128_GCM_SHA256
                 && cs != CIPHER_SUITE_ECDHE_ECDSA_AES128_GCM_SHA256
             {
                 tls_debug!("[tls-debug] unsupported cipher suite 0x%04x\n", cs as u64);
@@ -1406,13 +1419,12 @@ fn build_client_hello_hrr_group(
     body.extend_from_slice(session_id);
     // cipher_suites: TLS 1.3 + TLS 1.2
     body.push(0);
-    body.push(12);
+    body.push(10); // 5 suites — see the main builder on why 0x002F is absent
     body.extend_from_slice(&CIPHER_TLS13_AES128_GCM_SHA256.to_be_bytes());
     body.extend_from_slice(&CIPHER_TLS13_AES256_GCM_SHA384.to_be_bytes());
     body.extend_from_slice(&CIPHER_TLS13_CHACHA20_POLY1305_SHA256.to_be_bytes());
     body.extend_from_slice(&CIPHER_SUITE_ECDHE_ECDSA_AES128_GCM_SHA256.to_be_bytes());
     body.extend_from_slice(&CIPHER_SUITE_ECDHE_RSA_AES128_GCM_SHA256.to_be_bytes());
-    body.extend_from_slice(&CIPHER_SUITE_RSA_AES128_CBC_SHA.to_be_bytes());
     body.push(1);
     body.push(0); // compression methods
     let mut exts: Vec<byte> = Vec::new();
@@ -1848,13 +1860,12 @@ fn build_client_hello_with_psk(
     body.extend_from_slice(&session_id);
     // cipher_suites: same as normal ClientHello
     body.push(0);
-    body.push(12);
+    body.push(10); // 5 suites — see the main builder on why 0x002F is absent
     body.extend_from_slice(&CIPHER_TLS13_AES128_GCM_SHA256.to_be_bytes());
     body.extend_from_slice(&CIPHER_TLS13_AES256_GCM_SHA384.to_be_bytes());
     body.extend_from_slice(&CIPHER_TLS13_CHACHA20_POLY1305_SHA256.to_be_bytes());
     body.extend_from_slice(&CIPHER_SUITE_ECDHE_ECDSA_AES128_GCM_SHA256.to_be_bytes());
     body.extend_from_slice(&CIPHER_SUITE_ECDHE_RSA_AES128_GCM_SHA256.to_be_bytes());
-    body.extend_from_slice(&CIPHER_SUITE_RSA_AES128_CBC_SHA.to_be_bytes());
     body.push(1);
     body.push(0); // compression_methods
 
