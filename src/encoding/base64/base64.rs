@@ -1,4 +1,11 @@
-// go: file encoding/base64/base64.go decls: NewEncoding, Encoding.WithPadding, Encoding.Strict, Encoding.Encode, Encoding.AppendEncode, Encoding.EncodeToString, encoder.Write, encoder.Close, NewEncoder, Encoding.EncodedLen, CorruptInputError.Error, Encoding.decodeQuantum, Encoding.AppendDecode, Encoding.DecodeString, decoder.Read, Encoding.Decode, assemble32, assemble64, newlineFilteringReader.Read, NewDecoder, Encoding.DecodedLen, decodedLen
+// go: file encoding/base64/base64.go decls: NewEncoding, Encoding.WithPadding, Encoding.Strict, Encoding.Encode, Encoding.AppendEncode, Encoding.EncodeToString, encoder.Write, encoder.Close, NewEncoder, Encoding.EncodedLen, CorruptInputError.Error, Encoding.decodeQuantum, Encoding.AppendDecode, Encoding.DecodeString, decoder.Read, Encoding.Decode, assemble32, assemble64, newlineFilteringReader.Read, NewDecoder, Encoding.DecodedLen
+//
+// goishlint:ignore GOISH018 decodedLen — Go's free `decodedLen(n, padChar)`
+//     is `Encoding.DecodedLen`'s whole body, branching on whether the
+//     encoding is padded. `DecodedLen` here branches on `self.padded()`
+//     and computes the same value: Go's unpadded arm is
+//     `n/4*3 + n%4*6/8` and this one is `n*6/8`, equal for every n
+//     because the `24q/8` term of the first divides exactly.
 //
 // goishlint:ignore GOISH021 decodeMapInitialize — Go's 256-byte
 //     initialiser string exists so `NewEncoding` can `copy` it into

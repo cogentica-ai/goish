@@ -1,4 +1,10 @@
-// go: file bufio/bufio.go decls: errNegativeRead, errNegativeWrite, NewReaderSize, NewReader, Reader.Size, Reader.Reset, Reader.reset, Reader.fill, Reader.readErr, Reader.Peek, Reader.Discard, Reader.Read, Reader.ReadByte, Reader.UnreadByte, Reader.ReadRune, Reader.UnreadRune, Reader.Buffered, Reader.ReadSlice, Reader.ReadLine, Reader.collectFragments, Reader.ReadBytes, Reader.ReadString, Reader.WriteTo, Reader.writeBuf, NewWriterSize, NewWriter, Writer.Size, Writer.Reset, Writer.Flush, Writer.Available, Writer.AvailableBuffer, Writer.Buffered, Writer.Write, Writer.WriteByte, Writer.WriteRune, Writer.WriteString, Writer.ReadFrom, NewReadWriter
+// go: file bufio/bufio.go decls: errNegativeRead, errNegativeWrite, NewReaderSize, NewReader, Reader.Size, Reader.Reset, Reader.fill, Reader.readErr, Reader.Peek, Reader.Discard, Reader.Read, Reader.ReadByte, Reader.UnreadByte, Reader.ReadRune, Reader.UnreadRune, Reader.Buffered, Reader.ReadSlice, Reader.ReadLine, Reader.collectFragments, Reader.ReadBytes, Reader.ReadString, Reader.WriteTo, Reader.writeBuf, NewWriterSize, NewWriter, Writer.Size, Writer.Reset, Writer.Flush, Writer.Available, Writer.AvailableBuffer, Writer.Buffered, Writer.Write, Writer.WriteByte, Writer.WriteRune, Writer.WriteString, Writer.ReadFrom, NewReadWriter
+//
+// goishlint:ignore GOISH018 Reader.reset — Go's `reset` rebuilds the whole
+//     Reader struct (`*b = Reader{buf: buf, rd: r, ...}`) so that both
+//     `NewReaderSize` and `Reset` can share it. goish's `Reset` assigns
+//     the same fields in place and `NewReaderSize` builds the struct
+//     literally, so neither needs the helper.
 //
 // `errNegativeRead` and `errNegativeWrite` are package-level `var`s in
 // Go; they are named in the manifest because goish spells them as

@@ -1,4 +1,11 @@
-// go: file strings/builder.go decls: new, default, Builder.String, Builder.Len, Builder.Cap, Builder.Reset, Builder.grow, Builder.Grow, Builder.Write, Builder.WriteByte, Builder.WriteRune, Builder.WriteString
+// go: file strings/builder.go decls: new, default, Builder.String, Builder.Len, Builder.Cap, Builder.Reset, Builder.Grow, Builder.Write, Builder.WriteByte, Builder.WriteRune, Builder.WriteString
+//
+// goishlint:ignore GOISH018 Builder.grow — Go's unexported `grow` is the
+//     reallocation half of `Grow`: it makes a `2*cap+n` buffer and copies
+//     into it. Rust's `Vec::reserve(n)` guarantees room for n MORE
+//     elements past the current length, which is exactly what `grow`
+//     leaves behind, so `Grow` calls it directly and there is no second
+//     function to name.
 //
 // goishlint:ignore GOISH018 copyCheck — see the waiver below; the
 //     `// go: waived` line takes it out of the coverage denominator,

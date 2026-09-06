@@ -5,7 +5,14 @@
 // instead of reusing a cached expansion. Correctness-equivalent; slower
 // for repeated signing with one key. Remove this ignore when
 // fips140cache lands.
-// go: file crypto/ed25519/ed25519.go decls: PublicKey.Equal, PrivateKey.Public, PrivateKey.Equal, PrivateKey.Seed, PrivateKey.Sign, Options.HashFunc, GenerateKey, NewKeyFromSeed, newKeyFromSeed, Sign, sign, Verify, VerifyWithOptions, from, eq, PublicKey, __goish_as_dyn_any, empty_slice, str_to_slice, optionsContext
+// go: file crypto/ed25519/ed25519.go decls: PublicKey.Equal, PrivateKey.Public, PrivateKey.Equal, PrivateKey.Seed, PrivateKey.Sign, Options.HashFunc, GenerateKey, NewKeyFromSeed, Sign, Verify, VerifyWithOptions, from, eq, PublicKey, __goish_as_dyn_any, empty_slice, str_to_slice, optionsContext
+//
+// goishlint:ignore GOISH018 newKeyFromSeed, sign — in Go these are the
+//     middle of a three-layer call: `NewKeyFromSeed` -> `newKeyFromSeed`
+//     -> `fips140/ed25519`, and likewise for `Sign`. The middle layer
+//     exists to write into a caller-provided buffer, which goish does not
+//     need because the fips call returns the key. Both exported functions
+//     call `fips::` directly.
 //
 // crypto/ed25519 — port of Go 1.25's public `crypto/ed25519` package.
 //
