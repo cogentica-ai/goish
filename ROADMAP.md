@@ -463,6 +463,25 @@ one-liner's 0 of 70, and still mostly false positives. The signal is
 worth running once and reading; it is not worth automating into a gate.
 The 7 above do NOT need re-walking, which is the point of listing them.
 
+**What the density signal is actually for, established the same day.**
+It was built to find UNANCHORED code and it does, but its two biggest
+hits were stale BANNERS: handshake_server.rs called a 1989-line port of
+the TLS 1.2 server state machine "one function", and client.rs denied
+the connection pool and TLS support that transport.rs has carried for
+some time. Both read as capability statements. So the signal finds
+files whose DOCUMENTATION has drifted from their contents, of which
+missing anchors is one symptom and a wrong banner another.
+
+All twelve current candidates have now had their banners read. Two were
+wrong and are fixed; the rest are accurate or already tracked here —
+syscall (raw syscalls, no Go contract to cite), json and json/v2
+(documented reimplementations), convert.rs (Go builtins), math (libm
+delegation), regexp (2c; its no-linear-time divergence re-measured and
+still true, and its NFA mentions are citations of Go's reference
+behaviour, not claims about goish's algorithm), record.rs and
+handshake_client_tls13.rs (1), key_schedule and runtime/mod.rs. Do not
+re-walk them; re-run the signal after work lands instead.
+
 **Case-only credits: two packages fixed, the rest left visible on
 purpose.** `port_coverage` matches case-insensitively, so Go's
 unexported half of an exported/unexported pair is credited to the
