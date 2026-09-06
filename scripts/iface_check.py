@@ -310,9 +310,14 @@ def main():
     print(f"iface_check: {len(targets)} asserted interface(s) under {SRC}/")
     print(f"  BOXED_UNREGISTERED examined {pairs} (carrier, type) pair(s) "
           f"across {len(boxed)} carrier(s).")
-    print("  That number is the scope of its OK: a constructor whose boxed")
-    print("  type it cannot resolve to a struct in the same file is skipped,")
-    print("  so a clean result is not a claim about the whole tree.")
+    print("  Small on purpose. The tree has ~119 fns returning Box/Arc<dyn T>")
+    print("  and 71 with a nearby ::new(); the rest of the gap is mostly")
+    print("  `Box::new(self)` inside clone_box, where the boxed type IS the")
+    print("  impl's own and carries no signal. What this resolves is the")
+    print("  FACTORY shape — a constructor boxing some OTHER type — which is")
+    print("  the shape the sha3 defect took. Resolution is not widened")
+    print("  further because the remainder needs dataflow (`Box::new(st)`)")
+    print("  for cases that cannot be wrong in the interesting way.")
 
     if unregistered:
         print(f"\n  UNREGISTERED ({len(unregistered)}) — implemented, asserted on, never registered:")
