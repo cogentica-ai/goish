@@ -1351,19 +1351,15 @@ impl<'a> Parser<'a> {
                     return (Value::Null, syntax_err(b, "exceeded max depth"));
                 }
                 self.depth += 1;
-                // `maybe_grow_step` because this descent RECURSES where
-                // Go's v1 scanner keeps an explicit parseState stack and
-                // does not. Go can afford maxNestingDepth = 10000 with
-                // no stack cost; here 10000 frames is more than an 8 MiB
-                // goroutine stack holds in a debug build — measured, it
-                // SIGSEGVs — so the limit alone is not enough to make
-                // the bound safe. This pivots to a fresh stack when the
-                // current one runs low, which is what the runtime's own
-                // stack-overflow diagnostic recommends.
                 // This descent RECURSES where Go's v1 scanner keeps an
                 // explicit parseState stack and does not, so Go can
                 // afford maxNestingDepth = 10000 at no stack cost and
-                // this cannot. Measured in a DEBUG build (which is what
+                // this cannot. The limit alone is therefore not enough
+                // to make the bound safe; this pivots to a fresh stack
+                // when the current one runs low, which is what the
+                // runtime's own stack-overflow diagnostic recommends.
+                //
+                // Measured in a DEBUG build (which is what
                 // `make e2e` runs) on an 8 MiB goroutine stack: without
                 // a pivot, depth 8000 SIGSEGVs; with one, 8000 survives
                 // and 8500 does not. Ten thousand levels of debug frames

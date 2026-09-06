@@ -498,6 +498,12 @@ impl super::super::server::Handler for ReverseProxy {
     fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
         return Some(self);
     }
+    // go: none — goish idiom: the `&mut` twin of the hook above.
+    // Overriding only the immutable one is what hook_pair_check calls
+    // MUT_MISSING: `cast!(&mut x, Iface)` then misses silently.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
 }
 
 // go: none — goish idiom: `reverseProxyHandler` is unexported, so only
