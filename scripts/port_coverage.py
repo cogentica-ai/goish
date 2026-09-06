@@ -765,6 +765,9 @@ RELOCATED = {
     "vendor/golang.org/x/crypto/cryptobyte": "crypto/cryptobyte",
     "vendor/golang.org/x/crypto/cryptobyte/asn1": "crypto/cryptobyte/asn1",
     "vendor/golang.org/x/net/http/httpproxy": "net/http/httpproxy",
+    # Added once term.rs was anchored — the grep above now reports it,
+    # which is the whole entry criterion working as intended.
+    "cmd/vendor/golang.org/x/term": "term",
 }
 
 
