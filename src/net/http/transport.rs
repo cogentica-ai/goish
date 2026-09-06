@@ -91,17 +91,6 @@ pub fn canonicalAddr(url: &URL) -> string {
 // `_ incomparable`, a zero-width marker that makes the struct
 // uncomparable with ==. Rust structs are not comparable unless they
 // derive it, so the marker has no counterpart and no purpose.
-// go: sdk 1.25.5 net/http/transport.go:1994-2004 connectMethod
-/// Go: "connectMethod is the map key (in its String form) for keeping
-/// persistent TCP connections alive for subsequent HTTP requests."
-///
-/// Go's doc table of key shapes is the specification:
-///
-///     |http|foo.com                     http direct, no proxy
-///     |https,h1|foo.com                 https direct, HTTP/2 disabled
-///     http://proxy.com|https|foo.com    http proxy, then CONNECT
-///     http://proxy.com|http             http proxy, http anywhere after
-///     socks5://proxy.com|http|foo.com   socks5, then http
 // go: waived prepareTransportCancel — wraps the request's
 // CancelCause into the reqCanceler map so the DEPRECATED
 // Request.Cancel channel and pre-1.5 CancelRequest keep working.
@@ -293,6 +282,22 @@ pub struct pcLoops {
     pub writeErrCh: crate::gochan::chan<error>,
 }
 
+// go: sdk 1.25.5 net/http/transport.go:1994-2004 connectMethod
+/// Go: "connectMethod is the map key (in its String form) for keeping
+/// persistent TCP connections alive for subsequent HTTP requests."
+///
+/// Go's doc table of key shapes is the specification:
+///
+///     |http|foo.com                     http direct, no proxy
+///     |https,h1|foo.com                 https direct, HTTP/2 disabled
+///     http://proxy.com|https|foo.com    http proxy, then CONNECT
+///     http://proxy.com|http             http proxy, http anywhere after
+///     socks5://proxy.com|http|foo.com   socks5, then http
+///
+/// This anchor and doc sat at the top of the file until 2026-09-06,
+/// above an unrelated pair of waivers and then `transportRequest`'s own
+/// anchor — so `connectMethod` carried no provenance and anchor_check
+/// could not see it. Found by the UNATTACHED report added the same day.
 #[derive(Clone, Default)]
 pub struct connectMethod {
     /// Go: "nil for no proxy, else full proxy URL"
@@ -566,16 +571,6 @@ impl wantConn {
 
 // ─── wantConnQueue ──────────────────────────────────────────────────
 
-// go: sdk 1.25.5 net/http/transport.go:1384-1398 wantConnQueue
-/// Go: "a queue of wantConns", implemented as a head slice consumed
-/// from `headPos` plus a tail slice, so pushes amortise and the front
-/// pops without shifting.
-///
-/// The element type is a placeholder until `wantConn` lands with the
-/// dial machinery; the QUEUE DISCIPLINE is what this slice ports, and
-/// it is pure. `Waiter` is the one method the queue calls on its
-/// elements, so `cleanFrontNotWaiting` keeps Go's arity instead of
-/// taking the predicate as an extra parameter.
 // go: none — goish-only: Go's queue holds `*wantConn` concretely.
 // goish keeps it generic over `Waiter` so the queue stays testable
 // without the dial machinery; `wantConn` above is the real
@@ -606,6 +601,19 @@ impl Waiter for Arc<wantConn> {
 // Go's map holds wantConnQueue BY VALUE — its own comment says "q is
 // a value (like a slice), so we have to store the updated q back into
 // the map". Clone + Default give goish the same get-modify-put shape.
+// go: sdk 1.25.5 net/http/transport.go:1384-1398 wantConnQueue
+/// Go: "a queue of wantConns", implemented as a head slice consumed
+/// from `headPos` plus a tail slice, so pushes amortise and the front
+/// pops without shifting.
+///
+/// The element type is a placeholder until `wantConn` lands with the
+/// dial machinery; the QUEUE DISCIPLINE is what this slice ports, and
+/// it is pure. `Waiter` is the one method the queue calls on its
+/// elements, so `cleanFrontNotWaiting` keeps Go's arity instead of
+/// taking the predicate as an extra parameter.
+///
+/// This anchor sat above `pub trait Waiter` until 2026-09-06, so the
+/// queue itself carried no provenance. Found by the UNATTACHED report.
 #[derive(Clone)]
 pub struct wantConnQueue<T: Waiter + Clone> {
     /// Go: "This is a queue, not a deque. It is split into two stages
