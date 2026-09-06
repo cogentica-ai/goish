@@ -13,18 +13,24 @@ use crate::types::byte;
 /// rewriting the URL's Scheme/Host/Path and stripping hop-by-hop
 /// headers in both directions.
 ///
-/// Slim deviations from Go:
-///   - No Director, ModifyResponse, ErrorHandler, or Transport hooks
-///     (the proxy uses a default `http::Client`).
-///   - No streaming Body — request body is `slice<byte>` already.
-///   - X-Forwarded-For IS appended (Go's Director-path
-///     behaviour); X-Forwarded-Host / -Proto are not set, since
-///     those come from SetXForwarded, which needs the ProxyRequest
-///     type goish does not have.
-///   - No connection upgrade (websocket) handling.
+/// This block listed, until 2026-09-06: no Director, ModifyResponse,
+/// ErrorHandler or Transport hooks; no connection upgrade handling; and
+/// X-Forwarded-Host / -Proto unset "since those come from
+/// SetXForwarded, which needs the ProxyRequest type goish does not
+/// have". Every one of those has since landed in this file — Director
+/// and Rewrite, ModifyResponse, ErrorHandler, Transport, the 101
+/// upgrade path, and ProxyRequest::SetXForwarded at line 1534.
 ///
-/// Sufficient for in-process reverse-proxy demos and basic load
-/// balancers; not a drop-in for Go's hardened `httputil.ReverseProxy`.
+/// The list went stale the same day it was corrected, because the work
+/// that landed those hooks did not touch this paragraph. That is the
+/// failure mode being catalogued elsewhere in this tree — a note
+/// understating what exists — arriving from the other direction.
+///
+/// What is still true:
+///   - The request body is a `slice<byte>`, so nothing streams; a
+///     proxied upload is held whole (ROADMAP section 0 A).
+///   - `FlushInterval` is a field and is INERT — see the note above the
+///     struct, which explains why and what it is blocked on.
 pub fn NewSingleHostReverseProxy(
     target: super::super::url::URL,
 ) -> alloc::sync::Arc<dyn super::super::server::Handler> {
