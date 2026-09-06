@@ -154,8 +154,9 @@ a structural-fidelity decision, not twelve fixes.
 
 **Re-measured 2026-09-04, re-checked 2026-09-06.** Everything this
 section used to describe as unwritten is written:
-`scripts/port_coverage.py crypto --pkg tls` reports **275/291 = 94.5%**
-across 21 Go files — run it rather than trusting the ratio here. The
+`scripts/port_coverage.py crypto/tls --by-decl` reports **353/353 =
+100%** across its two packages — run it rather than trusting the ratio
+here, which read 275/291 = 94.5% two days ago. The
 anchor count that used to sit in this sentence is deliberately gone:
 it read 891 and was 896 two days later, moved by ordinary work on the
 file, which is what a number in prose does. Every file
@@ -164,16 +165,22 @@ prf, cipher_suites, auth, ticket, key_agreement, conn,
 handshake_client, handshake_server, handshake_server_tls13, common,
 ech, quic, cache — now exists as an anchored port.
 
-The 16 remaining declarations are **all QUIC**: HandleData, NextEvent,
-Start, StoreSession, SetTransportParameters and the eleven `quic*`
-helpers. Five more are already waived by design.
+The 16 QUIC declarations that used to sit here — HandleData,
+NextEvent, Start, StoreSession, SetTransportParameters and the eleven
+`quic*` helpers — are still unported. They are no longer counted
+because they are now **waived**: all 24 waivers in `crypto/tls` are
+QUIC (`QUICClient`, `QUICServer`, `QUICConn.*`, `Conn.quic*`,
+`newQUICConn`, `quicError`), justified in-tree as dead code without a
+QUIC transport. That is why the ratio reads 353/353 — the numerator did
+not climb to meet the denominator, the denominator came down. Nothing
+else Go declares in `crypto/tls` is missing.
 
 What is left of the demolition:
 
 | file | LOC | anchors | state |
 |---|--:|--:|---|
-| `record.rs` | 938 | 0 | invented. `conn.rs` is Go's record layer, ported with 55 anchors, and both are live. **Diffing it against conn.rs on 2026-09-04 produced three security defects** — two missing length bounds and a padding oracle — each fixed with a smoke. A fourth, a discarded RNG error, was reported and then retracted: `crypto::rand::Read` calls `fatal` on failure, so the `let _ =` could not leave a zero IV. The file header carries the retraction and lists what was checked clean. Retiring it is still the goal; until then it is no longer unexamined. |
-| `session.rs` | 145 | 0 | invented. Diffed 2026-09-06 against Go's lruSessionCache: it bounded tickets PER HOST and nothing bounded the host count, where Go bounds keys. Fixed, and the smoke's existing capacity row could not have caught it — 200 tickets on one host was already bounded. |
+| `record.rs` | 1145 | 1 | invented. `conn.rs` is Go's record layer, ported with 55 anchors, and both are live. **Diffing it against conn.rs on 2026-09-04 produced three security defects** — two missing length bounds and a padding oracle — each fixed with a smoke. A fourth, a discarded RNG error, was reported and then retracted: `crypto::rand::Read` calls `fatal` on failure, so the `let _ =` could not leave a zero IV. The file header carries the retraction and lists what was checked clean. Retiring it is still the goal; until then it is no longer unexamined. |
+| `session.rs` | 261 | 0 | invented. Diffed 2026-09-06 against Go's lruSessionCache: it bounded tickets PER HOST and nothing bounded the host count, where Go bounds keys. Fixed, and the smoke's existing capacity row could not have caught it — 200 tickets on one host was already bounded. |
 
 ### The invented CLIENT handshake, audited 2026-09-06
 

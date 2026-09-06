@@ -9,7 +9,7 @@ single statically-linked binary with no `glibc`, no `ld.so`, no garbage collecto
 language runtime to initialize. Goish ships its own `_start`, page allocator, M:N scheduler,
 epoll netpoller and HTTP stack.
 
-- **Traceable crypto.** Every one of the 1722 declarations in `crypto/` names the Go source
+- **Traceable crypto.** Every one of the 1720 declarations in `crypto/` names the Go source
   file and line range it was translated from. CI re-opens the Go 1.25.5 tree on every push and
   checks that the citation still resolves. See [Provenance](#provenance).
 - **No GC, no libc.** Go's allocator design (mheap / mcentral / per-P mcache, 67 size classes)
@@ -93,9 +93,11 @@ per-P, and an HTTP server with an allocation-free hot path.
 - **Not security-audited.** The TLS stack is a machine-checked port, but it has had no
   external review and no side-channel analysis. See [SECURITY.md](SECURITY.md).
 - **Not all of Go.** `crypto/` and `net/http` are complete. The rest of `net`, `encoding`
-  and `os` are partial, and outside `crypto/`, `net/http` and `testing` most ports are
-  name-level rather than anchor-verified; the
-  [coverage table](#coverage-measured) marks which is which.
+  and `os` are partial — the [coverage table](#coverage-measured) gives the per-subtree
+  figures. What is ported is almost all anchor-verified: 103 of 5,826 ported declarations
+  (1.8%) are credited by a name match with no `// go:` anchor behind them, and they cluster
+  in `runtime/debug`, `os/user`, `embed`, `maps` and `runtime`. Coverage reports mark those
+  as UNVERIFIED.
 - **Not the Go compiler.** You write Rust that reads like Go, using goish's `string`,
   `slice<T>`, `map<K,V>` and macros. It does not compile `.go` files.
 
@@ -103,7 +105,7 @@ per-P, and an HTTP server with an allocation-free hot path.
 
 ## Status
 
-Active development. The e2e suite runs 419 declared examples at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines.
+Active development. The e2e suite runs 856 declared examples at tiered loop counts (`make e2e`): deterministic examples once, memory-subsystem examples ×10, and the race-sensitive scheduler/chan/select/sync/timer/server families ×50. `spawn_million` still parks 1M goroutines.
 
 Goish is single-target: `x86_64-unknown-linux-gnu`.
 
@@ -175,11 +177,15 @@ a subtest spares its siblings.
 
 Three things to know before relying on it:
 
-- **What is ported.** The `testing` root package sits at 141/149 declarations (94.6%), with
-  402 `// go:` anchors across the tree; `testing.B`, `testing.M` and `t.Parallel()` are all
-  there. The eight missing root functions are the fuzzing entry points (`testing.F` is not
-  ported), the profiling hooks and the synctest bridge — so fuzzing and `-test.*profile` are
-  out, as are `testing/quick` (7/14) and `testing/synctest` (0/4).
+- **What is ported.** The `testing` root package sits at 150/164 declarations (91.5%), with
+  449 `// go:` anchors across the tree; `testing.B`, the `testing.M` type and `t.Parallel()`
+  are all there. The fourteen missing root declarations are the fuzzing entry points
+  (`testing.F` is not ported, so `F.Add`/`F.Fuzz` and `fRunner`/`runFuzzTests`/`runFuzzing`
+  are absent), `M.writeProfiles`, the synctest bridge, and `M.Run` with its `M.before`/
+  `M.after` pair — goish's driver is `testing::Main`, which arms the alarm and calls
+  `RunTestsMatch` itself rather than going through an `M.Run` that sets an exit code. So
+  fuzzing and `-test.*profile` are out, as are `testing/quick` (9/16) and
+  `testing/synctest` (0/4).
 - **Tests are registered by hand** in a slice rather than discovered, because goish has no
   compile-time reflection over modules.
 - **A subtest closure needs `Send + 'static`.** goish spawns through `go!()`, so the body
@@ -201,9 +207,9 @@ name matches.
 
 #### `crypto/` — complete, and on the live path
 
-`crypto/` is at **1722/1722 declarations (100%) across all 66 packages**,
+`crypto/` is at **1720/1720 declarations (100%) across all 66 packages**,
 counted by receiver-qualified declaration rather than collapsed names,
-each carrying a provenance anchor checked against Go 1.25.5. 26
+each carrying a provenance anchor checked against Go 1.25.5. 28
 declarations are waived out of the denominator with in-tree
 justifications. 24 of those are the QUIC transport surface (`QUICConn`
 and the `c.quic` hooks), which is dead code without a QUIC stack; each
@@ -226,7 +232,7 @@ and server against each other over TLS 1.3 and TLS 1.2.
 
 `net/http` is at **639/639 functions (100.0%) across all twelve of its
 packages** (root, `httputil`, `fcgi`, `httptest`, `cookiejar`, `cgi`,
-`pprof`, `httptrace` and the internals), with 1476 `// go:` lines and
+`pprof`, `httptrace` and the internals), with 1516 `// go:` lines and
 33 declarations waived on in-tree justifications. Bodies stream both
 directions, the client pools connections through Go's
 `getConn`/`persistConn` call graph, and `net/http/pprof` serves from a
@@ -234,17 +240,17 @@ new `runtime/pprof` user-registry with real captured stacks.
 
 | subtree | ported (by name) | `// go:` lines |
 |---|--:|--:|
-| `crypto` | **1431/1447 (98.9%)** — 100% by declaration | 3041 |
-| `net` | 788/1413 (55.8%) — `net/http` at 100% | 1570 |
-| `math` | 307/661 (46.4%) | 5 |
-| `testing` | 217/247 (87.9%) | 402 |
-| `encoding` | 210/1018 (20.6%) | 125 |
-| `compress` | 142/151 (94.0%) | 42 |
-| `os` | 112/366 (30.6%) | 3 |
+| `crypto` | **1429/1445 (98.9%)** — 100% by declaration | 3083 |
+| `net` | 967/1413 (68.4%) — `net/http` at 100% | 2126 |
+| `math` | 333/661 (50.4%) | 155 |
+| `testing` | 217/247 (87.9%) | 449 |
+| `encoding` | 234/992 (23.6%) | 462 |
+| `compress` | **150/150 (100.0%)** | 303 |
+| `os` | 151/366 (41.3%) | 182 |
 
 The right-hand column counts *all* `// go:` lines, which is what
-`port_coverage.py` reports. It mixes the 3,450 `sdk` anchors with the
-1,548 `none` markers and the file/package manifests, so it runs larger
+`port_coverage.py` reports. It mixes the 6,437 `sdk` anchors with the
+2,666 `none` markers and the file/package manifests, so it runs larger
 than the number of functions actually traced to Go.
 
 Aggregate: **169 packages with a port, 88 at 100%, 3,450 source anchors.**
@@ -305,7 +311,7 @@ side-channel analysis. Read this before trusting goish with anything.
 - **`net`** (M17): TCP/UDP over raw sockets, integrated with an **epoll netpoller** - a blocking `Read`/`Write` parks the goroutine instead of the thread. The poller is sharded **per-P epoll** (nginx-model), with a dedicated blocking-poller M woken via `netpollBreak`, and `SetDeadline` handled by a slab scan - no global heap on the request path. `ListenConfig.Control` + `syscall.RawConn` expose pre-bind socket options (`SO_REUSEPORT` per-CPU listeners work out of the box).
 - **DNS resolver**: `LookupHost` / `LookupIP` / `LookupCNAME` / `LookupAddr` / `LookupTXT` / `LookupNS` / `LookupMX` / `LookupSRV` over a port of Go's `dnsclient_unix.go` - `/etc/resolv.conf` config, `dnsmessage` wire format, UDP round-trips through the netpoller.
 - **`crypto/tls`**: a verbatim port of Go's, client and server, TLS 1.2 + 1.3, backed by goish's own `crypto/{aes, sha256, ecdh, ed25519, x509, …}` ports. `tls.Conn` owns the ported connection directly, so `Handshake`/`Read`/`Write` are the ported drivers and record loops — no interior locking (Go's `handshakeMutex`/`in`/`out`/`activeCall` become `&mut self`), so a shared conn is locked once, by the layer that shares it. See [SECURITY.md](SECURITY.md).
-- **`net/http` server** (M18, production-hardened in M31): HTTP/1.1 with keep-alive, Go 1.22 `ServeMux` patterns (`"GET /users/{id}"` wildcards, GET-matches-HEAD, 405 + `Allow` on method mismatch), composable `Handler` middleware, `Flusher` chunked streaming, `TimeoutHandler`, `FileServer` + range requests, `httputil` reverse proxy, and an **allocation-free hot request path** through `bufio`. `ListenAndServeTLS` / `ServeTLS` serve HTTPS over the TLS 1.3 stack. Deployment-grade operations: `Shutdown(ctx)` draining every tracked listener and idle conn, `Close`, `RegisterOnShutdown`, live `IdleTimeout`, `BaseContext`/`ConnContext`, `ErrorLog`, `Expect: 100-continue`, HEAD body suppression, accept-failure backoff, `TCP_NODELAY` + keep-alive socket defaults, and `signal::NotifyContext` for SIGTERM-triggered graceful drain - see `examples/deploy_rest_api.rs` for the blessed pattern.
+- **`net/http` server** (M18, production-hardened in M31): HTTP/1.1 with keep-alive, Go 1.22 `ServeMux` patterns (`"GET /users/{id}"` wildcards, GET-matches-HEAD, 405 + `Allow` on method mismatch), composable `Handler` middleware, `Flusher` chunked streaming, `TimeoutHandler`, `FileServer` + range requests, `httputil` reverse proxy, and an **allocation-free hot request path** through `bufio`. `ListenAndServeTLS` / `ServeTLS` serve HTTPS over the TLS 1.2 + 1.3 stack. Deployment-grade operations: `Shutdown(ctx)` draining every tracked listener and idle conn, `Close`, `RegisterOnShutdown`, live `IdleTimeout`, `BaseContext`/`ConnContext`, `ErrorLog`, `Expect: 100-continue`, HEAD body suppression, accept-failure backoff, `TCP_NODELAY` + keep-alive socket defaults, and `signal::NotifyContext` for SIGTERM-triggered graceful drain - see `examples/deploy_rest_api.rs` for the blessed pattern.
 - **Live request contexts**: every inbound request carries a cancellable `r.Context()` - canceled when the response finishes, or the moment the client disconnects mid-handler. Disconnect detection is wired at the netpoller `PollDesc` level (probing with `recv(MSG_PEEK | MSG_DONTWAIT)` so a pipelined request is never eaten) - no per-request watcher goroutine.
 - **`net/http` client**: `Get` / `Post` / `Do` with redirects, cookies, and a **streaming `Response.Body`** (`io.ReadCloser` shape). `Client.Timeout` re-parents the request under `context.WithTimeout` - one deadline covers every redirect hop - and a mid-flight `ctx` cancel interrupts blocked I/O through the netpoller, surfacing `context.Canceled` / `DeadlineExceeded` like Go's `url.Error` unwrapping.
 - **`goginx`** (`examples/goginx.rs`): an nginx clone in Goish - `nginx.conf`-style config, virtual hosts, longest-prefix `location` matching, autoindex, upstream round-robin proxying with next-upstream retry, TLS termination, `listen … reuseport` per-CPU accept loops, access logs, graceful SIGTERM drain.
@@ -474,7 +480,7 @@ The book in `doc/` walks through the implementation chapter by chapter - bootstr
 | Standalone binary      | ✅ no glibc, no ld.so     | ✅ static linkable       | needs `std`           |
 | GC                     | none (manual mheap)       | concurrent mark+sweep    | none                  |
 | Memory safety          | Rust ownership            | GC + runtime checks      | Rust ownership        |
-| Per-function provenance to upstream source | ✅ CI-checked, 3,450 anchors | n/a (is upstream) | ✗ |
+| Per-function provenance to upstream source | ✅ CI-checked, 6,437 anchors | n/a (is upstream) | ✗ |
 | Freestanding (`no_std`) | ✅                       | ✗ (needs the Go runtime) | ✅ with `no_std` crates |
 
 Goish is **not** a clone of Go - it ports the runtime *idioms* into a Rust ownership model. Go's `morestack` (grow by copying the stack) is impossible here - relocating a Rust stack would require fixing up raw pointers the runtime cannot see - so goish grows the other way: bare `go!()` reserves 1 MiB of virtual address space per goroutine and lets the kernel commit physical pages on touch. Depth is transparent up to the reservation; physical cost tracks actual use; overflow faults into a guard page with a spawn-site diagnostic. `go!(stack(N), …)` remains the opt-in for sub-page density (the 1M-goroutine demo) or for goroutines needing more than 1 MiB. No GC either way.

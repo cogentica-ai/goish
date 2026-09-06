@@ -917,8 +917,8 @@ landed with byte-exact vectors and the percentage did not move.
 
 | | by name | by declaration |
 |---|--:|--:|
-| crypto/ | 1431/1447 (98.9%) | **1722/1722 (100.0%)** |
-| crypto/tls | 275/291 (94.5%) | 350/350 (100.0%) |
+| crypto/ | 1429/1445 (98.9%) | **1720/1720 (100.0%)** |
+| crypto/tls | 278/294 (94.6%) | 353/353 (100.0%) |
 
 `--by-decl` had an understating defect of its own, found the same way:
 15 ported, anchored declarations read MISSING because goish ports a Go
@@ -939,7 +939,7 @@ while missing `CertificateRequest.CheckSignature` and
 169/169 either way.
 
 The anchors do not have this problem — `anchor_by_name.py` keys methods
-by `Recv.Method`, so the 2238 anchors are receiver-qualified and
+by `Recv.Method`, so the 3083 anchors are receiver-qualified and
 GOISH018 diffs each one individually. **Anchor counts are the honest
 signal; percentages are an upper bound.** Fixing the counter is a small
 change to `scan_go` and would restate every figure here downward.

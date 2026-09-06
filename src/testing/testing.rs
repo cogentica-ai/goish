@@ -2907,9 +2907,10 @@ fn runTestsWithMatch(
     return (ran, ok);
 }
 
-// Go exports both of these for the main package `go test` generates;
-// goish's `M.Run` calls `RunTestsMatch` directly, so nothing in-tree
-// calls either — hence `dead_code`.
+// Go exports both of these for the main package `go test` generates.
+// goish has no `M.Run` (see the note on `M` below); its driver is
+// `testing::Main`, which calls `RunTestsMatch` directly — so nothing
+// in-tree calls either of these, hence `dead_code`.
 #[allow(non_snake_case, dead_code)]
 pub fn runTests(tests: &[InternalTest], deadline: crate::time::Time) -> (bool, bool) {
     return runTestsWithMatch(tests, deadline, None);
