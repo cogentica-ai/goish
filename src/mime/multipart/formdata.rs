@@ -9,6 +9,13 @@
 // loop have nothing to do here. What is kept is the ACCOUNTING: the
 // same memory budget, the same ErrMessageTooLarge, so a caller that
 // bounds an upload still gets it bounded.
+//
+// That last sentence is the whole argument for the eager design being
+// safe, so it was checked rather than trusted on 2026-09-06: the budget
+// is decremented at seven sites (part name, map-entry overhead, part
+// content, MIME header size, FileHeader size) and TESTED at five, where
+// Go tests at four. A budget that is tracked and never consulted is a
+// shape this tree has produced before; this is not one.
 
 #![allow(non_snake_case)]
 
