@@ -701,6 +701,7 @@ impl File {
         return self.wrapErr(op, syscall::Errno(-rc.rc()).into());
     }
 
+    // go: sdk 1.25.5 os/stat_unix.go:15-26 File.Stat
     /// `(*File).Stat()` (os/file.go:432) — fstat the open fd.
     pub fn Stat(&self) -> (FileInfoData, error) {
         let mut st = syscall::Stat_t::default();
@@ -722,6 +723,7 @@ impl File {
         (fileinfo_from_stat(base, &st), nil)
     }
 
+    // go: sdk 1.25.5 os/dir.go:69-81 File.Readdirnames
     /// `(*File).Readdirnames(n)` (os/dir.go:46).
     /// Returns up to `n` directory entry names from the directory
     /// the receiver is open on. `n <= 0` reads all entries. Mirrors
@@ -822,6 +824,7 @@ impl File {
         (slice::<string>::__from_vec(names), nil)
     }
 
+    // go: sdk 1.25.5 os/file.go:303-315 File.Seek
     /// `(*File).Seek(offset, whence)` (os/file.go:286).
     pub fn Seek(&self, offset: int, whence: int) -> (int, error) {
         let rc = syscall::Lseek(self.fd, offset, whence as i32);
@@ -2007,6 +2010,7 @@ impl File {
         }
     }
 
+    // go: sdk 1.25.5 os/file.go:725-727 File.Fd
     /// `f.Fd()` (os/file_unix.go:50) — raw fd as `uintptr`, matching
     /// Go's signature. Cast to `int` at call sites that need the
     /// signed-integer form (`syscall::Flock(int(f.Fd()), …)`).
@@ -2014,11 +2018,13 @@ impl File {
         self.fd as crate::types::uintptr
     }
 
+    // go: sdk 1.25.5 os/file.go:63 File.Name
     /// `f.Name()` — the name passed to NewFile (or "/dev/stdout" for stdio).
     pub fn Name(&self) -> string {
         self.name.clone()
     }
 
+    // go: sdk 1.25.5 os/file_posix.go:19-24 File.Close
     /// `f.Close()` — close the underlying fd. Subsequent Reads/Writes
     /// will return errors. Closing fd < 0 is a no-op (matches "already
     /// closed" calls).
@@ -2042,6 +2048,7 @@ impl File {
         }
     }
 
+    // go: sdk 1.25.5 os/file_posix.go:162-170 File.Sync
     /// `f.Sync()` — flush any buffered data to disk. Returns an error
     /// if the underlying fsync syscall fails.
     pub fn Sync(&mut self) -> error {
@@ -2056,6 +2063,7 @@ impl File {
         }
     }
 
+    // go: sdk 1.25.5 os/file.go:152-172 File.ReadAt
     /// `f.ReadAt(buf, off)` — read from file at given offset.
     /// Does not change the current file offset.
     pub fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
@@ -2101,6 +2109,7 @@ impl File {
         return (n as int, err);
     }
 
+    // go: sdk 1.25.5 os/file.go:239-262 File.WriteAt
     /// `f.WriteAt(buf, off)` — write to file at given offset.
     /// Does not change the current file offset.
     pub fn WriteAt(&mut self, p: slice<byte>, off: i64) -> (int, error) {
@@ -2115,6 +2124,7 @@ impl File {
         }
     }
 
+    // go: sdk 1.25.5 os/file_posix.go:149-157 File.Truncate
     /// `f.Truncate(size)` — truncate file to given size.
     pub fn Truncate(&mut self, size: int) -> error {
         if self.fd < 0 {
@@ -2128,6 +2138,7 @@ impl File {
         }
     }
 
+    // go: sdk 1.25.5 os/file.go:651 File.Chmod
     /// `(*File).Chmod(mode)` (os/file_posix.go:106) — change the mode of
     /// the underlying file. Inherent so callers don't need to import
     /// any extra trait; the call shape matches Go exactly:
@@ -2204,6 +2215,7 @@ impl File {
         return (n as int, nil);
     }
 
+    // go: sdk 1.25.5 os/file.go:140-146 File.Read
     /// `(*File).Read(p)` (os/file.go:118) — inherent forwarder, see
     /// the rationale on `Write` above.
     pub fn Read(&self, p: &mut slice<byte>) -> (int, error) {

@@ -6,6 +6,26 @@
 //   syscall.Write(fd, buf)               syscall::Write(fd, buf.as_ptr(), buf.len())
 //   syscall.Exit(0)                      syscall::Exit(0)
 //
+// WHY THE WRAPPERS HERE CARRY NO `// go: sdk` ANCHOR, checked 2026-09-06.
+// Fifty-four of them share a name with a Go declaration — Open, Read,
+// Write, Close, Fstat, Wait4 — and an anchor on any of them would
+// overclaim, because the contracts differ at every point that matters:
+//
+//   Go    func Open(path string, mode int, perm uint32) (fd int, err error)
+//         calls openat(_AT_FDCWD, ..., mode|O_LARGEFILE, perm)
+//   goish pub fn Open(path: *const u8, flags: i32, mode: i32) -> i32
+//         issues SYS_OPEN directly and returns the raw -errno
+//
+// Different signature, different syscall, and an `error` against a
+// negative return. `// go: sdk` says "this declaration is a port of that
+// range", and anchor_check would happily verify the range while the
+// claim itself was false. The layer above — `src/os` — is where the Go
+// contract is reconstructed, and that is where the anchors live: `os`
+// carries 100 of them, all verified.
+//
+// This note exists because the unanchored-declaration scan reports
+// these 54 every time it is run. They are not a gap.
+//
 // Calling convention (SysV / Linux x86-64 syscall):
 //   rax = syscall number
 //   rdi, rsi, rdx, r10, r8, r9 = args 1..6

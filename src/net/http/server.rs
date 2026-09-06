@@ -145,6 +145,7 @@ impl ServeMux {
         return;
     }
 
+    // go: sdk 1.25.5 net/http/server.go:2870-2876 ServeMux.Handle
     /// `mux.Handle(pattern, h)` — register a Handler. Patterns that
     /// contain `{` are parsed as Go 1.22 wildcards; any parse error
     /// causes the registration to be silently dropped (Go panics).
@@ -225,6 +226,7 @@ impl ServeMux {
         }
     }
 
+    // go: sdk 1.25.5 net/http/server.go:2881-2887 ServeMux.HandleFunc
     /// `mux.HandleFunc(pattern, fn)` — register a closure handler.
     /// The closure must be `Send + Sync + 'static` to be safely
     /// shared across the per-connection worker goroutines.
@@ -2848,6 +2850,7 @@ impl Server {
         s
     }
 
+    // go: sdk 1.25.5 net/http/server.go:3377-3390 Server.ListenAndServe
     /// `(*Server).ListenAndServe` (server.go:3377) — bind to `Addr`
     /// and run the accept loop. Returns ErrServerClosed after a
     /// successful Shutdown, or the underlying network error otherwise.
@@ -2978,6 +2981,7 @@ impl Server {
         }
     }
 
+    // go: sdk 1.25.5 net/http/server.go:3433-3495 Server.Serve
     /// `(*Server).Serve(l)` (server.go:3433) — accept loop on a
     /// pre-bound Listener. Tracks the listener so `Shutdown` can
     /// break the Accept loop and close the socket.
@@ -3120,6 +3124,7 @@ impl Server {
         }
     }
 
+    // go: sdk 1.25.5 net/http/server.go:3179-3215 Server.Shutdown
     /// `(*Server).Shutdown(timeout)` — graceful shutdown. Closes the
     /// tracked listener (causing Accept to return ErrServerClosed),
     /// then polls active connection count until it reaches zero or
@@ -3198,6 +3203,7 @@ impl Server {
         }
     }
 
+    // go: sdk 1.25.5 net/http/server.go:3129-3148 Server.Close
     /// `(*Server).Close` (server.go:3129) — immediately close the
     /// listener and kick every tracked connection regardless of
     /// state. Does not wait for handlers to finish (use `Shutdown`
@@ -3221,6 +3227,7 @@ impl Server {
         errors::nil
     }
 
+    // go: sdk 1.25.5 net/http/server.go:3222-3226 Server.RegisterOnShutdown
     /// `(*Server).RegisterOnShutdown(f)` (server.go:3221) — register
     /// a callback to run (on its own goroutine) when `Shutdown` or
     /// `Close` begins.
@@ -4014,6 +4021,7 @@ impl Server {
         return quiescent;
     }
 
+    // go: sdk 1.25.5 net/http/server.go:3675-3681 Server.logf
     /// `(*Server).logf` (server.go:3691): route a message through
     /// `ErrorLog` when set, else the `log` package default (stderr).
     pub(crate) fn logf(&self, msg: string) {
@@ -4065,6 +4073,7 @@ impl Server {
 
 // ─── Free-function wrappers (Go-faithful one-liners) ─────────────────
 
+// go: sdk 1.25.5 net/http/server.go:3702-3705 ListenAndServe
 /// `http.ListenAndServe(addr, handler)` — bind + accept loop +
 /// goroutine-per-connection dispatch. Blocks until the server is
 /// shut down (returns ErrServerClosed) or the underlying Listen
@@ -4083,6 +4092,7 @@ pub fn ListenAndServe<A: Into<string>>(addr: A, handler: Arc<dyn Handler>) -> er
     srv.ListenAndServe()
 }
 
+// go: sdk 1.25.5 net/http/server.go:2969-2972 Serve
 /// `http.Serve(l, handler)` — accept loop on a pre-bound Listener.
 /// Mirrors Go's `func Serve(l net.Listener, handler Handler) error`
 /// (server.go:3676). For per-server config / shutdown, use

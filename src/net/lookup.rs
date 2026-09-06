@@ -152,6 +152,7 @@ const ERR_MALFORMED_DNS: &str = "DNS response contained records which contain in
 // ─── Resolver methods ────────────────────────────────────────────────────────
 
 impl Resolver {
+    // go: sdk 1.25.5 net/lookup.go:193-202 Resolver.LookupHost
     /// `(*Resolver).LookupHost` — resolves host to a list of address strings.
     pub fn LookupHost<S: Into<string>>(
         &self,
@@ -183,6 +184,7 @@ impl Resolver {
         (out, errors::nil)
     }
 
+    // go: sdk 1.25.5 net/lookup.go:220-222 Resolver.LookupIPAddr
     /// `(*Resolver).LookupIPAddr` — resolves host to a list of `IPAddr`.
     pub fn LookupIPAddr<S: Into<string>>(
         &self,
@@ -192,6 +194,7 @@ impl Resolver {
         self.lookup_ip_addr_inner(ctx, "ip", host.into())
     }
 
+    // go: sdk 1.25.5 net/lookup.go:228-252 Resolver.LookupIP
     /// `(*Resolver).LookupIP` — resolves host to a list of `IP` for the
     /// given network ("ip", "ip4", "ip6").
     pub fn LookupIP<N: Into<string>, S: Into<string>>(
@@ -227,6 +230,7 @@ impl Resolver {
         (out, errors::nil)
     }
 
+    // go: sdk 1.25.5 net/lookup.go:469-478 Resolver.LookupCNAME
     /// `(*Resolver).LookupCNAME` — returns the canonical name.
     pub fn LookupCNAME<S: Into<string>>(
         &self,
@@ -284,6 +288,7 @@ impl Resolver {
         (cname, errors::nil)
     }
 
+    // go: sdk 1.25.5 net/lookup.go:662-677 Resolver.LookupAddr
     /// `(*Resolver).LookupAddr` — reverse DNS lookup.
     pub fn LookupAddr<S: Into<string>>(
         &self,
@@ -338,6 +343,7 @@ impl Resolver {
         (out, errors::nil)
     }
 
+    // go: sdk 1.25.5 net/lookup.go:636-638 Resolver.LookupTXT
     /// `(*Resolver).LookupTXT` — returns TXT records for name.
     pub fn LookupTXT<S: Into<string>>(
         &self,
@@ -382,6 +388,7 @@ impl Resolver {
         (out, errors::nil)
     }
 
+    // go: sdk 1.25.5 net/lookup.go:600-619 Resolver.LookupNS
     /// `(*Resolver).LookupNS` — returns NS records for name.
     pub fn LookupNS<S: Into<string>>(
         &self,
@@ -424,6 +431,7 @@ impl Resolver {
         (out, errors::nil)
     }
 
+    // go: sdk 1.25.5 net/lookup.go:555-579 Resolver.LookupMX
     /// `(*Resolver).LookupMX` — returns MX records sorted by preference.
     pub fn LookupMX<S: Into<string>>(
         &self,
@@ -473,6 +481,7 @@ impl Resolver {
         (out, errors::nil)
     }
 
+    // go: sdk 1.25.5 net/lookup.go:512-534 Resolver.LookupSRV
     /// `(*Resolver).LookupSRV` — returns SRV records.
     pub fn LookupSRV<Svc: Into<string>, Proto: Into<string>, N: Into<string>>(
         &self,
@@ -662,6 +671,7 @@ static DEFAULT_RESOLVER: Resolver = Resolver {
     StrictErrors: false,
 };
 
+// go: sdk 1.25.5 net/lookup.go:187-189 LookupHost
 /// `net.LookupHost` — resolves host to a list of address strings.
 pub fn LookupHost<S: Into<string>>(host: S) -> (slice<string>, error) {
     let host = host.into();
@@ -713,6 +723,7 @@ fn as_dns_error(host: &str, e: error) -> error {
     });
 }
 
+// go: sdk 1.25.5 net/lookup.go:206-216 LookupIP
 /// `net.LookupIP` — resolves host to a list of IPv4 and IPv6 addresses.
 pub fn LookupIP<S: Into<string>>(host: S) -> (slice<super::IP>, error) {
     let host = host.into();
@@ -733,6 +744,7 @@ pub fn LookupIP<S: Into<string>>(host: S) -> (slice<super::IP>, error) {
     (out, errors::nil)
 }
 
+// go: sdk 1.25.5 net/lookup.go:452-454 LookupCNAME
 /// `net.LookupCNAME` — returns the canonical name for host.
 pub fn LookupCNAME<S: Into<string>>(host: S) -> (string, error) {
     let host = host.into();
@@ -774,30 +786,35 @@ pub fn LookupCNAME<S: Into<string>>(host: S) -> (string, error) {
     (string::from_bytes(cname_str.as_bytes()), errors::nil)
 }
 
+// go: sdk 1.25.5 net/lookup.go:628-630 LookupTXT
 /// `net.LookupTXT` — returns TXT records for name.
 pub fn LookupTXT<S: Into<string>>(name: S) -> (slice<string>, error) {
     let ctx = crate::context::Background();
     DEFAULT_RESOLVER.LookupTXT(&ctx, name)
 }
 
+// go: sdk 1.25.5 net/lookup.go:652-654 LookupAddr
 /// `net.LookupAddr` — reverse DNS lookup.
 pub fn LookupAddr<S: Into<string>>(addr: S) -> (slice<string>, error) {
     let ctx = crate::context::Background();
     DEFAULT_RESOLVER.LookupAddr(&ctx, addr)
 }
 
+// go: sdk 1.25.5 net/lookup.go:590-592 LookupNS
 /// `net.LookupNS` — returns NS records for name.
 pub fn LookupNS<S: Into<string>>(name: S) -> (slice<nilable<NS>>, error) {
     let ctx = crate::context::Background();
     DEFAULT_RESOLVER.LookupNS(&ctx, name)
 }
 
+// go: sdk 1.25.5 net/lookup.go:545-547 LookupMX
 /// `net.LookupMX` — returns MX records for name, sorted by preference.
 pub fn LookupMX<S: Into<string>>(name: S) -> (slice<nilable<MX>>, error) {
     let ctx = crate::context::Background();
     DEFAULT_RESOLVER.LookupMX(&ctx, name)
 }
 
+// go: sdk 1.25.5 net/lookup.go:494-496 LookupSRV
 /// `net.LookupSRV` — resolves SRV records.
 pub fn LookupSRV<Svc: Into<string>, Proto: Into<string>, N: Into<string>>(
     service: Svc,
