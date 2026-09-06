@@ -672,12 +672,26 @@ coincidences: `internal/runtime/maps` is not `src/maps`,
 `cmd/vendor/.../pprof/internal/driver` is not `src/database/sql/driver`.
 Four are real, and their headers say so outright:
 
-| Go package | goish | lines | anchors |
-|---|---|--:|--:|
-| `vendor/golang.org/x/net/dns/dnsmessage` | `net/dnsmessage` | 1995 | 0 |
-| `cmd/vendor/golang.org/x/term` | `term` | 144 | 0 |
-| `vendor/golang.org/x/crypto/internal/poly1305` | `crypto/poly1305` | 344 | 0 |
-| `vendor/golang.org/x/crypto/chacha20poly1305` | `crypto/chacha20poly1305` | 210 | 0 |
+| Go package | goish | lines | anchors | state |
+|---|---|--:|--:|---|
+| `cmd/vendor/golang.org/x/term` | `term` | 144 | 8 | **anchored 2026-09-06**, in RELOCATED, 10/44 |
+| `vendor/golang.org/x/crypto/chacha20poly1305` | `crypto/chacha20poly1305` | 210 | 12 | **anchored 2026-09-06**, in RELOCATED, 9/18 |
+| `vendor/golang.org/x/crypto/internal/poly1305` | `crypto/poly1305` | 344 | 0 | to do — needs the same two-file split |
+| `vendor/golang.org/x/net/dns/dnsmessage` | `net/dnsmessage` | 1995 | 0 | to do — largest, and see the version note below |
+
+Two of the four are done, and both took the same shape: split the file
+the way Go splits it (GOISH015 allows one Go file per `.rs`, and both
+ports had two Go files in one `mod.rs`), anchor each declaration, then
+fix whatever goishlint could suddenly see — tail expressions and casts
+that a `mod.rs` was never checked for. Each then entered `RELOCATED` by
+the map's own criterion rather than by hand, because the derivation
+grep started reporting it.
+
+Anchoring is also what finds things. chacha20poly1305 turned out to
+have dropped Go's `errOpen` sentinel, building the same message inline
+at two sites so neither could match the other by identity; term's
+`errno_err` had a `// go: none` that was not first in its comment block
+and so attached to nothing.
 
 **All four have zero anchors, and that is why they stay out of the
 map** — but the reason is narrower than it first looks, and the first

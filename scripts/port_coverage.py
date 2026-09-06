@@ -785,6 +785,7 @@ RELOCATED = {
     # which is the whole entry criterion working as intended.
     "cmd/vendor/golang.org/x/term": "term",
     "vendor/golang.org/x/crypto/chacha20poly1305": "crypto/chacha20poly1305",
+    "vendor/golang.org/x/crypto/internal/poly1305": "crypto/poly1305",
 }
 
 
