@@ -192,10 +192,23 @@ regression there is an outage rather than a test failure. Dispatch
 
 ## 2. Runtime defects blocking a clean CI
 
-1. **`Timer::Stop()` and the `Sleep` beneath it.** `tick.rs` now calls
-   `timer_cancel` and documents the ordering (the flag must be visible
-   before the wake). Re-verify before acting on this entry — the text
-   here predates that code.
+1. ~~**`Timer::Stop()` and the `Sleep` beneath it.**~~ **Verified
+   2026-09-06**, which is what the entry asked for. `Stop` stores
+   `stopped` with `Release` and only then calls `timer_cancel`
+   (tick.rs:66-67), and the tick loop reads it with `Acquire` at all
+   THREE points where it could otherwise miss it: before parking, after
+   a cancelled park, and after winning the fire CAS but before sending.
+   That last one is the race the entry was about — the fire and the
+   Stop can both be in flight — and it is handled rather than argued
+   about. A Release store with no matching Acquire would have been the
+   defect worth finding here; there isn't one.
+
+   Covered functionally by `time_stop_no_pin_smoke`, whose
+   discriminator is wall time (a stopped 30s timer must not pin exit)
+   so a Stop that "works" by never arming cannot pass it, and by
+   `timer_reset_ref_smoke` against Go. Not covered: the race itself
+   under contention, which needs repetition to provoke and is left to
+   the tier-3 stress family rather than a smoke.
 2. **`cast!` on an `Any` carrier.** Still open; documented as
    CONTRIBUTING.md §9b. Three options were scoped: reject at compile
    time with a `const` assert pointing at `.As::<>()`, narrow the
