@@ -37,6 +37,37 @@
 //          /proc/sys/kernel/ostype, which stats as 0 and reads back
 //          "Linux\n" on every Linux, so the row is machine-independent.
 //
+//   FIXED  Rename answered "file exists" for Rename(missing, dir). Go
+//          re-stats oldname when newname is an existing directory and
+//          reports THAT error first. The doc note called the omission a
+//          case-sensitivity simplification, which covered the SameFile
+//          half and hid the priority half. Pinned by a new
+//          rename/missingoverdir row in os_link_ref_smoke.
+//   FIXED  Chtimes rejected any pre-1970 time with a fractional part.
+//          NsecToTimespec's negative-remainder correction was missing,
+//          so tv_nsec went negative and utimensat returned EINVAL. A
+//          whole-second pre-1970 time has remainder 0 and always
+//          worked, which is why it took the fractional case to surface.
+//          Pinned by examples/os_chtimes_ref_smoke.rs.
+//
+//   clean  ReadDir sorts by name in Go's byte order.
+//   clean  Symlink and Link both build a *LinkError carrying both paths.
+//   clean  OpenFile sets O_CLOEXEC on every open, as Go does.
+//   clean  UserHomeDir, UserCacheDir and UserConfigDir match Go's env
+//          precedence, its "neither $X nor $HOME are defined" text and
+//          its "path in $X is relative" absoluteness check.
+//   clean  Executable trims the " (deleted)" suffix procfs appends.
+//   clean  Pipe uses pipe2 with O_CLOEXEC and keeps the errno.
+//   clean  TempDir honours TMPDIR and falls back to /tmp.
+//
+//   NOTE   Hostname calls uname and stops there. Go tries uname first
+//          and falls back to reading /proc/sys/kernel/hostname when the
+//          name is absent or 64 bytes (possibly truncated, since
+//          Nodename is 65). Unreachable on Linux in practice — uname
+//          does not fail here and HOST_NAME_MAX is 64, so the fallback
+//          would return the same bytes — but the error path also
+//          returns a bare "uname failed" rather than the errno.
+//
 // The rest of the 61 have NOT been read. This note records where the
 // sample stopped, not that the file is clear.
 //
@@ -1169,6 +1200,11 @@ pub fn Executable() -> (string, error) {
     (path, err)
 }
 
+// go: sdk 1.25.5 os/file_posix.go:179-185 Chtimes
+// goishlint:ignore GOISH018 chtimesUtimes — Go's per-time helper
+//     (os/file_posix.go:187-199) is the closure below; its only
+//     substance is the zero-Time -> UTIME_OMIT branch and the
+//     NsecToTimespec negative-remainder correction, both here.
 /// `os.Chtimes(name, atime, mtime)` (file_posix.go:179) — change the
 /// access and modification times of the named file. A zero time.Time
 /// leaves the corresponding timestamp unchanged (UTIME_OMIT), as in Go.
@@ -1188,10 +1224,32 @@ pub fn Chtimes<N: Into<string>>(
             }
         } else {
             // Go: utimes[i] = syscall.NsecToTimespec(t.UnixNano())
+            //
+            // The correction is the whole point of that helper
+            // (syscall/timestruct.go:13-21):
+            //
+            //     sec := nsec / 1e9
+            //     nsec = nsec % 1e9
+            //     if nsec < 0 { nsec += 1e9; sec-- }
+            //
+            // Rust's `%`, like Go's, truncates toward zero, so a
+            // pre-1970 time with a fractional part leaves tv_nsec
+            // NEGATIVE. utimensat rejects a tv_nsec outside
+            // [0, 999999999] with EINVAL, so Chtimes failed outright on
+            // a timestamp Go writes without complaint — what an archive
+            // extractor hits restoring old mtimes. A whole-second
+            // pre-1970 time has remainder 0 and always worked, which is
+            // why this needed the fractional case to surface.
             let ns = t.UnixNano() as i64;
+            let mut sec = ns / 1_000_000_000;
+            let mut nsec = ns % 1_000_000_000;
+            if nsec < 0 {
+                nsec += 1_000_000_000;
+                sec -= 1;
+            }
             syscall::Timespec {
-                tv_sec: ns / 1_000_000_000,
-                tv_nsec: ns % 1_000_000_000,
+                tv_sec: sec,
+                tv_nsec: nsec,
             }
         }
     };
