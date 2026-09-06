@@ -57,6 +57,24 @@ request, and `getConn` dials — so goish opens a connection wherever Go
 reuses one. Deleting the loops means accepting that permanently and
 deleting `idleConnWait` with them; wiring them up recovers the reuse.
 
+**The full inventory, so the decision can be sized.** Five members of
+the ported transport machinery are unwired, all by the same choice of
+an inline path over Go's looped one:
+
+| ported | why it is dead |
+|---|---|
+| `readLoop` / `writeLoop` | `__spawn_loops`'s only caller is an example |
+| `removeIdleConn` | called from the loops in Go |
+| `idleConnWait` | written by queueForIdleConn, read only by Go's tryPutIdleConn, which readLoop calls |
+| `startDialConnForLocked` | Go's queueForDial spawns through it; goish's calls `dialConnFor` inline, and its own comment says "the goroutine form stays available" |
+| `cleanFrontCanceled` | Go's caller is the dialsInProgress bookkeeping the inline dial does not carry |
+
+Every one is a faithful port with a verified anchor, and every one is
+unreachable. That is the drift this decision exists to stop: the cost
+is not the dead code, it is that a reader cannot tell which path is
+the maintained one, and a change to the live path leaves the ported
+one silently stale.
+
 ### C. The conn is not shareable
 
 `GotConnInfo.Conn` is `Arc<dyn Conn>` and the client path has no such
