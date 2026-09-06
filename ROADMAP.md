@@ -750,8 +750,47 @@ from, or to re-port against 1.25.5 and lose SVCB. Until then
 `dnsmessage_ref_smoke` is what checks it, and it checks the wire
 format, which is the part that matters most.
 
-**The same version claim on two more files, with no such evidence
-either way.** `dnsclient.rs` and `dnsconfig.rs` also say 1.26.0, and
+**dnsclient.rs: the 1.25.5 anchors VALIDATE, and the cleanup is the
+blocker.** Attempted 2026-09-06 and reverted, because the result is
+worth more as a measurement than as a half-finished file.
+
+Every declaration in `src/net/dnsclient.rs` maps to a Go 1.25.5 one by
+the camelCase-to-snake_case fold this tree already uses — `new_request`
+/ `newRequest`, `try_one_name` / `tryOneName`, `is_domain_name` /
+`isDomainName`, and so on for all of them. Splitting the file per Go
+file (`dnsclient.go` keeps `equalASCIIName` and `isDomainName`;
+everything else is `dnsclient_unix.go`) and anchoring thirteen
+declarations, **`anchor_check.py` exits 0**: every range names exactly
+the declaration claimed, against the pinned 1.25.5 tree. So unlike
+dnsmessage there is nothing here that only a newer x/net or Go could
+provide, and the port is anchorable against the SDK this repo has.
+
+What stops it is the cleanup, not the provenance. The file predates the
+tree's conventions and goishlint has 95 findings for it once it is
+split and anchored:
+
+  - 25 that are a pure path move, and the baseline proves it — the old
+    `src/net/dnsclient.rs` entry reads GOISH005 11, GOISH006 1,
+    GOISH007 1, GOISH010 12, and the new path reproduces those four
+    counts exactly. `String::from` twelve times, a `Result<T, E>`
+    return, `.as_str()`: a public surface in Rust types rather than
+    goish ones.
+  - ~60 that are new, and they are the price of the anchors: GOISH018
+    and GOISH021 fire because a file citing `net/dnsclient_unix.go`
+    OWES its declarations, and goish ports about half — no
+    `goLookupHostOrder`, `goLookupCNAME`, `avoidDNS`, no
+    `hostLookupOrder` constants, no `resolverConfig`. Removing the
+    manifests does not help; that was measured too, and drops only the
+    six GOISH017.
+
+So the work is: migrate the public surface off `String`/`Vec<String>`/
+`&str`/`Result` onto goish types, then split, anchor and waive the
+genuinely unported half. That is a package-sized job on the live
+resolver, and it wants doing as one, not as an annotation pass that
+locks sixty waivers around code that should be rewritten anyway.
+
+**The version claim on the two dnsclient files, with no evidence either
+way.** `dnsclient.rs` and `dnsconfig.rs` also say 1.26.0, and
 unlike dnsmessage nothing in them settles it: Go 1.25.5 has both
 `net/dnsclient_unix.go` and `net/dnsconfig.go`, and goish's `DnsConfig`
 carries 10 of Go's 14 fields — `single_request`, `use_tcp`, `trust_ad`,
