@@ -157,6 +157,11 @@ use crate::string;
 use crate::syscall;
 use crate::types::{byte, int};
 
+// go: waived chtimesUtimes — Go's per-time helper (file_posix.go:187-199) is the closure in Chtimes below; its only substance is the zero-Time -> UTIME_OMIT branch and the NsecToTimespec negative-remainder correction, both present there.
+
+// go: waived readFileContents — Go's two ReadFile helpers (file.go:889-928 and 877-882) are inlined into the ReadFile body below; statOrZero's whole contract is "a failed Stat is size 0, not an error", which is the else-0 arm there.
+// go: waived statOrZero — Go's two ReadFile helpers (file.go:889-928 and 877-882) are inlined into the ReadFile body below; statOrZero's whole contract is "a failed Stat is size 0, not an error", which is the else-0 arm there.
+
 extern crate alloc;
 use alloc::vec::Vec;
 

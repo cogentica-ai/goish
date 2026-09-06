@@ -1079,6 +1079,41 @@ five are missing, but `context`'s names five where only four are, and
 waiving a ported declaration pulls it out of the numerator as well —
 which is how `strings` once read 108/113 instead of 110/115.
 
+**os: four waived, two refused — and the refusal is the point.** Its
+GOISH018 reasons read as one class but are two. `chtimesUtimes`,
+`readFileContents` and `statOrZero` are helpers Go factors out and
+goish inlines into the body below ("statOrZero's whole contract is 'a
+failed Stat is size 0, not an error', which is the else-0 arm here");
+`runtime_rand` is a runtime linkname goish has no hook for, replaced by
+an LCG seeded from the monotonic clock. Case 1, waived.
+
+`openDirAt` and `removeAllFrom` are NOT. Their reason says Go's unix
+RemoveAll walks the tree with openat(2)/unlinkat(2) relative
+descriptors "so a rename between the stat and the unlink cannot
+redirect it", and goish's "walks by PATH; it is the same traversal
+without that race guard". That is a missing TOCTOU protection blocked
+on syscalls goish does not have — case 4, and waiving it would have
+laundered a security gap into a coverage number. Bulk-waiving `os`'s
+six on the strength of the other four would have done exactly that.
+
+**Two packages deliberately NOT waived at all.** `internal/poll` is
+3/130: goish ports the two deadline sentinels and nothing else, because
+"goish's descriptor runtime is not this one — sockets go through `net`,
+files through `os`, and both call the kernel directly rather than
+through a shared poller". That reason would justify waiving all 127,
+which would report 3/3 = 100% for a package goish does not implement.
+3/130 is the honest number and it stays. `testing/quick`'s seven are
+§2b's own case-4 example.
+
+Triage so far: **52 declarations waived across six packages** — sort
+30, os/user 7, io/fs 5, context 4, log 4, textproto 2 — plus one
+declaration ported (`trim`) and three added (`sort`'s Search methods),
+against `flag`'s 25, `testing/quick`'s 7, `os`'s 2 and
+`internal/poll`'s 127 that must not be. Left unread: `log/slog`'s six,
+which are mixed — one is case 2 (`NewRecord` is in mod.rs and already
+counted, so its ignore entry is merely stale), and `appendJSONMarshal`
+is blocked on a reflective marshaller.
+
 What this does NOT resolve is the rest of the triage. `flag` keeps 43 names
 and they are ROADMAP case 4, blocked work rather than case 1: the
 package is a hand-written v1 FlagSet, and Go's `Var`/`Value` surface —

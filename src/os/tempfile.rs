@@ -10,6 +10,8 @@
 
 #![allow(non_snake_case)]
 
+// go: waived runtime_rand — Go pulls its randomness from the runtime through a linkname; goish has no such hook, so nextRandom seeds an LCG from the monotonic clock instead. The property both need — two calls in one process do not collide — is the same.
+
 extern crate alloc;
 use alloc::vec::Vec;
 
