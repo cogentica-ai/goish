@@ -36,22 +36,31 @@ use goish::mime::multipart;
 use goish::types::int;
 use goish::fmt;
 
-const GO: [&str; 4] = [
+const GO: [&str; 9] = [
     "headers=5      ok values=1",
     "headers=9998   ok values=1",
     "headers=10001  err=multipart: message too large",
     "headers=50000  err=multipart: message too large",
+    "maxMemory ok values=1",
+    "maxMemory ok values=1",
+    "maxMemory ok values=1",
+    "maxMemory ok values=1",
+    "maxMemory ok values=1",
 ];
+
+static mut BAD: usize = 0;
 
 fn chk(ln: &mut usize, got: &string) {
     if *ln >= GO.len() {
         fmt::Printf!("[!!] extra line: %q\n", got);
+        unsafe { BAD += 1 };
         *ln += 1;
         return;
     }
     if got == GO[*ln] {
         fmt::Printf!("[ok] %s\n", got);
     } else {
+        unsafe { BAD += 1 };
         fmt::Printf!("[!!] line %d\n  got  %q\n  want %q\n", *ln as int + 1, got, GO[*ln]);
     }
     *ln += 1;
@@ -83,7 +92,52 @@ fn main() {
         let vals = form.Value.Get(string::from("f")).0;
         chk(&mut ln, &fmt::Sprintf!("headers=%-6d ok values=%d", *n, goish::len(&vals)));
     }
+    // maxMemory boundaries. Go computes `maxMemory + 10<<20` with
+    // WRAPPING arithmetic and catches the wrapped negative with a
+    // `<= 0` guard that resets it to MaxInt64. goish trapped on the
+    // addition instead, so ReadForm(int64::MAX) panicked in a debug
+    // build before ever reaching that guard — the guard was dead code
+    // for the one input written for it. Every row below is `ok
+    // values=1` in Go, checked against a running Go 1.25.5.
+    for m in [
+        1i64 << 20,
+        goish::types::int64::MAX,
+        goish::types::int64::MAX - 1,
+        0,
+        -1,
+    ]
+    .iter()
+    {
+        let body = "--B\r\nContent-Disposition: form-data; name=\"f\"\r\n\r\nBODY\r\n--B--\r\n";
+        let mut r = multipart::NewReader(
+            goish::goslice::slice::__from_vec(body.as_bytes().to_vec()),
+            string::from("B"),
+        );
+        let (form, err) = r.ReadForm(*m);
+        if !err.IsNil() {
+            chk(&mut ln, &fmt::Sprintf!("maxMemory err=%v", err));
+            continue;
+        }
+        let vals = form.Value.Get(string::from("f")).0;
+        chk(
+            &mut ln,
+            &fmt::Sprintf!("maxMemory ok values=%d", goish::len(&vals)),
+        );
+    }
+
     if ln != GO.len() {
         fmt::Printf!("[!!] produced %d lines, pinned %d\n", ln as int, GO.len() as int);
+        unsafe { BAD += 1 };
     }
+    // e2e_runner.sh: "rc=0 wins regardless of stdout content", so
+    // printing a mismatch is not a gate. This smoke is not a
+    // *_ref_smoke either, so the rc=0-panic rule added for those does
+    // not cover it — a regression that PANICS here still exits 0 and
+    // shows only as output that stops early.
+    let bad = unsafe { BAD };
+    if bad != 0 {
+        fmt::Printf!("[!!] %d row(s) diverge from Go\n", bad as i64);
+        goish::os::Exit(1);
+    }
+    goish::os::Exit(0);
 }

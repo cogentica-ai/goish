@@ -228,6 +228,22 @@ impl Reader {
         // Counted down exactly as Go counts: 10000 headers are allowed
         // and the 10001st fails, which is what the pinned 9998/10001
         // rows in multipart_maxheaders_smoke straddle.
+        //
+        // Go's OTHER bound, maxMIMEHeaderSize (multipart.go:348,
+        // 10 << 20), is not ported, and the reason it is not a hole is
+        // worth writing down rather than rediscovering. Go streams the
+        // body through a bufio.Reader, so an unbounded header block
+        // would be read incrementally and could exceed any buffer;
+        // goish's Reader owns the whole body as a `slice<byte>` before
+        // parsing starts, so a header block cannot be larger than the
+        // body already in memory. That body is capped at 16 MiB by
+        // __read_request_server (ROADMAP section 0 A).
+        //
+        // So the exposure is a header block of up to the body cap where
+        // Go stops at 10 MiB — a bounded difference, not an unbounded
+        // one. If section 0 A is ever decided in favour of STREAMING,
+        // this stops being true and maxMIMEHeaderSize has to be ported
+        // with it.
         let mut maxHeaders: i64 = 10000;
         loop {
             // Find next CRLF.

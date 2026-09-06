@@ -185,8 +185,25 @@ impl super::reader::Reader {
 
         // Go: "We reserve an additional 10 MB in maxMemoryBytes for
         // non-file data."
-        let maxFileMemoryBytes = maxMemory;
-        let mut maxMemoryBytes = maxMemory + (10 << 20);
+        // Go: `maxFileMemoryBytes := maxMemory; if == MaxInt64 { -- }`.
+        // The decrement was missing here; Go backs off by one so the
+        // later `>= maxFileMemoryBytes` comparisons cannot be satisfied
+        // by the saturated value itself.
+        let mut maxFileMemoryBytes = maxMemory;
+        if maxFileMemoryBytes == crate::types::int64::MAX {
+            maxFileMemoryBytes -= 1;
+        }
+        // Go: `maxMemoryBytes := maxMemory + int64(10<<20)`, which WRAPS
+        // on overflow and is then caught by the `<= 0` guard below —
+        // that guard exists precisely to turn the wrapped negative into
+        // MaxInt64.
+        //
+        // Rust's `+` traps instead, so `ReadForm(int64::MAX)` panicked
+        // in a debug build before reaching the guard, making the guard
+        // dead code for the one input it was written for. e2e builds
+        // debug. wrapping_add reproduces Go's arithmetic so the guard
+        // does its job.
+        let mut maxMemoryBytes = maxMemory.wrapping_add(10 << 20);
         if maxMemoryBytes <= 0 {
             if maxMemory < 0 {
                 maxMemoryBytes = 0;
