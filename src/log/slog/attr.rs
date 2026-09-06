@@ -11,6 +11,8 @@
 
 #![allow(non_snake_case)]
 
+// go: waived GroupAttrs — Go adds GroupAttrs alongside Group because Group takes ...any and cannot accept a []Attr directly; goish's Group already takes the slice, so the second entry point has nothing to add.
+
 extern crate alloc;
 
 use super::{Attr, GroupValue};

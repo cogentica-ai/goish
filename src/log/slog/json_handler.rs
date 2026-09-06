@@ -11,6 +11,8 @@
 #![allow(non_snake_case)]
 // goishlint:ignore GOISH018 appendJSONMarshal — Go routes a Float64 and an arbitrary `any` through `encoding/json.Marshal`; goish has no reflective marshaller here, so those two kinds render through `Value::append` and `Value::String` instead, which produce the same bytes for every payload slog can hold.
 
+// go: waived appendJSONMarshal — Go routes a Float64 and an arbitrary any through encoding/json.Marshal; goish has no reflective marshaller, so those two kinds render through Value::append and Value::String, which produce the same bytes for every payload slog can hold.
+
 extern crate alloc;
 use alloc::sync::Arc;
 use alloc::vec::Vec;

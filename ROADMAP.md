@@ -1109,10 +1109,31 @@ Triage so far: **52 declarations waived across six packages** — sort
 30, os/user 7, io/fs 5, context 4, log 4, textproto 2 — plus one
 declaration ported (`trim`) and three added (`sort`'s Search methods),
 against `flag`'s 25, `testing/quick`'s 7, `os`'s 2 and
-`internal/poll`'s 127 that must not be. Left unread: `log/slog`'s six,
-which are mixed — one is case 2 (`NewRecord` is in mod.rs and already
-counted, so its ignore entry is merely stale), and `appendJSONMarshal`
-is blocked on a reflective marshaller.
+`internal/poll`'s 127 that must not be. `log/slog`'s six then split
+four ways, which is the strongest argument yet for reading each one:
+
+  - `GroupAttrs` and `byteSlice` are case 1 and waived. Go adds
+    `GroupAttrs` beside `Group` only because its `Group` takes `...any`
+    and cannot accept a `[]Attr`; goish's already takes the slice. Go's
+    `[]byte` fast path in `appendTextValue` reflects over the boxed
+    `any` to spot a byte slice; goish's `Value` cannot hold one, so
+    there is nothing for the path to match.
+  - `appendJSONMarshal` is also case 1, and its reason turns on a
+    clause easy to skim past. "goish has no reflective marshaller"
+    sounds like blocked work; the sentence continues "so those two
+    kinds render through Value::append and Value::String, which produce
+    the same bytes for every payload slog can hold". Same output by
+    another route is case 1. Waived.
+  - `NewLogLogger` is not. Its reason is "the package-level wrappers
+    and the `...any` form are not ported" — unwritten, not resolved
+    elsewhere, so it stays missing along with `countAttrs` and `stack`,
+    which serve that same unported `...any` path.
+  - `NewRecord` was case 2 all along: it is in `mod.rs` and already
+    counted, so its entry in record.rs's ignore is merely stale rather
+    than a waiver candidate.
+
+slog 124/154 to 124/151. slog_handler_ref_smoke, slog_group_smoke and
+slog_default_ref_smoke all match Go after.
 
 What this does NOT resolve is the rest of the triage. `flag` keeps 43 names
 and they are ROADMAP case 4, blocked work rather than case 1: the
