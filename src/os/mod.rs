@@ -50,6 +50,19 @@
 //          worked, which is why it took the fractional case to surface.
 //          Pinned by examples/os_chtimes_ref_smoke.rs.
 //
+//   FIXED  dirFS.join, the DirFS sandbox boundary, was missing both of
+//          Go's checks. An EMPTY root produced "/" + name — an absolute
+//          path from the filesystem root — so DirFS("") read anything
+//          the process could. And the name was validated with
+//          fs::ValidPath alone, where Go uses Localize = ValidPath PLUS
+//          a NUL rejection: ValidPath checks path ELEMENTS, not bytes,
+//          so "f\0junk" passed and the kernel truncated it at the C
+//          string boundary. Measured: a request naming "f\0ignored"
+//          returned the contents of "f" — the file opened was not the
+//          file validated. All four entry points (Open, Stat, ReadFile,
+//          ReadDir) route through this one join, checked by reading
+//          every call site. Pinned by examples/os_dirfs_ref_smoke.rs.
+//
 //   clean  ReadDir sorts by name in Go's byte order.
 //   clean  Symlink and Link both build a *LinkError carrying both paths.
 //   clean  OpenFile sets O_CLOEXEC on every open, as Go does.
@@ -2268,16 +2281,47 @@ impl crate::io::fs::File for dirFSFile {
     }
 }
 
-// Go: `type dirFS string` (os/file.go:754).
+// go: sdk 1.25.5 os/file.go:755 dirFS
 #[allow(non_camel_case_types)] // Go name
 struct dirFS {
     dir: string,
 }
 
 impl dirFS {
-    // Go: dirFS.join (os/file.go:830) — dir/name with validity check.
+    // go: sdk 1.25.5 os/file.go:849-861 dirFS.join
+    /// `dir/name`, with the empty-root and Localize checks that make
+    /// this a boundary rather than a string concatenation.
     fn join(&self, op: &'static str, name: &string) -> (string, error) {
-        if !crate::io::fs::ValidPath(name.clone()) {
+        // Go: if dir == "" { return "", errors.New("os: DirFS with empty root") }
+        //
+        // First, before the name is looked at, as Go orders it. Without
+        // this the join below produces "/" + name — an absolute path
+        // from the FILESYSTEM ROOT rather than a contained one — so
+        // DirFS("") reads anything the process can.
+        if self.dir.Len() == 0 {
+            return (
+                string::new(),
+                errors::Wrap(crate::io::fs::PathError {
+                    Op: string::from_static(op),
+                    Path: name.clone(),
+                    Err: errors::New(string::from_static(
+                        "os: DirFS with empty root",
+                    )),
+                }),
+            );
+        }
+        // Go: name, err := filepathlite.Localize(name); if err != nil { ErrInvalid }
+        //
+        // Localize is fs.ValidPath AND a rejection of any embedded NUL
+        // (internal/filepathlite/path_unix.go:27-32). ValidPath alone
+        // is not enough: it checks path ELEMENTS, not bytes, so "f\0junk"
+        // passes it and is then truncated at the C string boundary by
+        // the kernel — the file OPENED is not the file VALIDATED. That
+        // was measured: this returned the contents of "f" for a request
+        // naming "f\0ignored".
+        if !crate::io::fs::ValidPath(name.clone())
+            || name.as_bytes().contains(&0u8)
+        {
             return (
                 string::new(),
                 errors::Wrap(crate::io::fs::PathError {
@@ -2303,7 +2347,7 @@ impl dirFS {
 }
 
 impl crate::io::fs::FS for dirFS {
-    // Go: dirFS.Open (os/file.go:766).
+    // go: sdk 1.25.5 os/file.go:757-772 dirFS.Open
     fn Open(
         &self,
         name: string,

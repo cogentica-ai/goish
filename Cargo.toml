@@ -3484,6 +3484,10 @@ name = "jsontext_utf8_ref_smoke"
 path = "examples/jsontext_utf8_ref_smoke.rs"
 
 [[example]]
+name = "os_dirfs_ref_smoke"
+path = "examples/os_dirfs_ref_smoke.rs"
+
+[[example]]
 name = "os_chtimes_ref_smoke"
 path = "examples/os_chtimes_ref_smoke.rs"
 
