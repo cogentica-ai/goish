@@ -91,6 +91,23 @@ const maxSessionTicketLifetimeMs: u64 = 7 * 24 * 60 * 60 * 1000;
 /// it likes, and every one was appended here.
 const maxTicketsPerHost: usize = 64;
 
+/// Go: common.go:1623 — the SAME 64, but Go spends it differently and
+/// the difference is the whole point of this bound.
+///
+/// `lruSessionCache` holds one entry per session key and at most 64
+/// keys, evicting the least-recently-used when full (common.go, Put).
+/// Sixty-four sessions, total, forever.
+///
+/// This cache holds up to `maxTicketsPerHost` per host — a deliberate
+/// divergence, since a TLS 1.3 server issues several tickets and
+/// keeping them allows parallel resumption — and, until this bound, an
+/// unbounded number of HOSTS. Only `take` ever removed a key, so a
+/// client that dialled many names and resumed none of them grew this
+/// map for the life of the process, 64 peer-sized tickets per name.
+/// A redirect chain or a crawl is enough to drive it, which makes the
+/// growth peer-influenced rather than merely unbounded.
+const maxHosts: usize = 64;
+
 type CacheMap = crate::map<string, slice<cachedSession>>;
 
 pub static CACHE: Lazy<sync::Mutex<CacheMap>> =
@@ -120,6 +137,38 @@ pub fn put<S: Into<string>>(server_name: S, state: cachedSession) {
     }
     list = slice::<cachedSession>::__from_vec(v);
     m.Set(name, list);
+
+    // Bound the number of hosts, the way Go bounds the number of keys.
+    //
+    // Go evicts the least-recently-USED entry; this cache keeps no use
+    // timestamps, but every session carries `received_at_ms`, so the
+    // host whose newest ticket is oldest is the one least recently
+    // written. That is eviction by age rather than by use — for a
+    // cache whose entries are only read once (take removes them) the
+    // two orderings differ only for hosts that were read and not
+    // rewritten, and those have already been dropped by `take`.
+    while m.Len() as usize > maxHosts {
+        let mut victim: Option<string> = None;
+        let mut victim_age: u64 = u64::MAX;
+        for (k, lst) in crate::range!(&*m) {
+            let mut newest: u64 = 0;
+            for i in 0..lst.Len() {
+                if lst[i].received_at_ms > newest {
+                    newest = lst[i].received_at_ms;
+                }
+            }
+            if newest < victim_age {
+                victim_age = newest;
+                victim = Some(k.clone());
+            }
+        }
+        match victim {
+            Some(k) => {
+                crate::delete!(m, k);
+            }
+            None => break,
+        }
+    }
 }
 
 /// Pop the most-recently-stored session for `server_name`, or `None`.

@@ -49,12 +49,13 @@ fn mk(lifetime: u32, received_at_ms: u64) -> session::cachedSession {
     return c;
 }
 
-const GO: [&str; 5] = [
+const GO: [&str; 6] = [
     "fresh                    resumable=true",
     "past-lifetime            resumable=false",
     "zero-lifetime            resumable=false",
     "over-7-days              resumable=false",
     "capacity                 kept=64",
+    "host-capacity            hosts<=64 kept=64",
 ];
 
 fn chk(ln: &mut usize, got: &string) {
@@ -102,6 +103,34 @@ fn main() {
         session::put("many.example", mk(3600 + i, now));
     }
     chk(&mut ln, &fmt::Sprintf!("%-24s kept=%d", "capacity", session::len_total() as int));
+
+    // Host capacity: 200 DISTINCT hosts must not all be kept either.
+    //
+    // The row above bounds tickets per host and passed long before this
+    // one existed, which is exactly why the host dimension went
+    // unnoticed: `put` capped the list it appends to and nothing capped
+    // the number of lists. Go bounds KEYS — lruSessionCache holds at
+    // most 64 and evicts the least-recently-used (common.go:1623) — so
+    // an unbounded key count is the divergence, and a client that dials
+    // many names and resumes none of them is the way to reach it.
+    //
+    // One ticket each, so `kept` is also the host count.
+    {
+        let mut m = session::CACHE.Lock();
+        *m = goish::map::new_no_zero();
+    }
+    for i in 0..200u32 {
+        let host = fmt::Sprintf!("h%d.example", i as int);
+        session::put(host, mk(3600, now + i as u64));
+    }
+    chk(
+        &mut ln,
+        &fmt::Sprintf!(
+            "%-24s hosts<=64 kept=%d",
+            "host-capacity",
+            session::len_total() as int
+        ),
+    );
     let _: byte = 0;
     if ln != GO.len() {
         fmt::Printf!("[!!] produced %d lines, pinned %d\n", ln as int, GO.len() as int);
