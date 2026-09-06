@@ -31,12 +31,35 @@ pub struct DnsConfig {
     /// Whether to rotate through servers round-robin.
     pub rotate: bool,
     /// Use a single request (sequential A + AAAA) rather than parallel.
+    ///
+    /// Parsed from `options single-request` and never read, which is
+    /// CORRECT rather than an oversight: `dnsclient.rs` issues A and
+    /// AAAA in a plain loop over `&[TypeA, TypeAAAA]` with no
+    /// goroutine, so the queries are already sequential and the option
+    /// asks for what happens anyway. Go needs the flag because its
+    /// resolver runs the two in parallel by default.
+    ///
+    /// Recorded here because a field that is set and never read is the
+    /// shape of two real defects found in this tree — jsontext's
+    /// AllowInvalidUTF8 and tls's skip_verify — so the next reader
+    /// deserves to know which kind this one is.
     pub single_request: bool,
     /// Force TCP for DNS resolutions.
     pub use_tcp: bool,
     /// Add AD (authentic data) flag.
     pub trust_ad: bool,
     /// Do not reload from disk.
+    ///
+    /// Parsed from `options no-reload` and never read, and unlike
+    /// `single_request` this one IS a divergence: `dnsclient.rs` calls
+    /// `dns_read_config("/etc/resolv.conf")` on every lookup with no
+    /// cache, so goish always reloads and a caller asking it not to is
+    /// ignored. Go caches the config and honours the option.
+    ///
+    /// Left as-is rather than fixed because honouring it means adding
+    /// the cache Go has, which is a behaviour change to every lookup
+    /// rather than a flag read — but it is a divergence, not a no-op,
+    /// and saying so is the point of this comment.
     pub no_reload: bool,
     /// Round-robin server offset counter.
     soffset: AtomicU32,
