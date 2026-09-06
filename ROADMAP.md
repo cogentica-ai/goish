@@ -241,10 +241,42 @@ starts where this left off rather than repeating it.
 
 `scripts/example_coverage.py` finds packages no example imports. The
 equivalent for this class is a one-liner — every `.rs` over 200 lines
-with zero `go: sdk` anchors — and the remaining candidates are
+with zero `go: sdk` anchors — and the remaining candidates were
 `encoding/json/jsontext/mod.rs` (1500) and `runtime/netpoll/mod.rs`
 (1112). `crypto/ssh/mod.rs` (1235) was read and is invented with no Go
 counterpart at all; its header says what that means.
+
+**Worked 2026-09-06.** `jsontext` gave up one: `AllowInvalidUTF8` was
+stored and never read, so the decoder accepted invalid UTF-8 that Go
+refuses — a parser differential, fixed and pinned by
+`jsontext_utf8_ref_smoke`. `runtime/netpoll` was read and found to
+handle EINTR correctly at both sites; it has no Go counterpart to diff
+against, so it is a different kind of gap from the rest of this list.
+
+**The one-liner does not generalise, and the failure is worth keeping**
+so nobody rebuilds it. Run against everything over 250 lines it
+returns about 70 files and the sampled ones were all false positives:
+`mod.rs` re-export roots, generated tables (`p256_table`,
+`*_tables.rs`), goish-specific runtime (`scheduler`, `gomap`,
+`gochan`), and documented REIMPLEMENTATIONS that are diffed anyway —
+`math/big` (7110 lines, no anchors, three ref smokes) and
+`net/dnsmessage` (1995, one). "No anchors" separates nothing on its
+own; this tree has far more legitimately-unanchored code than
+unchecked code.
+
+Two other sweeps came back empty the same day, recorded for the same
+reason. Auditing by FILENAME for packages with no `*_ref_smoke` is
+useless here: `hpke_smoke` decrypts Go-produced ciphertexts,
+`des_smoke` uses vectors lifted from Go's own `des_test.go`, and
+`fips140_tls13_smoke` checks against an independent RFC 8446 HKDF
+implementation — none of them named `_ref_smoke`. And `os/exec`
+(1148 lines, no anchors, absent from the list above) is covered:
+`lookpath_ref_smoke` pins Go 1.19's ErrDot including the empty-entry
+and trailing-entry cases, and `exec_cmd_ref_smoke` pins Env
+duplicate-key collapsing.
+
+What did work, three times running, was reading a file this section
+already names.
 
 ## 2c. `regexp` does not keep Go's linear-time guarantee
 
