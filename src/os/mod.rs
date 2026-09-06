@@ -23,6 +23,20 @@
 //          converting it to 0; verified against a running Go, where
 //          the no-op succeeds and chowning to root is refused.
 //
+// ─── Continued 2026-09-06 ────────────────────────────────────────────
+//
+//   FIXED  ReadFile sized its buffer to Stat().Size() and read exactly
+//          that many bytes. Go treats the stat size as a CAPACITY HINT
+//          and reads to EOF — `statOrZero` returns 0 when Stat fails
+//          rather than erroring. So every file whose stat size is 0 but
+//          which yields data came back EMPTY: all of /proc and /sys.
+//          Go's own comment names the case. It also truncated any file
+//          that grew between the stat and the read. Now anchored, with
+//          Go's minBuf growth, and pinned by
+//          examples/os_readfile_ref_smoke.rs — the probe is
+//          /proc/sys/kernel/ostype, which stats as 0 and reads back
+//          "Linux\n" on every Linux, so the row is machine-independent.
+//
 // The rest of the 61 have NOT been read. This note records where the
 // sample stopped, not that the file is clear.
 //
@@ -743,7 +757,12 @@ fn bytes_of(s: &string) -> &[u8] {
     crate::gostring::__crate_as_bytes(s)
 }
 
-/// `os.ReadFile(name)` (os/file.go:735) — read the entire named file
+// go: sdk 1.25.5 os/file.go:867-875 ReadFile
+// goishlint:ignore GOISH018 readFileContents, statOrZero — Go's two
+//     helpers (os/file.go:889-928 and 877-882) are inlined into the
+//     body below; `statOrZero`'s whole contract is "a failed Stat is
+//     size 0, not an error", which is the `else 0` arm here.
+/// `os.ReadFile(name)` — read the entire named file
 /// and return its contents. Closes the file before returning.
 pub fn ReadFile<N: Into<string>>(name: N) -> (slice<byte>, error) {
     let name: string = name.into();
@@ -754,39 +773,67 @@ pub fn ReadFile<N: Into<string>>(name: N) -> (slice<byte>, error) {
     }
     // err is nil ⇒ Open returned a non-nil File. Narrow.
     let f = f.MustMut();
-    let (fi, ferr) = f.Stat();
-    if !ferr.IsNil() {
-        let _ = f.Close();
-        return (slice::<byte>::__from_vec(Vec::new()), ferr);
+    // Go: readFileContents(statOrZero(f), f.Read).
+    //
+    // The stat size is a CAPACITY HINT, not a limit: `statOrZero`
+    // returns 0 when Stat fails rather than erroring, and the loop runs
+    // until EOF. Sizing a buffer to Stat().Size() and reading exactly
+    // that much — as this used to — returns EMPTY for every file whose
+    // stat size is 0 but which yields data, which is all of /proc and
+    // /sys. Go's own comment says so: "files in Linux's /proc claim
+    // size 0 but then do not work right if read in small pieces". It
+    // also truncated any file that grew between the stat and the read.
+    let stat_size: int = {
+        let (fi, ferr) = f.Stat();
+        if ferr.IsNil() {
+            fi.Size()
+        } else {
+            0
+        }
+    };
+    let zero_size = stat_size == 0;
+    // Go: const minBuf = 512
+    let min_buf: usize = 512;
+    // Go: size = int(statSize); size++ // one byte for final read at EOF
+    let mut size = (stat_size as usize).saturating_add(1);
+    if size < min_buf {
+        size = min_buf;
     }
-    let want = fi.Size();
-    let mut body = slice::<byte>::__from_vec(alloc::vec![0u8; want as usize]);
-    let mut got: int = 0;
-    while got < want {
-        let mut chunk = slice::<byte>::__from_vec(alloc::vec![0u8; (want - got) as usize]);
+    let mut data: Vec<byte> = Vec::with_capacity(size);
+    loop {
+        // Go: read(data[len(data):cap(data)])
+        let room = data.capacity() - data.len();
+        let mut chunk = slice::<byte>::__from_vec(alloc::vec![0u8; room]);
         let (n, rerr) = f.Read(&mut chunk);
-        if n > 0 {
-            for i in 0..n {
-                body[got + i] = chunk[i];
-            }
-            got += n;
+        let mut i: int = 0;
+        while i < n {
+            data.push(chunk[i]);
+            i += 1;
         }
         if !rerr.IsNil() {
-            if crate::errors::Is(rerr.clone(), crate::io::EOF) {
-                break;
-            }
             let _ = f.Close();
-            return (body, rerr);
+            // Go: if err == io.EOF { err = nil }
+            if crate::errors::Is(rerr.clone(), crate::io::EOF) {
+                return (slice::<byte>::__from_vec(data), nil);
+            }
+            return (slice::<byte>::__from_vec(data), rerr);
         }
+        // Go loops until an error, so a Reader returning (0, nil)
+        // forever would hang there too. goish stops instead: the
+        // io.Reader contract discourages that return, and a hung
+        // example is a 15-second e2e timeout with no other signal.
         if n == 0 {
-            break;
+            let _ = f.Close();
+            return (slice::<byte>::__from_vec(data), nil);
+        }
+        // Go: grow if out of capacity, or if a /proc-like zero-sized
+        // file left less than minBuf — issue 72080 wants reads on those
+        // issued with a non-tiny buffer.
+        let cap_remain = data.capacity() - data.len();
+        if cap_remain == 0 || (zero_size && cap_remain < min_buf) {
+            data.reserve(min_buf);
         }
     }
-    let _ = f.Close();
-    if got < want {
-        body = body.slice(0, got);
-    }
-    (body, nil)
 }
 
 // ─── Env ────────────────────────────────────────────────────────────
