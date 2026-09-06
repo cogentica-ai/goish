@@ -248,6 +248,13 @@ pub(crate) fn invertSparseEntries(src: &sparseDatas, size: i64) -> sparseHoles {
 }
 
 // go: sdk 1.25.5 archive/tar/common.go:287-300 alignSparseEntries
+//
+// UNREACHABLE here, and deliberately: Go's two callers are in the
+// WRITER (writer.go:142 and 263, both on the sparse-file path), and
+// that half is stubbed — see the GOISH018 ignore at the top of
+// writer.rs. The reader's sparse handling does not need it, because it
+// consumes the alignment rather than producing it. Ported ahead of its
+// caller; nothing reaches it today.
 fn alignSparseEntries(src: &sparseDatas, size: i64) -> sparseDatas {
     let mut dst = sparseDatas::new();
     for (_, s) in crate::range!(src) {
