@@ -43,6 +43,20 @@ change; deleting them is honest if the inline path is the maintained
 one; keeping both guarantees drift. `removeIdleConn` being uncalled is
 a symptom, not a separate item.
 
+**A second symptom, measured 2026-09-06:** `Transport.idleConnWait` is
+written by `queueForIdleConn` and read nowhere. In Go the read is in
+`tryPutIdleConn`, and the call reaching it — `tryPutIdleConn(rc.treq)`
+at transport.go:2336 — is INSIDE `persistConn.readLoop`. The waiter
+queue is dead for exactly the reason `removeIdleConn` is uncalled: the
+loop that would drive it does not run.
+
+That gives this decision a concrete cost rather than a stylistic one.
+While the loops stay unwired, a connection freed while another request
+is waiting is parked in the idle pool instead of handed to that
+request, and `getConn` dials — so goish opens a connection wherever Go
+reuses one. Deleting the loops means accepting that permanently and
+deleting `idleConnWait` with them; wiring them up recovers the reuse.
+
 ### C. The conn is not shareable
 
 `GotConnInfo.Conn` is `Arc<dyn Conn>` and the client path has no such
@@ -220,6 +234,13 @@ regression there is an outage rather than a test failure. Dispatch
    `AllowInvalidUTF8` and net/lookup's nine ignored contexts: state
    whose WRITES are all present, so the bookkeeping reads as finished,
    and only grepping for a READ tells them apart.
+
+   **This is section 0 B's symptom, not its own item.** Go's read sits
+   in `tryPutIdleConn`, reached from `persistConn.readLoop` at
+   transport.go:2336 — the loop goish does not start. It is fixed by
+   DECIDING B, not by wiring delivery into `__try_put_idle`, which
+   would leave two half-connected paths where there is one working one
+   today.
 
 
 1. ~~**`Timer::Stop()` and the `Sleep` beneath it.**~~ **Verified
