@@ -123,7 +123,55 @@ What is left of the demolition:
 | file | LOC | anchors | state |
 |---|--:|--:|---|
 | `record.rs` | 938 | 0 | invented. `conn.rs` is Go's record layer, ported with 55 anchors, and both are live. **Diffing it against conn.rs on 2026-09-04 produced three security defects** — two missing length bounds and a padding oracle — each fixed with a smoke. A fourth, a discarded RNG error, was reported and then retracted: `crypto::rand::Read` calls `fatal` on failure, so the `let _ =` could not leave a zero IV. The file header carries the retraction and lists what was checked clean. Retiring it is still the goal; until then it is no longer unexamined. |
-| `session.rs` | 145 | 0 | invented. |
+| `session.rs` | 145 | 0 | invented. Diffed 2026-09-06 against Go's lruSessionCache: it bounded tickets PER HOST and nothing bounded the host count, where Go bounds keys. Fixed, and the smoke's existing capacity row could not have caught it — 200 tickets on one host was already bounded. |
+
+### The invented CLIENT handshake, audited 2026-09-06
+
+`record.rs` got this treatment on 2026-09-04. The other half of §1's
+invented code is the client handshake — `do_client_handshake` and the
+`do_client_handshake_tls13*` family, about 2,400 lines across
+handshake_client.rs and handshake_client_tls13.rs, exported from
+mod.rs. Three defects, all in authentication:
+
+  * `verify_cert_verify` returned SUCCESS for any signature algorithm
+    its match did not list, with a comment saying it skipped
+    verification. CertificateVerify is what proves the peer holds the
+    private key, so a party with a copy of a server's public
+    certificate could name an unlisted algorithm and be accepted. Go
+    refuses at two gates (handshake_client_tls13.go:680 and :686).
+  * `do_client_handshake` and `do_client_handshake_chacha20_only` took
+    a `skip_verify` parameter and IGNORED it — the underscore said so.
+    Neither performs any certificate verification: no chain, no
+    hostname, no roots. A caller passing `false` to ask for
+    verification got an unauthenticated channel silently. They now
+    refuse rather than pretend.
+  * the TLS 1.3 decrypt path had no maxPlaintext bound, which
+    record.rs applies at both of its decrypt sites. Bounded overage
+    rather than unbounded — `read_record` caps the ciphertext — so a
+    spec deviation, not a DoS.
+
+Checked and found CORRECT, so the next reader need not redo it:
+
+  * the server Finished verify_data is compared in constant time and a
+    mismatch aborts.
+  * the X25519 all-zero shared secret check is present in the invented
+    path and correct (constant-time OR, then compare) — RFC 8446
+    requires the abort.
+  * `client_random` checks its `rand::Read` result at both sites. The
+    six `let _ = rand::Read(…)` elsewhere are all SAFE: goish's Read
+    ports Go's contract and calls `fatal` on failure, so it cannot
+    return an error or short-read. This was misread once already —
+    see the retraction in record.rs's header.
+  * the downgrade canary (RFC 8446 4.1.3) is checked on the LIVE path,
+    a faithful port including the operator precedence.
+
+Scope worth carrying: none of the three defects is reachable from
+`tls::Dial`. That runs Conn::Handshake -> handshakeContext ->
+clientHandshake -> the ported clientHandshakeStateTLS13, which was
+traced rather than assumed. handshake_client_tls13.rs's header claimed
+the invented client was "the live TLS 1.3 client"; it is not, and that
+is corrected. The invented family is public API, which is why the
+defects were worth fixing rather than waiting for retirement.
 
 `handshake_client.rs` and `handshake_server_tls13.rs` are no longer
 squatters — they carry 22 and 19 anchors.
