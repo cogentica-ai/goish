@@ -24,7 +24,9 @@
 // carries 100 of them, all verified.
 //
 // This note exists because the unanchored-declaration scan reports
-// these 54 every time it is run. They are not a gap.
+// these 54 every time it is run. They are not a gap. Openat is the exception:
+// it was added later with the exact Go-shaped string/(fd,error) contract and
+// therefore carries its SDK anchor at the declaration.
 //
 // Calling convention (SysV / Linux x86-64 syscall):
 //   rax = syscall number
@@ -89,6 +91,7 @@ pub const SYS_EXECVE: usize = 59;
 pub const SYS_WAIT4: usize = 61;
 pub const SYS_DUP2: usize = 33;
 pub const SYS_DUP3: usize = 292;
+pub const SYS_OPENAT: usize = 257;
 
 // Signal numbers (Linux). Mirror /usr/include/asm-generic/signal.h.
 pub const SIGHUP: i32 = 1;
@@ -634,6 +637,12 @@ pub const EOPNOTSUPP: Errno = Errno(95);
 /// Open flags. Subset of `<fcntl.h>`.
 pub const O_RDONLY: i32 = 0;
 pub const O_CLOEXEC: i32 = 0o2_000_000;
+// go: sdk 1.25.5 syscall/zerrors_linux_amd64.go:626 O_DIRECTORY
+pub const O_DIRECTORY: i32 = 0o200_000;
+// go: sdk 1.25.5 syscall/zerrors_linux_amd64.go:633 O_NOCTTY
+pub const O_NOCTTY: i32 = 0o400;
+// go: sdk 1.25.5 syscall/zerrors_linux_amd64.go:634 O_NOFOLLOW
+pub const O_NOFOLLOW: i32 = 0o400_000;
 /// `O_PATH` — obtain an fd that references a location without opening
 /// the file itself (follows symlinks; needs only search permission).
 pub const O_PATH: i32 = 0o10_000_000;
@@ -643,6 +652,40 @@ pub const O_PATH: i32 = 0o10_000_000;
 #[allow(non_snake_case)]
 pub fn Open(path: *const u8, flags: i32, mode: i32) -> i32 {
     unsafe { syscall3(SYS_OPEN, path as usize, flags as usize, mode as usize) as i32 }
+}
+
+// go: sdk 1.25.5 syscall/syscall_linux.go:285-287 Openat
+// Go: func Openat(dirfd int, path string, flags int, mode uint32) (fd int, err error)
+/// `syscall.Openat(dirfd, path, flags, mode)` — open `path` relative to
+/// `dirfd`, or relative to the current directory for `AT_FDCWD`. Absolute
+/// paths ignore `dirfd`, as Linux specifies. Kernel failures return
+/// `(-1, error)`; an embedded NUL returns `(0, EINVAL)` before the syscall,
+/// matching Go's named-result zero value.
+#[allow(non_snake_case)]
+pub fn Openat<P: Into<crate::string>>(
+    dirfd: crate::int,
+    path: P,
+    flags: crate::int,
+    mode: u32,
+) -> (crate::int, crate::error) {
+    let path = path.into();
+    if path.as_bytes().contains(&0) {
+        return (0, EINVAL.into());
+    }
+    let path = __c_path(path);
+    let rc = unsafe {
+        syscall4(
+            SYS_OPENAT,
+            dirfd as usize,
+            path.as_ptr() as usize,
+            flags as usize,
+            mode as usize,
+        )
+    };
+    if rc < 0 {
+        return (-1, Errno(-crate::int32(rc)).into());
+    }
+    return (crate::int(rc), crate::errors::nil);
 }
 
 /// `close(2)` — close a file descriptor.

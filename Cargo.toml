@@ -926,6 +926,10 @@ name = "syscall_fswatch_smoke"
 path = "examples/syscall_fswatch_smoke.rs"
 
 [[example]]
+name = "syscall_openat_ref_smoke"
+path = "examples/syscall_openat_ref_smoke.rs"
+
+[[example]]
 name = "xxh3_smoke"
 path = "examples/xxh3_smoke.rs"
 
