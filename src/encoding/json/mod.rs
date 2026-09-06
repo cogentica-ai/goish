@@ -1331,6 +1331,14 @@ fn parse_to_value(data: &[byte]) -> (Value, error) {
 /// `encode_reflect` — not the 4x this note once claimed against the
 /// parser. That number was measured on the wrong path.
 ///
+/// Note what this constant does NOT cover: `Marshal` has no depth
+/// check, and neither does Go's encoder — Go has
+/// `startDetectingCyclesAfter = 1000`, which is cycle detection. The
+/// designs match; the stacks do not, since Go's grow and goish's are
+/// fixed. Parsing caps at 2000 and marshalling survives 3500, so a
+/// round trip is safe by construction and only a deliberately built
+/// value reaches the encoder's ceiling.
+///
 /// Raising it to Go's 10000 needs `encode_reflect` iterative too.
 /// Until then a REFUSAL is the right failure: rejecting a document Go
 /// accepts is a divergence, and parsing one that then crashes on

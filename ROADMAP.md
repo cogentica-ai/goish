@@ -366,6 +366,21 @@ Note which encoder that is: `Marshal` is generic over
 `reflect::Reflect` and never calls `encode_value`, so making the
 `Value` encoder iterative — worth doing, and done — moved the ceiling
 not at all. Finding that out cost a fourth pass.
+
+One thing to settle before a fifth. `maxNestingDepth` guards the
+PARSER only; `Marshal` has no depth check, and neither does Go's —
+Go's encoder has `startDetectingCyclesAfter = 1000`, which is cycle
+detection, not depth. So the design matches and the consequence does
+not: Go's goroutine stacks grow, goish's are fixed at 8 MiB, so Go
+survives depths that fault here at about 3750.
+
+That bounds the exposure and it is why this is not urgent. Parsing
+caps at 2000 and marshalling survives 3500, so a parse-then-marshal
+round trip is safe by construction. Reaching the encoder's ceiling
+takes a value built deliberately in code, not one that arrived over a
+wire. A fifth pass should make `encode_reflect` iterative — NOT add a
+depth limit Go does not have, which would refuse documents Go
+encodes.
 Verified that it is genuinely the only one left: with parse and clone
 both handled, depth 10000 parses and 10001 is refused, exactly Go's
 behaviour — and then the marshal of that tree faults. Parsing a
