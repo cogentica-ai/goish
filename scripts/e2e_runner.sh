@@ -22,7 +22,8 @@
 # Env knobs:
 #   LOOPS=N          force a uniform loop count (disables tiers)
 #   TIER1/2/3=N      override a tier's loop count (default 1/10/50)
-#   TIMEOUT=15       per-run timeout (seconds)
+#   TIMEOUT=15       per-run timeout (seconds); see example_timeout
+#                    for the per-example exceptions
 #   ARTIFACTS=...    where to save failure logs (default scripts/.e2e-artifacts)
 #   FILTER=regex     only run examples whose name matches (default: all)
 #   EXCLUDE=regex    skip examples matching this pattern
@@ -61,6 +62,28 @@ loops_for() {
       echo "$TIER1" ;;
   esac
 }
+# Per-example timeout override, in seconds. Defaults to $TIMEOUT.
+#
+# The global budget is tuned for a smoke that starts, asserts and
+# exits. A few examples stand up real servers and drive them, and the
+# expensive part is a DEBUG-build RSA handshake — https_server_smoke's
+# own comment records that one of those can miss a 300ms budget on a
+# loaded box. goginx does several, plus a full static/vhost/proxy
+# self-test, and timed out once on CI while exiting in 2.3s on an idle
+# machine here: measured across the commit it was blamed on, 2.29-2.34s
+# before and 2.30-2.32s after, so the cause was contention, not a
+# change.
+#
+# Raising the GLOBAL timeout would hide real hangs in the other ~840
+# examples, so the exception is named rather than universal. A genuine
+# hang in goginx still fails the suite, just later.
+example_timeout() {
+  case "$1" in
+    goginx) echo 60 ;;
+    *)      echo "$TIMEOUT" ;;
+  esac
+}
+
 ARTIFACTS="${ARTIFACTS:-scripts/.e2e-artifacts}"
 FILTER="${FILTER:-.*}"
 # Default skips: HTTP servers that don't self-terminate, very-large
@@ -118,9 +141,9 @@ done <<< "$DECLARED"
 
 NUM_TARGETS=${#TARGETS[@]}
 if [[ -n "$LOOPS" ]]; then
-  echo "e2e suite — $NUM_TARGETS examples × $LOOPS loops (uniform; timeout=${TIMEOUT}s each)"
+  echo "e2e suite — $NUM_TARGETS examples × $LOOPS loops (uniform; timeout=${TIMEOUT}s each, see example_timeout for exceptions)"
 else
-  echo "e2e suite — $NUM_TARGETS examples, tiered loops (functional=$TIER1 memory=$TIER2 stress=$TIER3; timeout=${TIMEOUT}s each)"
+  echo "e2e suite — $NUM_TARGETS examples, tiered loops (functional=$TIER1 memory=$TIER2 stress=$TIER3; timeout=${TIMEOUT}s each, see example_timeout for exceptions)"
 fi
 if [[ ${#SKIPPED[@]} -gt 0 ]]; then
   echo "  skipped (EXCLUDE): ${SKIPPED[*]}"
@@ -151,18 +174,19 @@ for name in "${TARGETS[@]}"; do
   inp=$(example_inputs "$name")
   ex_args="${inp%%||*}"
   ex_stdin="${inp#*||}"
+  ex_timeout=$(example_timeout "$name")
 
   for i in $(seq 1 "$loops"); do
     if [[ -n "$ex_stdin" ]]; then
       # Stdin-driven demo (e.g. json_pretty).
       # shellcheck disable=SC2086
-      out=$(printf '%s' "$ex_stdin" | timeout "$TIMEOUT" "$bin" $ex_args 2>&1)
+      out=$(printf '%s' "$ex_stdin" | timeout "$ex_timeout" "$bin" $ex_args 2>&1)
     elif [[ -n "$ex_args" ]]; then
       # Argv-driven demo.
       # shellcheck disable=SC2086
-      out=$(timeout "$TIMEOUT" "$bin" $ex_args 2>&1)
+      out=$(timeout "$ex_timeout" "$bin" $ex_args 2>&1)
     else
-      out=$(timeout "$TIMEOUT" "$bin" 2>&1)
+      out=$(timeout "$ex_timeout" "$bin" 2>&1)
     fi
     rc=$?
     # rc=0 wins regardless of stdout content. Tests that intentionally
@@ -181,7 +205,7 @@ for name in "${TARGETS[@]}"; do
     elif [[ $rc -eq 124 ]]; then
       tout=$((tout+1))
       if [[ ! -s "$first_log" ]]; then
-        { echo "=== iter $i: TIMEOUT after ${TIMEOUT}s ==="; echo "$out"; } > "$first_log"
+        { echo "=== iter $i: TIMEOUT after ${ex_timeout}s ==="; echo "$out"; } > "$first_log"
       fi
     elif echo "$out" | grep -q '^goish: panic$'; then
       panic=$((panic+1))
