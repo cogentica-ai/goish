@@ -1,5 +1,10 @@
 // Port of net/dnsconfig.go + net/dnsconfig_unix.go @ Go 1.26.0
 //
+// PROVENANCE WARNING (recorded 2026-09-06): the tree pins 1.25.5 and
+// goref.sh can only diff against 1.25.5, so this claim is
+// uncheckable here. No anchors in this file either. See the longer
+// note in dnsclient.rs and ROADMAP.md §2b.
+//
 // DnsConfig holds parsed /etc/resolv.conf settings.
 // dnsReadConfig reads and parses the resolv.conf file.
 

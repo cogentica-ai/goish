@@ -657,6 +657,87 @@ duplicate-key collapsing.
 What did work, three times running, was reading a file this section
 already names.
 
+### Relocated packages, and the two that aliasing must not touch
+
+Added 2026-09-06 alongside the `RELOCATED` fix in §2b-ii. Aliasing
+`vendor/...` Go packages onto the goish paths that hold them credited
+86 anchored declarations. The obvious next step — find the REST of the
+relocated packages and alias those too — is a trap, and the reason is
+worth writing down.
+
+A second sweep for Go packages with `rs_files=0` whose leaf name
+matches a goish directory gives 23 candidates. Most are leaf-name
+coincidences: `internal/runtime/maps` is not `src/maps`,
+`cmd/compile/internal/types` is not `src/go/types`,
+`cmd/vendor/.../pprof/internal/driver` is not `src/database/sql/driver`.
+Four are real, and their headers say so outright:
+
+| Go package | goish | lines | anchors |
+|---|---|--:|--:|
+| `vendor/golang.org/x/net/dns/dnsmessage` | `net/dnsmessage` | 1995 | 0 |
+| `cmd/vendor/golang.org/x/term` | `term` | 144 | 0 |
+| `vendor/golang.org/x/crypto/internal/poly1305` | `crypto/poly1305` | 344 | 0 |
+| `vendor/golang.org/x/crypto/chacha20poly1305` | `crypto/chacha20poly1305` | 210 | 0 |
+
+**All four have zero anchors, and that is why they stay out of the
+map** — but the reason is narrower than it first looks, and the first
+version of this section overstated it, so both are recorded.
+
+Aliasing them was measured rather than argued about. It credits **85**
+declarations, not the ~245 the line count suggests, and every one of
+the 85 is reported UNVERIFIED, because a zero-anchor file marks all its
+names unanchored:
+
+    term                10/44   all 10 unverified
+    chacha20poly1305     7/18   all  7 unverified
+    poly1305            13/20   all 13 unverified
+    dnsmessage          55/163  all 55 unverified
+
+So aliasing would NOT launder them — the report says exactly what the
+credit rests on. And these four are not unchecked: `dnsmessage` has
+`dnsmessage_ref_smoke`, chacha20poly1305 has
+`chacha20_poly1305_ref_smoke`, `term` has `term_pty_smoke`, and
+poly1305 rides the chacha smoke. That is §2b's own lesson — "no
+anchors" does not mean unchecked — and it cuts against the argument for
+excluding them.
+
+What decides it is the invariant. `RELOCATED`'s entries earn their
+credit from anchors `anchor_check.py` validates against the Go tree;
+entries earning it from a name match break that property and make the
+map's rationale incoherent. The cost is concrete: tree-wide ported
+would go 5,917 to 6,002 with nothing newly verified, and the
+name-level figure the README publishes would go from 1.4% to 2.7%. A
+worse headline number bought with no additional checking.
+
+Both readings have a point — 0/163 for `dnsmessage` is a false "not
+ported", and 55/163-all-unverified would at least be true. The fix that
+satisfies both is to anchor these four, which is the work; aliasing
+them is the shortcut that removes the reason to do it.
+
+Note the asymmetry that makes the map safe to extend correctly: `grep
+'// go: sdk .*vendor/' src/` finds relocated packages that ARE anchored,
+which are precisely the ones eligible. A relocated package the grep
+cannot see is a relocated package with nothing to credit.
+
+**A provenance defect fell out of this.** Three of those files claim a
+Go version this tree does not have:
+
+    src/net/dnsclient.rs        @ Go 1.26.0
+    src/net/dnsconfig.rs        @ Go 1.26.0
+    src/net/dnsmessage/mod.rs   @go1.26.0
+
+All 6,402 `// go: sdk` anchors in `src/` say 1.25.5, `go env GOROOT`
+here is 1.25.5, and `scripts/goref.sh` diffs against `go env GOROOT` —
+so these three claims cannot be checked by any tool in the repo, and if
+they are accurate the code was ported from a source nobody here can
+open. Together they are 3,584 lines carrying no anchors, and they are
+the DNS resolver the README advertises. `dnsmessage` is the exception
+worth knowing: `examples/dnsmessage_ref_smoke.rs` diffs it against a
+running Go, so its wire format IS pinned and only the version line is
+unverified. `dnsclient.rs` and `dnsconfig.rs` have neither anchors nor
+a diffing smoke. Each file now carries the warning; the work is to
+re-verify against 1.25.5 and correct the line or the code.
+
 ### A detector that does work: grep the banner, not the anchors
 
 Added 2026-09-06. The zero-anchor scan above fails because "no anchors"

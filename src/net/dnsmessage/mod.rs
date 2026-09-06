@@ -1,4 +1,12 @@
 // Port of vendor/golang.org/x/net/dns/dnsmessage@go1.26.0
+//
+// PROVENANCE WARNING (recorded 2026-09-06): the tree pins 1.25.5 and
+// goref.sh diffs against 1.25.5, so this version claim is uncheckable
+// here. Unlike its two siblings this file IS pinned by comparison —
+// examples/dnsmessage_ref_smoke.rs diffs it against a running Go — so
+// the wire format is checked even though the file carries no anchors.
+// It is the version line, not the behaviour, that is unverified. See
+// ROADMAP.md §2b.
 // (message.go + svcb.go combined)
 #![allow(non_snake_case)]
 #![allow(dead_code)]

@@ -746,6 +746,18 @@ def scan_rs(root):
 # the Go package its own anchors cite. Re-run that grep before adding
 # a fourth.
 #
+# That the grep only finds ANCHORED relocations is the safety property,
+# not a limitation to work around. These entries earn their credit from
+# anchors `anchor_check.py` validates against the Go tree. There are
+# four more relocated packages — dnsmessage, term, poly1305,
+# chacha20poly1305 — and every one carries zero anchors. Aliasing those
+# was measured, not assumed: it credits 85 declarations, and all 85
+# report UNVERIFIED, so it would not launder them. They stay out
+# anyway, to keep this map's one property intact — every entry's credit
+# rests on an anchor `anchor_check.py` validates. Anchor them, do not
+# alias them. See ROADMAP §2b for the measurement and the argument on
+# both sides.
+#
 # Keys are subtree-relative, so this only takes effect for the whole
 # tree (`port_coverage.py .`). Running the `vendor` subtree directly
 # still reports zero, because `src/vendor` does not exist.

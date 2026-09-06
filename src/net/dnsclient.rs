@@ -1,5 +1,14 @@
 // Port of net/dnsclient.go + net/dnsclient_unix.go @ Go 1.26.0
 //
+// PROVENANCE WARNING (recorded 2026-09-06): that version is not this
+// tree's. Every one of the 6,402 `// go: sdk` anchors in `src/` says
+// 1.25.5, `go env GOROOT` here is 1.25.5, and `scripts/goref.sh` diffs
+// against exactly that — so the claim above cannot be checked by any
+// tool in the repo, and if it is true this file was ported from a
+// source nobody here can open. This file carries no anchors either, so
+// nothing else pins it. Re-verify against 1.25.5 and correct the line
+// or the code; see ROADMAP.md §2b.
+//
 // goishlint:ignore GOISH015 — this file covers TWO Go files and carries
 //     ZERO provenance anchors, so the rule is right and the fix is a
 //     split into `dnsclient.rs` and `dnsclient_unix.rs` with anchors on
