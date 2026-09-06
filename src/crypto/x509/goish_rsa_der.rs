@@ -5,17 +5,31 @@
 //
 // Go parses private keys with `asn1.Unmarshal` into tagged structs —
 // `pkcs1.ParsePKCS1PrivateKey`, `pkcs8.ParsePKCS8PrivateKey`,
-// `sec1.ParseECPrivateKey`. goish has `asn1.Marshal` but not
-// `asn1.Unmarshal` (it needs reflect setter dispatch), so none of those
-// three can be ported today.
+// `sec1.ParseECPrivateKey`. This banner said goish "has `asn1.Marshal`
+// but not `asn1.Unmarshal` (it needs reflect setter dispatch), so none
+// of those three can be ported today". All four of those statements
+// are now false: `asn1::Unmarshal` is in `encoding/asn1`, and all
+// three parsers exist here as real ports — `pkcs1.rs`, `pkcs8.rs`,
+// `sec1.rs`.
 //
 // What lives here is the hand-written DER walk `crypto/tls` has been
 // using since before this package had a parser. It is RSA-only and it is
 // not a port of anything. It carries goish-flavoured names on purpose:
 // calling it `ParsePKCS1PrivateKey` would make `port_coverage` count
 // `crypto/x509` as having ported a function it has not, which is exactly
-// the squatting this file exists to avoid. When `asn1.Unmarshal` lands,
-// pkcs1.go and pkcs8.go get real ports and this file is deleted.
+// the squatting this file exists to avoid.
+//
+// The exit condition written here was "when `asn1.Unmarshal` lands,
+// pkcs1.go and pkcs8.go get real ports and this file is deleted". That
+// happened, and the deletion did not. Two callers remain, both in
+// `crypto/tls`'s `parsePrivateKey`, where these are the first two
+// fast paths tried before it falls through to the real
+// `ParsePKCS8PrivateKey` / `ParseECPrivateKey` — so the RSA shapes
+// never reach a ported parser. Retiring this file means pointing those
+// two arms at `x509::ParsePKCS1PrivateKey` and
+// `x509::ParsePKCS8PrivateKey` and deleting both functions and the
+// re-export. It moves TLS key loading, so it wants the e2e run this
+// machine does not do; see ROADMAP.md.
 //
 // goishlint:ignore GOISH015 — goish-only file; there is no
 // `crypto/x509/goish_rsa_der.go` to anchor against, and the two

@@ -26,8 +26,18 @@
 //     sendSessionTickets are omitted; clients do a full handshake
 //     every time).
 //   - No client certificates (ClientAuth == NoClientCert only).
-//   - Certificates: RSA (PSS signatures) and Ed25519. ECDSA signing
-//     needs ecdsa::SignASN1 which Goish does not have yet.
+//   - Certificates: this line read "RSA (PSS signatures) and Ed25519.
+//     ECDSA signing needs ecdsa::SignASN1 which Goish does not have
+//     yet". Both halves are stale. SignASN1 is in crypto/ecdsa,
+//     ecdsa::PrivateKey implements crypto::Signer, and
+//     RegisterStandardSigners registers it from goish::init — and this
+//     server never names a key type: pickCertificate defers to
+//     auth::selectSignatureScheme, which lists the ECDSAWithP*
+//     schemes, and the CertificateVerify signs through
+//     auth::signerOf -> crypto::Signer::Sign. Nothing here excludes an
+//     ECDSA certificate. Re-measured 2026-09-06; not pinned by a
+//     smoke, so "nothing excludes it" is the honest claim, not "it is
+//     tested".
 //
 // The handshake flow (RFC 8446, Section 2):
 //   Client → Server: ClientHello                        (plaintext)

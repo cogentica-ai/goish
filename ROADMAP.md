@@ -657,6 +657,40 @@ duplicate-key collapsing.
 What did work, three times running, was reading a file this section
 already names.
 
+### A detector that does work: grep the banner, not the anchors
+
+Added 2026-09-06. The zero-anchor scan above fails because "no anchors"
+does not distinguish UNCHECKED from LEGITIMATELY UNANCHORED, and this
+tree has far more of the latter. Grepping the first ~45 lines of every
+`.rs` for the phrases a deferral is written in does distinguish them:
+
+    in v1 | Phase A | not yet | no ... yet | will be added
+    is deferred | are deferred | for now, | stub only | not implemented
+
+That is 31 files. It works because it does not ask whether code is
+checked — it finds a DATED CLAIM, and a dated claim can simply be
+re-run. Every one is falsifiable by a grep, which the zero-anchor
+candidates were not.
+
+Of the 31, about seventeen were wrong and the rest were accurate and
+left alone. What the wrong ones have in common is that the work
+happened and the sentence did not move: `net/mod.rs` promised an epoll
+netpoller "in Phase B" from a file that imports it; `net/http/server.rs`
+claimed no keep-alive and a pre-wildcard mux; `textproto/mod.rs` listed
+five reader functions as unported that `reader.rs` had corrected the
+same day in its own header. The accurate ones are worth naming too,
+because they are the reason not to sed the phrases away: no AES-NI, no
+SHA-NI, `term::ReadPassword`, `net/lookup`'s unwired context,
+`os/user`'s supplementary groups, and `GOMAXPROCS(n)` not rescaling.
+
+Two of the wrong ones were not merely stale. `crypto/tls`'s TLS 1.3
+server cannot serve an ECDSA certificate "because ecdsa::SignASN1 which
+Goish does not have yet"; it has it. `fips140/rsa`'s drbg shims stand
+in for a package that exists and differ from it. Both are §2m. That is
+the pattern worth carrying forward: when the REASON for a limitation
+goes stale, the limitation stops being re-examined, and it is the
+limitations that matter most that acquire the longest-lived excuses.
+
 ## 2c. `regexp` does not keep Go's linear-time guarantee
 
 Go's regexp documents that it "is guaranteed to run in time linear in
@@ -1354,6 +1388,78 @@ module's own doc advertises `pub enum Value { … Number(f64) … }`, so
 every user pattern match on it is affected, and `FromValue` would want
 a way to see the raw text. That is a deliberate API change to make at a
 version boundary, not a rider on a bug fix.
+
+## 2m. RSA's drbg shims predate the drbg package they stand in for
+
+Found 2026-09-06 by re-measuring header claims, not by looking for a
+crypto defect. `crypto/internal/fips140/rsa` reads randomness through
+two local shims in `rsa.rs`, `read_with_reader` and `drbg_read`, each
+annotated "crypto/internal/fips140/drbg has no goish package yet".
+That package exists, with `Read`, `ReadWithReader` and
+`ReadWithReaderDeterministic` all ported and anchored.
+
+The shims are not equivalent to it, in two ways that are worth naming
+separately:
+
+1. **`read_with_reader` skips `randutil::MaybeReadByte`.** The shim's
+   own comment says the `DefaultReader` fast path and `MaybeReadByte`
+   are "FIPS-mode-only". They are not — the ported `ReadWithReader` has
+   no `fips140::Enabled()` branch and calls `MaybeReadByte` on every
+   non-default reader. Go reads one extra byte on a coin flip so that
+   callers cannot depend on how many bytes a key generation consumes.
+   goish consumes a fixed count, so `GenerateKey` over a deterministic
+   reader yields a different key here than in Go. That is the shape
+   this tree normally catches with a ref smoke, and there is no smoke
+   over a fixed reader to catch it.
+
+2. **One shim serves two Go functions.** `keygen.rs` calls
+   `read_with_reader` where Go calls `ReadWithReader`; `pkcs1v22.rs`
+   calls the same shim where Go calls `ReadWithReaderDeterministic`.
+   Those two differ in exactly the `MaybeReadByte` call, so the shim
+   cannot be right for both. It currently matches the Deterministic
+   one.
+
+3. **`drbg_read` always takes the kernel CSPRNG**, where the real
+   `drbg::Read` branches on `fips140::Enabled()` and uses the approved
+   DRBG under FIPS. goish makes no FIPS 140-3 claim and the service
+   indicator is inert, so this is a conformance divergence rather than
+   a weaker RNG.
+
+**A near-miss worth recording, same day.** The TLS 1.3 server's banner
+says it serves "RSA (PSS signatures) and Ed25519", not ECDSA, "because
+ECDSA signing needs ecdsa::SignASN1 which Goish does not have yet". The
+reason is false — SignASN1 exists and `crypto::Signer` is implemented
+and registered for `ecdsa::PrivateKey` — and I wrote this section up as
+a live ECDSA gap on that basis. Then I read the code. `pickCertificate`
+defers to `auth::selectSignatureScheme`, which lists the `ECDSAWithP*`
+schemes, and the CertificateVerify signs through `auth::signerOf` into
+`crypto::Signer::Sign`; the server never names a key type. Nothing
+excludes an ECDSA certificate. The banner was stale in its FACT as well
+as its reason, and believing the fact because the reason was checkable
+nearly put a fictional limitation in this file. No smoke pins an ECDSA
+handshake, so "nothing excludes it" is as far as the evidence goes.
+
+**A third instance, and this one is a deletion.**
+`crypto/x509/goish_rsa_der.rs` is a hand-written RSA-only DER walk
+whose banner says goish "has `asn1.Marshal` but not `asn1.Unmarshal`
+... so none of those three can be ported today", and states its own
+exit condition: "when `asn1.Unmarshal` lands, pkcs1.go and pkcs8.go get
+real ports and this file is deleted". `asn1::Unmarshal` is in
+`encoding/asn1`, and `pkcs1.rs`, `pkcs8.rs` and `sec1.rs` are all real
+ports. The file was not deleted, and `crypto/tls`'s `parsePrivateKey`
+still tries its two functions first, so an RSA private key never
+reaches a ported parser — hand-rolled ASN.1 stays on the TLS key path
+for the commonest key type. The EC arms below it already go through the
+real parsers. The work is to point those two arms at
+`x509::ParsePKCS1PrivateKey` / `ParsePKCS8PrivateKey`, delete both
+`goish*` functions and the re-export, and let the file go.
+
+**The work:** point the four call sites (`keygen.rs` twice,
+`pkcs1v22.rs` twice) at the real package and delete the shims. The
+signatures differ — the shims take `&mut [byte]` where drbg takes
+`&mut slice<byte>` — so it is a real edit, not a rename, and it moves
+the RSA key path. It wants a ref smoke over a fixed reader first, which
+would also pin item 1.
 
 ## 3. Gaps other packages will hit next
 

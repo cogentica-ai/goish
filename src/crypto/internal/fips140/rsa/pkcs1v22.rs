@@ -19,7 +19,11 @@
 //
 //   * Go's `hash hash.Hash` parameter is `&mut dyn crate::hash::Hash`.
 //   * `drbg.ReadWithReaderDeterministic(rand, b)` is `read_with_reader`
-//     (rsa.rs) — with FIPS mode off Go's body is `io.ReadFull`.
+//     (rsa.rs). That mapping is the closer of the two the shim serves:
+//     Deterministic is the variant that does NOT call MaybeReadByte,
+//     which is what the shim does. keygen.rs calls the SAME shim where
+//     Go calls plain `ReadWithReader`, which does — so one shim stands
+//     in for two Go functions that differ in exactly that call.
 //   * OAEP takes the label DIGEST, not the label — see the GOISH020
 //     waiver on EncryptOAEP/DecryptOAEP below.
 //   * `checkApprovedHash` is a no-op — see its own comment.
