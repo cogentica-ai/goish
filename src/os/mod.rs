@@ -186,6 +186,7 @@ pub const PathListSeparator: u8 = b':';
 /// `os.IsPathSeparator(c)` (path_unix.go:14) — reports whether `c` is
 /// the OS's path separator. Linux-pinned in goish v1, so just `c == '/'`.
 #[inline]
+// go: sdk 1.25.5 os/path_unix.go:15-17 IsPathSeparator
 pub fn IsPathSeparator(c: u8) -> bool {
     return c == PathSeparator;
 }
@@ -508,6 +509,7 @@ fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfoData {
 
 // ─── Open / Stat / Create ──────────────────────────────────────────────
 
+// go: sdk 1.25.5 os/file.go:389-391 Open
 /// `os.Open(name)` (os/file.go:386) — open `name` read-only.
 ///
 /// Go's signature is `func Open(name string) (*File, error)`. Goish
@@ -518,6 +520,7 @@ pub fn Open<N: Into<string>>(name: N) -> (nilable<File>, error) {
     OpenFile(name, O_RDONLY, FileMode(0))
 }
 
+// go: sdk 1.25.5 os/file.go:399-401 Create
 /// `os.Create(name)` (os/file.go:402) — create or truncate `name`.
 pub fn Create<N: Into<string>>(name: N) -> (nilable<File>, error) {
     let name: string = name.into();
@@ -578,6 +581,7 @@ pub fn OpenFile<N: Into<string>, M: Into<FileMode>>(
     )
 }
 
+// go: sdk 1.25.5 os/stat.go:11-14 Stat
 /// `os.Stat(name)` (os/stat.go:14) — stat a path, following symlinks.
 pub fn Stat<N: Into<string>>(name: N) -> (FileInfoData, error) {
     let name: string = name.into();
@@ -610,6 +614,7 @@ pub fn Stat<N: Into<string>>(name: N) -> (FileInfoData, error) {
     (fileinfo_from_stat(base, &st), nil)
 }
 
+// go: sdk 1.25.5 os/stat.go:24-27 Lstat
 /// Line-by-line port of `os.Lstat(name)` (file.go:417 → stat_unix.go).
 /// Like Stat but does not follow a final-component symlink, so
 /// FileInfo.Mode() reports ModeSymlink for a link target.
@@ -1194,6 +1199,7 @@ pub fn Symlink<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> erro
     nil
 }
 
+// go: sdk 1.25.5 os/file.go:449-451 Readlink
 /// Line-by-line port of `os.Readlink(name)` (file.go:449 →
 /// file_unix.go:427 readlink) — read the target of a symbolic link.
 /// Doubles the buffer until the result fits, mirroring Go's growth
@@ -1428,6 +1434,7 @@ pub fn Truncate<N: Into<string>>(name: N, size: int) -> error {
     nil
 }
 
+// go: sdk 1.25.5 os/file_posix.go:105-113 Chown
 /// Line-by-line port of `os.Chown(name, uid, gid)` (file_posix.go:105).
 /// uid or gid of -1 leaves that field unchanged. Follows symlinks
 /// (per Go).
@@ -1444,6 +1451,7 @@ pub fn Chown<N: Into<string>>(name: N, uid: int, gid: int) -> error {
     nil
 }
 
+// go: sdk 1.25.5 os/file_posix.go:121-129 Lchown
 /// Line-by-line port of `os.Lchown(name, uid, gid)` (file_posix.go:121)
 /// — does not follow a final-component symlink.
 pub fn Lchown<N: Into<string>>(name: N, uid: int, gid: int) -> error {
@@ -1459,31 +1467,37 @@ pub fn Lchown<N: Into<string>>(name: N, uid: int, gid: int) -> error {
     nil
 }
 
+// go: sdk 1.25.5 os/proc.go:31 Getuid
 /// `os.Getuid()` (proc.go:31) — caller's real user id.
 pub fn Getuid() -> int {
     syscall::Getuid() as int
 }
 
+// go: sdk 1.25.5 os/proc.go:36 Geteuid
 /// `os.Geteuid()` (proc.go:36) — caller's effective user id.
 pub fn Geteuid() -> int {
     syscall::Geteuid() as int
 }
 
+// go: sdk 1.25.5 os/proc.go:41 Getgid
 /// `os.Getgid()` (proc.go:41) — caller's real group id.
 pub fn Getgid() -> int {
     syscall::Getgid() as int
 }
 
+// go: sdk 1.25.5 os/proc.go:46 Getegid
 /// `os.Getegid()` (proc.go:46) — caller's effective group id.
 pub fn Getegid() -> int {
     syscall::Getegid() as int
 }
 
+// go: sdk 1.25.5 os/exec.go:233 Getpid
 /// `os.Getpid()` (proc.go:50) — caller's process id.
 pub fn Getpid() -> int {
     syscall::Getpid() as int
 }
 
+// go: sdk 1.25.5 os/exec.go:236 Getppid
 /// `os.Getppid()` (proc.go:55) — caller's parent process id.
 pub fn Getppid() -> int {
     syscall::Getppid() as int
@@ -1585,6 +1599,7 @@ pub fn Hostname() -> (string, error) {
 
 // ─── Mkdir / Remove ──────────────────────────────────────────────────
 
+// go: sdk 1.25.5 os/file.go:327-348 Mkdir
 /// `os.Mkdir(name, perm)` (os/file.go) — create a single directory.
 pub fn Mkdir<N: Into<string>, M: Into<FileMode>>(name: N, perm: M) -> error {
     let name: string = name.into();
@@ -1613,6 +1628,7 @@ pub fn Mkdir<N: Into<string>, M: Into<FileMode>>(name: N, perm: M) -> error {
 mod path;
 pub use path::*;
 
+// go: sdk 1.25.5 os/file_unix.go:356-387 Remove
 /// `os.Remove(name)` (os/file_unix.go). Removes a file or empty
 /// directory. First tries unlink; falls back to rmdir on EISDIR.
 pub fn Remove<N: Into<string>>(name: N) -> error {
@@ -1866,6 +1882,7 @@ fn newUnixDirent(parent: string, name: string, typ: FileMode) -> (unixDirent, er
     return (ude, nil);
 }
 
+// go: sdk 1.25.5 os/file.go:935-945 WriteFile
 /// `os.WriteFile(name, data, perm)` (os/file.go:763) — write `data`
 /// to the named file, creating or truncating it.
 pub fn WriteFile<N: Into<string>, D: AsRef<[byte]>, M: Into<FileMode>>(
@@ -2279,6 +2296,7 @@ unsafe fn cstrlen(p: *const u8) -> usize {
 
 // ─── os.Exit ───────────────────────────────────────────────────────────
 
+// go: sdk 1.25.5 os/proc.go:62-78 Exit
 /// `os.Exit(code)` — terminate the process. Mirrors `syscall::Exit`,
 /// re-exported here under the Go-shaped path.
 pub fn Exit(code: int) -> ! {

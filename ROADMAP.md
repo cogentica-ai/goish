@@ -297,6 +297,42 @@ panic. So the hazard was known in this file and missed one line away —
 which is the argument for reading a whole file rather than grepping it
 for a pattern.
 
+**Worked 2026-09-06: `src/os/mod.rs`.** Named by the same
+anchors-but-not-enough-of-them signal as asn1 — 120 fn declarations
+against 13 anchors — and by its own header, which recorded that a
+sample had been read on 2026-09-05 and ended "the rest of the 61 have
+NOT been read. This note records where the sample stopped, not that the
+file is clear."
+
+Six defects in the rest:
+
+| what | effect |
+|---|---|
+| `ReadFile` sized its buffer to `Stat().Size()` | every file in /proc and /sys read back EMPTY, with a nil error |
+| `dirFS.join` had neither of Go's boundary checks | `DirFS("")` resolved against `/`; a NUL in the name opened a different file than the one validated |
+| `Rename` returned EEXIST too early | `Rename(missing, dir)` said "file exists" instead of the oldname's error |
+| `Chtimes` skipped NsecToTimespec's correction | every pre-1970 timestamp with a fractional part failed with EINVAL |
+| `Getwd` fell through when `stat(".")` failed | a bare "getwd failed" where Go reports the stat error |
+| four paths returned `errors.New("<call> failed")` | the errno was gone, so ENOENT and EACCES were indistinguishable |
+
+All six are pinned: `os_readfile_ref_smoke`, `os_dirfs_ref_smoke`,
+`os_chtimes_ref_smoke`, and a new `rename/missingoverdir` row in the
+existing `os_link_ref_smoke`. Thirteen more functions were read and
+found clean, listed in the file header so nobody repeats them.
+
+**Three of the six were held open by a COMMENT.** `Rename`'s omission
+was labelled a case-sensitivity simplification, which covered half of
+what it dropped. `Getwd`'s note asserted Go "falls through ... including
+a stat of '.' that failed", which Go does not do. `ReadFile`'s doc cited
+a line number 132 lines stale. In this tree a comment explaining why
+goish differs from Go is a claim to re-measure, not context to trust —
+2 above says the same thing about deviation notes and it keeps proving
+out.
+
+The file is now fully anchored: 89 anchors under `src/os`, all verified,
+and `port_lint` findings fell 8244 -> 8189 across the pass. `Hostname`
+is the one documented divergence left, and it is unreachable on Linux.
+
 **The one-liner does not generalise, and the failure is worth keeping**
 so nobody rebuilds it. Run against everything over 250 lines it
 returns about 70 files and the sampled ones were all false positives:
