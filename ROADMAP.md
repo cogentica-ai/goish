@@ -106,9 +106,13 @@ a structural-fidelity decision, not twelve fixes.
 
 ## 1. `crypto/tls` — the record layer is the last invented code
 
-**Re-measured 2026-09-04.** Everything this section used to describe as
-unwritten is written: `port_coverage.py crypto --pkg tls` reports
-**275/291 = 94.5%** across 21 Go files and 891 anchors, and every file
+**Re-measured 2026-09-04, re-checked 2026-09-06.** Everything this
+section used to describe as unwritten is written:
+`scripts/port_coverage.py crypto --pkg tls` reports **275/291 = 94.5%**
+across 21 Go files — run it rather than trusting the ratio here. The
+anchor count that used to sit in this sentence is deliberately gone:
+it read 891 and was 896 two days later, moved by ordinary work on the
+file, which is what a number in prose does. Every file
 the old order-of-work table listed — alert, common_string, defaults,
 prf, cipher_suites, auth, ticket, key_agreement, conn,
 handshake_client, handshake_server, handshake_server_tls13, common,
