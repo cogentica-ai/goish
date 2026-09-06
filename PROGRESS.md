@@ -987,11 +987,22 @@ the only thing standing between this class of defect and a release.
 
 ## Test suite
 
-417 examples are declared in `Cargo.toml` and run by `make e2e` at
+**852** examples are declared in `Cargo.toml` and run by `make e2e` at
 tiered loop counts — deterministic ones once, memory-subsystem ones ×10,
-and the race-sensitive scheduler/chan/select/timer/server families ×50.
+and the race-sensitive scheduler/chan/select/timer/server families ×50
+(`TIER1`/`TIER2`/`TIER3` in `scripts/e2e_runner.sh`). Count them with
+`grep -c '^\[\[example\]\]' Cargo.toml` rather than trusting this
+number; it was 417 on 2026-08-15 and moves with every smoke added.
+
 **Only declared examples run**; an `examples/*.rs` file without an
-`[[example]]` block is invisible to CI.
+`[[example]]` block is invisible to CI. That is currently true of
+exactly four, and all four are deliberate: `grow_3tier_smoke`,
+`grow_auto_smoke`, `grow_macro_smoke` and `grow_park_smoke` specify
+automatic stack growth for the bare `go!()` form, a feature that does
+not exist, and each says so in its own first line. Checking the claim
+is a one-liner — compare `ls examples/*.rs | wc -l` against the count
+above — and it is worth running, because a smoke that silently never
+runs looks exactly like one that passes.
 
 Local verification is `cargo check --lib`, `cargo build --examples`,
 `make lint`, and the individual binaries a change touches. `make e2e`
@@ -1002,8 +1013,11 @@ belongs on CI.
 `scripts/lint_baseline.json` records goishlint's finding count per
 **(file, rule)**; `make lint` fails only when a pair increases. Two
 consequences: a file absent from the baseline must be lint-clean, and
-fixing file A cannot pay for a regression in file B. Current total:
-13081.
+fixing file A cannot pay for a regression in file B. The baseline sums
+to **16504** on 2026-09-06, up from 13081 on 2026-08-15 — it grows as
+ported code arrives, so a rise is not a regression and the per-pair
+ratchet is what enforces that. Sum it rather than quoting either
+figure.
 
 ## Known defects, open
 
