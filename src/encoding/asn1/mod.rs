@@ -665,7 +665,8 @@ pub fn ParseNumericString(bytes: slice<byte>) -> (string, error) {
     (slice_to_string(&bytes), crate::errors::nil)
 }
 
-/// `isNumeric` (asn1.go:392). NumericString = digits + space.
+// go: sdk 1.25.5 encoding/asn1/asn1.go:392-395 isNumeric
+/// NumericString = digits + space.
 pub(crate) fn isNumeric(b: byte) -> bool {
     (b'0' <= b && b <= b'9') || b == b' '
 }
@@ -699,8 +700,9 @@ pub(crate) fn canHaveDefaultValue(k: crate::reflect::Kind) -> bool {
     };
 }
 
-/// `isPrintable` (asn1.go:426). PrintableString allowed-byte set, with
-/// the historical asterisk/ampersand carve-outs Go grants for x509.
+// go: sdk 1.25.5 encoding/asn1/asn1.go:426-445 isPrintable
+/// PrintableString allowed-byte set, with the historical
+/// asterisk/ampersand carve-outs Go grants for x509.
 fn isPrintable(b: byte, allow_asterisk: bool, allow_ampersand: bool) -> bool {
     (b'a' <= b && b <= b'z')
         || (b'A' <= b && b <= b'Z')

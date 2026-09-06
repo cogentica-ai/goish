@@ -257,7 +257,7 @@ refuses — a parser differential, fixed and pinned by
 handle EINTR correctly at both sites; it has no Go counterpart to diff
 against, so it is a different kind of gap from the rest of this list.
 
-**Next candidate, found 2026-09-06 by a different signal:**
+**Worked 2026-09-06, and it paid.**
 `src/encoding/asn1/mod.rs` (1226 lines, 7 anchors). The zero-anchor
 one-liner cannot see this file — it HAS anchors — but seventeen of its
 declarations are DER parsers carrying only a prose reference
@@ -276,13 +276,26 @@ counted name differing from Go's in case alone AND carrying no anchor.
 That is a DENSITY signal where the old one-liner was a ZERO signal,
 which is why it sees a file with seven anchors and 1226 lines.
 
-Worth reading because it is the input path for x509 certificate
-parsing, and because the sibling `asn1.rs` and `marshal.rs` are
-properly anchored (10 and 43) — the unanchored parsers are the
-exception in their own package, not the house style. The naming is
-deliberate and documented (goish exports Go's unexported parsers so
-`asn1_marshal_smoke` can reach them); it is the missing anchors, not
-the capital letters, that leave them unchecked.
+The naming is deliberate and documented (goish exports Go's unexported
+parsers so `asn1_marshal_smoke` can reach them); it was the missing
+anchors, not the capital letters, that left them unchecked.
+
+All sixteen now carry `// go: sdk` anchors (75 under the package, all
+verified by anchor_check) and every body was read against its Go range.
+One defect, in `parseBitString`: Go's `||` short-circuits so
+`1<<bytes[0]` only ever runs with a shift of 7 or less, and goish
+computed that mask eagerly — a u32 shifted by 32 or more for any BIT
+STRING whose first byte is 32 or more. Debug panics, release silently
+yields 255, and `make e2e` builds debug, so the two profiles disagreed
+about a byte that arrives in an X.509 signature or public key. Fixed
+and pinned by `asn1_bitstring_ref_smoke` (14 rows, exits nonzero on
+divergence).
+
+The other fifteen are faithful, and the notable part is that
+`parseInt64` ALREADY used `wrapping_shl` to avoid this exact debug
+panic. So the hazard was known in this file and missed one line away —
+which is the argument for reading a whole file rather than grepping it
+for a pattern.
 
 **The one-liner does not generalise, and the failure is worth keeping**
 so nobody rebuilds it. Run against everything over 250 lines it
