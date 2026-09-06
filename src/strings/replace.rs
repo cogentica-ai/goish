@@ -1,6 +1,6 @@
 // go: file strings/replace.go decls: NewReplacer, Replacer.build, trieNode.add, genericReplacer.lookup, makeGenericReplacer, genericReplacer.Replace, genericReplacer.WriteString, makeSingleStringReplacer, singleStringReplacer.Replace, singleStringReplacer.WriteString, byteReplacer.Replace, byteReplacer.WriteString, byteStringReplacer.Replace, byteStringReplacer.WriteString, Replacer.Replace, Replacer.WriteString
 //
-// go: waived buildOnce — Go defers the trie build to the first
+// go: waived Replacer.buildOnce — Go defers the trie build to the first
 //     Replace behind a sync.Once so NewReplacer stays allocation-free.
 //     A goish `&self` method cannot lazily initialise without interior
 //     mutability, which would cost Replacer the Clone its callers use,
@@ -663,3 +663,16 @@ impl byteStringReplacer {
 fn __nil_error() -> error {
     return nil;
 }
+
+// The three writer methods behind `getStringWriter`, waived out of the
+// coverage denominator for the reason already given in the GOISH018
+// ignore at the top of this file: `appendSliceWriter` and
+// `stringWriter` exist only so Go can reach `io.StringWriter` when a
+// caller's `io.Writer` also implements it, saving a string->[]byte
+// copy. goish's `io::Writer` already takes `slice<byte>` and there is
+// no `io::StringWriter` to type-assert for, so the two shims and their
+// methods have nothing to be.
+//
+// go: waived appendSliceWriter.Write — a shim for Go's io.StringWriter fast path; no goish counterpart.
+// go: waived appendSliceWriter.WriteString — likewise.
+// go: waived stringWriter.WriteString — likewise.

@@ -1353,3 +1353,20 @@ fn sub(s: &string, low: int, high: int) -> string {
     let bytes = s.as_bytes();
     return string::from_bytes(&bytes[low as usize..high as usize]);
 }
+
+// Go's two negated-scan helpers, inlined into their callers here and
+// waived so the count stops crediting them by CASE. `port_coverage`
+// matches case-insensitively, so `indexFunc` was being credited to
+// goish's exported `IndexFunc` — a different declaration — and read as
+// ported without anything having checked it. That is the substitution
+// the --case-detail line exists to surface.
+//
+// Both really are inlined, checked against Go on 2026-09-06:
+// `IndexFunc` walks the runes and returns on `f(r)`, which is Go's
+// `indexFunc(s, f, true)`; `TrimLeftFunc` walks while `f(r)` and breaks
+// on the first false, which is `indexFunc(s, f, false)`. The truth
+// parameter Go threads through one helper is spelled as the two loops
+// that need it.
+//
+// go: waived indexFunc — inlined into IndexFunc and TrimLeftFunc; Go's `truth` parameter becomes the loop's own condition.
+// go: waived lastIndexFunc — inlined into LastIndexFunc and TrimRightFunc, the same way.

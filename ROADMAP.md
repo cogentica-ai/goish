@@ -463,6 +463,31 @@ one-liner's 0 of 70, and still mostly false positives. The signal is
 worth running once and reading; it is not worth automating into a gate.
 The 7 above do NOT need re-walking, which is the point of listing them.
 
+**Case-only credits: two packages fixed, the rest left visible on
+purpose.** `port_coverage` matches case-insensitively, so Go's
+unexported half of an exported/unexported pair is credited to the
+exported one — a DIFFERENT declaration, counted as ported with nothing
+having checked it. The `--case-detail` line added 2026-09-06 prints the
+count on every run.
+
+`strings` and `bytes` are now waived clean, because their two each —
+`indexFunc` and `lastIndexFunc` — were verified inlined against Go:
+IndexFunc is `indexFunc(s, f, true)` and TrimLeftFunc is the same
+helper with `truth` false, spelled as each loop's own condition. Those
+packages went from a flattering 109/109 and 115/115 to an honest
+107/107 and 113/113.
+
+About 109 remain — math 47, os 22, runtime 18, net 16, and a handful
+elsewhere — and they are NOT waived. Most are Go's `Acos`/`acos`
+shape, where goish's exported function delegates to `libm` and Go's
+unexported implementation genuinely has no goish counterpart. Waiving
+them would be accurate and would cost 109 edits for precision the
+report line already discloses on every run. Verify the inlining before
+waiving any of them: the two that were done here were checked function
+by function against Go first, and `bufio.Reader.reset` is the reminder
+that this shape sometimes hides a declaration with no counterpart at
+all rather than an inlined one.
+
 **A coverage percentage is a claim about the DENOMINATOR too.**
 Recorded 2026-09-06 after losing the start of a session to it.
 

@@ -11,7 +11,7 @@
 //     `// go: waived` line takes it out of the coverage denominator,
 //     this takes it out of the dropped-function check.
 //
-// go: waived copyCheck — Go's Builder holds an `addr *Builder` self
+// go: waived Builder.copyCheck — Go's Builder holds an `addr *Builder` self
 //     pointer and copyCheck panics when it finds the Builder has been
 //     copied, using `noescape` to keep that pointer off the heap. A
 //     goish Builder owns its Vec and a copy is a deep copy, so there is
