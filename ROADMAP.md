@@ -4,10 +4,10 @@ What is left, in the order it makes sense to do it. Current state lives
 in [PROGRESS.md](PROGRESS.md); conventions and the rules a port must
 follow live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## 0. Four decisions, and what each one closes
+## 0. Six decisions, and what each one closes
 
 Sections 2b onward grew one finding at a time, and a reader cannot see
-from them that most of what is open traces back to four choices. This
+from them that most of what is open traces back to six choices. This
 is that view. Nothing here is new; it is the same items, grouped by
 what would settle them.
 
@@ -62,6 +62,40 @@ moves to a shared conn.
     from goish (https_iface_ref_smoke).
 
 Both are version-boundary changes rather than bug fixes.
+
+### E. A Handler is handed a borrowed ResponseWriter
+
+`Handler::ServeHTTP` receives `&(dyn ResponseWriter + …)`, and the
+server builds that writer as a stack local. Anything needing to keep
+the writer past the call cannot have it, and one thing does:
+`ReverseProxy.copyResponse` — the method that gives `FlushInterval`
+its meaning — takes an `Arc<dyn ResponseWriter>`, because
+`maxLatencyWriter` arms its flush through `time::AfterFunc`, whose
+closure must be `'static`.
+
+So copyResponse is not merely uncalled, it is UNCALLABLE from the one
+place Go calls it, and http_maxlatency_smoke passes only because it
+constructs an Arc-wrapped writer of its own. That is why 2m's
+ServeHTTP flushes after every write instead.
+
+Three ways out, none local: change `Handler::ServeHTTP`'s signature
+tree-wide; have the serve loop allocate its `response` into an `Arc`
+and hand out a clone, in both server.rs and server_tls.rs; or
+restructure `maxLatencyWriter` so the timer cannot outlive the call.
+
+Closely related to C — both are "the thing the caller needs to keep is
+owned by someone who will not share it" — and probably wants the same
+answer.
+
+### F. NewSingleHostReverseProxy's return type
+
+Go's returns a `*ReverseProxy`, so a caller can then set
+`ModifyResponse`, `ErrorHandler` or `Transport` on it. goish's returns
+an opaque `Arc<dyn Handler>` wrapping the hookless slim proxy. Since
+2m, `ReverseProxy` is a Handler and could be returned instead, which
+would retire `reverseProxyHandler` entirely — but it changes an
+exported signature every existing caller uses. Smallest of the six,
+and the only one that is purely an API choice.
 
 ### Not blocked on anything
 
@@ -848,60 +882,67 @@ Anything a tool asserts should be re-checked against Go before it
 changes a plan. Five wrong-leverage calls this cycle came from trusting
 a number; the fifth was produced by the tooling itself.
 
-## 2m. httputil.ReverseProxy cannot serve — it is not a Handler
+## 2m-fixed. httputil.ReverseProxy is a Handler now
 
-**Found 2026-09-05**, following `dead_port_check`'s report that
-`copyHeader`, `modifyResponse` and `copyResponse` are called only from
-smokes. Those three are the core of Go's `ReverseProxy.ServeHTTP`, so
-nothing calling them is a strong signal, and it points at something
-larger than three functions.
-
-goish has two unrelated reverse proxies:
-
-  `reverseProxyHandler` — unexported, returned by
-  `NewSingleHostReverseProxy`, and the only one that can actually
-  serve. Its `ServeHTTP` inlines the header copy and has no hooks. Its
-  own doc comment is honest about this: "No Director, ModifyResponse,
-  ErrorHandler, or Transport hooks […] not a drop-in for Go's hardened
-  httputil.ReverseProxy."
-
-  `ReverseProxy` — the exported struct, with `Rewrite`, `Director`,
-  `FlushInterval`, `ErrorLog`, `ModifyResponse`, `BufferPool` and
-  `ErrorHandler`, and with `modifyResponse`, `copyResponse`,
-  `handleError`, `handleUpgradeResponse`, `getErrorHandler`,
-  `flushInterval` and `copyBuffer` implemented as methods.
-
-The second one has no `ServeHTTP` and no `impl Handler`. Measured by
-the compiler, not by reading:
+**Found 2026-09-05, fixed 2026-09-06.** goish had two unrelated
+reverse proxies. `reverseProxyHandler` is unexported, is what
+`NewSingleHostReverseProxy` returns, and had the only `ServeHTTP`.
+`ReverseProxy` is the exported struct with `Rewrite`, `Director`,
+`FlushInterval`, `ErrorLog`, `ModifyResponse`, `BufferPool` and
+`ErrorHandler`, every supporting method implemented — and no
+`ServeHTTP` and no `impl Handler`. The compiler said so:
 
     the trait bound `ReverseProxy: net::http::Handler` is not satisfied
 
-So the whole exported API is unreachable. A caller cannot mount a
-`ReverseProxy` on a mux or pass it to a `Server`; and because
-`NewSingleHostReverseProxy` returns the slim handler rather than a
-`*ReverseProxy` as Go does, there is no path to one that serves. Every
-hook on it — `ModifyResponse` above all — is inert not because it is
-unwired but because nothing can invoke the type at all.
+So the exported API was unreachable. `ModifyResponse` and the rest
+were inert not because they were unwired but because the type could
+not be invoked at all — the ResponseController and CGI-Flusher shape
+one level up, where every piece is individually correct and tested and
+the assembly is missing.
 
-This is the ResponseController and CGI-Flusher shape one level up: a
-complete, documented public API where each piece is individually
-correct and tested, and the assembly is missing. `http_proxyrequest_smoke`
-and `http_maxlatency_smoke` pass because they call the methods
-directly.
+Two things kept it hidden. The struct's own doc called `ServeHTTP`
+"staged" because it "needs the streaming response copy, which needs
+Body as io.ReadCloser", and that reason had gone stale: `Response.Body`
+is an `io::Reader` and the slim handler had been streaming through it
+for some time. And the ANCHOR for `ReverseProxy.ServeHTTP` sat on
+`reverseProxyHandler`'s `ServeHTTP`, so every provenance tier saw the
+function as ported.
 
-Also missing from the struct: Go's `Transport http.RoundTripper`
-field, which `ServeHTTP` reads first.
+`ServeHTTP` is now ported from the pieces the file already had, plus
+the `Transport` field Go reads first and goish lacked. The anchor sits
+on the port; the slim handler is marked goish-only.
+`http_reverseproxy_ref_smoke` pins seven rows against Go — the
+Director and Rewrite paths differ deliberately on X-Forwarded-For,
+both assert the Connection-named hop-by-hop header does not reach the
+client, ModifyResponse's error gives 502, ErrorHandler overrides it,
+a 3xx is relayed rather than followed, and Director-plus-Rewrite is
+Go's documented error.
 
-The fix is to port `ReverseProxy.ServeHTTP` (reverseproxy.go:345-563)
-and register the Handler impl — assembly of pieces that already exist,
-plus the `Transport` field. The open question that should be settled
-with it: whether `NewSingleHostReverseProxy` should return a
-`ReverseProxy` as Go's does, which would retire `reverseProxyHandler`
-but changes an exported signature every existing caller uses.
+Writing that smoke found a second, unrelated defect: `Client.do`
+closed the hop's response body BEFORE calling `CheckRedirect`, so
+`ErrUseLastResponse` returned a response whose body had already gone.
+Go closes it at the top of the next iteration, only once it commits to
+following, and that distinction is the whole contract Go documents as
+returning the response "with its body unclosed". Fixed with it.
 
-### 2m addendum: why this is not just assembly
+### Still open, deliberately
 
-Attempting the port turned up a second, harder problem. `copyResponse`
+Two decisions were left alone rather than guessed at.
+
+  1. `NewSingleHostReverseProxy` still returns the slim handler, not a
+     `*ReverseProxy` as Go's does. Changing it would retire
+     `reverseProxyHandler` and match Go, but it changes an exported
+     signature every existing caller uses.
+  2. `FlushInterval` is still not honoured — see the addendum below,
+     which is unchanged and is the reason. The body is flushed after
+     every write instead, which is what the slim handler does and the
+     only thing a borrowed writer can do. This is stated on the struct
+     rather than left silent.
+
+### 2m addendum: why FlushInterval is still not honoured
+
+Attempting the port turned up a second, harder problem, and it
+is the one part that did NOT get fixed with the rest of 2m. `copyResponse`
 — the method that gives `FlushInterval` its meaning — takes
 
     dst: Arc<dyn ResponseWriter + Send + Sync + 'static>
