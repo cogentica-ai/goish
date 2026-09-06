@@ -1695,7 +1695,31 @@ x509_keys_smoke 91 checks / 0 failures, tls_common_smoke 1473 checks /
 still 1720/1720; crypto/x509 176/176.
 
 **The work:** point the four call sites (`keygen.rs` twice,
-`pkcs1v22.rs` twice) at the real package and delete the shims. The
+`pkcs1v22.rs` twice) at the real package and delete the shims.
+
+**Two things make it more than a rename, both found 2026-09-06 while
+scoping it.** First the bounds: `drbg::ReadWithReader` takes `&mut (dyn
+io::Reader + Send + Sync + 'static)` and so does
+`randutil::MaybeReadByte`, while `fips140/rsa::GenerateKey` — the
+public entry point — takes a bare `&mut dyn io::Reader`. Wiring them up
+means widening a public crypto signature, not editing a call site.
+
+Second, and the reason the obvious shortcut is wrong: adding
+`MaybeReadByte` to the shim would CREATE a divergence rather than
+remove one. Go calls it only on the non-default path —
+
+    if _, ok := r.(DefaultReader); ok { Read(b); return nil }
+    fips140.RecordNonApproved()
+    randutil.MaybeReadByte(r)
+
+— and goish's callers normally pass `crypto::rand::Reader`, which is
+that default. A shim that called MaybeReadByte unconditionally would
+consume an extra byte where Go consumes none. Any fix has to carry the
+DefaultReader test with it, and that test is `goish::cast!`, which
+needs the same bounds as above. So the order is: widen the signature,
+then delete the shims, then pin the whole thing with a fixed-reader ref
+smoke — which is also the only thing that would have caught the
+original divergence. The
 signatures differ — the shims take `&mut [byte]` where drbg takes
 `&mut slice<byte>` — so it is a real edit, not a rename, and it moves
 the RSA key path. It wants a ref smoke over a fixed reader first, which
