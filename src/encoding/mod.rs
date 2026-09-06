@@ -1,6 +1,6 @@
 // encoding — Go's `encoding` package tree.
 //
-// Reference: /share/go/src/encoding/encoding.go (interfaces) +
+// Reference: encoding/encoding.go (interfaces) +
 // subpackage source for each codec.
 //
 // v1 ships:
@@ -30,7 +30,7 @@ pub mod pem;
 
 // ─── Marshaler / Unmarshaler interfaces ────────────────────────────────
 //
-// Direct port of /share/go/src/encoding/encoding.go (78 LOC, 6 ifaces).
+// Direct port of encoding/encoding.go (78 LOC, 6 ifaces).
 // These are pure declarations — they pin the method signatures that
 // goish types reach for when they want to be discoverable by
 // future encoding/gob, encoding/json, encoding/xml dispatch.

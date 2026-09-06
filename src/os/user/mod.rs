@@ -1,6 +1,6 @@
 // os/user — user account lookups via /etc/passwd and /etc/group.
 //
-// Reference: /share/go/src/os/user/{user.go, lookup.go, lookup_unix.go}.
+// Reference: os/user/{user.go, lookup.go, lookup_unix.go}.
 //
 // Slim deviations from upstream:
 //

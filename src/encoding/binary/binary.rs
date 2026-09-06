@@ -5,7 +5,7 @@
 // binary.go — the ByteOrder interface, its two implementations, and
 // the fixed-width Read/Write/Size/Append/Encode/Decode family.
 //
-// Reference: /share/go/src/encoding/binary/binary.go.
+// Reference: encoding/binary/binary.go.
 //
 // Public API mirrors Go's:
 //

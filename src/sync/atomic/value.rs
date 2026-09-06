@@ -11,7 +11,7 @@
 
 // ─── Value<T> ─────────────────────────────────────────────────────
 //
-// Reference: /share/go/src/sync/atomic/value.go (194 LOC).
+// Reference: sync/atomic/value.go (194 LOC).
 //
 // Slim deviations from Go (documented):
 //

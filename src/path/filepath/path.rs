@@ -598,7 +598,7 @@ fn errInvalidPath() -> error {
 
 /// `filepath.SplitList(p)` — splits PATH-style list at ListSeparator.
 /// Empty input yields empty result (not `[""]`). Mirrors
-/// /share/go/src/path/filepath/path_unix.go and filepath.SplitList.
+/// path/filepath/path_unix.go and filepath.SplitList.
 
 // go: sdk 1.25.5 path/filepath/path.go:147-150 EvalSymlinks
 //

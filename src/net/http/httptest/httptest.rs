@@ -1,6 +1,6 @@
 // net/http/httptest — utilities for HTTP testing.
 //
-// Reference: /share/go/src/net/http/httptest/httptest.go.
+// Reference: net/http/httptest/httptest.go.
 //
 // Phase A (this file): NewRequest + NewRequestWithContext only.
 // Phase B (deferred — task #166): ResponseRecorder, NewServer.

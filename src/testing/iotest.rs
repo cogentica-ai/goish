@@ -1,6 +1,6 @@
 // testing/iotest — Readers and Writers useful for testing.
 //
-// Reference: /share/go/src/testing/iotest/reader.go
+// Reference: testing/iotest/reader.go
 //
 // Slim deviations:
 //   * `TestReader` is ported except for its ReadSeeker and ReaderAt

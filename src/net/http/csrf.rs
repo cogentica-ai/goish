@@ -1,6 +1,6 @@
 // net/http/csrf — Cross-Origin Request Forgery protection.
 //
-// Reference: /share/go/src/net/http/csrf.go (Go 1.25.5).
+// Reference: net/http/csrf.go (Go 1.25.5).
 // Line-by-line port. Slim deviations:
 //
 //   * Go uses `atomic.Pointer[Handler]` for the deny handler. Goish's

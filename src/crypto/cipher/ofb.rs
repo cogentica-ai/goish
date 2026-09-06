@@ -2,7 +2,7 @@
 //
 // crypto/cipher/ofb — OFB (Output Feedback) Mode.
 //
-// Reference: /share/go/src/crypto/cipher/ofb.go (88 LOC).
+// Reference: crypto/cipher/ofb.go (88 LOC).
 //
 // Slim deviations:
 //

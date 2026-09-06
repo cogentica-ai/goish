@@ -6,13 +6,13 @@
 //   1. Functions mirroring Go's `runtime` package (NumCPU,
 //      NumGoroutine, GOMAXPROCS) — re-exported up to `runtime::`
 //      so `goish::runtime::NumCPU()` Just Works. Reference:
-//      /share/go/src/runtime/debug.go.
+//      runtime/debug.go.
 //
 //   2. Functions mirroring Go's `runtime/debug` package
 //      (Stack, PrintStack, SetGCPercent, FreeOSMemory,
 //      SetMemoryLimit, GCStats / ReadGCStats, …). Users access
 //      them as `goish::runtime::debug::SetGCPercent(...)`.
-//      Reference: /share/go/src/runtime/debug/{stack.go,
+//      Reference: runtime/debug/{stack.go,
 //      garbage.go}.
 //
 // Goish v1 simplifications:
@@ -114,7 +114,7 @@ pub fn GOMAXPROCS(n: int) -> int {
 
 // ─── Go `runtime/debug` package surface ──────────────────────────────
 //
-// Below this line: ports of /share/go/src/runtime/debug/*.go. Users
+// Below this line: ports of runtime/debug/*.go. Users
 // reach these through `goish::runtime::debug::<Name>(...)`, matching
 // Go's import path `import "runtime/debug"`.
 

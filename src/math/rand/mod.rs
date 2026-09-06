@@ -6,8 +6,8 @@
 //     the v1 API (e.g. `oklog/ulid/v2`) compile unchanged.
 //   * v2 (Go 1.22+) — `goish::math::rand::v2`, mounted as a sub-mod.
 //
-// Reference: /share/go/src/math/rand/{rand.go,rng.go,normal.go,exp.go}
-//            /share/go/src/math/rand/v2/
+// Reference: math/rand/{rand.go,rng.go,normal.go,exp.go}
+//            math/rand/v2/
 //
 // The v1 generator implemented here is the additive lagged-Fibonacci
 // generator (ALFG) — lags 273 and 607, modulo 2^63 — exactly as

@@ -11,7 +11,7 @@
 //
 // mime/encodedword — RFC 2047 encoded-word encoder/decoder.
 //
-// Reference: /share/go/src/mime/encodedword.go
+// Reference: mime/encodedword.go
 //
 // Slim deviations:
 //   * bEncode buffers the to-be-encoded substring then calls

@@ -2,7 +2,7 @@
 //
 // compress/lzw — Lempel-Ziv-Welch (GIF/PDF flavor).
 //
-// Line-by-line port of Go 1.25 `/share/go/src/compress/lzw/reader.go`.
+// Line-by-line port of Go 1.25 `compress/lzw/reader.go`.
 // LZW with variable-width codes up to 12 bits; the first 1<<litWidth
 // codes are literals, then a `clear` and `eof` code, then learned
 // dictionary entries up to 4096 codes total.

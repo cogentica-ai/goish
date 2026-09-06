@@ -1,7 +1,7 @@
 // runtime::signal — Linux signal handler infrastructure (M23).
 //
-// Reference: /share/go/src/runtime/signal_unix.go,
-// /share/go/src/runtime/sigaction.go.
+// Reference: runtime/signal_unix.go,
+// runtime/sigaction.go.
 //
 // Architecture (Go-faithful):
 //

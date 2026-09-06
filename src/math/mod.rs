@@ -1,6 +1,6 @@
 // math — Go's `math` parent package.
 //
-// Reference: /share/go/src/math/
+// Reference: math/
 //
 // Public API surface (Goish v1):
 //

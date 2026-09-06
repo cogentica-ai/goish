@@ -1,6 +1,6 @@
 // testing — Go's `testing` package.
 //
-// Reference: /share/go/src/testing/testing.go.
+// Reference: testing/testing.go.
 //
 // User-facing API:
 //

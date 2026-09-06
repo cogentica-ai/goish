@@ -7,7 +7,7 @@
 //
 // goishlint:ignore GOISH018 doSlow — Go splits the mutex-held path into `doSlow` so `Do`'s fast path stays inlinable; goish's `Do` is both, with the same ordering: the store to `done` happens under the mutex, after `f` returns.
 //
-// Verbatim port of /share/go/src/sync/once.go: an AtomicBool fast
+// Verbatim port of sync/once.go: an AtomicBool fast
 // path + a Mutex slow path. Mirrors Go line for line; the slow path
 // is the load-bearing piece — without holding the Mutex across `f`,
 // a second concurrent caller could see done=false, race ahead, and

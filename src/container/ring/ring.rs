@@ -48,7 +48,7 @@
 //     that a "lost" ring is harmless in practice — long-lived rings
 //     are the typical use case. Memory cost is bounded by user usage.
 //
-// Reference: /share/go/src/container/ring/ring.go
+// Reference: container/ring/ring.go
 
 #![allow(non_snake_case)]
 

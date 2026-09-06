@@ -1,6 +1,6 @@
 // io/pipe — Go's io.Pipe (synchronous in-memory pipe).
 //
-// Line-by-line port of /share/go/src/io/pipe.go. Wires an io.Reader
+// Line-by-line port of io/pipe.go. Wires an io.Reader
 // to an io.Writer via a pair of shared chans:
 //
 //   wrCh chan []byte  — writer hands a buffer slice to a reader

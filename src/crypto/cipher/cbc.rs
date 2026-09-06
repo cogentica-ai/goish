@@ -11,7 +11,7 @@
 // dispatch arms are dropped (see the notes on each constructor), so
 // declaring the two empty traits would assert a capability nothing has.
 //
-// Reference: /share/go/src/crypto/cipher/cbc.go (208 LOC).
+// Reference: crypto/cipher/cbc.go (208 LOC).
 //
 // CBC provides confidentiality by xoring (chaining) each plaintext block
 // with the previous ciphertext block before applying the block cipher.

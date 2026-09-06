@@ -340,7 +340,7 @@ impl Bool {
 
 // ─── Pointer<T> ───────────────────────────────────────────────────
 //
-// Line-by-line port of /share/go/src/sync/atomic/type.go:44-69.
+// Line-by-line port of sync/atomic/type.go:44-69.
 //
 // Slim deviations from upstream:
 //

@@ -1,6 +1,6 @@
 // expvar — published variables exposed at /debug/vars in JSON.
 //
-// Reference: /share/go/src/expvar/expvar.go (417 LOC).
+// Reference: expvar/expvar.go (417 LOC).
 //
 // Slim deviations from Go (documented):
 //

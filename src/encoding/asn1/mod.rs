@@ -1,8 +1,8 @@
 // go: package encoding/asn1
 // encoding/asn1 — DER-encoded ASN.1 parsing primitives.
 //
-// Reference: /share/go/src/encoding/asn1/asn1.go +
-//            /share/go/src/encoding/asn1/common.go (Go 1.25.5).
+// Reference: encoding/asn1/asn1.go +
+//            encoding/asn1/common.go (Go 1.25.5).
 //
 // What this v1 ports (foundational subset):
 //

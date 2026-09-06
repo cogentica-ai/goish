@@ -2,7 +2,7 @@
 //
 // crypto/cipher/io — wrap a cipher::Stream into io::Reader / io::Writer.
 //
-// Reference: /share/go/src/crypto/cipher/io.go (53 LOC).
+// Reference: crypto/cipher/io.go (53 LOC).
 //
 // The Go file lives in the `cipher` package; goish puts it in a sibling
 // submodule and re-exports the public surface from `crypto/cipher/mod.rs`

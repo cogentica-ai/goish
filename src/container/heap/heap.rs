@@ -20,7 +20,7 @@
 //
 // container/heap — heap operations over a user-supplied data structure.
 //
-// Reference: /share/go/src/container/heap/heap.go.
+// Reference: container/heap/heap.go.
 //
 // Slim deviations:
 //

@@ -1,6 +1,6 @@
 // sync::Cond — Go's `sync.Cond` (slim).
 //
-// Reference: /share/go/src/sync/cond.go.
+// Reference: sync/cond.go.
 //
 // Slim deviations:
 //

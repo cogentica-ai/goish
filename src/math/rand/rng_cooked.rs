@@ -1,6 +1,6 @@
 // AUTO-GENERATED from Go 1.25.5 `math/rand/rng.go` `rngCooked[607]`.
 // Do not edit by hand. Regenerate via `python3 extract.py` against the
-// Go SDK source at `/share/go/src/math/rand/rng.go`.
+// Go SDK source at `math/rand/rng.go`.
 
 pub(super) const RNG_COOKED: [i64; 607] = [
     -4181792142133755926i64,
