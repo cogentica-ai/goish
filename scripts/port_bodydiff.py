@@ -23,6 +23,20 @@ positive rate, all from legitimate differences:
     slices.Clone -> derive(Clone))
   - a documented deviation (no weak pointers, no RWMutex, no QUIC)
   - goish merges two identical Go switch arms
+  - a package that deliberately EXPORTS Go's unexported names. Callers
+    then spell the capitalised form, so every lowercase Go name reads as
+    0/N. encoding/asn1 does this on purpose (so asn1_marshal_smoke can
+    reach the parsers) and produced seven such rows on 2026-09-06 —
+    parseBool, checkInteger, parseBitString, parseBase128Int,
+    parseNumericString and two more — all false. Triaged by grepping the
+    callers for the capitalised name: asn1.rs:343 calls ParseBool.
+
+Run on src/os the same day it found a TRUE one that hand-reading had
+missed: `ignoringEINTR 0/1` on Truncate, Symlink and Link. Go wraps ten
+syscalls in an EINTR retry and goish calls each once. Reading the two
+bodies side by side does not surface that, because the difference is a
+WRAPPER around Go's call rather than anything inside either body — which
+is the shape this tool is for.
 
   --emit  restricts the comparison to cryptobyte builder/parser calls.
           Those have no operator or helper equivalent, so a deficit is

@@ -89,6 +89,20 @@
 //   clean  Getwd implements Go's $PWD kludge, including the SameFile
 //          comparison that makes it return the symlinked path.
 //
+//   NOTE   No function here retries on EINTR. Go wraps ten of these
+//          syscalls in `ignoringEINTR` (os/file_unix.go and
+//          file_posix.go) and goish calls the syscall once, so an
+//          interrupted call returns EINTR where Go retries. Measured
+//          rather than guessed at: every signal handler goish installs
+//          sets SA_RESTART — the preemption handler at
+//          runtime/preempt.rs:684 included — so the kernel restarts
+//          these calls itself and the gap is not reachable through
+//          goish's own signals. The two `sa_flags: 0` sites are a
+//          zeroed out-parameter for QUERYING a handler and the SIGSEGV
+//          reset to SIG_DFL, neither of which installs anything. It
+//          stays a real divergence for a syscall the kernel will not
+//          restart, which is why it is written down.
+//
 //   NOTE   Hostname calls uname and stops there. Go tries uname first
 //          and falls back to reading /proc/sys/kernel/hostname when the
 //          name is absent or 64 bytes (possibly truncated, since
@@ -1121,12 +1135,6 @@ pub fn Chdir<N: Into<string>>(name: N) -> error {
     nil
 }
 
-/// Line-by-line port of `os.Chmod(name, mode)` (file.go:647 →
-/// file_posix.go:76 chmod). Slim: no PathError wrapping, no EINTR
-/// retry loop (chmod(2) is not interruptible on Linux in practice).
-///
-/// `mode: impl Into<FileMode>` so ports passing a bare integer
-/// literal (Go's untyped-int) flow through `From<i32>`/`From<u32>`.
 // go: sdk 1.25.5 os/file_posix.go:60-73 syscallMode
 /// Convert a `FileMode` to the bits a `chmod`/`open`/`mkdir` syscall
 /// wants.
@@ -1179,8 +1187,13 @@ pub fn Chmod<N: Into<string>, M: Into<FileMode>>(name: N, mode: M) -> error {
 }
 
 // go: sdk 1.25.5 os/file_unix.go:417-425 Symlink
-/// Line-by-line port of `os.Symlink(oldname, newname)` (file_unix.go:417).
-/// Slim: no LinkError wrapping, no EINTR retry.
+/// Line-by-line port of `os.Symlink(oldname, newname)`.
+///
+/// This said "Slim: no LinkError wrapping, no EINTR retry" until
+/// 2026-09-06. The LinkError half stopped being true when the error
+/// shapes were fixed — the body below returns `linkErr(...)` carrying
+/// both paths. Only the EINTR half survives; see the note in the file
+/// header.
 pub fn Symlink<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> error {
     let oldname: string = oldname.into();
     let newname: string = newname.into();
@@ -2138,16 +2151,6 @@ impl File {
         }
     }
 
-    /// `(*File).Write(p)` (os/file.go:188) — inherent forwarder so
-    /// `f.Write(data)` works without `use goish::io::Writer;` at the
-    /// call site. Mirrors Go where `(*os.File).Write` is a concrete
-    /// method on the type (the io.Writer interface is satisfied
-    /// structurally, not by trait-method dispatch).
-    ///
-    /// Takes `&self` for the same reason as `Chmod`: lets transpiled
-    /// callers reach in through `t.Must().File.Write(data)` (immutable
-    /// cell access). The underlying syscall doesn't mutate the `File`
-    /// struct itself — only the kernel's file-offset table.
     // go: sdk 1.25.5 os/file.go:319-322 File.WriteString
     /// Go: "WriteString is like Write, but writes the contents of
     /// string s rather than a slice of bytes."
@@ -2160,6 +2163,22 @@ impl File {
         return self.Write(slice::__from_vec(s.as_bytes().to_vec()));
     }
 
+    // go: sdk 1.25.5 os/file.go:211-230 File.Write
+    /// Inherent forwarder so `f.Write(data)` works without
+    /// `use goish::io::Writer;` at the call site. Mirrors Go, where
+    /// `(*os.File).Write` is a concrete method on the type (io.Writer
+    /// is satisfied structurally, not by trait-method dispatch).
+    ///
+    /// Takes `&self` for the same reason as `Chmod`: lets transpiled
+    /// callers reach in through `t.Must().File.Write(data)` (immutable
+    /// cell access). The underlying syscall does not mutate the `File`
+    /// struct itself — only the kernel's file-offset table.
+    ///
+    /// This doc block sat above `WriteString`'s anchor until
+    /// 2026-09-06, so rustdoc attached it to WriteString and `Write`
+    /// had neither documentation nor provenance. Same shape as the
+    /// orphan `Chmod` left behind when `syscallMode` was inserted
+    /// above it.
     pub fn Write(&self, p: slice<byte>) -> (int, error) {
         // Go's `poll.FD.Write` LOOPS until every byte is written or a
         // syscall fails, which is what lets os.File satisfy io.Writer:
