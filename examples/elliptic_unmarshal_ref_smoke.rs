@@ -47,16 +47,20 @@ const GO: [&str; 9] = [
 
 static mut LN: usize = 0;
 
+static mut BAD: usize = 0;
+
 fn chk(got: &string) {
     let ln = unsafe { LN };
     if ln >= GO.len() {
         fmt::Printf!("[!!] extra line %d: %q\n", ln as int + 1, got);
+        unsafe { BAD += 1 };
         unsafe { LN += 1 };
         return;
     }
     if got == GO[ln] {
         fmt::Printf!("[ok] %s\n", got);
     } else {
+        unsafe { BAD += 1 };
         fmt::Printf!("[!!] line %d\n  got  %q\n  want %q\n", ln as int + 1, got, GO[ln]);
     }
     unsafe { LN += 1 };
@@ -117,5 +121,13 @@ fn main() {
     let done = unsafe { LN };
     if done != GO.len() {
         fmt::Printf!("[!!] produced %d lines, pinned %d\n", done as int, GO.len() as int);
+        unsafe { BAD += 1 };
+    }
+    let bad = unsafe { BAD };
+    if bad != 0 {
+        // e2e_runner.sh: "rc=0 wins regardless of stdout content",
+        // so printing the mismatch is not enough to fail CI.
+        fmt::Printf!("[!!] %d row(s) diverge from Go\n", bad as i64);
+        goish::os::Exit(1);
     }
 }

@@ -84,9 +84,12 @@ impl io::Reader for plainReader {
     }
 }
 
+static mut BAD: usize = 0;
+
 fn chk(ln: &mut usize, got: &string) {
     if *ln >= ROWS.len() {
         fmt::Printf!("[!!] extra line %d: %q\n", *ln as int + 1, got);
+        unsafe { BAD += 1 };
         *ln += 1;
         return;
     }
@@ -95,6 +98,7 @@ fn chk(ln: &mut usize, got: &string) {
         if want == go {
             fmt::Printf!("[ok] %s\n", got);
         } else {
+            unsafe { BAD += 1 };
             fmt::Printf!("[DIVERGENT] %s\n           Go: %s\n", got, go);
         }
     } else {
@@ -145,5 +149,13 @@ fn main() {
 
     if ln != ROWS.len() {
         fmt::Printf!("[!!] produced %d lines, pinned %d\n", ln as int, ROWS.len() as int);
+        unsafe { BAD += 1 };
+    }
+    let bad = unsafe { BAD };
+    if bad != 0 {
+        // e2e_runner.sh: "rc=0 wins regardless of stdout content",
+        // so printing the mismatch is not enough to fail CI.
+        fmt::Printf!("[!!] %d row(s) diverge from Go\n", bad as i64);
+        goish::os::Exit(1);
     }
 }

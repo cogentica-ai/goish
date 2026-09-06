@@ -57,9 +57,12 @@ const GO: [&str; 10] = [
     "code=0     <connection closed, no response>",
 ];
 
+static mut BAD: usize = 0;
+
 fn chk(ln: &mut usize, got: &string) {
     if *ln >= GO.len() {
         fmt::Printf!("[!!] extra line: %q\n", got);
+        unsafe { BAD += 1 };
         *ln += 1;
         return;
     }
@@ -67,6 +70,7 @@ fn chk(ln: &mut usize, got: &string) {
     if got.clone() == want {
         fmt::Printf!("[ok] %s\n", got);
     } else {
+        unsafe { BAD += 1 };
         fmt::Printf!("[!!] goish: %q\n", got);
         fmt::Printf!("     go   : %q\n", want);
     }
@@ -124,6 +128,14 @@ fn run() {
     }
     if ln != GO.len() {
         fmt::Printf!("[!!] line count mismatch with the Go reference\n");
+        unsafe { BAD += 1 };
+    }
+    let bad = unsafe { BAD };
+    if bad != 0 {
+        // e2e_runner.sh: "rc=0 wins regardless of stdout content",
+        // so printing the mismatch is not enough to fail CI.
+        fmt::Printf!("[!!] %d row(s) diverge from Go\n", bad as i64);
+        goish::os::Exit(1);
     }
     goish::os::Exit(0);
 }

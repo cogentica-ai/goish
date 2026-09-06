@@ -61,15 +61,19 @@ fn lbl(d: &&str) -> &'static str {
     return "set";
 }
 
+static mut BAD: usize = 0;
+
 fn chk(ln: &mut usize, got: &string) {
     if *ln >= GO.len() {
         fmt::Printf!("[!!] extra line: %q\n", got);
+        unsafe { BAD += 1 };
         *ln += 1;
         return;
     }
     if got == GO[*ln] {
         fmt::Printf!("[ok] %s\n", got);
     } else {
+        unsafe { BAD += 1 };
         fmt::Printf!("[!!] line %d\n  got  %q\n  want %q\n", *ln as int + 1, got, GO[*ln]);
     }
     *ln += 1;
@@ -149,6 +153,14 @@ fn main() {
     let _ = goish::os::Remove(outp);
     if ln != GO.len() {
         fmt::Printf!("[!!] produced %d lines, pinned %d\n", ln as int, GO.len() as int);
+        unsafe { BAD += 1 };
+    }
+    let bad = unsafe { BAD };
+    if bad != 0 {
+        // e2e_runner.sh: "rc=0 wins regardless of stdout content",
+        // so printing the mismatch is not enough to fail CI.
+        fmt::Printf!("[!!] %d row(s) diverge from Go\n", bad as i64);
+        goish::os::Exit(1);
     }
     goish::os::Exit(0);
 }

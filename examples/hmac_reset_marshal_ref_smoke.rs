@@ -68,9 +68,12 @@ const GO: [&str; 12] = [
     "sha3-512    mac=6a2339660a8484899c048c2b0527cdfc272b0871a8a19a62d0d733ef482409512c5dd6c777aba335f1a448f05f29991938774eb7a6e80e42bb542639a4584705 stable=true matches-fresh=true size=64",
 ];
 
+static mut BAD: usize = 0;
+
 fn chk(ln: &mut usize, got: &string) {
     if *ln >= GO.len() {
         fmt::Printf!("[!!] extra line: %q\n", got);
+        unsafe { BAD += 1 };
         *ln += 1;
         return;
     }
@@ -78,6 +81,7 @@ fn chk(ln: &mut usize, got: &string) {
     if got.clone() == want {
         fmt::Printf!("[ok] %s\n", got);
     } else {
+        unsafe { BAD += 1 };
         fmt::Printf!("[!!] goish: %q\n", got);
         fmt::Printf!("     go   : %q\n", want);
     }
@@ -143,6 +147,7 @@ fn main() {
     }
     if ln != GO.len() {
         fmt::Printf!("[!!] line count mismatch with the Go reference\n");
+        unsafe { BAD += 1 };
     }
 
     // ── wiring: is the cached path reachable at all? ──────────────
@@ -167,6 +172,13 @@ fn main() {
     }
     if bad != 0 {
         fmt::Printf!("[!!] %d hash(es) cannot take HMAC's cached path\n", bad as i64);
+    }
+    let bad = unsafe { BAD };
+    if bad != 0 {
+        // e2e_runner.sh: "rc=0 wins regardless of stdout content",
+        // so printing the mismatch is not enough to fail CI.
+        fmt::Printf!("[!!] %d row(s) diverge from Go\n", bad as i64);
+        goish::os::Exit(1);
     }
     goish::os::Exit(0);
 }
