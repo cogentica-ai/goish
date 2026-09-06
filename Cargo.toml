@@ -3478,3 +3478,7 @@ path = "examples/http_reverseproxy_ref_smoke.rs"
 [[example]]
 name = "hmac_reset_marshal_ref_smoke"
 path = "examples/hmac_reset_marshal_ref_smoke.rs"
+
+[[example]]
+name = "jsontext_utf8_ref_smoke"
+path = "examples/jsontext_utf8_ref_smoke.rs"

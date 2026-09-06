@@ -1281,7 +1281,29 @@ impl Decoder {
             };
             self.pos += 1;
             match b {
-                b'"' => return Ok(string::from_bytes(&out)),
+                b'"' => {
+                    // RFC 7493 §2.1 and RFC 8259 §8.1: a JSON string is
+                    // UTF-8. Go rejects invalid UTF-8 unless
+                    // AllowInvalidUTF8 is set (options.go:62-65), and
+                    // that option was accepted and stored here and
+                    // never read — so every malformed sequence was
+                    // passed through, which is the option's `true`
+                    // behaviour applied unconditionally.
+                    //
+                    // The consequence is a parser differential: a
+                    // document this accepts and Go refuses. That
+                    // matters most where goish validates or forwards
+                    // JSON to something written in Go, which is the
+                    // usual reason to have a syntax layer at all.
+                    if !self.opts.allow_invalid_utf8.unwrap_or(false)
+                        && core::str::from_utf8(&out).is_err()
+                    {
+                        return Err(crate::errors::New(
+                            "jsontext: invalid UTF-8 within string",
+                        ));
+                    }
+                    return Ok(string::from_bytes(&out));
+                }
                 b'\\' => {
                     let e = match self.peek_at(0) {
                         Some(e) => e,
@@ -1623,6 +1645,11 @@ impl Decoder {
     /// Scan past a quoted string without decoding escapes.
     fn scan_string_raw(&mut self) -> Result<(), error> {
         debug_assert_eq!(self.buf[self.pos], b'"');
+        // Remember where the contents start so the same UTF-8 rule as
+        // `scan_string_decoded` can be applied to the raw span. Escapes
+        // inside are ASCII by construction, so checking the raw bytes
+        // is equivalent to checking the decoded ones for validity.
+        let contents_start = self.pos + 1;
         self.pos += 1;
         loop {
             let b = match self.peek_at(0) {
@@ -1631,7 +1658,17 @@ impl Decoder {
             };
             self.pos += 1;
             match b {
-                b'"' => return Ok(()),
+                b'"' => {
+                    if !self.opts.allow_invalid_utf8.unwrap_or(false) {
+                        let end = self.pos - 1;
+                        if core::str::from_utf8(&self.buf[contents_start..end]).is_err() {
+                            return Err(crate::errors::New(
+                                "jsontext: invalid UTF-8 within string",
+                            ));
+                        }
+                    }
+                    return Ok(());
+                }
                 b'\\' => {
                     if self.peek_at(0).is_none() {
                         return Err(crate::io::ErrUnexpectedEOF.into());
