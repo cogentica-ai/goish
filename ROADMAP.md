@@ -239,6 +239,34 @@ defects, in three separate packages:
 | `crypto/tls/session.rs` | 145 | cached tickets never expired; the cache was unbounded, so the peer decided how much it held |
 | `net/dnsclient.rs` | 1143 | a xorshift transaction ID where Go uses the OS-seeded generator; a truncated answer returned as success |
 
+**`src/net/lookup.rs` — context accepted and ignored, found 2026-09-06.**
+Nine public methods take `ctx: &Arc<dyn context::Context>` —
+`Resolver::LookupHost`, `LookupIPAddr`, `LookupIP`, `LookupCNAME`,
+`LookupAddr`, `LookupTXT`, `LookupNS`, `LookupMX`, `LookupSRV` — and
+not one reads it. There is no `ctx.Done()`, `ctx.Err()` or
+`ctx.Deadline()` anywhere in the file. A caller who bounds a DNS lookup
+with a one-second context gets an unbounded lookup.
+
+The file header says so ("Context parameters are accepted but not yet
+wired into cancellation"), and `#![allow(unused_variables)]` at the top
+suppresses the warning that would otherwise say it every build. It was
+not tracked in this document, which is why it is here now.
+
+**Do not fix this with an entry-time `ctx.Err()` check.** Measured
+against a running Go: Go does not short-circuit on a done context. It
+carries the context into the dial, so the error is a `*DNSError` whose
+`Err` is `dial udp [resolver]:53: operation was canceled`, with
+`IsTimeout=false, IsTemporary=true`; for an expired deadline it is
+`... : i/o timeout` with `IsTimeout=true, IsTemporary=true`. An entry
+check returning a bare "context canceled" would swap one divergence for
+a narrower but equally wrong one, and would look like a fix. The real
+work is wiring the context into `dnsclient`'s dial, which is what the
+header means by "the underlying dnsclient is context-free in this port".
+
+A smoke for this cannot pin the error text verbatim — it contains the
+resolver's address, which differs per machine — but the three flags and
+the message suffix are stable and are what to compare.
+
 All three now carry a "What has been diffed against Go" block listing
 what was checked CLEAN as well as what was fixed, so the next reader
 starts where this left off rather than repeating it.
@@ -332,6 +360,29 @@ out.
 The file is now fully anchored: 89 anchors under `src/os`, all verified,
 and `port_lint` findings fell 8244 -> 8189 across the pass. `Hostname`
 is the one documented divergence left, and it is unreachable on Linux.
+
+**The density signal's full hit rate, measured 2026-09-06.** Ranking
+every `.rs` that HAS anchors but accounts for under half its `fn`
+declarations gave 14 candidates. Walking all 14:
+
+- **Productive (2).** `encoding/asn1/mod.rs` — one defect
+  (parseBitString). `os/mod.rs` — six.
+- **Known and tracked (5).** `jsontext/mod.rs` and `runtime/netpoll`
+  (worked above), `crypto/tls/record.rs` and
+  `handshake_client_tls13.rs` (1), `regexp/mod.rs` (2c).
+- **Legitimately unanchored (7).** `convert.rs` is Go's BUILTIN
+  conversions, which have no declarations to anchor — and its edge
+  cases are pinned anyway: `runeconv_ref_smoke` covers both directions
+  including invalid runes to U+FFFD. `math/mod.rs` delegates to `libm`
+  and is compared against Go by four smokes. `syscall/mod.rs` is raw
+  Linux syscalls with no Go counterpart to cite. `encoding/json/mod.rs`
+  and `json/v2` are documented reimplementations, `key_schedule.rs` is
+  anchored where it matters, `runtime/mod.rs` is goish's own startup.
+
+So 2 of 14 held defects — a far better rate than the zero-anchor
+one-liner's 0 of 70, and still mostly false positives. The signal is
+worth running once and reading; it is not worth automating into a gate.
+The 7 above do NOT need re-walking, which is the point of listing them.
 
 **The one-liner does not generalise, and the failure is worth keeping**
 so nobody rebuilds it. Run against everything over 250 lines it

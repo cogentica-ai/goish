@@ -1,21 +1,54 @@
 // encoding/json — Go's encoding/json package, ported.
 //
-// v1 surface:
+// v1 surface — re-read against the code on 2026-09-06, because every
+// line of the block that used to be here had gone stale:
 //
 //   pub enum Value { Null, Bool(bool), Number(f64), String(string),
 //                    Array(slice<Value>), Object(map<string, Value>) }
-//   pub fn Marshal(v: &Value) -> (slice<byte>, error);
-//   pub fn MarshalIndent(v: &Value, prefix, indent) -> (slice<byte>, error);
-//   pub fn Unmarshal(data) -> (Value, error);
+//   pub fn Marshal<T: reflect::Reflect + ?Sized>(v: &T) -> (slice<byte>, error);
+//   pub fn MarshalIndent<T: reflect::Reflect + ?Sized>(v: &T, prefix, indent)
+//                                                 -> (slice<byte>, error);
+//   pub fn Unmarshal<T: FromValue>(data: &[byte], dest: &mut T) -> error;
 //   pub fn NewEncoder(w) -> Encoder<W>;  Encoder::Encode/SetIndent.
-//   pub fn NewDecoder(r) -> Decoder<R>;  Decoder::Decode.
-//   pub trait Marshaler / Unmarshaler.
-//   pub fn ErrSyntax() / ErrUnexpectedEnd().
+//   pub fn NewDecoder(r) -> Decoder;     Decoder::Decode.
+//   pub trait FromValue / Marshaler / Unmarshaler.
+//   pub const ErrSyntax / ErrUnexpectedEnd: error.
 //
-// v1 deviations from Go (doc'd in wip_json.md):
-//   * No reflection — user structs serialize via `Marshaler` trait;
-//     dynamic JSON uses the `Value` enum.
-//   * Object keys iterate sorted (BTreeMap-backed map<K, V>).
+// What that block said before, and why each was wrong:
+//
+//   "pub fn Marshal(v: &Value)" — Marshal is generic over
+//   `reflect::Reflect` and goes through `encode_reflect`. Passing a
+//   `&Value` still works because `Value` implements `Reflect`, but the
+//   signature described the only case rather than the API.
+//
+//   "pub fn Unmarshal(data) -> (Value, error)" — it takes a `&mut T:
+//   FromValue` destination and returns a bare `error`. A caller
+//   following the old line would not compile.
+//
+//   "pub fn ErrSyntax()" — these are `error` CONSTANTS, not functions.
+//
+//   "No reflection — user structs serialize via `Marshaler`" — false
+//   since the reflect path landed. Reflection is now the PRIMARY route:
+//   `#[goish::reflect]` generates what `Marshal` walks, and `Marshaler`
+//   is the escape hatch rather than the mechanism.
+//
+//   "Object keys iterate sorted" was filed under DEVIATIONS FROM GO. It
+//   is not a deviation: Go sorts map keys too (encode.go:186, "are
+//   sorted and used as JSON object keys"). goish gets there via a
+//   BTreeMap instead of an explicit sort, and the observable order is
+//   the same. Listing a MATCH as a divergence is the inverse of the
+//   usual failure and just as misleading — it invites someone to
+//   "fix" conforming behaviour.
+//
+// Both of the old "deviations" were therefore wrong, and this note does
+// NOT replace them with a new list. Writing one meant guessing, and two
+// guesses failed on the spot: struct tags ARE parsed
+// (`#[tag(r#"json:"name""#)]` -> `__parse_json_tag`), and `omitempty`
+// IS honoured (see the field walk around line 946 — `__parse_json_tag`
+// drops the options because it serves the DECODE path, where they do
+// not apply). wip_json.md is the deviation list; anything added here
+// should be measured against Go first, which is how this block rotted
+// in the first place.
 
 // goishlint:ignore GOISH015 — this package is 1885 lines in one mod.rs and predates the one-.rs-per-.go split. Splitting encoding/json is its own unit; `appendString` is anchored here because its BEHAVIOUR changed and the provenance line is worth more than the file boundary is. Claiming an encode.go manifest in a new file would instead demand all 77 of that file's other declarations, which would be a larger lie than this waiver.
 #![allow(non_snake_case, non_upper_case_globals)]

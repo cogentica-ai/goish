@@ -36,9 +36,28 @@ Checks per anchor:
                net/http's client entry point had no provenance while
                this script reported 1059/1059 ok. Counted and listed,
                NOT a failure: 124 of 6333 do not match, and most are
-               deliberate Rust renames (`hexDigit` -> `HEX_DIGIT`,
-               `_P` -> `PUNCT`, `HardwareAddr.String` ->
-               `HardwareAddrString`). Read the list; do not gate on it.
+               deliberate Rust renames. Read the list; do not gate on it.
+
+               Triaged in full on 2026-09-06. The families, so nobody
+               re-walks them: archive/tar is 55 of the 122
+               (`headerV7.name` -> `v7_name`, `headerUSTAR.magic` ->
+               `ustar_magic`, and the `*m_` marshalling twins); log has
+               six `*_impl`; base32/base64 use `*_into`; unicode/tables
+               renames `_P` -> `PUNCT`; net gives `hexDigit` ->
+               `HEX_DIGIT` and `HardwareAddr.String` ->
+               `HardwareAddrString`. Six were REAL, all in os and
+               net/http: File.Write, Client.Do, Request.isReplayable,
+               Request.requiresHTTP1, connectMethod, wantConnQueue —
+               every one a declaration with no provenance while this
+               script reported all-green.
+
+               A looser rule was tried and rejected: allowing the
+               anchor's name as a SUBSTRING of the item's would clear
+               most of the 122, and would still have caught Client.Do
+               and connectMethod, but it silently passes
+               `File.Write` -> `WriteString`. Losing a real stranding to
+               quiet a list that has now been triaged once is the wrong
+               trade.
   BARE         Symbol names a method without its receiver, so it cannot
                be told apart from same-named methods on other types
                (reported by --strict only; 80% of the tree is like this)
