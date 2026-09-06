@@ -1541,6 +1541,38 @@ Six hooks, in that order, with `Reused` the only difference between a
 fresh conn and a pooled one — which is exactly what most callers of
 this API are measuring.
 
+**Scoped 2026-09-06. Five of the six are call-site work; the sixth
+needs an ownership decision.** The plumbing is further along than the
+zero call sites suggest — `transfer.rs`'s `writeHeader` already takes
+`Option<&ClientTrace>` and fires `WroteHeaderField` from it. Its two
+callers pass `None`. Where each hook goes:
+
+| hook | site |
+|---|---|
+| `GetConn(hostPort)` | before `self.getConn(&rt_req, &cm)` in `Transport::RoundTrip` |
+| `WroteHeaders()` | after the `tw.writeHeader(&mut hb, None)` block, which already wants the trace |
+| `WroteRequest(info)` | after the body write, with the write error |
+| `GotFirstResponseByte()` | at the first byte of the response read |
+| `PutIdleConn(err)` | where the conn returns to the pool |
+
+`GotConn` is the one that is not a call site. `GotConnInfo.Conn` is
+`Arc<dyn Conn>` because Go's is a `net.Conn` interface value that the
+Transport keeps owning and hands to the hook by reference. goish's
+transport owns the connection BY VALUE, inside a
+`bufio::Reader<TCPConn | tls::Conn | DynConn>` in `ConnSrc`; there is
+no `Arc<dyn Conn>` anywhere on that path to hand out, and a socket
+wrapper cannot be cloned to make one. So firing `GotConn` means either
+making the transport's conn `Arc`-shared — a real ownership change on
+the request hot path — or narrowing `GotConnInfo.Conn` to an `Option`
+and passing `None`, which is a public API change and would leave the
+field permanently empty.
+
+That matters because `GotConn` carries `Reused`, and `Reused` is what
+most callers of this API are actually measuring — so the cheap five do
+not deliver the interesting one. Deciding the ownership question first
+is what makes this worth doing at all, and it belongs with §0 B, which
+is the other item gated on how the transport holds its connections.
+
 Five of the six are straightforward: their hook types take a string, a
 `WroteRequestInfo`, an `error`, or nothing, and every call site exists
 in the inline RoundTrip path already.
