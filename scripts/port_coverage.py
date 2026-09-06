@@ -580,6 +580,22 @@ def _facts(paths):
                      if "." not in k
                      and k not in fns
                      and re.sub(r"(?<!^)(?=[A-Z])", "_", k).lower() in fns}
+            # And the same fold for the METHOD half of a `Recv.Method`
+            # key, which the exact-match rule above misses:
+            # `chacha20poly1305.sealGeneric` is anchored on a fn spelled
+            # `seal_generic`. Identical transformation, identical
+            # evidence — the anchor, whose range anchor_check re-opens
+            # against the Go tree — and it stays narrow on purpose. It
+            # credits a camelCase-to-snake_case rename and nothing else,
+            # so archive/tar's `headerGNU.accessTime` on `gnu_accessTime`
+            # and flate's `huffmanBitWriter.write` on `write_buf` are
+            # still reported: those are renames the fold cannot derive,
+            # and ROADMAP §2b-ii keeps them on the list.
+            mine |= {k for k in anchored_decl_keys(src)
+                     if "." in k
+                     and k.split(".", 1)[1] not in fns
+                     and re.sub(r"(?<!^)(?=[A-Z])", "_",
+                                k.split(".", 1)[1]).lower() in fns}
         idents |= mine
         anchored |= anchored_decl_keys(src)
         # The draft line is itself a `// go:` comment, so it would
@@ -768,6 +784,7 @@ RELOCATED = {
     # Added once term.rs was anchored — the grep above now reports it,
     # which is the whole entry criterion working as intended.
     "cmd/vendor/golang.org/x/term": "term",
+    "vendor/golang.org/x/crypto/chacha20poly1305": "crypto/chacha20poly1305",
 }
 
 
