@@ -2,10 +2,24 @@
 //
 // crypto/tls — the server handshake state machine.
 //
-// **Partial port.** handshake_server.go is 1000 lines of
-// `serverHandshakeState`, which owns a Conn and drives the TLS 1.0-1.2
-// handshake. What is here is the one function that does not: the ECDHE
-// support check, which `ClientHelloInfo.SupportsCertificate` also calls.
+// This banner said, until 2026-09-06: "**Partial port.**
+// handshake_server.go is 1000 lines of `serverHandshakeState` … What is
+// here is the one function that does not [own a Conn]: the ECDHE
+// support check."
+//
+// The state machine is here. `serverHandshakeState.handshake` (132
+// lines), `processClientHello` (222), `doFullHandshake` (421),
+// `checkForResumption` (164), `Conn.serverHandshake` (62) and
+// `readClientHello` (151) are all implemented, in this file's 1989
+// lines against Go's 1000, and the manifest above names seventeen
+// declarations rather than one. `tls::handshake_loopback`
+// (mod.rs:8933) runs this server against the ported client for both
+// TLS 1.2 and 1.3, from tls_common_smoke.
+//
+// A reader taking that paragraph at face value concludes goish cannot
+// terminate a TLS connection. The GOISH018 ignore below still lists the
+// same names; that is belt-and-braces now, not a statement about what
+// the file contains.
 //
 // goishlint:ignore GOISH018 serverHandshake, handshake, readClientHello, processClientHello, doResumeHandshake, doFullHandshake, sendSessionTicket — serverHandshakeState and Conn; see the banner. ROADMAP.md.
 
