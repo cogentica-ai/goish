@@ -21,7 +21,7 @@ EXAMPLES_DIR := target/$(TARGET)/$(PROFILE)/examples
 SCOPE     ?= src
 
 .PHONY: all build e2e e2e-full e2e-build e2e-quick e2e-clean clean help \
-        lint lint-new lint-update
+        lint lint-new lint-update anchors manifests ifaces split-brain
 
 help:
 	@echo "goish-v1 make targets:"
@@ -88,7 +88,7 @@ e2e-clean:
 
 # The lint backlog is grandfathered by scripts/lint_baseline.json; these
 # targets let it shrink and never grow. See scripts/port_lint.py.
-lint: anchors ifaces split-brain
+lint: anchors manifests ifaces split-brain
 	@python3 scripts/port_lint.py --check --scope $(SCOPE)
 
 # goishlint resolves an anchored symbol by name and never looks at the
@@ -106,6 +106,15 @@ anchors:
 # fails: some zero-implementor interfaces are extension points.
 ifaces:
 	@python3 scripts/iface_check.py
+
+# A `decls:` manifest naming a Go METHOD by its bare name is an
+# incomplete provenance claim, and where Go declares that name on more
+# than one type it is an unreadable one. It also silently drops the
+# declaration out of --by-decl coverage, or - worse, because nothing
+# flags it - credits it to a case-insensitive twin: Go's unexported
+# `List.remove` was being matched to goish's public `List.Remove`.
+manifests:
+	@python3 scripts/manifest_qual_check.py $(SCOPE)
 
 # Rust needs a trait impl written separately from the inherent method,
 # and when neither forwards to the other the type has TWO

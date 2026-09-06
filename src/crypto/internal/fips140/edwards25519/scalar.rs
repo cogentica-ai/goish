@@ -1,4 +1,4 @@
-// go: file crypto/internal/fips140/edwards25519/scalar.go decls: NewScalar, isReduced, MultiplyAdd, Add, Subtract, Negate, Multiply, Set, SetUniformBytes, setShortBytes, SetCanonicalBytes, SetBytesWithClamping, Bytes, bytes, Equal, nonAdjacentForm, signedRadix16
+// go: file crypto/internal/fips140/edwards25519/scalar.go decls: NewScalar, isReduced, Scalar.MultiplyAdd, Scalar.Add, Scalar.Subtract, Scalar.Negate, Scalar.Multiply, Scalar.Set, Scalar.SetUniformBytes, Scalar.setShortBytes, Scalar.SetCanonicalBytes, Scalar.SetBytesWithClamping, Scalar.Bytes, Scalar.bytes, Scalar.Equal, Scalar.nonAdjacentForm, Scalar.signedRadix16
 
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 

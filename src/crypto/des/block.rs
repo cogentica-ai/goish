@@ -1,7 +1,7 @@
 // goishlint:ignore GOISH021 — feistelBoxOnce has no separate Rust binding:
 // no_std has no sync::Once, so the Once and the feistelBox array collapse
 // into one SpinLock<Option<..>> named feistelBox (see its anchor below).
-// go: file crypto/des/block.go decls: cryptBlock, feistel, permuteBlock, initFeistelBox, permuteInitialBlock, permuteFinalBlock, ksRotate, generateSubkeys, unpack, ensureFeistelBox, fb_lookup, beUint64, bePutUint64
+// go: file crypto/des/block.go decls: cryptBlock, feistel, permuteBlock, initFeistelBox, permuteInitialBlock, permuteFinalBlock, ksRotate, desCipher.generateSubkeys, unpack, ensureFeistelBox, fb_lookup, beUint64, bePutUint64
 //
 // Deviations from block.go @ Go 1.25.5:
 //

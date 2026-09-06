@@ -1,4 +1,4 @@
-// go: file crypto/x509/pkix/pkix.go decls: String, FillFromRDNSequence, appendRDNs, ToRDNSequence, oidInAttributeTypeAndValue, HasExpired
+// go: file crypto/x509/pkix/pkix.go decls: Name.String, RDNSequence.String, Name.FillFromRDNSequence, Name.appendRDNs, Name.ToRDNSequence, oidInAttributeTypeAndValue, CertificateList.HasExpired
 //
 // Shared, low-level structures for ASN.1 parsing and serialization of
 // X.509 certificates, CRLs and OCSP.

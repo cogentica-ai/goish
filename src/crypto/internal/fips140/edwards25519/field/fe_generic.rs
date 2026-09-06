@@ -1,4 +1,4 @@
-// go: file crypto/internal/fips140/edwards25519/field/fe_generic.go decls: mul, addMul, mul19, addMul19, addMul38, shiftRightBy51, feMulGeneric, feSquareGeneric, carryPropagate
+// go: file crypto/internal/fips140/edwards25519/field/fe_generic.go decls: mul, addMul, mul19, addMul19, addMul38, shiftRightBy51, feMulGeneric, feSquareGeneric, Element.carryPropagate
 
 #![allow(non_snake_case)]
 

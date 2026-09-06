@@ -7,7 +7,7 @@
 // because testDeps names it in four method signatures, so the driver
 // cannot be ported without it.
 //
-// go: file testing/fuzz.go decls: fuzzResult.String,
+// go: file testing/fuzz.go decls: fuzzResult.String
 // goishlint:ignore GOISH021 F, fuzzCrashError, fuzzContext, fuzzState, fuzzMode, fuzzCoordinator, fuzzWorker, seedCorpusOnly, fuzzWorkerExitCode, supportedTypes — the fuzzing engine needs internal/fuzz, which goish does not have; only corpusEntry is carried across, for testDeps' signatures.
 // goishlint:ignore GOISH018 Add, Fail, Fuzz, Helper, Skipped, Skip, Skipf, SkipNow, Error, Errorf, Fatal, Fatalf, Log, Logf, Setenv, TempDir, Name, Cleanup, report, fRunner, runFuzzTests, runFuzzing, initFuzzFlags — same: F and the fuzzing engine are not ported.
 

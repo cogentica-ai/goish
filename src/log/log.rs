@@ -1,4 +1,4 @@
-// go: file log/log.go decls: formatHeader, Println, Printf, Print, Fatal, Fatalf, Fatalln, New, Default, SetOutput, Flags, SetFlags, Prefix, SetPrefix, Output, itoa, formatHeader, Logger.Output, Logger.SetOutput, Logger.Flags, Logger.SetFlags, Logger.Prefix, Logger.SetPrefix, Logger.Print, Logger.Printf, Logger.Println, Logger.Fatal, Logger.Fatalf, Logger.Fatalln, Logger.Panic, Logger.Panicf, Logger.Panicln
+// go: file log/log.go decls: formatHeader, Println, Printf, Print, Fatal, Fatalf, Fatalln, New, Default, SetOutput, Flags, SetFlags, Prefix, SetPrefix, Output, itoa, Logger.Output, Logger.SetOutput, Logger.Flags, Logger.SetFlags, Logger.Prefix, Logger.SetPrefix, Logger.Print, Logger.Printf, Logger.Println, Logger.Fatal, Logger.Fatalf, Logger.Fatalln, Logger.Panic, Logger.Panicf, Logger.Panicln
 // goishlint:ignore GOISH018 getBuffer, putBuffer, init, Writer — Go
 // pools the header buffer through a sync.Pool (`bufferPool`,
 // `getBuffer`, `putBuffer`, and the `init` that seeds it); goish

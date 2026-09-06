@@ -1,4 +1,4 @@
-// go: file time/format.go decls: startsWithLowerCase, nextStdChunk, ParseError.Error, newParseError, quote, atoi, getnum, getnum3, cutspace, skip, commaOrPeriod, parseNanoseconds, parseTimeZone, parseGMT, parseSignedOffset, Parse, ParseInLocation, parse, match, lookup, appendInt, stdFracSecond, digitsLen, separator, appendNano, String, Time.Format, Time.AppendFormat, Time.appendFormat, ParseDuration, unitMap, leadingInt, leadingFraction
+// go: file time/format.go decls: startsWithLowerCase, nextStdChunk, ParseError.Error, newParseError, quote, atoi, getnum, getnum3, cutspace, skip, commaOrPeriod, parseNanoseconds, parseTimeZone, parseGMT, parseSignedOffset, Parse, ParseInLocation, parse, match, lookup, appendInt, stdFracSecond, digitsLen, separator, appendNano, Time.String, Time.Format, Time.AppendFormat, Time.appendFormat, ParseDuration, unitMap, leadingInt, leadingFraction
 // goishlint:ignore GOISH018 errBad — Go's `errBad` is a sentinel
 // error returned by the parse helpers and compared by identity; it is
 // never shown to a caller. goish's helpers return a bool for the same

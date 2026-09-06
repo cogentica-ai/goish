@@ -1,4 +1,4 @@
-// go: file crypto/x509/oid.go decls: ParseOID, newOIDFromDER, OIDFromInts, base128IntLength, appendBase128Int, base128BigIntLength, appendBase128BigInt, AppendText, MarshalText, UnmarshalText, unmarshalOIDText, AppendBinary, MarshalBinary, UnmarshalBinary, Equal, parseBase128Int, EqualASN1OID, String, toASN1OID
+// go: file crypto/x509/oid.go decls: ParseOID, newOIDFromDER, OIDFromInts, base128IntLength, appendBase128Int, base128BigIntLength, appendBase128BigInt, OID.AppendText, OID.MarshalText, OID.UnmarshalText, OID.unmarshalOIDText, OID.AppendBinary, OID.MarshalBinary, OID.UnmarshalBinary, OID.Equal, parseBase128Int, OID.EqualASN1OID, OID.String, OID.toASN1OID
 //
 // `x509.OID` — an Object Identifier held in its DER encoding rather than
 // as a component slice, which is what lets it represent components too

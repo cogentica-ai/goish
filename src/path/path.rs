@@ -1,4 +1,4 @@
-// go: file path/path.go decls: index, append, lazybuf.string, Clean, Split, Join, Ext, Base, IsAbs, Dir
+// go: file path/path.go decls: lazybuf.index, lazybuf.append, lazybuf.string, Clean, Split, Join, Ext, Base, IsAbs, Dir
 //
 // path.go — Clean, Split, Join, Ext, Base, IsAbs, Dir, and the
 // lazybuf they share.

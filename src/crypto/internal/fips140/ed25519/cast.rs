@@ -1,4 +1,4 @@
-// go: file crypto/internal/fips140/ed25519/cast.go decls: fipsSelfTest, castSelfTest, fipsPCT, pairwiseTest, signWithoutSelfTest, verifyWithoutSelfTest, fipsSelfTest, castSelfTest
+// go: file crypto/internal/fips140/ed25519/cast.go decls: fipsSelfTest, castSelfTest, fipsPCT, pairwiseTest, signWithoutSelfTest, verifyWithoutSelfTest
 //
 // Deviation: Go drives the CAST once via `sync.Once` inside
 // `fips140.CAST`; no_std has no sync::Once, so an AtomicBool latch

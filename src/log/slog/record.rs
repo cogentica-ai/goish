@@ -1,4 +1,4 @@
-// go: file log/slog/record.go decls: argsToAttr, Source, Source.group, Source.isEmpty, Record.Source, Record.Clone, Record.NumAttrs, Record.Attrs, Record.AddAttrs, Record.Add
+// go: file log/slog/record.go decls: argsToAttr, Record.Source, Source.group, Source.isEmpty, Record.Clone, Record.NumAttrs, Record.Attrs, Record.AddAttrs, Record.Add
 //
 // log/slog/record.go — the loose-argument pairing behind the `...any`
 // logging form.

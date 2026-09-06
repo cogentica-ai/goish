@@ -1,4 +1,4 @@
-// go: file io/multi.go decls: eofReader.Read, Read, multiReader.WriteTo, multiReader.writeToWithBuffer, MultiReader, Write, multiWriter.WriteString, MultiWriter
+// go: file io/multi.go decls: eofReader.Read, multiReader.Read, multiReader.WriteTo, multiReader.writeToWithBuffer, MultiReader, multiWriter.Write, multiWriter.WriteString, MultiWriter
 //
 // multi.go — MultiReader and MultiWriter.
 

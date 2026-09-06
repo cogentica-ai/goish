@@ -1,4 +1,4 @@
-// go: file container/list/list.go decls: Element.Next, Element.Prev, List.Init, New, List.Len, List.Front, List.Back, lazyInit, insert, insertValue, remove, move, List.Remove, List.PushFront, List.PushBack, List.InsertBefore, List.InsertAfter, List.MoveToFront, List.MoveToBack, List.MoveBefore, List.MoveAfter, List.PushBackList, List.PushFrontList
+// go: file container/list/list.go decls: Element.Next, Element.Prev, List.Init, New, List.Len, List.Front, List.Back, List.lazyInit, List.insert, List.insertValue, List.remove, List.move, List.Remove, List.PushFront, List.PushBack, List.InsertBefore, List.InsertAfter, List.MoveToFront, List.MoveToBack, List.MoveBefore, List.MoveAfter, List.PushBackList, List.PushFrontList
 //
 // goishlint:ignore GOISH019 Element, List — goish models Go's ring of
 //     `*Element` pointers as a slab: `ListInner` holds a `BTreeMap` of
