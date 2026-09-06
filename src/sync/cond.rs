@@ -1,3 +1,9 @@
+// go: file sync/cond.go decls: NewCond, Cond.Wait, Cond.Signal, Cond.Broadcast
+//
+// goishlint:ignore GOISH021 copyChecker, noCopy — the two types behind that same machinery; see the GOISH018 line below.
+//
+// goishlint:ignore GOISH018 copyChecker.check, noCopy.Lock, noCopy.Unlock — Go's copy-detection machinery. `copyChecker` compares the Cond's own address against a stored one to catch a Cond copied after first use, and `noCopy` is the zero-size marker `go vet` keys on. Rust moves and borrows make both unnecessary: a `Cond` here borrows its Locker for its lifetime, so a copy that would break Go cannot be written.
+//
 // sync::Cond — Go's `sync.Cond` (slim).
 //
 // Reference: sync/cond.go.
@@ -50,6 +56,7 @@ pub struct Cond<'a, L: Locker + ?Sized> {
     sema: Sema,
 }
 
+// go: sdk 1.25.5 sync/cond.go:48-50 NewCond
 /// `sync.NewCond(l)` (cond.go:48) — build a Cond with locker `l`.
 pub fn NewCond<L: Locker + ?Sized>(l: &L) -> Cond<'_, L> {
     Cond {
@@ -60,6 +67,7 @@ pub fn NewCond<L: Locker + ?Sized>(l: &L) -> Cond<'_, L> {
 }
 
 impl<'a, L: Locker + ?Sized> Cond<'a, L> {
+    // go: sdk 1.25.5 sync/cond.go:67-73 Cond.Wait
     /// `(*Cond).Wait()` (cond.go:67) — atomically unlocks `L` and
     /// suspends the calling goroutine. After resuming, re-acquires
     /// `L` before returning.
@@ -75,6 +83,7 @@ impl<'a, L: Locker + ?Sized> Cond<'a, L> {
         self.l.Lock();
     }
 
+    // go: sdk 1.25.5 sync/cond.go:82-85 Cond.Signal
     /// `(*Cond).Signal()` (cond.go:82) — wake one waiter, if any.
     pub fn Signal(&self) {
         // Decrement only if there's a waiter to consume; avoid
@@ -95,6 +104,7 @@ impl<'a, L: Locker + ?Sized> Cond<'a, L> {
         }
     }
 
+    // go: sdk 1.25.5 sync/cond.go:91-94 Cond.Broadcast
     /// `(*Cond).Broadcast()` (cond.go:91) — wake all waiters.
     pub fn Broadcast(&self) {
         let n = self.waiters.swap(0, Ordering::AcqRel);

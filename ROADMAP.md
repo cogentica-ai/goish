@@ -196,6 +196,32 @@ regression there is an outage rather than a test failure. Dispatch
 
 ## 2. Runtime defects blocking a clean CI
 
+0. **`Transport.idleConnWait` is written and never read**, found
+   2026-09-06. `queueForIdleConn` pushes a waiter onto it on an idle
+   miss (transport.rs) and nothing pops it — the field's only other
+   mentions are its declaration and its initialiser. Go reads the same
+   map in `tryPutIdleConn`, handing a returning connection to a waiter
+   BEFORE parking it in `idleConn`; `__try_put_idle` has every other
+   guard Go has, in Go's order, but not that one.
+
+   The push is dead rather than wrong: `getConn` ignores the `false`
+   return and calls `queueForDial`, so an idle miss always dials. What
+   it costs is reuse — a connection freed while a request is waiting is
+   parked instead of handed over, so goish opens a connection where Go
+   does not.
+
+   NOT fixed here on purpose. Delivering means popping the queue under
+   the pool lock and calling `tryDeliver`, and a half-wired handoff in a
+   connection pool is the kind of defect that surfaces as an
+   intermittent hang nobody can reproduce. It wants someone who can run
+   the race suite.
+
+   Third instance of this shape today, after jsontext's
+   `AllowInvalidUTF8` and net/lookup's nine ignored contexts: state
+   whose WRITES are all present, so the bookkeeping reads as finished,
+   and only grepping for a READ tells them apart.
+
+
 1. ~~**`Timer::Stop()` and the `Sleep` beneath it.**~~ **Verified
    2026-09-06**, which is what the entry asked for. `Stop` stores
    `stopped` with `Release` and only then calls `timer_cancel`
@@ -477,6 +503,30 @@ GOISH014 "unanchored fn" findings resolved at the same time.
 The general rule, which GOISH014 states and this proves the cost of: an
 anchor is only an anchor when it is the FIRST line of the comment block
 above the declaration. Anywhere else it is a comment.
+
+**The same scan then found `src/sync/cond.rs`** — 116 lines, no anchors,
+no manifest, six of Go's seven cond.go declarations present. Anchored
+the four that map (NewCond, Cond.Wait, Cond.Signal, Cond.Broadcast) with
+documented ignores for what does not: Go's `copyChecker` compares a
+Cond's own address against a stored one to catch a copy after first use,
+and `noCopy` is the zero-size marker `go vet` keys on. Rust's moves and
+borrows make both unnecessary — a Cond here borrows its Locker for its
+lifetime, so the copy that breaks Go cannot be written.
+
+**That exhausts this signal, which is the point of recording it.**
+Looking for a `.rs` with zero anchors whose fn names match the
+declarations of a same-named Go file returns exactly two candidates,
+both now done. Widening it to any Go file in the matching package adds
+one more and it is a false positive:
+`encoding/binary/native_endian_little.rs` matches seven names that
+belong to `littleEndian` in binary.go, which Go's `nativeEndian`
+inherits by EMBEDDING — the file is a forwarding impl and already
+carries the manifest and ignore that say so.
+
+This is a much better signal than 2b's original "over 200 lines with no
+anchors", which returned about 70 candidates and was all false
+positives. The difference is requiring a NAME MATCH against real Go
+declarations rather than the absence of anchors alone.
 
 **The one-liner does not generalise, and the failure is worth keeping**
 so nobody rebuilds it. Run against everything over 250 lines it

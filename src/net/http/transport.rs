@@ -1938,6 +1938,22 @@ pub struct idlePool {
     pub closeIdle: bool,
     /// Go: `idleConnWait map[connectMethodKey]wantConnQueue` —
     /// waiters registered for the NEXT conn that becomes idle.
+    //
+    // NOT CONSUMED, established 2026-09-06. `queueForIdleConn` pushes a
+    // waiter here on an idle miss and nothing ever pops it: the only
+    // other mentions of this field in the tree are its declaration and
+    // its initialiser. Go reads it in tryPutIdleConn, which hands a
+    // returning connection to a waiter BEFORE parking it in idleConn —
+    // that step has no counterpart in `__try_put_idle`.
+    //
+    // The push is therefore dead, not wrong: getConn ignores the false
+    // return and calls queueForDial, so every idle miss dials. The
+    // observable difference from Go is that a connection freed while a
+    // request is waiting is parked rather than handed over, so goish
+    // opens a connection where Go reuses one. Left as it is rather than
+    // half-wired — delivering here means popping a queue under the pool
+    // lock and calling tryDeliver, which is concurrent code this pass
+    // cannot exercise. Recorded in ROADMAP 2 instead.
     pub idleConnWait: crate::gomap::map<string, wantConnQueue<Arc<wantConn>>>,
 }
 
