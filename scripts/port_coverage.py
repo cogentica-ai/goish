@@ -6,6 +6,7 @@
     scripts/port_coverage.py crypto --pkg tls  # per-package detail (missing fns)
     scripts/port_coverage.py crypto --md       # markdown table (for tracking docs)
     scripts/port_coverage.py crypto --by-decl  # count Recv.Method, not bare names
+    scripts/port_coverage.py crypto --case-detail  # name the case-only credits
 
 Go source root comes from $GOROOT, else `go env GOROOT`, else --goroot.
 
@@ -149,6 +150,7 @@ def norm(s):
 
 PUREGO = False
 BY_DECL = False
+CASE_DETAIL = False
 
 
 # GOOS values. A file whose //go:build line mentions ONLY these and does
@@ -473,6 +475,23 @@ def draft_syms(src):
     return out
 
 
+def anchor_names(go_decl, anchored):
+    """Does a `// go: sdk` anchor in the package name this declaration?
+
+    An anchor is the authoritative link — anchor_check.py re-opens its
+    line range against the real Go tree and `make lint` gates on it — so
+    an anchored declaration is ported no matter what the Rust fn is
+    called. encoding/asn1 deliberately exports Go's unexported parsers
+    (`parseBigInt` is `pub fn ParseBigInt`), and the anchor above each
+    one still names Go's spelling. Without this, every such rename reads
+    as a case-only credit.
+    """
+    if go_decl in anchored:
+        return True
+    return go_decl.rsplit(".", 1)[-1] in {a.rsplit(".", 1)[-1]
+                                          for a in anchored}
+
+
 def spelled(go_decl, raw):
     """Does `raw` hold this Go declaration under a spelling goish allows?
 
@@ -494,7 +513,7 @@ def spelled(go_decl, raw):
 
 def _facts(paths):
     idents, loc, anchors, cited, unanchored = set(), 0, 0, set(), set()
-    waived, drafts = set(), set()
+    waived, drafts, anchored = set(), set(), set()
     for p in paths:
         src = open(p, errors="replace").read()
         waived |= set(WAIVED.findall(src))
@@ -509,6 +528,7 @@ def _facts(paths):
             mine |= {k for k in anchored_decl_keys(src)
                      if "." in k and k.split(".", 1)[1] in fns}
         idents |= mine
+        anchored |= anchored_decl_keys(src)
         # The draft line is itself a `// go:` comment, so it would
         # otherwise inflate the anchor count by one per draft.
         n = len(ANCHOR.findall(src)) - len(DRAFT_LINE.findall(src))
@@ -525,7 +545,7 @@ def _facts(paths):
         cited |= set(ANCHOR_GO.findall(src))
         loc += src.count("\n")
     return {"idents": {norm(i) for i in idents}, "raw": set(idents),
-            "loc": loc,
+            "anchored": anchored, "loc": loc,
             "nfiles": len(paths), "anchors": anchors, "cited": cited,
             "unanchored": unanchored, "waived": waived, "drafts": drafts}
 
@@ -703,7 +723,8 @@ def build(subtree, gr):
             # and one the package genuinely does not port. This never
             # shows up as missing, so it is reported here instead.
             "case_only": sorted(f for f in hit
-                                if r and not spelled(f, r["raw"])),
+                                if r and not spelled(f, r["raw"])
+                                and not anchor_names(f, r["anchored"])),
         })
     return rows
 
@@ -715,6 +736,9 @@ def main():
     global PUREGO, BY_DECL
     PUREGO = "--purego" in argv
     BY_DECL = "--by-decl" in argv
+    global CASE_DETAIL
+    CASE_DETAIL = "--case-detail" in argv
+    argv = [a for a in argv if a != "--case-detail"]
     subtree, gr = argv[0], goroot(argv)
     rows = build(subtree, gr)
 
@@ -806,11 +830,15 @@ def main():
     # so without this line nothing in the output would mention it.
     co = [(r["pkg"], f) for r in rows for f in r["case_only"]]
     if co:
-        print(f"      {len(co)} credited only by case — the goish name "
-              f"differs from Go's in case alone, so the port named is "
-              f"NOT the declaration counted:")
-        for pkg, f in co:
-            print(f"        {pkg}: {f}")
+        print(f"      {len(co)} counted name(s) differ from Go's in CASE "
+              f"only and carry no anchor — mostly Go's own "
+              f"exported-wraps-unexported pair (`Acos`/`acos`), where the "
+              f"body is here under the exported name. Not all: "
+              f"`bufio.Reader.reset` had no counterpart at all. "
+              f"--case-detail lists them.")
+        if CASE_DETAIL:
+            for pkg, f in co:
+                print(f"        {pkg}: {f}")
 
 
 if __name__ == "__main__":

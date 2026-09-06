@@ -257,6 +257,33 @@ refuses — a parser differential, fixed and pinned by
 handle EINTR correctly at both sites; it has no Go counterpart to diff
 against, so it is a different kind of gap from the rest of this list.
 
+**Next candidate, found 2026-09-06 by a different signal:**
+`src/encoding/asn1/mod.rs` (1226 lines, 7 anchors). The zero-anchor
+one-liner cannot see this file — it HAS anchors — but seventeen of its
+declarations are DER parsers carrying only a prose reference
+(`/// parseBool (asn1.go:56)`), not a `// go: sdk` anchor:
+`parseBool`, `checkInteger`, `parseInt32`, `parseInt64`,
+`parseBitString`, `parseObjectIdentifier`, `parseBase128Int`,
+`parseTagAndLength`, and the seven string parsers. `anchor_check.py`
+cannot re-open a prose reference against the Go tree, so those line
+numbers have never been verified and nothing would notice if they
+drifted.
+
+The package reads 77/77 = 100%, because `port_coverage.py` matched
+Go's `parseBool` to goish's `ParseBool` case-insensitively. What
+surfaced it was the new case-only line under that script's TOTAL: a
+counted name differing from Go's in case alone AND carrying no anchor.
+That is a DENSITY signal where the old one-liner was a ZERO signal,
+which is why it sees a file with seven anchors and 1226 lines.
+
+Worth reading because it is the input path for x509 certificate
+parsing, and because the sibling `asn1.rs` and `marshal.rs` are
+properly anchored (10 and 43) — the unanchored parsers are the
+exception in their own package, not the house style. The naming is
+deliberate and documented (goish exports Go's unexported parsers so
+`asn1_marshal_smoke` can reach them); it is the missing anchors, not
+the capital letters, that leave them unchecked.
+
 **The one-liner does not generalise, and the failure is worth keeping**
 so nobody rebuilds it. Run against everything over 250 lines it
 returns about 70 files and the sampled ones were all false positives:
