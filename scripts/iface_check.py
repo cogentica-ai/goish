@@ -144,10 +144,13 @@ def scan():
     reg_re = re.compile(r"__goish_register_([A-Za-z_]+)_impl::<\s*([A-Za-z_][A-Za-z0-9_:<>, ]*?)\s*>\s*\(")
     # `pub fn NewHash() -> Box<dyn Hash + Send + Sync>` and the
     # `Box::new(...)` that follows it.
+    # `-> Box<dyn T>` and `-> Arc<dyn T>` both hand a concrete type out
+    # as an interface, and both are subject to the same defect.
     boxfn_re = re.compile(
         r"fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*->\s*"
-        r"(?:alloc::boxed::)?Box<\s*dyn\s+(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Za-z_][A-Za-z0-9_]*)")
-    boxnew_re = re.compile(r"Box::new\(\s*([A-Za-z_][A-Za-z0-9_:]*)")
+        r"(?:alloc::(?:boxed|sync)::)?(?:Box|Arc)<\s*dyn\s+"
+        r"(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Za-z_][A-Za-z0-9_]*)")
+    boxnew_re = re.compile(r"(?:Box|Arc)::new\(\s*([A-Za-z_][A-Za-z0-9_:]*)")
     # `pub fn New256() -> SHA3 {` — the plain constructor a boxed one wraps.
     plainfn_re = re.compile(
         r"fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*->\s*"
@@ -303,7 +306,13 @@ def main():
                 boxed_unregistered.append((carrier, target, concrete, site,
                                            len(covered)))
 
+    pairs = sum(len({c for c, _ in e}) for e in boxed.values())
     print(f"iface_check: {len(targets)} asserted interface(s) under {SRC}/")
+    print(f"  BOXED_UNREGISTERED examined {pairs} (carrier, type) pair(s) "
+          f"across {len(boxed)} carrier(s).")
+    print("  That number is the scope of its OK: a constructor whose boxed")
+    print("  type it cannot resolve to a struct in the same file is skipped,")
+    print("  so a clean result is not a claim about the whole tree.")
 
     if unregistered:
         print(f"\n  UNREGISTERED ({len(unregistered)}) — implemented, asserted on, never registered:")
