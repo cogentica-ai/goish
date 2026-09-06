@@ -98,6 +98,14 @@ pub(super) fn lookup_user_id(uid: string) -> (User, error) {
         .unwrap_or_else(|| (User::default(), UnknownUserIdError::new(crate::int(i))));
 }
 
+// go: waived readColonFile — Go streams the file through readColonFile with a lineFunc closure built by matchUserIndexValue / matchGroupIndexValue, entered by the four find* wrappers; goish reads the file whole and scans it in find_user_by / find_group_by, so all seven fold into two functions and no single Go declaration maps to either.
+// go: waived matchUserIndexValue — Go streams the file through readColonFile with a lineFunc closure built by matchUserIndexValue / matchGroupIndexValue, entered by the four find* wrappers; goish reads the file whole and scans it in find_user_by / find_group_by, so all seven fold into two functions and no single Go declaration maps to either.
+// go: waived matchGroupIndexValue — Go streams the file through readColonFile with a lineFunc closure built by matchUserIndexValue / matchGroupIndexValue, entered by the four find* wrappers; goish reads the file whole and scans it in find_user_by / find_group_by, so all seven fold into two functions and no single Go declaration maps to either.
+// go: waived findUserId — Go streams the file through readColonFile with a lineFunc closure built by matchUserIndexValue / matchGroupIndexValue, entered by the four find* wrappers; goish reads the file whole and scans it in find_user_by / find_group_by, so all seven fold into two functions and no single Go declaration maps to either.
+// go: waived findUsername — Go streams the file through readColonFile with a lineFunc closure built by matchUserIndexValue / matchGroupIndexValue, entered by the four find* wrappers; goish reads the file whole and scans it in find_user_by / find_group_by, so all seven fold into two functions and no single Go declaration maps to either.
+// go: waived findGroupId — Go streams the file through readColonFile with a lineFunc closure built by matchUserIndexValue / matchGroupIndexValue, entered by the four find* wrappers; goish reads the file whole and scans it in find_user_by / find_group_by, so all seven fold into two functions and no single Go declaration maps to either.
+// go: waived findGroupName — Go streams the file through readColonFile with a lineFunc closure built by matchUserIndexValue / matchGroupIndexValue, entered by the four find* wrappers; goish reads the file whole and scans it in find_user_by / find_group_by, so all seven fold into two functions and no single Go declaration maps to either.
+
 // ─── /etc/passwd + /etc/group line scanner ───────────────────────────
 //
 // Go's lookup_unix.go uses bufio.Reader.ReadLine + lineFunc closures.

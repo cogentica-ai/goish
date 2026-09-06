@@ -1021,6 +1021,33 @@ true, and precisely the reason to spend three lines instead of a
 waiver, so a caller holding an `IntSlice` can write `p.Search(x)` as in
 Go. sort_ref_smoke 7/7, sort_smoke 11/11, sort_nan_ref_smoke 8/8.
 
+**os/user and net/textproto followed.** os/user's seven —
+`readColonFile`, the two `match*IndexValue` closure builders and the
+four `find*` wrappers — are case 1 and now waived with the reason
+already written into the file: goish folds all seven into
+`find_user_by` / `find_group_by`. 15/51 to 15/44.
+
+net/textproto's five split three ways, which is why per-declaration
+reading beats a bulk decision. `noValidation` and
+`mustHaveFieldNameColon` are case 1 — Go declares them as the only two
+closures `readContinuedLineSlice` is ever passed, and goish spells the
+choice as the `ValidatorKind` enum — so they are waived. `trim` was
+NOT a case at all: it is ported, as `trim_slice`, with prose
+provenance and no anchor, so it got the anchor it deserved rather than
+a waiver. `Dial` and `NewConn` stay missing: they are the SMTP/NNTP
+client surface, simply unwritten, and a waiver claims "resolved
+elsewhere by design", which would be a lie.
+
+**A mechanism note that cost a round trip.** `// go: waived` and
+`goishlint:ignore GOISH018` are ORTHOGONAL. The first removes a
+declaration from port_coverage's denominator; the second stops
+goishlint reporting it as dropped. Waiving does not satisfy the lint
+rule, so a waived declaration still needs the ignore. And an anchored
+declaration under a sanctioned rename still reads as dropped to
+GOISH018, because that rule keys off the anchor attaching by NAME —
+which is the same gap `anchored_attached_keys` closed on the coverage
+side in §2b-ii, still open on the lint side.
+
 What this does NOT resolve is the rest of the triage. `flag` keeps 43 names
 and they are ROADMAP case 4, blocked work rather than case 1: the
 package is a hand-written v1 FlagSet, and Go's `Var`/`Value` surface —
