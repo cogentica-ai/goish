@@ -1,4 +1,4 @@
-// net — Go's `net` package, ported (M27b — TCP only, blocking I/O).
+// net — Go's `net` package, ported. TCP over the epoll netpoller.
 //
 //   Go                                   goish
 //   ──────────────────────────────────   ──────────────────────────────────
@@ -14,21 +14,29 @@
 // tuples). No `Vec<u8>`, `&str`, `&[u8]`, `String` leak. Internal
 // scratch is plain Rust; convert at the boundary.
 //
-// **Concurrency model — Phase A (M27b)**: blocking syscalls. A
-// goroutine that calls `Accept` / `Read` / `Write` blocks the OS
-// thread (M) hosting it. With NumCPU Ms, that caps in-flight blocking
-// calls at NumCPU. For HTTP-server-style "goroutine per connection"
-// this means you get NumCPU concurrent in-flight requests; the rest
-// queue. Sufficient for a useful demo. Phase B (M27e) introduces an
-// epoll netpoller that lifts this cap.
+// **Concurrency model**: the epoll netpoller, not blocking syscalls.
+// `Accept` / `Read` / `Write` park the GOROUTINE on a `PollDesc` and
+// release the M, so in-flight I/O is not capped at NumCPU. This banner
+// described the opposite — Phase A's blocking model, with a note that
+// "Phase B (M27e) introduces an epoll netpoller that lifts this cap" —
+// for as long as the netpoller has been wired in at the `use
+// crate::runtime::netpoll` below.
 //
-// **What's not in v1**:
-//   - DNS resolution: only IP-literal addresses (`127.0.0.1:8080`,
-//     `0.0.0.0:8080`, `[::1]:8080`). Hostnames return an error.
-//   - IPv6: stub TCPAddr only stores v4; the parser rejects v6.
-//   - UDP / Unix domain: TCP only.
-//   - Deadlines / timeouts: the API surface is present but a no-op
-//     in Phase A; needs the netpoller to be useful.
+// **What is genuinely absent** (re-measured 2026-09-06; the two other
+// entries this list used to carry were fixed long before, which is the
+// reason to distrust a list like this and re-run the greps):
+//   - IPv6: `TCPAddr` stores four octets and `parse_ipv4` is the only
+//     literal parser, so a v6 literal fails at the parse boundary.
+//   - UDP / Unix domain: TCP only, and enforced — `dial_deadline`
+//     rejects any network but `tcp`/`tcp4`. There is no `UDPConn`,
+//     `UDPAddr`, `ListenUDP` or `DialUDP` anywhere in the tree. DNS
+//     sends its own UDP datagrams through the netpoller directly; that
+//     is not a public UDP API.
+//
+// Fixed since, and no longer limitations: DNS resolution (a hostname
+// dials — `parse_dial_addr` falls through to `dnsclient::lookup_a`),
+// and deadlines (`SetDeadline` arms `netpoll::set_deadline`, it is not
+// a no-op).
 
 #![allow(non_snake_case)]
 

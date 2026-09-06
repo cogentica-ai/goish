@@ -94,10 +94,14 @@ per-P, and an HTTP server with an allocation-free hot path.
   external review and no side-channel analysis. See [SECURITY.md](SECURITY.md).
 - **Not all of Go.** `crypto/` and `net/http` are complete. The rest of `net`, `encoding`
   and `os` are partial — the [coverage table](#coverage-measured) gives the per-subtree
-  figures. What is ported is almost all anchor-verified: 103 of 5,826 ported declarations
-  (1.8%) are credited by a name match with no `// go:` anchor behind them, and they cluster
-  in `runtime/debug`, `os/user`, `embed`, `maps` and `runtime`. Coverage reports mark those
-  as UNVERIFIED.
+  figures. What is ported is almost all anchor-verified: 79 of 5,826 ported declarations
+  (1.4%) are credited by a name match with no `// go:` anchor behind them, and they cluster
+  in `runtime/debug` (19), `runtime` (15), `os/user` (13) and `embed` (12) — subtrees whose
+  bodies are goish's own runtime rather than Go's. Coverage reports mark those as
+  UNVERIFIED.
+- **IPv4 only, TCP only.** `net.TCPAddr` stores four octets, `Dial` accepts `tcp` and
+  `tcp4`, and an IPv6 literal fails at the parse boundary. There is no public `UDPConn` or
+  Unix-domain socket. `net/http`, `crypto/tls` and `goginx` all inherit this.
 - **Not the Go compiler.** You write Rust that reads like Go, using goish's `string`,
   `slice<T>`, `map<K,V>` and macros. It does not compile `.go` files.
 
@@ -308,7 +312,7 @@ side-channel analysis. Read this before trusting goish with anything.
 - **`context`**: `Background`, `WithCancel` / `WithTimeout` / `WithDeadline` / `WithValue`, `Cause`. `Done()` returns a real `chan<()>` that composes with `select!`; nil for non-cancellable contexts, exactly like Go.
 
 ### Networking & web
-- **`net`** (M17): TCP/UDP over raw sockets, integrated with an **epoll netpoller** - a blocking `Read`/`Write` parks the goroutine instead of the thread. The poller is sharded **per-P epoll** (nginx-model), with a dedicated blocking-poller M woken via `netpollBreak`, and `SetDeadline` handled by a slab scan - no global heap on the request path. `ListenConfig.Control` + `syscall.RawConn` expose pre-bind socket options (`SO_REUSEPORT` per-CPU listeners work out of the box).
+- **`net`** (M17): TCP over raw sockets (IPv4; there is no public UDP or Unix-domain API — `Dial` accepts `tcp`/`tcp4` only), integrated with an **epoll netpoller** - a blocking `Read`/`Write` parks the goroutine instead of the thread. The poller is sharded **per-P epoll** (nginx-model), with a dedicated blocking-poller M woken via `netpollBreak`, and `SetDeadline` handled by a slab scan - no global heap on the request path. `ListenConfig.Control` + `syscall.RawConn` expose pre-bind socket options (`SO_REUSEPORT` per-CPU listeners work out of the box).
 - **DNS resolver**: `LookupHost` / `LookupIP` / `LookupCNAME` / `LookupAddr` / `LookupTXT` / `LookupNS` / `LookupMX` / `LookupSRV` over a port of Go's `dnsclient_unix.go` - `/etc/resolv.conf` config, `dnsmessage` wire format, UDP round-trips through the netpoller.
 - **`crypto/tls`**: a verbatim port of Go's, client and server, TLS 1.2 + 1.3, backed by goish's own `crypto/{aes, sha256, ecdh, ed25519, x509, …}` ports. `tls.Conn` owns the ported connection directly, so `Handshake`/`Read`/`Write` are the ported drivers and record loops — no interior locking (Go's `handshakeMutex`/`in`/`out`/`activeCall` become `&mut self`), so a shared conn is locked once, by the layer that shares it. See [SECURITY.md](SECURITY.md).
 - **`net/http` server** (M18, production-hardened in M31): HTTP/1.1 with keep-alive, Go 1.22 `ServeMux` patterns (`"GET /users/{id}"` wildcards, GET-matches-HEAD, 405 + `Allow` on method mismatch), composable `Handler` middleware, `Flusher` chunked streaming, `TimeoutHandler`, `FileServer` + range requests, `httputil` reverse proxy, and an **allocation-free hot request path** through `bufio`. `ListenAndServeTLS` / `ServeTLS` serve HTTPS over the TLS 1.2 + 1.3 stack. Deployment-grade operations: `Shutdown(ctx)` draining every tracked listener and idle conn, `Close`, `RegisterOnShutdown`, live `IdleTimeout`, `BaseContext`/`ConnContext`, `ErrorLog`, `Expect: 100-continue`, HEAD body suppression, accept-failure backoff, `TCP_NODELAY` + keep-alive socket defaults, and `signal::NotifyContext` for SIGTERM-triggered graceful drain - see `examples/deploy_rest_api.rs` for the blessed pattern.

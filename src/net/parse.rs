@@ -1,9 +1,12 @@
 // net::parse — TCPAddr type + "host:port" parsers.
 //
-// IPv4 literals only in v1. `host` may be empty (binds wildcard for
-// Listen) or a dotted-decimal IPv4 (`127.0.0.1`, `0.0.0.0`).
-// Hostnames (no DNS in v1) and IPv6 literals (no IPv6 sockaddr yet)
-// return errors at the parse boundary.
+// IPv4 only. `host` may be empty (binds wildcard for Listen), a
+// dotted-decimal IPv4 (`127.0.0.1`, `0.0.0.0`), or a hostname:
+// `parse_dial_addr` falls through to `dnsclient::lookup_a` when
+// `parse_ipv4` rejects the host. This header used to say "Hostnames
+// (no DNS in v1) ... return errors at the parse boundary", twenty
+// lines above the code that resolves them. IPv6 literals do still
+// return an error — there is no v6 sockaddr here.
 //
 // Public surface: `TCPAddr` is the `net.TCPAddr` Go type but slim.
 

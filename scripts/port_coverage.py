@@ -546,10 +546,15 @@ def _facts(paths):
         # slices/ look like unported work when the API is there. Fifteen
         # such aliases tree-wide, all deliberate: slices' four sort
         # macros, log's Fatal family, http's ResolvePath.
-        mine |= set(ALIAS.findall(src))
+        # Tracked separately from `mine`: a re-export is evidence that
+        # the API is PUBLISHED, which is what coverage counts, but it is
+        # not evidence about where the body lives. The unanchored report
+        # below needs that distinction — see the comment there.
+        borrowed = set(ALIAS.findall(src))
         for grp in REEXPORT.findall(src):
-            mine |= {x.strip() for x in grp.split(",")
-                     if re.fullmatch(r"[A-Za-z_]\w*", x.strip())}
+            borrowed |= {x.strip() for x in grp.split(",")
+                         if re.fullmatch(r"[A-Za-z_]\w*", x.strip())}
+        mine |= borrowed
         if BY_DECL:
             # Credit anchored Recv.Method keys whose method exists in this
             # file as a fn under any receiver shape — see anchored_decl_keys.
@@ -589,7 +594,17 @@ def _facts(paths):
         # package is invented; one anchorless file inside a partly-ported
         # package slips through. So the names are tracked and reported.
         if n == 0:
-            unanchored |= {norm(i) for i in mine}
+            # Only names this file DEFINES. A `mod.rs` that is nothing
+            # but `pub use` lines has no anchors by construction, and
+            # counting its re-exports here reported anchored work as
+            # unverified: `maps::Keys` is anchored in `maps/iter.rs` and
+            # `sync::NewCond` in `sync/cond.rs`, but both are re-exported
+            # from a zero-anchor `mod.rs`, so both read UNVERIFIED. That
+            # was 24 of the 103 names the tree-wide report listed.
+            # Subtracting `borrowed` costs no coverage: the file that
+            # actually defines the name still contributes it, and if THAT
+            # file has no anchors the name is still reported.
+            unanchored |= {norm(i) for i in mine - borrowed}
         cited |= set(ANCHOR_GO.findall(src))
         loc += src.count("\n")
     return {"idents": {norm(i) for i in idents}, "raw": set(idents),
