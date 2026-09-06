@@ -10,7 +10,7 @@
 //     string->[]byte copy. goish's io::Writer already takes
 //     slice<byte> and there is no io::StringWriter to assert for.
 //
-// goishlint:ignore GOISH018 Replacer.buildOnce, appendSliceWriter.Write, appendSliceWriter.WriteString, stringWriter.WriteString, getStringWriter — two Go
+// goishlint:ignore GOISH018 Replacer.buildOnce, appendSliceWriter.Write, getStringWriter — two Go
 //     shapes with no goish counterpart. `buildOnce` exists so Go's
 //     `NewReplacer` can stay allocation-free and defer the trie build
 //     to the first `Replace` behind a `sync.Once`; a goish `&self`

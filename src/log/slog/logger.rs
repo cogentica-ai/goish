@@ -14,7 +14,7 @@
 // pairing loose key/value arguments needs Go's `any` type switch, and
 // `LogAttrs` covers the same ground with Attrs the caller built.
 //
-// goishlint:ignore GOISH018 New, Handler, Default, SetDefault, Debug, Info, Warn, Error, LogAttrs, DebugContext, InfoContext, WarnContext, ErrorContext, log, argsToAttrSlice, SetLogLoggerLevel, NewLogLogger, Value, LogValue, Handle, Enabled, WithAttrs, Write, clone, init — the package-level wrappers and the `...any` form are not ported; see the note above.
+// goishlint:ignore GOISH018 New, Handler, argsToAttrSlice, NewLogLogger, Value, LogValue, Handle, WithAttrs, Write, clone, init — the package-level wrappers and the `...any` form are not ported; see the note above.
 // goishlint:ignore GOISH021 Logger, LogValuer, defaultLogger, logLoggerLevel, handlerWriter — same. handlerWriter bridges log.Logger's io.Writer onto a slog Handler, which needs the package-level default this file does not carry.
 
 #![allow(non_snake_case)]

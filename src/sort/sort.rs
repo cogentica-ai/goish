@@ -3,7 +3,7 @@
 // sort.go — Interface, Sort, Stable, IsSorted, Reverse, the
 // three convenience Slice types, and the *AreSorted predicates.
 //
-// goishlint:ignore GOISH018 Next, nextPowerOfTwo, Ints, Float64s, Strings — `Next` and `nextPowerOfTwo` belong to `xorshift`, the PRNG pdqsort uses to break adversarial patterns, and goish's Sort is a heapsort. `Ints`, `Float64s` and `Strings` are macros in the module root rather than functions: they mutate in place, and goish keeps such call sites free of a visible `&mut`.
+// goishlint:ignore GOISH018 Next, nextPowerOfTwo — `Next` and `nextPowerOfTwo` belong to `xorshift`, the PRNG pdqsort uses to break adversarial patterns, and goish's Sort is a heapsort. `Ints`, `Float64s` and `Strings` were listed here too, described as "macros in the module root rather than functions". They are `pub fn`s in this file, anchored to sort.go, and taking `&mut slice<T>` — so the waiver was suppressing GOISH018 over three ported declarations, on a reason that had stopped being true. Re-checked 2026-09-06.
 // goishlint:ignore GOISH021 sortedHint, unknownHint, increasingHint, decreasingHint, xorshift, lessSwap — pdqsort's internals: the hint it passes down about a partition's existing order, its PRNG, and the closure pair `Slice` builds to drive the generated `zsortfunc.go`. goish's Slice delegates to Rust's sort, which needs none of them.
 
 extern crate alloc;

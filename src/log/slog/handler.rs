@@ -7,7 +7,7 @@
 // share. `TextHandler` and `JSONHandler` themselves live one file each,
 // as in Go.
 //
-// goishlint:ignore GOISH018 Enabled, Handle, WithAttrs, WithGroup, appendError, free, newHandleState — `Enabled`/`Handle`/`WithAttrs`/`WithGroup` are the Handler impls, which live on TextHandler and JSONHandler in their own files; `free`/`newHandleState` are Go's buffer-pool lifecycle, which goish has no pool for; `appendError` and `newDefaultHandler` belong to the default handler, which is not ported.
+// goishlint:ignore GOISH018 appendError, free, newHandleState — `Enabled`/`Handle`/`WithAttrs`/`WithGroup` are the Handler impls, which live on TextHandler and JSONHandler in their own files; `free`/`newHandleState` are Go's buffer-pool lifecycle, which goish has no pool for; `appendError` and `newDefaultHandler` belong to the default handler, which is not ported.
 // goishlint:ignore GOISH021 DiscardHandler, Handler, discardHandler, groupPool — `Handler` and `discardHandler` are declared in the module root; `groupPool` is Go's sync.Pool, which goish allocates instead; `DiscardHandler` and `defaultHandler` are not ported.
 
 #![allow(non_snake_case)]

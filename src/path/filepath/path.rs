@@ -3,7 +3,7 @@
 // path.go — ToSlash, FromSlash, VolumeName, Abs, Rel, Walk,
 // WalkDir, SkipDir and SkipAll.
 //
-// goishlint:ignore GOISH018 Clean, Split, Join, Ext, Base, Dir, IsAbs, SplitList, Localize, unixAbs, readDirNames — Clean/Split/Join/Ext/Base/Dir/IsAbs are re-exported from the slash-only `path` sibling by the module root: on Linux they are byte-identical, and Go only declares them twice because Windows needs volume names and a backslash separator. SplitList's body is in path_unix.rs, Localize's wrapper is here and its check is `io/fs.ValidPath`, `unixAbs` is inlined into `Abs` (its only caller), and `readDirNames` is inlined into `walk_helper` (likewise).
+// goishlint:ignore GOISH018 Clean, Split, Join, Ext, Base, Dir, IsAbs, SplitList, unixAbs, readDirNames — Clean/Split/Join/Ext/Base/Dir/IsAbs are re-exported from the slash-only `path` sibling by the module root: on Linux they are byte-identical, and Go only declares them twice because Windows needs volume names and a backslash separator. SplitList's body is in path_unix.rs, Localize's wrapper is here and its check is `io/fs.ValidPath`, `unixAbs` is inlined into `Abs` (its only caller), and `readDirNames` is inlined into `walk_helper` (likewise).
 // goishlint:ignore GOISH021 Separator, ListSeparator, WalkFunc, lstat — Separator and ListSeparator are declared in the module root beside the re-exports they belong with; `WalkFunc` is Go's named function type, which goish expresses as the `F: FnMut(...)` bound on `Walk`; and `lstat` is Go's `var lstat = os.Lstat`, a seam that exists only so Go's own tests can swap it.
 
 extern crate alloc;

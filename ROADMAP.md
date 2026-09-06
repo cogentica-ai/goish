@@ -959,6 +959,47 @@ starts with the method would let `write` claim `writeBytes`.
 names, and five anchors naming Go's receivers took the package from
 13/18 to 18/18.
 
+## 2b-iii. 129 GOISH018 waivers named declarations that exist
+
+Found 2026-09-06 while doing the §2b waiver triage this file asks for.
+Reading `flag`'s GOISH018 ignore — 58 names it says the port does not
+have — twelve of them are `fn`s in that same file, each carrying a
+`// go: sdk` anchor: `Parse`, `parseOne`, `PrintDefaults`,
+`UnquoteUsage`, `isZeroValue`, `numError`, `usage`, `NFlag`, `Visit`,
+`Set`, `String`, `SetOutput`.
+
+A waiver naming a ported declaration is not merely untidy: GOISH018 is
+the rule that reports a DROPPED declaration, so every stale name is a
+declaration the rule can no longer speak about. If one of those twelve
+were deleted tomorrow, nothing would say so.
+
+Swept tree-wide with lint as the oracle rather than trusting the
+name-match, which is the same trap that once credited Go's
+`List.remove` to goish's `List.Remove`: remove from every GOISH018
+ignore any name that is both a `fn` in the file and anchored, then run
+`port_lint`. Anything genuinely needed fires as a new finding. Nothing
+did — **129 names across 13 files, and port_lint stayed OK with none
+new**, which is the proof that all 129 were dead.
+
+    testing/testing.rs 50   slog/logger.rs 14   textproto/reader.rs 12
+    slog/value.rs      10   slog/record.rs  8   testing/benchmark.rs 7
+    flag/flag.rs       12   sort/sort.rs    3   url/url.rs           2
+    …and four more
+
+Two of the reasons were false in the same way the names were.
+`sort`'s said `Ints`, `Float64s` and `Strings` are "macros in the module
+root rather than functions"; all three are `pub fn`s in that file,
+anchored to sort.go. `textproto/reader.rs`'s list had already been
+corrected in its prose earlier the same day while the waiver kept the
+names.
+
+What this does NOT resolve is the triage itself. `flag` keeps 43 names
+and they are ROADMAP case 4, blocked work rather than case 1: the
+package is a hand-written v1 FlagSet, and Go's `Var`/`Value` surface —
+`newBoolValue` and the ten other `newXValue` constructors, `BoolVar`
+and the ten other `XVar` binders — waits on the interface work, not on
+a decision. Waiving those would launder a real gap into 100%.
+
 ## 2c. `regexp` does not keep Go's linear-time guarantee
 
 Go's regexp documents that it "is guaranteed to run in time linear in

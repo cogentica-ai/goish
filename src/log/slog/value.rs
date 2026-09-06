@@ -5,7 +5,7 @@
 // **Partial port.** The typed Value constructors live in mod[rs] and
 // predate this file; only the group path is anchored here.
 //
-// goishlint:ignore GOISH018 Any, Bool, BoolValue, Duration, DurationValue, Equal, Float64, Float64Value, Group, Int64, Int64Value, IntValue, Kind, LogValuer, String, StringValue, Time, TimeValue, Uint64, Uint64Value, append, bool, duration, float, group, stack, str, time — not ported; only the declarations in this file are.
+// goishlint:ignore GOISH018 Any, Bool, Duration, Equal, Float64, Group, Int64, Kind, LogValuer, Time, Uint64, bool, duration, float, group, stack, str, time — not ported; only the declarations in this file are.
 // goishlint:ignore GOISH021 Kind, KindAny, KindBool, KindDuration, KindFloat64, KindGroup, KindInt64, KindLogValuer, KindString, KindTime, KindUint64, LogValuer, Value, kind, kindStrings, groupptr, stringptr, timeLocation, timeTime — same. The four
 // pointer-shaped types are Go's unsafe packing of a Value's payload;
 // goish carries the payload in `any` and has nothing to pack.
