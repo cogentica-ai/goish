@@ -3466,3 +3466,7 @@ path = "examples/http_ctx_cause_ref_smoke.rs"
 [[example]]
 name = "http_writeheader_code_ref_smoke"
 path = "examples/http_writeheader_code_ref_smoke.rs"
+
+[[example]]
+name = "fcgi_response_ref_smoke"
+path = "examples/fcgi_response_ref_smoke.rs"
