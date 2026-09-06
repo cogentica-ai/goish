@@ -6,17 +6,30 @@
 //   resp, err := http.Post(url, ct, body)    let (resp, err) = http::Post(url, ct, body);
 //   resp, err := client.Do(req)              let (resp, err) = client.Do(&req);
 //
-// Slim port consolidating Go 1.25 src/net/http/client.go (1040 LOC),
-// transport.go (3142 LOC, only the dial-and-read portion), and
-// response.go (371 LOC). Total goish-side: this single file.
+// This banner described a much smaller thing than the tree now holds,
+// and every line below was rewritten on 2026-09-06. It used to say:
 //
-// **Deviations from Go (v1):**
+//   "Slim port consolidating client.go, transport.go (only the
+//    dial-and-read portion) and response.go. Total goish-side: this
+//    single file."
+//   "No connection pool / idle reuse — each RoundTrip dials a fresh
+//    conn and closes it after the response."
+//   "No TLS (`https://`). Calls return an error if Scheme == https."
 //
-//   * No connection pool / idle reuse — each RoundTrip dials a fresh
-//     conn and closes it after the response. Ports for keepalive
-//     reuse defer to a future iteration; the wire-level state machine
-//     here is the right base.
-//   * No TLS (`https://`). Calls return an error if Scheme == "https".
+// None of the three is true. transport.go has its own 3130-line port in
+// transport.rs, carrying the idle pool — idleConn, idleLRU,
+// tryPutIdleConn, maxIdleConnsPerHost and the per-host cap — so
+// connections ARE reused. And https works: the transport dials TLS on
+// that scheme (transport.rs:56), the client handles an https->http
+// redirect downgrade here at the Scheme check below, and four examples
+// exercise it, including https_real_smoke against live endpoints and a
+// TLS-1.3-required one.
+//
+// **Deviations from Go that DO still hold:**
+//
+//   * The request body is read eagerly rather than streamed, which is
+//     ROADMAP section 0 A and the root of four separate limitations
+//     listed there.
 //   * No CookieJar. Cookies must be set via `req.AddCookie` and read
 //     via `resp.Cookies()` explicitly.
 //   * Request contexts are honored: `RoundTrip` fast-fails a done
