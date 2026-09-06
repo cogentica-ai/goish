@@ -204,7 +204,9 @@ pub(crate) fn syntax(msg: &'static str) -> error {
 
 // ─── BOOLEAN (asn1.go:56) ─────────────────────────────────────────────
 
-/// `parseBool` (asn1.go:56). Decodes a DER-encoded BOOLEAN.
+// go: sdk 1.25.5 encoding/asn1/asn1.go:56-75 parseBool
+/// Decodes a DER-encoded BOOLEAN. Exported here (Go keeps it
+/// unexported) so `asn1_marshal_smoke` can reach it.
 pub fn ParseBool(bytes: slice<byte>) -> (bool, error) {
     // Go: if len(bytes) != 1 { err = SyntaxError{"invalid boolean"}; return }
     if bytes.Len() != 1 {
@@ -220,6 +222,7 @@ pub fn ParseBool(bytes: slice<byte>) -> (bool, error) {
 
 // ─── INTEGER (asn1.go:79) ─────────────────────────────────────────────
 
+// go: sdk 1.25.5 encoding/asn1/asn1.go:81-92 checkInteger
 /// `checkInteger` (asn1.go:81). nil iff `bytes` is a valid DER INTEGER.
 pub fn CheckInteger(bytes: slice<byte>) -> error {
     // Go: if len(bytes) == 0 { return StructuralError{"empty integer"} }
@@ -239,6 +242,7 @@ pub fn CheckInteger(bytes: slice<byte>) -> error {
     crate::errors::nil
 }
 
+// go: sdk 1.25.5 encoding/asn1/asn1.go:96-115 parseInt64
 /// `parseInt64` (asn1.go:96). Treats `bytes` as big-endian signed int.
 pub fn ParseInt64(bytes: slice<byte>) -> (i64, error) {
     let err = CheckInteger(bytes.clone());
@@ -270,6 +274,7 @@ pub fn ParseInt64(bytes: slice<byte>) -> (i64, error) {
     (ret, crate::errors::nil)
 }
 
+// go: sdk 1.25.5 encoding/asn1/asn1.go:119-131 parseInt32
 /// `parseInt32` (asn1.go:119). Like `ParseInt64` but bounded to int32.
 pub fn ParseInt32(bytes: slice<byte>) -> (i32, error) {
     let err = CheckInteger(bytes.clone());
@@ -339,6 +344,7 @@ impl BitString {
     }
 }
 
+// go: sdk 1.25.5 encoding/asn1/asn1.go:197-212 parseBitString
 /// `parseBitString` (asn1.go:197). Parses an ASN.1 BIT STRING.
 pub fn ParseBitString(bytes: slice<byte>) -> (BitString, error) {
     let empty = BitString {
@@ -354,9 +360,22 @@ pub fn ParseBitString(bytes: slice<byte>) -> (BitString, error) {
     // Go: if paddingBits > 7 || (len==1 && paddingBits>0) ||
     //         bytes[len-1]&((1<<bytes[0])-1) != 0 { … "invalid padding bits …" }
     let n = bytes.Len();
+    //
+    // Go's `||` short-circuits, so `1<<bytes[0]` is never evaluated
+    // once `paddingBits > 7` is true. Computing the mask eagerly, as
+    // this did, gives Rust a shift of 32 or more for any BIT STRING
+    // whose first byte is >= 32 — `attempt to shift left with
+    // overflow`, a panic in a debug build, where Go returns a
+    // SyntaxError. e2e builds debug. BIT STRING is how X.509 carries
+    // signatures and public keys, so the input reaches this from a
+    // certificate. Ordered as Go orders it, the shift is only ever
+    // reached with paddingBits <= 7.
+    if paddingBits > 7 || (n == 1 && paddingBits > 0) {
+        return (empty, syntax("invalid padding bits in BIT STRING"));
+    }
     let last = bytes[n - 1];
-    let mask: byte = ((1u32 << bytes[0 as int]) - 1) as byte;
-    if paddingBits > 7 || (n == 1 && paddingBits > 0) || (last & mask) != 0 {
+    let mask: byte = ((1u32 << paddingBits) - 1) as byte;
+    if (last & mask) != 0 {
         return (empty, syntax("invalid padding bits in BIT STRING"));
     }
     // Go: ret.BitLength = (len(bytes)-1)*8 - paddingBits
@@ -493,6 +512,7 @@ pub fn OIDString(oi: &ObjectIdentifier) -> string {
     s.String()
 }
 
+// go: sdk 1.25.5 encoding/asn1/asn1.go:250-286 parseObjectIdentifier
 /// `parseObjectIdentifier` (asn1.go:250) — decode a DER-encoded OID.
 pub fn ParseObjectIdentifier(bytes: slice<byte>) -> (ObjectIdentifier, error) {
     // Go: if len(bytes) == 0 { … "zero length OBJECT IDENTIFIER" }
@@ -585,6 +605,7 @@ impl crate::reflect::Reflect for Flag {
 
 const MaxInt32: i64 = 0x7FFF_FFFF;
 
+// go: sdk 1.25.5 encoding/asn1/asn1.go:300-331 parseBase128Int
 /// `parseBase128Int` (asn1.go:300) — decode a base-128 varint at
 /// `bytes[init_offset..]`. Returns `(value, new_offset, err)`.
 pub fn ParseBase128Int(bytes: slice<byte>, init_offset: int) -> (int, int, error) {
@@ -626,6 +647,7 @@ pub fn ParseBase128Int(bytes: slice<byte>, init_offset: int) -> (int, int, error
 
 // ─── String parsers (asn1.go:382-533) ─────────────────────────────────
 
+// go: sdk 1.25.5 encoding/asn1/asn1.go:382-389 parseNumericString
 /// `parseNumericString` (asn1.go:382). Validates ASN.1 NumericString.
 pub fn ParseNumericString(bytes: slice<byte>) -> (string, error) {
     let n = bytes.Len();
@@ -648,6 +670,7 @@ pub(crate) fn isNumeric(b: byte) -> bool {
     (b'0' <= b && b <= b'9') || b == b' '
 }
 
+// go: sdk 1.25.5 encoding/asn1/asn1.go:401-410 parsePrintableString
 /// `parsePrintableString` (asn1.go:401). Validates PrintableString.
 pub fn ParsePrintableString(bytes: slice<byte>) -> (string, error) {
     let n = bytes.Len();
@@ -692,6 +715,7 @@ fn isPrintable(b: byte, allow_asterisk: bool, allow_ampersand: bool) -> bool {
         || (allow_ampersand && b == b'&')
 }
 
+// go: sdk 1.25.5 encoding/asn1/asn1.go:451-460 parseIA5String
 /// `parseIA5String` (asn1.go:451). Validates IA5String (ASCII).
 pub fn ParseIA5String(bytes: slice<byte>) -> (string, error) {
     let n = bytes.Len();
@@ -709,6 +733,7 @@ pub fn ParseIA5String(bytes: slice<byte>) -> (string, error) {
     (slice_to_string(&bytes), crate::errors::nil)
 }
 
+// go: sdk 1.25.5 encoding/asn1/asn1.go:466-482 parseT61String
 /// `parseT61String` (asn1.go:466). Treats input as Latin-1 and re-encodes
 /// to UTF-8 (matches Go and BoringSSL).
 pub fn ParseT61String(bytes: slice<byte>) -> (string, error) {
@@ -725,6 +750,7 @@ pub fn ParseT61String(bytes: slice<byte>) -> (string, error) {
     (slice_to_string(&buf), crate::errors::nil)
 }
 
+// go: sdk 1.25.5 encoding/asn1/asn1.go:488-493 parseUTF8String
 /// `parseUTF8String` (asn1.go:488). Validates UTF-8 input.
 pub fn ParseUTF8String(bytes: slice<byte>) -> (string, error) {
     // Go: if !utf8.Valid(bytes) { return "", errors.New("asn1: invalid UTF-8 string") }
@@ -738,6 +764,7 @@ pub fn ParseUTF8String(bytes: slice<byte>) -> (string, error) {
     (slice_to_string(&bytes), crate::errors::nil)
 }
 
+// go: sdk 1.25.5 encoding/asn1/asn1.go:499-533 parseBMPString
 /// `parseBMPString` (asn1.go:499). UCS-2-encoded; rejects out-of-BMP
 /// surrogate / non-character code points.
 pub fn ParseBMPString(bytes: slice<byte>) -> (string, error) {
@@ -843,6 +870,7 @@ impl crate::reflect::Reflect for RawContent {
 
 // ─── parseTagAndLength (asn1.go:551) ──────────────────────────────────
 
+// go: sdk 1.25.5 encoding/asn1/asn1.go:554-627 parseTagAndLength
 /// `parseTagAndLength` (asn1.go:554) — decode a DER tag + length pair.
 /// Returns `(parsed, new_offset, err)`.
 pub fn ParseTagAndLength(bytes: slice<byte>, init_offset: int) -> (TagAndLength, int, error) {

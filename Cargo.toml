@@ -3482,3 +3482,7 @@ path = "examples/hmac_reset_marshal_ref_smoke.rs"
 [[example]]
 name = "jsontext_utf8_ref_smoke"
 path = "examples/jsontext_utf8_ref_smoke.rs"
+
+[[example]]
+name = "asn1_bitstring_ref_smoke"
+path = "examples/asn1_bitstring_ref_smoke.rs"
