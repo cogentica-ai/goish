@@ -1,9 +1,65 @@
 // net/http/fs — FileServer / ServeFile / Dir.
 //
-// Slim line-by-line port of Go 1.25 src/net/http/fs.go (~1000 LOC,
-// goish slims to the static-content serving path most users need).
-// No Range support, no If-Modified-Since, no directory index HTML —
-// these are flagged for follow-up iterations.
+// Line-by-line port of Go 1.25 net/http/fs.go, 68 anchors over 1822
+// lines against Go's 1116.
+//
+// This header said "Slim ... No Range support, no If-Modified-Since, no
+// directory index HTML — these are flagged for follow-up iterations"
+// until 2026-09-06. All three had landed: `parseRange` and
+// StatusPartialContent, `checkIfModifiedSince` and
+// `checkPreconditions`, and `dirList`. The file is no longer slim in
+// any sense — it is larger than the Go it ports.
+//
+// ─── What has been diffed against Go, 2026-09-06 ─────────────────────
+//
+//   clean  containsDotDot, the guard ServeFile and ServeFileFS both run
+//          on r.URL.Path. Matches Go including the early
+//          `Contains(v, "..")` fast path, and its `isSlashRune` splits
+//          on BOTH '/' and '\\' — a backslash-only traversal is
+//          rejected, which is the case a '/'-only predicate would pass.
+//   clean  parseRange carries every guard Go has: the `i < 0`
+//          rejection, the `i > size` clamp for a suffix range, the
+//          `i >= size` no-overlap continue, `r.start > i`, the
+//          `i = size - 1` clamp, and the final noOverlap-and-empty
+//          check that returns errNoOverlap.
+//
+//   clean  Dir::Open is a faithful line-by-line port of the traversal
+//          defence: `path.Clean("/" + name)[1:]`, the ""-to-"." case,
+//          `Localize` returning errInvalidUnsafePath, the dir default,
+//          Join, and mapOpenError with filepath.Separator.
+//   clean  ioFS::Open matches Go, including that it does NOT clean the
+//          path itself — io/fs puts that on the FS implementation via
+//          ValidPath, and Go's version is identical.
+//
+//          That last one matters more than it looks. `http::FS(fsys)`
+//          wraps into ioFS, so the common idiom
+//          `http::FS(os::DirFS(dir))` reaches `dirFS::join` — and until
+//          2026-09-06 that join had neither of Go's checks: an empty
+//          root resolved against "/", and a NUL in the name was
+//          truncated by the kernel so the file OPENED was not the file
+//          VALIDATED. Both are fixed and pinned by
+//          examples/os_dirfs_ref_smoke.rs. The defect lived in `os` and
+//          was reachable through this server.
+//
+//   clean  checkPreconditions follows RFC 7232 section 6 in Go's order:
+//          If-Match, then If-Unmodified-Since, then If-None-Match with
+//          the GET/HEAD split, then If-Modified-Since, then If-Range.
+//          It called checkIfNoneMatch twice where Go evaluates it once
+//          in a switch; bound to a local now (the function is pure, so
+//          the behaviour was already correct).
+//   clean  dirList escapes exactly what Go escapes. `html_replace`
+//          covers & < > " ' with Go's own replacements, and every other
+//          byte passes through, so a UTF-8 filename survives. That is
+//          the whole defence between a filename and the listing.
+//   clean  serveContent carries Go's guards: the sniff of the first
+//          512 bytes only when Content-Type is unset, 416 on a
+//          parseRange error, and the `sumRangesSize > size` drop. Its
+//          one divergence is documented at the site — the multi-range
+//          body is materialised rather than streamed through a pipe,
+//          bounded by one file's size because that drop runs first.
+//
+// Not yet read against Go: the fileHandler serving path and
+// mapOpenError.
 //
 // Public API:
 //   pub struct Dir { … }                           // Go: type Dir string
@@ -113,7 +169,24 @@ impl FileSystem for Dir {
     }
 }
 
-/// Slim analogue of Go's `htmlReplacer` (fs.go:135).
+// No `// go: sdk` line here on purpose. htmlReplacer is declared in
+// server.go (2458-2466), and GOISH015 allows one Go file per .rs —
+// citing a second makes this file CLAIM server.go, which fired 130
+// GOISH018 and 60 GOISH021 findings for every declaration of
+// server.go's that fs.rs does not port. Measured, not guessed: the
+// anchor was added and `make lint` went from 0 to 191 new findings.
+// The reference below is prose for that reason.
+/// Go builds this with `strings.NewReplacer`; goish walks the bytes.
+/// The SET is identical — & < > " ' to &amp; &lt; &gt; &#34; &#39; —
+/// and every other byte passes through unchanged, so a UTF-8 filename
+/// survives intact.
+///
+/// This said "Slim analogue of Go's `htmlReplacer` (fs.go:135)" until
+/// 2026-09-06. It is not slim, it is exact; and htmlReplacer is
+/// declared in server.go, not fs.go. Escaping is the whole defence
+/// between a filename and the directory listing that renders it, so a
+/// note calling it approximate invites someone to trust it less than
+/// they should — or to "complete" it and diverge.
 fn html_replace(s: string) -> string {
     let mut b = strings::Builder::new();
     b.Grow(s.Len());
@@ -1035,7 +1108,15 @@ pub fn checkPreconditions(
         w.WriteHeader(StatusPreconditionFailed);
         return (true, string(""));
     }
-    if checkIfNoneMatch(w, r) == condFalse {
+    // Go: `switch checkIfNoneMatch(w, r)` — evaluated ONCE. This called
+    // it twice, once per arm, re-parsing the If-None-Match list on
+    // every conditional request that is not condFalse. The function is
+    // pure today (it only reads w.Header().Get("Etag")), so the two
+    // calls agree and the behaviour was correct; bound to a local so it
+    // stays correct if that ever stops being true, and so the header is
+    // parsed once.
+    let inm = checkIfNoneMatch(w, r);
+    if inm == condFalse {
         if r.Must().Method == "GET" || r.Must().Method == "HEAD" {
             writeNotModified(w);
             return (true, string(""));
@@ -1043,7 +1124,7 @@ pub fn checkPreconditions(
             w.WriteHeader(StatusPreconditionFailed);
             return (true, string(""));
         }
-    } else if checkIfNoneMatch(w, r) == condNone {
+    } else if inm == condNone {
         if checkIfModifiedSince(r, modtime) == condFalse {
             writeNotModified(w);
             return (true, string(""));
@@ -1314,8 +1395,17 @@ pub fn serveContent<C: crate::io::Reader + crate::io::Seeker>(
     // no borrowed per-part Writer — it exposes WritePart(header, body)
     // — so the parts are assembled into a buffer here instead. Same
     // bytes on the wire; the divergence is that a multi-range response
-    // is materialised rather than streamed, so a request for many
-    // large ranges holds them in memory.
+    // is materialised rather than streamed.
+    //
+    // The bound, since "holds them in memory" on its own reads as
+    // unbounded: the `sumRangesSize(&ranges) > size` check above has
+    // already run and dropped the ranges entirely if they total more
+    // than the file, so the buffer cannot exceed ONE file's size and a
+    // client cannot amplify beyond it by asking for overlapping ranges.
+    // What it does mean is that a range request against a large file
+    // holds that file in memory where Go streams it, which is a reason
+    // to bound file size at the handler rather than a hole a request
+    // can widen.
     let mut multipartBody: slice<byte> = slice::new();
     if len(&ranges) == 1 {
         // RFC 7233 §4.1: a server MUST NOT generate a multipart
