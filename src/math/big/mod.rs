@@ -944,11 +944,16 @@ impl Int {
     /// `(*Int).Int64()` — low 64 bits as a signed value (Go bit-truncates).
     pub fn Int64(&self) -> i64 {
         let mag = limbs_to_u64(&self.abs);
+        let v = mag as i64;
         if self.neg {
-            -(mag as i64)
-        } else {
-            mag as i64
+            // Go: `v := int64(low64(x.abs)); if x.neg { v = -v }`. Go's
+            // negation wraps, so x = -2^63 gives MinInt64 back. Rust's
+            // unary `-` TRAPS on that one input in a debug build, and
+            // e2e builds debug — `big.NewInt(0).SetString("-9223372036854775808", 10).Int64()`
+            // aborted where Go returns the value.
+            return v.wrapping_neg();
         }
+        return v;
     }
 
     /// `(*Int).Cmp(y)` — -1 / 0 / 1.
@@ -5597,8 +5602,14 @@ impl Float {
                     if prec > d.mant.len() as int {
                         prec = d.mant.len() as int;
                     }
-                    // fmt+'e'-'g' maps 'g'->'e', 'G'->'E'
-                    let efmt = fmt - b'g' + b'e';
+                    // Go: `fmt + 'e' - 'g'`, which maps 'g'->'e' and
+                    // 'G'->'E'. The ORDER is load-bearing in Rust:
+                    // written `fmt - b'g' + b'e'` this underflows for
+                    // 'G' (0x47 < 0x67) and panics in a debug build,
+                    // where adding first stays in range for every
+                    // format byte. Same shape as the reordering that
+                    // broke asn1's parseBitString.
+                    let efmt = fmt + b'e' - b'g';
                     return fmt_e(buf, efmt, prec - 1, &d);
                 }
                 if prec > d.exp as int {

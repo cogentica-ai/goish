@@ -86,6 +86,9 @@ example_timeout() {
 
 ARTIFACTS="${ARTIFACTS:-scripts/.e2e-artifacts}"
 FILTER="${FILTER:-.*}"
+# Ref smokes whose pinned Go behaviour IS a panic; see the note at the
+# rc=0 panic check below. Anchored so a substring cannot match.
+PANIC_EXPECTED='^(http_writeheader_code_ref_smoke)$'
 # Default skips: HTTP servers that don't self-terminate, very-large
 # stress workloads that take >TIMEOUT seconds, and tests whose
 # success requires external drivers.
@@ -209,13 +212,23 @@ for name in "${TARGETS[@]}"; do
     # panics in a debug build (and e2e builds debug). Its own ref smoke
     # would have reported rc=0 with the output simply stopping early.
     #
-    # Narrowed to *_ref_smoke deliberately. Those are pure Go
-    # comparisons: none of the 200 panics on purpose — checked, the 19
-    # that mention "panic" all do so in prose. The intentional
-    # panic+recover tests this rule would otherwise break
-    # (panic_recovery_smoke, defer_panic_smoke, http_panic_demo) are
-    # not ref smokes, so they keep the rc=0-wins behaviour above.
-    if [[ $rc -eq 0 && "$name" == *_ref_smoke ]] \
+    # Narrowed to *_ref_smoke, minus the ones that pin a PANIC as the
+    # Go behaviour under test. PANIC_EXPECTED is that list and every
+    # entry needs a reason:
+    #
+    #   http_writeheader_code_ref_smoke — Go's checkWriteHeaderCode
+    #     panics on an out-of-range status, and the smoke asserts what a
+    #     panicking handler does to the connection. The panic IS the
+    #     pinned behaviour.
+    #
+    # This list exists because the first version of this rule claimed no
+    # ref smoke panics on purpose, on the strength of grepping the
+    # examples for `panic!` and `Recover`. That cannot see a panic
+    # raised by the LIBRARY the example exercises, which is precisely
+    # the case here, and CI found the mistake rather than I did. It also
+    # found two real ones the same run — math/big's Int64 and %G
+    # formatting both trapped on overflow — so the rule stays.
+    if [[ $rc -eq 0 && "$name" == *_ref_smoke && ! "$name" =~ $PANIC_EXPECTED ]] \
        && echo "$out" | grep -q '^goish: panic$'; then
       panic=$((panic+1))
       if [[ ! -s "$first_log" ]]; then
