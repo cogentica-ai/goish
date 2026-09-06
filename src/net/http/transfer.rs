@@ -10,9 +10,11 @@
 // request-write path — a streaming request body with unknown length
 // goes out `Transfer-Encoding: chunked`.
 //
-// Not yet ported from transfer.go (readTransfer's read half):
-//   readTransfer, body.Read/readLocked/readTrailer/Close/
-//   unreadDataSizeLocked, bodyLocked, mergeSetHeader's caller side.
+// Not yet ported from transfer.go (readTransfer's read half),
+// re-counted 2026-09-06: body.readLocked, unreadDataSizeLocked and
+// bodyLocked. The list here also named readTransfer, readTrailer and
+// mergeSetHeader, all three of which are in this file now — a to-do
+// that outlived its work.
 
 #![allow(non_snake_case, non_camel_case_types)]
 

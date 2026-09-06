@@ -10,12 +10,21 @@
 //   });
 //   let _ = http::ListenAndServe(string(":8080"), &mux);
 //
-// One goroutine per connection (`go!(stack(N), …)`), blocking I/O.
-// HTTP/1.x only, no keep-alive in v1 (`Connection: close` injected
-// by ResponseWriter). The mux uses a flat exact-match table plus
-// longest-prefix tiebreak for `"/path/"` patterns — same algorithm
-// shape as Go's `ServeMux` (Go 1.22 simple form, pre-`{wildcard}`
-// patterns).
+// One goroutine per connection (`go!(stack(N), …)`). Not blocking
+// I/O: the conn is a `net::TCPConn`, so a read that would block parks
+// the goroutine on the netpoller and releases the M.
+//
+// HTTP/1.x, with keep-alive — `IdleTimeout`, `SetKeepAlivesEnabled`
+// and `doKeepAlives` are all here. The mux is Go 1.22's, wildcards
+// included: `parsePattern` and the precedence rules live in
+// `pattern.rs`, a port of Go's pattern.go.
+//
+// Three sentences stood here saying the opposite of each of those —
+// blocking I/O, "no keep-alive in v1 (`Connection: close` injected by
+// ResponseWriter)", and a flat exact-match mux "pre-`{wildcard}`
+// patterns". All three described the first version of this file and
+// survived the work that replaced it, which is what a capability
+// banner does if nothing re-measures it.
 
 #![allow(non_snake_case, non_camel_case_types)]
 

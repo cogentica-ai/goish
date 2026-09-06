@@ -24,7 +24,10 @@
 //     path in ftoa.go. Both files carry the slow path only, which is
 //     correct but not fast; the fast paths are recorded as open
 //     findings in scripts/lint_baseline.json.
-//   * ParseComplex / FormatComplex — no `complex` type yet.
+//
+// (`ParseComplex` / `FormatComplex` were listed here as unported for
+// want of a `complex` type. Both exist — `atoc.rs` and `ctoa.rs`, over
+// `types::complex128`.)
 //
 // v1 differences from Go semantics:
 //
