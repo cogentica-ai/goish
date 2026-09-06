@@ -24,9 +24,14 @@
 //   * `Exp` is square-and-multiply on top of the multi-precision `Mul`
 //     and `Mod`, so RSA-sized operands and moduli work.
 //
-// The one remaining limitation: `Exp` with a negative exponent panics
-// (it requires a modular inverse / extended-GCD, which is deferred).
-// Everything else is unrestricted.
+// That limitation is gone. This banner said "the one remaining
+// limitation: `Exp` with a negative exponent panics (it requires a
+// modular inverse / extended-GCD, which is deferred)". `GCD` and
+// `ModInverse` are both in this file, `Exp` uses them for y < 0, and
+// the panic was separately removed as a crash on attacker-chosen
+// input — a caller asking for an inverse that does not exist now gets
+// Go's unchanged-receiver convention, not an abort. See the note in
+// the `Exp` body.
 
 #![allow(non_snake_case)]
 

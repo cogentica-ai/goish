@@ -5,15 +5,20 @@
 //     net/textproto/textproto.go     (Error, ProtocolError, TrimString)
 //     net/textproto/header.go        (MIMEHeader)
 //     net/textproto/writer.go        (Writer, dotWriter, PrintfLine)
-//     net/textproto/reader.go        (Reader, ReadLine, ReadMIMEHeader — slim)
+//     net/textproto/reader.go        (Reader, ReadLine, ReadMIMEHeader,
+//                                       the dot readers, ReadResponse)
+//     net/textproto/pipeline.go      (Pipeline)
 //
-// Slim deviations:
-//   * `Conn`, `Pipeline` are not ported in v1: SMTP/NNTP framing is out
-//     of v1 scope.
+// Slim deviations (re-measured 2026-09-06):
+//   * `Conn` is not ported — the SMTP/NNTP client surface (Dial, Cmd,
+//     Close) has no consumer here. `Pipeline` WAS listed beside it as
+//     unported and is a seven-anchor port in `pipeline.rs`.
 //   * `Reader::DotReader` / `ReadCodeLine` / `ReadResponse` /
-//     `ReadDotBytes` / `ReadDotLines` are not ported (SMTP/NNTP-specific).
-//     The line + MIME-header surface (used by HTTP and net/mail) is
-//     present in `reader.rs`.
+//     `ReadDotBytes` / `ReadDotLines` were listed here as not ported.
+//     All five are in `reader.rs`, and the dot-encoding pair is pinned
+//     against Go by examples/textproto_dot_ref_smoke.rs. reader.rs's
+//     own header was corrected earlier the same day; this copy was not,
+//     which is what a fact duplicated across two files does.
 //   * `MIMEHeader` is `map<string, slice<string>>`. The map keys must
 //     already be canonicalized; the methods canonicalize for the caller.
 //   * `dotWriter` is a struct that writes to a referenced bufio writer

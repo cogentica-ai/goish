@@ -9,9 +9,16 @@
 //     global publish table and be served from any goroutine.
 //
 //   * `Func` (Go's `type Func func() any` with JSON-marshal-on-Read) is
-//     dropped — JSON-marshaling arbitrary `any` requires reflection
-//     not yet ported. Callers wanting a computed Var should implement
-//     `Var` directly on their own struct (the trait is public).
+//     dropped. The reason recorded here was "requires reflection not
+//     yet ported"; `reflect` IS ported, and the real obstacle is
+//     narrower and worth naming: `json::Marshal` is generic over
+//     `reflect::Reflect`, and `Reflect` has a `__reflect_type()` that
+//     takes no `self`, so `dyn Reflect` is not a type Rust will build.
+//     A `Func` returning the runtime's `Any` carrier therefore has
+//     nothing to hand `Marshal`. The same gap is documented at the top
+//     of encoding/asn1/marshal.rs. Callers wanting a computed Var
+//     should implement `Var` directly on their own struct (the trait
+//     is public).
 //
 //   * `Map.Add` and `Map.AddFloat` are dropped — Go relies on a
 //     runtime type assertion (`i.(*Int)`) to upgrade an empty entry to
