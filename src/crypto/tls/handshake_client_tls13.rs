@@ -1,4 +1,4 @@
-// goishlint:ignore GOISH018 handshake, processHelloRetryRequest, handleNewSessionTicket — the rest of clientHandshakeStateTLS13, which drives the whole exchange through the key schedule and the transcript; the live TLS 1.3 client below is a self-contained function, not a port of these. See ROADMAP.md.
+// goishlint:ignore GOISH018 handshake, processHelloRetryRequest, handleNewSessionTicket — the rest of clientHandshakeStateTLS13, which drives the whole exchange through the key schedule and the transcript; the self-contained TLS 1.3 client below is not a port of these. It was described here as the LIVE client and is not: tls::Dial goes Conn::Handshake -> handshakeContext -> clientHandshake -> the ported clientHandshakeStateTLS13. The invented one is reachable only through the do_client_handshake* functions mod.rs exports, which is a public surface and so still worth auditing, but it is not what a dialled connection runs. See ROADMAP.md.
 // crypto/tls/handshake_client_tls13.rs — TLS 1.3 client handshake.
 //
 // Port of:
@@ -467,12 +467,31 @@ fn verify_cert_verify(
             }
         }
         _ => {
-            // For unknown sig_alg: log and skip verification (InsecureSkipVerify for unknown)
+            // An unrecognised signature_algorithm is a REFUSAL, not a
+            // pass. This arm used to log a warning and return nil,
+            // which is success: CertificateVerify is the step that
+            // proves the peer holds the private key for the
+            // certificate it sent, so skipping it means any party
+            // holding a copy of a server's public certificate — public
+            // data — could complete the handshake as that server by
+            // naming an algorithm this match did not list.
+            //
+            // Go rejects before it ever dispatches:
+            // handshake_client_tls13.go line 680 refuses a scheme that
+            // is not in supportedSignatureAlgorithms with
+            // alertIllegalParameter, and line 686 treats an
+            // unrecognised scheme as alertInternalError. There is no
+            // path in Go where an unknown algorithm verifies.
+            //
+            // Not reachable from tls::Dial — that runs the ported
+            // clientHandshake — but this function belongs to the
+            // invented handshake that mod.rs exports publicly, so a
+            // caller can reach it.
             tls_debug!(
-                "[tls13-debug] WARNING: unknown sig_alg=0x%04x — skipping verification\n",
+                "[tls13-debug] unknown sig_alg=0x%04x — refusing\n",
                 sig_alg as u64
             );
-            crate::errors::nil
+            crate::errors::New("tls13: certificate used with invalid signature algorithm")
         }
     }
 }
