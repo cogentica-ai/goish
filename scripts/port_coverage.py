@@ -473,12 +473,31 @@ def draft_syms(src):
     return out
 
 
+def spelled(go_decl, raw):
+    """Does `raw` hold this Go declaration under a spelling goish allows?
+
+    Two are allowed. Verbatim is the rule (CONTRIBUTING.md §5). The one
+    sanctioned rename is snake_case, and only where Go's export rule made
+    two names that Rust cannot: `bytes.splitSeq` is `split_seq` here
+    because `SplitSeq` already took the camel-case spelling.
+
+    The fold goes ONE WAY — Go's name into snake_case, never goish's.
+    Folding both collapses `reset` onto `Reset`, which is the exact
+    substitution this is meant to catch.
+    """
+    if go_decl in raw:
+        return True
+    base = go_decl.rsplit(".", 1)[-1]
+    snake = re.sub(r"(?<!^)(?=[A-Z])", "_", base).lower()
+    return any(r.rsplit(".", 1)[-1] in (base, snake) for r in raw)
+
+
 def _facts(paths):
     idents, loc, anchors, cited, unanchored = set(), 0, 0, set(), set()
     waived, drafts = set(), set()
     for p in paths:
         src = open(p, errors="replace").read()
-        waived |= {norm(w) for w in WAIVED.findall(src)}
+        waived |= set(WAIVED.findall(src))
         drafts |= draft_syms(src)
         mine = rust_decl_idents(src) if BY_DECL else set(RSFN.findall(src))
         if BY_DECL:
@@ -505,7 +524,8 @@ def _facts(paths):
             unanchored |= {norm(i) for i in mine}
         cited |= set(ANCHOR_GO.findall(src))
         loc += src.count("\n")
-    return {"idents": {norm(i) for i in idents}, "loc": loc,
+    return {"idents": {norm(i) for i in idents}, "raw": set(idents),
+            "loc": loc,
             "nfiles": len(paths), "anchors": anchors, "cited": cited,
             "unanchored": unanchored, "waived": waived, "drafts": drafts}
 
@@ -645,8 +665,13 @@ def build(subtree, gr):
         # denominator — they are not remaining work — but are carried on
         # the row so they stay visible. See WAIVED.
         wv = r["waived"] if r else set()
-        waived = sorted(f for f in want if norm(f) in wv)
-        want = [f for f in want if norm(f) not in wv]
+        # EXACT, not `norm`. A waiver names one declaration, and `norm`
+        # is `.lower()`: `// go: waived Builder.grow` matched Go's
+        # `Builder.Grow` too and pulled a real, ported, exported
+        # function out of both numerator and denominator. strings read
+        # 108/113 instead of 110/115 from a single waiver line.
+        waived = sorted(f for f in want if f in wv)
+        want = [f for f in want if f not in wv]
         # A draft is present in the tree but unreviewed, so it counts as
         # neither ported nor missing-entirely: it is its own state, and
         # it stays OUT of the percentage. See DRAFT_LINE.
@@ -671,6 +696,14 @@ def build(subtree, gr):
             "gap_portable": len(missing) - len(missing_asm),
             "unanchored": sorted(f for f in hit
                                  if r and norm(f) in r["unanchored"]),
+            # `norm` is `.lower()`, so a Go declaration is credited to a
+            # goish name that differs from it only in case. Go's
+            # unexported `bufio.Reader.reset` was being credited to
+            # goish's public `Reader.Reset` — a DIFFERENT declaration,
+            # and one the package genuinely does not port. This never
+            # shows up as missing, so it is reported here instead.
+            "case_only": sorted(f for f in hit
+                                if r and not spelled(f, r["raw"])),
         })
     return rows
 
@@ -768,6 +801,16 @@ def main():
           f"{len(rows)} packages   {sum(r['go_loc'] for r in rows)} Go LOC vs "
           f"{sum(r['rs_loc'] for r in rows)} goish LOC   {ta} anchors")
     print(f"      {split}")
+    # A credit whose goish name differs from Go's only in case is a
+    # credit to a different declaration. It cannot appear in `missing`,
+    # so without this line nothing in the output would mention it.
+    co = [(r["pkg"], f) for r in rows for f in r["case_only"]]
+    if co:
+        print(f"      {len(co)} credited only by case — the goish name "
+              f"differs from Go's in case alone, so the port named is "
+              f"NOT the declaration counted:")
+        for pkg, f in co:
+            print(f"        {pkg}: {f}")
 
 
 if __name__ == "__main__":

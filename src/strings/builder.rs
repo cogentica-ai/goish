@@ -156,3 +156,5 @@ impl io::Writer for Builder {
         return (n, nil);
     }
 }
+
+// go: waived Builder.grow — the reallocation half of `Grow`, which here is `Vec::reserve(n)`: same guarantee, no second function to name.

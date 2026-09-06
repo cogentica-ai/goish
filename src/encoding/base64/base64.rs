@@ -988,3 +988,5 @@ pub fn NewDecoder<R: crate::io::Reader>(enc: Encoding, r: R) -> Decoder<R> {
         outbuf: [0; 1024 / 4 * 3],
     };
 }
+
+// go: waived decodedLen — `Encoding.DecodedLen`'s whole body; goish branches on `self.padded()` in place and computes the same value for every n.

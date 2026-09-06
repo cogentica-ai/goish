@@ -444,3 +444,7 @@ fn optionsContext(opts: &dyn crypto::SignerOpts) -> string {
         None => string::default(),
     }
 }
+
+// go: waived newKeyFromSeed — the middle of Go's three-layer call, there to fill a caller-provided buffer; `NewKeyFromSeed` calls `fips::` directly because the fips call returns the key.
+
+// go: waived sign — as `newKeyFromSeed`: `Sign` calls `fips::Sign` directly.

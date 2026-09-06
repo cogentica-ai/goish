@@ -1138,3 +1138,5 @@ pub fn NewReadWriter<R: io::Reader, W: io::Writer>(r: Reader<R>, w: Writer<W>) -
         writer: w,
     };
 }
+
+// go: waived Reader.reset — Go's shared struct-rebuild for `NewReaderSize` and `Reset`; goish's `Reset` assigns the fields in place and the constructor builds the struct literally.
