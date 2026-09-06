@@ -25,8 +25,22 @@
 //     constant-time `extractPadding` is now ported verbatim and the
 //     two results are folded before either is acted on. The same check
 //     also refused padding over 16 bytes, where TLS permits 255.
-//   * a discarded `rand::Read` result, which on failure left the
-//     per-record IV as zeros.
+//
+// A fourth was reported at the time and RETRACTED — a discarded
+// `rand::Read` result said to leave the per-record IV as zeros. It
+// does not: `crypto::rand::Read` matches Go's contract and calls
+// `fatal` on a read failure, which diverges, so it can neither return
+// a non-nil error nor short-read. The `let _ =` was correct. The
+// correction has been in the code at the IV draw for some time and
+// this header kept claiming four; it is three, and the retraction is
+// stated here because the next reader reaches this list first.
+//
+// Rediscovered independently on 2026-09-06 by the same reasoning that
+// produced it — five more `let _ = rand::Read(…)` in
+// handshake_client.rs and one in x25519_generate, all of which look
+// alarming (the x25519 one would fix the ECDHE private key to a
+// constant) and none of which can fire. That is what a misleading
+// header costs.
 //
 // Checked and found to MATCH Go, so the next reader need not redo it:
 //
