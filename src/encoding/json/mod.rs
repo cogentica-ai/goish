@@ -989,15 +989,95 @@ struct IndentCfg<'a> {
     indent: &'a str,
 }
 
+// go: none — goish-only: the iterative encoder. Go recurses here and
+// can afford to, because its own limit is enforced on the way IN.
+/// Encode one `Value`, using an EXPLICIT stack for composites.
+///
+/// This used to recurse — `encode_value` into `encode_array`, back
+/// into `encode_value` — one frame per level. Measured in a DEBUG
+/// build on an 8 MiB goroutine stack, a depth-3500 tree encoded and
+/// 4000 faulted, which is LESS THAN HALF what the recursive parser
+/// managed. That made the encoder, not the parser, what
+/// `maxNestingDepth` was really protecting, and it is why raising the
+/// limit needed this as well as the parse and clone work.
+///
+/// The output is byte-for-byte what the recursive version produced:
+/// the same sorted keys, the same separators, the same indentation at
+/// the same depths. `Task::Lit` and `Task::Indent` exist so the
+/// closing bracket and its indent can be QUEUED when a composite is
+/// opened, which is the part recursion was doing implicitly on the
+/// way back up.
 fn encode_value(out: &mut Vec<byte>, v: &Value, cfg: Option<&IndentCfg>, _: &str, depth: usize) {
-    match v {
-        Value::Null => out.extend_from_slice(b"null"),
-        Value::Bool(true) => out.extend_from_slice(b"true"),
-        Value::Bool(false) => out.extend_from_slice(b"false"),
-        Value::Number(n) => encode_number(out, *n),
-        Value::String(s) => encode_string(out, s.as_bytes()),
-        Value::Array(a) => encode_array(out, a, cfg, depth),
-        Value::Object(o) => encode_object(out, o, cfg, depth),
+    enum Task<'a> {
+        Val(&'a Value, usize),
+        Lit(&'static [u8]),
+        Indent(usize),
+        Key(&'a string),
+    }
+    // Reverse order: the stack pops what should be emitted first.
+    let mut stack: Vec<Task> = alloc::vec![Task::Val(v, depth)];
+    while let Some(t) = stack.pop() {
+        match t {
+            Task::Lit(b) => out.extend_from_slice(b),
+            Task::Indent(d) => {
+                if let Some(c) = cfg {
+                    write_newline_indent(out, c, d);
+                }
+            }
+            Task::Key(k) => {
+                encode_string(out, k.as_bytes());
+                out.push(b':');
+                if cfg.is_some() {
+                    out.push(b' ');
+                }
+            }
+            Task::Val(v, d) => match v {
+                Value::Null => out.extend_from_slice(b"null"),
+                Value::Bool(true) => out.extend_from_slice(b"true"),
+                Value::Bool(false) => out.extend_from_slice(b"false"),
+                Value::Number(n) => encode_number(out, *n),
+                Value::String(s) => encode_string(out, s.as_bytes()),
+                Value::Array(a) => {
+                    let raw: &[Value] = a;
+                    if raw.is_empty() {
+                        out.extend_from_slice(b"[]");
+                        continue;
+                    }
+                    out.push(b'[');
+                    let inner = d + 1;
+                    stack.push(Task::Lit(b"]"));
+                    stack.push(Task::Indent(d));
+                    for (i, item) in raw.iter().enumerate().rev() {
+                        stack.push(Task::Val(item, inner));
+                        stack.push(Task::Indent(inner));
+                        if i > 0 {
+                            stack.push(Task::Lit(b","));
+                        }
+                    }
+                }
+                Value::Object(o) => {
+                    if o.Len() == 0 {
+                        out.extend_from_slice(b"{}");
+                        continue;
+                    }
+                    // Go's encoding/json marshals map keys in sorted order.
+                    let mut pairs: alloc::vec::Vec<(&string, &Value)> = o.__iter().collect();
+                    pairs.sort_by(|(a, _), (b, _)| a.as_bytes().cmp(b.as_bytes()));
+                    out.push(b'{');
+                    let inner = d + 1;
+                    stack.push(Task::Lit(b"}"));
+                    stack.push(Task::Indent(d));
+                    for (i, (k, val)) in pairs.iter().enumerate().rev() {
+                        stack.push(Task::Val(val, inner));
+                        stack.push(Task::Key(k));
+                        stack.push(Task::Indent(inner));
+                        if i > 0 {
+                            stack.push(Task::Lit(b","));
+                        }
+                    }
+                }
+            },
+        }
     }
 }
 
@@ -1102,66 +1182,6 @@ fn hex_digit(n: u8) -> u8 {
         return b'0' + n;
     }
     return b'a' + n - 10;
-}
-
-fn encode_array(out: &mut Vec<byte>, a: &slice<Value>, cfg: Option<&IndentCfg>, depth: usize) {
-    let raw: &[Value] = a;
-    if raw.is_empty() {
-        out.extend_from_slice(b"[]");
-        return;
-    }
-    out.push(b'[');
-    let inner_depth = depth + 1;
-    for (i, v) in raw.iter().enumerate() {
-        if i > 0 {
-            out.push(b',');
-        }
-        if let Some(c) = cfg {
-            write_newline_indent(out, c, inner_depth);
-        }
-        encode_value(out, v, cfg, "", inner_depth);
-    }
-    if let Some(c) = cfg {
-        write_newline_indent(out, c, depth);
-    }
-    out.push(b']');
-}
-
-fn encode_object(
-    out: &mut Vec<byte>,
-    o: &map<string, Value>,
-    cfg: Option<&IndentCfg>,
-    depth: usize,
-) {
-    if o.Len() == 0 {
-        out.extend_from_slice(b"{}");
-        return;
-    }
-    // Go's encoding/json marshals map keys in sorted order.
-    let mut pairs: alloc::vec::Vec<(&string, &Value)> = o.__iter().collect();
-    pairs.sort_by(|(a, _), (b, _)| a.as_bytes().cmp(b.as_bytes()));
-    out.push(b'{');
-    let inner_depth = depth + 1;
-    let mut first = true;
-    for (k, v) in pairs {
-        if !first {
-            out.push(b',');
-        }
-        first = false;
-        if let Some(c) = cfg {
-            write_newline_indent(out, c, inner_depth);
-        }
-        encode_string(out, k.as_bytes());
-        out.push(b':');
-        if cfg.is_some() {
-            out.push(b' ');
-        }
-        encode_value(out, v, cfg, "", inner_depth);
-    }
-    if let Some(c) = cfg {
-        write_newline_indent(out, c, depth);
-    }
-    out.push(b'}');
 }
 
 fn write_newline_indent(out: &mut Vec<byte>, cfg: &IndentCfg, depth: usize) {
@@ -1295,17 +1315,24 @@ fn parse_to_value(data: &[byte]) -> (Value, error) {
 ///   the whole tree, failing between 8000 and 9000. `from_value_owned`
 ///   moves the tree instead, so this path costs nothing per level.
 ///
-///   MARSHAL — still recursive, and the BINDING one. Encoding a deep
-///   `Value` recurses per level: 3500 survives, 4000 faults. That is
-///   less than half the parser's old ceiling, which means the limit
-///   was never really about the parser at all.
+///   ENCODE (Value) — fixed. `encode_value` recursed through
+///   `encode_array`/`encode_object`; it is a work stack now and those
+///   two are gone. This is the encoder behind `Compact`, `Indent` and
+///   `Value::String`.
 ///
-/// So 2000 stays, and the margin it buys is about 1.8x against the
-/// encoder — not the 4x this note used to claim against the parser.
-/// That number was measured on the wrong path.
+///   ENCODE (reflect) — still recursive, and the BINDING one.
+///   `Marshal` does not go through `encode_value` at all: it is
+///   generic over `reflect::Reflect` and walks `encode_reflect`, which
+///   recurses per level. Measured: a depth-3500 tree marshals, 4000
+///   faults. That is less than half the parser's old ceiling, so the
+///   limit was never really about the parser at all.
 ///
-/// Raising it to Go's 10000 needs the encoder iterative too. Until
-/// then a REFUSAL is the right failure: rejecting a document Go
+/// So 2000 stays, and the margin it buys is about 1.8x against
+/// `encode_reflect` — not the 4x this note once claimed against the
+/// parser. That number was measured on the wrong path.
+///
+/// Raising it to Go's 10000 needs `encode_reflect` iterative too.
+/// Until then a REFUSAL is the right failure: rejecting a document Go
 /// accepts is a divergence, and parsing one that then crashes on
 /// re-encode is a denial of service with an extra step.
 ///

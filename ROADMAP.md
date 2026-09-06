@@ -352,7 +352,8 @@ an 8 MiB goroutine stack:
 |---|--:|---|
 | `parse_value` into `parse_array`/`parse_object` | 8000 without a pivot, 8500 with | **fixed** — explicit frame stack, `maybe_grow` pivot removed |
 | `Value::clone` via `Unmarshal`'s `T::from_value(&raw)` | between 8000 and 9000 | **avoided** — `from_value_owned` moves the tree instead |
-| `Marshal` walking a deep `Value` | 3500 survives, 4000 faults | **open**, and the BINDING one |
+| `encode_value` through `encode_array`/`encode_object` | — | **fixed** — work stack; those two removed. Serves `Compact`, `Indent`, `Value::String` |
+| `encode_reflect`, which is what `Marshal` actually uses | 3500 survives, 4000 faults | **open**, and the BINDING one |
 
 The encoder was never mentioned in this section, and it is less than
 half the parser's ceiling. So `maxNestingDepth = 2000` was never really
@@ -360,7 +361,11 @@ about the parser: the margin it buys is about 1.8x against the
 encoder, not the 4x the old note claimed against the parser. That
 number was measured on the wrong path.
 
-Raising the limit to Go's 10000 needs the encoder iterative too.
+Raising the limit to Go's 10000 needs `encode_reflect` iterative too.
+Note which encoder that is: `Marshal` is generic over
+`reflect::Reflect` and never calls `encode_value`, so making the
+`Value` encoder iterative — worth doing, and done — moved the ceiling
+not at all. Finding that out cost a fourth pass.
 Verified that it is genuinely the only one left: with parse and clone
 both handled, depth 10000 parses and 10001 is refused, exactly Go's
 behaviour — and then the marshal of that tree faults. Parsing a
