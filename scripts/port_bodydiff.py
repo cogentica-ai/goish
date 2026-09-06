@@ -91,6 +91,16 @@ What the top of that list means, so it is not re-derived:
   persistConn.readLoop      -32. goish has no readLoop — ROADMAP 2h.
   Transport.dialConn        -59. Mostly `Close` in Go's error paths,
                             where goish's Drop handles the conn.
+  response.WriteHeader      -10. WAS REAL: checkWriteHeaderCode 0/1.
+                            The guard was ported, anchored, and called
+                            only from httptest's recorder, so the
+                            server put invalid status codes on the
+                            wire — WriteHeader(-1) emitted the
+                            syntactically invalid line
+                            `HTTP/1.1 00-1 status code -1`. Fixed and
+                            pinned by http_writeheader_code_ref_smoke.
+                            This is the one real find from the general
+                            mode so far, and it was below the top ten.
   ServeMux.findHandler      -18. FALSE POSITIVE. goish reaches the
                             same behaviour with a different call
                             structure. Diffed against Go across nine
@@ -101,6 +111,30 @@ What the top of that list means, so it is not re-derived:
                             covers 405-with-Allow and the /a/../admin
                             redirect, http_mux_routing_smoke covers
                             //double.
+
+Sampled elsewhere 2026-09-06, top entries only, all FALSE POSITIVES —
+recorded so the same six are not re-checked:
+
+  os.ReadDir, io/fs.ReadDir,   `SortFunc 0/1`. All three DO sort; they
+  ioutil.ReadDir               use Rust's `sort_by`, which the tool
+                               cannot see as SortFunc.
+  multipart.Reader.readForm    `CopyN 0/2`. Every bound is present —
+                               maxParts 1000, the +10MB maxMemoryBytes
+                               budget, the 200-byte mapEntryOverhead,
+                               ErrMessageTooLarge. Go's
+                               `maxFileMemoryBytes--` guard is absent
+                               and correctly so: it exists because Go
+                               computes `maxFileMemoryBytes+1` for
+                               CopyN, and goish compares instead of
+                               adding, so there is nothing to overflow.
+  base64 decodeQuantum         `CorruptInputError 0/8`. goish routes
+                               through a `corrupt(n)` helper; covered
+                               by base64_ref_smoke.
+  bufio Err* vars              `New 1/4`. Several vars share one Go
+                               anchor range, so each is charged for all
+                               the New calls in the block. Same
+                               artifact as net/http's transport.go
+                               err* block.
 """
 import os, re, sys, collections
 
