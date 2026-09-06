@@ -337,30 +337,42 @@ Two cheaper fixes have been considered and neither works:
   so even Go does not treat memoized backtracking as the general
   answer.
 
-## 2d. The JSON parsers recurse where Go's do not
+## 2d. Three recursions stand between the JSON limit and Go's
 
-`encoding/json`'s v1 scanner keeps an explicit `parseState` stack; both
-goish JSON parsers are recursive descent. Go can therefore afford
-`maxNestingDepth = 10000` at no stack cost, and goish cannot.
+**Worked 2026-09-06.** This section used to say the fix was Go's
+design — an explicit state stack instead of recursion — "after which
+both can carry Go's number". That was measured and is half right; the
+half it missed is the useful part.
 
-Measured 2026-09-05 in a DEBUG build — the profile `make e2e` uses — on
-an 8 MiB goroutine stack: without a pivot at the recursion site, depth
-8000 SIGSEGVs; with `maybe_grow`, 8000 survives and 8500 does not. The
-implementation ceiling is near 8200, below Go's limit.
+Doing it turned up a chain, each link only visible once the one before
+it was gone. All measured in a DEBUG build (what `make e2e` runs) on
+an 8 MiB goroutine stack:
 
-`encoding/json` therefore refuses past **2000**, roughly a 4x margin,
-and that divergence is deliberate: rejecting a document Go accepts is a
-divergence, crashing on one is a denial of service. `jsontext` keeps Go's
-10000 — its frames are leaner and 10000 was measured safe there.
+| recursion | ceiling | state |
+|---|--:|---|
+| `parse_value` into `parse_array`/`parse_object` | 8000 without a pivot, 8500 with | **fixed** — explicit frame stack, `maybe_grow` pivot removed |
+| `Value::clone` via `Unmarshal`'s `T::from_value(&raw)` | between 8000 and 9000 | **avoided** — `from_value_owned` moves the tree instead |
+| `Marshal` walking a deep `Value` | 3500 survives, 4000 faults | **open**, and the BINDING one |
 
-The fix is Go's design: replace the recursion with an explicit state
-stack, after which both can carry Go's number. That is a rewrite of the
-parser loop rather than a patch.
+The encoder was never mentioned in this section, and it is less than
+half the parser's ceiling. So `maxNestingDepth = 2000` was never really
+about the parser: the margin it buys is about 1.8x against the
+encoder, not the 4x the old note claimed against the parser. That
+number was measured on the wrong path.
 
-Worth noting for anyone verifying a change here: `PROFILE ?= debug` in
-the Makefile, so `make e2e` builds DEBUG. A `cargo build --release`
-check passes at depths the debug build faults on — which is how the
-first version of this limit reached CI.
+Raising the limit to Go's 10000 needs the encoder iterative too.
+Verified that it is genuinely the only one left: with parse and clone
+both handled, depth 10000 parses and 10001 is refused, exactly Go's
+behaviour — and then the marshal of that tree faults. Parsing a
+document that crashes on re-encode is a denial of service with an
+extra step, so the limit stays until the encoder is done.
+
+Not a constraint, checked so nobody re-checks it: dropping a deep
+tree. Rust's Drop glue recurses too, but its frames are small — 2000,
+5000 and 10000 all drop cleanly.
+
+`jsontext` keeps Go's 10000 and is unaffected; its decoder was already
+iterative.
 
 ## 2e. Ported, anchored, correct — and never called
 

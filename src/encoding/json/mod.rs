@@ -317,6 +317,21 @@ pub trait FromValue: Sized {
     /// typical Go-shape, with the second value carrying the type-mismatch
     /// or out-of-range error if any.
     fn from_value(v: &Value) -> (Self, error);
+
+    // go: none — goish-only: the OWNING form, so `Unmarshal` can hand
+    // the parsed tree over instead of copying it.
+    /// Same conversion, consuming the parsed `Value`.
+    ///
+    /// The default borrows and delegates, which is right for every
+    /// type that reads a few fields out of the tree. `Value` overrides
+    /// it to MOVE, and that override is what the nesting limit turns
+    /// on: `Unmarshal(data, &mut Value)` used to finish with
+    /// `v.clone()`, one stack frame per level over the whole tree,
+    /// which put the ceiling in the same place the recursive parser
+    /// had it.
+    fn from_value_owned(v: Value) -> (Self, error) {
+        return Self::from_value(&v);
+    }
 }
 
 // Identity — lets `Unmarshal(data, &mut json::Value)` work for the
@@ -324,6 +339,11 @@ pub trait FromValue: Sized {
 impl FromValue for Value {
     fn from_value(v: &Value) -> (Self, error) {
         (v.clone(), nil)
+    }
+    // The identity case, and the one that matters for depth: moving
+    // costs nothing per level where cloning cost a frame.
+    fn from_value_owned(v: Value) -> (Self, error) {
+        return (v, nil);
     }
 }
 
@@ -1167,7 +1187,10 @@ pub fn Unmarshal<T: FromValue>(data: &[byte], dest: &mut T) -> error {
     if err != nil {
         return err;
     }
-    let (v, err) = T::from_value(&raw);
+    // Owning form: for `T = Value` this MOVES the parsed tree rather
+    // than cloning it, which is what keeps a deeply nested document
+    // off the stack. Every other T takes the borrowing default.
+    let (v, err) = T::from_value_owned(raw);
     // Go: a null into a primitive leaves the target alone and reports
     // no error. See the note on ERR_NULL_NOOP.
     if err == ERR_NULL_NOOP {
@@ -1257,39 +1280,38 @@ fn parse_to_value(data: &[byte]) -> (Value, error) {
 /// Go: "This limits the max nesting depth to prevent stack overflow.
 /// This is permitted by RFC 7159 section 9." Go's value is 10000.
 ///
-/// goish's is 2000, and the reason MOVED without the number changing.
+/// goish's is 2000, and there are THREE recursions behind that number,
+/// not the one the note here used to name. Measured in a DEBUG build —
+/// which is what `make e2e` runs — on an 8 MiB goroutine stack.
 ///
-/// It used to be the parser. `parse_value` recursed into
-/// `parse_array`/`parse_object` where Go's scanner keeps an explicit
-/// `parseState` slice, so each level cost two stack frames; measured in
-/// a DEBUG build on an 8 MiB goroutine stack, depth 8000 SIGSEGVd
-/// without a `maybe_grow` pivot and 8500 did with one. That is fixed —
-/// `parse_value` is now an explicit frame stack, Go's design, and the
-/// pivot is gone with it.
+///   PARSE — fixed. `parse_value` recursed into
+///   `parse_array`/`parse_object` where Go's scanner keeps an explicit
+///   `parseState` slice. Depth 8000 SIGSEGVd without a `maybe_grow`
+///   pivot, 8500 with one. It is an explicit frame stack now and the
+///   pivot is gone.
 ///
-/// It did not buy the limit, because the parser was not the only thing
-/// that recursed. `Unmarshal` ends with `T::from_value(&raw)`, and for
-/// `T = Value` that is `v.clone()` — a recursive clone of the whole
-/// tree, one frame per level. Measured after the rewrite: 8000 fine,
-/// 9000 SIGSEGV. Almost exactly where the parser used to fail, so the
-/// effective ceiling is unchanged and 10000 would still crash on a
-/// document Go accepts.
+///   CLONE — avoided. `Unmarshal` ended with `T::from_value(&raw)`,
+///   and for `T = Value` that is `v.clone()`: one frame per level over
+///   the whole tree, failing between 8000 and 9000. `from_value_owned`
+///   moves the tree instead, so this path costs nothing per level.
 ///
-/// ROADMAP 2d said an explicit state stack would let this "carry Go's
-/// number". That was half right and the half is recorded here rather
-/// than left for the next attempt to rediscover: the parser had to
-/// become iterative AND `Value`'s clone does too, and the second is
-/// harder because it is derived rather than written.
+///   MARSHAL — still recursive, and the BINDING one. Encoding a deep
+///   `Value` recurses per level: 3500 survives, 4000 faults. That is
+///   less than half the parser's old ceiling, which means the limit
+///   was never really about the parser at all.
 ///
-/// 2000 keeps roughly the 4x margin the old note reasoned for, and for
-/// the same reason: a goroutine with a smaller stack than the main
-/// 8 MiB has less room still. A REFUSAL remains the right failure —
-/// rejecting a document Go accepts is a divergence, crashing on one is
-/// a denial of service.
+/// So 2000 stays, and the margin it buys is about 1.8x against the
+/// encoder — not the 4x this note used to claim against the parser.
+/// That number was measured on the wrong path.
 ///
-/// Checked and NOT the constraint: dropping a deep tree. Rust's Drop
-/// glue recurses too, but its frames are small — built one iteratively
-/// and dropped it at 2000, 5000 and 10000 with no fault.
+/// Raising it to Go's 10000 needs the encoder iterative too. Until
+/// then a REFUSAL is the right failure: rejecting a document Go
+/// accepts is a divergence, and parsing one that then crashes on
+/// re-encode is a denial of service with an extra step.
+///
+/// Checked and NOT a constraint: dropping a deep tree. Rust's Drop
+/// glue recurses, but its frames are small — 2000, 5000 and 10000 all
+/// drop cleanly.
 const maxNestingDepth: usize = 2000;
 
 struct Parser<'a> {
