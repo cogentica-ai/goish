@@ -18,6 +18,24 @@
 //   * `defaultCookieMaxNum` (3000) is a hard cap. Go lets the
 //     httpcookiemaxnum GODEBUG raise or disable it; goish has no
 //     godebug, so `cookieNumWithinMax` is the default branch only.
+// ─── What has been diffed against Go, 2026-09-06 ─────────────────────
+//
+//   clean  sanitizeCookieValue and its predicate. validCookieValueByte
+//          is byte-for-byte Go's — `0x20 <= b && b < 0x7f && b != '"'
+//          && b != ';' && b != '\\'` — which is what keeps a quote,
+//          semicolon, backslash or control byte out of a Set-Cookie
+//          header. The quoting rule (` ,` or an already-quoted value)
+//          matches too.
+//   clean  sanitizeCookieName rewrites CR and LF to '-' through the
+//          same Replacer pair Go uses. It does not REJECT a bad name,
+//          which the note at its definition already explains; that is
+//          Go's behaviour, not a slim.
+//   clean  the 3000-cookie cap is enforced at THREE call sites, the
+//          same three Go enforces it at (cookie.go:92, 236, 384). A
+//          limit that is defined and never consulted is a shape this
+//          tree has produced before, so the call sites were counted
+//          rather than assumed.
+//
 //   * Expires is rendered and parsed by hand rather than through
 //     time::Format / time::Parse — see the note above DAY_NAMES. The
 //     old note blamed those functions being unported; they are ported.

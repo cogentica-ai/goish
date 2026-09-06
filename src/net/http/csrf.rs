@@ -1,6 +1,28 @@
 // net/http/csrf — Cross-Origin Request Forgery protection.
 //
 // Reference: net/http/csrf.go (Go 1.25.5).
+//
+// ─── What has been diffed against Go, 2026-09-06 ─────────────────────
+//
+//   clean  Check's control flow matches Go's exactly: safe methods
+//          first, then the Sec-Fetch-Site switch with its empty /
+//          same-origin / none / default arms, then the Origin fallback
+//          with the fail-open note Go writes about HTTP->HTTPS.
+//   clean  the comparisons are BYTE-EXACT. `check_str` and `string_eq`
+//          both compare length then bytes, so `Sec-Fetch-Site:
+//          Same-Origin` does not match `same-origin` — a
+//          case-insensitive helper here would have been a CSRF bypass
+//          reachable by changing one letter of a header, which is why
+//          they were read rather than assumed.
+//   clean  isRequestExempt's sentinel test. Go compares
+//          `h == sentinelHandler` by identity; goish uses
+//          `Arc::ptr_eq(&h, &sentinelHandler())`, which only works
+//          because `sentinelHandler()` is a lazily-initialised
+//          SINGLETON returning clones of one Arc. Were it rebuilt per
+//          call — as `cookieNameSanitizer` legitimately is, being a
+//          pure value — every bypass pattern would silently stop
+//          matching.
+//
 // Line-by-line port. Slim deviations:
 //
 //   * Go uses `atomic.Pointer[Handler]` for the deny handler. Goish's
@@ -156,7 +178,7 @@ impl CrossOriginProtection {
             if self.isRequestExempt(req) {
                 return crate::errors::nil;
             }
-            return errCrossOriginRequest();
+            return errCrossOriginRequest.into();
         }
 
         // Go: origin := req.Header.Get("Origin")
@@ -175,7 +197,7 @@ impl CrossOriginProtection {
         if self.isRequestExempt(req) {
             return crate::errors::nil;
         }
-        errCrossOriginRequestFromOldBrowser()
+        errCrossOriginRequestFromOldBrowser.into()
     }
 
     // go: sdk 1.25.5 net/http/csrf.go:181-194 CrossOriginProtection.isRequestExempt
@@ -263,16 +285,13 @@ fn sentinelHandler() -> Arc<dyn Handler> {
 // ─── sentinel errors (csrf.go:173-177) ────────────────────────────────
 
 /// `errCrossOriginRequest` (csrf.go:174).
-pub fn errCrossOriginRequest() -> error {
-    crate::errors::New("cross-origin request detected from Sec-Fetch-Site header")
+crate::var! {
+    pub errCrossOriginRequest: error = "cross-origin request detected from Sec-Fetch-Site header";
 }
 
 /// `errCrossOriginRequestFromOldBrowser` (csrf.go:175).
-pub fn errCrossOriginRequestFromOldBrowser() -> error {
-    crate::errors::New(
-        "cross-origin request detected, and/or browser is out of date: \
-         Sec-Fetch-Site is missing, and Origin does not match Host",
-    )
+crate::var! {
+    pub errCrossOriginRequestFromOldBrowser: error = "cross-origin request detected, and/or browser is out of date: Sec-Fetch-Site is missing, and Origin does not match Host";
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────

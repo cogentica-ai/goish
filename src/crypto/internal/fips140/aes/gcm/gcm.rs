@@ -272,7 +272,19 @@ impl GCM {
 // result is not meaningful either way because Go's GCM never wraps it.
 /// Go: `var errOpen = errors.New("cipher: message authentication failed")`
 pub(crate) fn errOpen() -> error {
-    return crate::errors::New("cipher: message authentication failed");
+    // Go declares this as a package-level `var` (gcm.go:273), so it is
+    // ONE value and `errors.Is` against it compares identity. goish's
+    // `error` compares by Arc::ptr_eq, so a fresh `errors::New` per call
+    // can never match — which is what this did until 2026-09-06, while
+    // the comment above the sibling in crypto/cipher/gcm.rs asserted
+    // that both ports cached it. Only that one did.
+    use crate::runtime::spin::SpinLock;
+    static SLOT: SpinLock<Option<error>> = SpinLock::new(None);
+    let mut g = SLOT.lock();
+    if g.is_none() {
+        *g = Some(crate::errors::New("cipher: message authentication failed"));
+    }
+    return g.as_ref().unwrap().clone();
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:134-143 sliceForAppend
