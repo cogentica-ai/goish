@@ -854,9 +854,9 @@ impl response {
         g.chunked = true;
         // Go's chunkWriter.writeHeader calls declareTrailer for each
         // element of the `Trailer` response header as the head is
-        // written (server.go:1470-1476). Doing it here is what makes a
-        // handler's `w.Header().Set("Trailer", "X-Sum")` actually
-        // produce a trailer at the end.
+        // written, at server.go lines 1341-1344. Doing it here is what
+        // makes a handler's `w.Header().Set("Trailer", "X-Sum")`
+        // actually produce a trailer at the end.
         {
             let decls = self.header.Lock().Values(string("Trailer"));
             drop(g);

@@ -1,6 +1,7 @@
 // go: file archive/tar/format.go decls: Format.has, Format.mayBe, Format.mayOnlyBe, Format.mustNotBe, Format.String, formatNames, headerV7.name, headerV7.mode, headerV7.uid, headerV7.gid, headerV7.size, headerV7.modTime, headerV7.chksum, headerV7.typeFlag, headerV7.linkName, headerUSTAR.magic, headerUSTAR.version, headerUSTAR.userName, headerUSTAR.groupName, headerUSTAR.devMajor, headerUSTAR.devMinor, headerUSTAR.prefix, headerGNU.accessTime, headerGNU.changeTime, headerGNU.sparse, headerGNU.realSize, headerSTAR.prefix, headerSTAR.accessTime, headerSTAR.changeTime, headerSTAR.trailer, block.computeChecksum, block.getFormat, block.reset, headerGNU.magic, headerGNU.version, block.setFormat, blockPadding, sparseArray.entry, sparseArray.isExtended, sparseArray.maxEntries, sparseElem.offset, sparseElem.length
 //
-// format.go — Format, the on-disk `block` and its four views.
+// format.go — Format, the on-disk `block` (format.go line 160) and
+// its four views.
 //
 // goishlint:ignore GOISH018 toV7, toGNU, toSTAR, toUSTAR, toSparse, v7 - Go reaches a view of a block by casting the pointer, `(*headerV7)(b)`, and these five are that cast. Rust will not reinterpret one array type as another, so the four views are flattened onto `block` itself with a prefix per view and there is no cast to port. Every field the views expose is anchored individually to its Go accessor.
 // goishlint:ignore GOISH021 — file-wide, and only because one of the

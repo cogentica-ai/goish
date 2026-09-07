@@ -280,8 +280,9 @@ impl ServeMux {
     /// Shared body of `match_handler` and `Handler`: resolve a request
     /// through the routing tree, returning the handler, the matched
     /// pattern string, the pattern itself and the POSITIONAL wildcard
-    /// matches (Go's `pat`/`matches` pair, request.go:335-336 — named
-    /// resolution happens lazily in `Request.patIndex`, not here).
+    /// matches (Go's `pat`/`matches` pair, at request.go lines
+    /// 336-337 — named resolution happens lazily in
+    /// `Request.patIndex`, not here).
     fn find_node(
         &self,
         r: &Request,

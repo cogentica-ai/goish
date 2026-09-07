@@ -261,7 +261,8 @@ fn steal_work() -> Option<NonNull<G>> {
 /// *appears* empty (self.P empty, global empty) but actually has
 /// stealable work elsewhere — and never wakes again until the
 /// next unrelated `wake_idle_m`. Mirrors a slim subset of Go's
-/// "delicate dance" in `findRunnable` (proc.go:3635-3713) where
+/// "Delicate dance" in `findRunnable`, whose comment opens at
+/// proc.go line 3610 (`findRunnable` itself starts at 3377), where
 /// the spinning M re-checks all P runqs after dropping
 /// `nmspinning` and before truly parking.
 ///
@@ -1243,8 +1244,10 @@ fn any_runnable_anywhere() -> bool {
 /// Block in `epoll_wait` as `shard`'s designated blocking poller.
 /// Returns the HEAD ready G for the caller to `execute` directly on
 /// this M — Go's findRunnable does exactly this after its blocking
-/// netpoll: `gp := list.pop(); injectglist(&list); ...; return gp`
-/// (proc.go:3630-3650). Routing the head through goready instead
+/// netpoll: `gp := list.pop(); injectglist(&list); ...; return gp`,
+/// at proc.go lines 3762-3771 — the BLOCKING netpoll's arm, not the
+/// non-blocking one at 3487, which has the same four lines.
+/// Routing the head through goready instead
 /// cost a runq round-trip AND a spurious wake of another idle M per
 /// I/O wakeup (goready → wake_idle_m), which then raced this M to
 /// steal the G — pure churn in the one-conn-one-event case that

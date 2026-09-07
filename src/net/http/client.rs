@@ -1364,13 +1364,21 @@ pub type DialTLSContextFn = alloc::sync::Arc<
 /// Inert slots still exist — they are the ones whose comment says so.
 pub struct Transport {
     /// The idle-connection pool: Go's `idleMu` + `idleConn` +
-    /// `idleLRU` + `closeIdle` (transport.go:270-276), which its own
-    /// comments mark as guarded together. Keyed by
+    /// `idleLRU` + `closeIdle`, at transport.go lines 97-101, which
+    /// its own comments mark as guarded together. Keyed by
     /// `connectMethodKey.String()` because goish has no struct-keyed
-    /// map. STAGED — nothing puts a conn in it yet.
+    /// map.
+    ///
+    /// LIVE. This said "STAGED — nothing puts a conn in it yet" long
+    /// after `__try_put_idle` was wired into the response path
+    /// (client.rs, where a drained body banks its conn), and
+    /// http_conn_reuse_smoke and http_idlepool_smoke both depend on
+    /// it. The line also pointed at lines 270-276 of that file, which
+    /// are MaxResponseHeaderBytes — the wrong lines were what let the
+    /// wrong claim sit unread.
     pub(crate) __idle: Arc<crate::sync::Mutex<super::transport::idlePool>>,
-    /// Go's `connsPerHostMu` + `connsPerHost` + `connsPerHostWait`
-    /// (transport.go:278-281) — the MaxConnsPerHost limiter, a
+    /// Go's `connsPerHostMu` + `connsPerHost` + `connsPerHostWait`,
+    /// at transport.go lines 109-111 — the MaxConnsPerHost limiter, a
     /// separate lock from the idle pool in Go and kept separate here.
     pub(crate) __conns_per_host: crate::sync::Mutex<super::transport::connsPerHost>,
     /// Go's `MaxResponseHeaderBytes` (transport.go:288) — cap on the

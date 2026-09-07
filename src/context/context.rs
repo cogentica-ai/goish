@@ -362,13 +362,21 @@ impl Context for CancelCtx {
     }
 }
 
-// go: none — goish idiom: Go's `propagateCancel` registers the child
-//     on the parent's `children` map when the parent is itself a
-//     cancelCtx, and falls back to a watcher goroutine otherwise
-//     (context.go:294-323). goish always takes the watcher: one
-//     goroutine per derived context, which exits as soon as EITHER side
-//     fires, so nothing is held alive. `parentCancelCtx` and
-//     `removeChild` exist only to serve the map, so neither is ported.
+// go: none — goish idiom: Go's `propagateCancel` is a METHOD on
+//     `*cancelCtx`, at context.go lines 473-529, and it picks between
+//     THREE registrations: the parent's `children` map when the parent
+//     is itself a cancelCtx, the parent's own `AfterFunc` when it
+//     implements afterFuncer, and a watcher goroutine otherwise. goish
+//     always takes the watcher: one goroutine per derived context,
+//     which exits as soon as EITHER side fires, so nothing is held
+//     alive. `parentCancelCtx` and `removeChild` exist only to serve
+//     the map, so neither is ported.
+//
+//     The early return Go makes before any of that IS ported — a
+//     parent whose Done() is nil never fires, so no watcher is
+//     started; see the guard in `build_cancel_ctx`. Without it every
+//     context derived from Background would carry a goroutine that
+//     could never be woken.
 fn build_cancel_ctx(parent: &Arc<dyn Context>, own_deadline: Option<Time>) -> Arc<CancelCtx> {
     let me = Arc::new(CancelCtx {
         parent: parent.clone(),
@@ -675,7 +683,8 @@ struct ValueCtx {
 impl Context for ValueCtx {
     // go: none — goish idiom: Go's `valueCtx` EMBEDS the parent
     //     Context, so Deadline, Done and Err are promoted for free and
-    //     only Value is written out (context.go:744-748). Rust has no
+    //     only Value is written out; the struct is at context.go lines
+    //     742-745. Rust has no
     //     embedding, so the three forwards are spelled here.
     fn Deadline(&self) -> Option<Time> {
         return self.parent.Deadline();

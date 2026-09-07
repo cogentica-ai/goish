@@ -1805,7 +1805,8 @@ pub fn cloneTLSConfig(cfg: &crate::crypto::tls::Config) -> crate::crypto::tls::C
 // ─── the per-host connection limiter ────────────────────────────────
 
 // go: none — goish-only: the payload of Go's `connsPerHostMu`, i.e.
-// the two Transport fields it guards (transport.go:278-281). Keyed by
+// the two Transport fields it guards, at transport.go lines 109-111.
+// Keyed by
 // `connectMethodKey.String()` for the same reason the idle pool is.
 pub struct connsPerHost {
     /// Go: `connsPerHost map[connectMethodKey]int`

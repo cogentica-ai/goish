@@ -2117,7 +2117,8 @@ pub(super) fn buildCertExtensions(
 }
 
 // go: none — goish idiom: Go writes `ipAndMask` and `serialiseConstraints`
-// as closures inside `buildCertExtensions` (x509.go:1283-1338). Rust
+// as closures at x509.go lines 1285-1338, inside `buildCertExtensions`
+// (which starts at line 1182). Rust
 // closures cannot recurse into `Builder::AddASN1`'s `FnOnce` while also
 // capturing the enclosing `ret[n]` borrow, so both are lifted to
 // file-private functions with the same names, bodies and order.
