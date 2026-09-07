@@ -338,8 +338,11 @@ impl Duration {
 /// goish keeps the method on `Duration` next to its siblings and the
 /// 90-line buffer walk here.
 ///
-/// One deliberate divergence: goish writes ASCII "us" where Go writes
-/// "µs", because the rest of the formatter is ASCII-clean.
+/// The microsecond unit is Go's "µs" (U+00B5, 0xC2 0xB5), not ASCII
+/// "us". It was the latter, on the reasoning that the formatter is
+/// ASCII-clean; the reason described this function rather than the
+/// output anyone reads, and duration strings get compared with Go's.
+/// examples/duration_string_ref_smoke.rs pins all 21 rows.
 pub(crate) fn format_duration(d: int) -> string {
     // Largest representable Time in i64 nanoseconds → ~292 years; fits in 32 bytes.
     let mut buf = [0u8; 32];
@@ -370,11 +373,20 @@ pub(crate) fn format_duration(d: int) -> string {
             w = nw;
             w = fmt_int(&mut buf[..w], nu);
         } else if u < touint64(Millisecond.0) {
-            // us (ASCII; Go uses "µs" — see module docs)
+            // Go writes "µs" — U+00B5 MICRO SIGN, two bytes in UTF-8
+            // (0xC2 0xB5) — not ASCII "us". goish wrote "us" as a
+            // deliberate divergence "because the rest of the formatter
+            // is ASCII-clean", which was a reason about this function
+            // rather than about Duration: the PARSER beside it has
+            // always accepted the UTF-8 form (format.rs, the 0xC2 0xB5
+            // arm), and a duration string is compared, logged and
+            // diffed against Go's.
             w -= 1;
             buf[w] = b's';
             w -= 1;
-            buf[w] = b'u';
+            buf[w] = 0xb5;
+            w -= 1;
+            buf[w] = 0xc2;
             let (nw, nu) = fmt_frac(&mut buf[..w], u, 3);
             w = nw;
             w = fmt_int(&mut buf[..w], nu);

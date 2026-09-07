@@ -1380,6 +1380,10 @@ name = "bufio_writeto_readfrom_smoke"
 path = "examples/bufio_writeto_readfrom_smoke.rs"
 
 [[example]]
+name = "duration_string_ref_smoke"
+path = "examples/duration_string_ref_smoke.rs"
+
+[[example]]
 name = "encodedword_smoke"
 path = "examples/encodedword_smoke.rs"
 
