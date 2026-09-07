@@ -70,10 +70,12 @@ pub fn SignalString(sig: int) -> string {
     return string::from_static("signal ") + crate::strconv::Itoa(i64::from(sig));
 }
 
-// go: none — goish-only shape: Go declares `ProcessState` in
-// os/exec.go:207-211 holding a pid and a `syscall.WaitStatus`, and
-// reaches the bits through `Sys()`. goish has no WaitStatus type, so
-// the raw status is a field. The METHODS below are ports and carry
+// go: none — goish-only shape: Go declares `ProcessState` at
+// os/exec_posix.go lines 81-85, holding a pid, a `syscall.WaitStatus`
+// and a `*syscall.Rusage`, and reaches the bits through `Sys()`. goish
+// has neither of those types, so the raw status is a plain field and
+// there is no rusage at all — a different shape, not a port, which is
+// why this stays unanchored. The METHODS below are ports and carry
 // their own anchors.
 /// Go: "ProcessState stores information about a process, as reported
 /// by Wait."
@@ -95,9 +97,7 @@ impl ProcessState {
         return ProcessState { pid, status };
     }
 
-    // go: none — goish-only placement: Go's `ProcessState.Pid` is
-    // os/exec.go:214-216. goish has no .rs for os/exec.go — the name
-    // collides with the os/exec DIRECTORY — so the citation is prose.
+    // go: sdk 1.25.5 os/exec_posix.go:88-90 ProcessState.Pid
     /// Go: "Pid returns the process id of the exited process."
     pub fn Pid(&self) -> int {
         return self.pid;
@@ -177,9 +177,21 @@ impl ProcessState {
         } else if self.Signaled() {
             string::from_static("signal: ") + SignalString(self.Signal())
         } else if (self.status & 0xff) == 0x7f {
-            // Stopped: the signal is in the high byte.
-            string::from_static("stop signal: ")
-                + SignalString(int::from(i64::from((self.status >> 8) & 0xff)))
+            // Stopped: the signal is in the byte above, and for a
+            // ptrace stop the byte above THAT is the event number.
+            // Go appends it, so a traced child says which event
+            // stopped it instead of just "trace/breakpoint trap".
+            let stopsig = (self.status >> 8) & 0xff;
+            let mut r = string::from_static("stop signal: ")
+                + SignalString(int::from(i64::from(stopsig)));
+            let cause = (self.status >> 8) >> 8;
+            if stopsig == crate::syscall::SIGTRAP && cause != 0 {
+                r = r
+                    + string::from_static(" (trap ")
+                    + crate::strconv::Itoa(i64::from(cause))
+                    + string::from_static(")");
+            }
+            r
         } else if self.status == 0xffff {
             string::from_static("continued")
         } else {

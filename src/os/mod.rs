@@ -142,6 +142,11 @@ pub use dir::CopyFS;
 
 pub mod exec;
 pub mod exec_posix;
+// Go's names for these are `os.Process`, `os.ProcessState` and
+// `os.ErrProcessDone` — the package, not a submodule. goish files them
+// under exec_posix (one .rs per .go, §33), so re-export them here or
+// every caller spells a path Go does not have.
+pub use exec_posix::{ErrProcessDone, Process, ProcessState};
 pub mod signal;
 pub mod user;
 
