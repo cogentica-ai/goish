@@ -385,6 +385,16 @@ impl ServeMux {
         let mut methodSet: crate::gomap::map<string, bool> =
             crate::gomap::map::<string, bool>::new();
         s.tree.matchingMethods(&host, &path, &mut methodSet);
+        // Go (server.go:2839-2841): "matchOrRedirect will try
+        // appending a trailing slash if there is no match" — so the
+        // methods that would match THAT path are allowed here too.
+        // Without this second pass a mux carrying only "POST /x/"
+        // answered `GET /x` with 404 instead of 405 + Allow: POST,
+        // hiding a route that Go tells the caller about.
+        if !strings::HasSuffix(path.clone(), string("/")) {
+            s.tree
+                .matchingMethods(&host, &(path.clone() + string("/")), &mut methodSet);
+        }
         if methodSet.Len() > 0 {
             let mut allow: Vec<string> = Vec::new();
             for (m, _) in methodSet.__iter() {

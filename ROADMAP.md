@@ -1396,6 +1396,19 @@ therefore told the caller "http: transport read from server" where Go
 says "connection reset by peer". The write half already returned the
 real error; the read half now does too.
 
+`ServeMux.matchingMethods` was the seventh, and it is the one a user
+would have hit. It builds the Allow header of a 405, and Go runs the
+tree match TWICE — once for the path as given, again with a trailing
+slash appended, "because matchOrRedirect will try appending a trailing
+slash if there is no match". goish ran it once, so a mux carrying only
+`POST /x/` answered `GET /x` with 404 where Go answers 405 and names
+POST. A 404 says the route does not exist; a 405 says it exists under
+another method, and the wrong one sends a client hunting a bug that is
+not there. Fixed, and pinned by http_mux_allow_ref_smoke — five lines
+including the guard that matters: when the METHOD matches, the path
+must still REDIRECT (`GET /z` against a registered `GET /z/` is a 301),
+so the second match must not swallow the redirect path.
+
 Two of these are FIXED BUT NOT PINNED, worth stating plainly.
 Reaching either failing path needs a retry — an idle conn closed
 between the request being handed over and written — and reproducing
