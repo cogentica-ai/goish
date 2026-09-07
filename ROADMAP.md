@@ -815,6 +815,47 @@ unverified. `dnsclient.rs` and `dnsconfig.rs` have neither anchors nor
 a diffing smoke. Each file now carries the warning; the work is to
 re-verify against 1.25.5 and correct the line or the code.
 
+### A sharper one: grep the REMOVAL CONDITION
+
+Added 2026-09-07. The banner grep above finds dated claims. A subset of
+them state, in the comment itself, exactly what would make them false:
+
+    Remove this ignore when <X> lands | once <X> is ported
+    when <X> lands | until <X> exists
+
+That is ten comments in the tree, and SIX of their conditions had
+already been met:
+
+  * testing.rs, three of them — `Helper` "has no observable effect …
+    until callSite lands" (callSite landed and `frameSkip` consults
+    `helperPCs`), `Setenv`'s parallel guard "has to land with
+    Parallel" (both landed; `checkParallel` panics with Go's message),
+    and `newTestState` having "no runTests yet, and no field to store
+    a matcher in" (runTests exists, and the field is filled by
+    `runTestsWithMatch`).
+  * `ecdh/x25519.rs`'s shims, "once crypto/tls is ported" — crypto/tls
+    is 353/353, and what still uses them is section 1's INVENTED
+    client handshake, which is the actual dependency.
+  * `ed25519.rs`, "when fips140cache lands" — it landed, and never
+    caches by design, so wiring it would buy nothing. The ignore is
+    right; its reason was not.
+  * `net/http/server.rs`, fields "carried now … when it lands" — the
+    background reader landed, under a netpoller design that will never
+    set `inRead` or `hasByte`.
+
+And one that matters for planning rather than tidiness: `crypto/tls`
+deferred ECH round-trip coverage to "once computeAndUpdateOuterECHExtension
+lands". It is ported. The gap is a MISSING TEST, not a missing port,
+and those plan differently.
+
+Four were accurate and stay: ChaCha8 (math/rand/v2 is PCG only),
+internal/godebug, internal/testlog, and crypto/ssh, which is not in
+Go's standard library at all.
+
+Why this beats the banner grep: a removal condition is falsifiable by
+ONE grep, and it names the thing to grep for. No judgement about
+whether a limitation still holds — just "does X exist yet".
+
 ### A detector that does work: grep the banner, not the anchors
 
 Added 2026-09-06. The zero-anchor scan above fails because "no anchors"

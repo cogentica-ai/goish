@@ -190,8 +190,12 @@ impl T {
     /// it from `callSite`, which needs `frameSkip`, which walks the
     /// parent chain using `common`'s `runner`, `creator`, `level`,
     /// `cleanupName` and `cleanupPc` — fields goish's `T` does not
-    /// carry yet. So marking a helper is faithful and currently has no
-    /// observable effect; it stops being a no-op when callSite lands.
+    /// carry yet.
+    ///
+    /// This used to add "so marking a helper has no observable effect;
+    /// it stops being a no-op when callSite lands". callSite landed,
+    /// and `frameSkip` consults `helperPCs`, so a helper's frame IS
+    /// skipped when a failure is attributed. The claim outlived it.
     pub fn Helper(&self) {
         // Go: repeating code from callerName here to save walking a
         // stack frame.
@@ -1020,10 +1024,14 @@ impl T {
     /// test that set `HOME=""` and a test that unset `HOME` are
     /// different states, and `LookupEnv` can tell them apart.
     ///
-    /// Deviation: Go also refuses to run in a parallel test ("cannot
-    /// use Setenv in parallel tests"), since the environment is process
-    /// global. goish has no `t.Parallel`, so there is no such state to
-    /// check — when Parallel lands, that guard has to land with it.
+    /// Go refuses to run in a parallel test ("cannot use Setenv in
+    /// parallel tests"), since the environment is process global.
+    ///
+    /// This used to be listed as a DEVIATION, on the grounds that
+    /// goish had no `t.Parallel` and so no state to check. Both
+    /// landed: `Parallel` sets `isParallel`, and the `checkParallel()`
+    /// below walks the parent chain and panics with Go's message. The
+    /// guard is not missing; the note describing it as missing was.
     pub fn Setenv(&self, key: string, value: string) {
         self.checkFuzzFn(string::from_static("Setenv"));
         // Go: T.Setenv calls checkParallel before delegating to
@@ -2136,9 +2144,13 @@ pub struct testStateCounts {
 
 // go: sdk 1.25.5 testing/testing.go:2098-2105 newTestState
 // goishlint:ignore GOISH020 newTestState — Go's second parameter is
-// the *matcher, which runTests supplies; goish has no runTests yet, so
-// there is nothing to pass and no field to store it in. Restore the
-// parameter when runTests lands.
+// the *matcher, which runTests supplies. This used to say goish "has
+// no runTests yet, so there is nothing to pass and no field to store
+// it in"; both halves are now false. `runTests` exists, and the
+// `matcher` field is right there in testState — `runTestsWithMatch`
+// fills it after construction instead of through the constructor.
+// The ignore stays because the SIGNATURE still differs from Go's; the
+// plumbing does not.
 #[allow(non_snake_case)]
 pub fn newTestState(maxParallel: crate::types::int) -> Arc<testState> {
     return Arc::new(testState {

@@ -1,10 +1,21 @@
 // goishlint:ignore GOISH021 — `privateKeyCache` (ed25519.go:84) is a
-// `fips140cache.Cache[byte, ed25519.PrivateKey]` keyed by the address of
-// the key's first byte. goish has no crypto/internal/fips140cache port
-// yet (Wave C, 2 fns), so PrivateKey.Sign expands the key on every call
-// instead of reusing a cached expansion. Correctness-equivalent; slower
-// for repeated signing with one key. Remove this ignore when
-// fips140cache lands.
+// `fips140cache.Cache[byte, ed25519.PrivateKey]` keyed by the address
+// of the key's first byte, so PrivateKey.Sign can reuse an expansion.
+// goish's Sign calls fips::NewPrivateKey every time.
+//
+// This used to say "goish has no crypto/internal/fips140cache port yet
+// … remove this ignore when fips140cache lands". It landed, and the
+// ignore stays anyway, for a better reason: that port NEVER CACHES and
+// says so in its own header — Go's map is keyed by weak.Pointer and
+// evicted by runtime.AddCleanup, which need a garbage collector goish
+// does not have. Its Get always calls `new`, which is conforming
+// (Go documents Get as "MAY return the same value"). So holding a
+// Cache here would add a call that provably recomputes, and the
+// expansion-per-Sign cost would be exactly what it is now.
+//
+// The cost is unchanged and still worth naming: repeated signing with
+// one key re-expands it each time. Closing that needs a cache goish
+// can actually implement without weak references, not this one.
 // go: file crypto/ed25519/ed25519.go decls: PublicKey.Equal, PrivateKey.Public, PrivateKey.Equal, PrivateKey.Seed, PrivateKey.Sign, Options.HashFunc, GenerateKey, NewKeyFromSeed, Sign, Verify, VerifyWithOptions, from, eq, PublicKey, __goish_as_dyn_any, empty_slice, str_to_slice, optionsContext
 //
 // goishlint:ignore GOISH018 newKeyFromSeed, sign — in Go these are the

@@ -7142,8 +7142,11 @@ pub fn handshake_server_tls13_doHelloRetryRequest(
 // rejection — against a memConn so the alert path is live. The
 // outer-decrypt trial path needs a validly outer-extension-compressed
 // inner hello, which only the client-side ECH sealer
-// (computeAndUpdateOuterECHExtension, not yet ported) produces; it is
-// covered by the round trip once that lands.
+// (computeAndUpdateOuterECHExtension) produces. That sealer IS ported
+// now — ech.rs, called from handshake_client.rs — so the round-trip
+// coverage this defers to is writable and simply has not been written.
+// The gap is a MISSING TEST, not a missing port, which is a different
+// thing to plan around.
 // which: 0 inner, 1 no keys, 2 malformed.
 #[doc(hidden)]
 pub fn handshake_server_tls13_processECHClientHello(

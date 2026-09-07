@@ -2283,8 +2283,15 @@ pub struct connReader {
 
 // go: none — goish-only: the payload of Go's `mu sync.Mutex` on
 // connReader, restricted to the fields this slice ports.
-// The last three are Go's fields for the background reader, carried
-// now so the struct does not have to change shape when it lands.
+// `inRead` and `hasByte` are Go's fields for the background reader and
+// are deliberately NEVER SET here: the note above connReader explains
+// why — goish's background read is a netpoller MSG_PEEK watch that
+// consumes nothing, so there is no pipelined byte to stash and no
+// cond/inRead join to make. They used to be described as "carried now
+// so the struct does not have to change shape when it lands"; the
+// reader landed (startBackgroundRead below is anchored), under a
+// design that will not use them. `aborted` is the one of the three
+// that IS used.
 #[allow(dead_code)]
 struct connReaderState {
     /// Go: "bytes remaining"
