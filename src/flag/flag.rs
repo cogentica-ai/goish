@@ -1,4 +1,4 @@
-// go: file flag/flag.go decls: FlagSet.Uint64, Uint64, Arg, FlagSet.Func, FlagSet.BoolFunc, Func, BoolFunc, FlagSet.Int64, FlagSet.Uint, FlagSet.Duration, Parsed, Bool, Int, Int64, Uint, String, Duration, Parse, Set, FlagSet.Lookup, FlagSet.VisitAll, numError, UnquoteUsage, isZeroValue, FlagSet.Parse, FlagSet.parseOne, FlagSet.usage, FlagSet.NFlag, FlagSet.Visit, FlagSet.set, FlagSet.PrintDefaults, FlagSet.SetOutput
+// go: file flag/flag.go decls: FlagSet.Uint64, Uint64, Arg, FlagSet.Func, FlagSet.BoolFunc, Func, BoolFunc, FlagSet.sprintf, FlagSet.failf, FlagSet.Int64, FlagSet.Uint, FlagSet.Duration, Parsed, Bool, Int, Int64, Uint, String, Duration, Parse, Set, FlagSet.Lookup, FlagSet.VisitAll, numError, UnquoteUsage, isZeroValue, FlagSet.Parse, FlagSet.parseOne, FlagSet.usage, FlagSet.NFlag, FlagSet.Visit, FlagSet.set, FlagSet.PrintDefaults, FlagSet.SetOutput
 //
 // flag — the package-level CommandLine set, and the flag types goish's
 // hand-written FlagSet did not have.
@@ -236,6 +236,72 @@ pub fn Uint<N: Into<string>, U: Into<string>>(
 ) -> FlagHandle<crate::types::uint> {
     return CommandLine.Lock().Uint(name, default, usage);
 }
+
+// ─── Go's Value types, and what replaces them ───────────────────────
+//
+// Go gives each flag type its own `Value` implementation — boolValue,
+// intValue, stringValue and the rest — with String, Set and Get
+// methods, built by a `new*Value` constructor. The FlagSet holds them
+// behind the `Value` interface.
+//
+// goish holds a `FlagKind` instead: one closed enum whose arms ARE
+// those implementations. `FlagKind::Uint64(cell)` is uint64Value;
+// the `String()` match arm is uint64Value.String; the `Set` and
+// `apply_value` arms are its Set. The constructors build the arm
+// inline, so `new*Value` has nothing to be.
+//
+// This is waived from experience rather than inspection: two of these
+// arms were written today (Uint64 and Func/BoolFunc), each pinned
+// against a generated Go reference, which is what makes the mapping a
+// fact rather than a claim.
+//
+// go: waived boolValue.String — the FlagKind::Bool arm of String().
+// go: waived boolValue.Set — the FlagKind::Bool arm of Set().
+// go: waived boolValue.Get — FlagHandle::Get reads the cell.
+// go: waived boolValue.IsBoolFlag — the `isBool` test in parseOne,
+// which asks the same question Go asks of the Value.
+// go: waived intValue.String — the FlagKind::Int arm.
+// go: waived intValue.Set — same.
+// go: waived intValue.Get — FlagHandle::Get.
+// go: waived int64Value.String — the FlagKind::Int64 arm.
+// go: waived int64Value.Set — same.
+// go: waived int64Value.Get — FlagHandle::Get.
+// go: waived uintValue.String — the FlagKind::Uint arm.
+// go: waived uintValue.Set — same.
+// go: waived uintValue.Get — FlagHandle::Get.
+// go: waived uint64Value.String — the FlagKind::Uint64 arm.
+// go: waived uint64Value.Set — same.
+// go: waived uint64Value.Get — FlagHandle::Get.
+// go: waived float64Value.String — the FlagKind::Float64 arm.
+// go: waived float64Value.Set — same.
+// go: waived float64Value.Get — FlagHandle::Get.
+// go: waived durationValue.String — the FlagKind::Duration arm.
+// go: waived durationValue.Set — same.
+// go: waived durationValue.Get — FlagHandle::Get.
+// go: waived stringValue.String — the FlagKind::String arm.
+// go: waived stringValue.Set — same.
+// go: waived stringValue.Get — FlagHandle::Get.
+// go: waived funcValue.String — the FlagKind::Func arm, which returns
+// "" as Go's does.
+// go: waived funcValue.Set — the arm that calls the closure.
+// go: waived boolFuncValue.String — the FlagKind::BoolFunc arm.
+// go: waived boolFuncValue.Set — same.
+// go: waived boolFuncValue.IsBoolFlag — BoolFunc joins the `isBool`
+// test, which is why `-v` does not eat the next argument.
+// go: waived newBoolValue — FlagSet::Bool builds the arm inline.
+// go: waived newIntValue — FlagSet::Int.
+// go: waived newInt64Value — FlagSet::Int64.
+// go: waived newUintValue — FlagSet::Uint.
+// go: waived newUint64Value — FlagSet::Uint64.
+// go: waived newFloat64Value — FlagSet::Float64.
+// go: waived newDurationValue — FlagSet::Duration.
+// go: waived newStringValue — FlagSet::String.
+// go: waived sortFlags — VisitAll and Visit sort their names before
+// walking, which is where Go uses it (both were checked).
+//
+// newTextValue and textValue.* are NOT here: there is no textValue arm
+// and no Text handle, so that family is unported, not replaced. See
+// ROADMAP §2p.
 
 // ─── Go's *Var family, and what replaces it ─────────────────────────
 //
@@ -771,7 +837,7 @@ impl FlagSet {
         }
         let mut name: alloc::vec::Vec<byte> = sb[numMinuses..].to_vec();
         if name.is_empty() || name[0] == b'-' || name[0] == b'=' {
-            return (false, failf2(b"bad flag syntax: ", sb));
+            return (false, self.failf(b"bad flag syntax: ", sb));
         }
 
         // It's a flag. Does it have an argument?
@@ -799,7 +865,7 @@ impl FlagSet {
                     self.usage();
                     return (false, ErrHelp.into());
                 }
-                return (false, failf2(b"flag provided but not defined: -", &name));
+                return (false, self.failf(b"flag provided but not defined: -", &name));
             }
         };
 
@@ -827,7 +893,7 @@ impl FlagSet {
             } else {
                 let err = self.apply_value(def_idx, b"true");
                 if err != nil {
-                    return (false, failf2(b"invalid boolean flag ", &name));
+                    return (false, self.failf(b"invalid boolean flag ", &name));
                 }
             }
         } else {
@@ -841,7 +907,7 @@ impl FlagSet {
                 self.args.remove(0);
             }
             if !hasValue {
-                return (false, failf2(b"flag needs an argument: -", &name));
+                return (false, self.failf(b"flag needs an argument: -", &name));
             }
             let err = self.apply_value(def_idx, &value);
             if err != nil {
@@ -855,11 +921,52 @@ impl FlagSet {
         return (true, nil);
     }
 
+    // go: sdk 1.25.5 flag/flag.go:1050-1054 FlagSet.sprintf
+    /// goishlint:ignore GOISH020 sprintf — Go's is
+    ///     `sprintf(format string, a ...any)`: a format plus variadic
+    ///     arguments. Every caller here has already built its message
+    ///     (the parser knows the flag name), so this takes the finished
+    ///     bytes. The dropped parameter is Go's formatting, not
+    ///     information.
+    /// Go: format the message, write it to Output with a newline, and
+    /// return it. The WRITE is the point — a parse failure explains
+    /// itself on the output, it does not only travel as an error value.
+    fn sprintf(&self, msg: &[byte]) -> string {
+        let mut line: Vec<byte> = Vec::new();
+        line.extend_from_slice(msg);
+        line.push(b'\n');
+        self.__write_output(line);
+        return string::from_bytes(msg);
+    }
+
+    // go: sdk 1.25.5 flag/flag.go:1058-1062 FlagSet.failf
+    /// Go: "failf prints to standard error a formatted error and usage
+    /// message and returns the error." goish built the error and
+    /// printed NOTHING, so a user who mistyped a flag saw silence
+    /// where Go prints the reason and the flag list.
+    fn failf(&self, prefix: &[byte], rest: &[byte]) -> error {
+        let mut msg: Vec<byte> = Vec::new();
+        msg.extend_from_slice(prefix);
+        msg.extend_from_slice(rest);
+        let text = self.sprintf(&msg);
+        self.usage();
+        return errors::New(text);
+    }
+
     // go: sdk 1.25.5 flag/flag.go:1066-1072 FlagSet.usage
-    /// Go calls the FlagSet's Usage func, which defaults to printing
-    /// the defaults. goish has no settable Usage hook, so this is
-    /// `defaultUsage` directly.
+    /// Go calls the FlagSet's Usage func, which defaults to
+    /// `defaultUsage`. goish has no settable Usage hook, so this IS
+    /// defaultUsage.
+    ///
+    /// The header line is not decoration: Go prints "Usage of <name>:"
+    /// or, for an unnamed set, "Usage:" BEFORE the flag list
+    /// (flag.go:684-690). goish printed only the list, so `-h` output
+    /// differed from Go's on its very first line. This FlagSet carries
+    /// no name — see the ErrorHandling note in mod.rs, where the same
+    /// missing NewFlagSet parameter is the cause — so it always takes
+    /// Go's empty-name branch.
     fn usage(&self) {
+        self.__write_output(b"Usage:\n".to_vec());
         self.PrintDefaults();
     }
 

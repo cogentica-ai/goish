@@ -1783,6 +1783,27 @@ ErrorHandling enum, then honouring it in Parse — a public API change to
 a hand-written type, so it wants doing deliberately rather than as a
 side effect of the next flag port.
 
+**Two neighbouring defects, found while reading this and FIXED.** Both
+were about what a user SEES, and both hid the same way — the error
+value was right, so every existing assertion passed:
+
+  * `-h` printed the flag list with no header. Go's defaultUsage writes
+    "Usage of <name>:", or "Usage:" unnamed, first. flag_ref_smoke
+    drives PrintDefaults directly and asserts it byte for byte, so
+    nothing exercised the usage() path -h actually takes.
+  * a bad flag printed NOTHING. Go's failf writes the message to
+    Output and then the usage listing before returning the error, even
+    under ContinueOnError. goish returned an identical error value and
+    stayed silent, so a user who mistyped a flag saw nothing at all —
+    while flag_ref_smoke, which asserts those very errors, never looked
+    at the output buffer.
+
+Both are pinned now (flag_usage_ref_smoke, flag_failf_ref_smoke). The
+pattern is worth carrying: a gap can sit BETWEEN two well-tested
+things. PrintDefaults was checked byte for byte and the parse errors
+were checked by value; what neither covered was the path that joins
+them.
+
 ## 2c. `regexp` does not keep Go's linear-time guarantee
 
 Go's regexp documents that it "is guaranteed to run in time linear in
