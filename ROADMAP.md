@@ -1223,6 +1223,51 @@ surface; goish exports `Execve`, `Fcntl`, `Fork`, `Ioctl`,
 runtime. Crediting them is defensible and they are single-counted. They
 are listed here so the next audit does not re-open them.
 
+## 2b-v. 95 suppressions that suppress nothing
+
+Measured 2026-09-07, after the GOISH018 and GOISH021 name sweeps had
+removed 185 dead NAMES from waiver lists. This is the general version
+of that question: not "does this waiver name something that exists"
+but "does this waiver stop anything at all".
+
+Method, one lint run rather than hundreds: strip every
+comment-only `goishlint:ignore` line in `src/`, run `port_lint.py`, and
+collect the (file, rule) pairs that fire. Any pair that HAD an ignore
+and does NOT fire is inert — the rule would say nothing about that file
+even with the suppression gone.
+
+    comment-only (file, rule) ignores   399
+      fired when removed                295
+      never fired, rule ran elsewhere    95
+      rule never ran at all               9
+
+    GOISH018 28   GOISH019 28   GOISH014 12   GOISH021 11
+    GOISH020  9   GOISH017  6   GOISH023  1
+
+**The first attempt was wrong and the error is worth keeping.** It
+stripped whole LINES containing the marker, which for an inline
+suppression — `let fd32 = fd as i32; // goishlint:ignore GOISH005 …` —
+deletes the code that violates the rule along with the waiver for it.
+GOISH005, GOISH006 and GOISH008 then reported nothing and looked
+entirely dead, 50 pairs of them. Restricting the strip to lines that
+are comments start to finish is what makes the number mean anything.
+
+The nine "rule never ran" pairs are GOISH005/006/008/016/022, which
+`port_lint.py` does not enable — its FLAGS are `--enable-goish017` and
+`--enable-goish018`, and the second switches on 018/019/020/021 as a
+group. Those suppressions may well be load-bearing under a fuller
+goishlint invocation; this tool cannot say.
+
+**Removal is NOT the obvious follow-up, which is why this is a note and
+not a commit.** A waiver that no longer suppresses anything often still
+carries the only explanation of a divergence — `testing.rs`'s GOISH019
+on `M` describes exactly which fields Go's M holds and why goish's does
+not, and that paragraph is worth more than the suppression ever was.
+Ninety-five of these want reading one at a time: some are noise and
+should go, some should lose the marker and keep the prose as a plain
+comment. What must not happen is a bulk delete that takes the reasons
+with it.
+
 ## 2c. `regexp` does not keep Go's linear-time guarantee
 
 Go's regexp documents that it "is guaranteed to run in time linear in
