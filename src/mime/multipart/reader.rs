@@ -181,9 +181,12 @@ impl Reader {
                 // has been found.
                 let crlf = make_nl_dash_boundary(&self.boundary, false);
                 let lf = make_nl_dash_boundary(&self.boundary, true);
-                match find_subseq(&body_bytes[p..], &crlf) {
+                // Same matchAfterPrefix rule as the part scan: a
+                // preamble carrying a line that merely starts like the
+                // boundary must not open a part.
+                match find_boundary(&body_bytes[p..], &crlf) {
                     Some(off) => p += off + crlf.len(),
-                    None => match find_subseq(&body_bytes[p..], &lf) {
+                    None => match find_boundary(&body_bytes[p..], &lf) {
                         Some(off) => {
                             self.lf_only = true;
                             p += off + lf.len();
@@ -280,6 +283,8 @@ impl Reader {
         // this stops being true and maxMIMEHeaderSize has to be ported
         // with it.
         let mut maxHeaders: i64 = 10000;
+        // The header a continuation line would extend.
+        let mut last_key = string::new();
         loop {
             // Find next CRLF.
             let line_start = p;
@@ -307,6 +312,38 @@ impl Reader {
             if line.is_empty() {
                 break;
             }
+            // A line beginning with space or tab CONTINUES the header
+            // before it — RFC 5322's obsolete folding, which Go still
+            // accepts because textproto.ReadMIMEHeader reads a
+            // CONTINUED line, not a CRLF-delimited one. Splitting on
+            // CRLF alone made every folded header "malformed" and
+            // failed the whole part, not just that header.
+            //
+            // Go's join, measured: one space, then the continuation
+            // with its own leading whitespace removed, and the final
+            // value left-trimmed. That is why `X: a\r\n     b` is
+            // "a b" (the run collapses), `X: a\r\n ` keeps its
+            // trailing space, and `X: \r\n b` is "b" and not " b".
+            if line[0] == b' ' || line[0] == b'\t' {
+                let mut c_start = 0usize;
+                while c_start < line.len() && (line[c_start] == b' ' || line[c_start] == b'\t') {
+                    c_start += 1;
+                }
+                let cont = string::from_bytes(&line[c_start..]);
+                if last_key.Len() != 0 {
+                    let prev = header.Get(last_key.clone());
+                    let joined = prev + string(" ") + cont;
+                    let trimmed = crate::strings::TrimLeft(joined, string(" \t"));
+                    header.Set(last_key.clone(), trimmed);
+                    continue;
+                }
+                // A continuation with nothing to continue is malformed,
+                // exactly as a line with no colon is.
+                return (
+                    empty_part(),
+                    errors::New(string("multipart: malformed header")),
+                );
+            }
             // Parse "Key: Value".
             let colon = match line.iter().position(|b| *b == b':') {
                 Some(i) => i,
@@ -327,13 +364,14 @@ impl Reader {
             if maxHeaders < 0 {
                 return (empty_part(), super::formdata::ErrMessageTooLarge.into());
             }
+            last_key = key.clone();
             header.Add(key, value);
         }
 
         // 5. Body of this part runs until the next delimiter, which is
         //    preceded by the line ending this body is using.
         let nl_dash_boundary = make_nl_dash_boundary(&self.boundary, self.lf_only);
-        match find_subseq(&body_bytes[p..], &nl_dash_boundary) {
+        match find_boundary(&body_bytes[p..], &nl_dash_boundary) {
             Some(off) => {
                 let body_end = p + off;
                 let mut part_body = self.body.slice(p as int, body_end as int);
@@ -453,6 +491,46 @@ fn has_prefix(hay: &[u8], needle: &[u8]) -> bool {
         return false;
     }
     &hay[..needle.len()] == needle
+}
+
+// goishlint:ignore GOISH014 — this file is an UNANCHORED slim port;
+// anchoring one declaration would make it claim multipart.go
+// all-or-nothing. Go origin named in prose below.
+/// Go's `matchAfterPrefix` (multipart.go line 295) as a search: find
+/// the next occurrence of `needle` that is REALLY a boundary, not data
+/// that merely starts like one.
+///
+/// Go's rule is the byte after the boundary. Space, tab, CR or LF end
+/// a delimiter line; `--` makes it the final boundary; anything else
+/// means this is ordinary content and the part continues. Without the
+/// check, a part carrying a line like `--Bxyz` was truncated there and
+/// the parse then failed on the text after it as a malformed header —
+/// silent data loss followed by a confusing error.
+fn find_boundary(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    let mut from = 0usize;
+    while from <= hay.len() {
+        let rel = match find_subseq(&hay[from..], needle) {
+            Some(i) => i,
+            None => return None,
+        };
+        let at = from + rel;
+        let after = at + needle.len();
+        if after >= hay.len() {
+            // Go: `len(buf) == len(prefix)` with a read error — the
+            // boundary ends the input.
+            return Some(at);
+        }
+        let c = hay[after];
+        if c == b' ' || c == b'\t' || c == b'\r' || c == b'\n' {
+            return Some(at);
+        }
+        if c == b'-' && after + 1 < hay.len() && hay[after + 1] == b'-' {
+            return Some(at);
+        }
+        // Not a boundary: step past this candidate and keep looking.
+        from = at + 1;
+    }
+    return None;
 }
 
 fn find_subseq(hay: &[u8], needle: &[u8]) -> Option<usize> {

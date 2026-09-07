@@ -1601,6 +1601,35 @@ returned, a part with no headers, and a part with an empty body. goish
 matches Go on all eight. That is the evidence a waiver for those
 declarations should rest on, and it did not exist until now.
 
+Continuing that read past the scanner found TWO real defects, which is
+the answer to whether it was worth doing:
+
+  * `matchAfterPrefix` (multipart.go line 295) decides whether bytes
+    that START like a boundary are one — the next byte must be space,
+    tab, CR, LF or `-`. goish matched the prefix alone, so a part
+    carrying a line like `--Bxyz` was TRUNCATED there and the text
+    after it was then read as a header block, failing the parse with
+    "malformed header". Data loss first, confusing error second, and
+    for an upload the data is the user's file. Fixed on the part scan
+    and the preamble scan both; pinned by
+    examples/multipart_falseboundary_ref_smoke.rs.
+  * A part's headers are CONTINUED lines, not CRLF-delimited ones. Go
+    reads them with textproto.ReadMIMEHeader, where a line starting
+    with space or tab continues the header before it. goish split on
+    CRLF, so every folded header was "malformed" and the whole part
+    failed — legal input rejected outright. Fixed, with Go's joining
+    rule measured rather than guessed (one space, continuation
+    left-trimmed, final value left-trimmed: a wide fold collapses,
+    `X: a\r\n ` keeps its trailing space, `X: \r\n b` is "b"), and
+    pinned by examples/multipart_headers_ref_smoke.rs, which fails 6
+    of 10 without it.
+
+Still divergent and recorded rather than fixed: the error TEXT. Go's
+malformed-header failures carry textproto's wording ("malformed MIME
+header initial line: ..."), goish's say "multipart: malformed header".
+The decision to reject matches on every case tried; the message does
+not, here or anywhere else in this reader.
+
 Two of these are FIXED BUT NOT PINNED, worth stating plainly.
 Reaching either failing path needs a retry — an idle conn closed
 between the request being handed over and written — and reproducing

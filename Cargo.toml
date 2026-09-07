@@ -2876,6 +2876,18 @@ name = "base64_ref_smoke"
 path = "examples/base64_ref_smoke.rs"
 
 [[example]]
+name = "multipart_headers_ref_smoke"
+path = "examples/multipart_headers_ref_smoke.rs"
+
+[[example]]
+name = "multipart_falseboundary_ref_smoke"
+path = "examples/multipart_falseboundary_ref_smoke.rs"
+
+[[example]]
+name = "multipart_disposition_ref_smoke"
+path = "examples/multipart_disposition_ref_smoke.rs"
+
+[[example]]
 name = "multipart_boundary_ref_smoke"
 path = "examples/multipart_boundary_ref_smoke.rs"
 
