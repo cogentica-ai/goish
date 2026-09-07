@@ -29,7 +29,7 @@
 //   * `//go:linkname systemRoots` exists to keep a hall-of-shame
 //     reflection hack working; goish has no linkname.
 //
-// goishlint:ignore GOISH021 once, systemRootsMu, systemRoots, systemRootsErr, fallbacksSet, x509usefallbackroots — the package-level `var` block, spelled as SpinLock statics; `x509usefallbackroots` needs internal/godebug. See the banner.
+// goishlint:ignore GOISH021 systemRootsMu, systemRootsErr, x509usefallbackroots — the package-level `var` block, spelled as SpinLock statics; `x509usefallbackroots` needs internal/godebug. See the banner.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 

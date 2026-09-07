@@ -50,7 +50,7 @@
 //     instead of being a defined slice type.
 //
 // goishlint:ignore GOISH018 ParseRevocationList — a CRL parse needs RevocationList and RevocationListEntry, which live in x509.go's unported CRL half; see the banner.
-// goishlint:ignore GOISH021 x509negativeserial, x509v2Version — the godebug knob has no goish counterpart (the default, reject, is unconditional) and the CRL version const lands with ParseRevocationList.
+// goishlint:ignore GOISH021 x509negativeserial — the godebug knob has no goish counterpart (the default, reject, is unconditional) and the CRL version const lands with ParseRevocationList.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 

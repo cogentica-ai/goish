@@ -36,7 +36,7 @@
 //     share one allocation. goish builds a fresh slice; same elements,
 //     same order.
 //
-// goishlint:ignore GOISH021 certFileEnv, certDirEnv, certFiles, certDirectories — `certFiles`/`certDirectories` are heap-slice `var`s in root_linux.go, spelled as functions; see the banner.
+// goishlint:ignore GOISH021 certFiles, certDirectories — `certFiles`/`certDirectories` are heap-slice `var`s in root_linux.go, spelled as functions; see the banner.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 

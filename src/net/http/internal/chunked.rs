@@ -8,7 +8,7 @@
 // Go puts it — so port_deps reported net/http/internal as a SQUATTER at
 // 0/12 while a faithful port of all twelve sat one directory up.
 //
-// goishlint:ignore GOISH021 chunkedReader, chunkedWriter, semi, maxLineLength — chunkedReader/chunkedWriter are exposed as ChunkedReader/ChunkedWriter because Go returns them behind io.Reader/io.WriteCloser and goish's generic wrappers cannot be erased that way; `semi` is a one-byte separator inlined at its single use.
+// goishlint:ignore GOISH021 chunkedReader, chunkedWriter, semi — chunkedReader/chunkedWriter are exposed as ChunkedReader/ChunkedWriter because Go returns them behind io.Reader/io.WriteCloser and goish's generic wrappers cannot be erased that way; `semi` is a one-byte separator inlined at its single use.
 
 #![allow(non_snake_case)]
 #![allow(dead_code)]

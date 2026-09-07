@@ -82,7 +82,7 @@
 // goishlint:ignore GOISH017 matchURIConstraint — netip.ParseAddr has no goish equivalent; see the banner.
 // goishlint:ignore GOISH018 validPolicyNodes — ported as a policyGraph method, see below.
 // goishlint:ignore GOISH020 newPolicyGraphNode — takes the arena-owning graph as a first parameter; see the banner.
-// goishlint:ignore GOISH021 leafCertificate, intermediateCertificate, rootCertificate, maxChainSignatureChecks, errNotParsed, anyPolicyOID — ported, but as `pub(super) const` / a function (goish has no const slice, and `anyPolicyOID` is a heap OID).
+// goishlint:ignore GOISH021 errNotParsed, anyPolicyOID — ported, but as `pub(super) const` / a function (goish has no const slice, and `anyPolicyOID` is a heap OID).
 
 #![allow(non_snake_case, non_upper_case_globals)]
 

@@ -21,7 +21,7 @@
 // over a BenchmarkResult a caller filled in, plus the formatting.
 //
 // goishlint:ignore GOISH018 checkParallel, Write, initBenchmarkFlags — B, PB and the benchmark runner are not ported; see the note above on ReadMemStats and B.Loop.
-// goishlint:ignore GOISH021 benchState, benchmarkLock, memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
+// goishlint:ignore GOISH021 memStats, unitMetric, discard, hideStdoutForTesting, labelsOnce — same: the runner's types and package state come with the runner.
 
 #![allow(non_snake_case)]
 

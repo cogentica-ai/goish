@@ -2,7 +2,7 @@
 //
 // goishlint:ignore GOISH018 clientHandshake, handshake, doFullHandshake — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
 // goishlint:ignore GOISH019 echClientContext — same.
-// goishlint:ignore GOISH021 echClientContext, tlsmaxrsasize — same; tlsmaxrsasize is an internal/godebug var and godebug is not ported.
+// goishlint:ignore GOISH021 tlsmaxrsasize — same; tlsmaxrsasize is an internal/godebug var and godebug is not ported.
 //
 // Implements the CLIENT side of a TLS 1.2 handshake for:
 //   * TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 (0xC02F)  ← preferred

@@ -12,7 +12,7 @@
 // rather than re-slicing on every iteration. Same walk, no reallocation
 // per argument pair.
 // goishlint:ignore GOISH018 NewRecord, countAttrs — Record and its methods are hand-written in mod[rs].
-// goishlint:ignore GOISH021 Record, Source, nAttrsInline — same.
+// goishlint:ignore GOISH021 Record, nAttrsInline — same.
 
 #![allow(non_snake_case)]
 

@@ -16,7 +16,6 @@
 // friends against their own output today.
 //
 // goishlint:ignore GOISH018 Run, withSource — TestHandler and Run need the `cases` table described above; withSource formats a runtime.Caller(1) location into an explanation string and is only used by that table.
-// goishlint:ignore GOISH021 check, wrapper, replace — `cases` and `testCase` come with TestHandler; `check` is a func type, and goish spells it as a closure bound at each helper.
 
 #![allow(non_snake_case)]
 

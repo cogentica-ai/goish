@@ -26,7 +26,6 @@
 // long-lived server Go wrote this for.
 //
 // goishlint:ignore GOISH019 weakCertCache — the record is `struct{ sync.Map }`, and with no map to hold it degenerates to a unit; see the banner.
-// goishlint:ignore GOISH021 weakCertCache, globalCertCache — same.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
 

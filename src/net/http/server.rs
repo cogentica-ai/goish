@@ -1778,7 +1778,6 @@ pub trait connectionStater {
     fn ConnectionState(&self) -> crate::crypto::tls::ConnectionState;
 }
 
-// goishlint:ignore GOISH021 loggingConn — same embedded-interface
 // shape as onceCloseListener below: Go embeds `net.Conn` anonymously,
 // GOISH019 reads goish's necessarily-named field as an addition, and
 // the only alternative waiver is file-wide. Anchor omitted on the
@@ -1877,7 +1876,6 @@ impl net::Conn for loggingConn {
     }
 }
 
-// goishlint:ignore GOISH021 onceCloseListener — the type IS ported,
 // directly below; its `// go:` anchor is deliberately omitted so
 // GOISH019 does not fire. Go EMBEDS `net.Listener` anonymously, and
 // GOISH019's Go parser records no field name for an embedded field,

@@ -23,7 +23,7 @@
 //     `io::Writer` already takes `slice<byte>` and there is no
 //     `io::StringWriter` to type-assert for.
 //
-// goishlint:ignore GOISH021 replacer, appendSliceWriter, stringWriter, countCutOff — `replacer` is Go's
+// goishlint:ignore GOISH021 appendSliceWriter, stringWriter, countCutOff — `replacer` is Go's
 //     interface over the four algorithms; goish spells it as the enum
 //     below, since the implementation set is closed and goish avoids
 //     `dyn`. `countCutOff` tunes which of two counting loops
