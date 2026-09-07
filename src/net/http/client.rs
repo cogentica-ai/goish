@@ -298,6 +298,14 @@ struct BodyState {
     /// stops the timer when the body is closed, not when Do returns
     /// (the deadline covers body reads).
     cancel: Option<crate::context::CancelFunc>,
+    /// Go's `cancelTimerBody.reqDidTimeout` (client.go:969): did the
+    /// CLIENT's timer fire? `setRequestCancel` already returned this
+    /// closure and the call site already cited
+    /// `&cancelTimerBody{stop, rc, reqDidTimeout}` — but only `stop`
+    /// was handed over, so the wrapping half of that type was never
+    /// wired and a body read killed by Client.Timeout surfaced the
+    /// raw socket error instead of saying which deadline killed it.
+    did_timeout: Option<alloc::sync::Arc<dyn Fn() -> bool + Send + Sync>>,
     /// Go's `gzipReader.zerr` (transport.go:3042) — "any error from
     /// gzip.NewReader; sticky". It lives on the STATE rather than in
     /// the Gzip framing because Go checks it before the closed flag,
@@ -378,10 +386,42 @@ fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
         }
         FramedBody::Closed => (0, errors::New(string("http: read on closed response body"))),
     };
-    // A read interrupted by the cancel watcher surfaces as a timeout
-    // off the netpoller; prefer ctx.Err() (context canceled /
-    // deadline exceeded), matching Go's url.Error unwrapping.
+    // Go, cancelTimerBody.Read (client.go:972-984): nil and io.EOF go
+    // back untouched; anything else is wrapped ONLY if the client's
+    // timer fired. The message is the point — it names the deadline
+    // that killed the read instead of leaving the caller with a bare
+    // socket error.
     if !err.IsNil() && !errors::Is(err.clone(), io::EOF) {
+        if let Some(f) = &st.did_timeout {
+            if f() {
+                // Go wraps the error the read RETURNED, and on this
+                // path that is already "context deadline exceeded":
+                // its cancel replaces the read error. goish enforces
+                // the deadline on the conn instead, so the read
+                // returns the socket's i/o timeout with a port number
+                // in it. Substituting the ctx error keeps the
+                // observable string identical to Go's, which is what
+                // gen_body_timeout_ref.go pins.
+                let de: error = crate::context::DeadlineExceeded.into();
+                // Go builds `&timeoutError{…}`, so the result reports
+                // Timeout() == true — callers switch on that, not on
+                // the text. newTimeoutError is the same type the
+                // awaiting-headers annotation already uses, where this
+                // identical bug was found and fixed one call earlier.
+                return (
+                    n,
+                    super::transport::newTimeoutError(
+                        de.Error()
+                            + " (Client.Timeout or context cancellation while reading body)",
+                    ),
+                );
+            }
+        }
+        // Nothing constructs a Body with a ctx today (every
+        // `from_parts` call site passes None), so this cannot fire.
+        // Kept because the ctx belongs here the moment a body is built
+        // from a request context; the branch above is what the
+        // Client.Timeout path actually takes.
         if let Some(c) = &st.ctx {
             let ce = c.Err();
             if !ce.IsNil() {
@@ -489,6 +529,7 @@ impl Body {
                 ctx,
                 watch,
                 cancel: None,
+                did_timeout: None,
                 zerr: errors::nil,
             })),
         }
@@ -515,6 +556,17 @@ impl Body {
     pub(crate) fn __set_cancel(&self, cancel: crate::context::CancelFunc) {
         let mut g = self.inner.Lock();
         g.cancel = Some(cancel);
+    }
+
+    /// Crate-internal: the other half of Go's `cancelTimerBody` — the
+    /// `reqDidTimeout` predicate a body read consults before deciding
+    /// whether an error is the client's deadline.
+    pub(crate) fn __set_did_timeout(
+        &self,
+        f: alloc::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+    ) {
+        let mut g = self.inner.Lock();
+        g.did_timeout = Some(f);
     }
 
     /// Crate-internal (DumpResponse): drain the unread remainder,
@@ -2462,7 +2514,10 @@ pub(crate) fn send(
     // Response.Body is a value.
     if !deadline.IsZero() {
         // Go: resp.Body = &cancelTimerBody{stop, rc, reqDidTimeout}.
+        // Both halves: the timer release AND the predicate a body read
+        // consults to name the deadline in its error.
         resp.Body.__set_cancel(stop_timer);
+        resp.Body.__set_did_timeout(did_timeout.clone());
     }
     return (resp, did_timeout, errors::nil);
 }
