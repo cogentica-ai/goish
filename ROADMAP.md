@@ -1373,7 +1373,19 @@ failed here with errCannotRewind. Now tracked as Go tracks it, with
 `did_read`/`did_close` flags; for an Eager body the answer is
 identical to the old `off > 0`.
 
-That last one is FIXED BUT NOT PINNED, which is worth stating plainly.
+`maxBytesReader.Close` was the fourth, and the only one so far that
+was simply MISSING rather than subtly wrong. Go's MaxBytesReader
+returns an `io.ReadCloser` and closes what it wrapped, which is what
+makes the documented idiom `r.Body = http.MaxBytesReader(w, r.Body,
+n)` work — the handler puts the wrapper back, and closing the request
+body closes the real one. goish's wrapper implemented Reader only, so
+it could not be put back at all (`Body::from_reader` wants a
+ReadCloser) and the idiom was unwritable. Now a conditional
+`impl Closer` forwards, as Go's one-line `return l.r.Close()` does,
+pinned in http_maxbytes_close_smoke.
+
+The streaming-body one above is FIXED BUT NOT PINNED, worth stating
+plainly.
 Reaching it needs a retry — an idle conn closed between the request
 being handed over and written — and reproducing that on demand is a
 timing race, the kind this tree has been bitten by in e2e before.

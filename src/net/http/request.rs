@@ -1956,6 +1956,23 @@ pub fn MaxBytesReader<'w, R: io::Reader>(
     }
 }
 
+// Go returns `io.ReadCloser` from MaxBytesReader and closes the
+// wrapped body here, which is what makes the documented idiom
+// `r.Body = http.MaxBytesReader(w, r.Body, n)` work: the handler puts
+// the wrapper back and whoever closes the body closes the real one.
+// goish's wrapper implemented Reader only, so it could not be put
+// back (`Body::from_reader` wants a ReadCloser) and the idiom was
+// unwritable. The bound is conditional because the type is generic
+// over any Reader — a `bytes::Reader` has nothing to close, and the
+// eager server path below relies on that.
+impl<'w, R: io::Reader + io::Closer> io::Closer for maxBytesReader<'w, R> {
+    // go: sdk 1.25.5 net/http/request.go:1253-1255 maxBytesReader.Close
+    /// Go: "return l.r.Close()".
+    fn Close(&mut self) -> error {
+        return io::Closer::Close(&mut self.r);
+    }
+}
+
 impl<'w, R: io::Reader> io::Reader for maxBytesReader<'w, R> {
     // go: sdk 1.25.5 net/http/request.go:1211-1251 maxBytesReader.Read
     //
