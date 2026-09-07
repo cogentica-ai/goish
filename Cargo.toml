@@ -1042,6 +1042,10 @@ name = "zlib_smoke"
 path = "examples/zlib_smoke.rs"
 
 [[example]]
+name = "gzip_sticky_ref_smoke"
+path = "examples/gzip_sticky_ref_smoke.rs"
+
+[[example]]
 name = "gzip_smoke"
 path = "examples/gzip_smoke.rs"
 

@@ -1345,10 +1345,22 @@ rather than a hole, which is exactly what this section exists to list:
 the code no tier can check. Both of this tree's proven defect nurseries
 (§1's invented `crypto/tls`, §2b's unanchored files) have this shape.
 
-Open, and not answerable from the names: each of the 54 is either a
+Open, and not answerable from the names: each of the 50 is either a
 restructured port that should carry an anchor to Go's range, or a
 deliberate divergence that should carry a waiver with a reason. Those
 are different answers, and the per-declaration read is the work.
+
+The first one read confirms why it is worth doing. `gzipReader.Read`
+is a restructured port — goish's `Body` is a closed enum and Go's
+wrapper type is its `FramedBody::Gzip` variant — and reading it found
+a live divergence. Go's `zerr` is commented "sticky"; goish returned
+the gzip error once and then EOF, because the next Read re-ran
+gzip::NewReader over an already-consumed reader. A caller that read
+again after an error saw a corrupt body as a complete empty one. Go
+also checks zerr BEFORE the closed flag, so the error survives Close.
+Fixed and pinned by gzip_sticky_ref_smoke against Go 1.25.5. The
+declaration was not missing, and it was not correct either — which is
+the state this whole section is about.
 
 ## 2c. `regexp` does not keep Go's linear-time guarantee
 

@@ -298,9 +298,25 @@ struct BodyState {
     /// stops the timer when the body is closed, not when Do returns
     /// (the deadline covers body reads).
     cancel: Option<crate::context::CancelFunc>,
+    /// Go's `gzipReader.zerr` (transport.go:3042) — "any error from
+    /// gzip.NewReader; sticky". It lives on the STATE rather than in
+    /// the Gzip framing because Go checks it before the closed flag,
+    /// so it must outlive a Close: a body that failed to gunzip keeps
+    /// reporting that failure, not "read on closed response body".
+    ///
+    /// Without it the second Read re-ran gzip::NewReader over an
+    /// already-consumed reader and got EOF, so a corrupt body read as
+    /// an empty one to anything that retried after the first error.
+    zerr: error,
 }
 
 fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
+    // Go (gzipReader.Read, transport.go:3045-3053): the sticky
+    // gzip.NewReader error is returned BEFORE the body's closed flag
+    // is consulted, so it survives a Close.
+    if !st.zerr.IsNil() {
+        return (0, st.zerr.clone());
+    }
     let (n, err) = match &mut st.framing {
         FramedBody::Eager { data, off } => {
             let total = data.Len();
@@ -348,6 +364,9 @@ fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
             if z.is_none() {
                 let (r, e) = crate::compress::gzip::NewReader(inner.clone());
                 if !e.IsNil() {
+                    // Go: `gz.zr, gz.zerr = gzip.NewReader(gz.body)`,
+                    // and every later Read returns that same zerr.
+                    st.zerr = e.clone();
                     return (0, e);
                 }
                 *z = Some(alloc::boxed::Box::new(r));
@@ -470,6 +489,7 @@ impl Body {
                 ctx,
                 watch,
                 cancel: None,
+                zerr: errors::nil,
             })),
         }
     }
