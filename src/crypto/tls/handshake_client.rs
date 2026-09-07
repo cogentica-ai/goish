@@ -1,7 +1,16 @@
 // crypto/tls/handshake_client.rs — TLS 1.2 client handshake.
 //
-// goishlint:ignore GOISH018 clientHandshake, handshake, doFullHandshake — clientHandshakeState and the Conn-driven half of the TLS 1.2 client; the live client below the divider implements the same protocol by hand. See ROADMAP.md.
-// goishlint:ignore GOISH019 echClientContext — same.
+// `clientHandshake`, `handshake`, `doFullHandshake` and
+// `echClientContext` are all declared in this file, so the GOISH018 and
+// GOISH019 waivers that named them as dropped suppressed nothing and
+// are gone. What they said is still true and is the reason this file is
+// confusing, so it stays: those are clientHandshakeState and the
+// Conn-driven half of the TLS 1.2 client, and the live client BELOW the
+// divider implements the same protocol by hand. A dialled connection
+// runs the ported half — Conn::Handshake -> handshakeContext ->
+// clientHandshake — while the hand-written one is reachable only
+// through the do_client_handshake* functions mod.rs exports. See
+// ROADMAP.md §1.
 // goishlint:ignore GOISH021 tlsmaxrsasize — same; tlsmaxrsasize is an internal/godebug var and godebug is not ported.
 //
 // Implements the CLIENT side of a TLS 1.2 handshake for:

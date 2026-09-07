@@ -3,13 +3,20 @@
 // crypto/tls — handshake signature verification and signature-scheme
 // selection.
 //
-// **Partial port.** `selectSignatureScheme` and
-// `unsupportedCertificateError` take a `*Certificate`, which is not yet
-// a port (mod[rs] declares a hand-written one) — they land with
-// common.go's Certificate. Everything else in auth.go is here.
+// Every declaration in auth.go is here, `selectSignatureScheme` and
+// `unsupportedCertificateError` included. This banner called the file a
+// "**Partial port**" and said those two were waiting on `*Certificate`,
+// "which is not yet a port (mod[rs] declares a hand-written one)".
+// `Certificate` is a `pub struct` in common.rs and mod.rs declares no
+// such thing; both functions landed with it, and the two waivers that
+// went with the claim suppressed nothing:
 //
-// goishlint:ignore GOISH018  — both take a *Certificate, which is not ported yet; see the banner.
-// goishlint:ignore GOISH021 rsaSignatureSchemes — the table only selectSignatureScheme reads.
+//   * a GOISH018 line naming NO symbol at all — `GOISH018  —`, the
+//     names lost at some point, leaving a marker that could not have
+//     silenced anything even had there been something to silence;
+//   * a GOISH021 on `rsaSignatureSchemes`, which is declared right here.
+//     Its one true remark is kept: only `selectSignatureScheme` reads
+//     that table.
 //
 // One further deviation: Go's error strings for a wrong key type end
 // with `%T` — the dynamic Go type of the value. goish's `Any` has no
