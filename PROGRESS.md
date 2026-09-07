@@ -17,17 +17,17 @@ rows 2026-08-30.
 > touching an anchored file, which is why a ratio is worth quoting and
 > a count is not.
 
-## The whole tree — 5102 / 11142 functions (45.8%)
+## The whole tree — 5103 / 11026 functions (46.3%)
 
 Across the 165 packages of the Go 1.25.5 standard library that have a
-goish port: **110 are at 100%**. Was 4452 / 11061 (40.3%) across 169
+goish port: **111 are at 100%**. Was 4452 / 11061 (40.3%) across 169
 packages with 89 at 100% on 2026-08-15.
 
 **Two denominators, and they are not interchangeable.** The figure
 above counts only packages that HAVE a port, which is what the older
 number counted and the only basis on which the two can be compared.
 Counting every package `port_coverage.py` can see, ported or not, the
-same 5102 functions are **5102 / 14699 = 34.7% across 314 packages** —
+same 5103 functions are **5103 / 14583 = 35.0% across 314 packages** —
 a lower percentage from a larger denominator, not a regression. Quoting
 one against the other would say coverage fell in a month when it rose.
 
@@ -38,8 +38,8 @@ second.
 
 The anchors are not spread evenly, and that is the single most
 important thing on this page. `crypto/`, `net/` and `testing/` together
-held **92%** of them at the last refresh; on 2026-09-06 they hold
-**58%** (3638 of 6284). The concentration has broken up because the
+held **92%** of them at the last refresh; on 2026-09-07 they hold
+**57%** (3699 of 6498). The concentration has broken up because the
 rest of the tree gained anchors, not because those three lost any.
 
 The ratio is the durable fact; the two counts drift with every commit
@@ -791,12 +791,12 @@ until it read past a buffer.
 functions. `iter` is a squatter — goish fakes Go 1.23 iterator support
 with slices wherever it is needed.
 
-## crypto/ — 1722 / 1722 declarations (100.0%)
+## crypto/ — 1720 / 1720 declarations (100.0%)
 
 **All 66 crypto packages are at 100% by receiver-qualified
-declaration**, with 26 declarations waived out of the denominator on
+declaration**, with 28 declarations waived out of the denominator on
 in-tree justifications (24 of them the QUIC transport surface). The
-name-level counter reads 1431/1447 (98.9%) only because the QUIC
+name-level counter reads 1429/1445 (98.9%) only because the QUIC
 waiver is recorded per declaration: the 16 residual *names*
 (`quicSetReadSecret`, `HandleData`, …) are exactly that waived
 surface. There is no unported non-QUIC function left.
@@ -881,16 +881,28 @@ output.
 
 ## testing/ — 217 / 247 functions (87.9%)
 
-The root package is at **141/149 (94.6%)**, and `fstest` (38/38),
-`iotest` (11/11) and `slogtest` (10/10) are complete; 431 `// go:`
-lines across the tree. `testing.B`, `testing.M` and `t.Parallel()` are
-ported. The root's eight missing functions are the fuzzing entry
-points (`testing.F` is not ported), the profiling hooks
-(`writeProfiles`/`before`/`after`) and the synctest bridge — excluding
-fuzzing and profiling, the tree reads 97.3%. Still open: `quick`
-(7/14, blocked on a real `reflect` redesign — goish's `reflect` is a
-value tree), `internal/testdeps` (10/21, the fuzz/profile plumbing),
-and `synctest` (0/4).
+Re-measured 2026-09-07; every figure in this paragraph had drifted,
+and the README's copy of it was corrected a day earlier while this one
+was not.
+
+By declaration the root package is at **150/164 (91.5%)**, and
+`fstest` (43/43), `iotest` (18/18) and `slogtest` (10/10) are complete;
+435 `// go:` lines across the tree. `testing.B`, the `testing.M` TYPE
+and `t.Parallel()` are ported — `M.Run` is not, and neither are
+`M.before`/`M.after`: goish's driver is `testing::Main`, which arms the
+alarm and calls `RunTestsMatch` itself rather than going through an
+`M.Run` that sets an exit code.
+
+The root's fourteen missing declarations are the fuzzing entry points
+(`testing.F` is not ported, so `F.Add`/`F.Fuzz`/`F.Fail`/`F.Helper`/
+`F.Skipped`/`F.report` and `fRunner`/`runFuzzTests`/`runFuzzing` are
+absent), `M.writeProfiles`, the synctest bridge, and the `M.Run` trio
+above. Excluding fuzzing, profiling and synctest the root reads
+150/153, or 98.0%.
+
+Still open: `quick` (9/16, blocked on a real `reflect` redesign —
+goish's `reflect` is a value tree), `internal/testdeps` (5/6, the
+fuzz/profile plumbing), and `synctest` (0/4).
 
 ## The percentages are optimistic, and by how much
 
