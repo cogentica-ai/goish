@@ -61,6 +61,13 @@ fn main() {
         failed += 1;
     }
 
+    // Clean up what this made. Litter in /tmp is a signal worth
+    // keeping readable: os::RemoveAll's symlink defect (28367c7)
+    // was found because a PASSING smoke left a tree behind, and a
+    // leftover only means something if the ones left by design are
+    // gone (ROADMAP §2r).
+    let _ = os::Remove(string("/tmp/goish-readfile-smoke.txt"));
+
     if failed == 0 {
         fmt::Println!("ok 3/3");
         syscall::Exit(0);

@@ -73,6 +73,13 @@ fn main() {
 
     let _ = srv_arc.Shutdown(time::Second);
 
+    // Clean up the tree this made. It used to clean only at the START,
+    // which is idempotent but leaves /tmp littered — and litter is a
+    // signal worth keeping clean: os::RemoveAll's symlink defect
+    // (28367c7) was found because a smoke left a directory behind, and
+    // it had been leaving one since Sep 1.
+    let _ = os::RemoveAll(dir.clone());
+
     if failed == 0 {
         fmt::Println!("ok 1/1");
         syscall::Exit(0);

@@ -2901,6 +2901,43 @@ signatures differ — the shims take `&mut [byte]` where drbg takes
 the RSA key path. It wants a ref smoke over a fixed reader first, which
 would also pin item 1.
 
+## 2r. Leftover temp directories are a defect signal, not untidiness
+
+2026-09-07. `os::RemoveAll` followed symlinks and deleted what they
+pointed at (28367c7). It was found because a smoke PASSED and left its
+temp tree on disk — and once found, /tmp turned out to hold a week of
+the same evidence:
+
+    80  goish_dirent*                each containing exactly one entry: a symlink
+     1  goish-chmod-symlink-smoke    a DANGLING relative link
+     1  goish-evalsymlinks-smoke     a symlink CYCLE, cycA -> cycB -> cycA
+    38  goish_link*                  each containing one symlink
+
+Dated Sep 1 through Sep 7 18:10 — the newest an hour before the fix.
+After it, every one of those smokes leaves nothing. Three different
+symlink shapes, one bug, a week of unread evidence.
+
+**Why this beats reading the code:** a failing cleanup is invisible to
+the smoke (its cleanup is `let _ = os::RemoveAll(...)`, and rightly so)
+and invisible to e2e (which reads the exit status). It is visible only
+in the filesystem afterwards, and only if someone looks.
+
+**It can now be a gate, and that took tidying.** A leftover only means
+something if the ones left BY DESIGN are gone. Six smokes cleaned only
+at the START — idempotent, but permanently littering — and now clean at
+the end as well: http_fileserver_dir_smoke, os_readfile_smoke,
+os_readdir_smoke, http_fileserver_range_smoke, osfile_offset_ref_smoke,
+osfile_error_ref_smoke. One more, `goish_os_rename_ref`, was debris
+from a smoke that no longer exists and is simply deleted.
+
+After that, running the ten filesystem smokes leaves /tmp with ZERO
+`goish*` entries. So a post-run `ls -d /tmp/goish*` is now a clean
+signal, and wiring it into e2e as a gate is a small change with no
+known exceptions to carve out. Whoever does it should keep the two
+causes apart in the message — "cleanup failed" is a defect, "no cleanup
+written" is untidiness — because only the first is worth failing a
+build over.
+
 ## 2q. os.Root is ported except FS
 
 Landed 2026-09-07 across five commits: the walk (`doInRoot`,
