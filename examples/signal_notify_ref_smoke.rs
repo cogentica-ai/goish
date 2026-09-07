@@ -80,7 +80,7 @@ static mut LINE: usize = 0;
 /// expecting nothing still waits the full quiet window; a row
 /// expecting three waits until all three have landed and no more
 /// follow. Same comparison, no timing assumption.
-fn drain(c: &goish::gochan::chan<i32>, ms: i64) -> string {
+fn drain(c: &goish::gochan::chan<i32>, ms: i64, want_any: bool) -> string {
     let quiet_ticks = if ms / 5 > 1 { ms / 5 } else { 1 };
     let max_ticks = quiet_ticks * 10;
     let mut last = c.Len();
@@ -96,7 +96,21 @@ fn drain(c: &goish::gochan::chan<i32>, ms: i64) -> string {
         } else {
             stable += 1;
         }
-        if stable >= quiet_ticks {
+        // `want_any` is the part that was missing. Stability alone is
+        // also true of a channel nothing has reached YET, so a row
+        // expecting a signal returned empty as soon as ZERO had been
+        // stable for the quiet window — at ~200ms, nowhere near the 2s
+        // ceiling meant to cover a loaded machine. That is how this
+        // smoke failed CI again on 2026-09-07 while passing locally,
+        // one run after the quiet-window rewrite.
+        //
+        // It is a parameter and not a blanket `last > 0` because the
+        // rows that expect an EMPTY channel — `unregistered`,
+        // `stop-one-channel`'s c2 — would then wait the full ceiling
+        // every time, and so would the three discarded flush drains.
+        // That measured 9.9s against a 15s per-example e2e timeout,
+        // which trades a flake for a timeout.
+        if stable >= quiet_ticks && (!want_any || last > 0) {
             break;
         }
     }
@@ -130,7 +144,7 @@ fn main() {
     chk(fmt::Sprintf!(
         "%-26s got=%s",
         string("one-signal"),
-        drain(&c1, 200)
+        drain(&c1, 200, true)
     ));
 
     // A signal NOTHING registered for: delivered nowhere, and — since
@@ -140,14 +154,14 @@ fn main() {
     chk(fmt::Sprintf!(
         "%-26s got=%s",
         string("unregistered"),
-        drain(&c1, 200)
+        drain(&c1, 200, false)
     ));
 
     let c2 = goish::make!(chan i32, 4);
     signal::Notify(&c2, &[syscall::SIGUSR1]);
     me(syscall::SIGUSR1);
-    let g1 = drain(&c1, 200);
-    let g2 = drain(&c2, 200);
+    let g1 = drain(&c1, 200, true);
+    let g2 = drain(&c2, 200, true);
     chk(fmt::Sprintf!(
         "%-26s c1=%s c2=%s",
         string("two-channels"),
@@ -160,18 +174,18 @@ fn main() {
     chk(fmt::Sprintf!(
         "%-26s got=%s",
         string("notify-additive"),
-        drain(&c1, 200)
+        drain(&c1, 200, true)
     ));
 
-    let _ = drain(&c1, 100);
-    let _ = drain(&c2, 100);
+    let _ = drain(&c1, 100, false);
+    let _ = drain(&c2, 100, false);
     let c3 = goish::make!(chan i32, 1);
     signal::Notify(&c3, &[syscall::SIGUSR1]);
     for _ in 0..5 {
         me(syscall::SIGUSR1);
         time::Sleep(time::Duration(10_000_000));
     }
-    let d3 = drain(&c3, 200);
+    let d3 = drain(&c3, 200, true);
     let ds: &str = d3.as_ref();
     let n = if ds == "[]" {
         0
@@ -185,12 +199,12 @@ fn main() {
     ));
     signal::Stop(&c3);
 
-    let _ = drain(&c1, 100);
-    let _ = drain(&c2, 100);
+    let _ = drain(&c1, 100, false);
+    let _ = drain(&c2, 100, false);
     signal::Stop(&c2);
     me(syscall::SIGUSR1);
-    let g1b = drain(&c1, 200);
-    let g2b = drain(&c2, 200);
+    let g1b = drain(&c1, 200, true);
+    let g2b = drain(&c2, 200, false);
     chk(fmt::Sprintf!(
         "%-26s c1=%s c2=%s",
         string("stop-one-channel"),
@@ -206,7 +220,7 @@ fn main() {
     chk(fmt::Sprintf!(
         "%-26s got=%s",
         string("notify-all"),
-        drain(&c4, 300)
+        drain(&c4, 300, true)
     ));
     signal::Stop(&c4);
     signal::Stop(&c1);
