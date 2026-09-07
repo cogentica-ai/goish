@@ -1588,6 +1588,19 @@ multipart.rs. The anchors came back out and the Go origin of each is
 named in prose instead. Anchoring that file properly — port or waive
 all sixteen, then rename — is a unit of its own.
 
+That unit has started from the end that matters. Before waiving
+thirteen scanner internals as "the slim design replaces them", the
+design was tested where a scanner goes wrong:
+examples/multipart_boundary_ref_smoke.rs runs eight bodies through
+both implementations — LWSP after the delimiter and after the final
+boundary (RFC 2046 5.1 allows it and Go honours it with skipLWSPChar,
+so an exact-match scan would find NO parts), LF-only line endings
+(which Go accepts and switches to, "a violation of the spec, but
+occurs in practice"), a preamble that must be discarded rather than
+returned, a part with no headers, and a part with an empty body. goish
+matches Go on all eight. That is the evidence a waiver for those
+declarations should rest on, and it did not exist until now.
+
 Two of these are FIXED BUT NOT PINNED, worth stating plainly.
 Reaching either failing path needs a retry — an idle conn closed
 between the request being handed over and written — and reproducing
