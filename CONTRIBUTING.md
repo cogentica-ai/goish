@@ -633,5 +633,10 @@ is what stops this from becoming a way to launder a gap into 100%.
 Reach for it only when no counterpart *can* exist. A function that is
 merely hard, unported, or blocked is MISSING, not waived.
 
-crypto/ is 1108/1452 = 76.3%; the 344 left are 330 portable + 14
-assembly, and 37 counted names are still UNVERIFIED.
+As of 2026-09-07 crypto/ is **1720/1720 = 100% by declaration** with
+28 waived, and 1429/1445 = 98.9% by name; nothing is left and nothing
+in it is UNVERIFIED. This line read "1108/1452 = 76.3%; the 344 left
+are 330 portable + 14 assembly, and 37 counted names are still
+UNVERIFIED" until then, which is what a figure in prose does — re-run
+`scripts/port_coverage.py crypto --by-decl` rather than quoting either
+number.
