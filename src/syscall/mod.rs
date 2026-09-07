@@ -897,6 +897,11 @@ pub const SYS_MKDIR: usize = 83;
 pub const SYS_UNLINK: usize = 87;
 pub const SYS_MKDIRAT: usize = 258;
 pub const SYS_UNLINKAT: usize = 263;
+pub const SYS_FCHOWNAT: usize = 260;
+pub const SYS_RENAMEAT: usize = 264;
+pub const SYS_LINKAT: usize = 265;
+pub const SYS_SYMLINKAT: usize = 266;
+pub const SYS_FCHMODAT: usize = 268;
 
 /// `AT_REMOVEDIR` — make `unlinkat` behave as rmdir(2) instead of
 /// unlink(2). One flag is the whole difference between the two, which
@@ -966,6 +971,110 @@ pub fn Fstatat(dirfd: i32, path: *const u8, out: &mut Stat_t, flags: i32) -> i32
             path as usize,
             out as *mut Stat_t as usize,
             flags as usize,
+        )
+    };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `renameat(olddirfd, old, newdirfd, new)` — rename RELATIVE to two
+/// directory fds. `os.Root` resolves BOTH names through its walk and
+/// passes the two parent fds here, which is why an escape in either
+/// position is refused.
+#[allow(non_snake_case)]
+pub fn Renameat(olddirfd: i32, oldpath: *const u8, newdirfd: i32, newpath: *const u8) -> i32 {
+    let r = unsafe {
+        syscall4(
+            SYS_RENAMEAT,
+            olddirfd as usize,
+            oldpath as usize,
+            newdirfd as usize,
+            newpath as usize,
+        )
+    };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `linkat(olddirfd, old, newdirfd, new, flags)` — hard-link RELATIVE
+/// to two directory fds. Flags is 0 here: without AT_SYMLINK_FOLLOW a
+/// symlink is linked as itself, never resolved.
+#[allow(non_snake_case)]
+pub fn Linkat(
+    olddirfd: i32,
+    oldpath: *const u8,
+    newdirfd: i32,
+    newpath: *const u8,
+    flags: i32,
+) -> i32 {
+    let r = unsafe {
+        // syscall6 with a zero sixth argument: linkat takes five, and
+        // the kernel ignores the register the sixth would occupy.
+        syscall6(
+            SYS_LINKAT,
+            olddirfd as usize,
+            oldpath as usize,
+            newdirfd as usize,
+            newpath as usize,
+            flags as usize,
+            0,
+        )
+    };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `symlinkat(target, newdirfd, linkpath)` — create a symlink RELATIVE
+/// to `newdirfd`.
+///
+/// The TARGET is not resolved and not checked: it is bytes stored in
+/// the link. That is why `Root.Symlink("/etc/passwd", …)` succeeds and
+/// creates a link the same Root then refuses to follow.
+#[allow(non_snake_case)]
+pub fn Symlinkat(target: *const u8, newdirfd: i32, linkpath: *const u8) -> i32 {
+    let r = unsafe {
+        syscall3(
+            SYS_SYMLINKAT,
+            target as usize,
+            newdirfd as usize,
+            linkpath as usize,
+        )
+    };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `fchmodat(dirfd, path, mode, flags)` — chmod RELATIVE to `dirfd`.
+#[allow(non_snake_case)]
+pub fn Fchmodat(dirfd: i32, path: *const u8, mode: u32, flags: i32) -> i32 {
+    let r = unsafe {
+        syscall4(
+            SYS_FCHMODAT,
+            dirfd as usize,
+            path as usize,
+            mode as usize,
+            flags as usize,
+        )
+    };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `fchownat(dirfd, path, uid, gid, flags)` — chown RELATIVE to
+/// `dirfd`. `AT_SYMLINK_NOFOLLOW` gives the Lchown form, which changes
+/// the LINK rather than what it points at.
+#[allow(non_snake_case)]
+pub fn Fchownat(dirfd: i32, path: *const u8, uid: u32, gid: u32, flags: i32) -> i32 {
+    let r = unsafe {
+        // syscall6 with a zero sixth argument; see `Linkat`.
+        syscall6(
+            SYS_FCHOWNAT,
+            dirfd as usize,
+            path as usize,
+            uid as usize,
+            gid as usize,
+            flags as usize,
+            0,
         )
     };
     return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.

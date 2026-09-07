@@ -25,7 +25,7 @@ use crate::syscall;
 use crate::types::int;
 
 use super::root::{errPathEscapes, splitPathInRoot, Root};
-use super::{FileMode, PathError};
+use super::FileMode;
 
 // go: none — goish-only: Go's `checkSymlink` (os/root_unix.go:139-149)
 // answers "was that failure a symlink, and if so what does it point
@@ -70,7 +70,22 @@ impl Root {
     /// hostile path cannot turn one Open into unbounded work.
     // goishlint:ignore GOISH023 — the body ends in the walk loop, and
     // every exit from it is an explicit `return`.
-    pub(crate) fn doInRoot<T, F>(&self, op: &str, name: &string, mut last: F) -> (T, error)
+    // goishlint:ignore GOISH020 — Go takes four parameters: the Root,
+    // the name, an `openDirFunc` for the INTERMEDIATE components, and
+    // `f` for the last one. goish takes three: `self` is the Root, and
+    // openDirFunc is not a parameter here because the one operation
+    // that needs a custom one is not ported. Every caller but
+    // `rootMkdirAll` passes nil (meaning `rootOpenDir`, which the walk
+    // does inline below); rootMkdirAll passes a variant that CREATES a
+    // missing intermediate directory instead of failing on it, at
+    // root_openat.go:170. Porting MkdirAll means restoring this
+    // parameter — it is not an accident of shape.
+    /// The error returned is BARE — `path escapes from parent`, an
+    /// errno — with no PathError around it. Wrapping is the caller's,
+    /// because a one-name operation owes a `PathError{Op, Path}` and a
+    /// two-name one owes a `LinkError{Op, Old, New}`, and only the
+    /// caller knows which it is.
+    pub(crate) fn doInRoot<T, F>(&self, name: &string, mut last: F) -> (T, error)
     where
         T: Default,
         F: FnMut(i32, &string) -> LastResult<T>,
@@ -79,22 +94,14 @@ impl Root {
         const MAX_RESTARTS: i32 = 8;
         const MAX_SYMLINKS: i32 = 8;
 
-        let wrap = |e: error| -> error {
-            return errors::Wrap(PathError {
-                Op: string::from(op),
-                Path: name.clone(),
-                Err: e,
-            });
-        };
-
         let rootfd = *self.inner.fd.Lock();
         if rootfd < 0 {
-            return (T::default(), wrap(super::ErrClosed.into()));
+            return (T::default(), super::ErrClosed.into());
         }
 
         let (mut parts, mut suffix_sep, err) = splitPathInRoot(name, &[], &[]);
         if !err.IsNil() {
-            return (T::default(), wrap(err));
+            return (T::default(), err);
         }
 
         let mut dirfd = rootfd;
@@ -107,7 +114,7 @@ impl Root {
                     syscall::Close(dirfd);
                 }
                 // ENAMETOOLONG, as Go returns.
-                return (T::default(), wrap(syscall::Errno(36).into()));
+                return (T::default(), syscall::Errno(36).into());
             }
 
             if (parts[i].as_ref() as &str) == ".." {
@@ -121,7 +128,7 @@ impl Root {
                     if dirfd != rootfd {
                         syscall::Close(dirfd);
                     }
-                    return (T::default(), wrap(errPathEscapes()));
+                    return (T::default(), errPathEscapes());
                 }
                 parts.drain(i - count..end);
                 if parts.is_empty() {
@@ -162,7 +169,13 @@ impl Root {
                         if dirfd != rootfd {
                             syscall::Close(dirfd);
                         }
-                        return (T::default(), wrap(syscall::Errno(errno).into()));
+                        return (T::default(), syscall::Errno(errno).into());
+                    }
+                    LastResult::Errored(e) => {
+                        if dirfd != rootfd {
+                            syscall::Close(dirfd);
+                        }
+                        return (T::default(), e);
                     }
                     // The step wants the link followed: fall through to
                     // the splice below, exactly as Go's errSymlink does.
@@ -197,7 +210,7 @@ impl Root {
                     if dirfd != rootfd {
                         syscall::Close(dirfd);
                     }
-                    return (T::default(), wrap(syscall::Errno(e).into()));
+                    return (T::default(), syscall::Errno(e).into());
                 }
             }
             let target = match read_link_at(dirfd, &parts[i]) {
@@ -206,7 +219,7 @@ impl Root {
                     if dirfd != rootfd {
                         syscall::Close(dirfd);
                     }
-                    return (T::default(), wrap(syscall::Errno(e).into()));
+                    return (T::default(), syscall::Errno(e).into());
                 }
             };
             symlinks += 1;
@@ -214,7 +227,7 @@ impl Root {
                 if dirfd != rootfd {
                     syscall::Close(dirfd);
                 }
-                return (T::default(), wrap(syscall::Errno(40).into()));
+                return (T::default(), syscall::Errno(40).into());
             }
             let prefix: Vec<string> = parts[..i].to_vec();
             let rest: Vec<string> = parts[i + 1..].to_vec();
@@ -223,7 +236,7 @@ impl Root {
                 if dirfd != rootfd {
                     syscall::Close(dirfd);
                 }
-                return (T::default(), wrap(serr));
+                return (T::default(), serr);
             }
             if is_last {
                 suffix_sep = new_sep;
@@ -255,6 +268,11 @@ pub(crate) enum LastResult<T> {
     Ok(T),
     /// Failed, with a positive errno.
     Err(i32),
+    /// Failed with an error already shaped by an inner walk — a
+    /// two-name operation nests one walk inside another, and the
+    /// inner failure must reach the caller unchanged rather than
+    /// being flattened to an errno.
+    Errored(error),
     /// The final component is a symlink and this operation FOLLOWS it.
     /// An operation that acts on the link itself — Lstat, Remove,
     /// Mkdir — never answers this, which is why `remove escape`

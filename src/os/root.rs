@@ -162,7 +162,7 @@ impl Root {
         // signal to follow the link ourselves, under the walk's rules.
         let flag32 = crate::int32(flag);
         let mode32 = crate::int32(super::syscallMode(perm));
-        let (fd, err) = self.doInRoot(
+        let (fd, err) = self.__path_op(
             "openat",
             &name,
             |dirfd: i32, comp: &crate::gostring::string| {
@@ -249,6 +249,29 @@ pub(crate) fn splitPathInRoot(
 }
 
 impl Root {
+    // go: none — goish-only: Go wraps the walk's error at each call
+    // site; one helper does it here because every one-name operation
+    // owes the same `PathError{Op, Path}`.
+    /// Run the walk and wrap any failure as Go's PathError.
+    fn __path_op<T, F>(&self, op: &str, name: &string, f: F) -> (T, error)
+    where
+        T: Default,
+        F: FnMut(i32, &string) -> super::root_openat::LastResult<T>,
+    {
+        let (v, err) = self.doInRoot(name, f);
+        if !err.IsNil() {
+            return (
+                T::default(),
+                errors::Wrap(PathError {
+                    Op: string::from(op),
+                    Path: name.clone(),
+                    Err: err,
+                }),
+            );
+        }
+        return (v, errors::nil);
+    }
+
     // go: sdk 1.25.5 os/root.go:108-110 Root.Create
     /// Go: "Create creates or truncates the named file in the root."
     pub fn Create<N: Into<string>>(&self, name: N) -> (nilable<File>, error) {
@@ -320,7 +343,7 @@ impl Root {
     pub fn Mkdir<N: Into<string>>(&self, name: N, perm: FileMode) -> error {
         let name: string = name.into();
         let mode = crate::int32(super::syscallMode(perm));
-        let (_, err) = self.doInRoot::<i32, _>("mkdirat", &name, |dirfd, comp| {
+        let (_, err) = self.__path_op::<i32, _>("mkdirat", &name, |dirfd, comp| {
             let mut cb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
             cb.extend_from_slice(super::bytes_of(comp));
             cb.push(0);
@@ -342,7 +365,7 @@ impl Root {
     /// Go's behaviour and the safe one.
     pub fn Remove<N: Into<string>>(&self, name: N) -> error {
         let name: string = name.into();
-        let (_, err) = self.doInRoot::<i32, _>("removeat", &name, |dirfd, comp| {
+        let (_, err) = self.__path_op::<i32, _>("removeat", &name, |dirfd, comp| {
             let mut cb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
             cb.extend_from_slice(super::bytes_of(comp));
             cb.push(0);
@@ -370,7 +393,7 @@ impl Root {
     /// The shared body of Stat and Lstat.
     fn __stat(&self, name: string, lstat: bool) -> (super::FileInfoData, error) {
         let op = if lstat { "lstatat" } else { "statat" };
-        let (st, err) = self.doInRoot::<syscall::Stat_t, _>(op, &name, |dirfd, comp| {
+        let (st, err) = self.__path_op::<syscall::Stat_t, _>(op, &name, |dirfd, comp| {
             let mut cb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
             cb.extend_from_slice(super::bytes_of(comp));
             cb.push(0);
@@ -442,7 +465,7 @@ impl Root {
     /// may well be outside. Reading a link is not following one.
     pub fn Readlink<N: Into<string>>(&self, name: N) -> (string, error) {
         let name: string = name.into();
-        let (t, err) = self.doInRoot::<string, _>("readlinkat", &name, |dirfd, comp| {
+        let (t, err) = self.__path_op::<string, _>("readlinkat", &name, |dirfd, comp| {
             let mut cb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
             cb.extend_from_slice(super::bytes_of(comp));
             cb.push(0);
@@ -528,5 +551,196 @@ impl Root {
             return werr;
         }
         return cerr;
+    }
+}
+
+impl Root {
+    // go: none — goish-only: Go wraps a two-name failure at each call
+    // site; one helper does it here because Rename, Link and Symlink
+    // all owe the same `LinkError{Op, Old, New}` — the shape whose
+    // message names BOTH paths, which is how a caller tells which end
+    // escaped.
+    /// Resolve `old` and then `new` through the walk, and run `f` with
+    /// both parents. An escape in EITHER position fails.
+    fn __link_op<F>(&self, op: &str, old: &string, new: &string, mut f: F) -> error
+    where
+        F: FnMut(i32, &string, i32, &string) -> i32,
+    {
+        let mkerr = |e: error| -> error {
+            return errors::Wrap(super::LinkError {
+                Op: string::from(op),
+                Old: old.clone(),
+                New: new.clone(),
+                Err: e,
+            });
+        };
+        // Nested walks, as Go nests doInRoot inside doInRoot: the outer
+        // one holds the old parent open while the inner resolves the
+        // new name.
+        let (_, err) = self.doInRoot::<i32, _>(old, |oldparent, oldcomp| {
+            let oldcomp = oldcomp.clone();
+            let (_, inner) = self.doInRoot::<i32, _>(new, |newparent, newcomp| {
+                let r = f(oldparent, &oldcomp, newparent, newcomp);
+                if r == 0 {
+                    return super::root_openat::LastResult::Ok(0);
+                }
+                return super::root_openat::LastResult::Err(-r);
+            });
+            if !inner.IsNil() {
+                return super::root_openat::LastResult::Errored(inner);
+            }
+            return super::root_openat::LastResult::Ok(0);
+        });
+        if !err.IsNil() {
+            return mkerr(err);
+        }
+        return errors::nil;
+    }
+
+    // go: sdk 1.25.5 os/root.go:223-233 Root.Rename
+    /// Go: "Rename renames (moves) oldname to newname in the root."
+    ///
+    /// BOTH names go through the walk. Resolving one and taking the
+    /// other at face value would pass every single-name test in the
+    /// tree and still let a caller move a file out of the root.
+    pub fn Rename<O: Into<string>, N: Into<string>>(&self, oldname: O, newname: N) -> error {
+        let (o, n) = (oldname.into(), newname.into());
+        return self.__link_op("renameat", &o, &n, |op, oc, np, nc| {
+            let mut ob: Vec<u8> = Vec::with_capacity(oc.Len() as usize + 1);
+            ob.extend_from_slice(super::bytes_of(oc));
+            ob.push(0);
+            let mut nb: Vec<u8> = Vec::with_capacity(nc.Len() as usize + 1);
+            nb.extend_from_slice(super::bytes_of(nc));
+            nb.push(0);
+            return syscall::Renameat(op, ob.as_ptr(), np, nb.as_ptr());
+        });
+    }
+
+    // go: sdk 1.25.5 os/root.go:235-245 Root.Link
+    /// Go: "Link creates a hard link to oldname in the root."
+    ///
+    /// Flags are 0: without AT_SYMLINK_FOLLOW a symlink is linked as
+    /// itself and never resolved, so linking a link that points
+    /// outside copies the LINK, not the file it names.
+    pub fn Link<O: Into<string>, N: Into<string>>(&self, oldname: O, newname: N) -> error {
+        let (o, n) = (oldname.into(), newname.into());
+        return self.__link_op("linkat", &o, &n, |op, oc, np, nc| {
+            let mut ob: Vec<u8> = Vec::with_capacity(oc.Len() as usize + 1);
+            ob.extend_from_slice(super::bytes_of(oc));
+            ob.push(0);
+            let mut nb: Vec<u8> = Vec::with_capacity(nc.Len() as usize + 1);
+            nb.extend_from_slice(super::bytes_of(nc));
+            nb.push(0);
+            return syscall::Linkat(op, ob.as_ptr(), np, nb.as_ptr(), 0);
+        });
+    }
+
+    // go: sdk 1.25.5 os/root.go:247-251 Root.Symlink
+    /// Go: "Symlink creates newname as a symbolic link to oldname."
+    ///
+    /// Only NEWNAME is resolved. The target is bytes stored in the
+    /// link and is never checked, so `Symlink("/etc/passwd", …)`
+    /// succeeds — and creates a link this same Root then refuses to
+    /// follow. That is the whole design: the check belongs at
+    /// resolution, not at creation, because a link's meaning depends
+    /// on who resolves it.
+    pub fn Symlink<O: Into<string>, N: Into<string>>(&self, oldname: O, newname: N) -> error {
+        let (o, n) = (oldname.into(), newname.into());
+        let mut tb: Vec<u8> = Vec::with_capacity(o.Len() as usize + 1);
+        tb.extend_from_slice(super::bytes_of(&o));
+        tb.push(0);
+        let (_, err) = self.doInRoot::<i32, _>(&n, |dirfd, comp| {
+            let mut nb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
+            nb.extend_from_slice(super::bytes_of(comp));
+            nb.push(0);
+            let r = syscall::Symlinkat(tb.as_ptr(), dirfd, nb.as_ptr());
+            if r == 0 {
+                return super::root_openat::LastResult::Ok(0);
+            }
+            return super::root_openat::LastResult::Err(-r);
+        });
+        if !err.IsNil() {
+            return errors::Wrap(super::LinkError {
+                Op: string::from_static("symlinkat"),
+                Old: o,
+                New: n,
+                Err: err,
+            });
+        }
+        return errors::nil;
+    }
+
+    // go: sdk 1.25.5 os/root.go:139-147 Root.Chmod
+    /// Go: "Chmod changes the mode of the named file in the root."
+    ///
+    /// Symlinks are FOLLOWED, so chmod through a link pointing outside
+    /// is refused rather than silently changing a file the caller
+    /// cannot otherwise reach.
+    pub fn Chmod<N: Into<string>>(&self, name: N, mode: FileMode) -> error {
+        let name: string = name.into();
+        let m = crate::uint32(crate::int32(super::syscallMode(mode)));
+        let (_, err) = self.__path_op::<i32, _>("chmodat", &name, |dirfd, comp| {
+            let mut cb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
+            cb.extend_from_slice(super::bytes_of(comp));
+            cb.push(0);
+            // AT_SYMLINK_NOFOLLOW first, purely to LOOK: fchmodat's
+            // own NOFOLLOW is unsupported on Linux, so the link has to
+            // be handed to the walk instead of chmod'ed through.
+            let mut st = syscall::Stat_t::default();
+            let sr = syscall::Fstatat(dirfd, cb.as_ptr(), &mut st, syscall::AT_SYMLINK_NOFOLLOW);
+            if sr == 0 && (st.st_mode & syscall::S_IFMT) == syscall::S_IFLNK {
+                return super::root_openat::LastResult::Symlink;
+            }
+            let r = syscall::Fchmodat(dirfd, cb.as_ptr(), m, 0);
+            if r == 0 {
+                return super::root_openat::LastResult::Ok(0);
+            }
+            return super::root_openat::LastResult::Err(-r);
+        });
+        return err;
+    }
+
+    // go: sdk 1.25.5 os/root.go:170-174 Root.Chown
+    /// Go: "Chown changes the numeric uid and gid of the named file in
+    /// the root." Symlinks are followed.
+    pub fn Chown<N: Into<string>>(&self, name: N, uid: int, gid: int) -> error {
+        return self.__chown(name.into(), uid, gid, false);
+    }
+
+    // go: sdk 1.25.5 os/root.go:176-180 Root.Lchown
+    /// Go: "Lchown changes the numeric uid and gid of the named file
+    /// in the root. If the file is a symbolic link, it changes the uid
+    /// and gid of the link itself."
+    pub fn Lchown<N: Into<string>>(&self, name: N, uid: int, gid: int) -> error {
+        return self.__chown(name.into(), uid, gid, true);
+    }
+
+    // go: none — goish-only: Go's Chown and Lchown differ only in the
+    // AT_SYMLINK_NOFOLLOW flag and the Op string.
+    /// The shared body of Chown and Lchown.
+    fn __chown(&self, name: string, uid: int, gid: int, lchown: bool) -> error {
+        let op = if lchown { "lchownat" } else { "chownat" };
+        let (u, g) = (crate::uint32(crate::int32(uid)), crate::uint32(crate::int32(gid)));
+        let (_, err) = self.__path_op::<i32, _>(op, &name, |dirfd, comp| {
+            let mut cb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
+            cb.extend_from_slice(super::bytes_of(comp));
+            cb.push(0);
+            let flags = if lchown { syscall::AT_SYMLINK_NOFOLLOW } else { 0 };
+            if !lchown {
+                // Following is the walk's job, never the kernel's.
+                let mut st = syscall::Stat_t::default();
+                let sr =
+                    syscall::Fstatat(dirfd, cb.as_ptr(), &mut st, syscall::AT_SYMLINK_NOFOLLOW);
+                if sr == 0 && (st.st_mode & syscall::S_IFMT) == syscall::S_IFLNK {
+                    return super::root_openat::LastResult::Symlink;
+                }
+            }
+            let r = syscall::Fchownat(dirfd, cb.as_ptr(), u, g, flags);
+            if r == 0 {
+                return super::root_openat::LastResult::Ok(0);
+            }
+            return super::root_openat::LastResult::Err(-r);
+        });
+        return err;
     }
 }

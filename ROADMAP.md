@@ -2921,7 +2921,13 @@ STILL UNPORTED, and listed rather than waived:
     `Root.Chown`, `Root.Lchown`, `Root.Chtimes` — need renameat,
     linkat, symlinkat, fchmodat, fchownat, utimensat.
   * `Root.MkdirAll`, `Root.RemoveAll` — recursive, and RemoveAll wants
-    the walk to hand back a directory fd to iterate.
+    the walk to hand back a directory fd to iterate. MkdirAll also
+    needs the walk's `openDirFunc` parameter back: it is the ONLY
+    caller in Go that passes a non-nil one (root_openat.go:170), a
+    variant that creates a missing intermediate directory rather than
+    failing on it. goish's walk dropped that parameter, which is
+    correct for every operation ported so far and wrong the moment
+    MkdirAll arrives.
   * `Root.FS` and `rootFS` — io/fs plumbing rather than syscalls.
 
 **The caution below was written before the second commit and proved
