@@ -48,7 +48,7 @@ const GO: [&str; 7] = [
     "setgid     asked=grwxr-xr-x got=grwxr-xr-x perm=0755 setuid=false setgid=true sticky=false err=<nil>",
     "sticky     asked=trwxrwxrwx got=trwxrwxrwx perm=0777 setuid=false setgid=false sticky=true err=<nil>",
     "all-three  asked=ugtrwx------ got=ugtrwx------ perm=0700 setuid=true setgid=true sticky=true err=<nil>",
-    "mkdir-sticky   perm=0775 sticky=true err=<nil>",
+    "mkdir-sticky   perm=0777 sticky=true err=<nil>",
     "openfile-setgid perm=0640 setgid=true err=<nil>",
 ];
 
@@ -70,6 +70,18 @@ fn chk(ln: &mut usize, got: &string) {
 
 #[goish::main]
 fn main() {
+    // Zero the umask for the duration. Two rows below assert the mode
+    // of a file this smoke CREATES, and a created file's mode is
+    // `mode &^ umask` — so without this they assert the umask of
+    // whoever ran them. The pinned `mkdir-sticky perm=0775` was true
+    // on a umask-002 desktop and false under the 022 CI uses, and it
+    // went unseen because this smoke exited 0 on a mismatch until
+    // ROADMAP §2b-vii gave it a gate. The gate found it on the first
+    // CI run, which is the whole point of having one.
+    //
+    // Chmod is unaffected (umask applies to creation, not to chmod),
+    // which is why only the mkdir and openfile rows moved.
+    let old_umask = goish::syscall::Umask(goish::int(0));
     let mut ln: usize = 0;
     let base = os::TempDir() + "/goish_filemode_bits";
     let _ = os::RemoveAll(&base);
@@ -114,6 +126,7 @@ fn main() {
         fi.Mode().Perm(), (fi.Mode() & fs::ModeSetgid) != fs::FileMode(0), err));
 
     let _ = os::RemoveAll(&base);
+    let _ = goish::syscall::Umask(old_umask);
     if ln != GO.len() {
         fmt::Printf!("[!!] produced %d lines, pinned %d\n", ln as int, GO.len() as int);
         FAILED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
