@@ -252,6 +252,22 @@ impl crate::io::Writer for ConnSrcWriter<'_> {
 // entry to a read exactly as Go sets didRead before delegating.
 // go: waived readTrackingBody.Close — `BodyState.did_close`; the pair
 // is what `rewindBody` reads.
+// go: waived Request.closeBody — Go's one-liner ("close it if there is
+// one") exists to be called from the error paths that abandon a
+// request. goish calls `Body::__close_shared` at those same points —
+// the nil-URL and RequestURI rejections in do(), and rewindBody —
+// which is the behaviour; the helper has no separate work to do.
+// go: waived bufioFlushWriter.Write — Go wraps the write side for
+// CONNECT with an unknown body length, so each write is flushed out
+// of the *bufio.Writer instead of stalling a tunnel in it. goish's
+// client write path holds no buffered writer at all: ConnSrcWriter
+// hands bytes to the conn (`__rd_mut`) on every call, so there is
+// nothing to flush and no stall to prevent.
+// go: waived bodyLocked.Read — Go's one-line guard: closed bodies
+// answer ErrBodyReadAfterClose rather than more bytes. That is the
+// `FramedBody::Closed` arm of `read_locked`, which picks the message
+// the body was built with — the server's request-body error, or the
+// response-body one (examples/http_reqbody_close_ref_smoke.rs).
 // go: waived bodyEOFSignal.Read — Go's wrapper keeps `rerr` so a
 // failed read keeps failing; the conn-backed framings need no such
 // field, because each read hits the same dead connection and reports
@@ -333,6 +349,16 @@ struct BodyState {
     /// stops the timer when the body is closed, not when Do returns
     /// (the deadline covers body reads).
     cancel: Option<crate::context::CancelFunc>,
+    /// Go's `body.closed` on the SERVER side (transfer.go:1039): a
+    /// request body answers ErrBodyReadAfterClose once closed. Held as
+    /// the error itself, because it must outlive the framing being
+    /// replaced, and because the two closed-body messages differ — a
+    /// response body says "http: read on closed response body".
+    ///
+    /// Nil for a body built by NewRequest: Go wraps those in
+    /// io.NopCloser, so Close is a no-op and the bytes stay readable,
+    /// which is what lets a 307/308 replay the body.
+    closed_msg: error,
     /// The chunked body reached its terminator AND its trailer section
     /// was consumed, so the connection is synchronised at the start of
     /// whatever comes next. Go proves the same thing with
@@ -462,7 +488,17 @@ fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
                 None => (0, io::EOF.into()),
             }
         }
-        FramedBody::Closed => (0, errors::New(string("http: read on closed response body"))),
+        FramedBody::Closed => {
+            // Two different messages in Go: a closed RESPONSE body says
+            // one thing (errReadOnClosedResBody), a closed server
+            // REQUEST body another (ErrBodyReadAfterClose). Which one
+            // is set at construction; the framing cannot say.
+            if !st.closed_msg.IsNil() {
+                (0, st.closed_msg.clone())
+            } else {
+                (0, errors::New(string("http: read on closed response body")))
+            }
+        }
     };
     // Go, cancelTimerBody.Read (client.go:972-984): nil and io.EOF go
     // back untouched; anything else is wrapped ONLY if the client's
@@ -577,6 +613,11 @@ fn close_locked(st: &mut BodyState) -> error {
     // "always closes t.BodyCloser"; without this, that close killed
     // 307/308 redirect replay of an in-memory request body.
     if matches!(st.framing, FramedBody::Eager { .. }) {
+        // …unless this is a server request body, where Go's Close is
+        // not a NopCloser's: `body.closed` is set and later reads fail.
+        if !st.closed_msg.IsNil() {
+            st.framing = FramedBody::Closed;
+        }
         if let Some(c) = st.cancel.take() {
             c();
         }
@@ -636,6 +677,7 @@ impl Body {
                 ctx,
                 watch,
                 cancel: None,
+                closed_msg: errors::nil,
                 chunk_drained: false,
                 did_read: false,
                 did_close: false,
@@ -666,6 +708,14 @@ impl Body {
     pub(crate) fn __set_cancel(&self, cancel: crate::context::CancelFunc) {
         let mut g = self.inner.Lock();
         g.cancel = Some(cancel);
+    }
+
+    /// Crate-internal: mark this body as a SERVER request body, whose
+    /// Close is real — Go's `body.closed`, after which reads answer
+    /// ErrBodyReadAfterClose instead of more bytes.
+    pub(crate) fn __set_strict_close(&self) {
+        let mut g = self.inner.Lock();
+        g.closed_msg = super::transfer::ErrBodyReadAfterClose.into();
     }
 
     /// Crate-internal: the other half of Go's `cancelTimerBody` — the
@@ -2868,6 +2918,14 @@ impl Client {
                 };
                 return (resp, uerr(uerr_method.clone(), &current.URL, err));
             }
+            // go: waived Client.send — Go's send is the jar sandwich
+            // around one hop: apply the jar's cookies before, store
+            // the response's after. goish runs both halves inline in
+            // this loop because the loop IS the per-hop unit, which is
+            // what carries a session cookie set by a 302 into the
+            // redirected request (examples/http_client_jar_smoke.rs,
+            // http_jar_cross_host_smoke.rs).
+            //
             // Go (client.go, send): if c.Jar != nil { if rc :=
             // resp.Cookies(); len(rc) > 0 { c.Jar.SetCookies(req.URL, rc) } }
             //

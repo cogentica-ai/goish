@@ -101,6 +101,12 @@ pub fn canonicalAddr(url: &URL) -> string {
 // --by-decl's key, which spells a method `Recv.Method`.
 // go: waived awaitLegacyCancel — the goroutine that watches the
 // deprecated Request.Cancel channel; same absent-by-design field.
+// go: waived transportRequest.logf — Go's transport trace hook. It
+// fires only when the request context carries an UNEXPORTED key
+// (`tLogKey{}`) holding a log function, and the only thing that
+// installs one is export_test.go, for net/http's own tests. Nothing
+// outside the package can reach it, so there is no caller-visible
+// behaviour to port.
 // go: waived Transport.CancelRequest — reads the reqCanceler map
 // waived just above as absent by design. Go deprecates it for
 // Request.WithContext and says it "may become a no-op in a future
@@ -962,6 +968,23 @@ crate::var! {
 // Go: "used by Transport.readLoop when the 1 byte peek read fails and
 // we're actually anticipating a response. Usually this is just due to
 // the inherent keep-alive shut down race."
+//
+// Go's is a WRAPPER carrying the peek error; goish's is a sentinel,
+// because the only thing the retry decision needs is identity. What
+// Go's wrapper additionally buys — the cause, returned to the caller
+// on the path where the request will not be retried (transport.go:
+// 716-724, "Issue 16465") — goish does by handing that path the
+// original error directly, so the two methods below have nowhere left
+// to live and nothing left to do.
+//
+// go: waived transportReadFromServerError.Error — the sentinel's own
+// text; the cause reaches the caller unwrapped instead of formatted
+// into a wrapper's message.
+// go: waived transportReadFromServerError.Unwrap — nothing to unwrap:
+// the non-retry path returns the peek error itself.
+// go: waived nothingWrittenError.Unwrap — same shape, same reason,
+// for errNothingWritten below; the write path already returned the
+// underlying error rather than the sentinel.
 crate::var! {
     pub errTransportReadFromServer: error = "http: transport read from server";
 }

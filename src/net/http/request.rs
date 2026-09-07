@@ -1367,6 +1367,9 @@ pub(crate) fn __read_request_server<R: io::Reader>(
                 }
             }
             req.Body = super::Body::from_bytes(slice::<byte>::__from_vec(buf));
+            // Go's server request body is a `body`, not a NopCloser:
+            // once closed, reads answer ErrBodyReadAfterClose.
+            req.Body.__set_strict_close();
             return (req, errors::nil);
         }
         super::client::BodyKind::Cl(n) => {
@@ -1395,6 +1398,9 @@ pub(crate) fn __read_request_server<R: io::Reader>(
                 }
             }
             req.Body = super::Body::from_bytes(slice::<byte>::__from_vec(buf));
+            // Go's server request body is a `body`, not a NopCloser:
+            // once closed, reads answer ErrBodyReadAfterClose.
+            req.Body.__set_strict_close();
         }
         // Requests never get UntilEof from readTransfer (fixLength
         // answers 0 for a request without Content-Length); Empty

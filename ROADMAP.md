@@ -1290,7 +1290,7 @@ should go, some should lose the marker and keep the prose as a plain
 comment. What must not happen is a bulk delete that takes the reasons
 with it.
 
-## 2b-vi. net/http's 100% is a by-name figure; 28 declarations have no anchor
+## 2b-vi. net/http's 100% is a by-name figure; 18 declarations have no anchor
 
 Found 2026-09-07 while closing `net/http/cgi`'s last waiver, by running
 the package in both coverage modes instead of one.
@@ -1488,6 +1488,85 @@ all five lines, sticky repeat included, because each read hits the same
 dead connection. `examples/http_body_sticky_ref_smoke.rs` pins it, and
 is worth having precisely because this function has been edited three
 times today.
+
+Six more were waived after being read and found EQUIVALENT, not
+absent: `Client.send` (Go's jar sandwich, inlined into the redirect
+loop because that loop is the per-hop unit),
+`transportReadFromServerError.{Error,Unwrap}` and
+`nothingWrittenError.Unwrap` (goish uses sentinels for the retry
+decision and hands the caller the underlying cause directly, so the
+wrappers have nothing left to carry), `response.WriteString` (goish's
+io::WriteString makes no StringWriter assertion, so there is no
+interface to satisfy — the gap is the spelling, not the wire) and
+`checkConnErrorWriter.Write` (the disconnect watch cancels the request
+context from the read side; only a peer that stops READING while still
+connected is uncovered). Root 28 to 22, net/http 726/748 (97.1%).
+
+A small trap worth recording, since it cost a lint round: a
+`// go: waived` line placed directly above an anchored fn becomes the
+FIRST line of that fn's comment block, and GOISH014 then reports the
+fn as unanchored. Waivers go above a non-fn item, or in a block of
+their own.
+
+`persistConnWriter.{Write,ReadFrom}` are classified but NOT waived,
+because the difference is real even if narrow. Go's Write exists to
+maintain `pc.nwrite`, and `mapRoundTripError` asks
+`pc.nwrite == startBytesWritten` — zero bytes on the wire — before
+calling a failure `nothingWrittenError`, which is what licenses
+retrying a request that is not replayable. goish approximates that
+with a `head_failed` flag: the head write returned an error. The two
+agree except in one window, a head write that lands PARTIALLY: Go
+counts bytes, sees more than zero and declines to retry; goish sees
+the error and retries. A truncated header block is not an actionable
+request, so a server cannot have acted on it, which is why this is
+recorded rather than fixed — but Go's rule is a byte count and
+goish's is a proxy for one, and that is the kind of difference worth
+knowing about before someone relies on it. `ReadFrom` is Go's
+sendfile hook (io.Copy to the conn); goish's body write copies through
+userspace, which is performance, not behaviour.
+
+`bodyLocked.Read` was the next defect, and it was visible from the
+constant alone: `ErrBodyReadAfterClose` was ported, anchored, and
+returned by NOTHING — §2e's "ported, anchored, and never called"
+shape, with a behaviour missing behind it. Go's server request body
+carries a `closed` flag and answers that error once closed; goish let
+the handler keep reading:
+
+    Go     read-after-close n=0 err=http: invalid Read on closed Body
+    goish  read-after-close n=5 err=<nil>
+
+The reason it was missing is a real distinction goish had collapsed.
+An Eager body's Close is deliberately a NO-OP, because Go wraps a
+CLIENT's outgoing body in io.NopCloser and without that no-op a
+307/308 redirect cannot replay it. Both rules are correct, of
+different bodies: the outgoing one must survive Close, the incoming
+one must not. goish has one Body type for both, so the request parser
+now marks what it builds, and the closed-body message follows from
+that — the two differ in Go too ("read on closed response body" vs
+"invalid Read on closed Body"). Pinned by
+examples/http_reqbody_close_ref_smoke.rs, checked to fail without it.
+
+`Request.closeBody` and `bufioFlushWriter.Write` close the round of
+equivalents. The first is Go's "close it if there is one", called from
+the paths that abandon a request; goish calls `__close_shared` at the
+same three points, so the helper has no separate work. The second
+wraps CONNECT's write side so a tunnel is not stalled inside a
+`*bufio.Writer` — and goish's client write path holds no buffered
+writer at all, handing every write to the conn directly, so there is
+nothing to flush.
+
+`transportRequest.logf` goes with them: it fires only when the
+request context carries an unexported key (`tLogKey{}`) holding a log
+function, and the only thing that installs one is net/http's own
+export_test.go. Nothing outside the package can reach it.
+
+Where the section stands: 37 when it was written this morning, 18 now.
+Nine defects fixed, one mislabelled port re-anchored, ten waivers made
+visible to the by-declaration count, and the rest read and waived
+against the place their behaviour actually lives. What is left is the
+big restructured machinery — `conn.{serve,readRequest,close}`,
+`chunkWriter.*`, `persistConn.*` — plus the two blocked on §0 A
+(`expectContinueReader`) and the client-side upgrade surface.
 
 Two of these are FIXED BUT NOT PINNED, worth stating plainly.
 Reaching either failing path needs a retry — an idle conn closed

@@ -1774,6 +1774,15 @@ pub trait closeWriter {
     fn CloseWrite(&self) -> error;
 }
 
+// go: waived checkConnErrorWriter.Write — Go wraps the conn so the
+// FIRST write error is recorded and the request context cancelled,
+// which is how a handler blocked writing to a vanished client learns
+// to stop. goish arrives at the same place from the read side: the
+// netpoller disconnect watch (startBackgroundRead/abortPendingRead) is
+// wired to the request cancel, so a client that goes away cancels the
+// context either way. The write error itself is not separately wired,
+// which matters only for a peer that stops READING while still
+// connected.
 // go: waived finalFlush — Go's conn.finalFlush flushes and pool-returns
 // the CONN-LEVEL bufio reader/writer (c.bufr/c.bufw). goish's response
 // renders directly onto the conn (no conn-level writer to flush), and

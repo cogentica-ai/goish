@@ -834,6 +834,10 @@ name = "http_range_smoke"
 path = "examples/http_range_smoke.rs"
 
 [[example]]
+name = "http_reqbody_close_ref_smoke"
+path = "examples/http_reqbody_close_ref_smoke.rs"
+
+[[example]]
 name = "http_redirect_smoke"
 path = "examples/http_redirect_smoke.rs"
 

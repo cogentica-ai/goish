@@ -557,6 +557,18 @@ impl crate::io::Writer for writerOnly<'_> {
     }
 }
 
+// go: waived response.WriteString — Go's exists so io.WriteString can
+// take a fast path through io.StringWriter and skip the
+// string-to-[]byte copy. goish's io::WriteString makes no such
+// assertion: it converts and calls Write, so there is no interface for
+// this method to satisfy and no behaviour that differs. What is
+// missing is the SPELLING — a handler cannot write `w.WriteString(s)`
+// — not an effect on the wire.
+//
+// Kept here rather than above `response.Write`: a `go: waived` line
+// directly above an anchored fn becomes the first line of ITS comment
+// block, and GOISH014 then reports that fn as unanchored. Which is
+// what happened.
 impl response {
     // go: sdk 1.25.5 net/http/server.go:589-627 response.ReadFrom
     // goishlint:ignore GOISH020 ReadFrom — Go's src is io.Reader; the
