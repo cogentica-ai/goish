@@ -22,10 +22,8 @@ use alloc::vec::Vec;
 use crate::errors::{self, error};
 use crate::gostring::string;
 use crate::syscall;
-use crate::types::int;
 
 use super::root::{errPathEscapes, splitPathInRoot, Root};
-use super::FileMode;
 
 // go: none — goish-only: Go's `checkSymlink` (os/root_unix.go:139-149)
 // answers "was that failure a symlink, and if so what does it point

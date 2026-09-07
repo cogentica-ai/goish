@@ -20,7 +20,9 @@ use crate::int;
 use crate::io::fs::FileMode;
 use crate::syscall;
 
-use super::{bytes_of, error, IsPathSeparator, Mkdir, PathError, ReadDir, Remove, Stat};
+use super::{
+    bytes_of, error, IsNotExist, IsPathSeparator, Lstat, Mkdir, PathError, ReadDir, Remove, Stat,
+};
 
 // go: sdk 1.25.5 os/path.go:12-65 MkdirAll
 /// Create `path` along with any necessary parents, and return nil, or
@@ -112,13 +114,45 @@ pub fn RemoveAll<P: Into<string>>(path: P) -> error {
         });
     }
 
-    let (fi, err) = Stat(path.clone());
-    if !err.IsNil() {
-        // Go: a path that does not exist is not an error.
+    // Go: "Simple case: if Remove works, we're done."
+    //
+    // This ORDER is load-bearing and goish had it backwards. It used to
+    // Stat first and recurse when the answer was IsDir — but Stat
+    // FOLLOWS symlinks, so:
+    //
+    //   * a symlink to a directory answered IsDir, ReadDir followed it,
+    //     and the recursion deleted the TARGET's contents. RemoveAll of
+    //     a work directory holding a link to somewhere real emptied
+    //     that somewhere. Measured, not theorised: the smoke's victim
+    //     directory came back with 0 entries.
+    //   * a DANGLING symlink failed Stat, which the code below read as
+    //     "does not exist" and skipped — so the link survived, its
+    //     parent was not empty, and the rmdir failed. That is how this
+    //     was found: a passing smoke that left its own temp tree on
+    //     disk.
+    //
+    // Remove unlinks a symlink of any kind without looking through it,
+    // so trying it first settles both cases before anything can be
+    // followed. Only when Remove fails is this maybe-a-directory, and
+    // then it is LSTAT that says so.
+    let rerr = Remove(path.clone());
+    if rerr.IsNil() || IsNotExist(rerr.clone()) {
         return nil;
     }
+    let (fi, serr) = Lstat(path.clone());
+    if !serr.IsNil() {
+        // Go returns nil for "gone" or "not a directory", and the real
+        // error otherwise.
+        if IsNotExist(serr.clone()) {
+            return nil;
+        }
+        return serr;
+    }
     if !fi.IsDir() {
-        return Remove(path);
+        // Not a directory, so the original Remove failure is the
+        // answer — a permission error, say, rather than a claim that
+        // there was nothing to do.
+        return rerr;
     }
     let (entries, derr) = ReadDir(path.clone());
     if !derr.IsNil() {
