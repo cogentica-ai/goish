@@ -372,6 +372,144 @@ impl Cmd {
 /// to `name` itself (matching Go's `cmd.Args[0] = cmd.Path` only if
 /// the lookup succeeded — Go preserves the original name on failure
 /// so callers see the typo'd argv[0] in error messages).
+// go: none — goish-only: Go's Output points c.Stdout at a
+// `bytes.Buffer` it still holds a pointer to, and reads it after Run.
+// goish's Cmd OWNS the writer it is given, so the caller keeps a
+// shared handle instead.
+struct sharedSink(Arc<crate::sync::Mutex<Vec<byte>>>);
+
+impl io::Writer for sharedSink {
+    // go: none — goish-only: see the struct.
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        let raw: &[byte] = &p;
+        self.0.Lock().extend_from_slice(raw);
+        return (crate::len(&p), errors::nil);
+    }
+}
+
+// go: none — goish-only: the same handle trick for the bounded stderr
+// capture, so `Output` can read the saver back after Run.
+struct saverSink(Arc<crate::sync::Mutex<prefixSuffixSaver>>);
+
+impl io::Writer for saverSink {
+    // go: none — goish-only: forwards to prefixSuffixSaver::write.
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        let raw: &[byte] = &p;
+        let n = self.0.Lock().write(raw);
+        return (n, errors::nil);
+    }
+}
+
+// go: none — goish-only placement: this whole package lives in
+// mod.rs, so citing os/exec/exec.go here would make the MODULE ROOT
+// claim that file (GOISH015) and owe every declaration in it. Go's is
+// prefixSuffixSaver, exec.go line 1119.
+/// Go: "an io.Writer which retains the first N bytes and the last N
+/// bytes written to it. The Write method is not safe for concurrent
+/// use." It exists so `Output` can attach a child's stderr to an
+/// ExitError without letting a chatty failure hold megabytes.
+pub(crate) struct prefixSuffixSaver {
+    pub(crate) N: int,
+    prefix: Vec<byte>,
+    suffix: Vec<byte>,
+    suffixOff: usize,
+    skipped: i64,
+}
+
+impl prefixSuffixSaver {
+    // go: none — goish-only: Go writes `&prefixSuffixSaver{N: 32 << 10}`
+    // as a composite literal; the other fields are its zero value.
+    pub(crate) fn new(n: int) -> Self {
+        return prefixSuffixSaver {
+            N: n,
+            prefix: Vec::new(),
+            suffix: Vec::new(),
+            suffixOff: 0,
+            skipped: 0,
+        };
+    }
+
+    // go: none — goish-only placement: Go's prefixSuffixSaver.fill,
+    // exec.go line 1159. See the note on the struct.
+    /// Go: "fill appends up to len(p) bytes of p to *dst, such that
+    /// *dst does not grow larger than w.N. It returns the un-appended
+    /// suffix of p."
+    fn fill(&self, dst: &mut Vec<byte>, p: &[byte]) -> usize {
+        let remain = self.N as usize - dst.len().min(self.N as usize);
+        if remain > 0 {
+            let add = p.len().min(remain);
+            dst.extend_from_slice(&p[..add]);
+            return add;
+        }
+        return 0;
+    }
+
+    // go: none — goish-only placement: Go's prefixSuffixSaver.Write,
+    // exec.go line 1133.
+    pub(crate) fn write(&mut self, p: &[byte]) -> int {
+        let lenp = p.len();
+        let used = {
+            let mut prefix = core::mem::take(&mut self.prefix);
+            let n = self.fill(&mut prefix, p);
+            self.prefix = prefix;
+            n
+        };
+        let mut rest = &p[used..];
+
+        // Go: "Only keep the last w.N bytes of suffix data."
+        let n = self.N as usize;
+        if rest.len() > n {
+            let overage = rest.len() - n;
+            rest = &rest[overage..];
+            self.skipped += crate::int64(overage);
+        }
+        let used2 = {
+            let mut suffix = core::mem::take(&mut self.suffix);
+            let n2 = self.fill(&mut suffix, rest);
+            self.suffix = suffix;
+            n2
+        };
+        rest = &rest[used2..];
+
+        // Go: "w.suffix is full now if p is non-empty. Overwrite it in
+        // a circle." 0, 1, or 2 iterations.
+        while !rest.is_empty() {
+            let room = n - self.suffixOff;
+            let take = rest.len().min(room);
+            self.suffix[self.suffixOff..self.suffixOff + take].copy_from_slice(&rest[..take]);
+            rest = &rest[take..];
+            self.skipped += crate::int64(take);
+            self.suffixOff += take;
+            if self.suffixOff == n {
+                self.suffixOff = 0;
+            }
+        }
+        return crate::int(lenp);
+    }
+
+    // go: none — goish-only placement: Go's prefixSuffixSaver.Bytes,
+    // exec.go line 1168.
+    /// Go joins prefix and suffix, with "\n... omitting N bytes ...\n"
+    /// between them when anything was dropped, and unrolls the ring.
+    pub(crate) fn Bytes(&self) -> slice<byte> {
+        if self.suffix.is_empty() {
+            return slice::<byte>::__from_vec(self.prefix.clone());
+        }
+        if self.skipped == 0 {
+            let mut out = self.prefix.clone();
+            out.extend_from_slice(&self.suffix);
+            return slice::<byte>::__from_vec(out);
+        }
+        let mut out = self.prefix.clone();
+        out.extend_from_slice(b"\n... omitting ");
+        out.extend_from_slice(crate::strconv::FormatInt(self.skipped, 10).as_bytes());
+        out.extend_from_slice(b" bytes ...\n");
+        out.extend_from_slice(&self.suffix[self.suffixOff..]);
+        out.extend_from_slice(&self.suffix[..self.suffixOff]);
+        return slice::<byte>::__from_vec(out);
+    }
+}
+
 pub fn Command<S: Into<string>>(name: S, args: slice<string>) -> Cmd {
     let name = name.into();
     let path = if name_has_slash(&name) {
@@ -426,12 +564,17 @@ pub fn Command<S: Into<string>>(name: S, args: slice<string>) -> Cmd {
 /// back was to parse the message.
 ///
 /// Go's `Stderr` field — a captured prefix of the child's stderr,
-/// filled in only by `Cmd.Output` — is not carried: goish has no
-/// Output method yet, and an always-empty field would read as
-/// "the child printed nothing".
+/// filled in only by `Cmd.Output` — is carried now that `Output`
+/// exists to fill it. It stays empty for every other path, exactly as
+/// Go's does.
 #[derive(Clone)]
 pub struct ExitError {
     pub ProcessState: crate::os::exec_posix::ProcessState,
+    /// Go: "Stderr holds a subset of the standard error output from the
+    /// Cmd.Output method if standard error was not otherwise being
+    /// collected." Filled only by `Output`, and bounded — see
+    /// `prefixSuffixSaver`.
+    pub Stderr: slice<byte>,
 }
 
 impl crate::errors::ErrorTrait for ExitError {
@@ -1048,6 +1191,97 @@ impl Cmd {
         decode_wait_status(int::from(i64::from(pid)), status)
     }
 
+    // go: none — goish-only placement: Go's Cmd.String, exec.go line
+    // 494.
+    /// Go: "String returns a human-readable description of c. It is
+    /// intended only for debugging." The exact executable path plus the
+    /// arguments after argv[0].
+    ///
+    /// Go's first branch — join Args when the path lookup failed —
+    /// needs no counterpart: goish's `Command` leaves `Path` as the
+    /// requested name in that case and `Args[0]` IS that name, so both
+    /// branches print the same string.
+    pub fn String(&self) -> string {
+        let mut b = string::new();
+        b = b + self.Path.clone();
+        let n = crate::len(&self.Args);
+        let mut i: int = 1;
+        while i < n {
+            b = b + string::from_static(" ") + self.Args[i].clone();
+            i += 1;
+        }
+        return b;
+    }
+
+    // go: none — goish-only placement: Go's Cmd.Output, exec.go line
+    // 1006.
+    /// Go: "Output runs the command and returns its standard output.
+    /// Any returned error will usually be of type *ExitError. If
+    /// c.Stderr was nil, Output populates ExitError.Stderr."
+    pub fn Output(&mut self) -> (slice<byte>, error) {
+        if self.Stdout.is_some() {
+            return (
+                crate::make!([]byte, 0),
+                errors::New(string::from_static("exec: Stdout already set")),
+            );
+        }
+        let sink = Arc::new(crate::sync::Mutex::new(Vec::<byte>::new()));
+        self.SetStdout(sharedSink(sink.clone()));
+
+        // Go: captureErr := c.Stderr == nil
+        let captureErr = self.Stderr.is_none();
+        let saver = Arc::new(crate::sync::Mutex::new(prefixSuffixSaver::new(32 << 10)));
+        if captureErr {
+            self.SetStderr(saverSink(saver.clone()));
+        }
+
+        let err = self.Run();
+        let out = slice::<byte>::__from_vec(sink.Lock().clone());
+        if !err.IsNil() && captureErr {
+            // Go: if ee, ok := err.(*ExitError); ok {
+            //         ee.Stderr = c.Stderr.(*prefixSuffixSaver).Bytes() }
+            if let Some(ee) = errors::As::<ExitError>(err.clone()) {
+                // Go mutates the ExitError in place through its
+                // pointer; goish's As hands back an Arc, so the field
+                // is filled on a copy and re-wrapped. Same observable
+                // result: the error the caller gets carries Stderr.
+                let ee2 = ExitError {
+                    ProcessState: ee.ProcessState.clone(),
+                    Stderr: saver.Lock().Bytes(),
+                };
+                return (out, errors::Wrap(ee2));
+            }
+        }
+        return (out, err);
+    }
+
+    // go: none — goish-only placement: Go's Cmd.CombinedOutput,
+    // exec.go line 1029.
+    /// Go: "CombinedOutput runs the command and returns its combined
+    /// standard output and standard error." Both streams are pointed at
+    /// ONE buffer, which is what interleaves them; goish shares the
+    /// same Arc where Go assigns the same pointer twice.
+    pub fn CombinedOutput(&mut self) -> (slice<byte>, error) {
+        if self.Stdout.is_some() {
+            return (
+                crate::make!([]byte, 0),
+                errors::New(string::from_static("exec: Stdout already set")),
+            );
+        }
+        if self.Stderr.is_some() {
+            return (
+                crate::make!([]byte, 0),
+                errors::New(string::from_static("exec: Stderr already set")),
+            );
+        }
+        let sink = Arc::new(crate::sync::Mutex::new(Vec::<byte>::new()));
+        self.SetStdout(sharedSink(sink.clone()));
+        self.SetStderr(sharedSink(sink.clone()));
+        let err = self.Run();
+        let out = slice::<byte>::__from_vec(sink.Lock().clone());
+        return (out, err);
+    }
+
     /// `(*Cmd).Run()` — fork, exec, drain captured pipes, wait, return
     /// the child's status as an error (or nil on exit code 0).
     /// Unchanged API: callers that only need Run() continue to work as before.
@@ -1107,7 +1341,10 @@ fn decode_wait_status(pid: int, status: i32) -> error {
     // Go: Cmd.Wait returns `&ExitError{ProcessState: ps}` for any
     // non-zero state, and the message is ProcessState.String() — so
     // a signal renders by NAME ("signal: killed"), not by number.
-    return errors::Wrap(ExitError { ProcessState: st });
+    return errors::Wrap(ExitError {
+        ProcessState: st,
+        Stderr: crate::make!([]byte, 0),
+    });
 }
 
 /// Read everything from `fd` into the goish writer. Buffers are 4 KiB.
