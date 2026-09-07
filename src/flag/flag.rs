@@ -1,4 +1,4 @@
-// go: file flag/flag.go decls: FlagSet.Int64, FlagSet.Uint, FlagSet.Duration, Parsed, Bool, Int, Int64, Uint, String, Duration, Parse, Set, FlagSet.Lookup, FlagSet.VisitAll, numError, UnquoteUsage, isZeroValue, FlagSet.Parse, FlagSet.parseOne, FlagSet.usage, FlagSet.NFlag, FlagSet.Visit, FlagSet.set, FlagSet.PrintDefaults, FlagSet.SetOutput
+// go: file flag/flag.go decls: FlagSet.Uint64, Uint64, Arg, FlagSet.Int64, FlagSet.Uint, FlagSet.Duration, Parsed, Bool, Int, Int64, Uint, String, Duration, Parse, Set, FlagSet.Lookup, FlagSet.VisitAll, numError, UnquoteUsage, isZeroValue, FlagSet.Parse, FlagSet.parseOne, FlagSet.usage, FlagSet.NFlag, FlagSet.Visit, FlagSet.set, FlagSet.PrintDefaults, FlagSet.SetOutput
 //
 // flag — the package-level CommandLine set, and the flag types goish's
 // hand-written FlagSet did not have.
@@ -47,6 +47,32 @@ impl FlagSet {
             usage: usage.into(),
             kind: FlagKind::Int64(cell.clone()),
             defvalue: __defstr(&FlagKind::Int64(cell.clone())),
+            actual: false,
+        });
+        return FlagHandle { cell };
+    }
+
+    // go: sdk 1.25.5 flag/flag.go:864-868 FlagSet.Uint64
+    /// Go: "Uint64 defines a uint64 flag with specified name, default
+    /// value, and usage string."
+    ///
+    /// Go returns `*uint64` — the address of the variable the flag
+    /// writes into. goish returns the same thing in the shape it has:
+    /// a FlagHandle over the cell the parser sets. That is why the
+    /// `*Var` family has no counterpart here; the handle IS the
+    /// pointer Go hands back.
+    pub fn Uint64<N: Into<string>, U: Into<string>>(
+        &mut self,
+        name: N,
+        default: crate::types::uint64,
+        usage: U,
+    ) -> FlagHandle<crate::types::uint64> {
+        let cell = Arc::new(SpinLock::new(default));
+        self.defs.push(FlagDef {
+            name: name.into(),
+            usage: usage.into(),
+            kind: FlagKind::Uint64(cell.clone()),
+            defvalue: __defstr(&FlagKind::Uint64(cell.clone())),
             actual: false,
         });
         return FlagHandle { cell };
@@ -170,6 +196,27 @@ pub fn Uint<N: Into<string>, U: Into<string>>(
     return CommandLine.Lock().Uint(name, default, usage);
 }
 
+// go: sdk 1.25.5 flag/flag.go:872-874 Uint64
+/// Go: "Uint64 defines a uint64 flag with specified name, default
+/// value, and usage string." The one integer width goish's flag set
+/// could not express — a Go program calling `flag.Uint64` had nothing
+/// to call.
+pub fn Uint64<N: Into<string>, U: Into<string>>(
+    name: N,
+    default: crate::types::uint64,
+    usage: U,
+) -> FlagHandle<crate::types::uint64> {
+    return CommandLine.Lock().Uint64(name, default, usage);
+}
+
+// go: sdk 1.25.5 flag/flag.go:730-732 Arg
+/// Go: "Arg returns the i'th command-line argument. Arg(0) is the
+/// first remaining argument after flags have been processed. Arg
+/// returns an empty string if the requested element does not exist."
+pub fn Arg(i: crate::types::int) -> string {
+    return CommandLine.Lock().Arg(i);
+}
+
 // go: sdk 1.25.5 flag/flag.go:898-902 String
 /// Go: "String defines a string flag with specified name, default
 /// value, and usage string."
@@ -281,6 +328,7 @@ impl Value for kindValue {
             FlagKind::Int(ref c) => crate::strconv::Itoa(*c.lock()),
             FlagKind::Int64(ref c) => crate::strconv::FormatInt(*c.lock(), 10),
             FlagKind::Uint(ref c) => crate::strconv::FormatUint(*c.lock(), 10),
+            FlagKind::Uint64(ref c) => crate::strconv::FormatUint(*c.lock(), 10),
             FlagKind::Duration(ref c) => (*c.lock()).String(),
             FlagKind::Float64(ref c) => crate::strconv::FormatFloat(*c.lock(), b'g', -1, 64),
             FlagKind::String(ref c) => (*c.lock()).clone(),
@@ -314,6 +362,13 @@ impl Value for kindValue {
                 *c.lock() = v;
             }
             FlagKind::Uint(ref c) => {
+                let (v, err) = crate::strconv::ParseUint(s, 0, 64);
+                if err != crate::nil {
+                    return err;
+                }
+                *c.lock() = v;
+            }
+            FlagKind::Uint64(ref c) => {
                 let (v, err) = crate::strconv::ParseUint(s, 0, 64);
                 if err != crate::nil {
                     return err;
@@ -354,6 +409,7 @@ impl Flag {
             FlagKind::Int(_) | FlagKind::Int64(_) => "int",
             FlagKind::String(_) => "string",
             FlagKind::Uint(_) => "uint",
+            FlagKind::Uint64(_) => "uint64",
         };
     }
 }
@@ -518,7 +574,10 @@ pub fn UnquoteUsage(fl: &Flag) -> (string, string) {
 fn isZeroValue(kind: Option<&FlagKind>, value: &string) -> bool {
     let z: &str = match kind {
         Some(FlagKind::Bool(_)) => "false",
-        Some(FlagKind::Int(_)) | Some(FlagKind::Int64(_)) | Some(FlagKind::Uint(_)) => "0",
+        Some(FlagKind::Int(_))
+        | Some(FlagKind::Int64(_))
+        | Some(FlagKind::Uint(_))
+        | Some(FlagKind::Uint64(_)) => "0",
         Some(FlagKind::Float64(_)) => "0",
         Some(FlagKind::String(_)) => "",
         Some(FlagKind::Duration(_)) => "0s",
@@ -772,6 +831,12 @@ impl FlagSet {
                 // Go: strconv.ParseUint(value, 0, strconv.IntSize)
                 let (n, err) = strconv::ParseUint(s, 0, 64);
                 *cell.lock() = n as crate::types::uint;
+                return err;
+            }
+            FlagKind::Uint64(cell) => {
+                // Go: strconv.ParseUint(value, 0, 64)
+                let (n, err) = strconv::ParseUint(s, 0, 64);
+                *cell.lock() = n;
                 return err;
             }
             FlagKind::Duration(cell) => {

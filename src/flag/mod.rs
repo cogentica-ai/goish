@@ -84,6 +84,7 @@ pub enum FlagKind {
     Int(Arc<SpinLock<int>>),
     Int64(Arc<SpinLock<crate::types::int64>>),
     Uint(Arc<SpinLock<crate::types::uint>>),
+    Uint64(Arc<SpinLock<crate::types::uint64>>),
     Duration(Arc<SpinLock<crate::time::Duration>>),
     Float64(Arc<SpinLock<float64>>),
     String(Arc<SpinLock<string>>),
@@ -99,6 +100,7 @@ impl Clone for FlagKind {
             FlagKind::Int(c) => FlagKind::Int(c.clone()),
             FlagKind::Int64(c) => FlagKind::Int64(c.clone()),
             FlagKind::Uint(c) => FlagKind::Uint(c.clone()),
+            FlagKind::Uint64(c) => FlagKind::Uint64(c.clone()),
             FlagKind::Duration(c) => FlagKind::Duration(c.clone()),
             FlagKind::Float64(c) => FlagKind::Float64(c.clone()),
             FlagKind::String(c) => FlagKind::String(c.clone()),
@@ -229,6 +231,20 @@ impl FlagSet {
 
     pub fn NArg(&self) -> int {
         self.args.len() as int
+    }
+
+    // go: none — goish-only placement: this FlagSet is hand-written
+    // and lives in a module root, where GOISH015 forbids an anchored
+    // port. Go's is FlagSet.Arg, flag.go line 720.
+    /// `(*FlagSet).Arg(i)` — the i'th remaining
+    /// argument, or "" when out of range. Go returns the empty string
+    /// rather than panicking, which is what lets `flag.Arg(0)` be read
+    /// unguarded.
+    pub fn Arg(&self, i: int) -> string {
+        if i < 0 || i >= crate::int(self.args.len()) {
+            return string::new();
+        }
+        return self.args[i as usize].clone();
     }
 
     pub(crate) fn find_def(&self, name: &string) -> Option<usize> {
