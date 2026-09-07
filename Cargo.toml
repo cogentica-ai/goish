@@ -2124,6 +2124,10 @@ name = "os_root2_ref_smoke"
 path = "examples/os_root2_ref_smoke.rs"
 
 [[example]]
+name = "os_root3_ref_smoke"
+path = "examples/os_root3_ref_smoke.rs"
+
+[[example]]
 name = "flag_func_ref_smoke"
 path = "examples/flag_func_ref_smoke.rs"
 

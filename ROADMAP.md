@@ -2901,43 +2901,45 @@ signatures differ — the shims take `&mut [byte]` where drbg takes
 the RSA key path. It wants a ref smoke over a fixed reader first, which
 would also pin item 1.
 
-## 2q. os.Root: the walk is ported, the operations on it are not
+## 2q. os.Root: the walk and seven operations are ported
 
-Landed 2026-09-07: `Root`, `OpenRoot`, `Root.{Name,Close,Open,OpenFile}`,
-`splitPathInRoot` and `doInRoot` — the openat walk that carries the
-whole security property — pinned 20/20 against Go by
-os_root_ref_smoke, with each of its two rules verified by a separate
-perturbation.
+Landed 2026-09-07 across two commits. The walk — `doInRoot`,
+`splitPathInRoot`, and the openat/O_NOFOLLOW rules that carry the whole
+security property — plus `Root`, `OpenRoot`, `Root.{Name,Close,Open,
+OpenFile,Create,OpenRoot,Stat,Lstat,Mkdir,Remove}` and `OpenInRoot`.
+Pinned by os_root_ref_smoke (20/20) and os_root2_ref_smoke (21/21),
+each rule verified by its own perturbation.
 
-UNPORTED, and listed here rather than waived, because every one of them
-is the SAME walk with a different final step (which is why `doInRoot`
-takes that step as a parameter in Go and here):
+The walk's final step is a closure, as Go's is a function, so the
+remaining operations are each a closure and a reference row.
 
-  * stat half — `Root.Stat`, `Root.Lstat`, `Root.Readlink`,
-    `Root.ReadFile`. Needs `fstatat`, which the tree has as
-    SYS_NEWFSTATAT already, and `readlinkat`, added with the walk.
-  * mutating half — `Root.Mkdir`, `Root.MkdirAll`, `Root.Remove`,
-    `Root.RemoveAll`, `Root.Rename`, `Root.Link`, `Root.Symlink`,
-    `Root.Chmod`, `Root.Chown`, `Root.Lchown`, `Root.Chtimes`,
-    `Root.WriteFile`. Needs mkdirat, unlinkat, renameat, linkat,
-    symlinkat, fchmodat, fchownat, utimensat — none of which the tree
-    has yet.
-  * `OpenInRoot`, `Root.Create`, `Root.OpenRoot` — one-liners on what
-    is already here.
-  * `Root.FS` and the `rootFS` adapter, which want io/fs plumbing
-    rather than more syscalls.
+STILL UNPORTED, and listed rather than waived:
 
-**The enabling step is a refactor, not a syscall.** `doInRoot` is
-currently specialised to openat as its last move. Generalising it to
-take the final operation — Go passes a function — is what makes the
-rest cheap, and it should happen before the second operation is
-written, not after the fifth.
+  * `Root.Readlink`, `Root.ReadFile`, `Root.WriteFile` — no new
+    syscalls needed; Readlinkat is already in.
+  * `Root.Rename`, `Root.Link`, `Root.Symlink`, `Root.Chmod`,
+    `Root.Chown`, `Root.Lchown`, `Root.Chtimes` — need renameat,
+    linkat, symlinkat, fchmodat, fchownat, utimensat.
+  * `Root.MkdirAll`, `Root.RemoveAll` — recursive, and RemoveAll wants
+    the walk to hand back a directory fd to iterate.
+  * `Root.FS` and `rootFS` — io/fs plumbing rather than syscalls.
 
-**A caution for whoever does the mutating half.** The escape rules are
-tested by os_root_ref_smoke through `Open` only. An operation added to
-the walk inherits the walk's guarantees, but NOT its coverage: a
-`Root.Remove` that resolved its own path would be unprotected and every
-existing row would still pass. Add the escape rows per operation.
+**The caution below was written before the second commit and proved
+itself inside the hour, so it stays.** An operation added to the walk
+inherits the walk's guarantees but NOT its coverage. `Root.Stat` was
+written passing flags=0 to fstatat, so the KERNEL followed a symlink —
+outside the walk, where there is no root — and Stat of a link pointing
+out of the root returned nil and described a file the caller must not
+be able to see. Every other row passed; the walk was untouched and
+still correct.
+
+It was caught only because the reference gives EVERY operation the same
+three refusals ("..", an absolute path, a symlink pointing outside)
+rather than one "it works" row. Do that for each operation added here.
+The tell in a diff is a flag argument: `0` where the guarded form needs
+`AT_SYMLINK_NOFOLLOW` or `O_NOFOLLOW`. Those flags are the guard's only
+participation in the final step, and a syscall that resolves paths
+itself steps straight out of the guard.
 
 ## 3. Gaps other packages will hit next
 

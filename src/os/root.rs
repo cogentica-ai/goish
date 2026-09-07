@@ -430,3 +430,103 @@ pub fn OpenInRoot<D: Into<string>, N: Into<string>>(
     let _ = r.Close();
     return out;
 }
+
+impl Root {
+    // go: sdk 1.25.5 os/root.go:216-221 Root.Readlink
+    /// Go: "Readlink returns the destination of the named symbolic
+    /// link in the root."
+    ///
+    /// This acts on the LINK, not through it — the same family as
+    /// Lstat and Remove — so a link pointing outside the root is READ
+    /// rather than refused, and the answer is the path it holds, which
+    /// may well be outside. Reading a link is not following one.
+    pub fn Readlink<N: Into<string>>(&self, name: N) -> (string, error) {
+        let name: string = name.into();
+        let (t, err) = self.doInRoot::<string, _>("readlinkat", &name, |dirfd, comp| {
+            let mut cb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
+            cb.extend_from_slice(super::bytes_of(comp));
+            cb.push(0);
+            let mut buf: Vec<u8> = alloc::vec![0u8; 4096];
+            let n = syscall::Readlinkat(dirfd, cb.as_ptr(), buf.as_mut_ptr(), buf.len());
+            if n < 0 {
+                return super::root_openat::LastResult::Err(crate::int32(-n));
+            }
+            return super::root_openat::LastResult::Ok(string::from_bytes(&buf[..n as usize]));
+        });
+        return (t, err);
+    }
+
+    // go: sdk 1.25.5 os/root.go:253-262 Root.ReadFile
+    /// Go: "ReadFile reads the named file in the root and returns its
+    /// contents."
+    ///
+    /// Opened through `Open`, so it inherits that walk and its Op
+    /// string: a refusal here says `openat`, not `readfile`.
+    // goishlint:ignore GOISH023 — the body ends in the read loop, and
+    // every exit from it is an explicit `return`.
+    pub fn ReadFile<N: Into<string>>(&self, name: N) -> (crate::goslice::slice<super::byte>, error) {
+        use crate::io::Reader;
+        let (f, err) = self.Open(name);
+        if !err.IsNil() {
+            return (
+                crate::goslice::slice::<super::byte>::__from_vec(Vec::new()),
+                err,
+            );
+        }
+        let mut f = f.MustTake();
+        let mut out: Vec<super::byte> = Vec::new();
+        let mut buf = crate::goslice::slice::<super::byte>::__from_vec(alloc::vec![0u8; 4096]);
+        loop {
+            let (n, rerr) = f.Read(&mut buf);
+            if n > 0 {
+                out.extend_from_slice(&buf.as_ref()[..n as usize]);
+            }
+            if !rerr.IsNil() {
+                let _ = f.Close();
+                if crate::errors::Is(rerr.clone(), crate::io::EOF) {
+                    return (crate::goslice::slice::<super::byte>::__from_vec(out), errors::nil);
+                }
+                return (
+                    crate::goslice::slice::<super::byte>::__from_vec(out),
+                    rerr,
+                );
+            }
+            if n == 0 {
+                let _ = f.Close();
+                return (crate::goslice::slice::<super::byte>::__from_vec(out), errors::nil);
+            }
+        }
+    }
+
+    // go: sdk 1.25.5 os/root.go:264-274 Root.WriteFile
+    /// Go: "WriteFile writes data to the named file in the root,
+    /// creating it if necessary."
+    ///
+    /// Also through the walk, via OpenFile — which is why writing to a
+    /// symlink that points outside is refused rather than following it
+    /// and overwriting whatever is there.
+    pub fn WriteFile<N: Into<string>, D: AsRef<[super::byte]>>(
+        &self,
+        name: N,
+        data: D,
+        perm: FileMode,
+    ) -> error {
+        use crate::io::Writer;
+        let (f, err) = self.OpenFile(
+            name,
+            super::O_WRONLY | super::O_CREATE | super::O_TRUNC,
+            perm,
+        );
+        if !err.IsNil() {
+            return err;
+        }
+        let mut f = f.MustTake();
+        let d = crate::goslice::slice::<super::byte>::__from_vec(data.as_ref().to_vec());
+        let (_, werr) = f.Write(d);
+        let cerr = f.Close();
+        if !werr.IsNil() {
+            return werr;
+        }
+        return cerr;
+    }
+}
