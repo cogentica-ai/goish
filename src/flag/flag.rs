@@ -1,4 +1,4 @@
-// go: file flag/flag.go decls: FlagSet.Uint64, Uint64, Arg, FlagSet.Int64, FlagSet.Uint, FlagSet.Duration, Parsed, Bool, Int, Int64, Uint, String, Duration, Parse, Set, FlagSet.Lookup, FlagSet.VisitAll, numError, UnquoteUsage, isZeroValue, FlagSet.Parse, FlagSet.parseOne, FlagSet.usage, FlagSet.NFlag, FlagSet.Visit, FlagSet.set, FlagSet.PrintDefaults, FlagSet.SetOutput
+// go: file flag/flag.go decls: FlagSet.Uint64, Uint64, Arg, FlagSet.Func, FlagSet.BoolFunc, Func, BoolFunc, FlagSet.Int64, FlagSet.Uint, FlagSet.Duration, Parsed, Bool, Int, Int64, Uint, String, Duration, Parse, Set, FlagSet.Lookup, FlagSet.VisitAll, numError, UnquoteUsage, isZeroValue, FlagSet.Parse, FlagSet.parseOne, FlagSet.usage, FlagSet.NFlag, FlagSet.Visit, FlagSet.set, FlagSet.PrintDefaults, FlagSet.SetOutput
 //
 // flag — the package-level CommandLine set, and the flag types goish's
 // hand-written FlagSet did not have.
@@ -50,6 +50,47 @@ impl FlagSet {
             actual: false,
         });
         return FlagHandle { cell };
+    }
+
+    // go: sdk 1.25.5 flag/flag.go:979-981 FlagSet.Func
+    /// Go: "Func defines a flag with the specified name and usage
+    /// string. Each time the flag is seen, fn is called with the value
+    /// of the flag. If fn returns a non-nil error, it will be treated
+    /// as a flag value parsing error."
+    ///
+    /// Go passes `func(string) error`; goish takes the same shape as a
+    /// closure. There is no cell and no FlagHandle to return — the
+    /// callback IS the storage, which is the point of this form.
+    pub fn Func<N: Into<string>, U: Into<string>, F>(&mut self, name: N, usage: U, fn_: F)
+    where
+        F: Fn(string) -> error + Send + Sync + 'static,
+    {
+        let f: Arc<dyn Fn(string) -> error + Send + Sync> = Arc::new(fn_);
+        self.defs.push(FlagDef {
+            name: name.into(),
+            usage: usage.into(),
+            kind: FlagKind::Func(f),
+            defvalue: string::new(),
+            actual: false,
+        });
+    }
+
+    // go: sdk 1.25.5 flag/flag.go:993-995 FlagSet.BoolFunc
+    /// Go: "BoolFunc defines a flag with the specified name and usage
+    /// string without requiring values." `-v` alone calls fn with
+    /// "true"; `-v=false` calls it with "false".
+    pub fn BoolFunc<N: Into<string>, U: Into<string>, F>(&mut self, name: N, usage: U, fn_: F)
+    where
+        F: Fn(string) -> error + Send + Sync + 'static,
+    {
+        let f: Arc<dyn Fn(string) -> error + Send + Sync> = Arc::new(fn_);
+        self.defs.push(FlagDef {
+            name: name.into(),
+            usage: usage.into(),
+            kind: FlagKind::BoolFunc(f),
+            defvalue: string::new(),
+            actual: false,
+        });
     }
 
     // go: sdk 1.25.5 flag/flag.go:864-868 FlagSet.Uint64
@@ -196,6 +237,27 @@ pub fn Uint<N: Into<string>, U: Into<string>>(
     return CommandLine.Lock().Uint(name, default, usage);
 }
 
+// go: sdk 1.25.5 flag/flag.go:986-988 Func
+/// Go: "Func defines a flag with the specified name and usage string.
+/// Each time the flag is seen, fn is called with the value of the
+/// flag."
+pub fn Func<N: Into<string>, U: Into<string>, F>(name: N, usage: U, fn_: F)
+where
+    F: Fn(string) -> error + Send + Sync + 'static,
+{
+    CommandLine.Lock().Func(name, usage, fn_);
+}
+
+// go: sdk 1.25.5 flag/flag.go:1000-1002 BoolFunc
+/// Go: "BoolFunc defines a flag with the specified name and usage
+/// string without requiring values."
+pub fn BoolFunc<N: Into<string>, U: Into<string>, F>(name: N, usage: U, fn_: F)
+where
+    F: Fn(string) -> error + Send + Sync + 'static,
+{
+    CommandLine.Lock().BoolFunc(name, usage, fn_);
+}
+
 // go: sdk 1.25.5 flag/flag.go:872-874 Uint64
 /// Go: "Uint64 defines a uint64 flag with specified name, default
 /// value, and usage string." The one integer width goish's flag set
@@ -329,6 +391,9 @@ impl Value for kindValue {
             FlagKind::Int64(ref c) => crate::strconv::FormatInt(*c.lock(), 10),
             FlagKind::Uint(ref c) => crate::strconv::FormatUint(*c.lock(), 10),
             FlagKind::Uint64(ref c) => crate::strconv::FormatUint(*c.lock(), 10),
+            // Go: funcValue.String and boolFuncValue.String both return
+            // "" — a callback flag has no value to show.
+            FlagKind::Func(_) | FlagKind::BoolFunc(_) => string::new(),
             FlagKind::Duration(ref c) => (*c.lock()).String(),
             FlagKind::Float64(ref c) => crate::strconv::FormatFloat(*c.lock(), b'g', -1, 64),
             FlagKind::String(ref c) => (*c.lock()).clone(),
@@ -375,6 +440,10 @@ impl Value for kindValue {
                 }
                 *c.lock() = v;
             }
+            // Go: `func (f funcValue) Set(s string) error { return f(s) }`
+            FlagKind::Func(ref f) | FlagKind::BoolFunc(ref f) => {
+                return f(s);
+            }
             FlagKind::Duration(ref c) => {
                 let (v, err) = crate::time::ParseDuration(s);
                 if err != crate::nil {
@@ -410,6 +479,10 @@ impl Flag {
             FlagKind::String(_) => "string",
             FlagKind::Uint(_) => "uint",
             FlagKind::Uint64(_) => "uint64",
+            // Go's UnquoteUsage: a funcValue reports "value", and a
+            // boolFuncValue reports "" because it takes none.
+            FlagKind::Func(_) => "value",
+            FlagKind::BoolFunc(_) => "",
         };
     }
 }
@@ -580,6 +653,10 @@ fn isZeroValue(kind: Option<&FlagKind>, value: &string) -> bool {
         | Some(FlagKind::Uint64(_)) => "0",
         Some(FlagKind::Float64(_)) => "0",
         Some(FlagKind::String(_)) => "",
+        // A callback flag has no default to compare against; Go's
+        // isZeroValue builds a zero Value and asks it, which for these
+        // is "".
+        Some(FlagKind::Func(_)) | Some(FlagKind::BoolFunc(_)) => "",
         Some(FlagKind::Duration(_)) => "0s",
         None => return false,
     };
@@ -678,7 +755,14 @@ impl FlagSet {
             }
         };
 
-        let isBool = matches!(self.defs[def_idx].kind, FlagKind::Bool(_));
+        // Go asks the Value: `if fv, ok := flag.Value.(boolFlag); ok &&
+        // fv.IsBoolFlag()`. Both boolValue and boolFuncValue answer
+        // true, which is what lets `-v` stand alone without eating the
+        // next argument.
+        let isBool = matches!(
+            self.defs[def_idx].kind,
+            FlagKind::Bool(_) | FlagKind::BoolFunc(_)
+        );
         if isBool {
             // Special case: a bool flag does not need an argument, and
             // it never CONSUMES the next one. goish consumed it, so
@@ -838,6 +922,13 @@ impl FlagSet {
                 let (n, err) = strconv::ParseUint(s, 0, 64);
                 *cell.lock() = n;
                 return err;
+            }
+            // Go: the Value IS the function — `funcValue.Set` calls it
+            // and a non-nil result "will be treated as a flag value
+            // parsing error", so it propagates exactly like a bad int.
+            FlagKind::Func(f) | FlagKind::BoolFunc(f) => {
+                let f = f.clone();
+                return f(s);
             }
             FlagKind::Duration(cell) => {
                 let (d, err) = crate::time::ParseDuration(s);

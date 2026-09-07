@@ -97,6 +97,13 @@ pub enum FlagKind {
     Int64(Arc<SpinLock<crate::types::int64>>),
     Uint(Arc<SpinLock<crate::types::uint>>),
     Uint64(Arc<SpinLock<crate::types::uint64>>),
+    /// Go's `funcValue` — a flag whose "value" is a callback. There is
+    /// no cell: the parser hands each occurrence to the function and
+    /// the function keeps whatever state it wants.
+    Func(Arc<dyn Fn(string) -> crate::errors::error + Send + Sync>),
+    /// Go's `boolFuncValue`: the same, but `IsBoolFlag` is true, so
+    /// `-v` is legal without a value and the callback gets "true".
+    BoolFunc(Arc<dyn Fn(string) -> crate::errors::error + Send + Sync>),
     Duration(Arc<SpinLock<crate::time::Duration>>),
     Float64(Arc<SpinLock<float64>>),
     String(Arc<SpinLock<string>>),
@@ -113,6 +120,8 @@ impl Clone for FlagKind {
             FlagKind::Int64(c) => FlagKind::Int64(c.clone()),
             FlagKind::Uint(c) => FlagKind::Uint(c.clone()),
             FlagKind::Uint64(c) => FlagKind::Uint64(c.clone()),
+            FlagKind::Func(f) => FlagKind::Func(f.clone()),
+            FlagKind::BoolFunc(f) => FlagKind::BoolFunc(f.clone()),
             FlagKind::Duration(c) => FlagKind::Duration(c.clone()),
             FlagKind::Float64(c) => FlagKind::Float64(c.clone()),
             FlagKind::String(c) => FlagKind::String(c.clone()),
