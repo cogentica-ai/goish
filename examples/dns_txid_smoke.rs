@@ -86,5 +86,8 @@ fn main() {
         fmt::Printf!("dns_txid_smoke: all checks passed\n");
     } else {
         fmt::Printf!("dns_txid_smoke: %v FAILED\n", bad);
+        // e2e reads the exit status, not the word FAILED above
+        // (ROADMAP §2b-vii).
+        goish::os::Exit(1);
     }
 }

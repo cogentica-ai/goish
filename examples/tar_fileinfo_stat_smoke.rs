@@ -33,6 +33,11 @@
 extern crate alloc;
 extern crate goish;
 
+/// Every mismatch below lands here; `main` exits non-zero if it is not
+/// zero. Without it this smoke printed `[!!]` and exited 0, which e2e
+/// reads as a pass (ROADMAP §2b-vii).
+static FAILED: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
 use goish::archive::tar;
 use goish::fmt;
 use goish::gostring::string;
@@ -55,6 +60,7 @@ const GO: [&str; 10] = [
 fn chk(ln: &mut usize, got: &string) {
     if *ln >= GO.len() {
         fmt::Printf!("[!!] extra line %d: %q\n", *ln as int + 1, got);
+        FAILED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         *ln += 1;
         return;
     }
@@ -62,6 +68,7 @@ fn chk(ln: &mut usize, got: &string) {
         fmt::Printf!("[ok] %s\n", got);
     } else {
         fmt::Printf!("[!!] line %d\n  got  %q\n  want %q\n", *ln as int + 1, got, GO[*ln]);
+        FAILED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     }
     *ln += 1;
 }
@@ -79,13 +86,13 @@ fn main() {
     let (f, err) = os::Create(&path);
     if !err.IsNil() {
         fmt::Printf!("[!!] create: %v\n", err);
-        return;
+        goish::os::Exit(1);
     }
     let mut f = f.MustTake();
     let (_, err) = f.Write(goish::convert::bytes(string::from("hello")));
     if !err.IsNil() {
         fmt::Printf!("[!!] write: %v\n", err);
-        return;
+        goish::os::Exit(1);
     }
     let _ = f.Close();
     let _ = os::Chmod(&path, os::FileMode(0o640));
@@ -93,12 +100,12 @@ fn main() {
     let (fi, err) = os::Stat(&path);
     if !err.IsNil() {
         fmt::Printf!("[!!] stat: %v\n", err);
-        return;
+        goish::os::Exit(1);
     }
     let (h, err) = tar::FileInfoHeader(&fi, &string::from(""));
     if !err.IsNil() {
         fmt::Printf!("[!!] header: %v\n", err);
-        return;
+        goish::os::Exit(1);
     }
 
     chk(&mut ln, &fmt::Sprintf!("%-16s %v", "name", h.Name));
@@ -116,5 +123,12 @@ fn main() {
     let _ = os::Remove(&dir);
     if ln != GO.len() {
         fmt::Printf!("[!!] produced %d lines, pinned %d\n", ln as int, GO.len() as int);
+        FAILED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     }
+    let __f = FAILED.load(core::sync::atomic::Ordering::Relaxed);
+    if __f != 0 {
+        fmt::Printf!("\nFAILED %d check(s)\n", __f as i64);
+        goish::os::Exit(1);
+    }
+    fmt::Printf!("\nok %d/%d\n", ln as i64, GO.len() as i64);
 }

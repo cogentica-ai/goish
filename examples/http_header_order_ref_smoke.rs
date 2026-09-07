@@ -27,6 +27,11 @@
 #![allow(non_snake_case)]
 extern crate alloc;
 extern crate goish;
+
+/// Every mismatch below lands here; the process exits non-zero if it is
+/// not zero. Without it this smoke printed `[!!]` and exited 0, which
+/// e2e reads as a pass (ROADMAP §2b-vii).
+static FAILED: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use goish::goslice::slice;
@@ -50,6 +55,7 @@ const GO: [&str; 6] = [
 fn chk(ln: &mut usize, got: &string) {
     if *ln >= GO.len() {
         fmt::Printf!("[!!] extra line: %q\n", got);
+        FAILED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         *ln += 1;
         return;
     }
@@ -58,6 +64,7 @@ fn chk(ln: &mut usize, got: &string) {
         fmt::Printf!("[ok] %s\n", got);
     } else {
         fmt::Printf!("[!!] goish: %q\n", got);
+        FAILED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         fmt::Printf!("     go   : %q\n", want);
     }
     *ln += 1;
@@ -246,6 +253,13 @@ fn run() {
     }
     if ln != GO.len() {
         fmt::Printf!("[!!] line count mismatch with the Go reference\n");
+        FAILED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     }
+    let __f = FAILED.load(core::sync::atomic::Ordering::Relaxed);
+    if __f != 0 {
+        fmt::Printf!("\nFAILED %d check(s)\n", __f as i64);
+        goish::os::Exit(1);
+    }
+    fmt::Printf!("\nok %d/%d\n", ln as i64, GO.len() as i64);
     goish::os::Exit(0);
 }

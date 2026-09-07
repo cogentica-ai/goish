@@ -918,6 +918,62 @@ the pattern worth carrying forward: when the REASON for a limitation
 goes stale, the limitation stops being re-examined, and it is the
 limitations that matter most that acquire the longest-lived excuses.
 
+## 2b-vii. 22 smokes whose assertions cannot fail the process — FIXED
+
+Measured and fixed 2026-09-07. e2e gates on the exit status of 848
+examples (§ "printing a mismatch is not a gate"). Twenty-two of them
+printed a mismatch and then exited ZERO, so every regression they were
+written to catch was invisible to CI.
+
+Three shapes, all confirmed by reading the tail of the file:
+
+  * **no failure counter at all** — `tls_padding_oracle_smoke` ended
+    `if ln != GO.len() { Printf("[!!] produced %d lines …") }` and fell
+    off the end of `main`. A wrong plaintext, a MAC that stopped
+    failing, a padding oracle reopening: all printed `[!!]` and exited 0.
+  * **a counter that is printed, not returned** — `dns_txid_smoke`
+    accumulated `bad`, then printed `"dns_txid_smoke: %v FAILED"` and
+    returned normally. It said the word FAILED to a job that reads rc.
+  * **Exit(1) exists but only for setup** — `http_bodyless_status_smoke`
+    exited non-zero when Listen or Dial failed, which is what made the
+    file LOOK gated; the assertion path below it had no exit at all.
+    `tls_padding_oracle_smoke` and `tar_fileinfo_stat_smoke` had the
+    mirror problem — five setup failures that printed and `return`ed,
+    so a broken encrypt or a missing tempdir was also a pass. Those are
+    Exit(1) now too.
+
+The security-relevant ones are why this was not cosmetic:
+`tls_padding_oracle_smoke`, `tls_record_overflow_smoke`,
+`tls_record_iv_smoke`, `tls_session_expiry_smoke`,
+`http_request_header_injection_smoke` and `dns_txid_smoke`. None was
+failing — checked by building and running all of them before touching
+anything — so this bought protection, not a rescue.
+
+**The detector, and how it lied twice.** "Prints a mismatch but never
+calls Exit(1)" gives 14 and misses `http_bodyless_status_smoke`, whose
+setup errors do exit. "Mismatch print not followed by an exit within N
+lines" gives 318 — it flags every smoke using a `chk()` helper, where
+the print is in one function and the gate in another. The question that
+separates them is narrower: **is ANY `Exit(1)` driven by a failure
+aggregate rather than an error value?**
+
+That gave 60, and 38 of those were WRONG. A smoke can be perfectly
+gated without an `Exit(1)` anywhere: `math_big_smoke` ends
+`syscall::Exit(if p == t { 0 } else { 1 })`, `tls12_smoke` runs a real
+`testing::Main` harness over `t.Fatal`, and `http_dumpout_ref_smoke`
+exits on `f == 0`. Excluding those three shapes gives 22, which is the
+number that survived reading. Worth remembering: a detector for
+"nothing enforces this" has to enumerate every way the thing CAN be
+enforced, and the first draft never does. The 60 went into this file
+before the check — the correction is the entry.
+
+**How each fix was verified.** Not by reading. Two smokes were
+perturbed — one expected value changed — and confirmed to exit 1
+(`FAILED 1 check(s)`), then changed back. The first perturbation
+attempt hit the string in the file's HEADER COMMENT rather than in
+`GO[]` and reported rc=0, which reads exactly like a gate that does not
+work; the perturbation has to land in the array the assertion reads.
+
 ## 2b-ii. 110 declarations are ported AND anchored AND counted missing
 
 Measured 2026-09-06. For each Go package, take its MISSING list and
