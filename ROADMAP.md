@@ -1374,10 +1374,35 @@ time, and three of the four were fine:
     3/3, http_redirect_semantics_smoke 13/13, http_redirect_creds_smoke
     ok.
 
+**The list is 71 now, not 28.** That number in the paragraph above was
+right when written; the section counts entries carrying Go-caller
+evidence and it has grown with the port. Most of the growth is benign —
+`math/bits`' `Len32`/`Add32`/`Mul32` family, `container/list`'s
+`Front`/`Back`, `sync.Map`'s `LoadOrStore` — public API whose Go
+callers live in generic or per-width code goish does not have.
+
+Three more read the same day, all duplication rather than defect, and
+all already reasoned about in the tree:
+
+  - `server.rs`'s `idleTimeout` and `readHeaderTimeout` are unused
+    because the conn loop uses `idle_timeout_ns`. The comment above
+    them says why and refuses to collapse the two: Go tests `!= 0` and
+    returns a NEGATIVE IdleTimeout as-is, where `idle_timeout_ns` tests
+    `> 0` and treats it as unset. Go's negative value becomes a
+    deadline in the past and closes the idle conn at once; goish falls
+    through to ReadTimeout. A real divergence, on an input nobody
+    writes, recorded deliberately.
+  - `request.rs`'s `parseRequestLine` is unused because the server
+    splits with `parse_request_line`, a byte-view version that interns
+    the method and proto. The two agree on every input I traced,
+    including a line with three spaces.
+
 The lesson for the rest of the list: TESTED_NOT_WIRED plus "Go calls it"
-is a question, not a verdict. Three of these four are functions goish
-reaches by another route, which the checker cannot see and only reading
-settles.
+is a question, not a verdict, and the answer is usually "goish reaches
+it another way". Six read, one change. That is the opposite of §2b's
+curated lists, where nearly every named entry held something, and the
+difference is worth knowing before someone budgets time against the
+remaining 65.
 
 Fixed so far, one per finding read:
 
