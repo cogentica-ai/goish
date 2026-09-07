@@ -1,25 +1,27 @@
 // net/http/httputil/persist — the deprecated ClientConn / ServerConn
 // pipelining API.
 //
-// PARTIAL port of Go 1.25.5 net/http/httputil/persist.go. Go's own
-// header says what this is: "Deprecated: Use the Server in net/http
-// instead." It exists because callers still reach for `Hijack` to take
-// a connection back off a ServerConn.
+// Port of Go 1.25.5 net/http/httputil/persist.go. Go's own header
+// says what this is: "Deprecated: Use the Server in net/http instead."
+// It exists because callers still reach for `Hijack` to take a
+// connection back off a ServerConn.
 //
-// What lands: the two structs, their constructors, Hijack, Close and
-// Pending. NOT ported — Read/Write/Do, which drive the pipeline and
-// need `textproto.Pipeline` plus request/response serialisation over
-// a shared conn; and `Pending`'s counters only move once those do.
+// Every declaration in the file lands: both structs, their
+// constructors, Hijack, Close, and both pipelined halves — ClientConn
+// Write/Read/Do/Pending and ServerConn Read/Pending/Write. The server
+// half was the last of it, and the counters only became meaningful
+// with it: before, `Pending` had nothing to count.
 //
 // goishlint:ignore GOISH019 ServerConn — the ten Go fields are guarded
 // by its `mu` and are reached only under it, so they live in one
 // `state` behind a goish Mutex rather than beside a bare `sync.Mutex`
-// field. The unported Read/Write/Do are what would touch the rest.
+// field, with `pipe` beside it as in ClientConn.
 
 #![allow(non_snake_case)]
 
 extern crate alloc;
 
+use alloc::sync::Arc;
 use crate::errors::{self, error};
 use crate::net;
 use crate::types::int;
@@ -32,6 +34,14 @@ crate::var! {
     /// Go: "a ProtocolError […] the remote requested that this be the
     /// last request serviced."
     pub ErrPersistEOF: error = "persistent connection closed";
+
+    // go: sdk 1.25.5 net/http/httputil/persist.go:17-26 ErrClosed
+    /// Go: "connection closed by user" — the EXPORTED one, distinct
+    /// from `errClosed` above. Go returns this from exactly one of the
+    /// four closed-conn sites (ServerConn.Write, persist.go line 198)
+    /// and `errClosed` from the other three. The asymmetry is Go's;
+    /// reproducing it is the point of a port.
+    pub ErrClosed: error = "connection closed by user";
 
     // go: sdk 1.25.5 net/http/httputil/persist.go:17-26 ErrPipeline
     /// Go: returned by Read when the request was never written, so
@@ -48,16 +58,21 @@ fn __req_key(req: &super::super::request::Request) -> crate::types::uint {
 }
 
 // go: sdk 1.25.5 net/http/httputil/persist.go:37-47 ServerConn
-// goishlint:ignore GOISH019 ServerConn — Go's struct carries `re`/`we`
-// (read/write errors), `lastbody`, and `pipe textproto.Pipeline`,
-// which belong to the Read/Write half this type does not port. (An
-// earlier note here said "goish has no textproto.Pipeline at all".
-// It does — src/net/textproto/pipeline.rs, all five methods — and the
-// ClientConn half below now uses it.)
+// goishlint:ignore GOISH019 ServerConn — Go's `re`/`we` (sticky
+// read/write errors) live in `state`, and `pipe` beside it. Go's
+// `lastbody` has no counterpart: it exists to close a body the caller
+// left unread, and goish's ReadRequest consumes the body before it
+// returns, so there is never one outstanding. (Two earlier notes here
+// were wrong in turn: that goish has no textproto.Pipeline — it has,
+// all five methods — and that Read/Write are unported. Both are.)
 /// Go: "ServerConn is an artifact of Go's early HTTP implementation.
 /// Deprecated: Use the Server in net/http instead."
 pub struct ServerConn {
     state: crate::sync::Mutex<connState>,
+    /// Go's `pipe textproto.Pipeline` — the request/response
+    /// sequencer that keeps a pipelined Write behind the Read that
+    /// produced its request.
+    pipe: crate::net::textproto::Pipeline,
 }
 
 // go: none — goish-only: the payload of Go's `mu sync.Mutex`, limited
@@ -87,12 +102,17 @@ struct connState {
 /// is; goish's serve path owns its own buffering, so the reader is not
 /// carried here — `Hijack` returns the conn alone.
 pub fn NewServerConn(c: net::TCPConn, r: Option<crate::bufio::Reader<net::TCPConn>>) -> ServerConn {
-    // Go builds a bufio.Reader when `r` is nil and keeps it for its
-    // Read half. goish does not port that half, so the reader is
-    // accepted (Go's arity, and callers pass what they have) and
-    // dropped — Hijack returns the conn alone. It comes back with Read.
+    // Go builds a bufio.Reader when `r` is nil and keeps it across
+    // calls, because its ReadRequest can leave an unread body on the
+    // wire. goish's ReadRequest consumes the body before it returns
+    // (request.rs: "the reader is positioned at the first byte after
+    // the final CRLF of the request body"), so nothing is buffered
+    // between Reads and each Read wraps the conn afresh. The argument
+    // is still accepted for Go's arity, and dropped. Same reasoning
+    // as ClientConn.Read below, which drains no `lastbody` either.
     let _ = r;
     return ServerConn {
+        pipe: crate::net::textproto::Pipeline::new(),
         state: crate::sync::Mutex::new(connState {
             c: Some(c),
             nread: 0,
@@ -126,6 +146,193 @@ impl ServerConn {
         if let Some(mut c) = self.Hijack() {
             return crate::io::Closer::Close(&mut c);
         }
+        return errors::nil;
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/persist.go:88-162 ServerConn.Read
+    /// Go: "Read returns the next request on the wire. An
+    /// [ErrPersistEOF] is returned if it is gracefully determined that
+    /// there are no more requests (e.g. after the first request on an
+    /// HTTP/1.0 connection, or after a Connection:close on a HTTP/1.1
+    /// connection)."
+    ///
+    /// Returns `Arc<Request>` where Go returns `*http.Request`, and
+    /// the pointer is the whole point: `Write` finds this request's
+    /// pipeline slot by IDENTITY, and here the callee allocates it.
+    /// ClientConn takes a plain `&Request` because there the caller
+    /// owns the value across both calls. The asymmetry is Go's — one
+    /// direction hands you a pointer, the other borrows yours.
+    pub fn Read(&self) -> (Arc<super::super::request::Request>, error) {
+        // Go: "Ensure ordered execution of Reads and Writes."
+        let id = self.pipe.Next();
+        self.pipe.StartRequest(id);
+
+        // Go does this in a defer, which also burns the RESPONSE slot
+        // when no request came back — otherwise a Write that never
+        // happens leaves every later response waiting on this id.
+        // goish has no defer, so both exits are spelled out.
+        let end_dead = || {
+            self.pipe.EndRequest(id);
+            self.pipe.StartResponse(id);
+            self.pipe.EndResponse(id);
+        };
+
+        let mut c = {
+            // ONE lock for the whole check-and-take: goish's Mutex is
+            // not reentrant, so taking it twice here hangs rather than
+            // errors. Same care as ClientConn.Read below.
+            let mut st = self.state.Lock();
+            // Go: "no point receiving if write-side broken or closed".
+            if !st.we.IsNil() {
+                let e = st.we.clone();
+                drop(st);
+                end_dead();
+                return (Arc::new(Default::default()), e);
+            }
+            if !st.re.IsNil() {
+                let e = st.re.clone();
+                drop(st);
+                end_dead();
+                return (Arc::new(Default::default()), e);
+            }
+            // Go tests `sc.r == nil` — its reader, cleared by Hijack.
+            // goish keeps no reader (see NewServerConn), so the conn
+            // being gone is the same "closed by user in the meantime".
+            if st.c.is_none() {
+                drop(st);
+                end_dead();
+                return (Arc::new(Default::default()), errClosed.into());
+            }
+            st.c.take().unwrap()
+        };
+
+        // Go closes `lastbody` here so an unread body cannot desync
+        // the next request. goish's ReadRequest consumes the body, so
+        // there is no remainder to drain and no lastbody to keep.
+        let mut br = crate::bufio::NewReader(&mut c);
+        let (req, err) = super::super::request::ReadRequest(&mut br);
+        drop(br);
+
+        let mut st = self.state.Lock();
+        st.c = Some(c);
+        if !err.IsNil() {
+            if errors::Is(err.clone(), crate::io::ErrUnexpectedEOF) {
+                // Go: "A close from the opposing client is treated as
+                // a graceful close, even if there was some
+                // unparse-able data before the close."
+                st.re = ErrPersistEOF.into();
+                let e = st.re.clone();
+                drop(st);
+                end_dead();
+                return (Arc::new(Default::default()), e);
+            }
+            st.re = err.clone();
+            drop(st);
+            end_dead();
+            return (Arc::new(Default::default()), err);
+        }
+
+        st.nread += 1;
+        let close = req.Close;
+        let arc = Arc::new(req);
+        // Go's defer: "Remember the pipeline id of this request." The
+        // key is the identity Write will present.
+        st.pipereq
+            .Set(Arc::as_ptr(&arc) as crate::types::uint, id);
+        if close {
+            st.re = ErrPersistEOF.into();
+            let e = st.re.clone();
+            drop(st);
+            self.pipe.EndRequest(id);
+            return (arc, e);
+        }
+        drop(st);
+        self.pipe.EndRequest(id);
+        return (arc, errors::nil);
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/persist.go:166-170 ServerConn.Pending
+    /// Go: "Pending returns the number of unanswered requests that
+    /// have been received on the connection."
+    pub fn Pending(&self) -> int {
+        let st = self.state.Lock();
+        return st.nread - st.nwritten;
+    }
+
+    // go: sdk 1.25.5 net/http/httputil/persist.go:175-223 ServerConn.Write
+    /// Go: "Write writes resp in response to req. To close the
+    /// connection gracefully, set the Response.Close field to true.
+    /// Write should be considered operational until it returns an
+    /// error, regardless of any errors returned on the
+    /// [ServerConn.Read] side."
+    ///
+    /// Takes the `Arc<Request>` Read handed out; any other value is a
+    /// request this conn never read, and Go's answer to that is
+    /// ErrPipeline, not a guess at which response slot was meant.
+    pub fn Write(
+        &self,
+        req: &Arc<super::super::request::Request>,
+        resp: &super::super::response::Response,
+    ) -> error {
+        // Go: "Retrieve the pipeline ID of this request/response pair."
+        let id = {
+            let mut st = self.state.Lock();
+            let key = Arc::as_ptr(req) as crate::types::uint;
+            let (id, ok) = st.pipereq.Get(key);
+            st.pipereq.Delete(key);
+            if !ok {
+                return ErrPipeline.into();
+            }
+            id
+        };
+
+        // Go: "Ensure pipeline order."
+        self.pipe.StartResponse(id);
+
+        let mut c = {
+            let mut st = self.state.Lock();
+            if !st.we.IsNil() {
+                let e = st.we.clone();
+                drop(st);
+                self.pipe.EndResponse(id);
+                return e;
+            }
+            if st.c.is_none() {
+                drop(st);
+                self.pipe.EndResponse(id);
+                // The EXPORTED ErrClosed, and only here: Go returns
+                // `errClosed` from the other three closed-conn sites
+                // (persist.go lines 119, 329, 385) and this one alone
+                // returns ErrClosed. Kept as Go has it.
+                return ErrClosed.into();
+            }
+            if st.nread <= st.nwritten {
+                drop(st);
+                self.pipe.EndResponse(id);
+                return errors::New("persist server pipe count");
+            }
+            if resp.Close {
+                // Go: "After signaling a keep-alive close, any
+                // pipelined unread requests will be lost. It is up to
+                // the user to drain them before signaling."
+                st.re = ErrPersistEOF.into();
+            }
+            st.c.take().unwrap()
+        };
+
+        let err = resp.Write(&mut c);
+
+        let mut st = self.state.Lock();
+        st.c = Some(c);
+        if !err.IsNil() {
+            st.we = err.clone();
+            drop(st);
+            self.pipe.EndResponse(id);
+            return err;
+        }
+        st.nwritten += 1;
+        drop(st);
+        self.pipe.EndResponse(id);
         return errors::nil;
     }
 }

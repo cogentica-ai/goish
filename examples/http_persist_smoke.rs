@@ -4,6 +4,22 @@
 // connection, so the ServerConn keeps no reference and a later Close
 // cannot close a socket the caller now owns. Returning a clone instead
 // would double-close it.
+//
+// The ServerConn Read/Pending/Write half below is pinned against Go
+// 1.25.5, same program shape, `go run` on the SDK this tree targets:
+//
+//     read err=<nil> method="GET" path="/sc"
+//     pending after read=1
+//     write foreign err=pipeline error
+//     pending after foreign=1
+//     write real err=<nil>
+//     pending after write=0
+//     second write err=pipeline error
+//
+// The two that are easy to get wrong are the ones in the middle: a
+// Write for a request this conn never read must NOT consume the real
+// request's slot, and a second Write for the same request must fail —
+// Go deletes the pipeline id on the first, so the second finds none.
 
 #![no_std]
 #![no_main]
@@ -191,6 +207,117 @@ fn run() {
         );
         let _ = cc2.Close();
         let _ = srv.clone().Close();
+    }
+
+    // ── ServerConn.Read / Pending / Write ──
+    //
+    // The server half runs the pipeline the other way round: Read
+    // ALLOCATES the request and records its pipeline id, and Write
+    // finds that id by the identity Read handed back. Go keys that by
+    // *http.Request; goish hands out an Arc<Request> and keys by its
+    // pointer, so a request this conn never read cannot claim a slot.
+    {
+        let (sln2, e2) = net::Listen(string("tcp"), string("127.0.0.1:0"));
+        if !e2.IsNil() {
+            check("listen 3", false, fmt::Sprintf!("%v", e2));
+            finish();
+        }
+        let p2 = sln2.Addr().Port;
+        let a2 = fmt::Sprintf!("127.0.0.1:%d", p2 as i64);
+
+        // A raw client: send one request, then read to EOF.
+        let got = alloc::sync::Arc::new(goish::sync::Mutex::new(string::new()));
+        {
+            let got2 = got.clone();
+            let a3 = a2.clone();
+            go!(stack(512 * 1024), move || {
+                let (mut c, de) = net::Dial(string("tcp"), a3);
+                if !de.IsNil() {
+                    return;
+                }
+                let _ = goish::io::Writer::Write(
+                    &mut c,
+                    goish::bytes("GET /sc HTTP/1.1\r\nHost: x\r\n\r\n"),
+                );
+                let (b, _) = goish::io::ReadAll(&mut c);
+                *got2.Lock() = goish::string::from_bytes(&b);
+            });
+        }
+
+        let (sc_conn, ae) = sln2.Accept();
+        if !ae.IsNil() {
+            check("accept", false, fmt::Sprintf!("%v", ae));
+            finish();
+        }
+        let sc = NewServerConn(sc_conn, None);
+        let (req, rerr) = sc.Read();
+        check(
+            "ServerConn.Read returns the request off the wire",
+            rerr.IsNil() && req.Method == "GET" && req.URL.Path == "/sc",
+            fmt::Sprintf!("err=%v method=%q path=%q", rerr, req.Method, req.URL.Path),
+        );
+        check(
+            "Pending counts the request that has not been answered",
+            sc.Pending() == 1,
+            fmt::Sprintf!("pending=%d", sc.Pending()),
+        );
+
+        // A request this ServerConn never read has no pipeline slot.
+        // Go's answer is ErrPipeline, not a guess at whose slot it is.
+        let foreign = alloc::sync::Arc::new(goish::net::http::Request::default());
+        let mut hh = goish::net::http::Header::new();
+        hh.Set(string("X-Sc"), string("1"));
+        let resp = goish::net::http::Response {
+            StatusCode: 200,
+            ProtoMajor: 1,
+            ProtoMinor: 1,
+            Header: hh,
+            Body: goish::net::http::Body::from_bytes(goish::bytes("sc-ok")),
+            ContentLength: 5,
+            ..Default::default()
+        };
+        let ferr = sc.Write(&foreign, &resp);
+        check(
+            "Write for a request this conn never read is ErrPipeline",
+            goish::errors::Is(ferr.clone(), ErrPipeline),
+            fmt::Sprintf!("%v", ferr),
+        );
+        check(
+            "and the rejected Write did not consume the real slot",
+            sc.Pending() == 1,
+            fmt::Sprintf!("pending=%d", sc.Pending()),
+        );
+
+        let werr = sc.Write(&req, &resp);
+        check(
+            "Write answers the request Read handed back",
+            werr.IsNil(),
+            fmt::Sprintf!("%v", werr),
+        );
+        check(
+            "Pending returns to zero once written",
+            sc.Pending() == 0,
+            fmt::Sprintf!("pending=%d", sc.Pending()),
+        );
+        // Go: a second Write for the same request finds no slot, since
+        // the id was deleted on the first.
+        let derr2 = sc.Write(&req, &resp);
+        check(
+            "a second Write for the same request is ErrPipeline",
+            goish::errors::Is(derr2.clone(), ErrPipeline),
+            fmt::Sprintf!("%v", derr2),
+        );
+
+        let _ = sc.Close();
+        time::Sleep(time::Duration(250 * 1_000_000));
+        let seen = got.Lock().clone();
+        check(
+            "the response reaches the client",
+            goish::strings::Contains(seen.clone(), string("200 OK"))
+                && goish::strings::Contains(seen.clone(), string("X-Sc: 1"))
+                && goish::strings::Contains(seen.clone(), string("sc-ok")),
+            fmt::Sprintf!("%q", seen),
+        );
     }
 
     finish();

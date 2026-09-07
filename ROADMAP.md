@@ -1290,7 +1290,7 @@ should go, some should lose the marker and keep the prose as a plain
 comment. What must not happen is a bulk delete that takes the reasons
 with it.
 
-## 2b-vi. net/http's 100% is a by-name figure; 54 declarations have no anchor
+## 2b-vi. net/http's 100% is a by-name figure; 51 declarations have no anchor
 
 Found 2026-09-07 while closing `net/http/cgi`'s last waiver, by running
 the package in both coverage modes instead of one.
@@ -1298,10 +1298,12 @@ the package in both coverage modes instead of one.
 PROGRESS's net/http section read "639 / 639 functions (100.0%)", "All
 twelve packages are at 100.0%", and "This is an anchored port, not a
 name match". Measured by declaration the same tree is **721/775
-(93.0%)** — root 536/586 (91.5%), `httputil` 52/56 (92.9%).
+(93.0%)** — root 536/586 (91.5%), `httputil` 52/56 (92.9%). Since
+measured, `httputil`'s three are closed (below), putting the tree at
+724/775 (93.4%) with 51 left.
 
-The gap is not method-counting noise. **None of the 54 carries a
-`// go: sdk` anchor anywhere in its package**, checked by intersecting
+The gap is not method-counting noise. **None of the 54 as measured
+carried a `// go: sdk` anchor anywhere in its package**, by intersecting
 the MISSING list against every anchor symbol under `src/net/http/`:
 zero of 50 in the root, zero of 4 in `httputil`. Nor are they renamed
 -but-anchored ports. goish's per-connection loop is
@@ -1330,7 +1332,9 @@ What the 54 are — plumbing, not leaf helpers:
 - bodies: `gzipReader.{Read,Close}`, `cancelTimerBody.{Read,Close}`,
   `readTrackingBody.{Read,Close}`, `bodyLocked.Read`,
   `body.{readLocked,unreadDataSizeLocked}`, `maxBytesReader.Close`
-- `httputil`: `ServerConn.{Pending,Read,Write}`, `delegateReader.Read`
+- `httputil`: `delegateReader.Read`. **`ServerConn.{Read,Pending,
+  Write}` are DONE** — they were the half of a half-ported type, and
+  the first entry taken off this list. `httputil` is 55/56.
 
 The functionality is largely present — goish serves keep-alive
 connections and streams chunked bodies — so this is a PROVENANCE gap
