@@ -23,6 +23,8 @@
 
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 
+// go: waived Writer.init — Go factors the Writer reset into init and calls it from both NewWriterLevel and Reset; goish's Reset does that work inline, so there is no separate declaration to point at.
+
 extern crate alloc;
 use alloc::vec::Vec;
 
