@@ -2120,6 +2120,10 @@ name = "os_link_ref_smoke"
 path = "examples/os_link_ref_smoke.rs"
 
 [[example]]
+name = "os_file_readdir_ref_smoke"
+path = "examples/os_file_readdir_ref_smoke.rs"
+
+[[example]]
 name = "os_dirent_ref_smoke"
 path = "examples/os_dirent_ref_smoke.rs"
 

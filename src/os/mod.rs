@@ -728,6 +728,19 @@ impl File {
         (fileinfo_from_stat(base, &st), nil)
     }
 
+}
+
+// go: sdk 1.25.5 os/dir.go:15-15 readdirMode
+/// Go: the three shapes `readdir` can build. goish carries the two it
+/// has callers for; `Infos` (Go's `readdirFileInfo`, behind the
+/// deprecated `File.Readdir`) has none yet.
+#[derive(Clone, Copy, PartialEq)]
+enum readdirMode {
+    Names,
+    Dirents,
+}
+
+impl File {
     // go: sdk 1.25.5 os/dir.go:69-81 File.Readdirnames
     /// `(*File).Readdirnames(n)` (os/dir.go:46).
     /// Returns up to `n` directory entry names from the directory
@@ -735,7 +748,44 @@ impl File {
     /// the Go shape `([]string, error)`. Names are unsorted (Go's
     /// contract).
     pub fn Readdirnames(&mut self, n: int) -> (slice<string>, error) {
+        let (names, _, err) = self.readdir(n, readdirMode::Names);
+        return (names, err);
+    }
+
+    // go: sdk 1.25.5 os/dir.go:97-107 File.ReadDir
+    /// Go: "ReadDir reads the contents of the directory associated with
+    /// the file f and returns a slice of DirEntry values in directory
+    /// order. Subsequent calls on the same file will yield later
+    /// DirEntry records in the directory."
+    ///
+    /// `n > 0` returns at most n, and io.EOF once the directory is
+    /// drained — which is the whole point of the bounded form. `n <= 0`
+    /// returns everything and never io.EOF.
+    pub fn ReadDir(
+        &mut self,
+        n: int,
+    ) -> (slice<alloc::sync::Arc<dyn DirEntry + Send + Sync>>, error) {
+        let (_, dirents, err) = self.readdir(n, readdirMode::Dirents);
+        // Go: "Match Readdir and Readdirnames: don't return nil slices."
+        return (dirents, err);
+    }
+
+    // go: sdk 1.25.5 os/dir_unix.go:47-168 File.readdir
+    /// The one directory walk, with Go's `mode` deciding what it
+    /// builds. Go returns names, dirents and infos from a single
+    /// function for exactly this reason: the getdents buffer and its
+    /// resume point must not be duplicated, or two callers drift.
+    fn readdir(
+        &mut self,
+        n: int,
+        mode: readdirMode,
+    ) -> (
+        slice<string>,
+        slice<alloc::sync::Arc<dyn DirEntry + Send + Sync>>,
+        error,
+    ) {
         let mut names: Vec<string> = Vec::new();
+        let mut dirents: Vec<alloc::sync::Arc<dyn DirEntry + Send + Sync>> = Vec::new();
         // Go's readdirent path builds its `*PathError` directly rather
         // than through `wrapErr`, so the `poll.ErrFileClosing →
         // ErrClosed` remap does NOT happen here: a closed directory
@@ -744,6 +794,7 @@ impl File {
         if self.fd < 0 {
             return (
                 slice::<string>::new(),
+                slice::new(),
                 self.wrapErr("readdirent", crate::internal::poll::ErrFileClosing.into()),
             );
         }
@@ -811,11 +862,37 @@ impl File {
             if raw == b"." || raw == b".." {
                 continue;
             }
-            names.push(string::from_bytes(raw));
+            match mode {
+                readdirMode::Names => names.push(string::from_bytes(raw)),
+                readdirMode::Dirents => {
+                    // Go: de, err := newUnixDirent(f.name, string(name),
+                    //         direntType(rec))
+                    let dtype = d.buf[pos + 18];
+                    let (de, derr) = newUnixDirent(
+                        self.name.clone(),
+                        string::from_bytes(raw),
+                        direntType(dtype),
+                    );
+                    if !derr.IsNil() {
+                        // Go: an entry that vanished between the
+                        // getdents and the lstat is not an error, it is
+                        // a directory that changed underneath.
+                        if IsNotExist(derr.clone()) {
+                            continue;
+                        }
+                        return (slice::<string>::new(), slice::__from_vec(dirents), derr);
+                    }
+                    dirents.push(alloc::sync::Arc::new(de));
+                }
+            }
             left -= 1;
         }
         if !errored.IsNil() {
-            return (slice::<string>::__from_vec(names), errored);
+            return (
+                slice::<string>::__from_vec(names),
+                slice::__from_vec(dirents),
+                errored,
+            );
         }
         // Go: if n > 0 && len(names)+len(dirents)+len(infos) == 0 {
         //         return nil, nil, nil, io.EOF }
@@ -823,10 +900,14 @@ impl File {
         // goish returned nil here, so a caller draining a directory in
         // fixed-size batches — the reason the bounded form exists — had
         // no way to tell "no more entries" from "none this time".
-        if n > 0 && names.is_empty() {
-            return (slice::<string>::new(), io::EOF.into());
+        if n > 0 && names.is_empty() && dirents.is_empty() {
+            return (slice::<string>::new(), slice::new(), io::EOF.into());
         }
-        (slice::<string>::__from_vec(names), nil)
+        (
+            slice::<string>::__from_vec(names),
+            slice::__from_vec(dirents),
+            nil,
+        )
     }
 
     // go: sdk 1.25.5 os/file.go:303-315 File.Seek
