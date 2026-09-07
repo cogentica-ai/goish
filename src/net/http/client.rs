@@ -263,6 +263,15 @@ impl crate::io::Writer for ConnSrcWriter<'_> {
 // client write path holds no buffered writer at all: ConnSrcWriter
 // hands bytes to the conn (`__rd_mut`) on every call, so there is
 // nothing to flush and no stall to prevent.
+// go: waived readWriteCloserBody.Read — Go's 101 body reads the bufio
+// remainder and then the conn; goish's `UpgradedConn` reads through
+// ConnSrc, which IS that pair
+// (examples/http_upgrade_client_ref_smoke.rs).
+// go: waived readWriteCloserBody.CloseWrite — the half-close, on
+// UpgradedConn::CloseWrite. Go asserts the wrapped conn to an
+// interface with CloseWrite and answers ErrNotSupported when it has
+// none; goish's TCP and TLS carriers have one and the caller-supplied
+// Dyn carrier does not, which is the same fork.
 // go: waived bodyLocked.Read — Go's one-line guard: closed bodies
 // answer ErrBodyReadAfterClose rather than more bytes. That is the
 // `FramedBody::Closed` arm of `read_locked`, which picks the message
@@ -839,6 +848,31 @@ impl Body {
     // go: none — goish-only: Go's caller type-asserts
     // `res.Body.(io.ReadWriteCloser)`; goish's Body is a closed enum,
     // so the comma-ok is an extraction. Leaves the body Closed.
+    // go: none — goish-only: Go's caller writes a TYPE ASSERTION here,
+    // not a call, so there is no Go declaration to anchor to. The
+    // thing it asserts to is readWriteCloserBody (transport.go line
+    // 2561), whose Read/Write/Close/CloseWrite live on UpgradedConn
+    // below.
+    /// Go: `rwc, ok := res.Body.(io.ReadWriteCloser)` — the comma-ok a
+    /// caller performs after a 101 Switching Protocols, to take over
+    /// the connection and speak whatever protocol was negotiated.
+    ///
+    /// goish's Body is a closed enum, so the assertion is an
+    /// EXTRACTION: `None` where Go's comma-ok would be false. The
+    /// machinery was here and crate-private, which meant an external
+    /// caller could READ an upgraded body and never write to it —
+    /// half of what a 101 is for. Taking it leaves the Body closed,
+    /// exactly as handing the conn over should.
+    pub fn Upgraded(&self) -> Option<UpgradedConn> {
+        return match self.__take_upgraded() {
+            Some(src) => Some(UpgradedConn { src }),
+            None => None,
+        };
+    }
+
+    // go: none — goish-only: the extraction `Upgraded` above is built
+    // on. Leaves the body Closed, because the conn has been handed
+    // over and reading it as a body is no longer meaningful.
     pub(crate) fn __take_upgraded(&self) -> Option<ConnSrc> {
         let mut g = self.inner.Lock();
         if !matches!(g.framing, FramedBody::Upgraded { .. }) {
@@ -852,6 +886,58 @@ impl Body {
         }
     }
 }
+
+/// The connection behind a 101 response, as Go's
+/// `readWriteCloserBody` is: readable, writable, closable, and
+/// half-closable. Go builds it by wrapping the conn together with the
+/// bufio remainder (transport.go line 2561); goish's ConnSrc IS that
+/// pair, so this is the pair with Go's methods on it.
+pub struct UpgradedConn {
+    src: ConnSrc,
+}
+
+impl Reader for UpgradedConn {
+    // go: none — goish-only: Go's readWriteCloserBody.Read drains the
+    // bufio remainder before the conn; ConnSrc::Read already does.
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        return self.src.Read(p);
+    }
+}
+
+impl crate::io::Writer for UpgradedConn {
+    // go: none — goish-only: Go embeds the io.ReadWriteCloser and
+    // writes straight through to it.
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        return self.src.write(p);
+    }
+}
+
+impl crate::io::Closer for UpgradedConn {
+    // go: none — goish-only: closes the conn the 101 handed over.
+    fn Close(&mut self) -> error {
+        return self.src.close_conn();
+    }
+}
+
+impl UpgradedConn {
+    // go: none — goish-only: Go's readWriteCloserBody.CloseWrite
+    // (transport.go line 2581) asserts the wrapped conn to an
+    // interface with CloseWrite and returns ErrNotSupported if it has
+    // none. goish's TCP and TLS carriers both have one; a
+    // caller-supplied Dyn conn is reached through a trait that does
+    // not, which is the ErrNotSupported case.
+    pub fn CloseWrite(&mut self) -> error {
+        return match &mut self.src {
+            ConnSrc::Tcp(br) => br.__rd_mut().CloseWrite(),
+            ConnSrc::Tls(br) => br.__rd_mut().CloseWrite(),
+            ConnSrc::Dyn(_) => crate::fmt::Errorf!(
+                "CloseWrite: %w",
+                super::request::ErrNotSupported.into()
+            ),
+        };
+    }
+}
+
 
 impl Default for Body {
     fn default() -> Self {

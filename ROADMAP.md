@@ -1636,6 +1636,20 @@ header initial line: ..."), goish's say "multipart: malformed header".
 The decision to reject matches on every case tried; the message does
 not, here or anywhere else in this reader.
 
+`readWriteCloserBody.{Read,CloseWrite}` were the last piece of missing
+SURFACE rather than missing machinery. After a 101 the response body IS
+the connection, and Go's caller asserts
+`res.Body.(io.ReadWriteCloser)` to speak the negotiated protocol.
+goish had the carrier — `FramedBody::Upgraded` plus `__take_upgraded`,
+used end-to-end by ReverseProxy — and kept it `pub(crate)`, so an
+external caller could READ an upgraded body and never write to it.
+Half an upgrade, and the half that cannot send a WebSocket frame.
+`Body::Upgraded` is the extraction goish spells where Go writes the
+comma-ok, and `UpgradedConn` carries Read/Write/Close/CloseWrite;
+examples/http_upgrade_client_ref_smoke.rs drives a real 101 against a
+socket and matches Go on all three lines. Root gap 18 to 16, net/http
+726/742 (97.8%).
+
 Two of these are FIXED BUT NOT PINNED, worth stating plainly.
 Reaching either failing path needs a retry — an idle conn closed
 between the request being handed over and written — and reproducing

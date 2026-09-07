@@ -62,7 +62,7 @@ pub use crate::net::url;
 
 pub use client::{
     Body, Client, DialContextFn, ErrUseLastResponse, Get, Head, NewRequest, NewRequestWithContext,
-    Post, PostForm, ProxyFromEnvironment, ProxyResolver, RoundTripper, Transport,
+    Post, PostForm, ProxyFromEnvironment, ProxyResolver, RoundTripper, Transport, UpgradedConn,
 };
 pub use cookie::{
     Cookie, ParseCookie, ParseSetCookie, SameSite, SameSiteDefaultMode, SameSiteLaxMode,

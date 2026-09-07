@@ -1992,6 +1992,10 @@ name = "http_conn_reuse_smoke"
 path = "examples/http_conn_reuse_smoke.rs"
 
 [[example]]
+name = "http_upgrade_client_ref_smoke"
+path = "examples/http_upgrade_client_ref_smoke.rs"
+
+[[example]]
 name = "http_proxy_upgrade_smoke"
 path = "examples/http_proxy_upgrade_smoke.rs"
 
