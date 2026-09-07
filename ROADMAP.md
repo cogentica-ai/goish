@@ -1258,6 +1258,28 @@ The nine "rule never ran" pairs are GOISH005/006/008/016/022, which
 group. Those suppressions may well be load-bearing under a fuller
 goishlint invocation; this tool cannot say.
 
+**62 of them name no symbol at all.** Found 2026-09-07 after two turned
+up by hand — `auth.rs`'s `goishlint:ignore GOISH018  —` and
+`pprof/mod.rs`'s pair. Sweeping the five symbol-keyed rules
+(GOISH017/018/019/020/021) for markers whose symbol list is empty gives
+62, spread over crypto, net/http, unicode, compress, log/slog and more.
+
+Nearly all of them DO name the symbol — in the reason, after the em
+dash: "`checkFIPS140Only` (pbkdf2.go) rejects…", "`init` (md5[go])
+is…". goishlint reads the tokens BEFORE the reason, so it sees an empty
+list and the marker suppresses nothing. None of the rules fire on those
+files either — `md5.rs`'s baseline carries GOISH005 and GOISH023 and no
+GOISH018 — so nothing is being hidden today. What is wrong is that each
+reads as a recorded decision and is not one, and a future run that DID
+start reporting those symbols would find a waiver already there,
+looking deliberate, silencing nothing.
+
+The fix per marker is to move the symbol in front of the em dash, or to
+drop the marker and keep the prose — and which one depends on whether
+the rule has anything to say about that symbol, which is the same
+per-declaration reading the rest of this section wants. `auth.rs`,
+`pprof/mod.rs` and `slogtest.rs` are done that way; 59 to go.
+
 **Removal is NOT the obvious follow-up, which is why this is a note and
 not a commit.** A waiver that no longer suppresses anything often still
 carries the only explanation of a divergence — `testing.rs`'s GOISH019
