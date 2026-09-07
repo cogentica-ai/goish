@@ -2300,6 +2300,51 @@ every user pattern match on it is affected, and `FromValue` would want
 a way to see the raw text. That is a deliberate API change to make at a
 version boundary, not a rider on a bug fix.
 
+## 2n. A chunked response never reuses its connection, and never
+##     exposes its trailers
+
+Measured 2026-09-07 against Go 1.25.5 with
+tools/gen_chunked_reuse_ref.go: three requests to a handler that
+Flushes (so the response is chunked), counting connections with
+Server.ConnState.
+
+    Go     three chunked requests opened 1 connection
+    goish  three chunked requests opened 3 connections
+
+Same body, same `te=chunked`, `resp.Close` false and no Connection
+header on either side. Only the reuse differs, so every chunked
+response costs a fresh TCP connection — and a fresh TLS handshake over
+https.
+
+The cause is not the reuse logic. goish never reads the TRAILER
+section of a chunked response. `readTrailer` is ported and correct,
+and it is wired to exactly one caller: request.rs, the SERVER reading
+a chunked request body. Nothing on the client side runs it, so two
+things follow from one gap:
+
+  * `resp.Trailer` is never populated for a chunked response, where
+    Go's is.
+  * The trailer bytes stay unread on the wire, so the connection is
+    DESYNCED at the point the body reports EOF. Banking it would hand
+    the next request a conn whose stream begins mid-trailer, which is
+    a response-smuggling shape, not an optimisation — close_locked's
+    own comment says exactly that.
+
+So the conservative close is CORRECT as it stands, and this entry is
+not "goish forgot to reuse a connection". It is: the client half of
+readTransfer's trailer read is unported, and connection reuse for
+chunked is one of the things blocked behind it.
+
+Recorded rather than fixed, and the near miss is the reason it is
+written up this way. The obvious change — let the bank-back accept a
+Chunked framing — makes the smoke go green (three requests, one
+connection) while quietly introducing the desync. It was written,
+measured, and reverted. The order to do this in is trailers first:
+give the body a place to put them (Go's `body` holds the Response;
+goish's Body has no back-reference, so it needs one — an
+`Arc<Mutex<Header>>` shared with resp.Trailer is the obvious shape),
+read them on EOF, and only then is the conn clean enough to bank.
+
 ## 2m. RSA's drbg shims predate the drbg package they stand in for
 
 Found 2026-09-06 by re-measuring header claims, not by looking for a
