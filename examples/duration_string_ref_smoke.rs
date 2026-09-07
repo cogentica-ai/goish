@@ -74,6 +74,12 @@ fn main() {
 }
 
 fn run() {
+    // The loop is driven by NS, so a GO row without an NS row would
+    // never be checked. Assert they agree.
+    if NS.len() != GO.len() {
+        fmt::Printf!("rows: NS=%d GO=%d\n", NS.len() as i64, GO.len() as i64);
+        goish::os::Exit(1);
+    }
     let mut i = 0usize;
     while i < NS.len() {
         let got = fmt::Sprintf!("%d -> %q", NS[i], time::Duration(NS[i]).String());

@@ -84,7 +84,11 @@ fn run() {
     c4.Env = env(&["a=1", "A=2"]);
     chk(fmt::Sprintf!("case=%q", c4.Environ()));
     let f = FAILED.load(Ordering::Relaxed);
-    if f == 0 {
+    let seen = SEEN.load(Ordering::Relaxed);
+    // Nothing failed AND every row RAN. Checking only FAILED lets a
+    // smoke whose assertions were never wired report success — which
+    // happened once, in os_file_readdir_ref_smoke.
+    if f == 0 && seen == GO.len() {
         fmt::Printf!("
 ok 4/4
 ");

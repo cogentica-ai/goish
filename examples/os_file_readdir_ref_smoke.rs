@@ -34,11 +34,13 @@ use goish::string;
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 static SEEN: AtomicUsize = AtomicUsize::new(0);
 
-static GO: [&str; 4] = [
+static GO: [&str; 6] = [
     "all n=4 err=<nil> [a.txt:false b.txt:false c.txt:false sub:true]",
     "batch1 n=2 err=<nil>",
     "batch2 n=2 err=<nil>",
     "batch3 n=0 err=EOF (io.EOF=true)",
+    "infos n=4 err=<nil> [a.txt:false:1 b.txt:false:1 c.txt:false:1 sub:true:4096]",
+    "infos-after-drain n=0 err=EOF",
 ];
 
 fn chk(got: goish::string) {
@@ -94,7 +96,7 @@ fn run() {
         k += 1;
     }
     joined = joined + string::from_static("]");
-    fmt::Printf!("all n=%d err=%v %s\n", goish::len(&all) as i64, err, joined);
+    chk(fmt::Sprintf!("all n=%d err=%v %s", goish::len(&all) as i64, err, joined));
     let _ = f.Close();
 
     let (mut f2, _) = os::Open(dir.clone());
@@ -102,21 +104,64 @@ fn run() {
     let (b1, e1) = f2.ReadDir(2);
     let (b2, e2) = f2.ReadDir(2);
     let (b3, e3) = f2.ReadDir(2);
-    fmt::Printf!("batch1 n=%d err=%v\n", goish::len(&b1) as i64, e1);
-    fmt::Printf!("batch2 n=%d err=%v\n", goish::len(&b2) as i64, e2);
-    fmt::Printf!("batch3 n=%d err=%v (io.EOF=%v)\n", goish::len(&b3) as i64, e3.clone(),
-        goish::errors::Is(e3, goish::io::EOF));
+    chk(fmt::Sprintf!("batch1 n=%d err=%v", goish::len(&b1) as i64, e1));
+    chk(fmt::Sprintf!("batch2 n=%d err=%v", goish::len(&b2) as i64, e2));
+    chk(fmt::Sprintf!("batch3 n=%d err=%v (io.EOF=%v)", goish::len(&b3) as i64, e3.clone(),
+        goish::errors::Is(e3, goish::io::EOF)));
     let _ = f2.Close();
+
+    // The deprecated Readdir: FileInfo values, lstat'd per entry.
+    let (mut f3, _) = os::Open(dir.clone());
+    let f3 = f3.MustMut();
+    let (infos, ierr) = f3.Readdir(-1);
+    let mut inames: Vec<string> = Vec::new();
+    let mut j = 0;
+    while j < goish::len(&infos) {
+        inames.push(fmt::Sprintf!(
+            "%s:%v:%d",
+            infos[j].Name(),
+            infos[j].IsDir(),
+            infos[j].Size()
+        ));
+        j += 1;
+    }
+    inames.sort_by(|a, b| {
+        let (x, y): (&str, &str) = (a.as_ref(), b.as_ref());
+        x.cmp(y)
+    });
+    let mut ijoined = string::from_static("[");
+    let mut m = 0;
+    while m < inames.len() {
+        if m > 0 {
+            ijoined = ijoined + string::from_static(" ");
+        }
+        ijoined = ijoined + inames[m].clone();
+        m += 1;
+    }
+    ijoined = ijoined + string::from_static("]");
+    chk(fmt::Sprintf!(
+        "infos n=%d err=%v %s",
+        goish::len(&infos) as i64,
+        ierr,
+        ijoined
+    ));
+    let (i2, ierr2) = f3.Readdir(2);
+    chk(fmt::Sprintf!(
+        "infos-after-drain n=%d err=%v",
+        goish::len(&i2) as i64,
+        ierr2
+    ));
+    let _ = f3.Close();
     let _ = os::RemoveAll(dir);
     let f = FAILED.load(Ordering::Relaxed);
-    if f == 0 {
-        fmt::Printf!("
-ok 4/4
-");
+    let seen = SEEN.load(Ordering::Relaxed);
+    // Both halves: nothing failed AND every row actually ran. Checking
+    // only FAILED lets a smoke that asserts nothing report success —
+    // which this one did, until the row count caught it.
+    if f == 0 && seen == GO.len() {
+        fmt::Printf!("\nok %d/%d\n", seen as i64, GO.len() as i64);
         goish::os::Exit(0);
     }
-    fmt::Printf!("
-FAILED %d of 4
-", f as i64);
+    fmt::Printf!("\nFAILED %d of %d (ran %d)\n", f as i64, GO.len() as i64, seen as i64);
     goish::os::Exit(1);
 }

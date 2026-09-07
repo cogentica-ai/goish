@@ -37,4 +37,17 @@ func TestGoishRef(t *testing.T) {
 	fmt.Printf("batch2 n=%d err=%v\n", len(b2), e2)
 	fmt.Printf("batch3 n=%d err=%v (io.EOF=%v)\n", len(b3), e3, e3 == io.EOF)
 	f2.Close()
+
+	// The deprecated Readdir: FileInfo values, lstat'd per entry.
+	f3, _ := os.Open(dir)
+	infos, ierr := f3.Readdir(-1)
+	inames := []string{}
+	for _, fi := range infos {
+		inames = append(inames, fmt.Sprintf("%s:%v:%d", fi.Name(), fi.IsDir(), fi.Size()))
+	}
+	sort.Strings(inames)
+	fmt.Printf("infos n=%d err=%v %v\n", len(infos), ierr, inames)
+	i2, ierr2 := f3.Readdir(2)
+	fmt.Printf("infos-after-drain n=%d err=%v\n", len(i2), ierr2)
+	f3.Close()
 }

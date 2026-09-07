@@ -211,7 +211,11 @@ fn run() {
     let _ = tsrv.clone().Close();
 
     let f = FAILED.load(Ordering::Relaxed);
-    if f == 0 {
+    let seen = SEEN.load(Ordering::Relaxed);
+    // Nothing failed AND every row RAN. Checking only FAILED lets a
+    // smoke whose assertions were never wired report success — which
+    // happened once, in os_file_readdir_ref_smoke.
+    if f == 0 && seen == GO.len() {
         fmt::Printf!("\nok 6/6\n");
         goish::os::Exit(0);
     }

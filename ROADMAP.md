@@ -815,6 +815,28 @@ unverified. `dnsclient.rs` and `dnsconfig.rs` have neither anchors nor
 a diffing smoke. Each file now carries the warning; the work is to
 re-verify against 1.25.5 and correct the line or the code.
 
+### A smoke that asserts nothing still prints ok
+
+Added 2026-09-07, from a self-inflicted case. A ref smoke whose rows
+run through a `chk()` helper counts FAILURES, and its gate read
+`if FAILED == 0 { print "ok N/N"; exit 0 }`. In
+os_file_readdir_ref_smoke four of its rows were still plain `Printf`
+calls — the conversion to `chk` had silently not applied — so ZERO
+assertions ran and it printed "ok 4/4" and exited 0.
+
+It looked gated, because removing the ported method made it fail to
+COMPILE. That is a real gate for a missing API and no gate at all for
+a wrong value, and the two were conflated.
+
+The fix is one clause: gate on `FAILED == 0 && seen == GO.len()`, so a
+smoke that skipped its assertions cannot pass. Ten of the day's ref
+smokes had the same shape and now carry it; the loop-driven ones
+(which iterate GO itself, so a row cannot be skipped) do not need it.
+
+The check that finds this is not reading the smoke, it is PERTURBING
+it: change one expected value and confirm the smoke fails. A smoke
+that passes both ways is measuring nothing.
+
 ### A sharper one: grep the REMOVAL CONDITION
 
 Added 2026-09-07. The banner grep above finds dated claims. A subset of

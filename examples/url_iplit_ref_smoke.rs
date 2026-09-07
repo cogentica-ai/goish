@@ -66,6 +66,11 @@ fn main() {
 }
 
 fn run() {
+    // Driven by RAW: a GO row with no RAW row would never run.
+    if RAW.len() != GO.len() {
+        fmt::Printf!("rows: RAW=%d GO=%d\n", RAW.len() as i64, GO.len() as i64);
+        goish::os::Exit(1);
+    }
     let mut i = 0usize;
     while i < RAW.len() {
         let (u, e) = url::Parse(string(RAW[i]));
