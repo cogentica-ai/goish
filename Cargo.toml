@@ -674,6 +674,10 @@ name = "http_client_jar_smoke"
 path = "examples/http_client_jar_smoke.rs"
 
 [[example]]
+name = "http_body_sticky_ref_smoke"
+path = "examples/http_body_sticky_ref_smoke.rs"
+
+[[example]]
 name = "http_chunked_reuse_ref_smoke"
 path = "examples/http_chunked_reuse_ref_smoke.rs"
 

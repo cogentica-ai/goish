@@ -1290,7 +1290,7 @@ should go, some should lose the marker and keep the prose as a plain
 comment. What must not happen is a bulk delete that takes the reasons
 with it.
 
-## 2b-vi. net/http's 100% is a by-name figure; 30 declarations have no anchor
+## 2b-vi. net/http's 100% is a by-name figure; 28 declarations have no anchor
 
 Found 2026-09-07 while closing `net/http/cgi`'s last waiver, by running
 the package in both coverage modes instead of one.
@@ -1477,6 +1477,17 @@ reading these three is what found the sticky-error, Client.Timeout and
 rewind defects above. `ServeMux.matchingMethods` is the seventh, now
 inlined-but-correct and pinned. Root 37 to 30, net/http 726/756
 (96.0%).
+
+`bodyEOFSignal.{Read,Close}` came off the list by being MEASURED
+rather than reasoned about. Go's wrapper keeps `rerr` so a failed read
+keeps failing; the guess was that goish, having no such field outside
+gzip, would decay to EOF on the second read — the exact defect found
+in the gzip reader earlier. It does not: against a truncated response
+(Content-Length 100, ten bytes sent, conn closed) goish matches Go on
+all five lines, sticky repeat included, because each read hits the same
+dead connection. `examples/http_body_sticky_ref_smoke.rs` pins it, and
+is worth having precisely because this function has been edited three
+times today.
 
 Two of these are FIXED BUT NOT PINNED, worth stating plainly.
 Reaching either failing path needs a retry — an idle conn closed

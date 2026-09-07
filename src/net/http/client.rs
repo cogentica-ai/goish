@@ -252,6 +252,15 @@ impl crate::io::Writer for ConnSrcWriter<'_> {
 // entry to a read exactly as Go sets didRead before delegating.
 // go: waived readTrackingBody.Close — `BodyState.did_close`; the pair
 // is what `rewindBody` reads.
+// go: waived bodyEOFSignal.Read — Go's wrapper keeps `rerr` so a
+// failed read keeps failing; the conn-backed framings need no such
+// field, because each read hits the same dead connection and reports
+// the same error. Pinned, not assumed:
+// examples/http_body_sticky_ref_smoke.rs, five lines against Go.
+// go: waived bodyEOFSignal.Close — the bank-back it exists to run is
+// `close_locked`: banked when the body ended cleanly, closed
+// otherwise, which is Go's `earlyCloseFn` fork
+// (examples/http_chunked_reuse_ref_smoke.rs covers both sides).
 
 /// Wire framing of a body-in-progress. Mirrors Go's transfer.go body
 /// readers: `body` over a LimitedReader (Content-Length), over a
