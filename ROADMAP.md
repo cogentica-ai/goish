@@ -1362,6 +1362,25 @@ Fixed and pinned by gzip_sticky_ref_smoke against Go 1.25.5. The
 declaration was not missing, and it was not correct either — which is
 the state this whole section is about.
 
+The two read after it were the same. `cancelTimerBody.Read` had its
+predicate computed and dropped, so Client.Timeout killing a body read
+said "read tcp …: i/o timeout" instead of naming the deadline (fixed,
+pinned in client_timeout_ref_smoke). `readTrackingBody.{Read,Close}`
+is answered by `Body.__was_read`, which returned true for every
+framing except Eager — so an UNTOUCHED streaming request body read as
+consumed, and a retry Go performs (the request never reached the wire)
+failed here with errCannotRewind. Now tracked as Go tracks it, with
+`did_read`/`did_close` flags; for an Eager body the answer is
+identical to the old `off > 0`.
+
+That last one is FIXED BUT NOT PINNED, which is worth stating plainly.
+Reaching it needs a retry — an idle conn closed between the request
+being handed over and written — and reproducing that on demand is a
+timing race, the kind this tree has been bitten by in e2e before.
+`rewindBody` is `pub(crate)`, so an example cannot call it directly
+either. The Eager path is covered by the four client smokes; the
+streaming path rests on reading Go's rule and matching it.
+
 ## 2c. `regexp` does not keep Go's linear-time guarantee
 
 Go's regexp documents that it "is guaranteed to run in time linear in

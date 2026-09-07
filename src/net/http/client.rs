@@ -298,6 +298,12 @@ struct BodyState {
     /// stops the timer when the body is closed, not when Do returns
     /// (the deadline covers body reads).
     cancel: Option<crate::context::CancelFunc>,
+    /// Go's `readTrackingBody.didRead` / `.didClose` (transport.go:
+    /// 753-757), which is what `rewindBody` consults to decide whether
+    /// a retry needs the body rebuilt. Tracked here rather than in a
+    /// wrapper type because goish's Body IS the wrapper.
+    did_read: bool,
+    did_close: bool,
     /// Go's `cancelTimerBody.reqDidTimeout` (client.go:969): did the
     /// CLIENT's timer fire? `setRequestCancel` already returned this
     /// closure and the call site already cited
@@ -319,6 +325,9 @@ struct BodyState {
 }
 
 fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
+    // Go, readTrackingBody.Read: `r.didRead = true` before delegating,
+    // so an attempted read counts even if it fails.
+    st.did_read = true;
     // Go (gzipReader.Read, transport.go:3045-3053): the sticky
     // gzip.NewReader error is returned BEFORE the body's closed flag
     // is consulted, so it survives a Close.
@@ -437,6 +446,10 @@ fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
 // `reuse_fn` is an FnOnce TAKEN by close_locked below — the once-ness
 // is the type system's, with nothing left to guard.
 fn close_locked(st: &mut BodyState) -> error {
+    // Go, readTrackingBody.Close: `r.didClose = true` before
+    // delegating. rewindBody treats a closed body as needing a rewind
+    // even if nothing was ever read out of it.
+    st.did_close = true;
     // Watcher first — it holds a raw PollDesc pointer into the conn.
     if let Some(w) = st.watch.take() {
         stop_cancel_watch(Some(w));
@@ -529,6 +542,8 @@ impl Body {
                 ctx,
                 watch,
                 cancel: None,
+                did_read: false,
+                did_close: false,
                 did_timeout: None,
                 zerr: errors::nil,
             })),
@@ -603,11 +618,16 @@ impl Body {
     // (conservative, like a wrapper that saw a Read call).
     pub(crate) fn __was_read(&self) -> bool {
         let g = self.inner.Lock();
-        let out = match &g.framing {
-            FramedBody::Eager { off, .. } => *off > 0,
-            _ => true,
-        };
-        return out;
+        // Go, rewindBody: `!didRead && !didClose` means nothing to
+        // rewind. This used to answer `true` for every framing except
+        // Eager, on the reasoning that only an Eager body has a cursor
+        // to inspect — which reports an UNTOUCHED streaming request
+        // body as read, so a retry that Go performs (the request never
+        // reached the wire, the body is intact) failed here with
+        // errCannotRewind instead. The flags are tracked now, so the
+        // answer is exact for every framing; for an Eager body it is
+        // the same answer `off > 0` gave.
+        return g.did_read || g.did_close;
     }
 
     // go: none — goish-only: install the bodyEOFSignal bank-back (see
