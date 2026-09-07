@@ -843,10 +843,16 @@ already been met:
     background reader landed, under a netpoller design that will never
     set `inRead` or `hasByte`.
 
-And one that matters for planning rather than tidiness: `crypto/tls`
-deferred ECH round-trip coverage to "once computeAndUpdateOuterECHExtension
-lands". It is ported. The gap is a MISSING TEST, not a missing port,
-and those plan differently.
+One of the ten was gettable wrong in a way worth recording, because
+the detector invites it. `crypto/tls` deferred ECH round-trip coverage
+to "once computeAndUpdateOuterECHExtension lands", and the first
+correction — mine, on the same day — read "the sealer IS ported, so
+the coverage is writable and simply has not been written". Both halves
+of the condition were met: the sealer landed AND the test was written.
+`handshake_client_echRoundTrip` drives client seal into server open,
+and tls_common_smoke has asserted the recovered inner ServerName ever
+since. The right move on a met condition is to check whether the WORK
+behind it was also done, not just the dependency it named.
 
 Four were accurate and stay: ChaCha8 (math/rand/v2 is PCG only),
 internal/godebug, internal/testlog, and crypto/ssh, which is not in

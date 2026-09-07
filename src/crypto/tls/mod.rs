@@ -7142,11 +7142,15 @@ pub fn handshake_server_tls13_doHelloRetryRequest(
 // rejection — against a memConn so the alert path is live. The
 // outer-decrypt trial path needs a validly outer-extension-compressed
 // inner hello, which only the client-side ECH sealer
-// (computeAndUpdateOuterECHExtension) produces. That sealer IS ported
-// now — ech.rs, called from handshake_client.rs — so the round-trip
-// coverage this defers to is writable and simply has not been written.
-// The gap is a MISSING TEST, not a missing port, which is a different
-// thing to plan around.
+// (computeAndUpdateOuterECHExtension) produces.
+//
+// That path is COVERED, and has been since the sealer landed:
+// `handshake_client_echRoundTrip` below drives client seal into server
+// open, and tls_common_smoke asserts the recovered inner ServerName —
+// "secret.example" travelling behind "public.example" — because the
+// sealed bytes are nondeterministic (HPKE ephemeral). This comment
+// deferred to a test that already existed; the deferral is what was
+// stale, not the coverage.
 // which: 0 inner, 1 no keys, 2 malformed.
 #[doc(hidden)]
 pub fn handshake_server_tls13_processECHClientHello(
