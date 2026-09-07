@@ -22,7 +22,10 @@
 // goishlint:ignore GOISH020 Logf, Skipf — Go's signature is `(format string, args ...any)`; goish takes the already-formatted string, since `Sprintf!` formats at the call site. `Errorf`/`Fatalf` keep the runtime-variadic slice for ports that spread one, so both shapes exist in the package.
 // goishlint:ignore GOISH018 after, before, log, Main, testingSynctestTest, writeProfiles — the driver is only partly ported; see the note above.
 // goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, initRan, match, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, outputDir, panicHandling, panicOnExit0, parallel, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, short, shuffle, skip, T, TB, testingTesting, testlog, testlogFile, timeout, traceFile — same: the driver's types and package state come with the driver.
-// goishlint:ignore GOISH017 common.FailNow, common.Skip, common.SkipNow — declared on Go's `common`, ported as methods on goish's `T`, which is the only type that embeds it here.
+// `common.FailNow`, `common.Skip` and `common.SkipNow` are declared on
+// Go's `common` and ported as methods on goish's `T`, the only type
+// that embeds it here — so the manifest finds all three and the
+// GOISH017 marker that stood here suppressed nothing.
 
 #![allow(non_snake_case)]
 
@@ -1168,7 +1171,10 @@ pub fn parseCpuList(cpuListStr: string) -> (crate::goslice::slice<int>, crate::e
 
 // ─── chattyPrinter ───────────────────────────────────────────────────
 
-// goishlint:ignore GOISH019 chattyPrinter — Go carries `lastNameMu
+// `chattyPrinter` is declared below and its fields match, so the
+// GOISH019 marker here silenced nothing; the note is kept because the
+// difference it describes is real.
+// Go carries `lastNameMu
 // sync.Mutex` beside the `lastName` string it guards; goish folds them
 // into `Mutex<string>`, since that field is the only thing the mutex
 // protects. Same protection, one field fewer.
@@ -2079,7 +2085,8 @@ impl TState {
 pub(crate) const parallelConflict: &str =
     "testing: test using t.Setenv or t.Chdir can not use t.Parallel";
 
-// goishlint:ignore GOISH019 testState — `mu`, `running` and
+// `testState` is declared below, same story — marker gone, note kept.
+// `mu`, `running` and
 // `numWaiting` become one Mutex<testStateCounts>: Rust wants the
 // guarded group named, and the two counters are only ever read and
 // written as a pair. `match *matcher` is absent because the matcher is
@@ -3064,7 +3071,11 @@ pub fn listTests(
 
 // ─── M ───────────────────────────────────────────────────────────────
 
-// goishlint:ignore GOISH019 M — Go's M holds `benchmarks`,
+// `M` is declared below and the GOISH019 marker on it silenced
+// nothing. The paragraph stays: it is the only record of which
+// fields Go's M has and goish's does not, and it is why M.Run is
+// unported.
+// Go's M holds `benchmarks`,
 // `fuzzTargets`, `afterOnce` and `exitCode` for machinery goish does
 // not have (the benchmark and fuzz runners, and an M.Run that would set
 // an exit code). The four fields present are the ones MainStart fills
