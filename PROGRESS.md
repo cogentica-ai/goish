@@ -853,17 +853,29 @@ The irony is worth keeping: `asm_decls`'s own docstring says it exists
 because the raw gap column "has produced a wrong leverage claim three
 times in this repo", and it contained a fourth.
 
-## net/http — 639 / 639 functions (100.0%)
+## net/http — 639 / 639 by name, 721 / 775 by declaration (93.0%)
 
-**All twelve packages are at 100.0%**, with 1534 `// go:` lines (the
-root package alone carries 1107; both were 1476 and 1085 on
+**All twelve packages are at 100.0% by name**, with 1534 `// go:` lines
+(the root package alone carries 1107; both were 1476 and 1085 on
 2026-08-15 and drift upward with ordinary work) and 33 declarations waived on in-tree
-justifications. This is an anchored port, not a name match: request
+justifications. Much of that is a real anchored port: request
 and response bodies stream both directions through the ported
 `transfer.go` machinery, the client pools connections through Go's
 full `getConn`/`persistConn` call graph (idle reaping, GetBody rewind,
 sentinel-mapped retries, Expect: 100-continue), and the server runs
 `connReader` with Go's total-head byte limit (431/501 paths included).
+
+But read the by-name figure as the coarse one it is. `--by-decl` puts
+the same tree at **721/775 (93.0%)** — root 536/586, `httputil` 52/56 —
+and **none of the 54 short carries an anchor anywhere in its package**.
+They are the connection and body plumbing: `conn.serve`,
+`conn.readRequest`, `chunkWriter.Write`, `persistConn.roundTrip`,
+`Client.send`. The by-name mode hides them because it folds a method
+onto its bare name, so Go's `conn.serve` is credited to goish's
+exported `Serve` — the connection loop credited to the function that
+starts it. The functionality is largely present (goish serves
+keep-alive connections and streams chunked bodies); the provenance is
+not. ROADMAP §2b-vi lists all 54.
 
 | package | ported | | package | ported |
 |---|--:|---|---|--:|

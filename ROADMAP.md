@@ -1290,6 +1290,59 @@ should go, some should lose the marker and keep the prose as a plain
 comment. What must not happen is a bulk delete that takes the reasons
 with it.
 
+## 2b-vi. net/http's 100% is a by-name figure; 54 declarations have no anchor
+
+Found 2026-09-07 while closing `net/http/cgi`'s last waiver, by running
+the package in both coverage modes instead of one.
+
+PROGRESS's net/http section read "639 / 639 functions (100.0%)", "All
+twelve packages are at 100.0%", and "This is an anchored port, not a
+name match". Measured by declaration the same tree is **721/775
+(93.0%)** — root 536/586 (91.5%), `httputil` 52/56 (92.9%).
+
+The gap is not method-counting noise. **None of the 54 carries a
+`// go: sdk` anchor anywhere in its package**, checked by intersecting
+the MISSING list against every anchor symbol under `src/net/http/`:
+zero of 50 in the root, zero of 4 in `httputil`. Nor are they renamed
+-but-anchored ports. goish's per-connection loop is
+`Server::serve_conn` at server.rs line 3390, and its whole comment is
+"Per-connection serving loop. See keep-alive doc (M27f-β)".
+
+Why the coarse mode reads 100%: it folds a method onto its bare name,
+and `norm()` folds case but not underscores. Go's `Server.Serve` and
+`conn.serve` both key as `serve`, which goish's exported `Serve`
+satisfies — the connection loop credited to the function that starts
+it. `serve_conn` earns nothing (`serveconn` != `serve`). This is the
+conflation PROGRESS already documents for crypto ("the first one made
+all fifteen look done"), sitting unremarked in the larger package.
+
+What the 54 are — plumbing, not leaf helpers:
+
+- server: `conn.{serve,readRequest,close,finalFlush}`,
+  `chunkWriter.{Write,close,flush,writeHeader}`,
+  `expectContinueReader.{Read,Close}`, `response.WriteString`,
+  `checkConnErrorWriter.Write`, `timeoutWriter.Push`
+- transport: `persistConn.{Read,readResponse,roundTrip}`,
+  `persistConnWriter.{Write,ReadFrom}`,
+  `bodyEOFSignal.{Read,Close,condfn}`, `Client.send`,
+  `Transport.{CancelRequest,protocols,removeIdleConnLocked,
+  onceSetNextProtoDefaults,prepareTransportCancel}`
+- bodies: `gzipReader.{Read,Close}`, `cancelTimerBody.{Read,Close}`,
+  `readTrackingBody.{Read,Close}`, `bodyLocked.Read`,
+  `body.{readLocked,unreadDataSizeLocked}`, `maxBytesReader.Close`
+- `httputil`: `ServerConn.{Pending,Read,Write}`, `delegateReader.Read`
+
+The functionality is largely present — goish serves keep-alive
+connections and streams chunked bodies — so this is a PROVENANCE gap
+rather than a hole, which is exactly what this section exists to list:
+the code no tier can check. Both of this tree's proven defect nurseries
+(§1's invented `crypto/tls`, §2b's unanchored files) have this shape.
+
+Open, and not answerable from the names: each of the 54 is either a
+restructured port that should carry an anchor to Go's range, or a
+deliberate divergence that should carry a waiver with a reason. Those
+are different answers, and the per-declaration read is the work.
+
 ## 2c. `regexp` does not keep Go's linear-time guarantee
 
 Go's regexp documents that it "is guaranteed to run in time linear in
