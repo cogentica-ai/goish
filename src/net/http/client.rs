@@ -1815,7 +1815,27 @@ impl RoundTripper for Transport {
                         treq = super::transport::transportRequest::__new(rt_req.clone());
                         continue;
                     }
-                    let mapped_out = pc.mapRoundTripError(&treq, false, mapped);
+                    // Go (transport.go:716-724): "Issue 16465: return
+                    // underlying net.Conn.Read error from peek, as
+                    // we've historically done." When the request will
+                    // NOT be retried, Go unwraps
+                    // transportReadFromServerError back to the error
+                    // the peek actually got. goish's equivalent is a
+                    // sentinel rather than a wrapper, so it carries no
+                    // cause to unwrap — handing `mapped` on would tell
+                    // the caller "http: transport read from server"
+                    // where Go says "connection reset by peer". The
+                    // retry DECISION above still sees the sentinel;
+                    // only what reaches the caller changes.
+                    let out = if errors::Is(
+                        mapped.clone(),
+                        super::transport::errTransportReadFromServer,
+                    ) {
+                        rerr.clone()
+                    } else {
+                        mapped
+                    };
+                    let mapped_out = pc.mapRoundTripError(&treq, false, out);
                     return (resp, ctx_err_or(&ctx, mapped_out));
                 }
 

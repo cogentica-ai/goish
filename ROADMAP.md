@@ -1384,14 +1384,30 @@ ReadCloser) and the idiom was unwritable. Now a conditional
 `impl Closer` forwards, as Go's one-line `return l.r.Close()` does,
 pinned in http_maxbytes_close_smoke.
 
-The streaming-body one above is FIXED BUT NOT PINNED, worth stating
-plainly.
-Reaching it needs a retry — an idle conn closed between the request
-being handed over and written — and reproducing that on demand is a
-timing race, the kind this tree has been bitten by in e2e before.
-`rewindBody` is `pub(crate)`, so an example cannot call it directly
-either. The Eager path is covered by the four client smokes; the
-streaming path rests on reading Go's rule and matching it.
+`transportReadFromServerError.{Error,Unwrap}` and
+`nothingWrittenError.Unwrap` are the fifth and sixth, and they are a
+pair: goish replaces both wrapper types with SENTINELS, which is
+enough for the retry decision (identity is all it needs) and lossy for
+the caller. Go keeps the cause and, on the path where the request will
+NOT be retried, unwraps it — transport.go:716-724, commented "Issue
+16465: return underlying net.Conn.Read error from peek, as we've
+historically done." A reused conn failing a non-idempotent request
+therefore told the caller "http: transport read from server" where Go
+says "connection reset by peer". The write half already returned the
+real error; the read half now does too.
+
+Two of these are FIXED BUT NOT PINNED, worth stating plainly.
+Reaching either failing path needs a retry — an idle conn closed
+between the request being handed over and written — and reproducing
+that on demand is a timing race, the kind this tree has been bitten by
+in e2e before. `rewindBody` is `pub(crate)`, so an example cannot call
+it directly. The peek-error one is worse: whether the RST lands at
+write time or at peek time decides WHICH path runs, so a smoke would
+assert whichever won that day. `TCPConn::SetLinger(0)` makes the RST
+itself deterministic, so what a pin still needs is forced pool reuse
+and control of the peek ordering. The Eager and non-reused paths are
+covered by the client smokes; these two rest on reading Go's rule and
+matching it.
 
 ## 2c. `regexp` does not keep Go's linear-time guarantee
 
