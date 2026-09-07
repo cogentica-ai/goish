@@ -201,7 +201,7 @@ fn new_reader_from<FR: io::Reader + io::ByteReader>(
 /// Parse the RFC 1950 §2.2 header from `r`: 2-byte CMF/FLG, plus the
 /// optional 4-byte preset-dictionary Adler-32 id. Returns whether a
 /// preset dictionary is in use. Faithful port of `reader.Reset`'s
-/// header section (reader.go:141).
+/// header section (reader.go:133).
 fn readHeader<R: io::Reader>(r: &mut R, dict: &slice<byte>) -> (bool, error) {
     let mut scratch: [byte; 4] = [0; 4];
     // Read the 2-byte header.

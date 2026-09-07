@@ -128,7 +128,7 @@ pub struct MStorage {
     /// `acquirem()` (and auto-bumped by SpinLock acquisition);
     /// decremented by `releasem()`. M18b's SIGURG preempt handler
     /// reads this lock-free and skips injection while > 0. Mirrors
-    /// Go's `m.locks` (runtime2.go:546). Per-M and only mutated by
+    /// Go's `m.locks` (runtime2.go:553). Per-M and only mutated by
     /// the M's own thread, so accesses are race-free at the hardware
     /// level on x86-64; AtomicU32 is for lint compliance.
     pub locks: AtomicU32,
@@ -274,7 +274,7 @@ pub fn is_tls_ready() -> bool {
 /// Increment the calling M's non-yielding-section depth counter.
 /// Pairs with `releasem` (LIFO). No-op while TLS is not yet ready
 /// (early init on the main thread). Mirrors Go's `acquirem`
-/// (runtime/runtime1.go:631).
+/// (runtime/runtime1.go:628).
 ///
 /// **Why not RAII**: gopark's protocol requires `releasem` *before*
 /// the swap_context that yields the goroutine — see Go's
@@ -319,7 +319,7 @@ pub fn acquirem() {
 
 /// Decrement the calling M's non-yielding-section depth counter.
 /// Pairs with `acquirem`. Mirrors Go's `releasem`
-/// (runtime/runtime1.go:638).
+/// (runtime/runtime1.go:635).
 ///
 /// Single TLS-segment-relative `xadd` for the same migration-atomicity
 /// reason as `acquirem` (see there); `xadd` rather than `sub` so

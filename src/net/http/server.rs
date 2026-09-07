@@ -2689,7 +2689,7 @@ crate::var! {
     /// `http.ErrAbortHandler` (server.go:1909).
     pub ErrAbortHandler: error    = "net/http: abort Handler";
 
-    /// `http.ErrHandlerTimeout` (server.go:3829).
+    /// `http.ErrHandlerTimeout` (server.go:3826).
     pub ErrHandlerTimeout: error  = "http: Handler timeout";
 }
 
@@ -4198,7 +4198,7 @@ pub(crate) fn request_keep_alive_pub(req: &mut Request) -> bool {
 }
 
 /// Whether to reuse the connection after this request — the inverse of
-/// Go's `shouldClose` (transfer.go:745), which is what Go's conn.serve
+/// Go's `shouldClose` (transfer.go:748), which is what Go's conn.serve
 /// consults via `w.closeAfterReply`.
 ///
 /// This used to be hand-rolled here, comparing the WHOLE `Connection`

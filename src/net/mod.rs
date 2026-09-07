@@ -189,7 +189,7 @@ impl Listener {
 
     /// Accept plus a Go `net.Error.Temporary()` verdict on the error.
     /// goish has no typed `Errno` error carrier yet, so the http
-    /// server's Go-parity accept backoff (server.go:3428
+    /// server's Go-parity accept backoff (net/http/server.go:3468
     /// `ne.Temporary()`) gets the classification out-of-band.
     /// Temporary set mirrors `syscall.Errno.Temporary()`
     /// (syscall/syscall_unix.go): EMFILE, ENFILE, plus the resource
@@ -1447,7 +1447,7 @@ fn errno_error(op: &str, errno: i32) -> error {
 /// suitable for `netpoll::set_deadline`. Zero time → 0 (clear);
 /// already-past time → -1 (immediate expiry); future time → absolute
 /// monotonic ns of the deadline. Mirrors the start of Go's
-/// `poll_runtime_pollSetDeadline` (netpoll.go:380), where `d > 0`
+/// `poll_runtime_pollSetDeadline` (netpoll.go:372), where `d > 0`
 /// gets `d += nanotime()`.
 fn deadline_from_time(t: crate::time::Time) -> i64 {
     if t.IsZero() {

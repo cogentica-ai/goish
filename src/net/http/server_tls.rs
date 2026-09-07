@@ -686,7 +686,7 @@ impl Server {
                 return super::server::ErrServerClosed.into();
             }
             // Accept raw TCP, then wrap server-side TLS — what
-            // `tls::listener.Accept` (tls.go:77) does, inlined so the
+            // `tls::listener.Accept` (crypto/tls/tls.go:78) does, inlined so the
             // accept parks on the shutdown-tracked fd.
             let (c, err) = ln.Accept();
             if !err.IsNil() {

@@ -333,7 +333,7 @@ struct GoishAllocator;
 
 unsafe impl GlobalAlloc for GoishAllocator {
     // **Preemption mask (Go parity)**: `mallocgc` opens with
-    // `mp := acquirem()` (malloc.go:1018) precisely because the
+    // `mp := acquirem()` (malloc.go:1014) precisely because the
     // mcache fast path mutates owner-P-private state (`alloc_cache`,
     // `freeindex` — plain UnsafeCell writes under a "only the M
     // bound to this P touches these" discipline). Without the mask,

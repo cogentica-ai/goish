@@ -47,7 +47,7 @@ use crate::types::{byte, int, rune};
 pub(super) const gzipID1: byte = 0x1f;
 pub(super) const gzipID2: byte = 0x8b;
 pub(super) const gzipDeflate: byte = 8;
-/// `flagText` (gzip.go:23) — RFC 1952 FTEXT bit. Defined for fidelity
+/// `flagText` (gunzip.go:23) — RFC 1952 FTEXT bit. Defined for fidelity
 /// to Go's flag-constant block; not consulted by the reader or writer.
 #[allow(dead_code)]
 pub(super) const flagText: byte = 1 << 0;

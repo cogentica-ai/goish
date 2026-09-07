@@ -111,7 +111,7 @@ impl SelectCoord {
 /// `VecDeque<NonNull<Sudog<T>>>`. Push, pop, and mid-list cancel
 /// (select pass-3) all run in O(1) under the chan lock with zero
 /// allocator round-trips. Mirrors Go's `sudog.next` / `prev`
-/// (runtime/runtime2.go:335).
+/// (runtime/runtime2.go:336).
 #[doc(hidden)]
 pub struct Sudog<T> {
     #[doc(hidden)]

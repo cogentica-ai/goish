@@ -93,7 +93,7 @@ use super::transfer::bodyAllowedForStatus;
 
 // ─── The interfaces ─────────────────────────────────────────────────
 
-/// `http.ResponseWriter` (server.go:90) — the interface a handler
+/// `http.ResponseWriter` (server.go:96) — the interface a handler
 /// uses to construct an HTTP response.
 ///
 /// Every method takes `&self`: the concrete writer carries interior
@@ -338,7 +338,7 @@ fn register_response_impls() {
 ///     with `Transfer-Encoding: chunked` and every subsequent `Write`
 ///     emits one chunk. The closing `0\r\n\r\n` terminator is sent by
 ///     the final `flush()`.
-/// `response.closeNotifyCh` / `closeNotifyTriggered` (server.go:493),
+/// `response.closeNotifyCh` / `closeNotifyTriggered` (server.go:496),
 /// lifted into their own cell.
 ///
 /// Go keeps both on the response and reaches them from the conn's

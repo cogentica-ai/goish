@@ -179,7 +179,7 @@ pub fn NewReaderSize<R: io::Reader>(rd: R, size: int) -> Reader<R> {
 pub struct PoolBuf(pub(crate) Vec<byte>);
 
 // go: none — goish-only: the get half of net/http's bufio reader
-// pool (newBufioReader, server.go:866); sizes a recycled PoolBuf and
+// pool (newBufioReader, net/http/server.go:866); sizes a recycled PoolBuf and
 // builds a Reader around it.
 pub(crate) fn __new_reader_with_buf<R: io::Reader>(rd: R, buf: PoolBuf) -> Reader<R> {
     let mut buf = buf.0;
@@ -224,7 +224,7 @@ impl<R: io::Reader> Reader<R> {
     }
 
     // go: none — goish-only: the put half of Go's bufio reader pool
-    // (putBufioReader, server.go:886).
+    // (putBufioReader, net/http/server.go:886).
     /// Crate-internal: recover the backing buffer for recycling into
     /// the next `__new_reader_with_buf`. Buffered-but-unconsumed
     /// bytes are discarded, matching the previous
@@ -801,7 +801,7 @@ pub fn NewWriterSize<W: io::Writer>(wr: W, size: int) -> Writer<W> {
 }
 
 // go: none — goish-only: the get half of net/http's bufio writer
-// pools (newBufioWriterSize, server.go:900). See `PoolBuf` for why
+// pools (newBufioWriterSize, net/http/server.go:900). See `PoolBuf` for why
 // the buffer, not the Writer, is the pooled unit.
 /// Build a Writer around a recycled backing buffer, resized to
 /// `size`. The put half is `__into_buf`.
@@ -823,11 +823,11 @@ pub(crate) fn __new_writer_with_buf<W: io::Writer>(wr: W, buf: PoolBuf, size: in
 
 impl<W: io::Writer> Writer<W> {
     // go: none — goish-only: the put half of Go's bufio writer pools
-    // (putBufioWriter, server.go:921).
+    // (putBufioWriter, net/http/server.go:921).
     /// Consume the writer, returning its backing buffer for pooling.
     /// Unflushed bytes are DISCARDED — same contract as Go's
     /// `bw.Reset(nil)` before the pool Put (putBufioWriter,
-    /// server.go:922): callers flush first or forfeit the tail.
+    /// net/http/server.go:922): callers flush first or forfeit the tail.
     pub(crate) fn __into_buf(self) -> PoolBuf {
         return PoolBuf(self.buf);
     }

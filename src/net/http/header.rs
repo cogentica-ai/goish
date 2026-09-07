@@ -6,7 +6,7 @@
 //
 // Public type is `Header`, a thin wrapper over `gomap<string, slice<string>>`
 // with case-insensitive `Get`/`Set`/`Add` matching Go's
-// `net/http.Header` API (Go 1.25 src/net/http/header.go:24).
+// `net/http.Header` API (Go 1.25 src/net/http/header.go:30).
 
 #![allow(non_snake_case)]
 

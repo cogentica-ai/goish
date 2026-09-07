@@ -1493,7 +1493,7 @@ pub fn ValuesGet(v: &Values, key: string) -> string {
 }
 
 // go: none — goish idiom: see `ValuesGet`.
-/// `v.Set(key, value)` (url.go:930) — sets key to single value.
+/// `v.Set(key, value)` (url.go:958) — sets key to single value.
 pub fn ValuesSet(v: &mut Values, key: string, value: string) {
     let mut s = Vec::with_capacity(1);
     s.push(value);
@@ -1501,7 +1501,7 @@ pub fn ValuesSet(v: &mut Values, key: string, value: string) {
 }
 
 // go: none — goish idiom: see `ValuesGet`.
-/// `v.Add(key, value)` (url.go:940) — appends value to key's slice.
+/// `v.Add(key, value)` (url.go:964) — appends value to key's slice.
 pub fn ValuesAdd(v: &mut Values, key: string, value: string) {
     let (existing, ok) = v.Get(key.clone());
     if ok {
@@ -1519,13 +1519,13 @@ pub fn ValuesAdd(v: &mut Values, key: string, value: string) {
 }
 
 // go: none — goish idiom: see `ValuesGet`.
-/// `v.Del(key)` (url.go:950) — deletes the key.
+/// `v.Del(key)` (url.go:969) — deletes the key.
 pub fn ValuesDel(v: &mut Values, key: string) {
     v.Delete(key);
 }
 
 // go: none — goish idiom: see `ValuesGet`.
-/// `v.Has(key)` (url.go:960) — reports whether key exists.
+/// `v.Has(key)` (url.go:974) — reports whether key exists.
 pub fn ValuesHas(v: &Values, key: string) -> bool {
     return v.Has(key);
 }

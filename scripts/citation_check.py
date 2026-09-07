@@ -37,7 +37,7 @@ GOSRC = os.environ.get("GOROOT_SRC", "/usr/local/go/src")
 # was `Cmd.Process` cited to exec.go:189 — a line inside Dir's doc
 # comment, three fields above the real one.
 CITE = re.compile(
-    r'([a-z0-9_][a-z0-9_/]*\.go)(?::|\s+lines?\s+|\s+line\s+)(\d+)(?:-(\d+))?')
+    r'(?<![/\w])([a-z0-9_][a-z0-9_/]*\.go)(?::|\s+lines?\s+|\s+line\s+)(\d+)(?:-(\d+))?')
 TICK = re.compile(r'`([A-Za-z_][A-Za-z0-9_.]*)`')
 _lines = {}
 
@@ -132,6 +132,13 @@ def main(argv):
                 if not f.endswith(".rs"):
                     continue
                 rs = os.path.join(dirpath, f)
+                # A .rs that ports a NON-STDLIB Go module cites files
+                # that are not under GOROOT and never will be. src/xxh3
+                # names its origin in the banner; take it at its word
+                # rather than reporting fourteen unresolvable hits.
+                head = open(rs, errors="replace").read(4000)
+                if re.search(r'port of (github\.com|golang\.org/x)/', head):
+                    continue
                 for start, blk in blocks(rs):
                     # real anchors belong to anchor_check.py
                     if any(l.strip().startswith("// go: sdk") for l in blk):

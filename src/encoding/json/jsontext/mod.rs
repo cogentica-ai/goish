@@ -31,11 +31,14 @@
 //                          :232, WithIndentPrefix :265)
 //
 // Goish v1 simplifications (documented deviations):
-//   - `AllowInvalidUTF8` is accepted and recorded but not enforced:
-//     the tokenizer always passes byte content through verbatim (i.e.
-//     behaves as AllowInvalidUTF8(true)), which is the option
-//     typescript-go's json shim sets globally
-//     (internal/json/json.go:12).
+//   - `AllowInvalidUTF8` IS enforced: a string whose bytes are not
+//     valid UTF-8 is rejected unless the option is true, which is
+//     Go's rule. This note used to say the option was "accepted and
+//     recorded but not enforced" — it was, that was a parser
+//     differential (a document goish accepted and Go refused), and it
+//     was fixed at the read site in this file. The note outlived the
+//     defect, which is worse than useless: it tells a reader to expect
+//     a differential that is not there.
 //     `AllowDuplicateNames` IS enforced by the Decoder: names are
 //     tracked per open object frame and a repeat is an error unless
 //     the option is true. An earlier version of this note claimed
@@ -577,8 +580,9 @@ fn is_ws(b: byte) -> bool {
 }
 
 /// Append `s` as a quoted JSON string with the standard escapes
-/// (jsontext quote.go). Non-ASCII bytes pass through verbatim
-/// (AllowInvalidUTF8-true behavior; see module header).
+/// (jsontext quote.go). Non-ASCII bytes pass through verbatim on the
+/// WRITE side; validity is checked on the READ side, where
+/// `AllowInvalidUTF8` is enforced.
 fn append_quoted(out: &mut Vec<u8>, s: &[u8]) {
     out.push(b'"');
     for &b in s {
@@ -831,7 +835,7 @@ impl Encoder {
 
 // ─── Decoder ─────────────────────────────────────────────────────────
 
-/// `jsontext.Decoder` (decode.go:79) — streaming token reader over an
+/// `jsontext.Decoder` (decode.go:78) — streaming token reader over an
 /// `io::Reader` or byte buffer. Fills on demand; consumed bytes are
 /// compacted away at each top-level value boundary so long-lived
 /// stream decoders (LSP stdin) stay bounded by message size.
