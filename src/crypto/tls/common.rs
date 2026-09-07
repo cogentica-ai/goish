@@ -11,7 +11,19 @@
 // ports — see ROADMAP.md.
 //
 // goishlint:ignore GOISH018 CipherSuiteName, CipherSuites, InsecureCipherSuites, aeadModes, aesgcmCiphers, decodeCipherSuites, defaultCipherSuites, defaultCipherSuitesTLS13, deprecatedSessionTicketKey, echField, emptyConfig, errNoCertificates, fips140tls, handshakeMessage, hasAESGCMHardwareSupport, lruSessionCache, lruSessionCacheEntry, needFIPS, roleClient, roleServer, rsaKexCiphers, supportsSignatureAlgorithm, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, ticketKeyLifetime, ticketKeyRotation, tls10server, tlsrsakex, tlssha1, tlsunsafeekm, writerMutex — Config, ConnectionState, the session cache and the handshake-message machinery, none of which is ported yet; see the banner.
-// goishlint:ignore GOISH019 recordType, keyShare, pskIdentity, Config, dsaSignature, ecdsaSignature — same.
+// A GOISH019 marker on recordType, keyShare, pskIdentity, Config,
+// dsaSignature and ecdsaSignature stood here saying "same", and
+// suppressed nothing. Where those types actually are:
+//
+//   recordType                  here, and its fields match Go's
+//   keyShare, pskIdentity       handshake_messages.rs
+//   Config                      mod.rs
+//   dsaSignature, ecdsaSignature  absent from crypto/tls — Go uses
+//     them only to unmarshal a DSA/ECDSA signature with encoding/asn1,
+//     and goish's ecdsa verifies through ecdsa::VerifyASN1 instead.
+//
+// GOISH019 is about a type whose FIELDS differ, so it has nothing to
+// say about five types this file does not declare.
 // goishlint:ignore GOISH021 Config, defaultCipherSuitesFIPS, defaultCurvePreferences, defaultCurvePreferencesFIPS, defaultSupportedSignatureAlgorithmsFIPS, defaultSupportedVersionsFIPS, dsaSignature, ecdsaSignature, errEarlyCloseWrite, errShutdown, extensionEncryptedClientHelloOuterExtensions, keyShare, maxUselessBytes, pskIdentity, statusTypeOCSP, testingOnlyForceDowngradeCanary, testingOnlySupportedSignatureAlgorithms, tls10server, tlssha1, typeCertificate, typeCertificateRequest, typeCertificateStatus, typeCertificateVerify, typeClientHello, typeClientKeyExchange, typeEncryptedExtensions, typeEndOfEarlyData, typeFinished, typeHelloRequest, typeKeyUpdate, typeMessageHash, typeNewSessionTicket, typeServerHello, typeServerHelloDone, typeServerKeyExchange, writerMutex — same.
 
 #![allow(non_snake_case, non_upper_case_globals, dead_code)]
