@@ -1,4 +1,5 @@
 // mime/multipart/reader — Reader for parsing multipart messages.
+
 //
 // Slim port of Go 1.25 src/mime/multipart/multipart.go. Drops the
 // streaming bufio.Reader.Peek scanner in favor of a single-pass scan
@@ -38,6 +39,12 @@ use crate::types::{byte, int};
 pub struct Part {
     pub Header: Header,
     pub Body: slice<byte>,
+    /// Read cursor. Go's Part IS an io.Reader over the part's bytes
+    /// (multipart.go:196), and callers copy it straight into a file
+    /// with io.Copy. `Body` stays public because this port hands the
+    /// whole part over at once; the cursor is what makes the Go
+    /// spelling work too.
+    off: usize,
 }
 
 impl Part {
@@ -120,9 +127,37 @@ pub fn NewReader<B: Into<string>>(body: slice<byte>, boundary: B) -> Reader {
 }
 
 impl Reader {
-    /// `(*Reader).NextPart()` (multipart.go:371) — return the next
-    /// part. Returns `io::EOF` after the last part.
+    /// `(*Reader).NextPart()`, multipart.go line 371 — return the next
+    /// part. Returns `io::EOF` after the last part. Go: "As a special
+    /// case, if the Content-Transfer-Encoding header has a value of
+    /// quoted-printable, that header is instead hidden and the body is
+    /// transparently decoded during Read calls."
     pub fn NextPart(&mut self) -> (Part, error) {
+        return self.next_part(false);
+    }
+
+    // goishlint:ignore GOISH014 — this file is an UNANCHORED slim
+    // port and its other declarations carry no anchors either;
+    // anchoring these alone would make it CLAIM multipart.go, and
+    // that is all-or-nothing (all sixteen unported declarations,
+    // plus a rename). Go origin named in prose below.
+    /// multipart.go line 380. Go: "Unlike NextPart, it does not have special handling for
+    /// Content-Transfer-Encoding: quoted-printable." A caller that
+    /// wants the bytes as sent — a proxy relaying a part, a signature
+    /// check over the encoded form — needs this one.
+    pub fn NextRawPart(&mut self) -> (Part, error) {
+        return self.next_part(true);
+    }
+
+    // goishlint:ignore GOISH014 — this file is an UNANCHORED slim
+    // port and its other declarations carry no anchors either;
+    // anchoring these alone would make it CLAIM multipart.go, and
+    // that is all-or-nothing (all sixteen unported declarations,
+    // plus a rename). Go origin named in prose below.
+    /// The shared body of the two above (multipart.go line 384); Go
+    /// splits them the same way,
+    /// on a `rawPart bool`.
+    fn next_part(&mut self, raw_part: bool) -> (Part, error) {
         if self.finished {
             return (empty_part(), io::EOF.into());
         }
@@ -311,10 +346,12 @@ impl Reader {
                 // in place, so every quoted-printable upload arrived
                 // still encoded.
                 let cte = string::from("Content-Transfer-Encoding");
-                if crate::strings::EqualFold(
-                    header.Get(cte.clone()),
-                    string::from("quoted-printable"),
-                ) {
+                if !raw_part
+                    && crate::strings::EqualFold(
+                        header.Get(cte.clone()),
+                        string::from("quoted-printable"),
+                    )
+                {
                     header.Del(cte);
                     let mut src = crate::bytes::NewReader(part_body.clone());
                     let mut qr = crate::mime::quotedprintable::NewReader(&mut src);
@@ -328,6 +365,7 @@ impl Reader {
                     Part {
                         Header: header,
                         Body: part_body,
+                        off: 0,
                     },
                     errors::nil,
                 )
@@ -347,6 +385,34 @@ fn empty_part() -> Part {
     Part {
         Header: Header::new(),
         Body: slice::<byte>::__from_vec(Vec::new()),
+        off: 0,
+    }
+}
+
+// goishlint:ignore GOISH014 — this file is an UNANCHORED slim
+// port and its other declarations carry no anchors either;
+// anchoring these alone would make it CLAIM multipart.go, and
+// that is all-or-nothing (all sixteen unported declarations,
+// plus a rename). Go origin named in prose below.
+/// multipart.go line 184. Go: "Read reads the body of a part, after its headers and before
+/// the next part (if any) begins." Go's streams off the wire; this one
+/// walks the bytes the Reader already holds, which is the same
+/// contract to a caller: bytes, then io.EOF at the part's end.
+impl io::Reader for Part {
+    // goishlint:ignore GOISH014 — see the note above this impl: the
+    // file is an unanchored slim port, and anchoring one declaration
+    // would make it claim multipart.go all-or-nothing.
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        let total = self.Body.Len() as usize;
+        if self.off >= total {
+            return (0, io::EOF.into());
+        }
+        let want = core::cmp::min(p.Len() as usize, total - self.off);
+        for i in 0..want {
+            p[i] = self.Body[crate::int(self.off + i)];
+        }
+        self.off += want;
+        return (crate::int(want), errors::nil);
     }
 }
 

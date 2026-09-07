@@ -1568,6 +1568,26 @@ big restructured machinery — `conn.{serve,readRequest,close}`,
 `chunkWriter.*`, `persistConn.*` — plus the two blocked on §0 A
 (`expectContinueReader`) and the client-side upgrade surface.
 
+The same read applied to `mime/multipart` found two missing pieces of
+PUBLIC surface, both now ported and pinned by
+examples/multipart_rawpart_ref_smoke.rs: `Reader.NextRawPart`, which
+returns a part WITHOUT the quoted-printable decoding NextPart applies
+(a proxy relaying a part, or a signature over the encoded form, needs
+the bytes as sent), and `Part.Read` — Go's Part IS an io.Reader, which
+is how a handler copies an upload into a file, and goish exposed only
+a `Body` field, so that spelling did not compile.
+
+It also showed why `src/mime/multipart/reader.rs` cannot be anchored
+piecemeal, which is worth recording before someone tries again. The
+file is an unanchored slim port. Adding a `// go: sdk` anchor to the
+two new declarations made it CLAIM multipart.go, and the rule is
+all-or-nothing: GOISH018 immediately demanded an anchored counterpart
+for the sixteen declarations it does not port (the streaming scanner
+Go needs and this design replaces), and GOISH015 demanded a rename to
+multipart.rs. The anchors came back out and the Go origin of each is
+named in prose instead. Anchoring that file properly — port or waive
+all sixteen, then rename — is a unit of its own.
+
 Two of these are FIXED BUT NOT PINNED, worth stating plainly.
 Reaching either failing path needs a retry — an idle conn closed
 between the request being handed over and written — and reproducing
