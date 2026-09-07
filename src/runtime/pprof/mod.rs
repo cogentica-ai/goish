@@ -5,14 +5,17 @@
 // builtins (goroutine/heap/block/mutex writers), the protobuf
 // builder, and label machinery are pprof.go's other ~700 lines and
 // stay on the worklist below.
-// goishlint:ignore GOISH018 — per-file completeness cannot hold on a
-// package slice: the builtin-profile writers need runtime sampling
-// hooks (SIGPROF, mprof, blockprof) that do not exist yet; nothing
-// here claims them, and this header names them so the gap is a
-// ledger entry, not a silence.
-// goishlint:ignore GOISH021 — same slice reasoning for pprof.go's
-// remaining types/vars (countProfile, keysByCount, labelMap, the
-// builtin Profile vars).
+// Per-file completeness cannot hold on a package slice: the
+// builtin-profile writers need runtime sampling hooks (SIGPROF, mprof,
+// blockprof) that do not exist yet, and pprof.go's remaining
+// types and vars — countProfile, keysByCount, labelMap, the builtin
+// Profile vars — go with them. Nothing here claims any of it.
+//
+// That paragraph carried a GOISH018 and a GOISH021 marker, each naming
+// NO symbol, so neither suppressed anything. It also said the header
+// "names them so the gap is a ledger entry, not a silence" — which a
+// marker with an empty symbol list is exactly the opposite of. The
+// ledger is this prose; the markers were the silence.
 //
 // runtime/pprof — the user-registry half of Go's profiler.
 //
