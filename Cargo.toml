@@ -2104,6 +2104,10 @@ name = "os_processstate_string_ref_smoke"
 path = "examples/os_processstate_string_ref_smoke.rs"
 
 [[example]]
+name = "http_trailerprefix_ref_smoke"
+path = "examples/http_trailerprefix_ref_smoke.rs"
+
+[[example]]
 name = "flag_func_ref_smoke"
 path = "examples/flag_func_ref_smoke.rs"
 

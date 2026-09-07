@@ -1085,7 +1085,22 @@ impl response {
             // raw bytes — unparseable to any client that believed the
             // header.
             let hdr = self.header.Lock();
+            // Go's `trailers` is set by EITHER route (server.go:1331-
+            // 1344): a `Trailer` header, or any key under the
+            // `Trailer:` magic prefix — the way a handler announces a
+            // trailer whose name it does not know until after the body.
+            // goish honoured only the first, so the prefixed form got a
+            // Content-Length response and the trailer was dropped.
+            let mut prefixed = false;
+            for (k, _) in crate::range!(&*hdr) {
+                let ks: &str = k.as_ref();
+                if ks.starts_with(super::server::TrailerPrefix) {
+                    prefixed = true;
+                    break;
+                }
+            }
             let declares = hdr.Values(string("Trailer")).Len() > 0
+                || prefixed
                 || hdr.Get(string("Transfer-Encoding")).as_ref() as &str == "chunked";
             drop(hdr);
             if declares {
@@ -1753,6 +1768,15 @@ pub(crate) fn build_head(
     // server derived are excluded here and re-emitted below in
     // extraHeader order, which is what makes the wire bytes match Go.
     {
+        // Go's writeHeader also collects every `Trailer:`-prefixed key
+        // into excludeHeader here (server.go:1331-1340) — "Don't write
+        // out the fake Trailer:foo keys". goish needs no such pass:
+        // those names carry a colon, so writeSubset's
+        // ValidHeaderFieldName guard already refuses them. Measured,
+        // not assumed — with the guard as the only thing standing in
+        // the way, the head comes out byte-identical to Go's. An
+        // explicit exclusion here would be a branch no test could
+        // distinguish from its absence.
         let mut hb = crate::bytes::Buffer::new();
         let _ = header.WriteSubset(&mut hb, derived);
         buf.extend_from_slice(hb.Bytes().as_ref());

@@ -100,6 +100,7 @@ pub use server::{
     ErrContentLength, ErrHandlerTimeout, ErrHijacked, ErrServerClosed, Error, Handle, HandleFunc,
     Handler, HandlerFunc, ListenAndServe, MaxBytesHandler, NewServeMux, NotFound, NotFoundHandler,
     Redirect, RedirectHandler, Serve, ServeMux, Server, StripPrefix, TimeoutHandler,
+    TrailerPrefix,
 };
 pub use server_tls::ListenAndServeTLS;
 pub use sniff::DetectContentType;
