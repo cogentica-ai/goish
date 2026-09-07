@@ -918,6 +918,71 @@ the pattern worth carrying forward: when the REASON for a limitation
 goes stale, the limitation stops being re-examined, and it is the
 limitations that matter most that acquire the longest-lived excuses.
 
+## 2b-ix. exec.Cmd had no ProcessState — FIXED
+
+Go's `Cmd.ProcessState` (os/exec/exec.go:243) is documented as "Wait or
+Run will populate its ProcessState when the command completes", and it
+is how a caller reads the exit code, the signal, and — since
+os.Process.Wait was ported — UserTime and SystemTime. goish's Cmd has
+`Process` and no `ProcessState` at all, so none of that is reachable
+after a Run.
+
+Found by reading Go's struct next to goish's while checking the
+`Cmd.Process` citation, which pointed at Dir's doc comment.
+
+The fix was cheap only because os.Process.Wait had just landed:
+`Cmd.Wait` called `syscall::Wait4` itself with a NULL rusage, where Go
+reaps through `c.Process.Wait()` (exec.go:922). So the field could not
+have been filled usefully before — UserTime would have read zero
+however it was wired. Delegating to Process.Wait supplies the state AND
+the rusage in one move and deletes the duplicate wait path.
+
+Pinned by exec_processstate_ref_smoke, 8/8: what the field holds before
+Start (nil), after a clean exit, a non-zero exit and a signal death,
+that a SECOND Wait is refused with "exec: Wait was already called"
+while the state survives, and that a busy child out-burns a sleeper
+through Cmd — the row that could not have passed before.
+
+## 2b-viii. 200 single-line prose citations name a symbol that is not there
+
+Measured 2026-09-07 with `scripts/citation_check.py`, after teaching it
+the single-line form. The first version matched only RANGES
+(`x.go:12-20`), which saw 552 citations. Accepting `x.go:189` and
+`x.go line 189` as well brings the tree total to 1942 — most prose
+citations name one line, not a range — and 200 of those name a symbol
+in backticks that is not on the line they cite.
+
+The first one the fix found: `Cmd.Process` cited to
+os/exec/exec.go:189, which is inside `Dir`'s doc comment. The field is
+at 238, three fields further down.
+
+Classified by how far the named symbol actually is:
+
+  * **51 within ten lines** — version drift, and the cheapest to fix.
+    Go moved a line or three between the port and 1.25.5 and the
+    comment did not follow. `net.Listen` cited to dial.go:897, which is
+    `var lc ListenConfig`, one line below `func Listen`.
+  * **106 further away** — these need judgement and must NOT be
+    rewritten mechanically. A citation may legitimately point at a
+    CALL SITE or one interesting line inside a function rather than at
+    the declaration; "the symbol is not on that line" is then correct
+    and expected.
+  * **33 where the symbol is not in the cited file at all** — either
+    the wrong file, or the backticked name is goish's own rather than
+    Go's, which is the checker's main false positive.
+
+So the fixable-by-rule population is 51, not 200, and a sample of six
+suggested otherwise: every one of the six happened to be drift, because
+drift is what a small sample of a sorted list surfaces first. The
+histogram is what settled it — measure the distribution, not the head
+of the list.
+
+Not started. §2b-vii's lesson applies to the fix as much as the
+detector: the transformation is self-checking here (re-run the script
+and the count must fall), which makes it safer than most, but a
+mechanical rewrite of the 106 would silently destroy correct call-site
+citations.
+
 ## 2b-vii. 22 smokes whose assertions cannot fail the process — FIXED
 
 Measured and fixed 2026-09-07. e2e gates on the exit status of 848

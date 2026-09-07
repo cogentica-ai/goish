@@ -824,8 +824,8 @@ impl<T> chan<T> {
     /// released only inside `chan_park_commit` — which `gopark`
     /// schedules to run on the scheduler's stack *after*
     /// `swap_context` has committed the parker's gobuf. This mirrors
-    /// Go's chanparkcommit pattern (chan.go:748-766; see invariant
-    /// comment at chan.go:759-763). A waker on a different M cannot
+    /// Go's chanparkcommit pattern (runtime/chan.go:748-766; see invariant
+    /// comment at runtime/chan.go:759-763). A waker on a different M cannot
     /// observe our sudog without holding the chan lock, so by the
     /// time it can `goready` us our gobuf is already a valid
     /// suspended snapshot.

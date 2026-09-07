@@ -27,8 +27,17 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from port_coverage import RELOCATED  # noqa: E402  (one table, not two)
+
 GOSRC = os.environ.get("GOROOT_SRC", "/usr/local/go/src")
-CITE = re.compile(r'([a-z0-9_][a-z0-9_/]*\.go)(?::|\s+lines?\s+)(\d+)-(\d+)')
+# A citation is a range (`x.go:12-20`, `x.go lines 12-20`) OR a single
+# line (`x.go:189`, `x.go line 189`). The single-line form was missed by
+# the first version of this script, and the first thing the fix found
+# was `Cmd.Process` cited to exec.go:189 — a line inside Dir's doc
+# comment, three fields above the real one.
+CITE = re.compile(
+    r'([a-z0-9_][a-z0-9_/]*\.go)(?::|\s+lines?\s+|\s+line\s+)(\d+)(?:-(\d+))?')
 TICK = re.compile(r'`([A-Za-z_][A-Za-z0-9_.]*)`')
 _lines = {}
 
@@ -39,20 +48,63 @@ def golines(path):
     return _lines[path]
 
 
+_suffix = None
+
+
+def _index():
+    """Every .go under GOROOT/src, indexed by path suffix. A citation
+    names a file the way a reader would — `jsonwire/decode.go`,
+    `builder.go` — not by import path, so the resolver has to search."""
+    global _suffix
+    if _suffix is not None:
+        return _suffix
+    _suffix = {}
+    for dirpath, _, files in os.walk(GOSRC):
+        for f in files:
+            if not f.endswith(".go"):
+                continue
+            full = os.path.join(dirpath, f)
+            rel = os.path.relpath(full, GOSRC)
+            parts = rel.split(os.sep)
+            for i in range(len(parts)):
+                _suffix.setdefault("/".join(parts[i:]), []).append(full)
+    return _suffix
+
+
 def resolve(g, rspath):
-    """A citation may name a full import path or a bare file in the
-    same package as the .rs."""
+    """A citation may name an import path, a path fragment, or a bare
+    file in the .rs's own package. Returns (path, note) where a note
+    explains an unresolved or ambiguous result."""
+    g = g[4:] if g.startswith("src/") else g   # some cite `src/time/format.go`
     p = os.path.join(GOSRC, g)
     if os.path.exists(p):
-        return p
-    if "/" in g:
-        return None
+        return p, None
     d = os.path.dirname(rspath)
     d = d[4:] if d.startswith("src/") else d
-    for cand in (os.path.join(GOSRC, d, g), os.path.join(GOSRC, os.path.dirname(d), g)):
-        if os.path.exists(cand):
-            return cand
-    return None
+    if "/" not in g:
+        for cand in (os.path.join(GOSRC, d, g),
+                     os.path.join(GOSRC, os.path.dirname(d), g)):
+            if os.path.exists(cand):
+                return cand, None
+    hits = _index().get(g, [])
+    if len(hits) == 1:
+        return hits[0], None
+    if len(hits) > 1:
+        # prefer a hit in, or nearest to, the .rs's own package
+        near = [h for h in hits if os.path.relpath(h, GOSRC).startswith(d + "/")]
+        if len(near) == 1:
+            return near[0], None
+        # port_coverage's RELOCATED maps a Go package that goish files
+        # elsewhere (vendored x/crypto, mostly) onto the goish path.
+        # Reusing it rather than keeping a second copy: two tables of
+        # the same facts drift, and this one is already maintained.
+        for gopkg, goishpkg in RELOCATED.items():
+            if d == goishpkg or d.startswith(goishpkg + "/"):
+                cand = os.path.join(GOSRC, gopkg, os.path.basename(g))
+                if os.path.exists(cand):
+                    return cand, None
+        return None, "ambiguous: %d files match" % len(hits)
+    return None, "no such Go file"
 
 
 def blocks(path):
@@ -86,11 +138,12 @@ def main(argv):
                         continue
                     text = " ".join(l.strip().lstrip("/").strip() for l in blk)
                     for m in CITE.finditer(text):
-                        g, a, b = m.group(1), int(m.group(2)), int(m.group(3))
+                        g, a = m.group(1), int(m.group(2))
+                        b = int(m.group(3)) if m.group(3) else a
                         total += 1
-                        p = resolve(g, rs)
+                        p, note = resolve(g, rs)
                         if p is None:
-                            unresolved.append((rs, start, g, a, b, "no such Go file"))
+                            unresolved.append((rs, start, g, a, b, note))
                             continue
                         L = golines(p)
                         if a < 1 or a > b or b > len(L):

@@ -1185,9 +1185,6 @@ fn listen_with_config(
     )
 }
 
-/// `net.Dial` — connect to a TCP peer. `network` must be `"tcp"` or
-/// `"tcp4"`. `addr` is `"host:port"` with `host` an IPv4 literal
-/// (DNS resolution is not implemented in v1).
 /// Go-parity TCP connection defaults, applied to every dialed and
 /// accepted conn:
 ///
