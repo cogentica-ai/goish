@@ -1176,12 +1176,33 @@ that lets Go's `crypto/rsa` find goish's `crypto/rsa.rs`. Go has both
 by case against `setGCPercent`. `runtime` reads 36/2800 with eight of
 those 36 borrowed from a file that is already fully counted next door.
 
-The fix is not obvious and should not be rushed: excluding a
-file-as-package from its parent would change every package's numbers,
-and the `crypto/rsa.rs` case it exists for has the same shape. What is
-certain is the direction — the current numbers are inflated, not
-deflated, and only where a goish file's directory is itself a Go
-package.
+**Scope measured 2026-09-07, and it is narrow.** The first version of
+this entry said a fix "would change every package's numbers". That was
+pessimism, not measurement. The double count needs a goish file
+`X/Y.rs` exposed as package `X/Y` where `X` is ALSO a Go package, and
+there are exactly three in the tree:
+
+    runtime/debug     (parent runtime is a Go package too)
+    runtime/trace     (parent runtime is a Go package too)
+    testing/iotest    (parent testing is a Go package too)
+
+`crypto/rsa.rs`, the case the file-as-package rule exists for, is not
+one: goish keeps `crypto/rsa` as a DIRECTORY, so no file-form entry is
+created. And of the three, only `runtime/debug` actually inflates
+anything, because the double count bites only where a name coincides
+between the parent and sub packages — `SetGCPercent` against runtime's
+`setGCPercent`. `testing/iotest`'s `OneByteReader` has no counterpart
+in Go's `testing`, so it costs nothing.
+
+So the damage is eight declarations in one package. What makes the fix
+non-trivial is not breadth but placement: `scan_rs` is where a file is
+attributed and it knows nothing about Go packages, while `build` knows
+`gp` but sees merged fact sets rather than per-file ones. Excluding all
+non-`mod` files from their directory's package would be wrong in the
+common case — `net/http/client.rs` must count toward `net/http`,
+because `net/http/client` is not a Go package. The condition has to be
+"the file-as-package is itself in `gp`", which means threading that set
+into the scan or keeping per-file facts to subtract afterwards.
 
 The other six are `syscall: execve, exitThread, fcntl, fork, ioctl,
 utimensat`. Go keeps those unexported and offers a different public
