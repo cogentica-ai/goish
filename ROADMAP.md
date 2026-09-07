@@ -1142,6 +1142,54 @@ package is a hand-written v1 FlagSet, and Go's `Var`/`Value` surface —
 and the ten other `XVar` binders — waits on the interface work, not on
 a decision. Waiving those would launder a real gap into 100%.
 
+## 2b-iv. One goish function credited to two Go declarations
+
+Found 2026-09-07 while auditing the 231 case-only credits — the names
+port_coverage counts because they differ from Go's only in case, with
+no anchor behind them. The file's own note says they are "mostly Go's
+own exported-wraps-unexported pair (`Acos`/`acos`), where the body is
+here under the exported name. Not all: `bufio.Reader.reset` had no
+counterpart at all."
+
+Testing that: for each credit, does the Go package declare ANY name
+equal to it ignoring case? A pair like `Bind`/`bind` or `Flush`/`flush`
+does; a credit with no sibling at all is goish's exported `Foo`
+answering for a Go `foo` that has no `Foo`. **14 of the 231.**
+
+Two false starts are worth recording, because the naive version of this
+check is wrong in both directions. Capitalising only the first letter
+misses Go's actual spelling (`uint32n` pairs with `Uint32N`, not
+`Uint32n`), and a regex for `var X` misses a name declared inside a
+`var ( … )` block, which is where `os.ErrDeadlineExceeded` lives. Both
+looked like findings until they were opened.
+
+**Eight of the fourteen are a double count.** `runtime: readGCStats`,
+`setGCPercent`, `setMaxStack`, `setMaxThreads`, `setMemoryLimit`,
+`setPanicOnFault`, `setTraceback`, `start`. Go declares those in
+package `runtime` as the linknamed implementations that
+`runtime/debug`'s exported functions call. goish has them once, in
+`src/runtime/debug.rs`, and `scan_rs` exposes a non-`mod` file BOTH as
+part of its directory's package and as a package of its own — the rule
+that lets Go's `crypto/rsa` find goish's `crypto/rsa.rs`. Go has both
+`runtime` and `runtime/debug`, so the same file answers to both:
+`SetGCPercent` is counted in `runtime/debug` by name AND in `runtime`
+by case against `setGCPercent`. `runtime` reads 36/2800 with eight of
+those 36 borrowed from a file that is already fully counted next door.
+
+The fix is not obvious and should not be rushed: excluding a
+file-as-package from its parent would change every package's numbers,
+and the `crypto/rsa.rs` case it exists for has the same shape. What is
+certain is the direction — the current numbers are inflated, not
+deflated, and only where a goish file's directory is itself a Go
+package.
+
+The other six are `syscall: execve, exitThread, fcntl, fork, ioctl,
+utimensat`. Go keeps those unexported and offers a different public
+surface; goish exports `Execve`, `Fcntl`, `Fork`, `Ioctl`,
+`Utimensat` directly, which is the whole point of a raw-syscall
+runtime. Crediting them is defensible and they are single-counted. They
+are listed here so the next audit does not re-open them.
+
 ## 2c. `regexp` does not keep Go's linear-time guarantee
 
 Go's regexp documents that it "is guaranteed to run in time linear in
