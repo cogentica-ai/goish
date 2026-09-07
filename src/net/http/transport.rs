@@ -97,8 +97,23 @@ pub fn canonicalAddr(url: &URL) -> string {
 // goish's Request carries no Cancel channel by design (see
 // setRequestCancel) and context.CancelCause is unported; the direct
 // CancelRequest path (cancelRequest) IS ported.
+// go: waived Transport.prepareTransportCancel — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 // go: waived awaitLegacyCancel — the goroutine that watches the
 // deprecated Request.Cancel channel; same absent-by-design field.
+// go: waived Transport.CancelRequest — reads the reqCanceler map
+// waived just above as absent by design. Go deprecates it for
+// Request.WithContext and says it "may become a no-op in a future
+// release"; goish's cancellation IS the context path
+// (setRequestCancel + ctx_err_or), which is what Go points callers at.
+// go: waived Transport.protocols — computes the HTTP1/HTTP2 set from
+// `Transport.Protocols`, `TLSNextProto` and `ForceAttemptHTTP2`.
+// goish's Transport has no Protocols or TLSNextProto field: this
+// client speaks HTTP/1.x only, and a field whose answer could never be
+// anything but HTTP1 would be one more option accepted and ignored.
+// go: waived Transport.onceSetNextProtoDefaults — the HTTP/2 bootstrap
+// (bundled h2 vs x/net/http2, GODEBUG http2client), all of it about a
+// protocol this transport does not speak.
 
 // go: sdk 1.25.5 net/http/transport.go:514-524 transportRequest
 /// Go: "transportRequest is a wrapper around a *Request that adds
@@ -2352,10 +2367,15 @@ impl Transport {
     /// Go: "Clone returns a deep copy of t's exported fields."
     ///
     /// PARTIAL, and the omissions are Go fields goish's Transport does
-    /// not have — OnProxyConnectResponse, Dial/DialTLS(Context),
-    /// ResponseHeaderTimeout, ProxyConnectHeader,
-    /// GetProxyConnectHeader, ForceAttemptHTTP2, HTTP2, Protocols,
+    /// not have — OnProxyConnectResponse, ResponseHeaderTimeout,
+    /// ProxyConnectHeader, GetProxyConnectHeader, HTTP2, Protocols,
     /// TLSNextProto. Every field that DOES exist is copied.
+    ///
+    /// That last sentence was false for four of them. This list used
+    /// to name Dial, DialTLS, DialTLSContext and ForceAttemptHTTP2 as
+    /// absent; all four are declared, the three dial hooks are read at
+    /// the dial site, and none was copied. The doc is what kept it
+    /// hidden: it explained the omission instead of describing it.
     ///
     /// Deep in the sense that matters: the clone gets a FRESH idle
     /// pool and its own registered-protocol map, so a mutation on one
@@ -2376,6 +2396,16 @@ impl Transport {
         t2.WriteBufferSize = self.WriteBufferSize;
         t2.ReadBufferSize = self.ReadBufferSize;
         t2.Timeout = self.Timeout;
+        // The dial hooks. These were MISSED, and the doc above said
+        // they did not exist — so a Transport configured to reach the
+        // network a particular way (a custom Dial, a custom TLS dial)
+        // handed its clone none of it, and the clone dialled straight
+        // out. Go's Clone copies every exported field for exactly this
+        // reason.
+        t2.Dial = self.Dial.clone();
+        t2.DialTLS = self.DialTLS.clone();
+        t2.DialTLSContext = self.DialTLSContext.clone();
+        t2.ForceAttemptHTTP2 = self.ForceAttemptHTTP2;
         // Go: `t2.TLSClientConfig = t.TLSClientConfig.Clone()`.
         t2.TLSClientConfig = cloneTLSConfig(&self.TLSClientConfig);
         // Go clones TLSNextProto with maps.Clone. The goish analogue is
@@ -2421,10 +2451,14 @@ impl Transport {
     }
 }
 
-// go: none — goish-only: the body of removeIdleConnLocked, taking the
-// already-locked pool so tryPutIdleConn can call it without
-// re-entering a non-reentrant Mutex. Go relies on `idleMu` already
-// being held by the caller, which the `Locked` suffix announces.
+// go: sdk 1.25.5 net/http/transport.go:1242-1272 Transport.removeIdleConnLocked
+// Go's method, not goish-only — the label said `go: none` and hid a
+// real port from every tier that checks one. It takes the already
+// locked pool rather than a receiver, so tryPutIdleConn can call it
+// without re-entering a non-reentrant Mutex; Go relies on `idleMu`
+// already being held by the caller, which the `Locked` suffix
+// announces. Go's first act is `pconn.idleTimer.Stop()`, absent here
+// because this persistConn carries no idleTimer (see its struct).
 fn removeIdleConnLocked(pool: &mut idlePool, pconn: &Arc<persistConn>) -> bool {
     pool.idleLRU.remove(pconn);
     let key = pconn.cacheKey.String();

@@ -1290,7 +1290,7 @@ should go, some should lose the marker and keep the prose as a plain
 comment. What must not happen is a bulk delete that takes the reasons
 with it.
 
-## 2b-vi. net/http's 100% is a by-name figure; 50 declarations have no anchor
+## 2b-vi. net/http's 100% is a by-name figure; 37 declarations have no anchor
 
 Found 2026-09-07 while closing `net/http/cgi`'s last waiver, by running
 the package in both coverage modes instead of one.
@@ -1408,6 +1408,63 @@ not there. Fixed, and pinned by http_mux_allow_ref_smoke — five lines
 including the guard that matters: when the METHOD matches, the path
 must still REDIRECT (`GET /z` against a registered `GET /z/` is a 301),
 so the second match must not swallow the redirect path.
+
+`Transport.Clone` was the eighth and the worst, because it was silent.
+Go's Clone copies EVERY exported field; goish copied fifteen and
+dropped four — `Dial`, `DialTLS`, `DialTLSContext`,
+`ForceAttemptHTTP2`. The three dial hooks are read at the dial site, so
+a Transport configured to reach the network a particular way handed
+its clone none of it and the clone dialled straight out. Clone's own
+doc listed those four among "Go fields goish's Transport does not
+have" — it EXPLAINED the omission instead of describing it, which is
+why nothing questioned it. Pinned by http_transport_clone_ref_smoke,
+and the smoke was checked to FAIL without the fix (`used=false`), which
+matters here more than usual: the request still returns 200 either
+way, so nothing but the assertion can see the bypass.
+
+`removeIdleConnLocked` was the ninth and was not a defect at all: a
+faithful port of Go's method carrying `// go: none — goish-only`. A
+wrong label hides a real port from every tier that checks one. It is
+anchored now (transport.go:1242-1272), which is also why the count
+moved without any behaviour changing.
+
+Four more were READ and are NOT defects, which is worth recording so
+they are not re-opened: `response.WriteString` has no behavioural
+effect here, because goish's `io::WriteString` has no StringWriter
+fast path to assert on and always calls Write — the two are
+consistent, and the gap is source compatibility only.
+`checkConnErrorWriter.Write` cancels the request context on a write
+failure in Go; goish reaches the same place from the other side, since
+its netpoller disconnect watch (startBackgroundRead/abortPendingRead)
+is wired to the request cancel, so a client that goes away cancels
+either way. What is not separately wired is the write error itself.
+`Transport.{protocols,onceSetNextProtoDefaults}` need HTTP/2 and a
+`Transport.Protocols` field goish deliberately does not have, and
+`Transport.CancelRequest` indexes the `reqCanceler` map already waived
+above as absent by design — Go deprecates it for Request.WithContext
+and says it may become a no-op.
+
+A correction to this section's own premise, found by reading it out.
+Not all 50 were unexamined: TEN waivers in the tree name a Go METHOD
+by its bare name, and a waiver matches EXACTLY, so `--by-decl` — which
+keys a method `Recv.Method` — never applied them. Eight are in
+net/http (`conn.finalFlush`, `conn.maybeServeUnencryptedHTTP2`,
+`bodyEOFSignal.condfn`, `body.readLocked`,
+`body.unreadDataSizeLocked`, `Transport.prepareTransportCancel`, and
+the two h2 accessors), one in strings (`Builder.copyCheck`), one in
+compress/flate (`decompressor.makeReader`). They were reasoned about
+and deliberately waived; the count simply could not see it. Both
+spellings are carried now, the same fix cgi's `neverEnding.Read`
+needed. net/http root drops 45 to 37 without a line of behaviour
+changing, and crypto is untouched (1720/1720, so provenance's
+denominator floor is safe).
+
+Worth noting what did NOT come out of that scan: `slices`'s
+`rotateLeft`/`rotateRight` look method-only to a naive `^func name(`
+grep and are not — they are GENERIC free functions,
+`func rotateLeft[E any](...)`, so those waivers were right as written.
+A pattern that cannot see generics would have "fixed" two correct
+waivers into wrong ones.
 
 Two of these are FIXED BUT NOT PINNED, worth stating plainly.
 Reaching either failing path needs a retry — an idle conn closed

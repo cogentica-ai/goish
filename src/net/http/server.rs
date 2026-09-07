@@ -1546,16 +1546,25 @@ pub(crate) struct readResult {
 // HTTP/2 conn-wrapper request types (unencryptedHTTP2Request,
 // initALPNRequest); the receivers cannot exist without the HTTP/2
 // stack the h2c waivers below describe.
+// go: waived unencryptedHTTP2Request.BaseContext — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
+
+// go: waived initALPNRequest.BaseContext — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 // go: waived maybeServeUnencryptedHTTP2 — routes a conn whose first
 // bytes are the h2 preface into the HTTP/2 server; goish has no
 // HTTP/2 stack (the omithttp2 stubs), so there is no serving path for
 // the detection to hand the conn to. Lands with an h2 port, not
 // before.
+// go: waived conn.maybeServeUnencryptedHTTP2 — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 // go: waived unencryptedTLSConn — the tls.Conn wrapper the h2c path
 // fabricates so http2.ServeConn sees a *tls.Conn; same no-HTTP/2
 // blocker as maybeServeUnencryptedHTTP2.
 // go: waived UnencryptedNetConn — the accessor tests use to unwrap
 // the fabricated conn above; carried by the same waiver.
+// go: waived unencryptedNetConnInTLSConn.UnencryptedNetConn — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 
 // go: sdk 1.25.5 net/http/server.go:834-834 copyBufPool
 //
@@ -1763,6 +1772,8 @@ pub trait closeWriter {
 // the pooled request reader is already returned per request inside the
 // serve loop — the function's entire job is done elsewhere by
 // construction, and a ported body would be empty.
+// go: waived conn.finalFlush — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 
 // go: sdk 1.25.5 net/http/server.go:1820-1847 conn.closeWriteAndWait
 //

@@ -1116,6 +1116,8 @@ fn copy_into(dst: &mut slice<byte>, src: &slice<byte>) -> int {
 // goishlint:ignore GOISH018 makeReader — see the waiver above.
 
 // ─── constructors ─────────────────────────────────────
+// go: waived decompressor.makeReader — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 
 // go: none — goish idiom: the shared body of `NewReader`/`NewReaderDict`.
 fn new_decompressor<R: io::Reader + io::ByteReader>(r: R, dict: &[byte]) -> Decompressor<R> {

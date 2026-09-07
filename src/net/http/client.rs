@@ -445,6 +445,8 @@ fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
 // + clear); goish integrates the signal into BodyState, where
 // `reuse_fn` is an FnOnce TAKEN by close_locked below — the once-ness
 // is the type system's, with nothing left to guard.
+// go: waived bodyEOFSignal.condfn — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 fn close_locked(st: &mut BodyState) -> error {
     // Go, readTrackingBody.Close: `r.didClose = true` before
     // delegating. rewindBody treats a closed body as needing a rewind

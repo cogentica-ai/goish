@@ -906,10 +906,14 @@ impl transferWriter {
 // is this function (framing-dispatched read while the lock is held,
 // EOF bookkeeping included). A second copy here would be the
 // two-implementations drift this codebase keeps getting bitten by.
+// go: waived body.readLocked — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 // go: waived unreadDataSizeLocked — "number of bytes of unread
 // input"; goish's Cl framing carries it as `remaining`, consulted by
 // close_locked's clean-boundary test (the bodyEOFSignal bank gate) —
 // the same consumer Go wires it to.
+// go: waived body.unreadDataSizeLocked — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 // go: waived unwrapNopCloser — reflect.TypeOf against the two
 // io.NopCloser shapes; goish's Body is a closed enum that carries no
 // nopCloser wrapping to detect, so unwrapBody above is already the

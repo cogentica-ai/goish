@@ -854,6 +854,8 @@ pub fn EqualFold<S1: Into<string>, S2: Into<string>>(s: S1, t: S2) -> bool {
 //     is no aliasing bug to detect and no self pointer to compare.
 //
 // ─── M15: completeness pass ───────────────────────────────────────────
+// go: waived Builder.copyCheck — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 
 // go: sdk 1.25.5 strings/strings.go:1285-1287 Cut
 /// `strings.Cut(s, sep)` — split on first `sep`. Returns
