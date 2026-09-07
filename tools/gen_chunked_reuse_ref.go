@@ -49,4 +49,36 @@ func TestGoishRef(t *testing.T) {
 		}
 	}
 	fmt.Printf("three chunked requests opened %d connection(s)\n", atomic.LoadInt32(&conns))
+
+	// The same thing with a REAL trailer section. This is the case
+	// that decides whether consuming trailers is done right: if the
+	// trailer lines are left on the wire, the next response on that
+	// connection starts mid-trailer and parses as garbage.
+	var tconns int32
+	tsrv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Trailer", "X-Checksum")
+		w.Write([]byte("with-trailer"))
+		w.(http.Flusher).Flush()
+		w.Header().Set("X-Checksum", "abc123")
+	}))
+	tsrv.Config.ConnState = func(c net.Conn, s http.ConnState) {
+		if s == http.StateNew {
+			atomic.AddInt32(&tconns, 1)
+		}
+	}
+	tsrv.Start()
+	defer tsrv.Close()
+
+	tc := tsrv.Client()
+	for i := 0; i < 3; i++ {
+		resp, err := tc.Get(tsrv.URL)
+		if err != nil {
+			fmt.Printf("trailer get %d err=%v\n", i, err)
+			return
+		}
+		b, rerr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		fmt.Printf("trailer req %d body=%q err=%v\n", i, string(b), rerr)
+	}
+	fmt.Printf("three trailered requests opened %d connection(s)\n", atomic.LoadInt32(&tconns))
 }

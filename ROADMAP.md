@@ -2335,15 +2335,30 @@ not "goish forgot to reuse a connection". It is: the client half of
 readTransfer's trailer read is unported, and connection reuse for
 chunked is one of the things blocked behind it.
 
-Recorded rather than fixed, and the near miss is the reason it is
-written up this way. The obvious change — let the bank-back accept a
-Chunked framing — makes the smoke go green (three requests, one
-connection) while quietly introducing the desync. It was written,
-measured, and reverted. The order to do this in is trailers first:
-give the body a place to put them (Go's `body` holds the Response;
-goish's Body has no back-reference, so it needs one — an
-`Arc<Mutex<Header>>` shared with resp.Trailer is the obvious shape),
-read them on EOF, and only then is the conn clean enough to bank.
+FIXED in that order — trailers first. The chunked arm of the body
+read now calls `readTrailer` when the reader hits its terminator, and
+only a CLEAN trailer read marks the body drained; a malformed one
+leaves the stream anywhere, so the conn dies instead. Close banks the
+conn only when it is drained AND nothing is buffered ahead of it,
+since goish cannot push read-ahead bytes back. Three chunked requests
+now open one connection, matching Go, and so do three requests whose
+responses carry a real trailer section — that second case is the one
+that decides it, because a leftover trailer line makes the NEXT
+response on the conn parse as garbage.
+`examples/http_chunked_reuse_ref_smoke.rs` pins both, and was checked
+to fail without the fix.
+
+The near miss is worth keeping. The obvious change — let the bank-back
+accept a Chunked framing — makes the connection count go green while
+quietly introducing the desync, because nothing in the count can see a
+trailer left on the wire. It was written, measured and reverted before
+the real cause turned up.
+
+STILL OPEN, and unchanged by this: `resp.Trailer` is never populated.
+The trailers are consumed and dropped, because goish's Header wraps a
+value-typed map, so a Body cannot write into the Response's copy the
+way Go's `body` does through its reference-typed Header. Exposing them
+is a Response-shaped change.
 
 ## 2m. RSA's drbg shims predate the drbg package they stand in for
 

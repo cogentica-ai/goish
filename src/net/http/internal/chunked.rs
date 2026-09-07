@@ -137,6 +137,21 @@ impl<R: Reader> ChunkedReader<R> {
         return &mut self.r;
     }
 
+    // go: none — goish-only: hand back the source this reader was
+    // built over, so a fully-consumed chunked body can return its
+    // connection to the idle pool. `Buffered()` is what says that is
+    // safe: anything still in the buffer belongs to whatever comes
+    // next on that connection.
+    pub(crate) fn __buffered(&self) -> crate::types::int {
+        return self.r.Buffered();
+    }
+
+    // go: none — goish-only: the move half of the pair above. Sound
+    // only when `__buffered()` is zero, which the caller checks.
+    pub(crate) fn __into_src(self) -> R {
+        return self.r.__into_rd();
+    }
+
     // go: sdk 1.25.5 net/http/internal/chunked.go:46-86 chunkedReader.beginChunk
     /// Line-by-line port of `(*chunkedReader).beginChunk`
     /// (chunked.go:46).

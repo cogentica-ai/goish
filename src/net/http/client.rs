@@ -324,6 +324,14 @@ struct BodyState {
     /// stops the timer when the body is closed, not when Do returns
     /// (the deadline covers body reads).
     cancel: Option<crate::context::CancelFunc>,
+    /// The chunked body reached its terminator AND its trailer section
+    /// was consumed, so the connection is synchronised at the start of
+    /// whatever comes next. Go proves the same thing with
+    /// `bodyEOFSignal.rerr == io.EOF` because its `body.Read` reads
+    /// the trailer before returning that EOF (transfer.go). goish's
+    /// chunked reader stops at the terminator, so the trailer read is
+    /// separate and this is what records it.
+    chunk_drained: bool,
     /// Go's `readTrackingBody.didRead` / `.didClose` (transport.go:
     /// 753-757), which is what `rewindBody` consults to decide whether
     /// a retry needs the body rebuilt. Tracked here rather than in a
@@ -399,7 +407,33 @@ fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
                 }
             }
         }
-        FramedBody::Chunked { cr } => cr.Read(p),
+        FramedBody::Chunked { cr } => {
+            let (n, e) = cr.Read(p);
+            // Go's transfer.go body.Read calls readTrailer when the
+            // chunked reader hits EOF, and only then reports EOF to
+            // the caller — which is why Go can treat that EOF as
+            // "connection is clean". goish's chunked reader stops at
+            // the terminating chunk, leaving the trailer section (at
+            // minimum a bare CRLF) unread on the wire. Reading it here
+            // is what makes the conn reusable at Close.
+            //
+            // The trailers are consumed and DROPPED. Populating
+            // `resp.Trailer` needs somewhere to put them: goish's
+            // Header wraps a value-typed map, so a Body cannot write
+            // into the Response's copy, and Go's `body` holds the
+            // Response only because its Header is a reference. That is
+            // a Response-shaped change, left in ROADMAP §2n.
+            if !e.IsNil() && errors::Is(e.clone(), io::EOF) {
+                let mut scratch = super::header::Header::new();
+                let terr = super::transfer::readTrailer(cr.__bufio_mut(), &mut scratch);
+                // Only a CLEAN trailer read leaves the stream at a
+                // message boundary. A malformed one leaves it
+                // anywhere, and the conn must die rather than be
+                // handed to the next request mid-stream.
+                st.chunk_drained = terr.IsNil();
+            }
+            (n, e)
+        }
         FramedBody::UntilEof { src } => src.Read(p),
         FramedBody::Upgraded { src } => src.Read(p),
         FramedBody::Piped { r } => r.Read(p),
@@ -501,6 +535,29 @@ fn close_locked(st: &mut BodyState) -> error {
                 return errors::nil;
             }
         }
+        // A chunked body is reusable on the same terms: the terminator
+        // AND the trailer section are behind us. `__buffered` is the
+        // second half of that — read-ahead bytes belong to whatever
+        // comes next on this conn, and goish cannot push them back, so
+        // a conn holding any is closed rather than handed on. In
+        // practice the server has sent nothing more, so the buffer is
+        // empty and the conn is banked.
+        if st.chunk_drained {
+            if let FramedBody::Chunked { cr } =
+                core::mem::replace(&mut st.framing, FramedBody::Closed)
+            {
+                if cr.__buffered() == 0 {
+                    bank(Some(cr.__into_src()));
+                    if let Some(c) = st.cancel.take() {
+                        c();
+                    }
+                    return errors::nil;
+                }
+                // Put nothing back: the framing is already Closed and
+                // the reader is dropped here, closing the conn with it.
+                st.reuse_fn = None;
+            }
+        }
         // Dirty close: the conn is unusable — close it below and tell
         // the bank so (Go's earlyCloseFn / waitForBodyRead false).
         st.reuse_fn = Some(bank);
@@ -570,6 +627,7 @@ impl Body {
                 ctx,
                 watch,
                 cancel: None,
+                chunk_drained: false,
                 did_read: false,
                 did_close: false,
                 did_timeout: None,
@@ -1868,12 +1926,18 @@ impl RoundTripper for Transport {
                 }
 
                 // Go's bodyEOFSignal bank-back: reusable when the
-                // server didn't ask to close and the framing has a
-                // clean end (Empty now, Content-Length at body Close).
+                // server didn't ask to close and the body reached its
+                // end. Chunked joins Empty and Content-Length now that
+                // the trailer section is consumed on EOF — Go decides
+                // on `rerr == io.EOF`, never on the framing. UntilEof
+                // stays out: there the conn ending IS the framing.
                 let bank: Option<alloc::boxed::Box<dyn FnOnce(Option<ConnSrc>) + Send>> = if !self
                     .DisableKeepAlives
                     && !resp.Close
-                    && matches!(kind, BodyKind::Empty | BodyKind::Cl(_))
+                    && matches!(
+                        kind,
+                        BodyKind::Empty | BodyKind::Cl(_) | BodyKind::Chunked
+                    )
                 {
                     let idle = self.__idle.clone();
                     let cfg = self.__bank_cfg();
@@ -2013,6 +2077,12 @@ fn attach_stream_body(
                 ctx,
                 watch,
             );
+            // The Content-Length arm has always done this; the chunked
+            // arm did not, so even a fully-drained chunked body had no
+            // bank-back to run and its conn was dropped.
+            if let Some(b) = bank {
+                resp.Body.__set_reuse(b);
+            }
         }
         BodyKind::UntilEof => {
             resp.Body = Body::from_parts(FramedBody::UntilEof { src }, ctx, watch);

@@ -131,6 +131,16 @@ impl<R: io::Reader> Reader<R> {
     pub(crate) fn __rd_mut(&mut self) -> &mut R {
         return &mut self.rd;
     }
+
+    // go: none — goish-only: Go's callers hold the underlying reader
+    // themselves and let the *bufio.Reader go; goish's wrappers OWN
+    // theirs, so recovering it needs an explicit move. Only sound when
+    // `Buffered() == 0`: read-ahead bytes live in this buffer, not in
+    // the reader, and dropping them would silently truncate whatever
+    // reads next. Callers check.
+    pub(crate) fn __into_rd(self) -> R {
+        return self.rd;
+    }
 }
 
 // go: sdk 1.25.5 bufio/bufio.go:50-59 NewReaderSize
