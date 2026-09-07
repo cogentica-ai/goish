@@ -22,7 +22,12 @@ pub mod httputil;
 pub mod persist;
 pub mod reverseproxy;
 
-pub use dump::{dumpConn, outgoingLength, valueOrDefault, DumpRequest, DumpResponse};
+// DumpRequestOut is exported here because Go exports it. It was
+// reachable only as `httputil::dump::DumpRequestOut` before, which is
+// not the name Go users write.
+pub use dump::{
+    dumpConn, outgoingLength, valueOrDefault, DumpRequest, DumpRequestOut, DumpResponse,
+};
 pub use httputil::{ErrLineTooLong, NewChunkedReader, NewChunkedWriter};
 pub(crate) use reverseproxy::register_httputil_impls;
 pub use reverseproxy::{

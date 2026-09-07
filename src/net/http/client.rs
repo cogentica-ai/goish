@@ -47,7 +47,12 @@
 //     `resp.Body.Close()` exactly like Go. (The public
 //     `ReadResponse` helper still returns a pre-drained Body — its
 //     borrowed-reader signature can't carry ownership.)
-//   * No automatic decompression (no `Accept-Encoding: gzip`).
+//   * Transparent gzip IS done: the transport asks for it
+//     (`Accept-Encoding: gzip`, unless the caller set the header, a
+//     Range is asked for, or the method is HEAD) and decodes the
+//     answer, setting `Uncompressed`. `DisableCompression` turns it
+//     off. This line used to claim the opposite, and dump.rs believed
+//     it — see examples/http_dumpout_ref_smoke.rs.
 
 #![allow(non_snake_case)]
 #![allow(dead_code)]

@@ -853,7 +853,7 @@ The irony is worth keeping: `asm_decls`'s own docstring says it exists
 because the raw gap column "has produced a wrong leverage claim three
 times in this repo", and it contained a fourth.
 
-## net/http — 639 / 639 by name, 724 / 775 by declaration (93.4%)
+## net/http — 639 / 639 by name, 724 / 774 by declaration (93.5%)
 
 **All twelve packages are at 100.0% by name**, with 1534 `// go:` lines
 (the root package alone carries 1107; both were 1476 and 1085 on
@@ -866,8 +866,8 @@ sentinel-mapped retries, Expect: 100-continue), and the server runs
 `connReader` with Go's total-head byte limit (431/501 paths included).
 
 But read the by-name figure as the coarse one it is. `--by-decl` puts
-the same tree at **724/775 (93.4%)** — root 536/586, `httputil` 55/56 —
-and **none of the 51 short carries an anchor anywhere in its package**.
+the same tree at **724/774 (93.5%)** — root 536/586, `httputil` 55/55 —
+and **none of the 50 short carries an anchor anywhere in its package**.
 They are the connection and body plumbing: `conn.serve`,
 `conn.readRequest`, `chunkWriter.Write`, `persistConn.roundTrip`,
 `Client.send`. The by-name mode hides them because it folds a method
@@ -875,8 +875,8 @@ onto its bare name, so Go's `conn.serve` is credited to goish's
 exported `Serve` — the connection loop credited to the function that
 starts it. The functionality is largely present (goish serves
 keep-alive connections and streams chunked bodies); the provenance is
-not. ROADMAP §2b-vi lists all 51; httputil's
-`ServerConn.{Read,Pending,Write}` were the first taken off it.
+not. ROADMAP §2b-vi lists all 50; `httputil` is
+the first package taken off it, and opening it found two live defects.
 
 | package | ported | | package | ported |
 |---|--:|---|---|--:|

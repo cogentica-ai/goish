@@ -65,8 +65,11 @@ pub fn drainBody(
 /// round-tripping through a fake conn that records the wire; goish
 /// reaches the same guarantee directly: `serialize_request` IS the
 /// code path the goish client writes with, so the dump is exactly
-/// what would go on the wire. (Divergences follow the client's own:
-/// goish's transport does not add Accept-Encoding.)
+/// what would go on the wire, plus the one header the transport adds
+/// on its own (Accept-Encoding: gzip, under the transport's rule —
+/// see below). An earlier note here said goish's transport does not
+/// add Accept-Encoding; it does, in client.rs's roundTrip, and the
+/// dump said otherwise for as long as that note stood.
 ///
 /// `body == false` keeps the Content-Length header intact but cuts
 /// the dump at the end of the head — Go's dummyBody truncation at
@@ -79,10 +82,63 @@ pub fn DumpRequestOut(req: &Request, body: bool) -> (slice<byte>, error) {
     } else {
         req.URL.Host.clone()
     };
+    // Go: `save, req.Body, err = drainBody(req.Body)`, and `req.Body =
+    // save` before every return — dumping a request must not CONSUME
+    // it. goish's drainBody leaves the original re-readable (an Eager
+    // copy of the same bytes) and hands back an independent copy, so
+    // the restore is implicit; the dump serialises the copy. Without
+    // this, a second dump of the same request failed outright with
+    // "ContentLength=2 with nil Body", and a caller who dumped a
+    // request before sending it sent an empty one.
+    //
+    // Go skips the real body when `body` is false, substituting a
+    // dummy of the right length so a STREAMING body is not read.
+    // goish drains in both modes: the caller's body has to survive
+    // either way, and this is the divergence that buys it.
+    let (copy, _second, berr) = drainBody(&req.Body);
+    if !berr.IsNil() {
+        return (slice::<byte>::__from_vec(alloc::vec::Vec::new()), berr);
+    }
+    let mut req_copy = req.clone();
+    req_copy.Body = copy;
+    let req: &Request = &req_copy;
+
     let (dump, derr) = super::super::client::serialize_request(req, &host);
     if !derr.IsNil() {
         return (dump, derr);
     }
+    // Go dumps by ROUND-TRIPPING the request through a real Transport
+    // onto a fake conn, so every header the transport adds shows up.
+    // goish serialises directly, so the one header the transport adds
+    // on its own has to be applied here — otherwise this reports a
+    // wire that goish does not write. The rule and its three
+    // exemptions are the transport's, from client.rs's roundTrip:
+    // no gzip when the caller set Accept-Encoding, when a Range is
+    // asked for, or on a HEAD. DisableCompression is false because
+    // Go's DumpRequestOut builds a default Transport.
+    //
+    // It goes in LAST, after Content-Length and the caller's own
+    // headers, because Go carries it in `extraHeaders`, written after
+    // req.Header. Measured against Go 1.25.5, which is also why a
+    // caller-set EMPTY Accept-Encoding yields two lines: extraHeaders
+    // appends rather than displaces.
+    let add_gzip = req.Header.Get(string("Accept-Encoding")).Len() == 0
+        && req.Header.Get(string("Range")).Len() == 0
+        && req.Method != "HEAD";
+    let dump = if add_gzip {
+        let raw: &[u8] = &dump;
+        match raw.windows(4).position(|w| w == b"\r\n\r\n") {
+            Some(i) => {
+                let mut out = raw[..i + 2].to_vec();
+                out.extend_from_slice(b"Accept-Encoding: gzip\r\n");
+                out.extend_from_slice(&raw[i + 2..]);
+                slice::<byte>::__from_vec(out)
+            }
+            None => dump,
+        }
+    } else {
+        dump
+    };
     if !body {
         // Go: if i := bytes.Index(dump, "\r\n\r\n"); i >= 0 { dump = dump[:i+4] }
         let raw: &[u8] = &dump;
@@ -475,24 +531,25 @@ where
 
 // ─── Deliberately unported, with reasons ─────────────────────────────
 //
-// goishlint:ignore GOISH018 — drainBody reads an `io.ReadCloser` and
-// hands back TWO independent replacements (the classic "consume a
-// stream and give the caller two copies" move). goish's
-// `Request.Body` is a `slice<byte>`, already fully materialised, so
-// the function has nothing to do and no type to express: its two
-// return values would both be the same slice. Port it WITH the
-// Body -> io.ReadCloser model change, not before — writing it now
-// would bake the eager model into a signature that exists to hide it.
+// This block said three things, and all three had gone stale. Two of
+// them named functions THIS FILE ports (drainBody at the top,
+// DumpRequestOut below), and the third rested on a hook that exists.
+// Kept as a record, because the stale version is what let the
+// Accept-Encoding and body-consumption defects sit unexamined:
 //
-// goishlint:ignore GOISH018 — DumpRequestOut dumps the bytes an
-// `http.Transport` WOULD put on the wire, by running a real Transport
-// against a fake connection (dumpConn, ported above) and capturing
-// the output. It needs a Transport whose dial step can be replaced.
-// goish's Transport has no DialContext hook, so there is currently no
-// way to interpose. `dumpConn` is ported and unused pending that —
-// an orphan on purpose, unlike the four accidental ones that produced
-// real bugs earlier in this port.
+//   * "drainBody … goish's Request.Body is a slice<byte>, so the
+//     function has nothing to do." Request.Body is a `Body` (an
+//     Arc<Mutex<BodyState>>) and drainBody is ported and anchored.
+//   * "DumpRequestOut needs a Transport whose dial step can be
+//     replaced; goish's Transport has no DialContext hook." It has
+//     one (client.rs Transport.DialContext), it is read at the dial
+//     site, and it returns a `Box<dyn net::Conn>` — so a fake conn
+//     COULD be returned. DumpRequestOut is ported without needing to.
 //
-// goishlint:ignore GOISH018 — delegateReader is a reader that blocks
-// on a channel until another goroutine supplies the real reader. Its
-// only caller is DumpRequestOut, so it waits on the same hook.
+// go: waived delegateReader.Read — a reader that blocks on a channel
+// until another goroutine supplies the real one. It exists to feed
+// Go's fake-conn round trip; goish's DumpRequestOut serialises
+// directly and is pinned byte-exact against Go 1.25.5 by
+// examples/http_dumpout_ref_smoke.rs, so there is no round trip to
+// delegate into and nothing to hand it a reader.
+// goishlint:ignore GOISH018 delegateReader — see the waiver above.

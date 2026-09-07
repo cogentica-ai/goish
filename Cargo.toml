@@ -734,6 +734,10 @@ name = "http_dump_smoke"
 path = "examples/http_dump_smoke.rs"
 
 [[example]]
+name = "http_dumpout_ref_smoke"
+path = "examples/http_dumpout_ref_smoke.rs"
+
+[[example]]
 name = "http_error_smoke"
 path = "examples/http_error_smoke.rs"
 
