@@ -797,6 +797,15 @@ def scan_rs(root):
         for f in drafts:
             out[rel or "."]["drafts"] |= draft_syms(
                 open(os.path.join(dirpath, f), errors="replace").read())
+        # Kept so `build` can recompute this directory's facts without a
+        # file that Go declares as a package of its own. See the
+        # double-count note there; the paths, not the facts, because the
+        # subtraction has to be over source, not over merged sets.
+        out[rel or "."]["_own"] = list(own)
+        out[rel or "."]["_filepkgs"] = {
+            (f"{rel}/{stem}" if rel else stem): list(paths)
+            for stem, paths in filepkgs.items()
+        }
         # Also expose each non-mod file as its own candidate package name,
         # so Go's `crypto/rsa` finds goish's `crypto/rsa.rs`.
         for stem, paths in filepkgs.items():
@@ -849,6 +858,41 @@ RELOCATED = {
 def build(subtree, gr):
     gp = scan_go(os.path.join(gr, "src", subtree))
     rp = scan_rs(os.path.join("src", subtree))
+
+    # A goish file `X/Y.rs` is exposed both as part of package `X` and as
+    # package `X/Y`, so that Go's `crypto/rsa` finds goish's
+    # `crypto/rsa.rs`. When `X` is ALSO a Go package, the same file
+    # answers to both and one goish function is credited to two Go
+    # declarations: `SetGCPercent`, which lives in `src/runtime/debug.rs`,
+    # counted in `runtime/debug` by name AND in `runtime` by case against
+    # Go's linknamed `setGCPercent`.
+    #
+    # Three files in the tree are in that position — runtime/debug,
+    # runtime/trace and testing/iotest — and only where a name coincides
+    # between the two Go packages does it cost anything. `crypto/rsa.rs`
+    # is NOT one: goish keeps crypto/rsa as a directory, so no file-form
+    # entry exists for it.
+    #
+    # The condition has to be "the file-package is itself a Go package",
+    # not "the file is not mod.rs": `net/http/client.rs` must keep
+    # counting toward `net/http`, because `net/http/client` is not a Go
+    # package. Recomputed from the source paths rather than by
+    # subtracting ident sets, which would also remove a name the parent
+    # legitimately declares elsewhere.
+    for pkg, r in list(rp.items()):
+        subs = r.get("_filepkgs") or {}
+        shadowed = [k for k in subs if k in gp and k != pkg]
+        if not shadowed or pkg not in gp:
+            continue
+        keep = list(r.get("_own") or [])
+        for k, paths in subs.items():
+            if k not in shadowed:
+                keep.extend(paths)
+        merged = _facts(keep)
+        merged["drafts"] = r["drafts"]
+        merged["_own"], merged["_filepkgs"] = r.get("_own"), subs
+        rp[pkg] = merged
+
     rows = []
     for pkg, g in sorted(gp.items()):
         r = rp.get(pkg)

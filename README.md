@@ -94,10 +94,10 @@ per-P, and an HTTP server with an allocation-free hot path.
   external review and no side-channel analysis. See [SECURITY.md](SECURITY.md).
 - **Not all of Go.** `crypto/` and `net/http` are complete. The rest of `net`, `encoding`
   and `os` are partial — the [coverage table](#coverage-measured) gives the per-subtree
-  figures. What is ported is almost all anchor-verified: 60 of 6,007 ported declarations
-  (1.0%) are credited by a name match with no `// go:` anchor behind them, and they cluster
-  in `runtime/debug` (19), `runtime` (15) and `embed` (12) — subtrees whose bodies are
-  goish's own runtime rather than Go's. Coverage reports mark those as UNVERIFIED.
+  figures. What is ported is almost all anchor-verified: 49 of 6,002 ported declarations
+  (0.8%) are credited by a name match with no `// go:` anchor behind them, and they cluster
+  in `runtime/debug` (19) and `embed` (12) — subtrees whose bodies are goish's own runtime
+  rather than Go's. Coverage reports mark those as UNVERIFIED.
 - **IPv4 only, TCP only.** `net.TCPAddr` stores four octets, `Dial` accepts `tcp` and
   `tcp4`, and an IPv6 literal fails at the parse boundary. There is no public `UDPConn` or
   Unix-domain socket. `net/http`, `crypto/tls` and `goginx` all inherit this.

@@ -1194,15 +1194,27 @@ between the parent and sub packages — `SetGCPercent` against runtime's
 `setGCPercent`. `testing/iotest`'s `OneByteReader` has no counterpart
 in Go's `testing`, so it costs nothing.
 
-So the damage is eight declarations in one package. What makes the fix
-non-trivial is not breadth but placement: `scan_rs` is where a file is
+So the damage was eight declarations in one package. **Fixed
+2026-09-07**: `scan_rs` now keeps each directory's own paths and its
+file-package paths, and `build` recomputes a directory's facts without
+any file-package that is ITSELF in `gp`. Recomputed from source rather
+than by subtracting ident sets, because subtraction would also remove a
+name the parent legitimately declares elsewhere.
+
+`runtime` reads 28/2800 where it read 36, with UNVERIFIED 15 to 4, and
+nothing else in the tree moves: crypto stays 1720/1720 for
+provenance.yml, net/http 721/776 by declaration and 639/639 by name,
+io/fs 40/40, sort 41/41, context 25/28, testing 235/261. Tree-wide
+UNVERIFIED 60 to 49, 1.0% to 0.8%.
+
+What made it look hard was placement, not breadth: `scan_rs` is where a file is
 attributed and it knows nothing about Go packages, while `build` knows
 `gp` but sees merged fact sets rather than per-file ones. Excluding all
 non-`mod` files from their directory's package would be wrong in the
 common case — `net/http/client.rs` must count toward `net/http`,
-because `net/http/client` is not a Go package. The condition has to be
-"the file-as-package is itself in `gp`", which means threading that set
-into the scan or keeping per-file facts to subtract afterwards.
+because `net/http/client` is not a Go package. So the condition is "the
+file-as-package is itself in `gp`", which is why the paths ride along
+from the scan into `build` where `gp` is known.
 
 The other six are `syscall: execve, exitThread, fcntl, fork, ioctl,
 utimensat`. Go keeps those unexported and offers a different public
