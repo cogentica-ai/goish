@@ -382,6 +382,14 @@ impl ServeMux {
         }
         // Go: no pattern matched this method, but one may match the
         // path under a different method — reply 405 with Allow.
+        //
+        // go: waived ServeMux.matchingMethods — Go's method is this
+        // block: the same two tree walks (the second with a trailing
+        // slash), the same sorted set, inlined into findHandler
+        // because that is its only caller and the mux lock is already
+        // held here. examples/http_mux_allow_ref_smoke.rs pins the
+        // result, including the redirect case the second walk must
+        // not swallow.
         let mut methodSet: crate::gomap::map<string, bool> =
             crate::gomap::map::<string, bool>::new();
         s.tree.matchingMethods(&host, &path, &mut methodSet);

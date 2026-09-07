@@ -227,6 +227,32 @@ impl crate::io::Writer for ConnSrcWriter<'_> {
     }
 }
 
+// ─── Go's body wrapper types live here ──────────────────────────────
+//
+// Go layers a response body in wrapper TYPES, each adding one
+// behaviour: gzipReader decodes, cancelTimerBody names the client's
+// deadline, readTrackingBody remembers whether a retry may reuse the
+// body. goish's Body is a closed enum with the same behaviours as
+// framings and BodyState fields, so the wrappers have no counterpart
+// under their own names. Each is waived against the place it actually
+// lives, and each place is pinned — reading these one at a time is
+// what found the sticky-error, Client.Timeout and rewind defects, so
+// the waivers name the smoke that would catch a regression.
+//
+// go: waived gzipReader.Read — the `FramedBody::Gzip` arm of
+// `read_locked`, including Go's sticky `zerr`
+// (examples/gzip_sticky_ref_smoke.rs).
+// go: waived gzipReader.Close — `close_locked` forwards a Gzip close
+// to the body it wrapped.
+// go: waived cancelTimerBody.Read — the `did_timeout` wrap in
+// `read_locked` (examples/client_timeout_ref_smoke.rs, body half).
+// go: waived cancelTimerBody.Close — Go's `b.stop()`; `close_locked`
+// takes and calls `BodyState.cancel` on every close path.
+// go: waived readTrackingBody.Read — `BodyState.did_read`, set on
+// entry to a read exactly as Go sets didRead before delegating.
+// go: waived readTrackingBody.Close — `BodyState.did_close`; the pair
+// is what `rewindBody` reads.
+
 /// Wire framing of a body-in-progress. Mirrors Go's transfer.go body
 /// readers: `body` over a LimitedReader (Content-Length), over a
 /// chunkedReader (TE: chunked), or straight to EOF (Connection:

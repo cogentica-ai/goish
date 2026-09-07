@@ -1290,7 +1290,7 @@ should go, some should lose the marker and keep the prose as a plain
 comment. What must not happen is a bulk delete that takes the reasons
 with it.
 
-## 2b-vi. net/http's 100% is a by-name figure; 37 declarations have no anchor
+## 2b-vi. net/http's 100% is a by-name figure; 30 declarations have no anchor
 
 Found 2026-09-07 while closing `net/http/cgi`'s last waiver, by running
 the package in both coverage modes instead of one.
@@ -1465,6 +1465,18 @@ grep and are not — they are GENERIC free functions,
 `func rotateLeft[E any](...)`, so those waivers were right as written.
 A pattern that cannot see generics would have "fixed" two correct
 waivers into wrong ones.
+
+Seven more came off the list once they had been READ rather than
+counted: Go layers a response body in wrapper TYPES (gzipReader,
+cancelTimerBody, readTrackingBody), and goish's Body is a closed enum
+carrying the same behaviours as framings and BodyState fields, so the
+wrappers have no counterpart under their own names. They are waived
+against the place each behaviour actually lives, and every waiver
+names the smoke that would catch a regression — which is the point:
+reading these three is what found the sticky-error, Client.Timeout and
+rewind defects above. `ServeMux.matchingMethods` is the seventh, now
+inlined-but-correct and pinned. Root 37 to 30, net/http 726/756
+(96.0%).
 
 Two of these are FIXED BUT NOT PINNED, worth stating plainly.
 Reaching either failing path needs a retry — an idle conn closed
