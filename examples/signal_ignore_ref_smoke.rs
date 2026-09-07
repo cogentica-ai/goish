@@ -49,8 +49,42 @@ const GO: [&str; 9] = [
 
 static mut FAILED: i64 = 0;
 static mut LINE: usize = 0;
-fn drain(c: &goish::gochan::chan<i32>, ms: i64) -> string {
-    time::Sleep(time::Duration(ms * 1_000_000));
+/// Wait for the delivered set to go QUIET, then drain it.
+///
+/// This was a flat `Sleep(ms)` and then a drain of whatever had
+/// arrived — the exact shape `signal_notify_ref_smoke` was moved off
+/// after it failed CI on 2026-09-06, and which failed there a second
+/// time on 2026-09-07 because the rewrite left a hole. The sibling
+/// kept the original code, so it kept the original flake: only one row
+/// here expects a signal, `renotify-delivers`, and it asserted after a
+/// fixed 200ms that one had arrived.
+///
+/// Same fix, ported whole. Wait for the buffered count to stop
+/// CHANGING for `ms`, with ten times that as a ceiling; and when the
+/// row expects a signal, do not accept a count of zero as "stable",
+/// because a channel nothing has reached yet is stable too. Rows that
+/// expect an empty channel keep the cheap path, so the smoke does not
+/// grow a per-row ceiling it would have to pay every run.
+fn drain(c: &goish::gochan::chan<i32>, ms: i64, want_any: bool) -> string {
+    let quiet_ticks = if ms / 5 > 1 { ms / 5 } else { 1 };
+    let max_ticks = quiet_ticks * 10;
+    let mut last = c.Len();
+    let mut stable: i64 = 0;
+    let mut ticks: i64 = 0;
+    while ticks < max_ticks {
+        time::Sleep(time::Duration(5_000_000));
+        ticks += 1;
+        let n = c.Len();
+        if n != last {
+            last = n;
+            stable = 0;
+        } else {
+            stable += 1;
+        }
+        if stable >= quiet_ticks && (!want_any || last > 0) {
+            break;
+        }
+    }
     let mut names: Vec<string> = Vec::new();
     while c.Len() > 0 {
         let (s, ok) = c.Recv();
@@ -104,7 +138,7 @@ fn main() {
     signal::Notify(&c, &[syscall::SIGUSR2]);
     signal::Ignore(&[syscall::SIGUSR2]);
     me(syscall::SIGUSR2);
-    line_s("notify-then-ignore", drain(&c, 200));
+    line_s("notify-then-ignore", drain(&c, 200, false));
     line_b("ignored-usr2", signal::Ignored(syscall::SIGUSR2));
 
     signal::Reset(&[syscall::SIGUSR1]);
@@ -114,11 +148,11 @@ fn main() {
     signal::Notify(&c2, &[syscall::SIGUSR2]);
     line_b("ignored-after-renotify", signal::Ignored(syscall::SIGUSR2));
     me(syscall::SIGUSR2);
-    line_s("renotify-delivers", drain(&c2, 200));
+    line_s("renotify-delivers", drain(&c2, 200, true));
 
     signal::Reset(&[syscall::SIGUSR2]);
     me(syscall::SIGUSR2);
-    line_s("after-reset-delivers", drain(&c2, 200));
+    line_s("after-reset-delivers", drain(&c2, 200, false));
     signal::Stop(&c2);
     signal::Stop(&c);
 
