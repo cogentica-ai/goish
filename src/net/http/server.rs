@@ -2565,6 +2565,13 @@ impl crate::io::Reader for __ConnReaderRead<'_> {
 /// (an Eager Body), so today this always answers false — exactly Go's
 /// `*body` case with the source drained — and the serve loop takes
 /// the immediate-startBackgroundRead arm.
+///
+/// No caller since 2026-09-07: the serve loop used to branch on this
+/// into two arms that both called `startBackgroundRead`, which read as
+/// a distinction the server does not make. The branch collapsed and
+/// this kept its anchor, because Go declares it and the streaming body
+/// of ROADMAP §0 A is what gives it a caller again.
+#[allow(dead_code)]
 pub(crate) fn requestBodyRemains(rc: &super::Body) -> bool {
     let out = match rc.__eager_len() {
         Some(_) => false,
@@ -3711,14 +3718,21 @@ impl Server {
             // immediately. The server's eager body decode means the
             // second arm always runs today.
             cr.__set_hooks(req_cancel.clone(), cnc.clone());
-            if requestBodyRemains(&req.Body) {
-                // registerOnHitEOF territory — unreachable until the
-                // inbound body streams; the connReader is armed late
-                // there, at the body's EOF.
-                cr.startBackgroundRead(watch_pd);
-            } else {
-                cr.startBackgroundRead(watch_pd);
-            }
+            // Go arms the background read here for a DRAINED body, and
+            // defers it to the body's EOF via registerOnHitEOF when
+            // bytes are still on the wire. goish decodes the body
+            // eagerly, so `requestBodyRemains` is false for every
+            // server request and only the drained arm can run.
+            //
+            // This was written as an `if requestBodyRemains(...)` whose
+            // two arms both called `startBackgroundRead` — a condition
+            // that cannot be true guarding branches that do the same
+            // thing, which reads as a distinction the server does not
+            // make. The seam is a comment now instead: when the inbound
+            // body streams (ROADMAP §0 A), the remains-case arms the
+            // connReader late, at the body's EOF, and this is where
+            // that branch goes back.
+            cr.startBackgroundRead(watch_pd);
 
             // Go consults doKeepAlives twice per request — writeHeader
             // (server.go:1301) for the Connection header, conn.serve
