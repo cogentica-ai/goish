@@ -382,6 +382,19 @@ pub fn headerSorterPool() -> &'static crate::sync::Pool<headerSorter> {
 pub const TimeFormat: &str = "Mon, 02 Jan 2006 15:04:05 GMT";
 
 // go: sdk 1.25.5 net/http/header.go:120-124 timeFormats
+//
+// Go's ParseTime loops this table; goish's parses the same three
+// formats with hand-written scanners (parse_imf_fixdate, parse_rfc850)
+// and a time::Parse for ANSIC, so nothing under src/ reads the table.
+// It stays because it is the anchored port of Go's declaration and the
+// one place the three layouts are named together.
+//
+// One divergence follows from not looping: on failure Go returns the
+// last time.Parse error, a *time.ParseError, and goish returns
+// errors::New("http: invalid date format"). Go documents no error type
+// for ParseTime, and http_time_smoke asserts only that an error
+// occurred, so this is left as is — recorded 2026-09-07 so the next
+// reader of dead_port_check does not re-derive it.
 pub fn timeFormats() -> slice<string> {
     return slice::__from_vec(alloc::vec![
         string(TimeFormat),

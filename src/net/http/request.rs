@@ -786,6 +786,16 @@ pub const defaultMaxMemory: int = 32 << 20; // 32 MB
 
 // go: sdk 1.25.5 net/http/request.go:1027-1034 parseRequestLine
 //
+// Nothing under src/ calls this, and that is deliberate rather than a
+// gap: the server splits with `parse_request_line` further down, a
+// byte-view version that interns the method and proto instead of
+// allocating three strings per request. The two were traced against
+// each other and against Go's strings.Cut pair on 2026-09-07 and agree
+// on every input, including a line with three spaces. This one is the
+// anchored port of Go's signature, kept so the declaration has a home;
+// dead_port_check reports it under TESTED_NOT_WIRED and it is one of
+// the cases §2e describes as "goish reaches it another way".
+//
 /// Split "GET /path HTTP/1.1" into its three fields. Both separators
 /// must be present, and each cut takes the FIRST space, so a URI
 /// containing a space makes the remainder the proto and the line is
