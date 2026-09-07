@@ -1223,13 +1223,12 @@ fn parseAuthority(authority: string) -> (Userinfo, string, error) {
 /// its `%25` in `Host` and `Hostname()` returned `fe80::1%25eth0`
 /// instead of `fe80::1%eth0` — the escaped form where the caller wants
 /// the real one.
-// goishlint:ignore GOISH018 netip.ParseAddr — Go validates the bracketed
-//     literal with `netip.ParseAddr` and rejects an IPv4 in brackets.
-//     goish has no `net/netip` (0% ported), and `net`'s own `ParseIP`
-//     would make `net/url` depend on `net`, which Go's does not. The
-//     check here is the weaker "an IPv6 literal contains a colon",
-//     which accepts every address Go accepts and a few malformed ones
-//     Go would reject.
+// goishlint:ignore GOISH018 netip.ParseAddr — the call IS made now,
+//     to goish's own net/netip (88% by declaration). This ignore stays
+//     because the lint wants an anchored counterpart in THIS file for
+//     a Go function declared in another package. The reason it used to
+//     give — "goish has no net/netip (0% ported)" — went stale, and
+//     the weaker check it justified was accepting hosts Go rejects.
 fn parseHost(host: string) -> (string, error) {
     let open_bracket = strings::LastIndex(host.clone(), "[");
     if open_bracket != -1 {
@@ -1276,7 +1275,26 @@ fn parseHost(host: string) -> (string, error) {
             unescaped_hostname = h;
         }
         // See the waiver above: Go asks netip.ParseAddr here.
-        if !strings::Contains(unescaped_hostname.clone(), ":") {
+        // Go (url.go:674-682): "Per RFC 3986, only a host identified by
+        // a valid IPv6 address can be enclosed by square brackets. This
+        // excludes any IPv4, but notably not IPv4-mapped addresses."
+        // The validation is netip.ParseAddr plus an Is4 rejection.
+        //
+        // This used to be "the hostname contains a colon", on the
+        // reasoning that goish had no net/netip. It has one — 88% by
+        // declaration, ParseAddr included — so the weaker test was
+        // accepting hosts Go rejects: `[not:an:address]`, `[zz::1]`
+        // and `[:::]` all parsed here and all fail there. A URL parser
+        // that accepts more than Go's is the wrong direction for
+        // anything validating one.
+        let (addr, aerr) = crate::net::netip::ParseAddr(unescaped_hostname.clone());
+        if !aerr.IsNil() {
+            return (
+                string::new(),
+                crate::fmt::Errorf!("invalid host: %w", aerr),
+            );
+        }
+        if addr.Is4() {
             return (string::new(), errors::New("invalid IP-literal"));
         }
         return (
