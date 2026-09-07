@@ -1732,6 +1732,32 @@ and control of the peek ordering. The Eager and non-reused paths are
 covered by the client smokes; these two rest on reading Go's rule and
 matching it.
 
+## 2p. `flag` has no Value interface, so no user-defined flag types
+
+Recorded 2026-09-07 while waiving the `*Var` family.
+
+Go's `flag.Var(value Value, name, usage string)` is the package's
+extension point: a program implements `String()` and `Set(string)
+error` and gets a flag of its own type. `TextVar` is the same idea for
+anything implementing encoding.TextUnmarshaler.
+
+goish's FlagSet stores each flag as a `FlagKind` — a CLOSED enum over
+the types it knows (Bool, Int, Int64, Uint, Uint64, Float64, Duration,
+String, and now Func/BoolFunc). A caller cannot add an arm, so `Var`
+has nothing to accept and `TextVar` has no counterpart at all.
+
+`Func` and `BoolFunc`, ported today, cover the half of Var's uses that
+are really "call me with the string" — a repeatable option, a counter,
+a validator. They do not cover a custom TYPE with its own String(),
+which is what `Var` is for and what shows up in a `-help` listing.
+
+Closing it means either an open trait (a `dyn Value` arm on FlagKind,
+which is the faithful shape) or accepting that goish's flag types are
+fixed. The first is a small change to a hand-written type and belongs
+with section 2o's NewFlagSet work, since both touch the same file for
+the same reason: this FlagSet was written before the port and its
+shape, not its behaviour, is what diverges.
+
 ## 2o. `flag` always continues on a parse error
 
 Found 2026-09-07 while porting flag.Uint64.

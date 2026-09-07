@@ -237,6 +237,54 @@ pub fn Uint<N: Into<string>, U: Into<string>>(
     return CommandLine.Lock().Uint(name, default, usage);
 }
 
+// ─── Go's *Var family, and what replaces it ─────────────────────────
+//
+// Go pairs every typed constructor with a `*Var` form: `Int` returns
+// `*int`, `IntVar` writes into a caller's variable. Both hand the
+// FlagSet somewhere to store the parsed value; the pointer IS the
+// storage.
+//
+// goish's constructors return a `FlagHandle<T>` over an
+// `Arc<SpinLock<T>>`, which is that same storage in the shape Rust
+// can express — the caller holds it while the FlagSet mutates it, and
+// reads with `Get()`. So the `*Var` half has no counterpart to port:
+// it would be the same cell handed in rather than out. Verified by
+// building three flag types through this design today (Uint64, Func,
+// BoolFunc) rather than by assuming it.
+//
+// Waived for the eight types that HAVE a handle form. TextVar and Var
+// are deliberately NOT here — see the note below them.
+//
+// go: waived BoolVar — FlagHandle<bool> from Bool is the storage.
+// go: waived FlagSet.BoolVar — same.
+// go: waived IntVar — FlagHandle<int> from Int.
+// go: waived FlagSet.IntVar — same.
+// go: waived Int64Var — FlagHandle<int64> from Int64.
+// go: waived FlagSet.Int64Var — same.
+// go: waived UintVar — FlagHandle<uint> from Uint.
+// go: waived FlagSet.UintVar — same.
+// go: waived Uint64Var — FlagHandle<uint64> from Uint64.
+// go: waived FlagSet.Uint64Var — same.
+// go: waived StringVar — FlagHandle<string> from String.
+// go: waived FlagSet.StringVar — same.
+// go: waived Float64Var — FlagHandle<float64> from Float64.
+// go: waived FlagSet.Float64Var — same.
+// go: waived DurationVar — FlagHandle<Duration> from Duration.
+// go: waived FlagSet.DurationVar — same.
+//
+// NOT waived, because they are real gaps rather than a different
+// spelling:
+//
+//   * `Var`/`FlagSet.Var` take a caller-implemented `flag.Value`. That
+//     is the extension point of the package — how a program defines a
+//     flag type Go never shipped. goish's FlagKind is a CLOSED enum,
+//     so there is nothing to implement. `Func`/`BoolFunc` cover the
+//     callback half of what people use Var for; a custom type with its
+//     own String() does not.
+//   * `TextVar`/`textValue` parse into an encoding.TextUnmarshaler,
+//     and unlike the eight above there is no handle form either — this
+//     one is simply unported.
+
 // go: sdk 1.25.5 flag/flag.go:986-988 Func
 /// Go: "Func defines a flag with the specified name and usage string.
 /// Each time the flag is seen, fn is called with the value of the
