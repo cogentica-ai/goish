@@ -17,6 +17,17 @@
 // doInRoot does.
 //
 // goishlint:ignore GOISH018 OpenInRoot, Root.Create, Root.OpenRoot, Root.Chmod, Root.Mkdir, Root.MkdirAll, Root.Chown, Root.Lchown, Root.Chtimes, Root.Remove, Root.RemoveAll, Root.Stat, Root.Lstat, Root.Readlink, Root.Rename, Root.Link, Root.Symlink, Root.ReadFile, Root.WriteFile, Root.FS, Root.logOpen, Root.logStat, rootFS.Open, rootFS.ReadDir, rootFS.ReadFile, rootFS.Stat, rootFS.Lstat, rootFS.ReadLink, root.Close, root.Name, root.incref, root.decref, isValidRootFSPath - incremental port; these are unported, NOT waived, and the walk they all share is in root_openat.rs.
+// go: waived openRootNolog, newRoot — OpenRoot's body. Go opens the
+// directory and then fstats it to reject a non-directory; goish passes
+// O_DIRECTORY and lets the kernel answer, which renders identically
+// ("not a directory") and is one syscall rather than two
+// (examples/os_root_ref_smoke.rs).
+// go: waived root.incref, root.decref, root.Close, root.Name — Go's
+// unexported `root` refcounts because operations hand its fd out;
+// goish's Root holds the fd behind a mutex and never lends it, so
+// there is nothing to count. Name and Close are on Root itself.
+// go: waived isValidRootFSPath — part of Root.FS, which is unported.
+
 // goishlint:ignore GOISH019 — file-wide. `rootFS` is unported (Root.FS is), so the fs.FS adapter has nothing to be; and goish's `Root` holds the fd in an Arc'd inner struct plus the name, where Go's holds one pointer to an unexported `root` carrying both — a different layout for the same two facts, because Name must survive Close and clones must share one fd.
 // goishlint:ignore GOISH021 — file-wide. `rootMaxSymlinks` is a local const in the walk (root_openat.rs) rather than a package-level one, and `rootFS` is unported because Root.FS is.
 
@@ -742,5 +753,229 @@ impl Root {
             return super::root_openat::LastResult::Err(-r);
         });
         return err;
+    }
+}
+
+impl Root {
+    // go: sdk 1.25.5 os/root.go:182-186 Root.Chtimes
+    /// Go: "Chtimes changes the access and modification times of the
+    /// named file in the root."
+    ///
+    /// The Timespec conversion is `os::Chtimes`'s, including the
+    /// negative-nsec correction a pre-1970 fractional time needs —
+    /// utimensat rejects a tv_nsec outside [0, 1e9) with EINVAL.
+    pub fn Chtimes<N: Into<string>>(
+        &self,
+        name: N,
+        atime: crate::time::Time,
+        mtime: crate::time::Time,
+    ) -> error {
+        let name: string = name.into();
+        let set = |t: crate::time::Time| -> syscall::Timespec {
+            if t.IsZero() {
+                return syscall::Timespec {
+                    tv_sec: syscall::UTIME_OMIT,
+                    tv_nsec: syscall::UTIME_OMIT,
+                };
+            }
+            let ns = crate::int64(t.UnixNano());
+            let mut sec = ns / 1_000_000_000;
+            let mut nsec = ns % 1_000_000_000;
+            if nsec < 0 {
+                nsec += 1_000_000_000;
+                sec -= 1;
+            }
+            return syscall::Timespec {
+                tv_sec: sec,
+                tv_nsec: nsec,
+            };
+        };
+        let utimes = [set(atime), set(mtime)];
+        let (_, err) = self.__path_op::<i32, _>("chtimesat", &name, |dirfd, comp| {
+            let mut cb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
+            cb.extend_from_slice(super::bytes_of(comp));
+            cb.push(0);
+            // Following is the walk's job, never the kernel's — the
+            // same rule as Stat and Chmod.
+            let mut st = syscall::Stat_t::default();
+            let sr = syscall::Fstatat(dirfd, cb.as_ptr(), &mut st, syscall::AT_SYMLINK_NOFOLLOW);
+            if sr == 0 && (st.st_mode & syscall::S_IFMT) == syscall::S_IFLNK {
+                return super::root_openat::LastResult::Symlink;
+            }
+            let r = syscall::Utimensat(dirfd, cb.as_ptr(), utimes.as_ptr(), 0);
+            if r == 0 {
+                return super::root_openat::LastResult::Ok(0);
+            }
+            return super::root_openat::LastResult::Err(-r);
+        });
+        return err;
+    }
+
+    // go: none — goish-only: Mkdir's walk without the PathError, so
+    // MkdirAll can report the ORIGINAL path rather than the prefix it
+    // happened to fail on — Go says `mkdirat ../evil/x: path escapes
+    // from parent`, not `mkdirat ..: …` nested inside it.
+    /// Mkdir one component, returning the walk's bare error.
+    fn __mkdir_bare(&self, name: &string, perm: FileMode) -> error {
+        let mode = crate::int32(super::syscallMode(perm));
+        let (_, err) = self.doInRoot::<i32, _>(name, |dirfd, comp| {
+            let mut cb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
+            cb.extend_from_slice(super::bytes_of(comp));
+            cb.push(0);
+            let r = syscall::Mkdirat(dirfd, cb.as_ptr(), crate::uint32(mode));
+            if r == 0 {
+                return super::root_openat::LastResult::Ok(0);
+            }
+            return super::root_openat::LastResult::Err(-r);
+        });
+        return err;
+    }
+
+    // go: sdk 1.25.5 os/root.go:161-168 Root.MkdirAll
+    /// Go: "MkdirAll creates a new directory in the root, along with
+    /// any necessary parents."
+    ///
+    /// Go does this inside ONE walk, with a custom `openDirFunc` that
+    /// creates a missing intermediate instead of failing on it
+    /// (root_openat.go:170) — the only caller that passes one. goish
+    /// walks a prefix at a time instead: each prefix is a full,
+    /// independently checked resolution, so an escape anywhere in the
+    /// path is refused before anything is created. Slower in syscalls,
+    /// identical in what it permits, and it does not need the walk to
+    /// grow a parameter for one caller.
+    pub fn MkdirAll<N: Into<string>>(&self, name: N, perm: FileMode) -> error {
+        let name: string = name.into();
+        // Refuse the whole path FIRST, so a rejected MkdirAll leaves
+        // nothing behind: `../evil/x` must not create `evil`.
+        let (parts, _, serr) = splitPathInRoot(&name, &[], &[]);
+        if !serr.IsNil() {
+            return errors::Wrap(PathError {
+                Op: string::from_static("mkdirat"),
+                Path: name,
+                Err: serr,
+            });
+        }
+        let mut prefix = string::new();
+        for (i, p) in parts.iter().enumerate() {
+            if (p.as_ref() as &str) == "." {
+                continue;
+            }
+            if i > 0 && prefix.Len() > 0 {
+                prefix = prefix + string::from_static("/");
+            }
+            prefix = prefix + p.clone();
+            let err = self.__mkdir_bare(&prefix, perm);
+            if err.IsNil() {
+                continue;
+            }
+            // EEXIST is fine only when what exists is a directory,
+            // which is Go's rule for MkdirAll.
+            let (fi, serr) = self.Stat(prefix.clone());
+            if serr.IsNil() && fi.IsDir() {
+                continue;
+            }
+            return errors::Wrap(PathError {
+                Op: string::from_static("mkdirat"),
+                Path: name,
+                Err: err,
+            });
+        }
+        return errors::nil;
+    }
+}
+
+impl Root {
+    // go: sdk 1.25.5 os/root.go:194-198 Root.RemoveAll
+    /// Go: "RemoveAll removes the named file or directory and any
+    /// children that it contains."
+    ///
+    /// Note the Op: a refusal here says `RemoveAll`, not `removeat` —
+    /// Go names the operation the caller asked for, not the syscall it
+    /// got to.
+    ///
+    /// Every step goes through the walk, including each child, so a
+    /// symlink inside the tree is UNLINKED rather than followed. That
+    /// is not a detail: `os::RemoveAll` had the mirror bug — it stat'ed
+    /// where Go lstats, followed a link to a directory, and deleted the
+    /// target's contents. Inside a Root the same mistake would delete
+    /// outside the root, which is the one thing a Root exists to
+    /// prevent. The reference pins it with a link to a directory
+    /// outside, sitting in the tree being removed.
+    pub fn RemoveAll<N: Into<string>>(&self, name: N) -> error {
+        let name: string = name.into();
+        // Resolve the path through the walk BEFORE removing anything.
+        //
+        // Not belt and braces: without it this failed OPEN. The escape
+        // surfaced as a Remove error, and the "already gone is not an
+        // error" branch below then swallowed it and returned nil — a
+        // refusal reported as success, which is the worst shape a
+        // security check can fail in. The final step is a no-op, so
+        // this only resolves; it does not remove.
+        let (_, werr) = self.doInRoot::<i32, _>(&name, |_dirfd, _comp| {
+            return super::root_openat::LastResult::Ok(0);
+        });
+        if !werr.IsNil() {
+            return errors::Wrap(PathError {
+                Op: string::from_static("RemoveAll"),
+                Path: name,
+                Err: werr,
+            });
+        }
+        return self.__remove_all(name.clone(), &name);
+    }
+
+    // go: none — goish-only: the recursion behind RemoveAll, carrying
+    // the ORIGINAL name so every error names what the caller asked to
+    // remove rather than the child that failed.
+    /// Remove `path` and anything under it.
+    fn __remove_all(&self, path: string, orig: &string) -> error {
+        // Remove first — it unlinks a symlink of any kind without
+        // looking through it, which settles every non-directory case
+        // before anything can be followed. The same order os::RemoveAll
+        // now uses, and for the same reason.
+        let err = self.Remove(path.clone());
+        if err.IsNil() {
+            return errors::nil;
+        }
+        // Gone already is not an error — but ONLY gone. Go swallows
+        // exactly IsNotExist and ENOTDIR here and returns everything
+        // else (removeall_noat.go:36-42). Swallowing every Lstat
+        // failure would turn a permission error, or a refusal from the
+        // walk, into a silent success: the same fail-open shape that
+        // made RemoveAll("../victim") answer nil a few commits ago,
+        // one level further down.
+        let (fi, lerr) = self.Lstat(path.clone());
+        if !lerr.IsNil() {
+            if super::IsNotExist(lerr.clone()) {
+                return errors::nil;
+            }
+            return lerr;
+        }
+        if !fi.IsDir() {
+            return err;
+        }
+        // A directory: list it through the root and recurse.
+        let (d, derr) = self.OpenFile(
+            path.clone(),
+            super::O_RDONLY | int::from(i64::from(syscall::O_DIRECTORY)),
+            FileMode(0),
+        );
+        if !derr.IsNil() {
+            return derr;
+        }
+        let mut d = d.MustTake();
+        let (names, nerr) = d.Readdirnames(int::from(-1));
+        let _ = d.Close();
+        if !nerr.IsNil() {
+            return nerr;
+        }
+        for i in 0..names.Len() {
+            let child = path.clone() + string::from_static("/") + names[i].clone();
+            let cerr = self.__remove_all(child, orig);
+            if !cerr.IsNil() {
+                return cerr;
+            }
+        }
+        return self.Remove(path);
     }
 }

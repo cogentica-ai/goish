@@ -871,6 +871,58 @@ The irony is worth keeping: `asm_decls`'s own docstring says it exists
 because the raw gap column "has produced a wrong leverage claim three
 times in this repo", and it contained a fourth.
 
+## os/ — 213 / 376 by declaration (56.6%)
+
+Measured 2026-09-07 with `scripts/port_coverage.py os --by-decl`; was
+175 / 411 (42.6%) the same morning, and the anchors went 239 to 323.
+The root package alone is 170 / 269 (63.2%), from 132 / 304.
+
+**Read that denominator before the percentage.** It fell from 411 to
+376 because 35 declarations were WAIVED, and waivers move a number
+without porting anything. They are all the same shape: Go splits each
+Root operation into a pair (`rootChmod` calling `chmodat`, `rootStat`
+calling `modeAt`) because its walk takes the final step as a function
+value; goish's walk takes a closure, so each pair is one closure at the
+operation's own definition. Every waiver names the closure that
+replaced it and the smoke row that would catch its loss. The numerator
+moved from 175 to 213 on ported code; the denominator moved on
+bookkeeping, and the two should not be read together.
+
+Most of that day's movement is **`os.Root`**, Go 1.24's
+directory-limited filesystem access, which goish did not have and
+could not have had: the tree carried no `openat` at all, only
+`SYS_OPEN`. Root resolves every path component RELATIVE to a directory
+fd with `O_NOFOLLOW`, so a `..`, an absolute path, or a symlink
+pointing outside cannot leave the root even when an attacker chooses
+the name. It refuses rather than detects — the walk never opens the
+thing it would have to reject.
+
+Everything but `Root.FS` is ported, pinned by five reference smokes
+(89 rows) generated from Go itself. The rows that earn their keep are
+the ones where a plausible implementation differs from Go:
+
+  * `inside_link` and `dir_link/deep.txt` must SUCCEED — Root FOLLOWS
+    symlinks; it refuses escapes, not indirection. "Reject every
+    symlink" passes every escape row and is still wrong.
+  * `out_and_back` (`../inside/ok.txt`) resolves to a file INSIDE the
+    root and is still refused. Go refuses the moment a component
+    escapes; anything that cleans the path lexically and checks the
+    destination allows it.
+  * `remove:escape` succeeds and `secret_survived` proves it removed
+    the LINK, not what it pointed at, while `writefile:escape` is
+    refused because that write WOULD have gone through.
+
+`os.Process.Wait` also landed, with the rusage `Cmd.Wait` had been
+discarding — which is why `ProcessState.UserTime` and `Cmd.ProcessState`
+could not exist before it.
+
+And one defect worth recording here rather than only in the log:
+`os.RemoveAll` stat'ed where Go lstats, so it followed a symlink to a
+directory and deleted the TARGET's contents — `RemoveAll(work)` with
+`work/link -> /somewhere/real` emptied /somewhere/real. Found because a
+passing smoke left its own temp tree on disk, which was the same bug
+seen from its quiet side.
+
 ## net/http — 639 / 639 by name, 726 / 742 by declaration (97.8%)
 
 **All twelve packages are at 100.0% by name**, with 1534 `// go:` lines

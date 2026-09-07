@@ -2901,51 +2901,50 @@ signatures differ — the shims take `&mut [byte]` where drbg takes
 the RSA key path. It wants a ref smoke over a fixed reader first, which
 would also pin item 1.
 
-## 2q. os.Root: the walk and seven operations are ported
+## 2q. os.Root is ported except FS
 
-Landed 2026-09-07 across two commits. The walk — `doInRoot`,
-`splitPathInRoot`, and the openat/O_NOFOLLOW rules that carry the whole
-security property — plus `Root`, `OpenRoot`, `Root.{Name,Close,Open,
-OpenFile,Create,OpenRoot,Stat,Lstat,Mkdir,Remove}` and `OpenInRoot`.
-Pinned by os_root_ref_smoke (20/20) and os_root2_ref_smoke (21/21),
-each rule verified by its own perturbation.
+Landed 2026-09-07 across five commits: the walk (`doInRoot`,
+`splitPathInRoot`, openat + O_NOFOLLOW) and `Root`, `OpenRoot`,
+`OpenInRoot`, and Root's `Name Close Open OpenFile Create OpenRoot
+Stat Lstat Readlink ReadFile WriteFile Mkdir MkdirAll Remove RemoveAll
+Rename Link Symlink Chmod Chown Lchown Chtimes`. Pinned by five ref
+smokes (20+21+15+19+14 rows), each rule verified by its own
+perturbation.
 
-The walk's final step is a closure, as Go's is a function, so the
-remaining operations are each a closure and a reference row.
+STILL UNPORTED: `Root.FS` and the `rootFS` adapter, which want io/fs
+plumbing rather than syscalls, and the `dirFS.Lstat`/`dirFS.ReadLink`
+pair Go 1.25 added for io/fs.ReadLinkFS.
 
-STILL UNPORTED, and listed rather than waived:
+**Two divergences, both deliberate.** `MkdirAll` walks a prefix at a
+time where Go uses one walk with a custom `openDirFunc` that creates
+missing intermediates (root_openat.go:170, the only caller that passes
+one). Each prefix is an independent resolution, so an escape anywhere
+is refused before anything is created — more syscalls, identical
+permissions, and the walk does not grow a parameter for one caller.
+`Chmod`, `Chtimes` and `Stat` detect a final-component symlink with a
+NOFOLLOW fstatat and hand it to the walk, because Linux has no working
+AT_SYMLINK_NOFOLLOW for fchmodat: following is the walk's job, never
+the kernel's.
 
-  * `Root.Readlink`, `Root.ReadFile`, `Root.WriteFile` — no new
-    syscalls needed; Readlinkat is already in.
-  * `Root.Rename`, `Root.Link`, `Root.Symlink`, `Root.Chmod`,
-    `Root.Chown`, `Root.Lchown`, `Root.Chtimes` — need renameat,
-    linkat, symlinkat, fchmodat, fchownat, utimensat.
-  * `Root.MkdirAll`, `Root.RemoveAll` — recursive, and RemoveAll wants
-    the walk to hand back a directory fd to iterate. MkdirAll also
-    needs the walk's `openDirFunc` parameter back: it is the ONLY
-    caller in Go that passes a non-nil one (root_openat.go:170), a
-    variant that creates a missing intermediate directory rather than
-    failing on it. goish's walk dropped that parameter, which is
-    correct for every operation ported so far and wrong the moment
-    MkdirAll arrives.
-  * `Root.FS` and `rootFS` — io/fs plumbing rather than syscalls.
+**Three defects were found by the references, all in code written the
+same hour, and every one had every other row passing.** They are worth
+listing because they are three different ways for a guarded path to go
+wrong:
 
-**The caution below was written before the second commit and proved
-itself inside the hour, so it stays.** An operation added to the walk
-inherits the walk's guarantees but NOT its coverage. `Root.Stat` was
-written passing flags=0 to fstatat, so the KERNEL followed a symlink —
-outside the walk, where there is no root — and Stat of a link pointing
-out of the root returned nil and described a file the caller must not
-be able to see. Every other row passed; the walk was untouched and
-still correct.
+  * `Root.Stat` passed flags=0 to fstatat, so the KERNEL followed a
+    symlink out of the root and described a file the caller must not
+    see. A shared guard does not cover the final step.
+  * `Root.RemoveAll` FAILED OPEN. `RemoveAll("../victim")` returned
+    nil: the escape surfaced as a Remove error and the "already gone is
+    not an error" branch swallowed it. A refusal reported as success is
+    the worst shape a check can fail in, and it is invisible to any
+    test that only asks whether the happy path works.
+  * `Root.MkdirAll` double-wrapped its error, reporting the prefix it
+    failed on nested inside the original path.
 
-It was caught only because the reference gives EVERY operation the same
-three refusals ("..", an absolute path, a symlink pointing outside)
-rather than one "it works" row. Do that for each operation added here.
-The tell in a diff is a flag argument: `0` where the guarded form needs
-`AT_SYMLINK_NOFOLLOW` or `O_NOFOLLOW`. Those flags are the guard's only
-participation in the final step, and a syscall that resolves paths
-itself steps straight out of the guard.
+The rule that caught all three: give EVERY operation the same
+refusals — "..", an absolute path, and a symlink pointing outside —
+rather than one row saying it works.
 
 ## 3. Gaps other packages will hit next
 
