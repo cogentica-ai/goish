@@ -1430,9 +1430,33 @@ all already reasoned about in the tree:
     the method and proto. The two agree on every input I traced,
     including a line with three spaces.
 
+**Three more, chosen for consequence rather than order, all fine.**
+
+  - `transport.rs`'s `writeBufferSize` is uncalled and the field it
+    reads says why in its own doc: `WriteBufferSize` is INERT because
+    Go applies it at `pconn.bw = bufio.NewWriterSize(…)` and goish's
+    persistConn has no buffered writer to size. Its sibling
+    `ReadBufferSize` IS honoured, and records that it once was not.
+  - `gcm/ctrkdf.rs`'s `DeriveKey` has exactly one caller in Go —
+    `cast.go`, the algorithm self-test — and §2f already records that
+    every FIPS CAST here is inert. A ported building block whose
+    consumer is a test goish does not run.
+  - `transport.rs`'s `tlsHost` took real checking and is the one worth
+    writing down. Go calls it to get "the host name to match against
+    the peer's TLS certificate"; goish's `addTLS` takes that name from
+    `host_without_port(&key.addr)` instead. The two agree — but only
+    because of a detail one step away: Go's `cm.addr()` returns the
+    PROXY address when proxying while `cm.tlsHost()` always returns the
+    target, so deriving the TLS name from an addr field would be a
+    certificate-verification bug through a proxy. goish's
+    `connectMethodKey.key()` sets `addr` to `targetAddr` and blanks it
+    only for plain HTTP through a proxy, where the scheme is `http` and
+    no TLS name is needed. Correct, and correct for a reason that is
+    not obvious from either function alone.
+
 The lesson for the rest of the list: TESTED_NOT_WIRED plus "Go calls it"
 is a question, not a verdict, and the answer is usually "goish reaches
-it another way". Six read, one change. That is the opposite of §2b's
+it another way". Nine read, one change. That is the opposite of §2b's
 curated lists, where nearly every named entry held something, and the
 difference is worth knowing before someone budgets time against the
 remaining 65.
