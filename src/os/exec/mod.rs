@@ -213,12 +213,26 @@ pub struct Cmd {
     >,
 
     // go: none — goish-only placement: Go's `Cmd.Process` is
-    // os/exec/exec.go:189. See the note on ExitError for why the
+    // os/exec/exec.go line 238. See the note on ExitError for why the
     // citation is prose.
+    //
+    // Go's NEXT field, `ProcessState *os.ProcessState` at line 243, has
+    // no counterpart here — after a Run or Wait, Go hands back the
+    // state and goish has nowhere to put it (ROADMAP §2b-ix).
     /// Go: "Process is the underlying process, once started." It is
     /// None before Start and stays set after Wait, so `Kill` on a
     /// finished process reports ErrProcessDone rather than panicking.
     pub Process: Option<crate::os::exec_posix::Process>,
+    // go: none — goish-only placement: Go's `Cmd.ProcessState` is
+    // os/exec/exec.go line 243. Same reason as `Process` above for the
+    // prose citation.
+    /// Go: "ProcessState contains information about an exited process.
+    /// If the process was started successfully, Wait or Run will
+    /// populate its ProcessState when the command completes."
+    ///
+    /// None until then, and None again if the wait itself failed —
+    /// Go's `state` is nil on that path and it assigns it anyway.
+    pub ProcessState: Option<crate::os::exec_posix::ProcessState>,
     /// PID of the running child; set by Start(), cleared by Wait().
     /// -1 means "not started" or "already waited".
     pid: i32,
@@ -631,6 +645,7 @@ pub fn Command<S: Into<string>>(name: S, args: slice<string>) -> Cmd {
         Stdin: None,
         Stdout: None,
         Stderr: None,
+        ProcessState: None,
         pid: -1,
         stdin_pipe_read_fd: -1,
         cached_out_fd: -1,
@@ -1252,7 +1267,9 @@ impl Cmd {
             }
             return errors::New("exec: not started");
         }
-        let pid = self.pid;
+        // Clearing pid is what makes the second Wait above answer
+        // "Wait was already called"; the reap itself goes through
+        // Process, which carries the pid.
         self.pid = -1;
 
         // Drain captured pipes before blocking on wait4 to avoid
@@ -1271,17 +1288,38 @@ impl Cmd {
             self.cached_err_fd = -1;
         }
 
-        let mut status: i32 = 0;
-        let r = syscall::Wait4(pid, &mut status as *mut i32, 0, core::ptr::null_mut());
-        // The process is reaped either way: a later Kill must report
-        // ErrProcessDone rather than signalling a recycled pid.
-        if let Some(p) = &self.Process {
-            p.__set_done();
+        // Go reaps through `c.Process.Wait()` (exec.go:922) rather
+        // than calling wait4 itself, and that is not a stylistic
+        // preference: Process.Wait is what passes a rusage, so it is
+        // the only path on which `ProcessState.UserTime` has anything
+        // to report. goish had its own wait4 here with a NULL rusage,
+        // which is why this Cmd could not carry a ProcessState at all.
+        // Process.Wait also marks the process done, so a later Kill
+        // reports ErrProcessDone instead of signalling a recycled pid.
+        let p = match &self.Process {
+            Some(p) => p.clone(),
+            None => {
+                // pid >= 0 without a Process is unreachable — Start
+                // sets both — but the type allows it, so answer the
+                // way a never-started Cmd does rather than panic.
+                return errors::New("exec: not started");
+            }
+        };
+        let (st, werr) = p.Wait();
+        if !werr.IsNil() {
+            self.ProcessState = None;
+            return werr;
         }
-        if r < 0 {
-            return errors::New("os/exec: wait4 failed");
+        self.ProcessState = Some(st);
+        if st.Success() {
+            return crate::nilval::nil.into();
         }
-        decode_wait_status(int::from(i64::from(pid)), status)
+        // Go: `&ExitError{ProcessState: state}` — the SAME state, so
+        // the ExitError carries the rusage too.
+        return errors::Wrap(ExitError {
+            ProcessState: st,
+            Stderr: crate::make!([]byte, 0),
+        });
     }
 
     // go: none — goish-only placement: Go's Cmd.environ, exec.go line
@@ -1465,22 +1503,6 @@ fn child_die(code: i32) -> ! {
     loop {
         core::hint::spin_loop();
     }
-}
-
-/// Decode the raw `wait4(2)` status word into a goish `error`.
-/// Returns nil on clean exit 0, otherwise a descriptive error.
-fn decode_wait_status(pid: int, status: i32) -> error {
-    let st = crate::os::exec_posix::ProcessState::__new(pid, status);
-    if st.Success() {
-        return crate::nilval::nil.into();
-    }
-    // Go: Cmd.Wait returns `&ExitError{ProcessState: ps}` for any
-    // non-zero state, and the message is ProcessState.String() — so
-    // a signal renders by NAME ("signal: killed"), not by number.
-    return errors::Wrap(ExitError {
-        ProcessState: st,
-        Stderr: crate::make!([]byte, 0),
-    });
 }
 
 /// Read everything from `fd` into the goish writer. Buffers are 4 KiB.

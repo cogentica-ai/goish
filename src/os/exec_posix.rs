@@ -70,6 +70,47 @@ pub fn SignalString(sig: int) -> string {
     return string::from_static("signal ") + crate::strconv::Itoa(i64::from(sig));
 }
 
+// go: none — goish-only placement: Go's `Timeval` is at
+// syscall/ztypes_linux_amd64.go lines 27-30. goish has no .rs for that
+// generated file — anchoring here would make goishlint audit the whole
+// of ztypes against this one — so the citation is prose. The field
+// order IS the kernel's and must not be reordered: wait4(2) writes
+// this struct directly.
+/// Go: `syscall.Timeval`.
+#[derive(Clone, Copy, Default)]
+#[repr(C)]
+pub struct Timeval {
+    pub Sec: i64,
+    pub Usec: i64,
+}
+
+// go: none — goish-only placement: Go's `Rusage` is at
+// syscall/ztypes_linux_amd64.go lines 73-90; see `Timeval` above for
+// why the citation is prose.
+/// Go: the resource usage wait4(2) fills in. Only
+/// Utime and Stime are read today; the rest are carried because the
+/// kernel writes them and `SysUsage` hands the whole struct back.
+#[derive(Clone, Copy, Default)]
+#[repr(C)]
+pub struct Rusage {
+    pub Utime: Timeval,
+    pub Stime: Timeval,
+    pub Maxrss: i64,
+    pub Ixrss: i64,
+    pub Idrss: i64,
+    pub Isrss: i64,
+    pub Minflt: i64,
+    pub Majflt: i64,
+    pub Nswap: i64,
+    pub Inblock: i64,
+    pub Oublock: i64,
+    pub Msgsnd: i64,
+    pub Msgrcv: i64,
+    pub Nsignals: i64,
+    pub Nvcsw: i64,
+    pub Nivcsw: i64,
+}
+
 // go: none — goish-only shape: Go declares `ProcessState` at
 // os/exec_posix.go lines 81-85, holding a pid, a `syscall.WaitStatus`
 // and a `*syscall.Rusage`, and reaches the bits through `Sys()`. goish
@@ -87,6 +128,12 @@ pub fn SignalString(sig: int) -> string {
 pub struct ProcessState {
     pub(crate) pid: int,
     pub(crate) status: i32,
+    /// Go's `rusage *syscall.Rusage`. Go uses nil for "no rusage"
+    /// (a state built by anything but Wait); goish carries a zero
+    /// struct and a flag, because the accessors below must answer
+    /// something and Go's answer for nil is the zero Duration.
+    pub(crate) rusage: Rusage,
+    pub(crate) has_rusage: bool,
 }
 
 impl ProcessState {
@@ -94,7 +141,12 @@ impl ProcessState {
     // the values wait4 filled in; this names that construction.
     /// Build a state from a raw wait(2) status.
     pub fn __new(pid: int, status: i32) -> Self {
-        return ProcessState { pid, status };
+        return ProcessState {
+            pid,
+            status,
+            rusage: Rusage::default(),
+            has_rusage: false,
+        };
     }
 
     // go: sdk 1.25.5 os/exec_posix.go:88-90 ProcessState.Pid
@@ -165,6 +217,54 @@ impl ProcessState {
     /// with exit status 0 on Unix."
     pub fn Success(&self) -> bool {
         return self.Exited() && self.ExitCode() == 0;
+    }
+
+    // go: none — goish-only placement: Go's `ProcessState.UserTime` is
+    // os/exec.go:349-352, delegating to the per-platform `userTime`
+    // — os/exec_unix.go:137-139 on this one. goish has no .rs for
+    // either file: os/exec.go's name collides with the os/exec
+    // DIRECTORY, and exec_unix.go is not claimed here. So the citation
+    // is prose, the same reason as `Success` below.
+    /// Go: "UserTime returns the user CPU time of the exited process
+    /// and its children."
+    ///
+    /// Go's `userTime` reads `p.rusage.Utime`; a ProcessState built
+    /// without a Wait has a nil rusage there and Go panics on it. This
+    /// returns the zero Duration instead — the honest answer for a
+    /// state that never carried one, and the only one available to a
+    /// type that cannot be nil.
+    pub fn UserTime(&self) -> crate::time::Duration {
+        return timeval_to_duration(self.rusage.Utime);
+    }
+
+    // go: none — goish-only placement: Go's `ProcessState.SystemTime`
+    // is os/exec.go:354-357. Same reason as `UserTime` above for the
+    // prose citation.
+    /// Go: "SystemTime returns the system CPU time of the exited
+    /// process and its children." See `UserTime` on the nil rusage.
+    pub fn SystemTime(&self) -> crate::time::Duration {
+        return timeval_to_duration(self.rusage.Stime);
+    }
+
+    // go: none — goish-only: Go's `ProcessState.Sys` (os/exec.go lines
+    // 375-377) returns `any` holding a `syscall.WaitStatus`. goish has
+    // no WaitStatus type and no `any`, so this hands back the raw
+    // status word the predicates above read.
+    /// The raw wait(2) status.
+    pub fn Sys(&self) -> i32 {
+        return self.status;
+    }
+
+    // go: none — goish-only: Go's `ProcessState.SysUsage` (os/exec.go
+    // lines 384-386) returns `any` holding a `*syscall.Rusage`. goish
+    // returns the struct, and None when the state did not come from a
+    // Wait — which is Go's nil.
+    /// The rusage wait4(2) filled in, if this state came from a Wait.
+    pub fn SysUsage(&self) -> Option<Rusage> {
+        if !self.has_rusage {
+            return None;
+        }
+        return Some(self.rusage);
     }
 
     // go: sdk 1.25.5 os/exec_posix.go:108-136 ProcessState.String
@@ -284,6 +384,60 @@ impl Process {
         // SIGKILL is 9.
         return self.Signal(int::from(9));
     }
+
+    // go: none — goish-only placement: Go's `Process.Wait` is
+    // os/exec.go lines 339-341, delegating to `pidWait`
+    // (os/exec_unix.go lines 32-75). goish has no .rs for either file,
+    // so the citation is prose; the BODY is pidWait's second half.
+    /// Go: "Wait waits for the Process to exit, and then returns a
+    /// ProcessState describing its status and an error, if any."
+    ///
+    /// Go's first half has no counterpart: `blockUntilWaitable` exists
+    /// so that Wait can mark the process done BEFORE reaping it, which
+    /// closes a race where a concurrent Signal would target a reaped
+    /// pid. goish marks done after the reap, so that race is open — it
+    /// wants pidfd, which is the same dependency Go's own comment on
+    /// pidWait names. `Process.Release`, which Go checks for first, is
+    /// not ported either, so there is no statusReleased to answer.
+    pub fn Wait(&self) -> (ProcessState, crate::errors::error) {
+        let mut status: i32 = 0;
+        let mut ru = Rusage::default();
+        let pid32 = self.Pid as i32; // goishlint:ignore GOISH005 - a pid for wait4(2), a C ABI int
+        let r = crate::syscall::Wait4(
+            pid32,
+            &mut status as *mut i32,
+            0,
+            &mut ru as *mut Rusage as *mut u8,
+        );
+        if r < 0 {
+            return (
+                ProcessState::__new(self.Pid, 0),
+                crate::os::NewSyscallError(
+                    string::from_static("wait"),
+                    crate::errors::Wrap(crate::syscall::Errno((-r) as _)),
+                ),
+            );
+        }
+        self.__set_done();
+        return (
+            ProcessState {
+                pid: int::from(i64::from(r)),
+                status,
+                rusage: ru,
+                has_rusage: true,
+            },
+            crate::errors::nil,
+        );
+    }
+}
+
+// go: none — goish-only: Go's `ProcessState.userTime` is
+// `time.Duration(p.rusage.Utime.Nano()) * time.Nanosecond`, and
+// `Timeval.Nano` is syscall/timestruct.go lines 22-24. One helper
+// serves both accessors here.
+/// A wait4 Timeval as a Duration.
+fn timeval_to_duration(tv: Timeval) -> crate::time::Duration {
+    return crate::time::Duration(tv.Sec * 1_000_000_000 + tv.Usec * 1_000);
 }
 
 // go: none — goish-only placement: Go's `FindProcess` is
