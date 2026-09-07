@@ -21,6 +21,18 @@
 //     pub fn PrintDefaults(&self);
 //   }
 //
+// **No ErrorHandling, and that is a behavioural divergence, not a
+// missing accessor.** Go's `NewFlagSet(name, errorHandling)` takes a
+// policy that `Parse` acts on: ContinueOnError returns the error,
+// ExitOnError calls `os.Exit(2)` (or 0 for -help), PanicOnError
+// panics. goish's `NewFlagSet()` takes neither argument and always
+// behaves as ContinueOnError — the error comes back and the process
+// keeps running. A program ported from Go that relied on ExitOnError
+// to stop on a bad flag will CARRY ON here, which is the sort of
+// difference that shows up as odd behaviour rather than a compile
+// error. `flag.CommandLine` is Go's ExitOnError set, so this applies
+// to top-level `flag.Parse()` too.
+//
 // Each `String/Int/Bool/Float64` returns a typed `FlagHandle<T>` whose `Get()`
 // reads the parsed value. Internally backed by `Arc<SpinLock<T>>` so the
 // caller can hold the handle while the `FlagSet` mutates state.

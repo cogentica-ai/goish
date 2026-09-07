@@ -1732,6 +1732,31 @@ and control of the peek ordering. The Eager and non-reused paths are
 covered by the client smokes; these two rest on reading Go's rule and
 matching it.
 
+## 2o. `flag` always continues on a parse error
+
+Found 2026-09-07 while porting flag.Uint64.
+
+Go's `NewFlagSet(name, errorHandling)` takes a policy that Parse acts
+on (flag.go:1164): ContinueOnError returns the error, ExitOnError
+calls `os.Exit(2)` — or 0 for -help — and PanicOnError panics.
+`flag.CommandLine`, the set behind the top-level `flag.Parse()`, is an
+ExitOnError set, so a Go program with a bad flag STOPS.
+
+goish's FlagSet is hand-written and its `NewFlagSet()` takes neither
+argument. Parse always returns the error and the process carries on —
+ContinueOnError semantics for everything, including `flag.Parse()`.
+
+Two consequences worth separating. The signature difference is a
+compile error, which a porter sees immediately. The behaviour
+difference is SILENT: a program that relied on ExitOnError to stop on a
+bad flag runs on with a default value, which shows up as odd behaviour
+somewhere else entirely. The module header now says so.
+
+Closing it means giving NewFlagSet Go's two parameters and the
+ErrorHandling enum, then honouring it in Parse — a public API change to
+a hand-written type, so it wants doing deliberately rather than as a
+side effect of the next flag port.
+
 ## 2c. `regexp` does not keep Go's linear-time guarantee
 
 Go's regexp documents that it "is guaranteed to run in time linear in
