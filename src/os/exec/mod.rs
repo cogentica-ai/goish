@@ -367,11 +367,99 @@ impl Cmd {
     }
 }
 
-/// `exec.Command(name, args...)`. The first arg is the program name —
-/// run through `LookPath` if it has no `/` separator. Args[0] is set
-/// to `name` itself (matching Go's `cmd.Args[0] = cmd.Path` only if
-/// the lookup succeeded — Go preserves the original name on failure
-/// so callers see the typo'd argv[0] in error messages).
+// go: none — goish-only placement: Go's dedupEnvCase, exec.go line
+// 1250. Go: "dedupEnv is dedupEnv with a case option for testing. If
+// caseInsensitive is true, the case of keys is ignored. If nulOK is
+// false, items containing NUL characters are allowed."
+///
+/// The reverse walk is the algorithm: Go builds the output backwards
+/// so the LAST occurrence of a key wins, then reverses to restore the
+/// caller's order. Doing it forwards would keep the first.
+pub(crate) fn dedupEnvCase(
+    caseInsensitive: bool,
+    nulOK: bool,
+    env: slice<string>,
+) -> (slice<string>, error) {
+    let mut err: error = errors::nil;
+    let mut out = crate::make!([]string, 0, crate::len(&env));
+    let mut saw: crate::gomap::map<string, bool> = crate::gomap::map::new();
+    let mut n = crate::len(&env);
+    while n > 0 {
+        let kv = env[n - 1].clone();
+        n -= 1;
+
+        // Go: "Reject NUL in environment variables to prevent security
+        // issues (#56284); except on Plan 9, which uses NUL as
+        // os.PathListSeparator (#56544)."
+        if !nulOK && crate::strings::IndexByte(kv.clone(), 0) != -1 {
+            err = errors::New(string::from_static(
+                "exec: environment variable contains NUL",
+            ));
+            continue;
+        }
+
+        let mut i = crate::strings::Index(kv.clone(), string::from_static("="));
+        if i == 0 {
+            // Go: "We observe in practice keys with a single leading
+            // '=' on Windows."
+            i = crate::strings::Index(kv.slice(1, kv.Len()), string::from_static("=")) + 1;
+        }
+        if i < 0 {
+            // Go: "The entry is not of the form 'key=value' … Leave it
+            // as-is for now."
+            if kv.Len() != 0 {
+                out = crate::append!(out, kv);
+            }
+            continue;
+        }
+        let mut k = kv.slice(0, i);
+        if caseInsensitive {
+            k = crate::strings::ToLower(k);
+        }
+        let (seen, _) = saw.Get(k.clone());
+        if seen {
+            continue;
+        }
+        saw.Set(k, true);
+        out = crate::append!(out, kv);
+    }
+
+    // Go: "Now reverse the slice to restore the original order."
+    let ln = crate::len(&out);
+    let mut i: int = 0;
+    while i < ln / 2 {
+        let j = ln - i - 1;
+        let t = out[i].clone();
+        out[i] = out[j].clone();
+        out[j] = t;
+        i += 1;
+    }
+    return (out, err);
+}
+
+// go: none — goish-only placement: Go's dedupEnv, exec.go line 1243.
+/// Go: "returns a copy of env with any duplicates removed, in favor of
+/// later values. Items not of the normal environment 'key=value' form
+/// are preserved unchanged."
+///
+/// Go picks its two flags from runtime.GOOS; goish targets linux, so
+/// keys are case-SENSITIVE and NUL is rejected — the windows and plan9
+/// arms have no target to run on.
+pub(crate) fn dedupEnv(env: slice<string>) -> (slice<string>, error) {
+    return dedupEnvCase(false, false, env);
+}
+
+// go: none — goish-only placement: Go's addCriticalEnv, exec.go line
+// 1306.
+/// Go: "adds any critical environment variables that are required (or
+/// at least almost always required) on the operating system."
+/// Everything it does is inside `if runtime.GOOS != "windows" { return
+/// env }` — SYSTEMROOT. On linux it is the identity, and it is here so
+/// the call in `environ` reads like Go's.
+pub(crate) fn addCriticalEnv(env: slice<string>) -> slice<string> {
+    return env;
+}
+
 // go: none — goish-only: Go's Output points c.Stdout at a
 // `bytes.Buffer` it still holds a pointer to, and reads it after Run.
 // goish's Cmd OWNS the writer it is given, so the caller keeps a
@@ -510,6 +598,11 @@ impl prefixSuffixSaver {
     }
 }
 
+/// `exec.Command(name, args...)`. The first arg is the program name —
+/// run through `LookPath` if it has no `/` separator. Args[0] is set
+/// to `name` itself (matching Go's `cmd.Args[0] = cmd.Path` only if
+/// the lookup succeeded — Go preserves the original name on failure
+/// so callers see the typo'd argv[0] in error messages).
 pub fn Command<S: Into<string>>(name: S, args: slice<string>) -> Cmd {
     let name = name.into();
     let path = if name_has_slash(&name) {
@@ -1189,6 +1282,49 @@ impl Cmd {
             return errors::New("os/exec: wait4 failed");
         }
         decode_wait_status(int::from(i64::from(pid)), status)
+    }
+
+    // go: none — goish-only placement: Go's Cmd.environ, exec.go line
+    // 1189.
+    /// The environment the child would get: `Env` when set, else the
+    /// process environment, deduplicated last-wins.
+    ///
+    /// Go's PWD rule is deliberate and narrow, and worth keeping
+    /// verbatim: when `Dir` is set it appends `PWD=<abs Dir>`, but ONLY
+    /// when `Env` is nil — "to avoid unintended collateral damage we
+    /// only implicitly update PWD when Env is nil. That way, we're much
+    /// less likely to override an intentional change to the variable"
+    /// (go.dev/issue/50599).
+    pub(crate) fn environ(&self) -> (slice<string>, error) {
+        let mut err: error = errors::nil;
+        let mut env = self.Env.clone();
+        if crate::len(&env) == 0 {
+            env = crate::os::Environ();
+            if self.Dir.Len() != 0 {
+                let (pwd, abs_err) = crate::path::filepath::Abs(self.Dir.clone());
+                if abs_err.IsNil() {
+                    env = crate::append!(env, string::from_static("PWD=") + pwd);
+                } else if err.IsNil() {
+                    err = abs_err;
+                }
+            }
+        }
+        let (deduped, dedup_err) = dedupEnv(env);
+        if err.IsNil() {
+            err = dedup_err;
+        }
+        return (addCriticalEnv(deduped), err);
+    }
+
+    // go: none — goish-only placement: Go's Cmd.Environ, exec.go line
+    // 1215.
+    /// Go: "Environ returns a copy of the environment in which the
+    /// command would be run as it is currently configured." Go
+    /// intentionally drops the error — "environ returns a best-effort
+    /// environment no matter what" — and so does this.
+    pub fn Environ(&self) -> slice<string> {
+        let (env, _) = self.environ();
+        return env;
     }
 
     // go: none — goish-only placement: Go's Cmd.String, exec.go line

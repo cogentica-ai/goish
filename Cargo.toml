@@ -3488,6 +3488,10 @@ name = "http_expect100_server_smoke"
 path = "examples/http_expect100_server_smoke.rs"
 
 [[example]]
+name = "exec_environ_ref_smoke"
+path = "examples/exec_environ_ref_smoke.rs"
+
+[[example]]
 name = "exec_output_ref_smoke"
 path = "examples/exec_output_ref_smoke.rs"
 
