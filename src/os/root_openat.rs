@@ -70,14 +70,18 @@ impl Root {
     /// hostile path cannot turn one Open into unbounded work.
     // goishlint:ignore GOISH023 — the body ends in the walk loop, and
     // every exit from it is an explicit `return`.
-    pub(crate) fn doInRoot(&self, name: &string, flag: int, perm: FileMode) -> (i32, error) {
+    pub(crate) fn doInRoot<T, F>(&self, op: &str, name: &string, mut last: F) -> (T, error)
+    where
+        T: Default,
+        F: FnMut(i32, &string) -> LastResult<T>,
+    {
         const MAX_STEPS: i32 = 255;
         const MAX_RESTARTS: i32 = 8;
         const MAX_SYMLINKS: i32 = 8;
 
         let wrap = |e: error| -> error {
             return errors::Wrap(PathError {
-                Op: string::from_static("openat"),
+                Op: string::from(op),
                 Path: name.clone(),
                 Err: e,
             });
@@ -85,12 +89,12 @@ impl Root {
 
         let rootfd = *self.inner.fd.Lock();
         if rootfd < 0 {
-            return (-1, wrap(super::ErrClosed.into()));
+            return (T::default(), wrap(super::ErrClosed.into()));
         }
 
         let (mut parts, mut suffix_sep, err) = splitPathInRoot(name, &[], &[]);
         if !err.IsNil() {
-            return (-1, wrap(err));
+            return (T::default(), wrap(err));
         }
 
         let mut dirfd = rootfd;
@@ -103,7 +107,7 @@ impl Root {
                     syscall::Close(dirfd);
                 }
                 // ENAMETOOLONG, as Go returns.
-                return (-1, wrap(syscall::Errno(36).into()));
+                return (T::default(), wrap(syscall::Errno(36).into()));
             }
 
             if (parts[i].as_ref() as &str) == ".." {
@@ -117,7 +121,7 @@ impl Root {
                     if dirfd != rootfd {
                         syscall::Close(dirfd);
                     }
-                    return (-1, wrap(errPathEscapes()));
+                    return (T::default(), wrap(errPathEscapes()));
                 }
                 parts.drain(i - count..end);
                 if parts.is_empty() {
@@ -131,8 +135,8 @@ impl Root {
                 continue;
             }
 
-            let last = i == parts.len() - 1;
-            let comp = if last {
+            let is_last = i == parts.len() - 1;
+            let comp = if is_last {
                 parts[i].clone() + suffix_sep.clone()
             } else {
                 parts[i].clone()
@@ -141,42 +145,60 @@ impl Root {
             cb.extend_from_slice(super::bytes_of(&comp));
             cb.push(0);
 
-            #[allow(clippy::let_and_return)]
-            let openflags = if last {
-                crate::int32(flag) | syscall::O_NOFOLLOW | syscall::O_CLOEXEC
+            // The final component is the caller's business; every
+            // component before it is a directory this walk must open
+            // itself, always with O_NOFOLLOW so the kernel cannot
+            // traverse a link on our behalf.
+            let e: i32;
+            if is_last {
+                match last_step(&mut last, dirfd, &comp) {
+                    LastResult::Ok(v) => {
+                        if dirfd != rootfd {
+                            syscall::Close(dirfd);
+                        }
+                        return (v, errors::nil);
+                    }
+                    LastResult::Err(errno) => {
+                        if dirfd != rootfd {
+                            syscall::Close(dirfd);
+                        }
+                        return (T::default(), wrap(syscall::Errno(errno).into()));
+                    }
+                    // The step wants the link followed: fall through to
+                    // the splice below, exactly as Go's errSymlink does.
+                    LastResult::Symlink => {
+                        e = 40;
+                    }
+                }
             } else {
-                syscall::O_RDONLY
-                    | syscall::O_NOFOLLOW
-                    | syscall::O_CLOEXEC
-                    | syscall::O_DIRECTORY
-            };
-            let mode = if last { crate::int32(super::syscallMode(perm)) } else { 0 };
-            let fd = syscall::Openat(dirfd, cb.as_ptr(), openflags, mode);
-            if fd >= 0 {
-                if last {
+                let fd = syscall::Openat(
+                    dirfd,
+                    cb.as_ptr(),
+                    syscall::O_RDONLY
+                        | syscall::O_NOFOLLOW
+                        | syscall::O_CLOEXEC
+                        | syscall::O_DIRECTORY,
+                    0,
+                );
+                if fd >= 0 {
                     if dirfd != rootfd {
                         syscall::Close(dirfd);
                     }
-                    return (fd, errors::nil);
+                    dirfd = fd;
+                    i += 1;
+                    continue;
                 }
-                if dirfd != rootfd {
-                    syscall::Close(dirfd);
+                // ELOOP (40) and ENOTDIR (20) are how O_NOFOLLOW reports
+                // a symlink — ENOTDIR because a symlink used as a
+                // directory component fails that way. Anything else is
+                // the real error.
+                e = -fd;
+                if e != 40 && e != 20 {
+                    if dirfd != rootfd {
+                        syscall::Close(dirfd);
+                    }
+                    return (T::default(), wrap(syscall::Errno(e).into()));
                 }
-                dirfd = fd;
-                i += 1;
-                continue;
-            }
-
-            // ELOOP (40) and ENOTDIR (20) are how O_NOFOLLOW reports a
-            // symlink — ENOTDIR because a symlink used as a directory
-            // component fails that way. Anything else is the real
-            // error, reported against the path walked so far.
-            let e = -fd;
-            if e != 40 && e != 20 {
-                if dirfd != rootfd {
-                    syscall::Close(dirfd);
-                }
-                return (-1, wrap(syscall::Errno(e).into()));
             }
             let target = match read_link_at(dirfd, &parts[i]) {
                 Some(t) => t,
@@ -184,7 +206,7 @@ impl Root {
                     if dirfd != rootfd {
                         syscall::Close(dirfd);
                     }
-                    return (-1, wrap(syscall::Errno(e).into()));
+                    return (T::default(), wrap(syscall::Errno(e).into()));
                 }
             };
             symlinks += 1;
@@ -192,7 +214,7 @@ impl Root {
                 if dirfd != rootfd {
                     syscall::Close(dirfd);
                 }
-                return (-1, wrap(syscall::Errno(40).into()));
+                return (T::default(), wrap(syscall::Errno(40).into()));
             }
             let prefix: Vec<string> = parts[..i].to_vec();
             let rest: Vec<string> = parts[i + 1..].to_vec();
@@ -201,9 +223,9 @@ impl Root {
                 if dirfd != rootfd {
                     syscall::Close(dirfd);
                 }
-                return (-1, wrap(serr));
+                return (T::default(), wrap(serr));
             }
-            if last {
+            if is_last {
                 suffix_sep = new_sep;
             }
             // A component already walked has changed: restart, because
@@ -220,4 +242,31 @@ impl Root {
         }
         // Unreachable: every exit from the walk is a `return` above.
     }
+}
+
+// go: none — goish-only: Go's final step returns `(T, error)` and
+// signals "follow this symlink" with a distinguished `errSymlink`
+// error carrying the target. goish has no error type carrying a
+// payload the walk can read back, so the three outcomes are an enum
+// and the target is read by the walk itself.
+/// What a walk's final step can answer.
+pub(crate) enum LastResult<T> {
+    /// Done — this is the value.
+    Ok(T),
+    /// Failed, with a positive errno.
+    Err(i32),
+    /// The final component is a symlink and this operation FOLLOWS it.
+    /// An operation that acts on the link itself — Lstat, Remove,
+    /// Mkdir — never answers this, which is why `remove escape`
+    /// deletes the link and `lstat escape` describes it.
+    Symlink,
+}
+
+// go: none — goish-only: a named call so the walk's borrow of the
+// closure ends before the loop continues.
+fn last_step<T, F>(f: &mut F, dirfd: i32, comp: &string) -> LastResult<T>
+where
+    F: FnMut(i32, &string) -> LastResult<T>,
+{
+    return f(dirfd, comp);
 }

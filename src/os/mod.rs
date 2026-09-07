@@ -144,7 +144,7 @@ pub mod exec;
 pub mod exec_posix;
 pub mod root;
 pub mod root_openat;
-pub use root::{OpenRoot, Root};
+pub use root::{OpenInRoot, OpenRoot, Root};
 // Go's names for these are `os.Process`, `os.ProcessState` and
 // `os.ErrProcessDone` — the package, not a submodule. goish files them
 // under exec_posix (one .rs per .go, §33), so re-export them here or

@@ -895,6 +895,14 @@ pub const LOCK_NB: i32 = 4;
 
 pub const SYS_MKDIR: usize = 83;
 pub const SYS_UNLINK: usize = 87;
+pub const SYS_MKDIRAT: usize = 258;
+pub const SYS_UNLINKAT: usize = 263;
+
+/// `AT_REMOVEDIR` — make `unlinkat` behave as rmdir(2) instead of
+/// unlink(2). One flag is the whole difference between the two, which
+/// is why `os.Root.Remove` can try a file and fall back to a
+/// directory without a stat in between.
+pub const AT_REMOVEDIR: i32 = 0x200;
 pub const SYS_RMDIR: usize = 84;
 pub const SYS_CHMOD: usize = 90;
 pub const SYS_FCHMOD: usize = 91;
@@ -919,6 +927,48 @@ pub const SYS_UMASK: usize = 95;
 #[allow(non_snake_case)]
 pub fn Mkdir(path: *const u8, mode: u32) -> i32 {
     unsafe { syscall2(SYS_MKDIR, path as usize, mode as usize) as i32 }
+}
+
+// go: none — goish-only: the `at` form, taking a NUL-terminated
+// pointer and returning the raw -errno, for the reason the banner at
+// the top of this file gives for every wrapper here.
+/// `mkdirat(dirfd, path, mode)` — create a directory RELATIVE to
+/// `dirfd`. `os.Root` needs the relative form so the path cannot be
+/// redirected by anything that changes the process cwd.
+#[allow(non_snake_case)]
+pub fn Mkdirat(dirfd: i32, path: *const u8, mode: u32) -> i32 {
+    let r = unsafe { syscall3(SYS_MKDIRAT, dirfd as usize, path as usize, mode as usize) };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `unlinkat(dirfd, path, flags)` — remove a name RELATIVE to `dirfd`.
+/// With `AT_REMOVEDIR` it removes a directory instead.
+///
+/// It removes the NAME, never what a symlink points at, which is what
+/// makes `Root.Remove("link-pointing-outside")` delete the link and
+/// leave the target alone.
+#[allow(non_snake_case)]
+pub fn Unlinkat(dirfd: i32, path: *const u8, flags: i32) -> i32 {
+    let r = unsafe { syscall3(SYS_UNLINKAT, dirfd as usize, path as usize, flags as usize) };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `newfstatat(dirfd, path, &stat, flags)` — stat RELATIVE to `dirfd`.
+/// Pass `AT_SYMLINK_NOFOLLOW` for the Lstat form.
+#[allow(non_snake_case)]
+pub fn Fstatat(dirfd: i32, path: *const u8, out: &mut Stat_t, flags: i32) -> i32 {
+    let r = unsafe {
+        syscall4(
+            SYS_NEWFSTATAT,
+            dirfd as usize,
+            path as usize,
+            out as *mut Stat_t as usize,
+            flags as usize,
+        )
+    };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
 }
 
 /// `unlink(path)`. Returns 0 on success, -errno on failure.

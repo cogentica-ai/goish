@@ -156,7 +156,35 @@ impl Root {
                 }),
             );
         }
-        let (fd, err) = self.doInRoot(&name, flag, perm);
+        // The final step: openat with the caller's flags. O_NOFOLLOW is
+        // not optional — it is what stops the kernel traversing a
+        // symlink out of the root — and ELOOP/ENOTDIR from it is the
+        // signal to follow the link ourselves, under the walk's rules.
+        let flag32 = crate::int32(flag);
+        let mode32 = crate::int32(super::syscallMode(perm));
+        let (fd, err) = self.doInRoot(
+            "openat",
+            &name,
+            |dirfd: i32, comp: &crate::gostring::string| {
+                let mut cb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
+                cb.extend_from_slice(super::bytes_of(comp));
+                cb.push(0);
+                let fd = syscall::Openat(
+                    dirfd,
+                    cb.as_ptr(),
+                    flag32 | syscall::O_NOFOLLOW | syscall::O_CLOEXEC,
+                    mode32,
+                );
+                if fd >= 0 {
+                    return super::root_openat::LastResult::Ok(fd);
+                }
+                let e = -fd;
+                if e == 40 || e == 20 {
+                    return super::root_openat::LastResult::Symlink;
+                }
+                return super::root_openat::LastResult::Err(e);
+            },
+        );
         if !err.IsNil() {
             return (crate::nilval::nil.into(), err);
         }
@@ -218,4 +246,187 @@ pub(crate) fn splitPathInRoot(
     }
     parts.extend_from_slice(suffix);
     return (parts, suffix_sep, errors::nil);
+}
+
+impl Root {
+    // go: sdk 1.25.5 os/root.go:108-110 Root.Create
+    /// Go: "Create creates or truncates the named file in the root."
+    pub fn Create<N: Into<string>>(&self, name: N) -> (nilable<File>, error) {
+        return self.OpenFile(
+            name,
+            super::O_RDWR | super::O_CREATE | super::O_TRUNC,
+            FileMode(0o666),
+        );
+    }
+
+    // go: sdk 1.25.5 os/root.go:132-136 Root.OpenRoot
+    /// Go: "OpenRoot opens the named directory in the root."
+    ///
+    /// The new Root is reached through the SAME walk, so `..` is
+    /// refused here exactly as it is by Open — a caller cannot widen
+    /// its own root by asking for the parent.
+    pub fn OpenRoot<N: Into<string>>(&self, name: N) -> (nilable<Root>, error) {
+        let name: string = name.into();
+        let (f, err) = self.OpenFile(
+            name.clone(),
+            super::O_RDONLY | int::from(i64::from(syscall::O_DIRECTORY)),
+            FileMode(0),
+        );
+        if !err.IsNil() {
+            return (crate::nilval::nil.into(), err);
+        }
+        // The fd is taken over by the new Root. `File` has no Drop,
+        // so letting it go here closes nothing — the Root owns the
+        // descriptor from now on and its Close is what releases it.
+        let f = f.MustTake();
+        let fd = crate::int32(f.Fd());
+        return (
+            nilable::new(Root {
+                inner: alloc::sync::Arc::new(RootInner {
+                    fd: crate::sync::Mutex::new(fd),
+                }),
+                name,
+            }),
+            errors::nil,
+        );
+    }
+
+    // go: sdk 1.25.5 os/root.go:200-207 Root.Stat
+    /// Go: "Stat returns a FileInfo describing the named file in the
+    /// root." Symlinks are FOLLOWED, so a link pointing outside is
+    /// refused rather than described.
+    pub fn Stat<N: Into<string>>(&self, name: N) -> (super::FileInfoData, error) {
+        return self.__stat(name.into(), false);
+    }
+
+    // go: sdk 1.25.5 os/root.go:209-214 Root.Lstat
+    /// Go: "Lstat returns a FileInfo describing the named file in the
+    /// root. If the file is a symbolic link, the returned FileInfo
+    /// describes the symbolic link."
+    ///
+    /// So this one does NOT follow, and `Lstat` on a link pointing
+    /// outside SUCCEEDS — it describes the link, which is inside.
+    pub fn Lstat<N: Into<string>>(&self, name: N) -> (super::FileInfoData, error) {
+        return self.__stat(name.into(), true);
+    }
+
+    // go: sdk 1.25.5 os/root.go:149-155 Root.Mkdir
+    /// Go: "Mkdir creates a new directory in the root with the
+    /// specified name and permission bits."
+    ///
+    /// mkdirat never follows the final component, so a name that is
+    /// already a symlink answers "file exists" rather than an escape —
+    /// the link is in the way before its target is ever considered.
+    pub fn Mkdir<N: Into<string>>(&self, name: N, perm: FileMode) -> error {
+        let name: string = name.into();
+        let mode = crate::int32(super::syscallMode(perm));
+        let (_, err) = self.doInRoot::<i32, _>("mkdirat", &name, |dirfd, comp| {
+            let mut cb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
+            cb.extend_from_slice(super::bytes_of(comp));
+            cb.push(0);
+            let r = syscall::Mkdirat(dirfd, cb.as_ptr(), crate::uint32(mode));
+            if r == 0 {
+                return super::root_openat::LastResult::Ok(0);
+            }
+            return super::root_openat::LastResult::Err(-r);
+        });
+        return err;
+    }
+
+    // go: sdk 1.25.5 os/root.go:188-192 Root.Remove
+    /// Go: "Remove removes the named file or (empty) directory in the
+    /// root."
+    ///
+    /// unlinkat removes the NAME. A symlink pointing outside the root
+    /// is deleted here and its target is untouched, which is both
+    /// Go's behaviour and the safe one.
+    pub fn Remove<N: Into<string>>(&self, name: N) -> error {
+        let name: string = name.into();
+        let (_, err) = self.doInRoot::<i32, _>("removeat", &name, |dirfd, comp| {
+            let mut cb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
+            cb.extend_from_slice(super::bytes_of(comp));
+            cb.push(0);
+            let r = syscall::Unlinkat(dirfd, cb.as_ptr(), 0);
+            if r == 0 {
+                return super::root_openat::LastResult::Ok(0);
+            }
+            // EISDIR (21) and EPERM (1) are how unlink(2) refuses a
+            // directory; retry as rmdir, which is the whole of Go's
+            // removeat.
+            if -r == 21 || -r == 1 {
+                let r2 = syscall::Unlinkat(dirfd, cb.as_ptr(), syscall::AT_REMOVEDIR);
+                if r2 == 0 {
+                    return super::root_openat::LastResult::Ok(0);
+                }
+                return super::root_openat::LastResult::Err(-r2);
+            }
+            return super::root_openat::LastResult::Err(-r);
+        });
+        return err;
+    }
+
+    // go: none — goish-only: Go's Root.Stat and Root.Lstat both call
+    // `rootStat(r, name, lstat bool)` (os/root_openat.go). Same shape.
+    /// The shared body of Stat and Lstat.
+    fn __stat(&self, name: string, lstat: bool) -> (super::FileInfoData, error) {
+        let op = if lstat { "lstatat" } else { "statat" };
+        let (st, err) = self.doInRoot::<syscall::Stat_t, _>(op, &name, |dirfd, comp| {
+            let mut cb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
+            cb.extend_from_slice(super::bytes_of(comp));
+            cb.push(0);
+            // ALWAYS AT_SYMLINK_NOFOLLOW, even for the following form.
+            // Letting the kernel follow would resolve the link outside
+            // the walk, and outside the walk there is no root: a
+            // `Stat` of a link pointing out of the root SUCCEEDED that
+            // way, describing a file the caller must not be able to
+            // see. Stat follows by handing the link back to the walk,
+            // which re-resolves it under the escape rules.
+            let mut out = syscall::Stat_t::default();
+            let r = syscall::Fstatat(
+                dirfd,
+                cb.as_ptr(),
+                &mut out,
+                syscall::AT_SYMLINK_NOFOLLOW,
+            );
+            if r != 0 {
+                return super::root_openat::LastResult::Err(-r);
+            }
+            if !lstat && (out.st_mode & syscall::S_IFMT) == syscall::S_IFLNK {
+                return super::root_openat::LastResult::Symlink;
+            }
+            return super::root_openat::LastResult::Ok(out);
+        });
+        if !err.IsNil() {
+            return (
+                super::FileInfoData {
+                    name: name.clone(),
+                    size: 0,
+                    mode: FileMode(0),
+                    mod_time: crate::time::Time::default(),
+                    is_dir: false,
+                    sys: None,
+                },
+                err,
+            );
+        }
+        return (super::fileinfo_from_stat(super::base_name(&name), &st), errors::nil);
+    }
+}
+
+// go: sdk 1.25.5 os/root.go:25-33 OpenInRoot
+/// Go: "OpenInRoot opens the file name in the directory dir. It is
+/// equivalent to OpenRoot(dir) followed by opening the file in the
+/// root."
+pub fn OpenInRoot<D: Into<string>, N: Into<string>>(
+    dir: D,
+    name: N,
+) -> (nilable<File>, error) {
+    let (r, err) = OpenRoot(dir);
+    if !err.IsNil() {
+        return (crate::nilval::nil.into(), err);
+    }
+    let r = r.MustTake();
+    let out = r.Open(name);
+    let _ = r.Close();
+    return out;
 }

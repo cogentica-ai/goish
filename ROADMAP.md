@@ -2901,6 +2901,44 @@ signatures differ — the shims take `&mut [byte]` where drbg takes
 the RSA key path. It wants a ref smoke over a fixed reader first, which
 would also pin item 1.
 
+## 2q. os.Root: the walk is ported, the operations on it are not
+
+Landed 2026-09-07: `Root`, `OpenRoot`, `Root.{Name,Close,Open,OpenFile}`,
+`splitPathInRoot` and `doInRoot` — the openat walk that carries the
+whole security property — pinned 20/20 against Go by
+os_root_ref_smoke, with each of its two rules verified by a separate
+perturbation.
+
+UNPORTED, and listed here rather than waived, because every one of them
+is the SAME walk with a different final step (which is why `doInRoot`
+takes that step as a parameter in Go and here):
+
+  * stat half — `Root.Stat`, `Root.Lstat`, `Root.Readlink`,
+    `Root.ReadFile`. Needs `fstatat`, which the tree has as
+    SYS_NEWFSTATAT already, and `readlinkat`, added with the walk.
+  * mutating half — `Root.Mkdir`, `Root.MkdirAll`, `Root.Remove`,
+    `Root.RemoveAll`, `Root.Rename`, `Root.Link`, `Root.Symlink`,
+    `Root.Chmod`, `Root.Chown`, `Root.Lchown`, `Root.Chtimes`,
+    `Root.WriteFile`. Needs mkdirat, unlinkat, renameat, linkat,
+    symlinkat, fchmodat, fchownat, utimensat — none of which the tree
+    has yet.
+  * `OpenInRoot`, `Root.Create`, `Root.OpenRoot` — one-liners on what
+    is already here.
+  * `Root.FS` and the `rootFS` adapter, which want io/fs plumbing
+    rather than more syscalls.
+
+**The enabling step is a refactor, not a syscall.** `doInRoot` is
+currently specialised to openat as its last move. Generalising it to
+take the final operation — Go passes a function — is what makes the
+rest cheap, and it should happen before the second operation is
+written, not after the fifth.
+
+**A caution for whoever does the mutating half.** The escape rules are
+tested by os_root_ref_smoke through `Open` only. An operation added to
+the walk inherits the walk's guarantees, but NOT its coverage: a
+`Root.Remove` that resolved its own path would be unprotected and every
+existing row would still pass. Add the escape rows per operation.
+
 ## 3. Gaps other packages will hit next
 
 Re-measured 2026-09-04; four of the five entries this section used to
