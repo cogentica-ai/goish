@@ -38,6 +38,7 @@ use core::arch::asm;
 pub const SYS_READ: usize = 0;
 pub const SYS_WRITE: usize = 1;
 pub const SYS_OPEN: usize = 2;
+pub const SYS_OPENAT: usize = 257;
 pub const SYS_CLOSE: usize = 3;
 pub const SYS_MMAP: usize = 9;
 pub const SYS_MPROTECT: usize = 10;
@@ -638,6 +639,16 @@ pub const O_CLOEXEC: i32 = 0o2_000_000;
 /// the file itself (follows symlinks; needs only search permission).
 pub const O_PATH: i32 = 0o10_000_000;
 
+/// `O_NOFOLLOW` — fail with ELOOP if the final component is a symlink.
+///
+/// This is the whole basis of `os.Root`: resolving a path one component
+/// at a time with openat(2) and O_NOFOLLOW is what makes a symlink
+/// unable to carry the walk out of the root, no matter who wrote it.
+pub const O_NOFOLLOW: i32 = 0o400_000;
+
+/// `O_DIRECTORY` — fail with ENOTDIR unless the target is a directory.
+pub const O_DIRECTORY: i32 = 0o200_000;
+
 /// `open(2)` — open a file. `path` must be a NUL-terminated C string.
 /// Returns the new fd on success, or a negative `-errno` on error.
 #[allow(non_snake_case)]
@@ -756,6 +767,32 @@ pub fn Fstat(fd: i32, out: &mut Stat_t) -> i32 {
     unsafe { syscall2(SYS_FSTAT, fd as usize, out as *mut Stat_t as usize) as i32 }
 }
 
+// go: none — goish-only: Go's `syscall.Openat` takes a Go string and
+// returns `(int, error)`; this takes a NUL-terminated pointer and
+// returns the raw -errno, for the reason the banner at the top of this
+// file gives for every wrapper here.
+/// `openat(dirfd, path, flags, mode)` — open `path` RELATIVE to the
+/// directory `dirfd` refers to, rather than to the process cwd.
+/// `path` must be NUL-terminated; returns the fd or the raw -errno.
+///
+/// The relative resolution is the point. A path resolved against a
+/// directory fd cannot be redirected by anything that happens to the
+/// process cwd, and combined with O_NOFOLLOW it is how `os.Root`
+/// refuses a traversal instead of merely detecting one.
+#[allow(non_snake_case)]
+pub fn Openat(dirfd: i32, path: *const u8, flags: i32, mode: i32) -> i32 {
+    let r = unsafe {
+        syscall4(
+            SYS_OPENAT,
+            dirfd as usize,
+            path as usize,
+            flags as usize,
+            mode as usize,
+        )
+    };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
 /// `fstatat(AT_FDCWD, path, &stat, 0)` — stat a path relative to CWD,
 /// following symlinks. `path` must be NUL-terminated.
 pub const AT_FDCWD: i32 = -100;
@@ -864,6 +901,7 @@ pub const SYS_FCHMOD: usize = 91;
 pub const SYS_MKNOD: usize = 133;
 pub const SYS_SYMLINK: usize = 88;
 pub const SYS_READLINK: usize = 89;
+pub const SYS_READLINKAT: usize = 267;
 pub const SYS_RENAME: usize = 82;
 pub const SYS_LINK: usize = 86;
 pub const SYS_TRUNCATE: usize = 76;
@@ -954,6 +992,27 @@ pub fn Mknod(path: *const u8, mode: i32, dev: u64) -> i32 {
 #[allow(non_snake_case)]
 pub fn Readlink(path: *const u8, buf: *mut u8, bufsiz: usize) -> isize {
     unsafe { syscall3(SYS_READLINK, path as usize, buf as usize, bufsiz) as isize }
+}
+
+// go: none — goish-only: Go's `unix.Readlinkat` takes a Go string and
+// returns `(int, error)`; this takes a NUL-terminated pointer and
+// returns the raw -errno, for the reason the banner at the top of this
+// file gives for every wrapper here.
+/// `readlinkat(dirfd, path, buf, bufsiz)` — read a symlink target
+/// RELATIVE to `dirfd`. `os.Root` needs the relative form for the same
+/// reason it needs openat: the answer must not depend on the process
+/// cwd, which anything else in the program can change underneath it.
+#[allow(non_snake_case)]
+pub fn Readlinkat(dirfd: i32, path: *const u8, buf: *mut u8, bufsiz: usize) -> isize {
+    return unsafe {
+        syscall4(
+            SYS_READLINKAT,
+            dirfd as usize,
+            path as usize,
+            buf as usize,
+            bufsiz,
+        )
+    };
 }
 
 /// `utimensat(dirfd, path, times, flags)` — set file access/modification

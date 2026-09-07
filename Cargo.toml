@@ -2116,6 +2116,10 @@ name = "exec_processstate_ref_smoke"
 path = "examples/exec_processstate_ref_smoke.rs"
 
 [[example]]
+name = "os_root_ref_smoke"
+path = "examples/os_root_ref_smoke.rs"
+
+[[example]]
 name = "flag_func_ref_smoke"
 path = "examples/flag_func_ref_smoke.rs"
 
