@@ -285,7 +285,14 @@ at four lengths, the whitespace-before-a-soft-break case, and the
 `checkLastByte` rule that re-encodes a trailing space or tab. `qp_smoke`
 is now declared in Cargo.toml — it never was, so e2e had never run it.
 
-`mime/multipart`'s writer half followed: 18/36 with 8 anchors is now
+**mime is 77/77 by declaration now** — all three packages, the reader
+half included (2026-09-07). Getting there found two defects in the
+reader's "replaced by design" group: a boundary scanner that truncated
+a part at data merely STARTING like the boundary, and a header parser
+that rejected folded continuation lines outright. Both are fixed and
+pinned; ROADMAP §2b-vi has the detail and the order that produced it.
+
+`mime/multipart`'s writer half came first: 18/36 with 8 anchors is now
 24/36 with 29, and writer.go is complete. The six that were missing
 were `CreatePart` and everything that hangs off it — `CreateFormFile`,
 `CreateFormField`, `escapeQuotes`, `randomBoundary`, and the `part`

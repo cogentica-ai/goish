@@ -7,6 +7,52 @@
 // servers that already buffer the request body (goish's Request.Body
 // is `slice<byte>`).
 //
+// ─── Go's streaming half, and where it went ─────────────────────────
+//
+// Thirteen of Go's declarations exist to read a part off a
+// bufio.Reader without ever holding it whole: the scanner, its
+// one-byte lookahead, the readers that wrap it. An eager reader needs
+// none of them. They are waived below — but only AFTER the behaviour
+// each one carries was run against Go, because "replaced by design"
+// is what a defect hides behind. Two of these thirteen turned out to
+// be defects: the boundary scanner truncated a part at data that
+// merely started like the boundary, and the header parser rejected
+// folded lines. Both are fixed, and the waivers cite the smokes that
+// would catch them coming back.
+//
+// go: waived matchAfterPrefix — `find_boundary` below, the rule that
+// a boundary match is only real if the next byte is space, tab, CR,
+// LF or `-` (examples/multipart_falseboundary_ref_smoke.rs).
+// go: waived scanUntilBoundary — the same search, run over bytes
+// already in hand instead of a streaming window
+// (examples/multipart_boundary_ref_smoke.rs).
+// go: waived Reader.isBoundaryDelimiterLine — the delimiter-line
+// test, including the transport padding RFC 2046 5.1 allows and the
+// LF-only mode Go switches into; same smoke, rows lwsp-* and lf-only.
+// go: waived Reader.isFinalBoundary — the closing `--` test; same
+// smoke, rows lwsp-final and lwsp-both.
+// go: waived skipLWSPChar — the padding skip both of those use.
+// go: waived readMIMEHeader — the part's header block, CONTINUED
+// lines and all (examples/multipart_headers_ref_smoke.rs).
+// go: waived Part.populateHeaders — the same block plus its limits;
+// the 10000-header count is enforced inline here
+// (examples/multipart_maxheaders_smoke.rs), and maxMIMEHeaderSize is
+// not ported for the reason given at the header loop.
+// go: waived maxMIMEHeaders — that count, as a literal rather than a
+// godebug-tunable.
+// go: waived Part.parseContentDisposition — FormName and FileName
+// parse the header directly (examples/multipart_disposition_ref_smoke.rs).
+// go: waived newPart — the constructor; next_part builds the Part
+// inline because there is no reader to attach to it.
+// go: waived partReader.Read — Go's undecoded reader over a part;
+// here NextRawPart returns a Part whose bytes ARE undecoded and whose
+// Read walks them (examples/multipart_rawpart_ref_smoke.rs).
+// go: waived stickyErrorReader.Read — makes a streaming read error
+// repeat; an eager reader has no stream left to fail.
+// go: waived sectionReadCloser.Close — closes a section of the
+// spill-to-disk temp file, which formdata.rs documents as absent
+// wholesale (the budget it protected IS kept and tested).
+//
 // Design notes:
 //   * Boundary handling matches RFC 2046: each part is preceded by
 //     `\r\n--<boundary>` (or `--<boundary>` at the very start), and the

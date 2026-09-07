@@ -1624,6 +1624,12 @@ the answer to whether it was worth doing:
     pinned by examples/multipart_headers_ref_smoke.rs, which fails 6
     of 10 without it.
 
+With that read done, the thirteen ARE waived now — each against the
+place its behaviour lives and each citing the smoke that would catch a
+regression, which is the order this section keeps arguing for: measure
+first, fix what the measurement breaks, waive what survives it. mime
+is 90/90 by declaration.
+
 Still divergent and recorded rather than fixed: the error TEXT. Go's
 malformed-header failures carry textproto's wording ("malformed MIME
 header initial line: ..."), goish's say "multipart: malformed header".
