@@ -6,6 +6,17 @@
 //     constructs either. goish does not carry a type it can never
 //     produce, so their `Error` methods have no counterpart.
 // goishlint:ignore GOISH021 ReadError, WriteError — see above.
+//
+// The lint ignore above silences the RULE; it does not tell the
+// coverage count anything, and the two are orthogonal. Receiver
+// qualified on purpose and NOT also spelled bare: `Error` is the
+// method name of CorruptInputError and InternalError too, and a bare
+// waiver would take those real, ported declarations out of the
+// denominator along with these.
+// go: waived ReadError.Error — the method of a deprecated type Go
+// documents as "no longer returned" and nothing constructs; goish
+// does not carry the type, so the method has no counterpart.
+// go: waived WriteError.Error — same, for the write-side twin.
 // goishlint:ignore GOISH021 maxCodeLen — Go sizes two scratch arrays in
 //     `huffmanDecoder.init` with it; goish sizes the same two as
 //     `[int; 17]` literals, because a Rust array length must be a
