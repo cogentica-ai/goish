@@ -17,11 +17,22 @@ rows 2026-08-30.
 > touching an anchored file, which is why a ratio is worth quoting and
 > a count is not.
 
-## The whole tree — 5103 / 11026 functions (46.3%)
+## The whole tree — 5115 / 11017 functions (46.4%)
 
 Across the 165 packages of the Go 1.25.5 standard library that have a
 goish port: **111 are at 100%**. Was 4452 / 11061 (40.3%) across 169
-packages with 89 at 100% on 2026-08-15.
+packages with 89 at 100% on 2026-08-15, and 5103 / 11026 (46.3%)
+before 2026-09-07.
+
+**By DECLARATION the same tree is 5898 / 11819 (49.9%), with 122
+packages at 100%** (re-measured 2026-09-07). Do not read that as "the
+stricter mode is kinder" — the two counts differ in BOTH directions
+and neither dominates. By name, six ported methods called `Read` are
+one ported name; by declaration they are six. By declaration a method
+Go declares and goish does not is visible, where by name a same-named
+sibling hides it — which is exactly how net/http read 639/639 while
+54 declarations had no anchor (§2b-vi). Quote whichever answers the
+question being asked, and say which one it is.
 
 **Two denominators, and they are not interchangeable.** The figure
 above counts only packages that HAVE a port, which is what the older
