@@ -2802,10 +2802,12 @@ impl Client {
                         // call would shift every length by one and
                         // let defaultCheckRedirect run an extra hop.
                         via.push(current.clone());
-                        let e = match self.CheckRedirect.as_ref() {
-                            Some(fn_) => fn_(&next, &via[..]),
-                            None => defaultCheckRedirect(&next, &via[..]),
-                        };
+                        // Go calls c.checkRedirect here rather than
+                        // reaching into c.CheckRedirect, and so does
+                        // this now: the match used to be inlined, which
+                        // left the anchored method with no caller and
+                        // the policy decision written in two places.
+                        let e = self.checkRedirect(&next, &via[..]);
                         if !e.IsNil() {
                             let sentinel: error = ErrUseLastResponse.into();
                             if errors::Is(e.clone(), sentinel) {

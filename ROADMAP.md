@@ -1349,6 +1349,36 @@ is worse than none, because it reports OK.
 
 ### Working through the list
 
+**Read 2026-09-07, four findings, one change.** The list is 28 and the
+hit rate is not what §2b's lists gave — these need opening one at a
+time, and three of the four were fine:
+
+  - `header.rs`'s `headerNewlineToSpace` looked like the worst possible
+    case, a CR/LF sanitiser with no caller. It is not: `Header.Write`
+    calls `sanitize_header_value`, which does the replacement; the
+    exported function only publishes the same mapping "so the mapping
+    has one definition". No defect.
+  - `header.rs`'s `timeFormats` is uncalled because `ParseTime` parses
+    the same three formats by hand rather than looping a layout table.
+    One divergence falls out and is NOT worth changing: on failure Go
+    returns the last `time.Parse` error, a `*time.ParseError`, where
+    goish returns `errors::New("http: invalid date format")`.
+    `http_time_smoke` checks only whether an error occurred, so nothing
+    pins it — but Go does not document an error type here, so the text
+    is an implementation detail either way.
+  - `client.rs`'s `checkRedirect` WAS being honoured, by an inlined
+    copy of its body in the redirect loop. Not a defect, but the policy
+    decision was written in two places and the anchored method had no
+    caller. Now the loop calls `self.checkRedirect(&next, &via[..])`,
+    as Go's does. http_checkredirect_smoke 4/4, http_redirect_smoke
+    3/3, http_redirect_semantics_smoke 13/13, http_redirect_creds_smoke
+    ok.
+
+The lesson for the rest of the list: TESTED_NOT_WIRED plus "Go calls it"
+is a question, not a verdict. Three of these four are functions goish
+reaches by another route, which the checker cannot see and only reading
+settles.
+
 Fixed so far, one per finding read:
 
   - `Redirect` did not call `hexEscapeNonASCII`, so the Location header
