@@ -326,6 +326,10 @@ pub fn ErrProcessDone() -> crate::errors::error {
 pub struct Process {
     pub Pid: int,
     done: alloc::sync::Arc<core::sync::atomic::AtomicBool>,
+    /// Set by `Release`. Shared by clones, because Go's Signal checks
+    /// the released state before the done state and answers a
+    /// DIFFERENT error for it.
+    released: alloc::sync::Arc<core::sync::atomic::AtomicBool>,
 }
 
 impl Process {
@@ -336,6 +340,7 @@ impl Process {
         return Process {
             Pid: pid,
             done: alloc::sync::Arc::new(core::sync::atomic::AtomicBool::new(false)),
+            released: alloc::sync::Arc::new(core::sync::atomic::AtomicBool::new(false)),
         };
     }
 
@@ -360,6 +365,14 @@ impl Process {
     /// racing Wait would see "no such process" — an error about the
     /// implementation rather than about the process.
     pub fn Signal(&self, sig: int) -> crate::errors::error {
+        // Go's pidSignal tests the RELEASED state first and answers a
+        // different error for it (os/exec_unix.go:93-96). The order
+        // matters for more than the message: Release sets Pid to -1,
+        // and kill(-1, sig) means "every process this user may signal".
+        // Reaching the syscall at all here would be catastrophic.
+        if self.released.load(core::sync::atomic::Ordering::Acquire) {
+            return crate::errors::New(string::from_static("os: process already released"));
+        }
         if self.done.load(core::sync::atomic::Ordering::Acquire) {
             return ErrProcessDone();
         }
@@ -374,6 +387,25 @@ impl Process {
             return ErrProcessDone();
         }
         return crate::errors::Wrap(crate::syscall::Errno((-r) as _));
+    }
+
+    // go: none — goish-only placement: Go's `Process.Release` is
+    // os/exec.go lines 272-283. goish has no .rs for os/exec.go — the
+    // name collides with the os/exec DIRECTORY — so the citation is
+    // prose, as for the rest of this file.
+    /// Go: "Release releases any resources associated with the Process
+    /// p, rendering it unusable in the future. Release only needs to
+    /// be called if Wait is not."
+    ///
+    /// Go sets Pid to -1 here, and its own comment says why it cannot
+    /// stop: "for historical reasons". goish matches, because callers
+    /// read that field — and because the released flag below is what
+    /// keeps a later Signal away from kill(-1, …).
+    pub fn Release(&mut self) -> crate::errors::error {
+        self.released
+            .store(true, core::sync::atomic::Ordering::Release);
+        self.Pid = int::from(-1);
+        return crate::errors::nil;
     }
 
     // go: none — goish-only placement: Go's `Process.Kill` is

@@ -1633,6 +1633,21 @@ pub fn Lchown<N: Into<string>>(name: N, uid: int, gid: int) -> error {
     nil
 }
 
+// go: none — goish-only placement: Go's `Getpagesize` is os/types.go
+// line 13, in a file goish does not claim (os/types.go also declares
+// FileInfo and FileMode, which live in crate::io::fs here).
+//
+// Go's `syscall.Getpagesize` is linknamed to the runtime
+// (runtime/runtime.go:124-125) and returns `physPageSize`, which the
+// runtime discovers at startup — not a getpagesize(2) call. goish
+// targets linux/amd64 only, where that value is 4096, so the constant
+// is the same answer by a shorter route. It would need discovering if
+// a second architecture ever arrives.
+/// Go: "Getpagesize returns the underlying system's memory page size."
+pub fn Getpagesize() -> int {
+    return int::from(4096);
+}
+
 // go: sdk 1.25.5 os/proc.go:31 Getuid
 /// `os.Getuid()` (proc.go:31) — caller's real user id.
 pub fn Getuid() -> int {
@@ -2158,6 +2173,43 @@ impl File {
             name,
             dirinfo: None,
         }
+    }
+
+    // go: sdk 1.25.5 os/file_posix.go:204-213 File.Chdir
+    /// Go: "Chdir changes the current working directory to the file,
+    /// which must be a directory. If there is an error, it will be of
+    /// type *PathError."
+    ///
+    /// fchdir(2) rather than chdir(2) on the name: the directory is
+    /// identified by the OPEN fd, so nothing that happens to the path
+    /// between opening it and moving there can redirect the answer.
+    pub fn Chdir(&self) -> error {
+        if self.fd < 0 {
+            return self.wrapErr("chdir", ErrClosed.into());
+        }
+        let r = syscall::Fchdir(self.fd);
+        if r < 0 {
+            return self.fdErr("chdir", r);
+        }
+        return nil;
+    }
+
+    // go: sdk 1.25.5 os/file_posix.go:136-144 File.Chown
+    /// Go: "Chown changes the numeric uid and gid of the named file.
+    /// If there is an error, it will be of type *PathError."
+    pub fn Chown(&self, uid: int, gid: int) -> error {
+        if self.fd < 0 {
+            return self.wrapErr("chown", ErrClosed.into());
+        }
+        let r = syscall::Fchown(
+            self.fd,
+            crate::uint32(crate::int32(uid)),
+            crate::uint32(crate::int32(gid)),
+        );
+        if r < 0 {
+            return self.fdErr("chown", r);
+        }
+        return nil;
     }
 
     // go: sdk 1.25.5 os/file.go:725-727 File.Fd

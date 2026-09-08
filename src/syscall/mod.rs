@@ -898,6 +898,8 @@ pub const SYS_UNLINK: usize = 87;
 pub const SYS_MKDIRAT: usize = 258;
 pub const SYS_UNLINKAT: usize = 263;
 pub const SYS_FCHOWNAT: usize = 260;
+pub const SYS_FCHDIR: usize = 81;
+pub const SYS_FCHOWN: usize = 93;
 pub const SYS_RENAMEAT: usize = 264;
 pub const SYS_LINKAT: usize = 265;
 pub const SYS_SYMLINKAT: usize = 266;
@@ -1040,6 +1042,25 @@ pub fn Symlinkat(target: *const u8, newdirfd: i32, linkpath: *const u8) -> i32 {
             linkpath as usize,
         )
     };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `fchdir(fd)` — make the directory `fd` refers to the process cwd.
+/// Returns 0 or the raw -errno.
+#[allow(non_snake_case)]
+pub fn Fchdir(fd: i32) -> i32 {
+    let r = unsafe { syscall1(SYS_FCHDIR, fd as usize) };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `fchown(fd, uid, gid)` — change the owner of an OPEN file, so the
+/// answer cannot be redirected by a rename between the check and the
+/// call.
+#[allow(non_snake_case)]
+pub fn Fchown(fd: i32, uid: u32, gid: u32) -> i32 {
+    let r = unsafe { syscall3(SYS_FCHOWN, fd as usize, uid as usize, gid as usize) };
     return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
 }
 
