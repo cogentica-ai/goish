@@ -1499,3 +1499,20 @@ pub fn SplitAfterN<S1: Into<slice<byte>>, S2: Into<slice<byte>>>(
     let save = toint(sep.Len());
     return genSplit(s, sep, save, n);
 }
+
+// Go's two negated-scan helpers, inlined into their callers here and
+// waived so the count stops crediting them by CASE. `port_coverage`
+// matches case-insensitively, so `indexFunc` was credited to goish's
+// exported `IndexFunc` — a different declaration — and read as ported
+// with nothing having checked it. Same substitution as strings', and
+// the same fix.
+//
+// Both are genuinely inlined, checked against Go on 2026-09-06:
+// `IndexFunc` decodes runes and returns on `f(r)`, which is Go's
+// `indexFunc(s, f, true)`; `TrimLeftFunc` walks while `f(r)` holds and
+// breaks on the first false, which is `indexFunc(s, f, false)`. Go
+// threads a `truth` parameter through one helper; goish spells it as
+// the condition of whichever loop needs it.
+//
+// go: waived indexFunc — inlined into IndexFunc and TrimLeftFunc; Go's `truth` parameter becomes each loop's own condition.
+// go: waived lastIndexFunc — inlined into LastIndexFunc and TrimRightFunc, the same way.

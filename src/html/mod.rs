@@ -1,6 +1,6 @@
 // html — HTML escape / unescape.
 //
-// Reference: /share/go/src/html/escape.go (214 LOC).
+// Reference: html/escape.go (214 LOC).
 //
 // The full HTML5 named-entity table now ships, in entity.rs, generated
 // from Go's own entity.go rather than transcribed.
@@ -8,7 +8,7 @@
 // Slim deviations from upstream (documented):
 //
 //   * Full HTML5 named-entity table (2261 LOC of static data in
-//     /share/go/src/html/entity.go) is NOT shipped. `UnescapeString`
+//     html/entity.go) is NOT shipped. `UnescapeString`
 //     recognises only the five standard entities — `&amp;`, `&lt;`,
 //     `&gt;`, `&quot;`, `&apos;` (the inverse of `EscapeString`) —
 //     plus all numeric character references (`&#NN;` and `&#xNN;`),

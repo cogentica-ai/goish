@@ -4,8 +4,20 @@
 // tools/gen_client_timeout_ref.go. The GO[] line is Go's verbatim
 // output.
 //
-// One line, four assertions, and it exists because the API it checks
-// was ported onto a type the client never produced.
+// Two lines, and each exists because an API it checks was ported onto
+// something the client never produced.
+//
+// The second line is the body half. Client.Timeout covers reading the
+// response too, and there the error is not a url.Error at all — the
+// response already arrived. Go's cancelTimerBody.Read wraps whatever
+// the read returned, but only when the client's own timer fired, and
+// marks it a timeout. goish HAD the predicate: setRequestCancel
+// returns it, and the call site's comment even reads
+// `&cancelTimerBody{stop, rc, reqDidTimeout}` — while passing only
+// `stop`. So a body read killed by Client.Timeout came back as
+// "read tcp 127.0.0.1:60460->…: i/o timeout", naming a port instead
+// of the deadline. The same bug had already been found and fixed one
+// call earlier, for the awaiting-headers annotation.
 //
 // Go wraps EVERY error out of Client.do in a `*url.Error`
 // (client.go:617-634), which is what makes the standard idiom work:
@@ -44,8 +56,10 @@ use goish::net::url;
 use goish::{go, string, time};
 
 // Go's verbatim output.
-const GO: [&str; 1] =
-    ["client-timeout urlErr=true  Timeout=true  Temporary=true  netErr=true  op=\"Get\""];
+const GO: [&str; 2] = [
+    "client-timeout urlErr=true  Timeout=true  Temporary=true  netErr=true  op=\"Get\"",
+    "body-timeout n=10 netErr=true  Timeout=true  err=\"context deadline exceeded (Client.Timeout or context cancellation while reading body)\"",
+];
 
 static FAILED: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
 static LN: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
@@ -149,6 +163,70 @@ fn run() {
         is_net_err,
         op
     ));
+
+    // ── the other half: Client.Timeout while reading the BODY ──
+    //
+    // The response came back fine, so there is no url.Error here at
+    // all — Go's cancelTimerBody.Read wraps the read error instead,
+    // and only when the client's own timer is what fired. goish had
+    // the predicate (`setRequestCancel` returns it, and the call site
+    // even cited `&cancelTimerBody{stop, rc, reqDidTimeout}`) but
+    // handed the body only the stop function, so a body read killed
+    // by Client.Timeout surfaced the raw socket error with a port
+    // number in it, saying nothing about which deadline killed it.
+    let mux = http::ServeMux::new();
+    mux.HandleFunc("/s", |w, _r| {
+        w.Header().Set(string("Content-Length"), string("100"));
+        let _ = w.Write(goish::bytes("0123456789"));
+        let (fl, ok) = goish::cast!(w, http::Flusher);
+        if ok {
+            fl.Flush();
+        }
+        time::Sleep(time::Duration(3 * 1_000_000_000));
+    });
+    let srv = Arc::new(http::Server {
+        Handler: Arc::new(mux),
+        ReadHeaderTimeout: time::Duration(5 * 1_000_000_000),
+        ..Default::default()
+    });
+    let (bln, ble) = net::Listen(string("tcp"), string("127.0.0.1:0"));
+    if !ble.IsNil() {
+        fmt::Printf!("listen 2: %v\n", ble);
+        goish::os::Exit(1);
+    }
+    let bport = bln.Addr().Port;
+    {
+        let s2 = srv.clone();
+        go!(stack(1024 * 1024), move || {
+            let _ = s2.Serve(bln);
+        });
+    }
+    time::Sleep(time::Duration(200_000_000));
+
+    let mut bclient = http::Client::default();
+    bclient.Timeout = time::Duration(400_000_000);
+    bclient.Transport = Arc::new(http::Transport::default());
+    let (breq, _) = http::NewRequest(
+        string("GET"),
+        fmt::Sprintf!("http://127.0.0.1:%d/s", bport as i64),
+        goish::nil,
+    );
+    let (mut bresp, bgeterr) = bclient.Do(&breq);
+    if !bgeterr.IsNil() {
+        fmt::Printf!("body-timeout get failed: %v\n", bgeterr);
+        goish::os::Exit(1);
+    }
+    let (bbytes, readerr) = goish::io::ReadAll(&mut bresp.Body);
+    let (bne, is_body_net) = errors::AsIface::<goish::d!(goish::net::net::Error)>(&readerr);
+    let btimeout = is_body_net && bne.Timeout();
+    chk(fmt::Sprintf!(
+        "body-timeout n=%d netErr=%-5v Timeout=%-5v err=%q",
+        bbytes.Len() as i64,
+        is_body_net,
+        btimeout,
+        readerr
+    ));
+    let _ = srv.clone().Close();
 
     use core::sync::atomic::Ordering;
     let f = FAILED.load(Ordering::Relaxed);

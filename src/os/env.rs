@@ -39,8 +39,15 @@ pub fn Getenv<K: Into<string>>(key: K) -> string {
 // go: sdk 1.25.5 os/env.go:118-125 Setenv
 /// Set the
 /// value of the environment variable named `key`. Goish slim: writes
-/// to a process-wide overlay rather than the kernel envp, so child
-/// processes won't inherit the change (no exec support yet).
+/// to a process-wide overlay rather than the kernel envp.
+///
+/// Children DO inherit the change, contrary to what this comment said
+/// until 2026-09-06 ("child processes won't inherit the change (no
+/// exec support yet)"). `os/exec` exists, and it builds its envp from
+/// `os::Environ`, which merges the overlay over kernel envp and drops
+/// tombstoned keys — so a Setenv before a Command is visible in the
+/// child, as in Go. The overlay is invisible only to code that reads
+/// `/proc/self/environ` or walks envp itself.
 pub fn Setenv<K: Into<string>, V: Into<string>>(key: K, value: V) -> error {
     let key: string = key.into();
     let value: string = value.into();

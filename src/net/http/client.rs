@@ -6,17 +6,30 @@
 //   resp, err := http.Post(url, ct, body)    let (resp, err) = http::Post(url, ct, body);
 //   resp, err := client.Do(req)              let (resp, err) = client.Do(&req);
 //
-// Slim port consolidating Go 1.25 src/net/http/client.go (1040 LOC),
-// transport.go (3142 LOC, only the dial-and-read portion), and
-// response.go (371 LOC). Total goish-side: this single file.
+// This banner described a much smaller thing than the tree now holds,
+// and every line below was rewritten on 2026-09-06. It used to say:
 //
-// **Deviations from Go (v1):**
+//   "Slim port consolidating client.go, transport.go (only the
+//    dial-and-read portion) and response.go. Total goish-side: this
+//    single file."
+//   "No connection pool / idle reuse — each RoundTrip dials a fresh
+//    conn and closes it after the response."
+//   "No TLS (`https://`). Calls return an error if Scheme == https."
 //
-//   * No connection pool / idle reuse — each RoundTrip dials a fresh
-//     conn and closes it after the response. Ports for keepalive
-//     reuse defer to a future iteration; the wire-level state machine
-//     here is the right base.
-//   * No TLS (`https://`). Calls return an error if Scheme == "https".
+// None of the three is true. transport.go has its own 3130-line port in
+// transport.rs, carrying the idle pool — idleConn, idleLRU,
+// tryPutIdleConn, maxIdleConnsPerHost and the per-host cap — so
+// connections ARE reused. And https works: the transport dials TLS on
+// that scheme (transport.rs:56), the client handles an https->http
+// redirect downgrade here at the Scheme check below, and four examples
+// exercise it, including https_real_smoke against live endpoints and a
+// TLS-1.3-required one.
+//
+// **Deviations from Go that DO still hold:**
+//
+//   * The request body is read eagerly rather than streamed, which is
+//     ROADMAP section 0 A and the root of four separate limitations
+//     listed there.
 //   * No CookieJar. Cookies must be set via `req.AddCookie` and read
 //     via `resp.Cookies()` explicitly.
 //   * Request contexts are honored: `RoundTrip` fast-fails a done
@@ -34,7 +47,12 @@
 //     `resp.Body.Close()` exactly like Go. (The public
 //     `ReadResponse` helper still returns a pre-drained Body — its
 //     borrowed-reader signature can't carry ownership.)
-//   * No automatic decompression (no `Accept-Encoding: gzip`).
+//   * Transparent gzip IS done: the transport asks for it
+//     (`Accept-Encoding: gzip`, unless the caller set the header, a
+//     Range is asked for, or the method is HEAD) and decodes the
+//     answer, setting `Uncompressed`. `DisableCompression` turns it
+//     off. This line used to claim the opposite, and dump.rs believed
+//     it — see examples/http_dumpout_ref_smoke.rs.
 
 #![allow(non_snake_case)]
 #![allow(dead_code)]
@@ -209,6 +227,66 @@ impl crate::io::Writer for ConnSrcWriter<'_> {
     }
 }
 
+// ─── Go's body wrapper types live here ──────────────────────────────
+//
+// Go layers a response body in wrapper TYPES, each adding one
+// behaviour: gzipReader decodes, cancelTimerBody names the client's
+// deadline, readTrackingBody remembers whether a retry may reuse the
+// body. goish's Body is a closed enum with the same behaviours as
+// framings and BodyState fields, so the wrappers have no counterpart
+// under their own names. Each is waived against the place it actually
+// lives, and each place is pinned — reading these one at a time is
+// what found the sticky-error, Client.Timeout and rewind defects, so
+// the waivers name the smoke that would catch a regression.
+//
+// go: waived gzipReader.Read — the `FramedBody::Gzip` arm of
+// `read_locked`, including Go's sticky `zerr`
+// (examples/gzip_sticky_ref_smoke.rs).
+// go: waived gzipReader.Close — `close_locked` forwards a Gzip close
+// to the body it wrapped.
+// go: waived cancelTimerBody.Read — the `did_timeout` wrap in
+// `read_locked` (examples/client_timeout_ref_smoke.rs, body half).
+// go: waived cancelTimerBody.Close — Go's `b.stop()`; `close_locked`
+// takes and calls `BodyState.cancel` on every close path.
+// go: waived readTrackingBody.Read — `BodyState.did_read`, set on
+// entry to a read exactly as Go sets didRead before delegating.
+// go: waived readTrackingBody.Close — `BodyState.did_close`; the pair
+// is what `rewindBody` reads.
+// go: waived Request.closeBody — Go's one-liner ("close it if there is
+// one") exists to be called from the error paths that abandon a
+// request. goish calls `Body::__close_shared` at those same points —
+// the nil-URL and RequestURI rejections in do(), and rewindBody —
+// which is the behaviour; the helper has no separate work to do.
+// go: waived bufioFlushWriter.Write — Go wraps the write side for
+// CONNECT with an unknown body length, so each write is flushed out
+// of the *bufio.Writer instead of stalling a tunnel in it. goish's
+// client write path holds no buffered writer at all: ConnSrcWriter
+// hands bytes to the conn (`__rd_mut`) on every call, so there is
+// nothing to flush and no stall to prevent.
+// go: waived readWriteCloserBody.Read — Go's 101 body reads the bufio
+// remainder and then the conn; goish's `UpgradedConn` reads through
+// ConnSrc, which IS that pair
+// (examples/http_upgrade_client_ref_smoke.rs).
+// go: waived readWriteCloserBody.CloseWrite — the half-close, on
+// UpgradedConn::CloseWrite. Go asserts the wrapped conn to an
+// interface with CloseWrite and answers ErrNotSupported when it has
+// none; goish's TCP and TLS carriers have one and the caller-supplied
+// Dyn carrier does not, which is the same fork.
+// go: waived bodyLocked.Read — Go's one-line guard: closed bodies
+// answer ErrBodyReadAfterClose rather than more bytes. That is the
+// `FramedBody::Closed` arm of `read_locked`, which picks the message
+// the body was built with — the server's request-body error, or the
+// response-body one (examples/http_reqbody_close_ref_smoke.rs).
+// go: waived bodyEOFSignal.Read — Go's wrapper keeps `rerr` so a
+// failed read keeps failing; the conn-backed framings need no such
+// field, because each read hits the same dead connection and reports
+// the same error. Pinned, not assumed:
+// examples/http_body_sticky_ref_smoke.rs, five lines against Go.
+// go: waived bodyEOFSignal.Close — the bank-back it exists to run is
+// `close_locked`: banked when the body ended cleanly, closed
+// otherwise, which is Go's `earlyCloseFn` fork
+// (examples/http_chunked_reuse_ref_smoke.rs covers both sides).
+
 /// Wire framing of a body-in-progress. Mirrors Go's transfer.go body
 /// readers: `body` over a LimitedReader (Content-Length), over a
 /// chunkedReader (TE: chunked), or straight to EOF (Connection:
@@ -280,9 +358,60 @@ struct BodyState {
     /// stops the timer when the body is closed, not when Do returns
     /// (the deadline covers body reads).
     cancel: Option<crate::context::CancelFunc>,
+    /// Go's `body.closed` on the SERVER side (transfer.go:1039): a
+    /// request body answers ErrBodyReadAfterClose once closed. Held as
+    /// the error itself, because it must outlive the framing being
+    /// replaced, and because the two closed-body messages differ — a
+    /// response body says "http: read on closed response body".
+    ///
+    /// Nil for a body built by NewRequest: Go wraps those in
+    /// io.NopCloser, so Close is a no-op and the bytes stay readable,
+    /// which is what lets a 307/308 replay the body.
+    closed_msg: error,
+    /// The chunked body reached its terminator AND its trailer section
+    /// was consumed, so the connection is synchronised at the start of
+    /// whatever comes next. Go proves the same thing with
+    /// `bodyEOFSignal.rerr == io.EOF` because its `body.Read` reads
+    /// the trailer before returning that EOF (transfer.go). goish's
+    /// chunked reader stops at the terminator, so the trailer read is
+    /// separate and this is what records it.
+    chunk_drained: bool,
+    /// Go's `readTrackingBody.didRead` / `.didClose` (transport.go:
+    /// 753-757), which is what `rewindBody` consults to decide whether
+    /// a retry needs the body rebuilt. Tracked here rather than in a
+    /// wrapper type because goish's Body IS the wrapper.
+    did_read: bool,
+    did_close: bool,
+    /// Go's `cancelTimerBody.reqDidTimeout` (client.go:969): did the
+    /// CLIENT's timer fire? `setRequestCancel` already returned this
+    /// closure and the call site already cited
+    /// `&cancelTimerBody{stop, rc, reqDidTimeout}` — but only `stop`
+    /// was handed over, so the wrapping half of that type was never
+    /// wired and a body read killed by Client.Timeout surfaced the
+    /// raw socket error instead of saying which deadline killed it.
+    did_timeout: Option<alloc::sync::Arc<dyn Fn() -> bool + Send + Sync>>,
+    /// Go's `gzipReader.zerr` (transport.go:3042) — "any error from
+    /// gzip.NewReader; sticky". It lives on the STATE rather than in
+    /// the Gzip framing because Go checks it before the closed flag,
+    /// so it must outlive a Close: a body that failed to gunzip keeps
+    /// reporting that failure, not "read on closed response body".
+    ///
+    /// Without it the second Read re-ran gzip::NewReader over an
+    /// already-consumed reader and got EOF, so a corrupt body read as
+    /// an empty one to anything that retried after the first error.
+    zerr: error,
 }
 
 fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
+    // Go, readTrackingBody.Read: `r.didRead = true` before delegating,
+    // so an attempted read counts even if it fails.
+    st.did_read = true;
+    // Go (gzipReader.Read, transport.go:3045-3053): the sticky
+    // gzip.NewReader error is returned BEFORE the body's closed flag
+    // is consulted, so it survives a Close.
+    if !st.zerr.IsNil() {
+        return (0, st.zerr.clone());
+    }
     let (n, err) = match &mut st.framing {
         FramedBody::Eager { data, off } => {
             let total = data.Len();
@@ -322,7 +451,33 @@ fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
                 }
             }
         }
-        FramedBody::Chunked { cr } => cr.Read(p),
+        FramedBody::Chunked { cr } => {
+            let (n, e) = cr.Read(p);
+            // Go's transfer.go body.Read calls readTrailer when the
+            // chunked reader hits EOF, and only then reports EOF to
+            // the caller — which is why Go can treat that EOF as
+            // "connection is clean". goish's chunked reader stops at
+            // the terminating chunk, leaving the trailer section (at
+            // minimum a bare CRLF) unread on the wire. Reading it here
+            // is what makes the conn reusable at Close.
+            //
+            // The trailers are consumed and DROPPED. Populating
+            // `resp.Trailer` needs somewhere to put them: goish's
+            // Header wraps a value-typed map, so a Body cannot write
+            // into the Response's copy, and Go's `body` holds the
+            // Response only because its Header is a reference. That is
+            // a Response-shaped change, left in ROADMAP §2n.
+            if !e.IsNil() && errors::Is(e.clone(), io::EOF) {
+                let mut scratch = super::header::Header::new();
+                let terr = super::transfer::readTrailer(cr.__bufio_mut(), &mut scratch);
+                // Only a CLEAN trailer read leaves the stream at a
+                // message boundary. A malformed one leaves it
+                // anywhere, and the conn must die rather than be
+                // handed to the next request mid-stream.
+                st.chunk_drained = terr.IsNil();
+            }
+            (n, e)
+        }
         FramedBody::UntilEof { src } => src.Read(p),
         FramedBody::Upgraded { src } => src.Read(p),
         FramedBody::Piped { r } => r.Read(p),
@@ -330,6 +485,9 @@ fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
             if z.is_none() {
                 let (r, e) = crate::compress::gzip::NewReader(inner.clone());
                 if !e.IsNil() {
+                    // Go: `gz.zr, gz.zerr = gzip.NewReader(gz.body)`,
+                    // and every later Read returns that same zerr.
+                    st.zerr = e.clone();
                     return (0, e);
                 }
                 *z = Some(alloc::boxed::Box::new(r));
@@ -339,12 +497,54 @@ fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
                 None => (0, io::EOF.into()),
             }
         }
-        FramedBody::Closed => (0, errors::New(string("http: read on closed response body"))),
+        FramedBody::Closed => {
+            // Two different messages in Go: a closed RESPONSE body says
+            // one thing (errReadOnClosedResBody), a closed server
+            // REQUEST body another (ErrBodyReadAfterClose). Which one
+            // is set at construction; the framing cannot say.
+            if !st.closed_msg.IsNil() {
+                (0, st.closed_msg.clone())
+            } else {
+                (0, errors::New(string("http: read on closed response body")))
+            }
+        }
     };
-    // A read interrupted by the cancel watcher surfaces as a timeout
-    // off the netpoller; prefer ctx.Err() (context canceled /
-    // deadline exceeded), matching Go's url.Error unwrapping.
+    // Go, cancelTimerBody.Read (client.go:972-984): nil and io.EOF go
+    // back untouched; anything else is wrapped ONLY if the client's
+    // timer fired. The message is the point — it names the deadline
+    // that killed the read instead of leaving the caller with a bare
+    // socket error.
     if !err.IsNil() && !errors::Is(err.clone(), io::EOF) {
+        if let Some(f) = &st.did_timeout {
+            if f() {
+                // Go wraps the error the read RETURNED, and on this
+                // path that is already "context deadline exceeded":
+                // its cancel replaces the read error. goish enforces
+                // the deadline on the conn instead, so the read
+                // returns the socket's i/o timeout with a port number
+                // in it. Substituting the ctx error keeps the
+                // observable string identical to Go's, which is what
+                // gen_body_timeout_ref.go pins.
+                let de: error = crate::context::DeadlineExceeded.into();
+                // Go builds `&timeoutError{…}`, so the result reports
+                // Timeout() == true — callers switch on that, not on
+                // the text. newTimeoutError is the same type the
+                // awaiting-headers annotation already uses, where this
+                // identical bug was found and fixed one call earlier.
+                return (
+                    n,
+                    super::transport::newTimeoutError(
+                        de.Error()
+                            + " (Client.Timeout or context cancellation while reading body)",
+                    ),
+                );
+            }
+        }
+        // Nothing constructs a Body with a ctx today (every
+        // `from_parts` call site passes None), so this cannot fire.
+        // Kept because the ctx belongs here the moment a body is built
+        // from a request context; the branch above is what the
+        // Client.Timeout path actually takes.
         if let Some(c) = &st.ctx {
             let ce = c.Err();
             if !ce.IsNil() {
@@ -359,7 +559,13 @@ fn read_locked(st: &mut BodyState, p: &mut slice<byte>) -> (int, error) {
 // + clear); goish integrates the signal into BodyState, where
 // `reuse_fn` is an FnOnce TAKEN by close_locked below — the once-ness
 // is the type system's, with nothing left to guard.
+// go: waived bodyEOFSignal.condfn — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 fn close_locked(st: &mut BodyState) -> error {
+    // Go, readTrackingBody.Close: `r.didClose = true` before
+    // delegating. rewindBody treats a closed body as needing a rewind
+    // even if nothing was ever read out of it.
+    st.did_close = true;
     // Watcher first — it holds a raw PollDesc pointer into the conn.
     if let Some(w) = st.watch.take() {
         stop_cancel_watch(Some(w));
@@ -383,6 +589,29 @@ fn close_locked(st: &mut BodyState) -> error {
                 return errors::nil;
             }
         }
+        // A chunked body is reusable on the same terms: the terminator
+        // AND the trailer section are behind us. `__buffered` is the
+        // second half of that — read-ahead bytes belong to whatever
+        // comes next on this conn, and goish cannot push them back, so
+        // a conn holding any is closed rather than handed on. In
+        // practice the server has sent nothing more, so the buffer is
+        // empty and the conn is banked.
+        if st.chunk_drained {
+            if let FramedBody::Chunked { cr } =
+                core::mem::replace(&mut st.framing, FramedBody::Closed)
+            {
+                if cr.__buffered() == 0 {
+                    bank(Some(cr.__into_src()));
+                    if let Some(c) = st.cancel.take() {
+                        c();
+                    }
+                    return errors::nil;
+                }
+                // Put nothing back: the framing is already Closed and
+                // the reader is dropped here, closing the conn with it.
+                st.reuse_fn = None;
+            }
+        }
         // Dirty close: the conn is unusable — close it below and tell
         // the bank so (Go's earlyCloseFn / waitForBodyRead false).
         st.reuse_fn = Some(bank);
@@ -393,6 +622,11 @@ fn close_locked(st: &mut BodyState) -> error {
     // "always closes t.BodyCloser"; without this, that close killed
     // 307/308 redirect replay of an in-memory request body.
     if matches!(st.framing, FramedBody::Eager { .. }) {
+        // …unless this is a server request body, where Go's Close is
+        // not a NopCloser's: `body.closed` is set and later reads fail.
+        if !st.closed_msg.IsNil() {
+            st.framing = FramedBody::Closed;
+        }
         if let Some(c) = st.cancel.take() {
             c();
         }
@@ -452,6 +686,12 @@ impl Body {
                 ctx,
                 watch,
                 cancel: None,
+                closed_msg: errors::nil,
+                chunk_drained: false,
+                did_read: false,
+                did_close: false,
+                did_timeout: None,
+                zerr: errors::nil,
             })),
         }
     }
@@ -477,6 +717,25 @@ impl Body {
     pub(crate) fn __set_cancel(&self, cancel: crate::context::CancelFunc) {
         let mut g = self.inner.Lock();
         g.cancel = Some(cancel);
+    }
+
+    /// Crate-internal: mark this body as a SERVER request body, whose
+    /// Close is real — Go's `body.closed`, after which reads answer
+    /// ErrBodyReadAfterClose instead of more bytes.
+    pub(crate) fn __set_strict_close(&self) {
+        let mut g = self.inner.Lock();
+        g.closed_msg = super::transfer::ErrBodyReadAfterClose.into();
+    }
+
+    /// Crate-internal: the other half of Go's `cancelTimerBody` — the
+    /// `reqDidTimeout` predicate a body read consults before deciding
+    /// whether an error is the client's deadline.
+    pub(crate) fn __set_did_timeout(
+        &self,
+        f: alloc::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+    ) {
+        let mut g = self.inner.Lock();
+        g.did_timeout = Some(f);
     }
 
     /// Crate-internal (DumpResponse): drain the unread remainder,
@@ -513,11 +772,16 @@ impl Body {
     // (conservative, like a wrapper that saw a Read call).
     pub(crate) fn __was_read(&self) -> bool {
         let g = self.inner.Lock();
-        let out = match &g.framing {
-            FramedBody::Eager { off, .. } => *off > 0,
-            _ => true,
-        };
-        return out;
+        // Go, rewindBody: `!didRead && !didClose` means nothing to
+        // rewind. This used to answer `true` for every framing except
+        // Eager, on the reasoning that only an Eager body has a cursor
+        // to inspect — which reports an UNTOUCHED streaming request
+        // body as read, so a retry that Go performs (the request never
+        // reached the wire, the body is intact) failed here with
+        // errCannotRewind instead. The flags are tracked now, so the
+        // answer is exact for every framing; for an Eager body it is
+        // the same answer `off > 0` gave.
+        return g.did_read || g.did_close;
     }
 
     // go: none — goish-only: install the bodyEOFSignal bank-back (see
@@ -584,6 +848,31 @@ impl Body {
     // go: none — goish-only: Go's caller type-asserts
     // `res.Body.(io.ReadWriteCloser)`; goish's Body is a closed enum,
     // so the comma-ok is an extraction. Leaves the body Closed.
+    // go: none — goish-only: Go's caller writes a TYPE ASSERTION here,
+    // not a call, so there is no Go declaration to anchor to. The
+    // thing it asserts to is readWriteCloserBody (transport.go line
+    // 2561), whose Read/Write/Close/CloseWrite live on UpgradedConn
+    // below.
+    /// Go: `rwc, ok := res.Body.(io.ReadWriteCloser)` — the comma-ok a
+    /// caller performs after a 101 Switching Protocols, to take over
+    /// the connection and speak whatever protocol was negotiated.
+    ///
+    /// goish's Body is a closed enum, so the assertion is an
+    /// EXTRACTION: `None` where Go's comma-ok would be false. The
+    /// machinery was here and crate-private, which meant an external
+    /// caller could READ an upgraded body and never write to it —
+    /// half of what a 101 is for. Taking it leaves the Body closed,
+    /// exactly as handing the conn over should.
+    pub fn Upgraded(&self) -> Option<UpgradedConn> {
+        return match self.__take_upgraded() {
+            Some(src) => Some(UpgradedConn { src }),
+            None => None,
+        };
+    }
+
+    // go: none — goish-only: the extraction `Upgraded` above is built
+    // on. Leaves the body Closed, because the conn has been handed
+    // over and reading it as a body is no longer meaningful.
     pub(crate) fn __take_upgraded(&self) -> Option<ConnSrc> {
         let mut g = self.inner.Lock();
         if !matches!(g.framing, FramedBody::Upgraded { .. }) {
@@ -597,6 +886,58 @@ impl Body {
         }
     }
 }
+
+/// The connection behind a 101 response, as Go's
+/// `readWriteCloserBody` is: readable, writable, closable, and
+/// half-closable. Go builds it by wrapping the conn together with the
+/// bufio remainder (transport.go line 2561); goish's ConnSrc IS that
+/// pair, so this is the pair with Go's methods on it.
+pub struct UpgradedConn {
+    src: ConnSrc,
+}
+
+impl Reader for UpgradedConn {
+    // go: none — goish-only: Go's readWriteCloserBody.Read drains the
+    // bufio remainder before the conn; ConnSrc::Read already does.
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, error) {
+        return self.src.Read(p);
+    }
+}
+
+impl crate::io::Writer for UpgradedConn {
+    // go: none — goish-only: Go embeds the io.ReadWriteCloser and
+    // writes straight through to it.
+    fn Write(&mut self, p: slice<byte>) -> (int, error) {
+        return self.src.write(p);
+    }
+}
+
+impl crate::io::Closer for UpgradedConn {
+    // go: none — goish-only: closes the conn the 101 handed over.
+    fn Close(&mut self) -> error {
+        return self.src.close_conn();
+    }
+}
+
+impl UpgradedConn {
+    // go: none — goish-only: Go's readWriteCloserBody.CloseWrite
+    // (transport.go line 2581) asserts the wrapped conn to an
+    // interface with CloseWrite and returns ErrNotSupported if it has
+    // none. goish's TCP and TLS carriers both have one; a
+    // caller-supplied Dyn conn is reached through a trait that does
+    // not, which is the ErrNotSupported case.
+    pub fn CloseWrite(&mut self) -> error {
+        return match &mut self.src {
+            ConnSrc::Tcp(br) => br.__rd_mut().CloseWrite(),
+            ConnSrc::Tls(br) => br.__rd_mut().CloseWrite(),
+            ConnSrc::Dyn(_) => crate::fmt::Errorf!(
+                "CloseWrite: %w",
+                super::request::ErrNotSupported.into()
+            ),
+        };
+    }
+}
+
 
 impl Default for Body {
     fn default() -> Self {
@@ -1023,13 +1364,21 @@ pub type DialTLSContextFn = alloc::sync::Arc<
 /// Inert slots still exist — they are the ones whose comment says so.
 pub struct Transport {
     /// The idle-connection pool: Go's `idleMu` + `idleConn` +
-    /// `idleLRU` + `closeIdle` (transport.go:270-276), which its own
-    /// comments mark as guarded together. Keyed by
+    /// `idleLRU` + `closeIdle`, at transport.go lines 97-101, which
+    /// its own comments mark as guarded together. Keyed by
     /// `connectMethodKey.String()` because goish has no struct-keyed
-    /// map. STAGED — nothing puts a conn in it yet.
+    /// map.
+    ///
+    /// LIVE. This said "STAGED — nothing puts a conn in it yet" long
+    /// after `__try_put_idle` was wired into the response path
+    /// (client.rs, where a drained body banks its conn), and
+    /// http_conn_reuse_smoke and http_idlepool_smoke both depend on
+    /// it. The line also pointed at lines 270-276 of that file, which
+    /// are MaxResponseHeaderBytes — the wrong lines were what let the
+    /// wrong claim sit unread.
     pub(crate) __idle: Arc<crate::sync::Mutex<super::transport::idlePool>>,
-    /// Go's `connsPerHostMu` + `connsPerHost` + `connsPerHostWait`
-    /// (transport.go:278-281) — the MaxConnsPerHost limiter, a
+    /// Go's `connsPerHostMu` + `connsPerHost` + `connsPerHostWait`,
+    /// at transport.go lines 109-111 — the MaxConnsPerHost limiter, a
     /// separate lock from the idle pool in Go and kept separate here.
     pub(crate) __conns_per_host: crate::sync::Mutex<super::transport::connsPerHost>,
     /// Go's `MaxResponseHeaderBytes` (transport.go:288) — cap on the
@@ -1038,8 +1387,24 @@ pub struct Transport {
     pub MaxResponseHeaderBytes: i64,
     /// Go's `WriteBufferSize` (transport.go:298) — bytes of write
     /// buffer per connection. Zero means 4 KiB.
+    ///
+    /// INERT in goish, and it cannot be otherwise yet: Go applies this
+    /// at `pconn.bw = bufio.NewWriterSize(persistConnWriter{pconn}, …)`
+    /// (transport.go:1945), and goish's persistConn has no buffered
+    /// writer to size — requests go to the conn unbuffered. The field
+    /// is kept because `Transport.Clone` must carry it and
+    /// `writeBufferSize()` is diffed against Go, but setting it
+    /// changes nothing until a write-buffering layer exists.
     pub WriteBufferSize: int,
     /// Go's `ReadBufferSize` (transport.go:304). Zero means 4 KiB.
+    ///
+    /// Honoured since the persistConn's reader is built with
+    /// `bufio::NewReaderSize(conn, t.readBufferSize())`, matching
+    /// transport.go:1944. It used to be built with `NewReader`, so
+    /// this field was read by nothing and every connection got the
+    /// bufio default — which is also 4 KiB, so the default case was
+    /// indistinguishable and only a caller that set the field was
+    /// affected.
     pub ReadBufferSize: int,
     /// Go's `altProto atomic.Value` holding `map[string]RoundTripper`
     /// (transport.go:307), populated by `RegisterProtocol`. goish uses
@@ -1689,17 +2054,43 @@ impl RoundTripper for Transport {
                         treq = super::transport::transportRequest::__new(rt_req.clone());
                         continue;
                     }
-                    let mapped_out = pc.mapRoundTripError(&treq, false, mapped);
+                    // Go (transport.go:716-724): "Issue 16465: return
+                    // underlying net.Conn.Read error from peek, as
+                    // we've historically done." When the request will
+                    // NOT be retried, Go unwraps
+                    // transportReadFromServerError back to the error
+                    // the peek actually got. goish's equivalent is a
+                    // sentinel rather than a wrapper, so it carries no
+                    // cause to unwrap — handing `mapped` on would tell
+                    // the caller "http: transport read from server"
+                    // where Go says "connection reset by peer". The
+                    // retry DECISION above still sees the sentinel;
+                    // only what reaches the caller changes.
+                    let out = if errors::Is(
+                        mapped.clone(),
+                        super::transport::errTransportReadFromServer,
+                    ) {
+                        rerr.clone()
+                    } else {
+                        mapped
+                    };
+                    let mapped_out = pc.mapRoundTripError(&treq, false, out);
                     return (resp, ctx_err_or(&ctx, mapped_out));
                 }
 
                 // Go's bodyEOFSignal bank-back: reusable when the
-                // server didn't ask to close and the framing has a
-                // clean end (Empty now, Content-Length at body Close).
+                // server didn't ask to close and the body reached its
+                // end. Chunked joins Empty and Content-Length now that
+                // the trailer section is consumed on EOF — Go decides
+                // on `rerr == io.EOF`, never on the framing. UntilEof
+                // stays out: there the conn ending IS the framing.
                 let bank: Option<alloc::boxed::Box<dyn FnOnce(Option<ConnSrc>) + Send>> = if !self
                     .DisableKeepAlives
                     && !resp.Close
-                    && matches!(kind, BodyKind::Empty | BodyKind::Cl(_))
+                    && matches!(
+                        kind,
+                        BodyKind::Empty | BodyKind::Cl(_) | BodyKind::Chunked
+                    )
                 {
                     let idle = self.__idle.clone();
                     let cfg = self.__bank_cfg();
@@ -1839,6 +2230,12 @@ fn attach_stream_body(
                 ctx,
                 watch,
             );
+            // The Content-Length arm has always done this; the chunked
+            // arm did not, so even a fully-drained chunked body had no
+            // bank-back to run and its conn was dropped.
+            if let Some(b) = bank {
+                resp.Body.__set_reuse(b);
+            }
         }
         BodyKind::UntilEof => {
             resp.Body = Body::from_parts(FramedBody::UntilEof { src }, ctx, watch);
@@ -2408,22 +2805,15 @@ pub(crate) fn send(
     // Response.Body is a value.
     if !deadline.IsZero() {
         // Go: resp.Body = &cancelTimerBody{stop, rc, reqDidTimeout}.
+        // Both halves: the timer release AND the predicate a body read
+        // consults to name the deadline in its error.
         resp.Body.__set_cancel(stop_timer);
+        resp.Body.__set_did_timeout(did_timeout.clone());
     }
     return (resp, did_timeout, errors::nil);
 }
 
 impl Client {
-    // go: sdk 1.25.5 net/http/client.go:586-588 Client.Do
-    //
-    /// `(*Client).Do(req)` — execute the request, following up to 10
-    /// redirects on 301/302/303/307/308. Mirrors client.go:565.
-    ///
-    /// `Client.Timeout` bounds the entire exchange (all redirect hops
-    /// included) — implemented the way Go's `setRequestCancel`
-    /// (client.go:394) does it: the request is re-parented under
-    /// `context.WithTimeout`, and the transport folds the context
-    /// deadline into its connection deadlines.
     // go: sdk 1.25.5 net/http/client.go:192-197 Client.deadline
     /// Go: the absolute deadline for the whole request, or the zero
     /// Time when `Timeout` is unset.
@@ -2456,6 +2846,21 @@ impl Client {
         }
     }
 
+    // go: sdk 1.25.5 net/http/client.go:586-588 Client.Do
+    /// `(*Client).Do(req)` — execute the request, following up to 10
+    /// redirects on 301/302/303/307/308.
+    ///
+    /// `Client.Timeout` bounds the entire exchange (all redirect hops
+    /// included) — implemented the way Go's `setRequestCancel` does it:
+    /// the request is re-parented under `context.WithTimeout`, and the
+    /// transport folds the context deadline into its connection
+    /// deadlines.
+    ///
+    /// This anchor sat above `deadline` until 2026-09-06, six methods
+    /// away from the function it names. anchor_check passed it — the
+    /// RANGE was right, and that check reads the range, not what the
+    /// anchor is attached to — so the client's main entry point had no
+    /// provenance of its own and nothing said so.
     pub fn Do(&self, req: &Request) -> (Response, error) {
         let mut current = req.clone();
         // Go: deadline := c.deadline() — one wall-clock bound for the
@@ -2547,6 +2952,56 @@ impl Client {
                 // context I was handed expired" — different bugs with
                 // different fixes — and the wrapper is also what makes
                 // `err.(net.Error).Timeout()` answer true.
+                // Go's transport does not surface the raw I/O failure
+                // when the request's context ended it: readLoop and
+                // roundTrip both call
+                // `pc.cancelRequest(context.Cause(rc.treq.ctx))`
+                // (transport.go:2410, :2883), so the error the caller
+                // sees is the context's CAUSE.
+                //
+                // goish cancels by expiring the conn's netpoll deadline
+                // instead (arm_cancel_watch), which unblocks the I/O
+                // but reports whatever that I/O returned. Measured
+                // against Go: a `WithTimeout` request failed with
+                // `read tcp …: i/o timeout` where Go gives `context
+                // deadline exceeded`, so `errors.Is(err,
+                // context.DeadlineExceeded)` — the standard way to ask
+                // — answered false. A `WithCancelCause` request lost
+                // the cause entirely and reported plain "context
+                // canceled", which is the one thing WithCancelCause
+                // exists to prevent.
+                //
+                // Mapping here rather than in the transport keeps the
+                // one choke point every `do` error already passes
+                // through, and preserves Go's ORDER: the cause
+                // replaces the error first, then the Client.Timeout
+                // annotation below may wrap it.
+                let err = {
+                    let ctx = current.Context();
+                    if !ctx.Err().IsNil() {
+                        crate::context::Cause(&ctx)
+                    } else if ctx
+                        .Deadline()
+                        .map(|d| !d.After(time::Now()))
+                        .unwrap_or(false)
+                    {
+                        // The context's deadline has passed but its own
+                        // timer has not run yet. goish learns about
+                        // expiry from the CONN deadline, which the
+                        // transport sets from ctx.Deadline() and which
+                        // fires independently — so the I/O error can
+                        // arrive first and `ctx.Err()` still read nil.
+                        // Checking only Err() made this smoke flaky:
+                        // three runs green, one reporting `read tcp …:
+                        // i/o timeout`. A ctx whose deadline has passed
+                        // is going to report DeadlineExceeded, and that
+                        // is Go's cause for a WithTimeout context.
+                        let de: crate::errors::error = crate::context::DeadlineExceeded.into();
+                        de
+                    } else {
+                        err
+                    }
+                };
                 let err = if !deadline.IsZero() && did_timeout() {
                     super::transport::newTimeoutError(
                         err.Error()
@@ -2557,6 +3012,14 @@ impl Client {
                 };
                 return (resp, uerr(uerr_method.clone(), &current.URL, err));
             }
+            // go: waived Client.send — Go's send is the jar sandwich
+            // around one hop: apply the jar's cookies before, store
+            // the response's after. goish runs both halves inline in
+            // this loop because the loop IS the per-hop unit, which is
+            // what carries a session cookie set by a 302 into the
+            // redirected request (examples/http_client_jar_smoke.rs,
+            // http_jar_cross_host_smoke.rs).
+            //
             // Go (client.go, send): if c.Jar != nil { if rc :=
             // resp.Cookies(); len(rc) > 0 { c.Jar.SetCookies(req.URL, rc) } }
             //
@@ -2619,8 +3082,6 @@ impl Client {
                         );
                     }
                     let loc = loc_url;
-                    // Go: the hop's body is closed before following.
-                    let _ = resp.Body.__close_shared();
                     // Go's redirectBehavior (client.go):
                     //
                     //   301, 302, 303: redirectMethod = reqMethod, but
@@ -2720,10 +3181,12 @@ impl Client {
                         // call would shift every length by one and
                         // let defaultCheckRedirect run an extra hop.
                         via.push(current.clone());
-                        let e = match self.CheckRedirect.as_ref() {
-                            Some(fn_) => fn_(&next, &via[..]),
-                            None => defaultCheckRedirect(&next, &via[..]),
-                        };
+                        // Go calls c.checkRedirect here rather than
+                        // reaching into c.CheckRedirect, and so does
+                        // this now: the match used to be inlined, which
+                        // left the anchored method with no caller and
+                        // the policy decision written in two places.
+                        let e = self.checkRedirect(&next, &via[..]);
                         if !e.IsNil() {
                             let sentinel: error = ErrUseLastResponse.into();
                             if errors::Is(e.clone(), sentinel) {
@@ -2732,6 +3195,22 @@ impl Client {
                             return (resp, uerr(uerr_method.clone(), &current.URL, e));
                         }
                     }
+                    // Go closes the previous hop's body at the TOP of
+                    // the next iteration, which is to say only once it
+                    // is actually going to follow — not before
+                    // checkRedirect runs. The distinction is the whole
+                    // contract of ErrUseLastResponse, which Go
+                    // documents as returning "the most recent response
+                    // […] with its body unclosed", and which the
+                    // branch above relies on.
+                    //
+                    // This close used to sit before the redirect was
+                    // even decided, so a caller that stopped the chain
+                    // got a response whose Location and ContentLength
+                    // were intact and whose body was empty. Measured
+                    // against Go on a 302: cl=48 either way, body 48
+                    // bytes in Go and 0 here.
+                    let _ = resp.Body.__close_shared();
                     current = next;
                     continue;
                 }
@@ -3083,21 +3562,44 @@ impl<'a, R: Reader> Reader for BufioPassthrough<'a, R> {
 }
 
 /// Read a CRLF-terminated line, returning the line without CRLF.
+///
+/// Go reads response header lines through textproto, whose
+/// `readLineSlice` loops on `bufio.ReadLine`'s `more` flag and
+/// ACCUMULATES a line longer than the reader's buffer (reader.go).
+///
+/// This called `ReadSlice` once and surfaced its `ErrBufferFull`, so a
+/// response carrying a single header line over ~4 KiB failed the whole
+/// request with "bufio: buffer full" where Go returns it intact.
+/// Measured against Go with an 8000-byte `X-Long` header: Go answers
+/// 200 with all 8000 bytes, goish errored.
+///
+/// Not an edge case — a large `Set-Cookie`, a CSP policy or a
+/// `Server-Timing` list all exceed 4 KiB routinely, and the whole
+/// response was lost, not just the header.
+///
+/// `Transport.ReadBufferSize` does NOT bound this in Go either: it
+/// sizes the buffer for efficiency, and measured at 0 and 16384 Go
+/// accepts the same 8000-byte line both ways. So this is the line
+/// reader's job, not the buffer's.
 fn read_crlf_line<R: Reader>(br: &mut bufio::Reader<R>) -> Result<string, error> {
-    // Go: line, err := br.ReadSlice('\n')
-    let (line, err) = br.ReadSlice(b'\n');
-    if !err.IsNil() {
-        return Err(err);
+    // Go (textproto.readLineSlice): loop until `more` is false.
+    let mut acc: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+    loop {
+        let (l, more, err) = br.ReadLine();
+        if !err.IsNil() {
+            return Err(err);
+        }
+        // Go avoids the copy when the first read produced a whole
+        // line, which is every ordinary header.
+        if acc.is_empty() && !more {
+            return Ok(crate::convert::string(l));
+        }
+        acc.extend_from_slice(l.as_ref());
+        if !more {
+            break;
+        }
     }
-    // Go: trim trailing CRLF
-    let mut end = line.Len();
-    if end > 0 && line[end - 1] == b'\n' {
-        end -= 1;
-    }
-    if end > 0 && line[end - 1] == b'\r' {
-        end -= 1;
-    }
-    Ok(crate::convert::string(line.slice(0, end)))
+    Ok(string::from_bytes(&acc))
 }
 
 /// Line-by-line port of `ParseHTTPVersion` (request.go:1390 in Go's source).

@@ -116,7 +116,7 @@ pub struct PollDesc {
     /// `poll()` MSG_PEEKs this fd on every read-side event; on
     /// EOF/reset it fires the hook once. This reproduces the
     /// observable semantics of Go's connReader background read
-    /// (server.go:735 — cancel the request context if the client
+    /// (net/http/server.go:735 — cancel the request context if the client
     /// goes away while the handler runs) without dedicating a
     /// goroutine or paying per-request handoffs.
     pub watch_on: AtomicBool,
@@ -159,7 +159,7 @@ pub fn arm_watch(pd: &PollDesc, hook: alloc::sync::Arc<dyn Fn() + Send + Sync>) 
 
 /// Disarm the watch. Idempotent; racing `poll`'s disconnect fire is
 /// benign (the hook cancels a request context that is finished or
-/// about to be — Go cancels it post-response anyway, server.go:1683).
+/// about to be — Go cancels it post-response anyway, net/http/server.go:1683).
 pub fn disarm_watch(pd: &PollDesc) {
     pd.watch_on.store(false, Ordering::Release);
     let _ = pd.watch_hook.lock().take();

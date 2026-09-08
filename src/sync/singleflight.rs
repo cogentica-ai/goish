@@ -1,6 +1,6 @@
 // sync/singleflight — duplicate function-call suppression.
 //
-// Reference: /share/go/src/internal/singleflight/singleflight.go (123 LOC).
+// Reference: internal/singleflight/singleflight.go (123 LOC).
 //
 // `singleflight.Group` makes sure only one execution is in-flight for
 // a given key at a time. Used internally by Go's `net` (DNS resolver

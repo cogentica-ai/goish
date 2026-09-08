@@ -8,7 +8,7 @@
 // does not reclaim the ring's memory (matches Go's deferred GC of
 // unreachable cyclic data; bounded by user usage).
 //
-// Reference: /share/go/src/container/
+// Reference: container/
 
 #![allow(non_snake_case)]
 

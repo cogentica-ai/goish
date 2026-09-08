@@ -5,7 +5,11 @@
 // Deviations from keygen[go] @ Go 1.25.5:
 //
 //   * `drbg.ReadWithReader` / `drbg.Read` are the `read_with_reader` /
-//     `drbg_read` shims in rsa.rs (no goish `fips140/drbg` package yet).
+//     `drbg_read` shims in rsa.rs. The parenthetical here read "no
+//     goish `fips140/drbg` package yet"; there is one, and the shims
+//     differ from it — see their notes in rsa.rs. The one that bites
+//     keygen is `randutil::MaybeReadByte`, which Go calls on a
+//     caller-supplied reader and the shim does not.
 //   * Go's `primes` is a `var []uint`; goish spells it `static PRIMES:
 //     [uint; 255]`, same values, same order.
 //   * `millerRabin.m` is a `Vec<byte>` scratch buffer, not a

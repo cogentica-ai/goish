@@ -717,21 +717,6 @@ impl Request {
         return hasToken(self.Header.Get(string("Connection")), string("keep-alive"));
     }
 
-    // go: sdk 1.25.5 net/http/request.go:1579-1582 Request.requiresHTTP1
-    // go: sdk 1.25.5 net/http/request.go:1534-1548 Request.isReplayable
-    /// Go: whether this request may be re-sent on a fresh connection
-    /// after a connection failure.
-    ///
-    /// GET/HEAD/OPTIONS/TRACE are replayable because they are
-    /// idempotent. The two Idempotency-Key headers are non-standard
-    /// but "widely used to mean a POST or other request is idempotent"
-    /// (golang/go#19943) — a server that honours them opts its POSTs
-    /// into retry, so dropping the check would silently stop retrying
-    /// requests the caller expected to be retried.
-    ///
-    /// Go also requires `Body == nil || Body == NoBody || GetBody !=
-    /// nil`; goish's Request owns its body as a `slice<byte>`, which
-    /// is always replayable, so that guard is always satisfied.
     // go: sdk 1.25.5 net/http/request.go:1550-1560 Request.outgoingLength
     /// Go: "reports the Content-Length of this outgoing (Client)
     /// request. It maps 0 into -1 (unknown) when the Body is non-nil."
@@ -751,6 +736,22 @@ impl Request {
         return -1;
     }
 
+    // go: sdk 1.25.5 net/http/request.go:1534-1548 Request.isReplayable
+    /// GET/HEAD/OPTIONS/TRACE are replayable because they are
+    /// idempotent. The two Idempotency-Key headers are non-standard but
+    /// "widely used to mean a POST or other request is idempotent"
+    /// (golang/go#19943) — a server that honours them opts its POSTs
+    /// into retry, so dropping the check would silently stop retrying
+    /// requests the caller expected to be retried.
+    ///
+    /// Go also requires `Body == nil || Body == NoBody || GetBody !=
+    /// nil`; goish's Request owns its body as a `slice<byte>`, which is
+    /// always replayable, so that guard is always satisfied.
+    ///
+    /// This block sat above `outgoingLength`'s anchor until 2026-09-06,
+    /// so isReplayable had neither documentation nor provenance — the
+    /// third instance in one day of a doc block stranded by a function
+    /// inserted above the one it described.
     pub fn isReplayable(&self) -> bool {
         let m = if self.Method.Len() == 0 {
             string("GET")
@@ -768,6 +769,9 @@ impl Request {
         return false;
     }
 
+    // go: sdk 1.25.5 net/http/request.go:1579-1582 Request.requiresHTTP1
+    /// Go: whether the request must be sent over HTTP/1 rather than
+    /// being eligible for an HTTP/2 connection.
     pub fn requiresHTTP1(&self) -> bool {
         return hasToken(self.Header.Get(string("Connection")), string("upgrade"))
             && crate::net::http::internal::ascii::EqualFold(
@@ -781,6 +785,16 @@ impl Request {
 pub const defaultMaxMemory: int = 32 << 20; // 32 MB
 
 // go: sdk 1.25.5 net/http/request.go:1027-1034 parseRequestLine
+//
+// Nothing under src/ calls this, and that is deliberate rather than a
+// gap: the server splits with `parse_request_line` further down, a
+// byte-view version that interns the method and proto instead of
+// allocating three strings per request. The two were traced against
+// each other and against Go's strings.Cut pair on 2026-09-07 and agree
+// on every input, including a line with three spaces. This one is the
+// anchored port of Go's signature, kept so the declaration has a home;
+// dead_port_check reports it under TESTED_NOT_WIRED and it is one of
+// the cases §2e describes as "goish reaches it another way".
 //
 /// Split "GET /path HTTP/1.1" into its three fields. Both separators
 /// must be present, and each cut takes the FIRST space, so a URI
@@ -950,12 +964,31 @@ pub fn putTextprotoReader<R: io::Reader>(r: crate::net::textproto::Reader<R>) ->
     return br;
 }
 
-const DEFAULT_MAX_LINE: usize = 8 * 1024;
-const MAX_HEADERS: usize = 100;
+/// The cap on ONE header line when no `MaxHeaderBytes` is given.
+///
+/// This was 8 KiB, which is a goish-only restriction: Go has no
+/// per-line cap below the total. Its server bounds the whole head at
+/// `DefaultMaxHeaderBytes` (1 MiB) through the connReader's read limit,
+/// and textproto accumulates a line longer than the buffer rather than
+/// refusing it, so Go answers 200 to a single 100 KiB header where
+/// goish answered 400.
+///
+/// That is not a corner case. A JWT in an Authorization header, a fat
+/// cookie jar, a long Referer — 8 KiB is routinely exceeded by real
+/// traffic that Go serves.
+///
+/// The TOTAL is still bounded, and by the same value Go uses: the
+/// serve loop arms `initialReadLimitSize()` (MaxHeaderBytes + 4096) on
+/// the connReader, which is what produces 431 for an oversize head.
+/// Raising the per-line cap to the same number cannot admit a head the
+/// total bound would refuse.
+const DEFAULT_MAX_LINE: usize = super::server::DefaultMaxHeaderBytes as usize;
 const MAX_BODY: usize = 16 * 1024 * 1024; // 16 MiB safety cap
 
 /// `http.ReadRequest(b *bufio.Reader)` — parse an HTTP/1.x request
-/// using the default 8 KiB max-header-line. Mirrors
+/// bounded by `DefaultMaxHeaderBytes`, the same default Go's server
+/// uses. (The line said "8 KiB" while the constant said so too; both
+/// were a goish-only restriction Go does not have.) Mirrors
 /// `func ReadRequest(b *bufio.Reader) (*Request, error)`
 /// (request.go:1058).
 ///
@@ -1086,6 +1119,19 @@ pub(crate) fn __read_request_server<R: io::Reader>(
     // target do not survive it (readRequest, request.go:1105).
     req.RequestURI = target.clone();
 
+    // NOT PORTED, noted 2026-09-06: Go's authority-form handling.
+    // request.go:1118 computes
+    //     justAuthority := req.Method == "CONNECT" && !strings.HasPrefix(rawurl, "/")
+    // and, for a CONNECT target like "example.com:443", parses it as an
+    // AUTHORITY rather than a path — the result has Host set and Path
+    // empty. goish parses every target the same way, so a CONNECT
+    // request's URL here is whatever the general parser makes of
+    // "host:port", which is not what Go produces.
+    //
+    // ServeMux's CONNECT special case is separately unported and is
+    // noted at server.rs's match_handler. Both matter to the same
+    // request, and neither is faked.
+
     if !validMethod(method.clone()) {
         // Go: `badStringError("invalid method", req.Method)`.
         return (
@@ -1148,9 +1194,20 @@ pub(crate) fn __read_request_server<R: io::Reader>(
             }
             HeaderLine::Field(name, value) => {
                 count += 1;
-                if count > MAX_HEADERS {
-                    return (req, errors::New(string("net/http: too many headers")));
-                }
+                // No count cap. Go has none: the request head is bounded
+                // by MaxHeaderBytes and nothing else, so a request with
+                // 5000 headers is served — measured. goish refused past
+                // 100, which real traffic exceeds (many cookies, a CDN's
+                // forwarded and tracing headers), and answered 400 where
+                // Go answers 200.
+                //
+                // The byte bound is what limits the count, exactly as in
+                // Go: the serve loop arms initialReadLimitSize()
+                // (MaxHeaderBytes + 4096) on the connReader, and each
+                // header costs at least four bytes on the wire, so the
+                // 1 MiB default caps this at a couple of hundred
+                // thousand. That is Go's guarantee, and taking a
+                // tighter one was a divergence rather than a hardening.
                 // Special-case Host: into req.Host, not into Header.
                 if name.as_bytes() == b"Host" {
                     // Go (request.go:1138): `if len(req.Header["Host"]) > 1
@@ -1310,6 +1367,9 @@ pub(crate) fn __read_request_server<R: io::Reader>(
                 }
             }
             req.Body = super::Body::from_bytes(slice::<byte>::__from_vec(buf));
+            // Go's server request body is a `body`, not a NopCloser:
+            // once closed, reads answer ErrBodyReadAfterClose.
+            req.Body.__set_strict_close();
             return (req, errors::nil);
         }
         super::client::BodyKind::Cl(n) => {
@@ -1338,6 +1398,9 @@ pub(crate) fn __read_request_server<R: io::Reader>(
                 }
             }
             req.Body = super::Body::from_bytes(slice::<byte>::__from_vec(buf));
+            // Go's server request body is a `body`, not a NopCloser:
+            // once closed, reads answer ErrBodyReadAfterClose.
+            req.Body.__set_strict_close();
         }
         // Requests never get UntilEof from readTransfer (fixLength
         // answers 0 for a request without Content-Length); Empty
@@ -1835,6 +1898,7 @@ impl io::Closer for eagerMaxBytesBody {
     }
 }
 
+// go: sdk 1.25.5 net/http/request.go:1194-1196 MaxBytesError
 /// `http.MaxBytesError` (request.go:1193) — typed error returned by
 /// MaxBytesReader when its read limit is exceeded. Carries the
 /// configured byte limit so callers can introspect it. Mirrors:
@@ -1843,7 +1907,6 @@ impl io::Closer for eagerMaxBytesBody {
 /// type MaxBytesError struct { Limit int64 }
 /// func (e *MaxBytesError) Error() string { return "http: request body too large" }
 /// ```
-// go: sdk 1.25.5 net/http/request.go:1194-1196 MaxBytesError
 #[derive(Clone)]
 pub struct MaxBytesError {
     pub Limit: int,
@@ -1896,6 +1959,23 @@ pub fn MaxBytesReader<'w, R: io::Reader>(
         i: n,
         n,
         err: errors::nil,
+    }
+}
+
+// Go returns `io.ReadCloser` from MaxBytesReader and closes the
+// wrapped body here, which is what makes the documented idiom
+// `r.Body = http.MaxBytesReader(w, r.Body, n)` work: the handler puts
+// the wrapper back and whoever closes the body closes the real one.
+// goish's wrapper implemented Reader only, so it could not be put
+// back (`Body::from_reader` wants a ReadCloser) and the idiom was
+// unwritable. The bound is conditional because the type is generic
+// over any Reader — a `bytes::Reader` has nothing to close, and the
+// eager server path below relies on that.
+impl<'w, R: io::Reader + io::Closer> io::Closer for maxBytesReader<'w, R> {
+    // go: sdk 1.25.5 net/http/request.go:1253-1255 maxBytesReader.Close
+    /// Go: "return l.r.Close()".
+    fn Close(&mut self) -> error {
+        return io::Closer::Close(&mut self.r);
     }
 }
 

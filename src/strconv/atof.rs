@@ -438,8 +438,8 @@ fn assemble(neg: bool, mant: u64, exp: i32, flt: &floatInfo, overflow: bool) -> 
     return (bits, overflow);
 }
 
-/// Exact powers of 10 (f64).
 // go: sdk 1.25.5 strconv/atof.go:411-416 float64pow10
+/// Exact powers of 10 (f64).
 /// Exact powers of ten.
 const float64pow10: &[f64] = &[
     1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16,

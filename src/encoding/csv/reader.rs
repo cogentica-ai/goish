@@ -1,4 +1,4 @@
-// go: file encoding/csv/reader.go decls: ParseError.Error, ParseError.Unwrap, errInvalidDelim, validDelim, NewReader, Reader.Read, Reader.FieldPos, Reader.InputOffset, Reader.ReadAll, Reader.readLine, lengthNL, nextRune, Reader.readRecord
+// go: file encoding/csv/reader.go decls: ParseError.Error, ParseError.Unwrap, validDelim, NewReader, Reader.Read, Reader.FieldPos, Reader.InputOffset, Reader.ReadAll, Reader.readLine, lengthNL, nextRune, Reader.readRecord
 //
 // The `decls:` manifest above lists reader.go's funcs and methods only.
 // GOISH017 matches a manifest entry against Rust `fn` items, so naming
@@ -51,10 +51,8 @@ crate::var! {
 ///
 /// Go declares it as a package-level `var`; goish builds it per call,
 /// since it is compared by message rather than by identity.
-pub(super) fn errInvalidDelim() -> error {
-    return crate::errors::New(string::from_static(
-        "csv: invalid field or comment delimiter",
-    ));
+crate::var! {
+    pub(super) errInvalidDelim: error = "csv: invalid field or comment delimiter";
 }
 
 // go: sdk 1.25.5 encoding/csv/reader.go:98-100 validDelim
@@ -271,7 +269,7 @@ impl<R: io::Reader> Reader<R> {
             || !validDelim(self.Comma)
             || (self.Comment != 0 && !validDelim(self.Comment))
         {
-            return (slice::__from_vec(Vec::new()), errInvalidDelim());
+            return (slice::__from_vec(Vec::new()), errInvalidDelim.into());
         }
 
         // Go: read line, skipping empty lines and comment lines.

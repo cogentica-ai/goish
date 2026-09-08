@@ -10,33 +10,46 @@ losing.
 The rest of this file is specific about *which* parts are weakest,
 because "use at your own risk" is not actionable.
 
-### `crypto/tls` is not a port of Go — treat it as experimental
+### `crypto/tls` is ported now, and still not audited
 
 goish ships a working TLS 1.2/1.3 client and a server. They complete
 real handshakes against real servers, and they are exercised in CI at
 50× under the race-sensitive tier.
 
-They are nonetheless **hand-written**, not ported from Go. Four of the
-nine files in `src/crypto/tls/` contain no function Go declares, and the
-package sits at ~10% ported. That has two consequences worth stating
-plainly:
+**This section used to say the package was hand-written and ~10%
+ported. That is no longer true, and the correction is the point of the
+paragraph.** `scripts/port_coverage.py crypto/tls --by-decl` now reports
+**353/353 declarations (100%)** across its two packages, behind 901
+`// go:` lines — run it rather than trusting this number, which is the
+kind that goes stale. Read that 100% with its waivers in view: 24
+declarations sit outside the denominator, and all 24 are QUIC
+(`QUICClient`, `QUICServer`, `QUICConn.*`, `Conn.quic*`), which goish
+does not implement. There is no QUIC transport here to attack, and
+no QUIC support to rely on. A dialled connection runs ported code end to end:
+`tls::Dial` → `Conn::Handshake` → `handshakeContext` → `clientHandshake`
+→ the ported `clientHandshakeStateTLS13`, over `conn.rs`, which is Go's
+record layer.
 
-- The provenance tooling that checks every other crypto package against
-  the Go source **cannot check this one**. Where `crypto/x509` is
-  verified function-by-function against Go, the TLS state machine is
-  verified only by its own tests.
-- A TLS implementation's security lives in the details a passing
-  handshake does not exercise: downgrade protection, alert handling,
-  certificate-chain policy, nonce discipline, timing behaviour on
-  failure paths.
+Two hand-written files are still live, reachable through the
+`do_client_handshake*` functions the package exports rather than through
+`Dial`: `record.rs` (1,145 lines, its own record layer) and `session.rs`
+(261 lines, a client session cache). Both were diffed against their Go
+counterparts in September 2026, and that diffing produced four
+security fixes — two missing length bounds and a padding oracle in
+`record.rs`, and a cache that bounded tickets per host while nothing
+bounded the host count in `session.rs`. Retiring both is
+[roadmap](ROADMAP.md) §1.
 
-Replacing it with a verbatim port of Go's `crypto/tls` is the top item
-on the [roadmap](ROADMAP.md).
+What has *not* changed is the assurance argument. A port is not an
+audit, and a TLS implementation's security lives in the details a
+passing handshake does not exercise: downgrade protection, alert
+handling, certificate-chain policy, nonce discipline, timing behaviour
+on failure paths. None of that has had third-party review here.
 
 ### The rest of `crypto/`
 
-65 of 66 packages are ported function-by-function from Go 1.25.5 with
-machine-checked provenance, and their test vectors are generated from
+All 66 packages are ported declaration-by-declaration from Go 1.25.5
+with machine-checked provenance, and their test vectors are generated from
 Go rather than transcribed. That is a meaningful assurance argument, and
 it is still not an audit. Constant-time properties in particular are
 inherited from Go's algorithm choices, **not** verified in goish's
@@ -47,7 +60,6 @@ compiled output.
 | | |
 |---|---|
 | `goish::cast!` on an `Any` carrier always reports "no" | A type assertion silently takes the wrong branch. Use `.As::<dyn Trait + Send + Sync>()`. |
-| `crypto/ecdsa::PrivateKey` does not implement `crypto::Signer` | ECDSA keys cannot sign X.509 certificates. |
 | FIPS service indicator is inert | `fips140::Record{Non,}Approved` are ported but write through a runtime stub, so `ServiceIndicator()` always reports false. goish makes **no** FIPS 140-3 claim. |
 
 See [PROGRESS.md](PROGRESS.md) for the full list, including non-security
@@ -66,5 +78,5 @@ Please report privately rather than opening a public issue.
 
 ## Supported versions
 
-goish is pre-1.0 (`0.1.0`) and has no released versions. Only `main` is
+goish is pre-1.0 (`1.0.0-alpha.8`). Only `main` is
 supported. There is no security backporting.

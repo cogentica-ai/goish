@@ -36,6 +36,8 @@
 // goishlint:ignore GOISH018 Printf — `debugT.Printf` is `if debug {}` tracing with no behaviour attached; goish drops the whole facility.
 // goishlint:ignore GOISH021 debugT, debug — see the GOISH018 waiver above: the type and the package var exist only to carry that tracing.
 
+// go: waived debugT.Printf — Go's `debug` is `debugT(false)`, a package var that is never true, so debugT.Printf is `if debug {}` tracing with no behaviour attached; goish drops the whole facility and there is no counterpart to name.
+
 extern crate alloc;
 use alloc::boxed::Box;
 use alloc::vec::Vec;

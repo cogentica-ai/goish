@@ -487,14 +487,27 @@ from `goish::init()`. `crypto::RegisterStandardHashes` /
 `RegisterStandardSigners` are the pattern. **This is not a caller
 obligation** - a comment saying a use site must call one is wrong.
 
-As of 2026-08-12 **25 of the 56 interface traits have concrete
-implementors and zero registrations**, including `io::Writer` (20
-impls), `io::Reader` (17), `io::Closer` (11), `hash::Hash` (11),
-`http::Handler` (11), `fmt::Stringer`, `json::Marshaler` and
-`crypto::Decrypter`. So `if c, ok := w.(io.Closer)` - and every
-assertion like it - misses today regardless of carrier. Registering a
-trait's implementors is the fix; check the trait before relying on an
-assertion, and register what your port needs.
+That WAS widespread. As of 2026-08-12 this section recorded 25 of the
+56 interface traits as having concrete implementors and zero
+registrations, `io::Writer`, `io::Reader`, `io::Closer`, `hash::Hash`,
+`http::Handler`, `fmt::Stringer`, `json::Marshaler` and
+`crypto::Decrypter` among them, and concluded that
+`if c, ok := w.(io.Closer)` missed regardless of carrier.
+
+**Re-measured 2026-09-06: all eight of those are registered**, and of
+the interface traits carrying a concrete impl only two are not —
+`sync::Locker` and `rand::Source`, neither of which anything asserts
+on, so nothing misses because of them. The failure mode above is real
+and still worth ruling out; the sweeping version of it is no longer
+the state of the tree, and a contributor who believes it will work
+around a problem that is fixed.
+
+Do not take either number on trust, including this one. Run
+`scripts/iface_check.py`, which did not exist when the older figure was
+written and answers this directly: UNREGISTERED names a type that
+implements an asserted trait without being registered for it, and
+NO_IMPLEMENTOR names a trait nothing registers for at all. Registering
+a trait's implementors is still the fix when it reports one.
 
 ### 9a. Embedded interfaces - `#[goish::interface(embeds)]`
 
@@ -620,5 +633,10 @@ is what stops this from becoming a way to launder a gap into 100%.
 Reach for it only when no counterpart *can* exist. A function that is
 merely hard, unported, or blocked is MISSING, not waived.
 
-crypto/ is 1108/1452 = 76.3%; the 344 left are 330 portable + 14
-assembly, and 37 counted names are still UNVERIFIED.
+As of 2026-09-07 crypto/ is **1720/1720 = 100% by declaration** with
+28 waived, and 1429/1445 = 98.9% by name; nothing is left and nothing
+in it is UNVERIFIED. This line read "1108/1452 = 76.3%; the 344 left
+are 330 portable + 14 assembly, and 37 counted names are still
+UNVERIFIED" until then, which is what a figure in prose does — re-run
+`scripts/port_coverage.py crypto --by-decl` rather than quoting either
+number.

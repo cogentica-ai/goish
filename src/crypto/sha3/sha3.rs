@@ -151,6 +151,61 @@ impl SHA3 {
     }
 }
 
+// go: none — goish idiom: the boxed-interface forms of the three
+// methods above. Go's SHA3 satisfies encoding.BinaryMarshaler /
+// BinaryAppender / BinaryUnmarshaler by having the methods; goish
+// needs the impls and their Any hooks so a `Box<dyn Hash>` carrier can
+// be asserted back to this type.
+impl crate::encoding::BinaryMarshaler for SHA3 {
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:154-157 SHA3.MarshalBinary
+    fn MarshalBinary(&self) -> (slice<byte>, error) {
+        return SHA3::MarshalBinary(self);
+    }
+    // go: none — goish idiom: the hidden Any-view hook, so a
+    // `Box<dyn Hash>` carrier can be asserted back to this type.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: see __goish_as_dyn_any.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: none — goish idiom: see the BinaryMarshaler impl above.
+impl crate::encoding::BinaryAppender for SHA3 {
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:159-162 SHA3.AppendBinary
+    fn AppendBinary(&self, b: slice<byte>) -> (slice<byte>, error) {
+        return SHA3::AppendBinary(self, b);
+    }
+    // go: none — goish idiom: the hidden Any-view hook, so a
+    // `Box<dyn Hash>` carrier can be asserted back to this type.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: see __goish_as_dyn_any.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: none — goish idiom: see the BinaryMarshaler impl above.
+impl crate::encoding::BinaryUnmarshaler for SHA3 {
+    // go: sdk 1.25.5 crypto/sha3/sha3.go:164-167 SHA3.UnmarshalBinary
+    fn UnmarshalBinary(&mut self, b: slice<byte>) -> error {
+        return SHA3::UnmarshalBinary(self, b);
+    }
+    // go: none — goish idiom: the hidden Any-view hook, so a
+    // `Box<dyn Hash>` carrier can be asserted back to this type.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+    // go: none — goish idiom: see __goish_as_dyn_any.
+    fn __goish_as_dyn_any_mut(&mut self) -> Option<&mut (dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
 // ─── One-shot sums ────────────────────────────────────────────────────
 
 // go: sdk 1.25.5 crypto/sha3/sha3.go:24-30 Sum224

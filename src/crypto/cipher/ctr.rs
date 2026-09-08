@@ -6,7 +6,7 @@
 //
 // crypto/cipher/ctr — Counter (CTR) Mode.
 //
-// Reference: /share/go/src/crypto/cipher/ctr.go (115 LOC).
+// Reference: crypto/cipher/ctr.go (115 LOC).
 //
 // CTR converts a block cipher into a stream cipher by repeatedly
 // encrypting an incrementing counter and XOR-ing the resulting stream

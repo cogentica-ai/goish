@@ -18,7 +18,9 @@
 //     `zero_private_key` / `zero_public_key` / `zero_modulus` fill that
 //     slot — they are never observed by a caller that checks `err`.
 //   * The drbg shims (`read_with_reader`, `drbg_read`) stand in for
-//     `crypto/internal/fips140/drbg`, which has no goish package yet.
+//     `crypto/internal/fips140/drbg` — which DOES have a goish package;
+//     the shims predate it and are not equivalent to it. See the notes
+//     on each shim below for how they differ.
 
 extern crate alloc;
 
@@ -659,10 +661,21 @@ pub fn decrypt(priv_: &PrivateKey, ciphertext: slice<byte>, check: bool) -> (sli
 
 // ─── drbg shims (Go: crypto/internal/fips140/drbg) ────────────────────
 
-// go: none — `drbg.ReadWithReader` shim; crypto/internal/fips140/drbg
-// has no goish package yet. With FIPS mode off Go's body is exactly
-// `io.ReadFull(r, b)`; the `DefaultReader` fast path and
-// `randutil.MaybeReadByte` are FIPS-mode-only.
+// go: none — `drbg.ReadWithReader` shim. BOTH sentences that stood
+// here were wrong, and are kept as a record: the drbg package DOES
+// exist (`crypto/internal/fips140/drbg`, with `Read`, `ReadWithReader`
+// and `ReadWithReaderDeterministic`), and the `DefaultReader` fast path
+// and `randutil::MaybeReadByte` are NOT FIPS-mode-only — the ported
+// `ReadWithReader` has no `fips140::Enabled()` branch and calls
+// `MaybeReadByte` on every non-default reader.
+//
+// So this shim diverges from Go for a caller-supplied reader: Go reads
+// one extra byte on a coin flip, precisely so callers cannot depend on
+// how many bytes a key generation consumes, and this does not. A
+// deterministic reader therefore yields a different key here than in
+// Go. Rewiring the callers onto the real package is ROADMAP work, not
+// a comment fix; the signatures differ (`slice<byte>` vs `&mut
+// [byte]`) and the RSA path is not something to move without e2e.
 pub(super) fn read_with_reader(r: &mut dyn io::Reader, b: &mut [byte]) -> error {
     fips140::RecordNonApproved();
     let mut buf = slice::<byte>::__from_vec(b.to_vec());
@@ -679,8 +692,11 @@ pub(super) fn read_with_reader(r: &mut dyn io::Reader, b: &mut [byte]) -> error 
     return errors::nil;
 }
 
-// go: none — `drbg.Read` shim; crypto/internal/fips140/drbg has no goish
-// package yet. With FIPS mode off it draws from the kernel CSPRNG.
+// go: none — `drbg.Read` shim. The drbg package exists; see the note on
+// `read_with_reader` above. This always draws from the kernel CSPRNG,
+// where the real `drbg::Read` branches on `fips140::Enabled()` and uses
+// the approved DRBG when FIPS is on. goish makes no FIPS 140-3 claim,
+// so this is a conformance divergence rather than a weaker RNG.
 pub(super) fn drbg_read(b: &mut [byte]) {
     let mut buf = slice::<byte>::__from_vec(alloc::vec![0u8; b.len()]);
     let (_, err) = crate::crypto::rand::Read(&mut buf);

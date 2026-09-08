@@ -1,4 +1,4 @@
-// goishlint:ignore GOISH018 handshake, processHelloRetryRequest, handleNewSessionTicket — the rest of clientHandshakeStateTLS13, which drives the whole exchange through the key schedule and the transcript; the live TLS 1.3 client below is a self-contained function, not a port of these. See ROADMAP.md.
+// goishlint:ignore GOISH018 handshake, processHelloRetryRequest, handleNewSessionTicket — the rest of clientHandshakeStateTLS13, which drives the whole exchange through the key schedule and the transcript; the self-contained TLS 1.3 client below is not a port of these. It was described here as the LIVE client and is not: tls::Dial goes Conn::Handshake -> handshakeContext -> clientHandshake -> the ported clientHandshakeStateTLS13. The invented one is reachable only through the do_client_handshake* functions mod.rs exports, which is a public surface and so still worth auditing, but it is not what a dialled connection runs. See ROADMAP.md.
 // crypto/tls/handshake_client_tls13.rs — TLS 1.3 client handshake.
 //
 // Port of:
@@ -467,12 +467,31 @@ fn verify_cert_verify(
             }
         }
         _ => {
-            // For unknown sig_alg: log and skip verification (InsecureSkipVerify for unknown)
+            // An unrecognised signature_algorithm is a REFUSAL, not a
+            // pass. This arm used to log a warning and return nil,
+            // which is success: CertificateVerify is the step that
+            // proves the peer holds the private key for the
+            // certificate it sent, so skipping it means any party
+            // holding a copy of a server's public certificate — public
+            // data — could complete the handshake as that server by
+            // naming an algorithm this match did not list.
+            //
+            // Go rejects before it ever dispatches:
+            // handshake_client_tls13.go line 680 refuses a scheme that
+            // is not in supportedSignatureAlgorithms with
+            // alertIllegalParameter, and line 686 treats an
+            // unrecognised scheme as alertInternalError. There is no
+            // path in Go where an unknown algorithm verifies.
+            //
+            // Not reachable from tls::Dial — that runs the ported
+            // clientHandshake — but this function belongs to the
+            // invented handshake that mod.rs exports publicly, so a
+            // caller can reach it.
             tls_debug!(
-                "[tls13-debug] WARNING: unknown sig_alg=0x%04x — skipping verification\n",
+                "[tls13-debug] unknown sig_alg=0x%04x — refusing\n",
                 sig_alg as u64
             );
-            crate::errors::nil
+            crate::errors::New("tls13: certificate used with invalid signature algorithm")
         }
     }
 }
@@ -719,8 +738,32 @@ pub fn tls13_decrypt_record_suite(
         pt_s.__into_vec()
     };
 
+    // Go refuses a decrypted record over maxPlaintext, at conn.go
+    // line 82: `if len(data) > maxPlaintext { sendAlert(
+    // alertRecordOverflow) }`, applied to the DECRYPTED bytes.
+    //
+    // record.rs applies this at both of its decrypt sites and this
+    // file, which carries the TLS 1.3 path, did not — the earlier
+    // record.rs-versus-conn.rs audit did not reach here. `read_record`
+    // caps the ciphertext at maxCiphertext, so the exposure is the
+    // ~2 KiB of slack between the two rather than anything unbounded:
+    // a spec deviation and an inconsistency with the sibling paths,
+    // not a denial of service. Stated that way rather than implied,
+    // because the same sentence guards a real bound in record.rs.
+    if pt_v.len() > super::common::maxPlaintext as usize {
+        return (
+            Vec::new(),
+            0,
+            errors::New("tls13: oversized record received"),
+        );
+    }
+
     let mut inner = pt_v;
-    // Strip trailing zeros (padding) then inner_content_type byte
+    // Strip trailing zeros (padding) then inner_content_type byte.
+    //
+    // Safe to do in variable time: these bytes are already
+    // AEAD-authenticated, so the padding length is not attacker-chosen
+    // in the way CBC's is.
     while inner.last() == Some(&0) {
         inner.pop();
     }

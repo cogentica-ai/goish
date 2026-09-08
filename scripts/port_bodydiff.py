@@ -23,6 +23,20 @@ positive rate, all from legitimate differences:
     slices.Clone -> derive(Clone))
   - a documented deviation (no weak pointers, no RWMutex, no QUIC)
   - goish merges two identical Go switch arms
+  - a package that deliberately EXPORTS Go's unexported names. Callers
+    then spell the capitalised form, so every lowercase Go name reads as
+    0/N. encoding/asn1 does this on purpose (so asn1_marshal_smoke can
+    reach the parsers) and produced seven such rows on 2026-09-06 —
+    parseBool, checkInteger, parseBitString, parseBase128Int,
+    parseNumericString and two more — all false. Triaged by grepping the
+    callers for the capitalised name: asn1.rs:343 calls ParseBool.
+
+Run on src/os the same day it found a TRUE one that hand-reading had
+missed: `ignoringEINTR 0/1` on Truncate, Symlink and Link. Go wraps ten
+syscalls in an EINTR retry and goish calls each once. Reading the two
+bodies side by side does not surface that, because the difference is a
+WRAPPER around Go's call rather than anything inside either body — which
+is the shape this tool is for.
 
   --emit  restricts the comparison to cryptobyte builder/parser calls.
           Those have no operator or helper equivalent, so a deficit is
@@ -72,6 +86,69 @@ reader does not re-derive it:
 
 So the class this exists to catch — a dropped field under a valid
 anchor — currently has no instances.
+
+General mode, `src/net/http`, triaged 2026-09-05: 1047 anchored fns,
+502 deficits. Only the top few were checked; the rest is UNTRIAGED and
+the count is dominated by the legitimate differences listed above.
+What the top of that list means, so it is not re-derived:
+
+  ReverseProxy.ServeHTTP    -51. REAL, and already recorded as ROADMAP
+                            2m. The anchor is claimed by the slim
+                            `reverseProxyHandler`, which has no hooks;
+                            the exported `ReverseProxy` has no
+                            ServeHTTP at all. The missing calls name
+                            exactly what is absent — getErrorHandler,
+                            copyHeader, the Rewrite-path Header.Del.
+  ReverseProxy              -33. Same finding: getErrorHandler 0/7 and
+    .handleUpgradeResponse  Errorf 0/7 are the error reporting the
+                            slim path replaces with a bare status.
+  persistConn.readLoop      -32. goish has no readLoop — ROADMAP 2h.
+  Transport.dialConn        -59. Mostly `Close` in Go's error paths,
+                            where goish's Drop handles the conn.
+  response.WriteHeader      -10. WAS REAL: checkWriteHeaderCode 0/1.
+                            The guard was ported, anchored, and called
+                            only from httptest's recorder, so the
+                            server put invalid status codes on the
+                            wire — WriteHeader(-1) emitted the
+                            syntactically invalid line
+                            `HTTP/1.1 00-1 status code -1`. Fixed and
+                            pinned by http_writeheader_code_ref_smoke.
+                            This is the one real find from the general
+                            mode so far, and it was below the top ten.
+  ServeMux.findHandler      -18. FALSE POSITIVE. goish reaches the
+                            same behaviour with a different call
+                            structure. Diffed against Go across nine
+                            routing probes — trailing-slash redirect,
+                            /a/../x, //x, /./x, host:port stripping,
+                            405-with-Allow, 404, and /x/.. — and all
+                            nine agree. Already pinned: mux_ref_smoke
+                            covers 405-with-Allow and the /a/../admin
+                            redirect, http_mux_routing_smoke covers
+                            //double.
+
+Sampled elsewhere 2026-09-06, top entries only, all FALSE POSITIVES —
+recorded so the same six are not re-checked:
+
+  os.ReadDir, io/fs.ReadDir,   `SortFunc 0/1`. All three DO sort; they
+  ioutil.ReadDir               use Rust's `sort_by`, which the tool
+                               cannot see as SortFunc.
+  multipart.Reader.readForm    `CopyN 0/2`. Every bound is present —
+                               maxParts 1000, the +10MB maxMemoryBytes
+                               budget, the 200-byte mapEntryOverhead,
+                               ErrMessageTooLarge. Go's
+                               `maxFileMemoryBytes--` guard is absent
+                               and correctly so: it exists because Go
+                               computes `maxFileMemoryBytes+1` for
+                               CopyN, and goish compares instead of
+                               adding, so there is nothing to overflow.
+  base64 decodeQuantum         `CorruptInputError 0/8`. goish routes
+                               through a `corrupt(n)` helper; covered
+                               by base64_ref_smoke.
+  bufio Err* vars              `New 1/4`. Several vars share one Go
+                               anchor range, so each is charged for all
+                               the New calls in the block. Same
+                               artifact as net/http's transport.go
+                               err* block.
 """
 import os, re, sys, collections
 

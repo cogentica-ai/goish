@@ -10,12 +10,21 @@
 //   });
 //   let _ = http::ListenAndServe(string(":8080"), &mux);
 //
-// One goroutine per connection (`go!(stack(N), …)`), blocking I/O.
-// HTTP/1.x only, no keep-alive in v1 (`Connection: close` injected
-// by ResponseWriter). The mux uses a flat exact-match table plus
-// longest-prefix tiebreak for `"/path/"` patterns — same algorithm
-// shape as Go's `ServeMux` (Go 1.22 simple form, pre-`{wildcard}`
-// patterns).
+// One goroutine per connection (`go!(stack(N), …)`). Not blocking
+// I/O: the conn is a `net::TCPConn`, so a read that would block parks
+// the goroutine on the netpoller and releases the M.
+//
+// HTTP/1.x, with keep-alive — `IdleTimeout`, `SetKeepAlivesEnabled`
+// and `doKeepAlives` are all here. The mux is Go 1.22's, wildcards
+// included: `parsePattern` and the precedence rules live in
+// `pattern.rs`, a port of Go's pattern.go.
+//
+// Three sentences stood here saying the opposite of each of those —
+// blocking I/O, "no keep-alive in v1 (`Connection: close` injected by
+// ResponseWriter)", and a flat exact-match mux "pre-`{wildcard}`
+// patterns". All three described the first version of this file and
+// survived the work that replaced it, which is what a capability
+// banner does if nothing re-measures it.
 
 #![allow(non_snake_case, non_camel_case_types)]
 
@@ -145,6 +154,7 @@ impl ServeMux {
         return;
     }
 
+    // go: sdk 1.25.5 net/http/server.go:2870-2876 ServeMux.Handle
     /// `mux.Handle(pattern, h)` — register a Handler. Patterns that
     /// contain `{` are parsed as Go 1.22 wildcards; any parse error
     /// causes the registration to be silently dropped (Go panics).
@@ -159,10 +169,10 @@ impl ServeMux {
         self.handle_arc(pattern.into(), Arc::new(h));
     }
 
+    // go: sdk 1.25.5 net/http/server.go:2915-2956 ServeMux.registerErr
     /// Internal: stores an already-arced handler. Used by `Handle`,
     /// `HandleFunc`, and other internal callers that already hold an
     /// `Arc<dyn Handler>`.
-    // go: sdk 1.25.5 net/http/server.go:2915-2956 ServeMux.registerErr
     //
     /// Register `handler` for `pattern`, or return the reason it
     /// cannot be.
@@ -225,6 +235,7 @@ impl ServeMux {
         }
     }
 
+    // go: sdk 1.25.5 net/http/server.go:2881-2887 ServeMux.HandleFunc
     /// `mux.HandleFunc(pattern, fn)` — register a closure handler.
     /// The closure must be `Send + Sync + 'static` to be safely
     /// shared across the per-connection worker goroutines.
@@ -235,15 +246,25 @@ impl ServeMux {
         self.handle_arc(pattern.into(), Arc::new(HandlerFunc(f)));
     }
 
+    // go: sdk 1.25.5 net/http/server.go:2695-2749 ServeMux.findHandler
     /// Internal: pick the handler for `r`. Returns the chosen handler
     /// and (for wildcard hits) any path-value bindings, or a 404
     /// stub with empty bindings.
-    // go: sdk 1.25.5 net/http/server.go:2695-2749 ServeMux.findHandler
     //
     // Go strips the port from the Host, cleans the path, then asks the
-    // tree. The trailing-slash redirect (`matchOrRedirect`) and the
-    // CONNECT special case are NOT yet implemented — noted rather than
-    // faked, since both change which handler runs.
+    // tree.
+    //
+    // This said the trailing-slash redirect (`matchOrRedirect`) and the
+    // CONNECT special case were both "NOT yet implemented" until
+    // 2026-09-06. Half of that had stopped being true: `matchOrRedirect`
+    // is ported below, anchored to server.go:2757-2777, and called from
+    // this function — the `/tree` -> `/tree/` redirect works.
+    //
+    // The CONNECT special case is still absent, and still matters: Go
+    // does NOT canonicalize the path for a CONNECT request, so goish
+    // cleans one Go leaves alone. Its sibling gap is in readRequest,
+    // which does not implement Go's `justAuthority` parse either; the
+    // note there points back here.
     fn match_handler(
         &self,
         r: &Request,
@@ -259,8 +280,9 @@ impl ServeMux {
     /// Shared body of `match_handler` and `Handler`: resolve a request
     /// through the routing tree, returning the handler, the matched
     /// pattern string, the pattern itself and the POSITIONAL wildcard
-    /// matches (Go's `pat`/`matches` pair, request.go:335-336 — named
-    /// resolution happens lazily in `Request.patIndex`, not here).
+    /// matches (Go's `pat`/`matches` pair, at request.go lines
+    /// 336-337 — named resolution happens lazily in
+    /// `Request.patIndex`, not here).
     fn find_node(
         &self,
         r: &Request,
@@ -361,9 +383,27 @@ impl ServeMux {
         }
         // Go: no pattern matched this method, but one may match the
         // path under a different method — reply 405 with Allow.
+        //
+        // go: waived ServeMux.matchingMethods — Go's method is this
+        // block: the same two tree walks (the second with a trailing
+        // slash), the same sorted set, inlined into findHandler
+        // because that is its only caller and the mux lock is already
+        // held here. examples/http_mux_allow_ref_smoke.rs pins the
+        // result, including the redirect case the second walk must
+        // not swallow.
         let mut methodSet: crate::gomap::map<string, bool> =
             crate::gomap::map::<string, bool>::new();
         s.tree.matchingMethods(&host, &path, &mut methodSet);
+        // Go (server.go:2839-2841): "matchOrRedirect will try
+        // appending a trailing slash if there is no match" — so the
+        // methods that would match THAT path are allowed here too.
+        // Without this second pass a mux carrying only "POST /x/"
+        // answered `GET /x` with 404 instead of 405 + Allow: POST,
+        // hiding a route that Go tells the caller about.
+        if !strings::HasSuffix(path.clone(), string("/")) {
+            s.tree
+                .matchingMethods(&host, &(path.clone() + string("/")), &mut methodSet);
+        }
         if methodSet.Len() > 0 {
             let mut allow: Vec<string> = Vec::new();
             for (m, _) in methodSet.__iter() {
@@ -832,8 +872,8 @@ pub fn TimeoutHandler<H: Handler + 'static, S: Into<string>>(
     })
 }
 
-/// Go's unexported `timeoutHandler` (server.go:3808).
 // go: sdk 1.25.5 net/http/server.go:3828-3836 timeoutHandler
+/// Go's unexported `timeoutHandler` (server.go:3808).
 struct timeoutHandler {
     handler: Arc<dyn Handler>,
     body: string,
@@ -841,8 +881,8 @@ struct timeoutHandler {
 }
 
 impl timeoutHandler {
-    /// `(h *timeoutHandler).errorBody()` (server.go:3821).
     // go: sdk 1.25.5 net/http/server.go:3838-3843 timeoutHandler.errorBody
+    /// `(h *timeoutHandler).errorBody()` (server.go:3821).
     fn errorBody(&self) -> string {
         if self.body.Len() > 0 {
             return self.body.clone();
@@ -1265,7 +1305,17 @@ pub struct Server {
     /// Reset whenever a new request's headers are read. Zero or
     /// negative = no timeout.
     pub WriteTimeout: time::Duration,
-    /// Idle keep-alive timeout. Zero falls back to `ReadHeaderTimeout`.
+    /// Idle keep-alive timeout — how long a conn may sit between
+    /// requests. Zero falls back to `ReadTimeout`, as Go's
+    /// `Server.idleTimeout()` does (server.go:3636); only when BOTH
+    /// are zero does goish fall back again to the effective
+    /// read-header timeout, the same v1 safety net documented on
+    /// `ReadHeaderTimeout`. Go leaves an idle conn unbounded there.
+    ///
+    /// This used to say the fallback was `ReadHeaderTimeout`, which
+    /// skipped the `ReadTimeout` step both implementations actually
+    /// take — so a server setting only `ReadTimeout` was documented as
+    /// getting the 5s default when it really gets its own value.
     pub IdleTimeout: time::Duration,
     /// Cap on bytes per request line / per header line, in bytes.
     /// `<= 0` falls back to the parser default (8 KiB). Mirrors
@@ -1505,16 +1555,25 @@ pub(crate) struct readResult {
 // HTTP/2 conn-wrapper request types (unencryptedHTTP2Request,
 // initALPNRequest); the receivers cannot exist without the HTTP/2
 // stack the h2c waivers below describe.
+// go: waived unencryptedHTTP2Request.BaseContext — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
+
+// go: waived initALPNRequest.BaseContext — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 // go: waived maybeServeUnencryptedHTTP2 — routes a conn whose first
 // bytes are the h2 preface into the HTTP/2 server; goish has no
 // HTTP/2 stack (the omithttp2 stubs), so there is no serving path for
 // the detection to hand the conn to. Lands with an h2 port, not
 // before.
+// go: waived conn.maybeServeUnencryptedHTTP2 — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 // go: waived unencryptedTLSConn — the tls.Conn wrapper the h2c path
 // fabricates so http2.ServeConn sees a *tls.Conn; same no-HTTP/2
 // blocker as maybeServeUnencryptedHTTP2.
 // go: waived UnencryptedNetConn — the accessor tests use to unwrap
 // the fabricated conn above; carried by the same waiver.
+// go: waived unencryptedNetConnInTLSConn.UnencryptedNetConn — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 
 // go: sdk 1.25.5 net/http/server.go:834-834 copyBufPool
 //
@@ -1716,12 +1775,23 @@ pub trait closeWriter {
     fn CloseWrite(&self) -> error;
 }
 
+// go: waived checkConnErrorWriter.Write — Go wraps the conn so the
+// FIRST write error is recorded and the request context cancelled,
+// which is how a handler blocked writing to a vanished client learns
+// to stop. goish arrives at the same place from the read side: the
+// netpoller disconnect watch (startBackgroundRead/abortPendingRead) is
+// wired to the request cancel, so a client that goes away cancels the
+// context either way. The write error itself is not separately wired,
+// which matters only for a peer that stops READING while still
+// connected.
 // go: waived finalFlush — Go's conn.finalFlush flushes and pool-returns
 // the CONN-LEVEL bufio reader/writer (c.bufr/c.bufw). goish's response
 // renders directly onto the conn (no conn-level writer to flush), and
 // the pooled request reader is already returned per request inside the
 // serve loop — the function's entire job is done elsewhere by
 // construction, and a ported body would be empty.
+// go: waived conn.finalFlush — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 
 // go: sdk 1.25.5 net/http/server.go:1820-1847 conn.closeWriteAndWait
 //
@@ -1747,7 +1817,6 @@ pub trait connectionStater {
     fn ConnectionState(&self) -> crate::crypto::tls::ConnectionState;
 }
 
-// goishlint:ignore GOISH021 loggingConn — same embedded-interface
 // shape as onceCloseListener below: Go embeds `net.Conn` anonymously,
 // GOISH019 reads goish's necessarily-named field as an addition, and
 // the only alternative waiver is file-wide. Anchor omitted on the
@@ -1846,7 +1915,6 @@ impl net::Conn for loggingConn {
     }
 }
 
-// goishlint:ignore GOISH021 onceCloseListener — the type IS ported,
 // directly below; its `// go:` anchor is deliberately omitted so
 // GOISH019 does not fire. Go EMBEDS `net.Listener` anonymously, and
 // GOISH019's Go parser records no field name for an embedded field,
@@ -2216,8 +2284,15 @@ pub struct connReader {
 
 // go: none — goish-only: the payload of Go's `mu sync.Mutex` on
 // connReader, restricted to the fields this slice ports.
-// The last three are Go's fields for the background reader, carried
-// now so the struct does not have to change shape when it lands.
+// `inRead` and `hasByte` are Go's fields for the background reader and
+// are deliberately NEVER SET here: the note above connReader explains
+// why — goish's background read is a netpoller MSG_PEEK watch that
+// consumes nothing, so there is no pipelined byte to stash and no
+// cond/inRead join to make. They used to be described as "carried now
+// so the struct does not have to change shape when it lands"; the
+// reader landed (startBackgroundRead below is anchored), under a
+// design that will not use them. `aborted` is the one of the three
+// that IS used.
 #[allow(dead_code)]
 struct connReaderState {
     /// Go: "bytes remaining"
@@ -2534,6 +2609,13 @@ impl crate::io::Reader for __ConnReaderRead<'_> {
 /// (an Eager Body), so today this always answers false — exactly Go's
 /// `*body` case with the source drained — and the serve loop takes
 /// the immediate-startBackgroundRead arm.
+///
+/// No caller since 2026-09-07: the serve loop used to branch on this
+/// into two arms that both called `startBackgroundRead`, which read as
+/// a distinction the server does not make. The branch collapsed and
+/// this kept its anchor, because Go declares it and the streaming body
+/// of ROADMAP §0 A is what gives it a caller again.
+#[allow(dead_code)]
 pub(crate) fn requestBodyRemains(rc: &super::Body) -> bool {
     let out = match rc.__eager_len() {
         Some(_) => false,
@@ -2607,7 +2689,7 @@ crate::var! {
     /// `http.ErrAbortHandler` (server.go:1909).
     pub ErrAbortHandler: error    = "net/http: abort Handler";
 
-    /// `http.ErrHandlerTimeout` (server.go:3829).
+    /// `http.ErrHandlerTimeout` (server.go:3826).
     pub ErrHandlerTimeout: error  = "http: Handler timeout";
 }
 
@@ -2838,6 +2920,7 @@ impl Server {
         s
     }
 
+    // go: sdk 1.25.5 net/http/server.go:3377-3390 Server.ListenAndServe
     /// `(*Server).ListenAndServe` (server.go:3377) — bind to `Addr`
     /// and run the accept loop. Returns ErrServerClosed after a
     /// successful Shutdown, or the underlying network error otherwise.
@@ -2968,6 +3051,7 @@ impl Server {
         }
     }
 
+    // go: sdk 1.25.5 net/http/server.go:3433-3495 Server.Serve
     /// `(*Server).Serve(l)` (server.go:3433) — accept loop on a
     /// pre-bound Listener. Tracks the listener so `Shutdown` can
     /// break the Accept loop and close the socket.
@@ -3110,6 +3194,7 @@ impl Server {
         }
     }
 
+    // go: sdk 1.25.5 net/http/server.go:3179-3215 Server.Shutdown
     /// `(*Server).Shutdown(timeout)` — graceful shutdown. Closes the
     /// tracked listener (causing Accept to return ErrServerClosed),
     /// then polls active connection count until it reaches zero or
@@ -3188,6 +3273,7 @@ impl Server {
         }
     }
 
+    // go: sdk 1.25.5 net/http/server.go:3129-3148 Server.Close
     /// `(*Server).Close` (server.go:3129) — immediately close the
     /// listener and kick every tracked connection regardless of
     /// state. Does not wait for handlers to finish (use `Shutdown`
@@ -3211,6 +3297,7 @@ impl Server {
         errors::nil
     }
 
+    // go: sdk 1.25.5 net/http/server.go:3222-3226 Server.RegisterOnShutdown
     /// `(*Server).RegisterOnShutdown(f)` (server.go:3221) — register
     /// a callback to run (on its own goroutine) when `Shutdown` or
     /// `Close` begins.
@@ -3251,10 +3338,17 @@ impl Server {
 
     // go: sdk 1.25.5 net/http/server.go:3636-3641 Server.idleTimeout
     //
-    // Go falls back to ReadTimeout, NOT to ReadHeaderTimeout. goish's
-    // own accept loop uses a separate v1 fallback documented on the
-    // IdleTimeout field; this method is the Go-faithful one and is not
-    // wired into that path.
+    // Go falls back to ReadTimeout, NOT to ReadHeaderTimeout. The
+    // serve loops call `idle_timeout_ns` instead, which takes the same
+    // two steps and then adds goish's v1 safety net when both are
+    // zero; this method is the Go-faithful one and is not wired in.
+    //
+    // Before unifying them, note they disagree on NEGATIVE durations:
+    // Go tests `!= 0`, so a negative IdleTimeout is returned as-is,
+    // while `idle_timeout_ns` tests `> 0` and treats a negative value
+    // as unset and falls through. Collapsing one into the other
+    // changes behaviour for that input, which is why the duplication
+    // is recorded rather than quietly removed.
     pub fn idleTimeout(&self) -> time::Duration {
         if self.IdleTimeout != time::Duration(0) {
             return self.IdleTimeout;
@@ -3384,6 +3478,12 @@ impl Server {
         let idle_ns = self.idle_timeout_ns();
         let write_timeout_ns = self.write_timeout_ns();
         let mut first_request = true;
+        // Go: `c.lastMethod`, at server.go line 1053, set by readRequest and
+        // read on the NEXT request to decide whether to tolerate stray
+        // CR/LF before the request line. goish tracked no last method,
+        // so numLeadingCRorLF — ported and anchored — had nothing to
+        // gate on and was never called.
+        let mut last_method = string::new();
         // Go stamps `c.remoteAddr` ONCE at conn.serve entry
         // (server.go:2076); readRequest copies it onto every request
         // (:1120). Formatting it per request cost an alloc each.
@@ -3433,6 +3533,28 @@ impl Server {
                     cr: &cr,
                     rwc: &mut conn,
                 });
+                // Go: if c.lastMethod == "POST" { peek, _ :=
+                // c.bufr.Peek(4); c.bufr.Discard(numLeadingCRorLF(peek)) }
+                // — "RFC 7230 section 3 tolerance for old buggy
+                // clients", at server.go lines 1035-1039.
+                //
+                // The shape: an old client sends a POST whose body is
+                // followed by a CRLF that is not part of it, and the
+                // next request on the keep-alive connection starts
+                // with those bytes. Go serves it; goish answered 400.
+                //
+                // Gated on POST exactly as Go gates it. Skipping
+                // leading blank lines unconditionally would be a
+                // request-smuggling primitive: a proxy that skips them
+                // and an origin that does not disagree about where one
+                // request ends and the next begins.
+                if last_method == "POST" {
+                    let (peek, _) = br.Peek(4);
+                    let n = numLeadingCRorLF(peek);
+                    if n > 0 {
+                        let _ = br.Discard(n);
+                    }
+                }
                 // Server variant: carries the fd so the parser can
                 // emit `100 Continue` before the eager body read, and
                 // the connReader so the header limit lifts before the
@@ -3640,14 +3762,21 @@ impl Server {
             // immediately. The server's eager body decode means the
             // second arm always runs today.
             cr.__set_hooks(req_cancel.clone(), cnc.clone());
-            if requestBodyRemains(&req.Body) {
-                // registerOnHitEOF territory — unreachable until the
-                // inbound body streams; the connReader is armed late
-                // there, at the body's EOF.
-                cr.startBackgroundRead(watch_pd);
-            } else {
-                cr.startBackgroundRead(watch_pd);
-            }
+            // Go arms the background read here for a DRAINED body, and
+            // defers it to the body's EOF via registerOnHitEOF when
+            // bytes are still on the wire. goish decodes the body
+            // eagerly, so `requestBodyRemains` is false for every
+            // server request and only the drained arm can run.
+            //
+            // This was written as an `if requestBodyRemains(...)` whose
+            // two arms both called `startBackgroundRead` — a condition
+            // that cannot be true guarding branches that do the same
+            // thing, which reads as a distinction the server does not
+            // make. The seam is a comment now instead: when the inbound
+            // body streams (ROADMAP §0 A), the remains-case arms the
+            // connReader late, at the body's EOF, and this is where
+            // that branch goes back.
+            cr.startBackgroundRead(watch_pd);
 
             // Go consults doKeepAlives twice per request — writeHeader
             // (server.go:1301) for the Connection header, conn.serve
@@ -3658,6 +3787,9 @@ impl Server {
             // reused anyway, with no indication the setting had been
             // ignored. doKeepAlives is `!disabled && !shuttingDown`,
             // so it subsumes the check it replaces.
+            // Go: `c.lastMethod = req.Method`, at server.go line 1053, set
+            // once the request parses and read on the next one.
+            last_method = req.Method.clone();
             let keep_alive = request_keep_alive(&mut req) && self.doKeepAlives();
             let wants10 = req.wantsHttp10KeepAlive();
             let w = response::__new_with_cnc(conn, cnc);
@@ -3792,6 +3924,7 @@ impl Server {
         self.__state.in_shutdown.load(Ordering::Acquire)
     }
 
+    // go: sdk 1.25.5 net/http/server.go:3604-3621 Server.trackListener
     /// Install a listener into the shutdown-tracked set — the same
     /// critical section `Serve` runs at entry, factored out so the
     /// HTTPS serve loop (server_tls.rs ServeTLS) gets identical
@@ -3800,7 +3933,6 @@ impl Server {
     /// Returns `false` if shutdown already began (caller must return
     /// `ErrServerClosed` without accepting). Go: `trackListener(ln,
     /// true)` (server.go:3253).
-    // go: sdk 1.25.5 net/http/server.go:3604-3621 Server.trackListener
     /// Go: "trackListener adds or removes a net.Listener to the set of
     /// tracked listeners. Returns false if the server is shutting down."
     ///
@@ -3966,6 +4098,7 @@ impl Server {
         return quiescent;
     }
 
+    // go: sdk 1.25.5 net/http/server.go:3675-3681 Server.logf
     /// `(*Server).logf` (server.go:3691): route a message through
     /// `ErrorLog` when set, else the `log` package default (stderr).
     pub(crate) fn logf(&self, msg: string) {
@@ -4017,6 +4150,7 @@ impl Server {
 
 // ─── Free-function wrappers (Go-faithful one-liners) ─────────────────
 
+// go: sdk 1.25.5 net/http/server.go:3702-3705 ListenAndServe
 /// `http.ListenAndServe(addr, handler)` — bind + accept loop +
 /// goroutine-per-connection dispatch. Blocks until the server is
 /// shut down (returns ErrServerClosed) or the underlying Listen
@@ -4035,6 +4169,7 @@ pub fn ListenAndServe<A: Into<string>>(addr: A, handler: Arc<dyn Handler>) -> er
     srv.ListenAndServe()
 }
 
+// go: sdk 1.25.5 net/http/server.go:2969-2972 Serve
 /// `http.Serve(l, handler)` — accept loop on a pre-bound Listener.
 /// Mirrors Go's `func Serve(l net.Listener, handler Handler) error`
 /// (server.go:3676). For per-server config / shutdown, use
@@ -4063,7 +4198,7 @@ pub(crate) fn request_keep_alive_pub(req: &mut Request) -> bool {
 }
 
 /// Whether to reuse the connection after this request — the inverse of
-/// Go's `shouldClose` (transfer.go:745), which is what Go's conn.serve
+/// Go's `shouldClose` (transfer.go:748), which is what Go's conn.serve
 /// consults via `w.closeAfterReply`.
 ///
 /// This used to be hand-rolled here, comparing the WHOLE `Connection`

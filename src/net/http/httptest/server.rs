@@ -417,6 +417,18 @@ impl Server {
                 }
             }
         }
+        // Go: "Not part of httptest.Server's correctness, but assume
+        // most users of httptest.Server will be using the standard
+        // transport, so help them out and close any idle connections
+        // for them" — then the same for the Server's own client
+        // (server.go:238-248).
+        //
+        // It matters more here than the wording suggests. goish's
+        // DefaultTransport() memoises into a process-wide static, so
+        // idle conns to servers that are already gone accumulate for
+        // the life of the program rather than the life of a test.
+        super::super::transport::DefaultTransport().CloseIdleConnections();
+        self.client.CloseIdleConnections();
         // Go: "If this server doesn't shut down in 5 seconds, tell the
         // user why." See the note above on why this is a poll rather
         // than an AfterFunc.

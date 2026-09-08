@@ -93,7 +93,7 @@ use super::transfer::bodyAllowedForStatus;
 
 // ─── The interfaces ─────────────────────────────────────────────────
 
-/// `http.ResponseWriter` (server.go:90) — the interface a handler
+/// `http.ResponseWriter` (server.go:96) — the interface a handler
 /// uses to construct an HTTP response.
 ///
 /// Every method takes `&self`: the concrete writer carries interior
@@ -338,7 +338,7 @@ fn register_response_impls() {
 ///     with `Transfer-Encoding: chunked` and every subsequent `Write`
 ///     emits one chunk. The closing `0\r\n\r\n` terminator is sent by
 ///     the final `flush()`.
-/// `response.closeNotifyCh` / `closeNotifyTriggered` (server.go:493),
+/// `response.closeNotifyCh` / `closeNotifyTriggered` (server.go:496),
 /// lifted into their own cell.
 ///
 /// Go keeps both on the response and reaches them from the conn's
@@ -459,6 +459,22 @@ struct respInner {
     status: int,
     /// `true` once `WriteHeader` was called explicitly or implicitly.
     wrote_header: bool,
+    /// The header map as it stood when the head was COMMITTED.
+    ///
+    /// Go clones the handler's header at that moment
+    /// (`cw.header = w.handlerHeader.Clone()`, server.go:1216) and
+    /// writes the head from the clone, so a `Header().Set` after the
+    /// handler's first write is ignored. goish rendered the head from
+    /// the LIVE map at flush time, which honoured those late sets —
+    /// measured: a header set after the first Write reached the wire
+    /// where Go drops it.
+    ///
+    /// The visible cost was trailers. A handler that announces
+    /// `Trailer: X-Sum` and sets X-Sum after writing the body, without
+    /// an explicit Flush, had the value emitted BOTH in the head and
+    /// after the last chunk. `finalTrailers` still reads the live map,
+    /// which is what Go does too, so the trailer half stays correct.
+    committed: Option<Header>,
     /// `true` once `flush` has emitted bytes onto the wire.
     flushed: bool,
     /// Buffered body. In streaming mode it only holds bytes written
@@ -541,6 +557,18 @@ impl crate::io::Writer for writerOnly<'_> {
     }
 }
 
+// go: waived response.WriteString — Go's exists so io.WriteString can
+// take a fast path through io.StringWriter and skip the
+// string-to-[]byte copy. goish's io::WriteString makes no such
+// assertion: it converts and calls Write, so there is no interface for
+// this method to satisfy and no behaviour that differs. What is
+// missing is the SPELLING — a handler cannot write `w.WriteString(s)`
+// — not an effect on the wire.
+//
+// Kept here rather than above `response.Write`: a `go: waived` line
+// directly above an anchored fn becomes the first line of ITS comment
+// block, and GOISH014 then reports that fn as unanchored. Which is
+// what happened.
 impl response {
     // go: sdk 1.25.5 net/http/server.go:589-627 response.ReadFrom
     // goishlint:ignore GOISH020 ReadFrom — Go's src is io.Reader; the
@@ -579,6 +607,7 @@ impl response {
                 conn,
                 status: 200,
                 wrote_header: false,
+                committed: None,
                 flushed: false,
                 body: Vec::new(),
                 chunked: false,
@@ -814,6 +843,9 @@ impl response {
         let mut g = self.inner.Lock();
         if !g.wrote_header {
             g.wrote_header = true;
+            if g.committed.is_none() {
+                g.committed = Some(self.header.Lock().Clone());
+            }
         }
         if g.chunked {
             // Already streaming — nothing to flush at the writer level.
@@ -822,9 +854,9 @@ impl response {
         g.chunked = true;
         // Go's chunkWriter.writeHeader calls declareTrailer for each
         // element of the `Trailer` response header as the head is
-        // written (server.go:1470-1476). Doing it here is what makes a
-        // handler's `w.Header().Set("Trailer", "X-Sum")` actually
-        // produce a trailer at the end.
+        // written, at server.go lines 1341-1344. Doing it here is what
+        // makes a handler's `w.Header().Set("Trailer", "X-Sum")`
+        // actually produce a trailer at the end.
         {
             let decls = self.header.Lock().Values(string("Trailer"));
             drop(g);
@@ -842,7 +874,16 @@ impl response {
         // Build the head: set Transfer-Encoding, clear any user-set
         // Content-Length (mutually exclusive per RFC 7230 §3.3.2).
         let head = {
-            let mut h = self.header.Lock();
+            // The COMMITTED header, as in the buffered path — see
+            // respInner's `committed`. The chunked path needs it too:
+            // a handler that announces a trailer and sets its value
+            // after writing the body, with no explicit Flush, reaches
+            // HERE with the value already in the live map, and emitted
+            // it in the head as well as after the last chunk.
+            let mut h: Header = match &g.committed {
+                Some(c) => c.clone(),
+                None => self.header.Lock().Clone(),
+            };
             // Before the auto `chunked` below: Go's hasTE guard tests a
             // HANDLER-set Transfer-Encoding, and a flushed response is
             // still sniffed.
@@ -859,7 +900,8 @@ impl response {
                 h.Del(string("Content-Length"));
                 h.Set(string("Transfer-Encoding"), string("chunked"));
             }
-            build_head(g.status, &h, g.proto11)
+            let derived = derived_extras(g.committed.as_ref(), &h);
+            build_head(g.status, &h, g.proto11, &derived)
         };
         let (_, err) = g.conn.Write(slice::<byte>::__from_vec(head));
         if !err.IsNil() {
@@ -1043,7 +1085,22 @@ impl response {
             // raw bytes — unparseable to any client that believed the
             // header.
             let hdr = self.header.Lock();
+            // Go's `trailers` is set by EITHER route (server.go:1331-
+            // 1344): a `Trailer` header, or any key under the
+            // `Trailer:` magic prefix — the way a handler announces a
+            // trailer whose name it does not know until after the body.
+            // goish honoured only the first, so the prefixed form got a
+            // Content-Length response and the trailer was dropped.
+            let mut prefixed = false;
+            for (k, _) in crate::range!(&*hdr) {
+                let ks: &str = k.as_ref();
+                if ks.starts_with(super::server::TrailerPrefix) {
+                    prefixed = true;
+                    break;
+                }
+            }
             let declares = hdr.Values(string("Trailer")).Len() > 0
+                || prefixed
                 || hdr.Get(string("Transfer-Encoding")).as_ref() as &str == "chunked";
             drop(hdr);
             if declares {
@@ -1094,7 +1151,13 @@ impl response {
 
         // Buffered mode: emit Content-Length derived from buffered body.
         let buf = {
-            let mut h = self.header.Lock();
+            // The COMMITTED header, not the live one — see respInner's
+            // `committed`. Falls back to the live map for a response
+            // that never wrote anything.
+            let mut h: Header = match &g.committed {
+                Some(c) => c.clone(),
+                None => self.header.Lock().Clone(),
+            };
             // HEAD still advertises the GET-equivalent length; 1xx/
             // 204/304 must not carry an auto Content-Length at all
             // (Go omits it for bodyless statuses, server.go:1533).
@@ -1102,9 +1165,27 @@ impl response {
             // Transfer-Encoding, "because they're generally
             // incompatible" (server.go:1361).
             let hasTE = h.Get(string("Transfer-Encoding")).Len() != 0;
+            // Go's condition carries one more clause: `(!isHEAD ||
+            // len(p) > 0)` (server.go:1363). Its comment says why —
+            // zero bytes on a HEAD is ambiguous between "the resource
+            // really is empty" and "the handler noticed the method and
+            // wrote nothing", and Go refuses to guess: "If it's
+            // actually 0 bytes and the handler never looked at the
+            // Request.Method, we just don't send a Content-Length
+            // header."
+            //
+            // goish sent `Content-Length: 0`, which is not a refusal to
+            // answer but a claim that the GET would be empty. The
+            // common shape `if r.Method == "HEAD" { return }` therefore
+            // told every client the resource had no content, and a
+            // client that believes it has no reason to fetch it.
+            //
+            // A HEAD that DID write still advertises the GET-equivalent
+            // length, which is the head-writes-body row.
             if bodyAllowedForStatus(g.status)
                 && !hasTE
                 && h.Values(string("Content-Length")).Len() == 0
+                && (!g.is_head || g.body.len() > 0)
             {
                 h.Set(string("Content-Length"), int_to_string(g.body.len() as i64));
             }
@@ -1117,7 +1198,8 @@ impl response {
                 g.proto11,
                 g.is_head,
             );
-            let mut buf = build_head(g.status, &h, g.proto11);
+            let derived = derived_extras(g.committed.as_ref(), &h);
+            let mut buf = build_head(g.status, &h, g.proto11, &derived);
             if !suppress_body {
                 buf.reserve(g.body.len());
                 buf.extend_from_slice(&g.body);
@@ -1241,6 +1323,9 @@ impl ResponseWriter for response {
         let mut g = self.inner.Lock();
         if !g.wrote_header {
             g.wrote_header = true;
+            if g.committed.is_none() {
+                g.committed = Some(self.header.Lock().Clone());
+            }
         }
         // `(*response).write` (server.go:1686): a status that forbids
         // a body rejects handler writes with ErrBodyNotAllowed.
@@ -1311,8 +1396,33 @@ impl ResponseWriter for response {
             ));
             return;
         }
+        // Go: checkWriteHeaderCode(code) (server.go:1195), AFTER the
+        // hijacked and wroteHeader guards — so a superfluous
+        // WriteHeader with a bad code logs rather than panics, exactly
+        // as Go does.
+        //
+        // This was ported and anchored and called only from
+        // httptest's recorder, so the real server put whatever it was
+        // handed on the wire. Measured against Go: WriteHeader(-1)
+        // emitted the status line `HTTP/1.1 00-1 status code -1`,
+        // which is not merely a wrong code but a syntactically invalid
+        // one; 42 emitted `042`, 1000 emitted a four-digit field. Go
+        // panics for all of them, deliberately — "we'll consistently
+        // panic instead and help people find their bugs early".
+        drop(g);
+        super::server::checkWriteHeaderCode(statusCode);
+        let mut g = self.inner.Lock();
+        if g.wrote_header {
+            return;
+        }
         g.wrote_header = true;
         g.status = statusCode;
+        // Go clones the handler header at WriteHeader as well as at the
+        // implicit one on first Write (server.go:1216), so a Set after
+        // an explicit WriteHeader is ignored just the same.
+        if g.committed.is_none() {
+            g.committed = Some(self.header.Lock().Clone());
+        }
     }
 
     // go: none — goish-only interface-registry hook emitted for cast! support.
@@ -1578,8 +1688,61 @@ pub(crate) fn finalizeHeaders(
     return;
 }
 
-// go: none — goish-only: renders status line + sorted headers in one buffer; Go streams the same bytes through chunkWriter.writeHeader.
-pub(crate) fn build_head(status: int, header: &Header, is11: bool) -> Vec<u8> {
+// go: sdk 1.25.5 net/http/server.go:1265-1290 extraHeader.Write
+/// The five headers Go writes through `extraHeader` rather than the
+/// sorted map, in the order `extraHeader.Write` emits them
+/// (server.go:1265): Date, Content-Length, Content-Type, Connection,
+/// Transfer-Encoding.
+///
+/// Only when the SERVER derived them. A handler-set Content-Type stays
+/// in `cw.header` and sorts with everything else, which is why Go's
+/// wire order is not one fixed sequence: a ServeContent response puts
+/// Content-Type before Date, and a sniffed one after.
+const EXTRA_ORDER: [&str; 5] = [
+    "Date",
+    "Content-Length",
+    "Content-Type",
+    "Connection",
+    "Transfer-Encoding",
+];
+
+// go: none — goish-only: which of the five extraHeader names the
+// SERVER derived, by diffing the header before and after finalizeHeaders.
+/// `before` is the header as the handler left it — the commit-time
+/// snapshot on the plain path, or the pre-finalizeHeaders copy on the
+/// TLS one. `None` means no snapshot was taken, in which case every
+/// EXTRA_ORDER name present is treated as derived; that is Go's shape
+/// for a handler that sets no headers of its own.
+pub(crate) fn derived_extras(
+    before: Option<&Header>,
+    after: &Header,
+) -> crate::gomap::map<string, bool> {
+    let mut derived = crate::gomap::map::<string, bool>::new();
+    for k in EXTRA_ORDER.iter() {
+        let key = string::from(*k);
+        if after.Values(key.clone()).Len() == 0 {
+            continue;
+        }
+        let was_set = match before {
+            Some(b) => b.Values(key.clone()).Len() != 0,
+            None => false,
+        };
+        if !was_set {
+            derived.Set(key, true);
+        }
+    }
+    return derived;
+}
+
+// go: none — goish-only: renders status line + sorted headers + the
+// extraHeader block in one buffer; Go streams the same bytes through
+// chunkWriter.writeHeader.
+pub(crate) fn build_head(
+    status: int,
+    header: &Header,
+    is11: bool,
+    derived: &crate::gomap::map<string, bool>,
+) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::with_capacity(256);
     // Go's writeStatusLine (server.go:1596), ported in server.rs.
     // Go passes `w.req.ProtoAtLeast(1, 1)`, and so does goish now:
@@ -1601,11 +1764,35 @@ pub(crate) fn build_head(status: int, header: &Header, is11: bool) -> Vec<u8> {
     // bypassed it.
     //
     // Routing through writeSubset also sorts the keys, which Go does
-    // here too.
+    // here too — but only over the handler's own headers. The ones the
+    // server derived are excluded here and re-emitted below in
+    // extraHeader order, which is what makes the wire bytes match Go.
     {
+        // Go's writeHeader also collects every `Trailer:`-prefixed key
+        // into excludeHeader here (server.go:1331-1340) — "Don't write
+        // out the fake Trailer:foo keys". goish needs no such pass:
+        // those names carry a colon, so writeSubset's
+        // ValidHeaderFieldName guard already refuses them. Measured,
+        // not assumed — with the guard as the only thing standing in
+        // the way, the head comes out byte-identical to Go's. An
+        // explicit exclusion here would be a branch no test could
+        // distinguish from its absence.
         let mut hb = crate::bytes::Buffer::new();
-        let _ = header.WriteSubset(&mut hb, &crate::gomap::map::<string, bool>::new());
+        let _ = header.WriteSubset(&mut hb, derived);
         buf.extend_from_slice(hb.Bytes().as_ref());
+        for k in EXTRA_ORDER.iter() {
+            let key = string::from(*k);
+            if derived.Get(key.clone()).1 {
+                let vals = header.Values(key.clone());
+                for i in 0..vals.Len() {
+                    let mut one = Header::new();
+                    one.Set(key.clone(), vals[i].clone());
+                    let mut hb = crate::bytes::Buffer::new();
+                    let _ = one.WriteSubset(&mut hb, &crate::gomap::map::<string, bool>::new());
+                    buf.extend_from_slice(hb.Bytes().as_ref());
+                }
+            }
+        }
     }
     buf.extend_from_slice(b"\r\n");
     return buf;

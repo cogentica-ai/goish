@@ -19,8 +19,6 @@
 //   * There is no zone database. `Location` carries no state, `UTC`
 //     and `Local` are the same singleton, and every `Time` is stored
 //     and rendered in UTC.
-//   * `Duration.String()` writes ASCII "us" where Go writes "µs",
-//     because goish's formatter is ASCII-clean.
 //   * `Parse` recognises a fixed set of layouts rather than scanning
 //     an arbitrary one — see the note on it in format.rs.
 
@@ -35,6 +33,9 @@ pub use time_go::*;
 #[path = "format.rs"]
 mod format;
 pub use format::*;
+
+#[path = "format_rfc3339.rs"]
+mod format_rfc3339;
 
 #[path = "sleep.rs"]
 mod sleep;

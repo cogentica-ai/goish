@@ -13,12 +13,23 @@
 // (CreateCertificate, CreateRevocationList, Certificate.CreateCRL,
 // MarshalPKIXPublicKey and the extension builders behind them).
 //
-// What is still absent: the CSR and CRL *parsing* entry points —
-// `ParseCRL`, `ParseDERCRL`, `ParseRevocationList`,
-// `ParseCertificateRequest`, `parseCertificateRequest`,
-// `parseRawAttributes` and `parseCSRExtensions`. They are the read side
-// of the shapes declared here, and belong with `parser.go`'s half rather
-// than this one. They are absent, not stubbed.
+// This block said, until 2026-09-06: "What is still absent: the CSR and
+// CRL *parsing* entry points — ParseCRL, ParseDERCRL,
+// ParseRevocationList, ParseCertificateRequest, parseCertificateRequest,
+// parseRawAttributes and parseCSRExtensions … They are absent, not
+// stubbed."
+//
+// All seven are present, in THIS file, and they are implementations
+// rather than stubs — parseCertificateRequest is 71 lines,
+// parseCSRExtensions 50, and parseCertificateRequest populates
+// Attributes through parseRawAttributes exactly as Go does at
+// x509.go:2223. A reader taking that paragraph at face value would
+// conclude goish cannot parse a CSR or a CRL, which has not been true
+// for some time.
+//
+// The GOISH018 ignore further down still lists the same seven names.
+// That is now belt-and-braces rather than a statement about the file:
+// they are ported here, so the rule has nothing to fire on.
 //
 // Deviations from x509[go] @ Go 1.25.5:
 //
@@ -53,9 +64,13 @@
 //     certificate *signed* with RSA-PSS parses, but reports its
 //     signature algorithm as unknown.
 //
-// goishlint:ignore GOISH018 ParseCRL, ParseDERCRL, parseRawAttributes, parseCSRExtensions, ParseCertificateRequest, parseCertificateRequest — the CSR/CRL parsing entry points; see the banner.
-// goishlint:ignore GOISH019 pssParameters — the RSA-PSS parameter shape, read only by `getSignatureAlgorithmFromAI`'s unported RSA-PSS branch (which needs asn1.Unmarshal) and written by nothing. Every other ASN.1 shape in x509.go is declared, in this file.
-// goishlint:ignore GOISH021 pssParameters, pssParametersSHA256, pssParametersSHA384, pssParametersSHA512, oidSHA256, oidSHA384, oidSHA512, oidMGF1, pemCRLPrefix, pemType — the RSA-PSS parameter blobs, which belong to the unported RSA-PSS branch of getSignatureAlgorithmFromAI, and the three vars read only by ParseCRL / ParseCRL. Every other type, const and var in x509.go is here.
+// `pssParameters` is the RSA-PSS parameter shape, read only by the
+// unported RSA-PSS branch of `getSignatureAlgorithmFromAI` and written
+// by nothing; every other ASN.1 shape in x509.go IS declared here. It
+// carried a GOISH019 waiver, which suppressed nothing — GOISH019 is
+// about a type whose FIELDS differ, and this type is absent entirely,
+// which is the GOISH021 waiver below. Prose kept, marker dropped.
+// goishlint:ignore GOISH021 pssParameters, pssParametersSHA256, pssParametersSHA384, pssParametersSHA512, oidSHA256, oidSHA384, oidSHA512, oidMGF1 — the RSA-PSS parameter blobs, which belong to the unported RSA-PSS branch of getSignatureAlgorithmFromAI, and the three vars read only by ParseCRL / ParseCRL. Every other type, const and var in x509.go is here.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -1444,7 +1459,13 @@ pub(super) fn isIA5String(s: &string) -> error {
 //     Pinned by `x509_create_smoke`'s POLICYIDS case against Go run with
 //     `GODEBUG=x509usepolicies=0`.
 //
-// goishlint:ignore GOISH019 pssParameters, tbsCertificateRequest, certificateRequest — pssParameters is the RSA-PSS *parameter* shape, read by the unported `getSignatureAlgorithmFromAI` branch and written by nothing here; the two CSR shapes are declared but only reachable from `CreateCertificateRequest`, which is blocked on asn1::Unmarshal.
+// Same three, same reason, and one correction: `tbsCertificateRequest`
+// and `certificateRequest` ARE declared here, reachable from
+// `CreateCertificateRequest`, which this line said was "blocked on
+// asn1::Unmarshal". That blocker is gone — asn1::Unmarshal is in
+// encoding/asn1, which is how crypto/x509's own pkcs1/pkcs8/sec1
+// parsers work and why goish_rsa_der.rs could be retired on
+// 2026-09-07. The GOISH019 marker suppressed nothing and is dropped.
 
 // Go: x509.go:58-61
 //   type pkixPublicKey struct {
@@ -2096,7 +2117,8 @@ pub(super) fn buildCertExtensions(
 }
 
 // go: none — goish idiom: Go writes `ipAndMask` and `serialiseConstraints`
-// as closures inside `buildCertExtensions` (x509.go:1283-1338). Rust
+// as closures at x509.go lines 1285-1338, inside `buildCertExtensions`
+// (which starts at line 1182). Rust
 // closures cannot recurse into `Builder::AddASN1`'s `FnOnce` while also
 // capturing the enclosing `ret[n]` borrow, so both are lifted to
 // file-private functions with the same names, bodies and order.

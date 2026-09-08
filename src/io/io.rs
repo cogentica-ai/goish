@@ -55,16 +55,16 @@ pub trait Closer {
     fn Close(&mut self) -> error;
 }
 
-/// Go's `io.ReadCloser` — combines [`Reader`] and [`Closer`].
 // go: sdk 1.25.5 io/io.go:137-140 ReadCloser
+/// Go's `io.ReadCloser` — combines [`Reader`] and [`Closer`].
 pub trait ReadCloser: Reader + Closer {}
 
 /// Blanket impl: any type that implements both `Reader` and `Closer`
 /// automatically implements `ReadCloser`.
 impl<T: Reader + Closer> ReadCloser for T {}
 
-/// Go's `io.ReadWriter` — combines [`Reader`] and [`Writer`].
 // go: sdk 1.25.5 io/io.go:131-134 ReadWriter
+/// Go's `io.ReadWriter` — combines [`Reader`] and [`Writer`].
 pub trait ReadWriter: Reader + Writer {}
 
 /// Blanket impl. Go's interface satisfaction is structural, so a type
@@ -72,47 +72,47 @@ pub trait ReadWriter: Reader + Writer {}
 /// nominal, so each grouping interface needs one of these.
 impl<T: Reader + Writer> ReadWriter for T {}
 
-/// Go's `io.WriteCloser` — combines [`Writer`] and [`Closer`].
 // go: sdk 1.25.5 io/io.go:143-146 WriteCloser
+/// Go's `io.WriteCloser` — combines [`Writer`] and [`Closer`].
 pub trait WriteCloser: Writer + Closer {}
 
 /// Blanket impl, as for [`ReadWriter`].
 impl<T: Writer + Closer> WriteCloser for T {}
 
+// go: sdk 1.25.5 io/io.go:149-153 ReadWriteCloser
 /// Go's `io.ReadWriteCloser` — combines [`Reader`], [`Writer`] and
 /// [`Closer`].
-// go: sdk 1.25.5 io/io.go:149-153 ReadWriteCloser
 pub trait ReadWriteCloser: Reader + Writer + Closer {}
 
 /// Blanket impl, as for [`ReadWriter`].
 impl<T: Reader + Writer + Closer> ReadWriteCloser for T {}
 
+// go: sdk 1.25.5 io/io.go:163-167 ReadSeekCloser
 /// Go's `io.ReadSeekCloser` — combines [`Reader`], [`Seeker`] and
 /// [`Closer`].
-// go: sdk 1.25.5 io/io.go:163-167 ReadSeekCloser
 pub trait ReadSeekCloser: Reader + Seeker + Closer {}
 
 /// Blanket impl, as for [`ReadWriter`].
 impl<T: Reader + Seeker + Closer> ReadSeekCloser for T {}
 
-/// Go's `io.WriteSeeker` — combines [`Writer`] and [`Seeker`].
 // go: sdk 1.25.5 io/io.go:170-173 WriteSeeker
+/// Go's `io.WriteSeeker` — combines [`Writer`] and [`Seeker`].
 pub trait WriteSeeker: Writer + Seeker {}
 
 /// Blanket impl, as for [`ReadWriter`].
 impl<T: Writer + Seeker> WriteSeeker for T {}
 
+// go: sdk 1.25.5 io/io.go:176-180 ReadWriteSeeker
 /// Go's `io.ReadWriteSeeker` — combines [`Reader`], [`Writer`] and
 /// [`Seeker`].
-// go: sdk 1.25.5 io/io.go:176-180 ReadWriteSeeker
 pub trait ReadWriteSeeker: Reader + Writer + Seeker {}
 
 /// Blanket impl, as for [`ReadWriter`].
 impl<T: Reader + Writer + Seeker> ReadWriteSeeker for T {}
 
+// go: sdk 1.25.5 io/io.go:156-159 ReadSeeker
 /// Go's `io.ReadSeeker` (io.go:139) — combines [`Reader`] and
 /// [`Seeker`]. net/http's ServeContent takes one.
-// go: sdk 1.25.5 io/io.go:156-159 ReadSeeker
 pub trait ReadSeeker: Reader + Seeker {}
 
 /// Blanket impl, as for [`ReadCloser`].
@@ -154,8 +154,8 @@ pub trait ByteReader {
     fn ReadByte(&mut self) -> (byte, error);
 }
 
-/// Go's `io.ByteScanner` (io.go:274).
 // go: sdk 1.25.5 io/io.go:274-277 ByteScanner
+/// Go's `io.ByteScanner` (io.go:274).
 pub trait ByteScanner: ByteReader {
     fn UnreadByte(&mut self) -> error;
 }
@@ -174,10 +174,10 @@ pub trait RuneReader {
     fn ReadRune(&mut self) -> (crate::types::rune, int, error);
 }
 
+// go: sdk 1.25.5 io/io.go:301-304 RuneScanner
 /// Go's `io.RuneScanner` (io.go:301). Extends RuneReader with the
 /// ability to push back the last-read rune. Surfaced by gopkg.in/
 /// inf.v0's `Dec.scan(r io.RuneScanner)` parser path.
-// go: sdk 1.25.5 io/io.go:301-304 RuneScanner
 pub trait RuneScanner: RuneReader {
     fn UnreadRune(&mut self) -> error;
 }

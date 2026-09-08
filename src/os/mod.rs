@@ -23,6 +23,94 @@
 //          converting it to 0; verified against a running Go, where
 //          the no-op succeeds and chowning to root is refused.
 //
+// ─── Continued 2026-09-06 ────────────────────────────────────────────
+//
+//   FIXED  ReadFile sized its buffer to Stat().Size() and read exactly
+//          that many bytes. Go treats the stat size as a CAPACITY HINT
+//          and reads to EOF — `statOrZero` returns 0 when Stat fails
+//          rather than erroring. So every file whose stat size is 0 but
+//          which yields data came back EMPTY: all of /proc and /sys.
+//          Go's own comment names the case. It also truncated any file
+//          that grew between the stat and the read. Now anchored, with
+//          Go's minBuf growth, and pinned by
+//          examples/os_readfile_ref_smoke.rs — the probe is
+//          /proc/sys/kernel/ostype, which stats as 0 and reads back
+//          "Linux\n" on every Linux, so the row is machine-independent.
+//
+//   FIXED  Rename answered "file exists" for Rename(missing, dir). Go
+//          re-stats oldname when newname is an existing directory and
+//          reports THAT error first. The doc note called the omission a
+//          case-sensitivity simplification, which covered the SameFile
+//          half and hid the priority half. Pinned by a new
+//          rename/missingoverdir row in os_link_ref_smoke.
+//   FIXED  Chtimes rejected any pre-1970 time with a fractional part.
+//          NsecToTimespec's negative-remainder correction was missing,
+//          so tv_nsec went negative and utimensat returned EINVAL. A
+//          whole-second pre-1970 time has remainder 0 and always
+//          worked, which is why it took the fractional case to surface.
+//          Pinned by examples/os_chtimes_ref_smoke.rs.
+//
+//   FIXED  dirFS.join, the DirFS sandbox boundary, was missing both of
+//          Go's checks. An EMPTY root produced "/" + name — an absolute
+//          path from the filesystem root — so DirFS("") read anything
+//          the process could. And the name was validated with
+//          fs::ValidPath alone, where Go uses Localize = ValidPath PLUS
+//          a NUL rejection: ValidPath checks path ELEMENTS, not bytes,
+//          so "f\0junk" passed and the kernel truncated it at the C
+//          string boundary. Measured: a request naming "f\0ignored"
+//          returned the contents of "f" — the file opened was not the
+//          file validated. All four entry points (Open, Stat, ReadFile,
+//          ReadDir) route through this one join, checked by reading
+//          every call site. Pinned by examples/os_dirfs_ref_smoke.rs.
+//
+//   clean  ReadDir sorts by name in Go's byte order.
+//   clean  Symlink and Link both build a *LinkError carrying both paths.
+//   clean  OpenFile sets O_CLOEXEC on every open, as Go does.
+//   clean  UserHomeDir, UserCacheDir and UserConfigDir match Go's env
+//          precedence, its "neither $X nor $HOME are defined" text and
+//          its "path in $X is relative" absoluteness check.
+//   clean  Executable trims the " (deleted)" suffix procfs appends.
+//   clean  Pipe uses pipe2 with O_CLOEXEC and keeps the errno.
+//   clean  TempDir honours TMPDIR and falls back to /tmp.
+//
+//   FIXED  four error paths named the syscall and threw the errno away
+//          — Getwd, Getgroups (both call sites) and Hostname returned
+//          `errors.New("<call> failed")` where Go returns
+//          NewSyscallError. A caller could not tell ENOENT from EACCES.
+//          Same shape the Pipe path was already fixed for.
+//   FIXED  Getwd fell through to the syscall when stat(".") failed. Go
+//          returns that error. The comment beside it asserted Go "falls
+//          through ... including a stat of '.' that failed", which is
+//          not what Go does — with $PWD set and the working directory
+//          unlinked Go reports "stat .: no such file or directory" and
+//          goish reported a bare "getwd failed".
+//
+//   clean  Truncate and Chdir wrap the errno in a PathError.
+//   clean  Getwd implements Go's $PWD kludge, including the SameFile
+//          comparison that makes it return the symlinked path.
+//
+//   NOTE   No function here retries on EINTR. Go wraps ten of these
+//          syscalls in `ignoringEINTR` (os/file_unix.go and
+//          file_posix.go) and goish calls the syscall once, so an
+//          interrupted call returns EINTR where Go retries. Measured
+//          rather than guessed at: every signal handler goish installs
+//          sets SA_RESTART — the preemption handler at
+//          runtime/preempt.rs:684 included — so the kernel restarts
+//          these calls itself and the gap is not reachable through
+//          goish's own signals. The two `sa_flags: 0` sites are a
+//          zeroed out-parameter for QUERYING a handler and the SIGSEGV
+//          reset to SIG_DFL, neither of which installs anything. It
+//          stays a real divergence for a syscall the kernel will not
+//          restart, which is why it is written down.
+//
+//   NOTE   Hostname calls uname and stops there. Go tries uname first
+//          and falls back to reading /proc/sys/kernel/hostname when the
+//          name is absent or 64 bytes (possibly truncated, since
+//          Nodename is 65). Unreachable on Linux in practice — uname
+//          does not fail here and HOST_NAME_MAX is 64, so the fallback
+//          would return the same bytes — but the error path also
+//          returns a bare "uname failed" rather than the errno.
+//
 // The rest of the 61 have NOT been read. This note records where the
 // sample stopped, not that the file is clear.
 //
@@ -54,6 +142,14 @@ pub use dir::CopyFS;
 
 pub mod exec;
 pub mod exec_posix;
+pub mod root;
+pub mod root_openat;
+pub use root::{OpenInRoot, OpenRoot, Root};
+// Go's names for these are `os.Process`, `os.ProcessState` and
+// `os.ErrProcessDone` — the package, not a submodule. goish files them
+// under exec_posix (one .rs per .go, §33), so re-export them here or
+// every caller spells a path Go does not have.
+pub use exec_posix::{ErrProcessDone, Process, ProcessState};
 pub mod signal;
 pub mod user;
 
@@ -68,6 +164,11 @@ use crate::runtime;
 use crate::string;
 use crate::syscall;
 use crate::types::{byte, int};
+
+// go: waived chtimesUtimes — Go's per-time helper (file_posix.go:187-199) is the closure in Chtimes below; its only substance is the zero-Time -> UTIME_OMIT branch and the NsecToTimespec negative-remainder correction, both present there.
+
+// go: waived readFileContents — Go's two ReadFile helpers (file.go:889-928 and 877-882) are inlined into the ReadFile body below; statOrZero's whole contract is "a failed Stat is size 0, not an error", which is the else-0 arm there.
+// go: waived statOrZero — Go's two ReadFile helpers (file.go:889-928 and 877-882) are inlined into the ReadFile body below; statOrZero's whole contract is "a failed Stat is size 0, not an error", which is the else-0 arm there.
 
 extern crate alloc;
 use alloc::vec::Vec;
@@ -112,6 +213,7 @@ pub const PathListSeparator: u8 = b':';
 /// `os.IsPathSeparator(c)` (path_unix.go:14) — reports whether `c` is
 /// the OS's path separator. Linux-pinned in goish v1, so just `c == '/'`.
 #[inline]
+// go: sdk 1.25.5 os/path_unix.go:15-17 IsPathSeparator
 pub fn IsPathSeparator(c: u8) -> bool {
     return c == PathSeparator;
 }
@@ -434,6 +536,7 @@ fn fileinfo_from_stat(name: string, st: &syscall::Stat_t) -> FileInfoData {
 
 // ─── Open / Stat / Create ──────────────────────────────────────────────
 
+// go: sdk 1.25.5 os/file.go:389-391 Open
 /// `os.Open(name)` (os/file.go:386) — open `name` read-only.
 ///
 /// Go's signature is `func Open(name string) (*File, error)`. Goish
@@ -444,12 +547,14 @@ pub fn Open<N: Into<string>>(name: N) -> (nilable<File>, error) {
     OpenFile(name, O_RDONLY, FileMode(0))
 }
 
+// go: sdk 1.25.5 os/file.go:399-401 Create
 /// `os.Create(name)` (os/file.go:402) — create or truncate `name`.
 pub fn Create<N: Into<string>>(name: N) -> (nilable<File>, error) {
     let name: string = name.into();
     OpenFile(name, O_RDWR | O_CREATE | O_TRUNC, FileMode(0o666))
 }
 
+// go: sdk 1.25.5 os/file.go:410-419 OpenFile
 /// `os.OpenFile(name, flag, perm)` (os/file.go:412).
 ///
 /// `perm: impl Into<FileMode>` so ports that pass a bare `0666` /
@@ -503,6 +608,7 @@ pub fn OpenFile<N: Into<string>, M: Into<FileMode>>(
     )
 }
 
+// go: sdk 1.25.5 os/stat.go:11-14 Stat
 /// `os.Stat(name)` (os/stat.go:14) — stat a path, following symlinks.
 pub fn Stat<N: Into<string>>(name: N) -> (FileInfoData, error) {
     let name: string = name.into();
@@ -535,6 +641,7 @@ pub fn Stat<N: Into<string>>(name: N) -> (FileInfoData, error) {
     (fileinfo_from_stat(base, &st), nil)
 }
 
+// go: sdk 1.25.5 os/stat.go:24-27 Lstat
 /// Line-by-line port of `os.Lstat(name)` (file.go:417 → stat_unix.go).
 /// Like Stat but does not follow a final-component symlink, so
 /// FileInfo.Mode() reports ModeSymlink for a link target.
@@ -607,6 +714,7 @@ impl File {
         return self.wrapErr(op, syscall::Errno(-rc.rc()).into());
     }
 
+    // go: sdk 1.25.5 os/stat_unix.go:15-26 File.Stat
     /// `(*File).Stat()` (os/file.go:432) — fstat the open fd.
     pub fn Stat(&self) -> (FileInfoData, error) {
         let mut st = syscall::Stat_t::default();
@@ -628,13 +736,85 @@ impl File {
         (fileinfo_from_stat(base, &st), nil)
     }
 
+}
+
+// go: sdk 1.25.5 os/dir.go:15-15 readdirMode
+/// Go: the three shapes `readdir` can build — names, DirEntry values,
+/// or FileInfo values — each with one public method in front of it:
+/// Readdirnames, ReadDir, and the deprecated Readdir.
+#[derive(Clone, Copy, PartialEq)]
+enum readdirMode {
+    Names,
+    Dirents,
+    Infos,
+}
+
+impl File {
+    // go: sdk 1.25.5 os/dir.go:69-81 File.Readdirnames
     /// `(*File).Readdirnames(n)` (os/dir.go:46).
     /// Returns up to `n` directory entry names from the directory
     /// the receiver is open on. `n <= 0` reads all entries. Mirrors
     /// the Go shape `([]string, error)`. Names are unsorted (Go's
     /// contract).
     pub fn Readdirnames(&mut self, n: int) -> (slice<string>, error) {
+        let (names, _, _, err) = self.readdir(n, readdirMode::Names);
+        return (names, err);
+    }
+
+    // go: sdk 1.25.5 os/dir.go:97-107 File.ReadDir
+    /// Go: "ReadDir reads the contents of the directory associated with
+    /// the file f and returns a slice of DirEntry values in directory
+    /// order. Subsequent calls on the same file will yield later
+    /// DirEntry records in the directory."
+    ///
+    /// `n > 0` returns at most n, and io.EOF once the directory is
+    /// drained — which is the whole point of the bounded form. `n <= 0`
+    /// returns everything and never io.EOF.
+    pub fn ReadDir(
+        &mut self,
+        n: int,
+    ) -> (slice<alloc::sync::Arc<dyn DirEntry + Send + Sync>>, error) {
+        let (_, dirents, _, err) = self.readdir(n, readdirMode::Dirents);
+        // Go: "Match Readdir and Readdirnames: don't return nil slices."
+        return (dirents, err);
+    }
+
+    // go: sdk 1.25.5 os/dir.go:40-52 File.Readdir
+    /// Go: "Readdir reads the contents of the directory associated with
+    /// file and returns a slice of up to n FileInfo values, as would be
+    /// returned by Lstat, in directory order."
+    ///
+    /// Deprecated in Go in favour of ReadDir, "which is more efficient
+    /// and correct in the presence of removed files" — and this mode
+    /// shows why: it lstats EVERY entry, where ReadDir carries the type
+    /// getdents already reported and stats only on demand. Ported
+    /// because a Go program may already be written against it.
+    ///
+    /// Go: "Readdir has historically always returned a non-nil empty
+    /// slice, never nil, even on error." `slice::new()` is that.
+    pub fn Readdir(&mut self, n: int) -> (slice<FileInfoData>, error) {
+        let (_, _, infos, err) = self.readdir(n, readdirMode::Infos);
+        return (infos, err);
+    }
+
+    // go: sdk 1.25.5 os/dir_unix.go:47-168 File.readdir
+    /// The one directory walk, with Go's `mode` deciding what it
+    /// builds. Go returns names, dirents and infos from a single
+    /// function for exactly this reason: the getdents buffer and its
+    /// resume point must not be duplicated, or two callers drift.
+    fn readdir(
+        &mut self,
+        n: int,
+        mode: readdirMode,
+    ) -> (
+        slice<string>,
+        slice<alloc::sync::Arc<dyn DirEntry + Send + Sync>>,
+        slice<FileInfoData>,
+        error,
+    ) {
         let mut names: Vec<string> = Vec::new();
+        let mut dirents: Vec<alloc::sync::Arc<dyn DirEntry + Send + Sync>> = Vec::new();
+        let mut infos: Vec<FileInfoData> = Vec::new();
         // Go's readdirent path builds its `*PathError` directly rather
         // than through `wrapErr`, so the `poll.ErrFileClosing →
         // ErrClosed` remap does NOT happen here: a closed directory
@@ -643,6 +823,8 @@ impl File {
         if self.fd < 0 {
             return (
                 slice::<string>::new(),
+                slice::new(),
+                slice::new(),
                 self.wrapErr("readdirent", crate::internal::poll::ErrFileClosing.into()),
             );
         }
@@ -710,11 +892,65 @@ impl File {
             if raw == b"." || raw == b".." {
                 continue;
             }
-            names.push(string::from_bytes(raw));
+            match mode {
+                readdirMode::Names => names.push(string::from_bytes(raw)),
+                readdirMode::Dirents => {
+                    // Go: de, err := newUnixDirent(f.name, string(name),
+                    //         direntType(rec))
+                    let dtype = d.buf[pos + 18];
+                    let (de, derr) = newUnixDirent(
+                        self.name.clone(),
+                        string::from_bytes(raw),
+                        direntType(dtype),
+                    );
+                    if !derr.IsNil() {
+                        // Go: an entry that vanished between the
+                        // getdents and the lstat is not an error, it is
+                        // a directory that changed underneath.
+                        if IsNotExist(derr.clone()) {
+                            continue;
+                        }
+                        return (
+                            slice::<string>::new(),
+                            slice::__from_vec(dirents),
+                            slice::new(),
+                            derr,
+                        );
+                    }
+                    dirents.push(alloc::sync::Arc::new(de));
+                }
+                readdirMode::Infos => {
+                    // Go: info, err := lstat(dirname + "/" + name)
+                    let (info, ierr) = Lstat(
+                        self.name.clone()
+                            + string::from_static("/")
+                            + string::from_bytes(raw),
+                    );
+                    if !ierr.IsNil() {
+                        // Go: if IsNotExist(err) { continue } — the
+                        // entry went away between getdents and lstat.
+                        if IsNotExist(ierr.clone()) {
+                            continue;
+                        }
+                        return (
+                            slice::<string>::new(),
+                            slice::new(),
+                            slice::__from_vec(infos),
+                            ierr,
+                        );
+                    }
+                    infos.push(info);
+                }
+            }
             left -= 1;
         }
         if !errored.IsNil() {
-            return (slice::<string>::__from_vec(names), errored);
+            return (
+                slice::<string>::__from_vec(names),
+                slice::__from_vec(dirents),
+                slice::__from_vec(infos),
+                errored,
+            );
         }
         // Go: if n > 0 && len(names)+len(dirents)+len(infos) == 0 {
         //         return nil, nil, nil, io.EOF }
@@ -722,12 +958,23 @@ impl File {
         // goish returned nil here, so a caller draining a directory in
         // fixed-size batches — the reason the bounded form exists — had
         // no way to tell "no more entries" from "none this time".
-        if n > 0 && names.is_empty() {
-            return (slice::<string>::new(), io::EOF.into());
+        if n > 0 && names.is_empty() && dirents.is_empty() && infos.is_empty() {
+            return (
+                slice::<string>::new(),
+                slice::new(),
+                slice::new(),
+                io::EOF.into(),
+            );
         }
-        (slice::<string>::__from_vec(names), nil)
+        (
+            slice::<string>::__from_vec(names),
+            slice::__from_vec(dirents),
+            slice::__from_vec(infos),
+            nil,
+        )
     }
 
+    // go: sdk 1.25.5 os/file.go:303-315 File.Seek
     /// `(*File).Seek(offset, whence)` (os/file.go:286).
     pub fn Seek(&self, offset: int, whence: int) -> (int, error) {
         let rc = syscall::Lseek(self.fd, offset, whence as i32);
@@ -743,7 +990,12 @@ fn bytes_of(s: &string) -> &[u8] {
     crate::gostring::__crate_as_bytes(s)
 }
 
-/// `os.ReadFile(name)` (os/file.go:735) — read the entire named file
+// go: sdk 1.25.5 os/file.go:867-875 ReadFile
+// goishlint:ignore GOISH018 readFileContents, statOrZero — Go's two
+//     helpers (os/file.go:889-928 and 877-882) are inlined into the
+//     body below; `statOrZero`'s whole contract is "a failed Stat is
+//     size 0, not an error", which is the `else 0` arm here.
+/// `os.ReadFile(name)` — read the entire named file
 /// and return its contents. Closes the file before returning.
 pub fn ReadFile<N: Into<string>>(name: N) -> (slice<byte>, error) {
     let name: string = name.into();
@@ -754,39 +1006,67 @@ pub fn ReadFile<N: Into<string>>(name: N) -> (slice<byte>, error) {
     }
     // err is nil ⇒ Open returned a non-nil File. Narrow.
     let f = f.MustMut();
-    let (fi, ferr) = f.Stat();
-    if !ferr.IsNil() {
-        let _ = f.Close();
-        return (slice::<byte>::__from_vec(Vec::new()), ferr);
+    // Go: readFileContents(statOrZero(f), f.Read).
+    //
+    // The stat size is a CAPACITY HINT, not a limit: `statOrZero`
+    // returns 0 when Stat fails rather than erroring, and the loop runs
+    // until EOF. Sizing a buffer to Stat().Size() and reading exactly
+    // that much — as this used to — returns EMPTY for every file whose
+    // stat size is 0 but which yields data, which is all of /proc and
+    // /sys. Go's own comment says so: "files in Linux's /proc claim
+    // size 0 but then do not work right if read in small pieces". It
+    // also truncated any file that grew between the stat and the read.
+    let stat_size: int = {
+        let (fi, ferr) = f.Stat();
+        if ferr.IsNil() {
+            fi.Size()
+        } else {
+            0
+        }
+    };
+    let zero_size = stat_size == 0;
+    // Go: const minBuf = 512
+    let min_buf: usize = 512;
+    // Go: size = int(statSize); size++ // one byte for final read at EOF
+    let mut size = (stat_size as usize).saturating_add(1);
+    if size < min_buf {
+        size = min_buf;
     }
-    let want = fi.Size();
-    let mut body = slice::<byte>::__from_vec(alloc::vec![0u8; want as usize]);
-    let mut got: int = 0;
-    while got < want {
-        let mut chunk = slice::<byte>::__from_vec(alloc::vec![0u8; (want - got) as usize]);
+    let mut data: Vec<byte> = Vec::with_capacity(size);
+    loop {
+        // Go: read(data[len(data):cap(data)])
+        let room = data.capacity() - data.len();
+        let mut chunk = slice::<byte>::__from_vec(alloc::vec![0u8; room]);
         let (n, rerr) = f.Read(&mut chunk);
-        if n > 0 {
-            for i in 0..n {
-                body[got + i] = chunk[i];
-            }
-            got += n;
+        let mut i: int = 0;
+        while i < n {
+            data.push(chunk[i]);
+            i += 1;
         }
         if !rerr.IsNil() {
-            if crate::errors::Is(rerr.clone(), crate::io::EOF) {
-                break;
-            }
             let _ = f.Close();
-            return (body, rerr);
+            // Go: if err == io.EOF { err = nil }
+            if crate::errors::Is(rerr.clone(), crate::io::EOF) {
+                return (slice::<byte>::__from_vec(data), nil);
+            }
+            return (slice::<byte>::__from_vec(data), rerr);
         }
+        // Go loops until an error, so a Reader returning (0, nil)
+        // forever would hang there too. goish stops instead: the
+        // io.Reader contract discourages that return, and a hung
+        // example is a 15-second e2e timeout with no other signal.
         if n == 0 {
-            break;
+            let _ = f.Close();
+            return (slice::<byte>::__from_vec(data), nil);
+        }
+        // Go: grow if out of capacity, or if a /proc-like zero-sized
+        // file left less than minBuf — issue 72080 wants reads on those
+        // issued with a non-tiny buffer.
+        let cap_remain = data.capacity() - data.len();
+        if cap_remain == 0 || (zero_size && cap_remain < min_buf) {
+            data.reserve(min_buf);
         }
     }
-    let _ = f.Close();
-    if got < want {
-        body = body.slice(0, got);
-    }
-    (body, nil)
 }
 
 // ─── Env ────────────────────────────────────────────────────────────
@@ -798,6 +1078,7 @@ pub fn ReadFile<N: Into<string>>(name: N) -> (slice<byte>, error) {
 mod env;
 pub use env::*;
 
+// go: sdk 1.25.5 os/file.go:490-492 TempDir
 /// `os.TempDir()` (file.go:490) — TMPDIR if set, else "/tmp".
 pub fn TempDir() -> string {
     let (v, ok) = LookupEnv(string("TMPDIR"));
@@ -807,6 +1088,7 @@ pub fn TempDir() -> string {
     string("/tmp")
 }
 
+// go: sdk 1.25.5 os/file.go:608-627 UserHomeDir
 /// `os.UserHomeDir()` (os/file.go:608) — return the current user's home
 /// directory.
 ///
@@ -830,6 +1112,7 @@ pub fn UserHomeDir() -> (string, error) {
     (string::new(), errors::New(b.String()))
 }
 
+// go: sdk 1.25.5 os/file.go:507-545 UserCacheDir
 /// Line-by-line port of `os.UserCacheDir()` (file.go:507) — return the
 /// default root directory for user-specific cached data.
 ///
@@ -864,6 +1147,7 @@ pub fn UserCacheDir() -> (string, error) {
     (dir, nil)
 }
 
+// go: sdk 1.25.5 os/file.go:560-598 UserConfigDir
 /// Line-by-line port of `os.UserConfigDir()` (file.go:560) — return the
 /// default root directory for user-specific configuration data.
 ///
@@ -936,16 +1220,24 @@ pub fn Getwd() -> (string, error) {
     if dir.Len() > 0 && bytes_of(&dir)[0] == b'/' {
         // Go: dot, err = statNolog("."); if err != nil { return "", err }
         let (dot, err) = Stat(string("."));
-        if err.IsNil() {
-            // Go: d, err := statNolog(dir)
-            //     if err == nil && SameFile(dot, d) { return dir, nil }
-            let (d, err2) = Stat(dir.clone());
-            if err2.IsNil() && SameFile(&dot, &d) {
-                return (dir, nil);
-            }
+        // Go RETURNS here — `if err != nil { return "", err }` — it does
+        // not fall through. This comment used to claim the opposite,
+        // which is why the early return was missing: with $PWD set and
+        // the working directory unlinked, Go reports
+        // "stat .: no such file or directory" and goish reported a bare
+        // "getwd failed" from the syscall it went on to make.
+        if !err.IsNil() {
+            return (string::new(), err);
         }
-        // Go falls through to the syscall on any error here, including
-        // a stat of "." that failed, and so do we.
+        // Go: d, err := statNolog(dir)
+        //     if err == nil && SameFile(dot, d) { return dir, nil }
+        //
+        // A failure to stat $PWD is NOT fatal: Go notes that the slow
+        // path below would fail the same way but is worth trying.
+        let (d, err2) = Stat(dir.clone());
+        if err2.IsNil() && SameFile(&dot, &d) {
+            return (dir, nil);
+        }
     }
 
     // Go: var buf [128]byte; for { n, err := syscall.Getcwd(buf[:]); ... }
@@ -964,7 +1256,13 @@ pub fn Getwd() -> (string, error) {
         // Go: if err != ERANGE { return "", err } — bigger buffer otherwise.
         // Slim: -ERANGE is -34 on Linux. Anything else is fatal.
         if n != -34 {
-            return (string::new(), errors::New(string("getwd failed")));
+            // Go: return dir, NewSyscallError("getwd", err) — the errno
+            // is what lets a caller tell ENOENT (the cwd was removed)
+            // from EACCES (a parent became unreadable).
+            return (
+                string::new(),
+                NewSyscallError("getwd", syscall::Errno(-n.rc()).into()),
+            );
         }
         size *= 2;
     }
@@ -974,6 +1272,7 @@ pub fn Getwd() -> (string, error) {
     )
 }
 
+// go: sdk 1.25.5 os/file.go:361-383 Chdir
 /// Line-by-line port of `os.Chdir(name)` (file.go) — change the
 /// current working directory to `name`. Returns `nil` on success.
 pub fn Chdir<N: Into<string>>(name: N) -> error {
@@ -989,12 +1288,6 @@ pub fn Chdir<N: Into<string>>(name: N) -> error {
     nil
 }
 
-/// Line-by-line port of `os.Chmod(name, mode)` (file.go:647 →
-/// file_posix.go:76 chmod). Slim: no PathError wrapping, no EINTR
-/// retry loop (chmod(2) is not interruptible on Linux in practice).
-///
-/// `mode: impl Into<FileMode>` so ports passing a bare integer
-/// literal (Go's untyped-int) flow through `From<i32>`/`From<u32>`.
 // go: sdk 1.25.5 os/file_posix.go:60-73 syscallMode
 /// Convert a `FileMode` to the bits a `chmod`/`open`/`mkdir` syscall
 /// wants.
@@ -1046,8 +1339,14 @@ pub fn Chmod<N: Into<string>, M: Into<FileMode>>(name: N, mode: M) -> error {
     nil
 }
 
-/// Line-by-line port of `os.Symlink(oldname, newname)` (file_unix.go:417).
-/// Slim: no LinkError wrapping, no EINTR retry.
+// go: sdk 1.25.5 os/file_unix.go:417-425 Symlink
+/// Line-by-line port of `os.Symlink(oldname, newname)`.
+///
+/// This said "Slim: no LinkError wrapping, no EINTR retry" until
+/// 2026-09-06. The LinkError half stopped being true when the error
+/// shapes were fixed — the body below returns `linkErr(...)` carrying
+/// both paths. Only the EINTR half survives; see the note in the file
+/// header.
 pub fn Symlink<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> error {
     let oldname: string = oldname.into();
     let newname: string = newname.into();
@@ -1066,6 +1365,7 @@ pub fn Symlink<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> erro
     nil
 }
 
+// go: sdk 1.25.5 os/file.go:449-451 Readlink
 /// Line-by-line port of `os.Readlink(name)` (file.go:449 →
 /// file_unix.go:427 readlink) — read the target of a symbolic link.
 /// Doubles the buffer until the result fits, mirroring Go's growth
@@ -1106,6 +1406,7 @@ pub fn Readlink<N: Into<string>>(name: N) -> (string, error) {
     }
 }
 
+// go: sdk 1.25.5 os/executable.go:18-20 Executable
 /// `os.Executable()` (executable.go:19 → executable_procfs.go:15) —
 /// path name for the executable that started the current process, via
 /// `Readlink("/proc/self/exe")`. When the executable has been deleted,
@@ -1122,6 +1423,11 @@ pub fn Executable() -> (string, error) {
     (path, err)
 }
 
+// go: sdk 1.25.5 os/file_posix.go:179-185 Chtimes
+// goishlint:ignore GOISH018 chtimesUtimes — Go's per-time helper
+//     (os/file_posix.go:187-199) is the closure below; its only
+//     substance is the zero-Time -> UTIME_OMIT branch and the
+//     NsecToTimespec negative-remainder correction, both here.
 /// `os.Chtimes(name, atime, mtime)` (file_posix.go:179) — change the
 /// access and modification times of the named file. A zero time.Time
 /// leaves the corresponding timestamp unchanged (UTIME_OMIT), as in Go.
@@ -1141,10 +1447,32 @@ pub fn Chtimes<N: Into<string>>(
             }
         } else {
             // Go: utimes[i] = syscall.NsecToTimespec(t.UnixNano())
+            //
+            // The correction is the whole point of that helper
+            // (syscall/timestruct.go:13-21):
+            //
+            //     sec := nsec / 1e9
+            //     nsec = nsec % 1e9
+            //     if nsec < 0 { nsec += 1e9; sec-- }
+            //
+            // Rust's `%`, like Go's, truncates toward zero, so a
+            // pre-1970 time with a fractional part leaves tv_nsec
+            // NEGATIVE. utimensat rejects a tv_nsec outside
+            // [0, 999999999] with EINVAL, so Chtimes failed outright on
+            // a timestamp Go writes without complaint — what an archive
+            // extractor hits restoring old mtimes. A whole-second
+            // pre-1970 time has remainder 0 and always worked, which is
+            // why this needed the fractional case to surface.
             let ns = t.UnixNano() as i64;
+            let mut sec = ns / 1_000_000_000;
+            let mut nsec = ns % 1_000_000_000;
+            if nsec < 0 {
+                nsec += 1_000_000_000;
+                sec -= 1;
+            }
             syscall::Timespec {
-                tv_sec: ns / 1_000_000_000,
-                tv_nsec: ns % 1_000_000_000,
+                tv_sec: sec,
+                tv_nsec: nsec,
             }
         }
     };
@@ -1161,24 +1489,66 @@ pub fn Chtimes<N: Into<string>>(
     nil
 }
 
-/// Line-by-line port of `os.Rename(oldpath, newpath)` (file.go:440 →
-/// file_unix.go:26 rename). Slim: drops the SameFile case-only-rename
-/// gymnastics (Linux is always case-sensitive) but preserves the
-/// "newname is a directory" prelude check so `Rename(file, dir)` errors
-/// before clobbering anything.
+// go: sdk 1.25.5 os/file.go:440-442 Rename
+// goishlint:ignore GOISH018 rename — Go's Rename is a one-line
+//     forward to the platform `rename` (os/file_unix.go:26-53),
+//     whose body is inlined below: the Lstat-of-newname check, the
+//     oldname-error priority, the SameFile fall-through for a
+//     case-only rename, and the LinkError wrap.
+/// Line-by-line port of `os.Rename(oldpath, newpath)`.
+///
+/// This note used to read "Slim: drops the SameFile case-only-rename
+/// gymnastics (Linux is always case-sensitive)". That reasoning covers
+/// the SameFile comparison, but the block it dropped also held Go's
+/// oldname-error PRIORITY, which is not about case at all — so
+/// `Rename(missing, existingDir)` answered "file exists" where Go
+/// answers "no such file or directory", and the note made the omission
+/// read as a deliberate trade-off. Both are implemented now, and the
+/// case-only fall-through matters on a case-insensitive mount even
+/// though ext4 is not one.
 pub fn Rename<O: Into<string>, N: Into<string>>(oldpath: O, newpath: N) -> error {
     let oldpath: string = oldpath.into();
     let newpath: string = newpath.into();
-    // Go: fi, err := Lstat(newname); if err == nil && fi.IsDir() { return &LinkError{...EEXIST} }
+    // Go: fi, err := Lstat(newname); if err == nil && fi.IsDir() { ... }
     let (fi, e) = Lstat(newpath.clone());
     if e.IsNil() && fi.IsDir() {
-        // Go: return &LinkError{"rename", oldname, newname, syscall.EEXIST}
-        return errors::Wrap(LinkError {
-            Op: string::from_static("rename"),
-            Old: oldpath,
-            New: newpath,
-            Err: syscall::EEXIST.into(),
-        });
+        // Two independent errors are possible here — a bad oldname and a
+        // bad newname — and Go PRIORITISES the oldname one: "prioritize
+        // returning the oldname error because that's what we did
+        // historically" (os/file_unix.go). Returning EEXIST as soon as a
+        // directory is seen at newname gets the common case right and
+        // `Rename(missing, existingDir)` wrong, reporting "file exists"
+        // where Go reports "no such file or directory".
+        let (ofi, oerr) = Lstat(oldpath.clone());
+        if !oerr.IsNil() {
+            // Go: if pe, ok := err.(*PathError); ok { err = pe.Err } —
+            // the LinkError already carries both paths, so the inner
+            // error is unwrapped to the bare errno rather than nesting a
+            // PathError's path inside it.
+            let inner = match errors::As::<PathError>(oerr.clone()) {
+                Some(pe) => pe.Err.clone(),
+                None => oerr,
+            };
+            return errors::Wrap(LinkError {
+                Op: string::from_static("rename"),
+                Old: oldpath,
+                New: newpath,
+                Err: inner,
+            });
+        }
+        // Go: else if newname == oldname || !SameFile(fi, ofi) { EEXIST }
+        //
+        // Falling through when they ARE the same file is deliberate in
+        // Go: it is the case-only rename on a case-insensitive
+        // filesystem, which must be allowed to reach the syscall.
+        if newpath == oldpath || !SameFile(&fi, &ofi) {
+            return errors::Wrap(LinkError {
+                Op: string::from_static("rename"),
+                Old: oldpath,
+                New: newpath,
+                Err: syscall::EEXIST.into(),
+            });
+        }
     }
     // Go: err = ignoringEINTR(func() error { return syscall.Rename(oldname, newname) })
     let mut old_buf: Vec<u8> = Vec::with_capacity(oldpath.Len() as usize + 1);
@@ -1194,6 +1564,7 @@ pub fn Rename<O: Into<string>, N: Into<string>>(oldpath: O, newpath: N) -> error
     nil
 }
 
+// go: sdk 1.25.5 os/file_unix.go:403-411 Link
 /// Line-by-line port of `os.Link(oldname, newname)` (file_unix.go:403)
 /// — create `newname` as a hard link to `oldname`.
 pub fn Link<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> error {
@@ -1213,6 +1584,7 @@ pub fn Link<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> error {
     nil
 }
 
+// go: sdk 1.25.5 os/file_unix.go:344-352 Truncate
 /// Line-by-line port of `os.Truncate(name, size)` (file_unix.go:344)
 /// — change the size of the named file. Follows symlinks (per Go).
 pub fn Truncate<N: Into<string>>(name: N, size: int) -> error {
@@ -1228,6 +1600,7 @@ pub fn Truncate<N: Into<string>>(name: N, size: int) -> error {
     nil
 }
 
+// go: sdk 1.25.5 os/file_posix.go:105-113 Chown
 /// Line-by-line port of `os.Chown(name, uid, gid)` (file_posix.go:105).
 /// uid or gid of -1 leaves that field unchanged. Follows symlinks
 /// (per Go).
@@ -1244,6 +1617,7 @@ pub fn Chown<N: Into<string>>(name: N, uid: int, gid: int) -> error {
     nil
 }
 
+// go: sdk 1.25.5 os/file_posix.go:121-129 Lchown
 /// Line-by-line port of `os.Lchown(name, uid, gid)` (file_posix.go:121)
 /// — does not follow a final-component symlink.
 pub fn Lchown<N: Into<string>>(name: N, uid: int, gid: int) -> error {
@@ -1259,36 +1633,58 @@ pub fn Lchown<N: Into<string>>(name: N, uid: int, gid: int) -> error {
     nil
 }
 
+// go: none — goish-only placement: Go's `Getpagesize` is os/types.go
+// line 13, in a file goish does not claim (os/types.go also declares
+// FileInfo and FileMode, which live in crate::io::fs here).
+//
+// Go's `syscall.Getpagesize` is linknamed to the runtime
+// (runtime/runtime.go:124-125) and returns `physPageSize`, which the
+// runtime discovers at startup — not a getpagesize(2) call. goish
+// targets linux/amd64 only, where that value is 4096, so the constant
+// is the same answer by a shorter route. It would need discovering if
+// a second architecture ever arrives.
+/// Go: "Getpagesize returns the underlying system's memory page size."
+pub fn Getpagesize() -> int {
+    return int::from(4096);
+}
+
+// go: sdk 1.25.5 os/proc.go:31 Getuid
 /// `os.Getuid()` (proc.go:31) — caller's real user id.
 pub fn Getuid() -> int {
     syscall::Getuid() as int
 }
 
+// go: sdk 1.25.5 os/proc.go:36 Geteuid
 /// `os.Geteuid()` (proc.go:36) — caller's effective user id.
 pub fn Geteuid() -> int {
     syscall::Geteuid() as int
 }
 
+// go: sdk 1.25.5 os/proc.go:41 Getgid
 /// `os.Getgid()` (proc.go:41) — caller's real group id.
 pub fn Getgid() -> int {
     syscall::Getgid() as int
 }
 
+// go: sdk 1.25.5 os/proc.go:46 Getegid
 /// `os.Getegid()` (proc.go:46) — caller's effective group id.
 pub fn Getegid() -> int {
     syscall::Getegid() as int
 }
 
+// go: sdk 1.25.5 os/exec.go:233 Getpid
 /// `os.Getpid()` (proc.go:50) — caller's process id.
 pub fn Getpid() -> int {
     syscall::Getpid() as int
 }
 
+// go: sdk 1.25.5 os/exec.go:236 Getppid
 /// `os.Getppid()` (proc.go:55) — caller's parent process id.
 pub fn Getppid() -> int {
     syscall::Getppid() as int
 }
 
+// go: sdk 1.25.5 os/proc.go:52-55 Getgroups
 /// `os.Getgroups()` (proc.go:51) — list of the numeric IDs of the
 /// supplementary groups for the calling process.
 ///
@@ -1302,9 +1698,10 @@ pub fn Getgroups() -> (slice<int>, error) {
     let n = syscall::Getgroups(0, core::ptr::null_mut());
     // Go: if err != nil { return nil, err }
     if n < 0 {
+        // Go: return gids, NewSyscallError("getgroups", e)
         return (
             slice::<int>::__from_vec(Vec::new()),
-            errors::New(string("getgroups failed")),
+            NewSyscallError("getgroups", syscall::Errno(-n.rc()).into()),
         );
     }
     // Go: if n == 0 { return nil, nil }
@@ -1322,7 +1719,7 @@ pub fn Getgroups() -> (slice<int>, error) {
     if n2 < 0 {
         return (
             slice::<int>::__from_vec(Vec::new()),
-            errors::New(string("getgroups failed")),
+            NewSyscallError("getgroups", syscall::Errno(-n2.rc()).into()),
         );
     }
 
@@ -1335,6 +1732,7 @@ pub fn Getgroups() -> (slice<int>, error) {
     (slice::<int>::__from_vec(gids), errors::nil)
 }
 
+// go: sdk 1.25.5 os/pipe2_unix.go:13-22 Pipe
 /// Line-by-line port of `os.Pipe()` (pipe2_unix.go:13) — create a
 /// connected pair of Files; reads from `r` return bytes written to
 /// `w`. Both ends are O_CLOEXEC by default, mirroring upstream.
@@ -1361,13 +1759,17 @@ pub fn Pipe() -> (File, File, error) {
     )
 }
 
+// go: sdk 1.25.5 os/sys.go:8-10 Hostname
 /// `os.Hostname()` (sys.go:8) — return the kernel's nodename via
 /// uname(2).
 pub fn Hostname() -> (string, error) {
     let mut u = syscall::Utsname::default();
     let rc = syscall::Uname(&mut u);
     if rc < 0 {
-        return (string::new(), errors::New(string("uname failed")));
+        return (
+            string::new(),
+            NewSyscallError("uname", syscall::Errno(-rc).into()),
+        );
     }
     let mut n: usize = 0;
     while n < u.nodename.len() && u.nodename[n] != 0 {
@@ -1378,6 +1780,7 @@ pub fn Hostname() -> (string, error) {
 
 // ─── Mkdir / Remove ──────────────────────────────────────────────────
 
+// go: sdk 1.25.5 os/file.go:327-348 Mkdir
 /// `os.Mkdir(name, perm)` (os/file.go) — create a single directory.
 pub fn Mkdir<N: Into<string>, M: Into<FileMode>>(name: N, perm: M) -> error {
     let name: string = name.into();
@@ -1406,6 +1809,7 @@ pub fn Mkdir<N: Into<string>, M: Into<FileMode>>(name: N, perm: M) -> error {
 mod path;
 pub use path::*;
 
+// go: sdk 1.25.5 os/file_unix.go:356-387 Remove
 /// `os.Remove(name)` (os/file_unix.go). Removes a file or empty
 /// directory. First tries unlink; falls back to rmdir on EISDIR.
 pub fn Remove<N: Into<string>>(name: N) -> error {
@@ -1507,6 +1911,7 @@ fn register_os_fs_impls() {
     crate::io::fs::__goish_register_DirEntry_impl::<unixDirent>();
 }
 
+// go: sdk 1.25.5 os/dir.go:114-126 ReadDir
 /// `os.ReadDir(name)` (os/dir.go:114) — read directory entries from
 /// `name`, returning them sorted by filename. Slim port: relies on
 /// the Linux `getdents64(2)` syscall. Like Go, the return type is a
@@ -1658,6 +2063,7 @@ fn newUnixDirent(parent: string, name: string, typ: FileMode) -> (unixDirent, er
     return (ude, nil);
 }
 
+// go: sdk 1.25.5 os/file.go:935-945 WriteFile
 /// `os.WriteFile(name, data, perm)` (os/file.go:763) — write `data`
 /// to the named file, creating or truncating it.
 pub fn WriteFile<N: Into<string>, D: AsRef<[byte]>, M: Into<FileMode>>(
@@ -1769,6 +2175,44 @@ impl File {
         }
     }
 
+    // go: sdk 1.25.5 os/file_posix.go:204-213 File.Chdir
+    /// Go: "Chdir changes the current working directory to the file,
+    /// which must be a directory. If there is an error, it will be of
+    /// type *PathError."
+    ///
+    /// fchdir(2) rather than chdir(2) on the name: the directory is
+    /// identified by the OPEN fd, so nothing that happens to the path
+    /// between opening it and moving there can redirect the answer.
+    pub fn Chdir(&self) -> error {
+        if self.fd < 0 {
+            return self.wrapErr("chdir", ErrClosed.into());
+        }
+        let r = syscall::Fchdir(self.fd);
+        if r < 0 {
+            return self.fdErr("chdir", r);
+        }
+        return nil;
+    }
+
+    // go: sdk 1.25.5 os/file_posix.go:136-144 File.Chown
+    /// Go: "Chown changes the numeric uid and gid of the named file.
+    /// If there is an error, it will be of type *PathError."
+    pub fn Chown(&self, uid: int, gid: int) -> error {
+        if self.fd < 0 {
+            return self.wrapErr("chown", ErrClosed.into());
+        }
+        let r = syscall::Fchown(
+            self.fd,
+            crate::uint32(crate::int32(uid)),
+            crate::uint32(crate::int32(gid)),
+        );
+        if r < 0 {
+            return self.fdErr("chown", r);
+        }
+        return nil;
+    }
+
+    // go: sdk 1.25.5 os/file.go:725-727 File.Fd
     /// `f.Fd()` (os/file_unix.go:50) — raw fd as `uintptr`, matching
     /// Go's signature. Cast to `int` at call sites that need the
     /// signed-integer form (`syscall::Flock(int(f.Fd()), …)`).
@@ -1776,11 +2220,13 @@ impl File {
         self.fd as crate::types::uintptr
     }
 
+    // go: sdk 1.25.5 os/file.go:63 File.Name
     /// `f.Name()` — the name passed to NewFile (or "/dev/stdout" for stdio).
     pub fn Name(&self) -> string {
         self.name.clone()
     }
 
+    // go: sdk 1.25.5 os/file_posix.go:19-24 File.Close
     /// `f.Close()` — close the underlying fd. Subsequent Reads/Writes
     /// will return errors. Closing fd < 0 is a no-op (matches "already
     /// closed" calls).
@@ -1804,6 +2250,7 @@ impl File {
         }
     }
 
+    // go: sdk 1.25.5 os/file_posix.go:162-170 File.Sync
     /// `f.Sync()` — flush any buffered data to disk. Returns an error
     /// if the underlying fsync syscall fails.
     pub fn Sync(&mut self) -> error {
@@ -1818,6 +2265,7 @@ impl File {
         }
     }
 
+    // go: sdk 1.25.5 os/file.go:152-172 File.ReadAt
     /// `f.ReadAt(buf, off)` — read from file at given offset.
     /// Does not change the current file offset.
     pub fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
@@ -1863,6 +2311,7 @@ impl File {
         return (n as int, err);
     }
 
+    // go: sdk 1.25.5 os/file.go:239-262 File.WriteAt
     /// `f.WriteAt(buf, off)` — write to file at given offset.
     /// Does not change the current file offset.
     pub fn WriteAt(&mut self, p: slice<byte>, off: i64) -> (int, error) {
@@ -1877,6 +2326,7 @@ impl File {
         }
     }
 
+    // go: sdk 1.25.5 os/file_posix.go:149-157 File.Truncate
     /// `f.Truncate(size)` — truncate file to given size.
     pub fn Truncate(&mut self, size: int) -> error {
         if self.fd < 0 {
@@ -1890,6 +2340,7 @@ impl File {
         }
     }
 
+    // go: sdk 1.25.5 os/file.go:651 File.Chmod
     /// `(*File).Chmod(mode)` (os/file_posix.go:106) — change the mode of
     /// the underlying file. Inherent so callers don't need to import
     /// any extra trait; the call shape matches Go exactly:
@@ -1913,16 +2364,6 @@ impl File {
         }
     }
 
-    /// `(*File).Write(p)` (os/file.go:188) — inherent forwarder so
-    /// `f.Write(data)` works without `use goish::io::Writer;` at the
-    /// call site. Mirrors Go where `(*os.File).Write` is a concrete
-    /// method on the type (the io.Writer interface is satisfied
-    /// structurally, not by trait-method dispatch).
-    ///
-    /// Takes `&self` for the same reason as `Chmod`: lets transpiled
-    /// callers reach in through `t.Must().File.Write(data)` (immutable
-    /// cell access). The underlying syscall doesn't mutate the `File`
-    /// struct itself — only the kernel's file-offset table.
     // go: sdk 1.25.5 os/file.go:319-322 File.WriteString
     /// Go: "WriteString is like Write, but writes the contents of
     /// string s rather than a slice of bytes."
@@ -1935,6 +2376,22 @@ impl File {
         return self.Write(slice::__from_vec(s.as_bytes().to_vec()));
     }
 
+    // go: sdk 1.25.5 os/file.go:211-230 File.Write
+    /// Inherent forwarder so `f.Write(data)` works without
+    /// `use goish::io::Writer;` at the call site. Mirrors Go, where
+    /// `(*os.File).Write` is a concrete method on the type (io.Writer
+    /// is satisfied structurally, not by trait-method dispatch).
+    ///
+    /// Takes `&self` for the same reason as `Chmod`: lets transpiled
+    /// callers reach in through `t.Must().File.Write(data)` (immutable
+    /// cell access). The underlying syscall does not mutate the `File`
+    /// struct itself — only the kernel's file-offset table.
+    ///
+    /// This doc block sat above `WriteString`'s anchor until
+    /// 2026-09-06, so rustdoc attached it to WriteString and `Write`
+    /// had neither documentation nor provenance. Same shape as the
+    /// orphan `Chmod` left behind when `syscallMode` was inserted
+    /// above it.
     pub fn Write(&self, p: slice<byte>) -> (int, error) {
         // Go's `poll.FD.Write` LOOPS until every byte is written or a
         // syscall fails, which is what lets os.File satisfy io.Writer:
@@ -1960,6 +2417,7 @@ impl File {
         return (n as int, nil);
     }
 
+    // go: sdk 1.25.5 os/file.go:140-146 File.Read
     /// `(*File).Read(p)` (os/file.go:118) — inherent forwarder, see
     /// the rationale on `Write` above.
     pub fn Read(&self, p: &mut slice<byte>) -> (int, error) {
@@ -2071,6 +2529,7 @@ unsafe fn cstrlen(p: *const u8) -> usize {
 
 // ─── os.Exit ───────────────────────────────────────────────────────────
 
+// go: sdk 1.25.5 os/proc.go:62-78 Exit
 /// `os.Exit(code)` — terminate the process. Mirrors `syscall::Exit`,
 /// re-exported here under the Go-shaped path.
 pub fn Exit(code: int) -> ! {
@@ -2121,16 +2580,47 @@ impl crate::io::fs::File for dirFSFile {
     }
 }
 
-// Go: `type dirFS string` (os/file.go:754).
+// go: sdk 1.25.5 os/file.go:755 dirFS
 #[allow(non_camel_case_types)] // Go name
 struct dirFS {
     dir: string,
 }
 
 impl dirFS {
-    // Go: dirFS.join (os/file.go:830) — dir/name with validity check.
+    // go: sdk 1.25.5 os/file.go:849-861 dirFS.join
+    /// `dir/name`, with the empty-root and Localize checks that make
+    /// this a boundary rather than a string concatenation.
     fn join(&self, op: &'static str, name: &string) -> (string, error) {
-        if !crate::io::fs::ValidPath(name.clone()) {
+        // Go: if dir == "" { return "", errors.New("os: DirFS with empty root") }
+        //
+        // First, before the name is looked at, as Go orders it. Without
+        // this the join below produces "/" + name — an absolute path
+        // from the FILESYSTEM ROOT rather than a contained one — so
+        // DirFS("") reads anything the process can.
+        if self.dir.Len() == 0 {
+            return (
+                string::new(),
+                errors::Wrap(crate::io::fs::PathError {
+                    Op: string::from_static(op),
+                    Path: name.clone(),
+                    Err: errors::New(string::from_static(
+                        "os: DirFS with empty root",
+                    )),
+                }),
+            );
+        }
+        // Go: name, err := filepathlite.Localize(name); if err != nil { ErrInvalid }
+        //
+        // Localize is fs.ValidPath AND a rejection of any embedded NUL
+        // (internal/filepathlite/path_unix.go:27-32). ValidPath alone
+        // is not enough: it checks path ELEMENTS, not bytes, so "f\0junk"
+        // passes it and is then truncated at the C string boundary by
+        // the kernel — the file OPENED is not the file VALIDATED. That
+        // was measured: this returned the contents of "f" for a request
+        // naming "f\0ignored".
+        if !crate::io::fs::ValidPath(name.clone())
+            || name.as_bytes().contains(&0u8)
+        {
             return (
                 string::new(),
                 errors::Wrap(crate::io::fs::PathError {
@@ -2156,7 +2646,7 @@ impl dirFS {
 }
 
 impl crate::io::fs::FS for dirFS {
-    // Go: dirFS.Open (os/file.go:766).
+    // go: sdk 1.25.5 os/file.go:757-772 dirFS.Open
     fn Open(
         &self,
         name: string,
@@ -2267,6 +2757,7 @@ fn register_dirfs_impls() {
     crate::io::fs::__goish_register_File_impl::<dirFSFile>();
 }
 
+// go: sdk 1.25.5 os/file.go:746-748 DirFS
 /// `os.DirFS(dir)` (os/file.go:717) — an `fs::FS` for the tree of
 /// files rooted at the directory `dir`. Implements the optimized
 /// `StatFS` / `ReadFileFS` / `ReadDirFS` paths, so `fs::Stat`,

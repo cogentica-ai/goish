@@ -2,7 +2,7 @@
 //
 // compress/gzip — gzip file format (RFC 1952).
 //
-// Line-by-line port of Go 1.25 `/share/go/src/compress/gzip/`
+// Line-by-line port of Go 1.25 `compress/gzip/`
 // (`gunzip.go` + `gzip.go`). gzip is a thin framing around
 // `compress/flate`: a variable-length header (magic `1f 8b`, method,
 // flags, mtime, XFL, OS, optional FEXTRA / FNAME / FCOMMENT / FHCRC

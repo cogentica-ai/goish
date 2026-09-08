@@ -1,5 +1,4 @@
 // go: file encoding/binary/native_endian_little.go decls: nativeEndian.String
-// goishlint:ignore GOISH021 nativeEndian, NativeEndian — Go declares
 //     `type nativeEndian struct{ littleEndian }`, an embedding that
 //     inherits every method; Rust has no embedding, so `NativeEndian`
 //     is its own unit struct forwarding to `LittleEndian`.

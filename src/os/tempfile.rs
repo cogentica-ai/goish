@@ -1,4 +1,4 @@
-// go: file os/tempfile.go decls: nextRandom, errPatternHasSeparator, CreateTemp, prefixAndSuffix, MkdirTemp, joinPath
+// go: file os/tempfile.go decls: nextRandom, CreateTemp, prefixAndSuffix, MkdirTemp, joinPath
 // goishlint:ignore GOISH018 runtime_rand — Go pulls its randomness
 // from the runtime through a linkname; goish has no such hook, so
 // `nextRandom` seeds an LCG from the monotonic clock instead. The
@@ -9,6 +9,8 @@
 // keep a caller-supplied pattern inside the directory it names.
 
 #![allow(non_snake_case)]
+
+// go: waived runtime_rand — Go pulls its randomness from the runtime through a linkname; goish has no such hook, so nextRandom seeds an LCG from the monotonic clock instead. The property both need — two calls in one process do not collide — is the same.
 
 extern crate alloc;
 use alloc::vec::Vec;
@@ -63,7 +65,7 @@ fn prefixAndSuffix(pattern: &string) -> (string, string, error) {
     let mut i = 0usize;
     while i < pb.len() {
         if IsPathSeparator(pb[i]) {
-            return (string::new(), string::new(), errPatternHasSeparator());
+            return (string::new(), string::new(), errPatternHasSeparator.into());
         }
         i += 1;
     }
@@ -78,8 +80,8 @@ fn prefixAndSuffix(pattern: &string) -> (string, string, error) {
 }
 
 // go: sdk 1.25.5 os/tempfile.go:60-60 errPatternHasSeparator
-fn errPatternHasSeparator() -> error {
-    return errors::New("pattern contains path separator");
+crate::var! {
+    errPatternHasSeparator: error = "pattern contains path separator";
 }
 
 // go: sdk 1.25.5 os/tempfile.go:119-124 joinPath

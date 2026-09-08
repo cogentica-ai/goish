@@ -161,6 +161,13 @@ fn main() {
 
     let _ = srv_arc.Shutdown(time::Second);
 
+    // Clean up what this made. Litter in /tmp is a signal worth
+    // keeping readable: os::RemoveAll's symlink defect (28367c7)
+    // was found because a PASSING smoke left a tree behind, and a
+    // leftover only means something if the ones left by design are
+    // gone (ROADMAP §2r).
+    let _ = os::Remove(string("/tmp/goish-range-smoke.bin"));
+
     if failed == 0 {
         fmt::Println!("ok 6/6");
         syscall::Exit(0);

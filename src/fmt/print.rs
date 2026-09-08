@@ -50,6 +50,7 @@ pub trait Stringer {
     fn String(&self) -> string;
 }
 
+// go: sdk 1.25.5 fmt/print.go:36-52 State
 /// Go's `fmt.State` (fmt/print.go) — passed to `Formatter.Format`
 /// implementations. Carries the underlying writer plus the parsed
 /// width / precision / flags so a custom Format can render itself
@@ -61,7 +62,6 @@ pub trait Stringer {
 /// The `int` arg to `Flag` is a flag character (`'+'`, `'-'`, `'#'`,
 /// `' '`, `'0'`); Goish keeps the Go `int` widening so call sites
 /// like `f.Flag(b'+' as int)` (or `f.Flag('+' as int)`) compile.
-// go: sdk 1.25.5 fmt/print.go:36-52 State
 pub trait State: crate::io::Writer {
     // go: none — goish idiom: a method of Go's `State` interface; the
     //     interface itself carries the anchor. Go's implementation of

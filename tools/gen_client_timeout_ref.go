@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -42,6 +44,38 @@ func TestGoishRef(t *testing.T) {
 	fmt.Printf("client-timeout urlErr=%-5v Timeout=%-5v Temporary=%-5v netErr=%-5v op=%q\n",
 		isURLErr, timeout, temporary, isNetErr, opOf(ue, isURLErr))
 	<-done
+
+	// The OTHER half of Client.Timeout: it also covers reading the
+	// BODY, and there the error is not a url.Error at all — the
+	// response already came back fine. cancelTimerBody.Read
+	// (client.go:972) wraps whatever the read returned, but only when
+	// the client's timer is what fired, and marks it a timeout.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.Write([]byte("0123456789"))
+		w.(http.Flusher).Flush()
+		time.Sleep(3 * time.Second)
+	}))
+	defer srv.Close()
+
+	bc := &http.Client{Timeout: 400 * time.Millisecond}
+	resp, berr := bc.Get(srv.URL)
+	if berr != nil {
+		fmt.Printf("body-timeout get failed: %v\n", berr)
+		return
+	}
+	b, readErr := io.ReadAll(resp.Body)
+	var bne net.Error
+	isBodyNet := errors.As(readErr, &bne)
+	fmt.Printf("body-timeout n=%d netErr=%-5v Timeout=%-5v err=%q\n",
+		len(b), isBodyNet, isBodyNet && bne.Timeout(), errStr(readErr))
+}
+
+func errStr(e error) string {
+	if e == nil {
+		return ""
+	}
+	return e.Error()
 }
 
 func opOf(ue *url.Error, ok bool) string {

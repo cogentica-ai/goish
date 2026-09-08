@@ -1,4 +1,4 @@
-// go: file crypto/x509/verify.go decls: CertificateInvalidError.Error, HostnameError.Error, UnknownAuthorityError.Error, SystemRootsError.Error, SystemRootsError.Unwrap, parseRFC2821Mailbox, domainToReverseLabels, matchEmailConstraint, matchURIConstraint, matchIPConstraint, matchDomainConstraint, checkNameConstraints, isValid, Verify, appendToFreshChain, alreadyInChain, buildChains, validHostnamePattern, validHostnameInput, validHostname, matchExactly, matchHostnames, toLowerCaseASCII, VerifyHostname, checkChainForKeyUsage, mustNewOIDFromInts, newPolicyGraphNode, newPolicyGraph, insert, parentsWithExpected, parentWithAnyPolicy, parents, leaves, leafWithPolicy, deleteLeaf, validPolicyNodes, prune, incrDepth, policiesValid
+// go: file crypto/x509/verify.go decls: CertificateInvalidError.Error, HostnameError.Error, UnknownAuthorityError.Error, SystemRootsError.Error, SystemRootsError.Unwrap, parseRFC2821Mailbox, domainToReverseLabels, matchEmailConstraint, matchURIConstraint, matchIPConstraint, matchDomainConstraint, Certificate.checkNameConstraints, Certificate.isValid, Certificate.Verify, appendToFreshChain, alreadyInChain, Certificate.buildChains, validHostnamePattern, validHostnameInput, validHostname, matchExactly, matchHostnames, toLowerCaseASCII, Certificate.VerifyHostname, checkChainForKeyUsage, mustNewOIDFromInts, newPolicyGraphNode, newPolicyGraph, policyGraph.insert, policyGraph.parentsWithExpected, policyGraph.parentWithAnyPolicy, policyGraph.parents, policyGraph.leaves, policyGraph.leafWithPolicy, policyGraph.deleteLeaf, policyGraph.validPolicyNodes, policyGraph.prune, policyGraph.incrDepth, policiesValid
 //
 // Chain building, name-constraint checking, hostname matching and the
 // RFC 5280 / RFC 9618 certificate-policy graph.
@@ -79,10 +79,22 @@
 //     unexported field, but Rust's `..Default::default()` needs every
 //     field visible. See the comment on the fields.
 //
-// goishlint:ignore GOISH017 matchURIConstraint — netip.ParseAddr has no goish equivalent; see the banner.
-// goishlint:ignore GOISH018 validPolicyNodes — ported as a policyGraph method, see below.
 // goishlint:ignore GOISH020 newPolicyGraphNode — takes the arena-owning graph as a first parameter; see the banner.
-// goishlint:ignore GOISH021 leafCertificate, intermediateCertificate, rootCertificate, maxChainSignatureChecks, errNotParsed, anyPolicyOID — ported, but as `pub(super) const` / a function (goish has no const slice, and `anyPolicyOID` is a heap OID).
+//
+// Three more markers stood here — GOISH017 on matchURIConstraint,
+// GOISH018 on validPolicyNodes, GOISH021 on errNotParsed and
+// anyPolicyOID — and none suppressed anything, because all four are
+// ported and the rules had nothing to report. Their reasons are kept
+// as plain comments, since each records a real shape decision:
+//
+//   * `matchURIConstraint` is here, but `netip.ParseAddr` has no goish
+//     equivalent, so the host half of a URI constraint is matched the
+//     way the banner describes.
+//   * `validPolicyNodes` is ported as a `policyGraph` method rather
+//     than a free function, because the graph owns the arena.
+//   * `errNotParsed` is a `var!` sentinel and `anyPolicyOID` a
+//     function, not the const slice Go declares — goish has no const
+//     slice, and a heap OID cannot be one.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 

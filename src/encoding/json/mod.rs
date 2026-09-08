@@ -1,21 +1,54 @@
 // encoding/json — Go's encoding/json package, ported.
 //
-// v1 surface:
+// v1 surface — re-read against the code on 2026-09-06, because every
+// line of the block that used to be here had gone stale:
 //
 //   pub enum Value { Null, Bool(bool), Number(f64), String(string),
 //                    Array(slice<Value>), Object(map<string, Value>) }
-//   pub fn Marshal(v: &Value) -> (slice<byte>, error);
-//   pub fn MarshalIndent(v: &Value, prefix, indent) -> (slice<byte>, error);
-//   pub fn Unmarshal(data) -> (Value, error);
+//   pub fn Marshal<T: reflect::Reflect + ?Sized>(v: &T) -> (slice<byte>, error);
+//   pub fn MarshalIndent<T: reflect::Reflect + ?Sized>(v: &T, prefix, indent)
+//                                                 -> (slice<byte>, error);
+//   pub fn Unmarshal<T: FromValue>(data: &[byte], dest: &mut T) -> error;
 //   pub fn NewEncoder(w) -> Encoder<W>;  Encoder::Encode/SetIndent.
-//   pub fn NewDecoder(r) -> Decoder<R>;  Decoder::Decode.
-//   pub trait Marshaler / Unmarshaler.
-//   pub fn ErrSyntax() / ErrUnexpectedEnd().
+//   pub fn NewDecoder(r) -> Decoder;     Decoder::Decode.
+//   pub trait FromValue / Marshaler / Unmarshaler.
+//   pub const ErrSyntax / ErrUnexpectedEnd: error.
 //
-// v1 deviations from Go (doc'd in wip_json.md):
-//   * No reflection — user structs serialize via `Marshaler` trait;
-//     dynamic JSON uses the `Value` enum.
-//   * Object keys iterate sorted (BTreeMap-backed map<K, V>).
+// What that block said before, and why each was wrong:
+//
+//   "pub fn Marshal(v: &Value)" — Marshal is generic over
+//   `reflect::Reflect` and goes through `encode_reflect`. Passing a
+//   `&Value` still works because `Value` implements `Reflect`, but the
+//   signature described the only case rather than the API.
+//
+//   "pub fn Unmarshal(data) -> (Value, error)" — it takes a `&mut T:
+//   FromValue` destination and returns a bare `error`. A caller
+//   following the old line would not compile.
+//
+//   "pub fn ErrSyntax()" — these are `error` CONSTANTS, not functions.
+//
+//   "No reflection — user structs serialize via `Marshaler`" — false
+//   since the reflect path landed. Reflection is now the PRIMARY route:
+//   `#[goish::reflect]` generates what `Marshal` walks, and `Marshaler`
+//   is the escape hatch rather than the mechanism.
+//
+//   "Object keys iterate sorted" was filed under DEVIATIONS FROM GO. It
+//   is not a deviation: Go sorts map keys too (encode.go:186, "are
+//   sorted and used as JSON object keys"). goish gets there via a
+//   BTreeMap instead of an explicit sort, and the observable order is
+//   the same. Listing a MATCH as a divergence is the inverse of the
+//   usual failure and just as misleading — it invites someone to
+//   "fix" conforming behaviour.
+//
+// Both of the old "deviations" were therefore wrong, and this note does
+// NOT replace them with a new list. Writing one meant guessing, and two
+// guesses failed on the spot: struct tags ARE parsed
+// (`#[tag(r#"json:"name""#)]` -> `__parse_json_tag`), and `omitempty`
+// IS honoured (see the field walk around line 946 — `__parse_json_tag`
+// drops the options because it serves the DECODE path, where they do
+// not apply). wip_json.md is the deviation list; anything added here
+// should be measured against Go first, which is how this block rotted
+// in the first place.
 
 // goishlint:ignore GOISH015 — this package is 1885 lines in one mod.rs and predates the one-.rs-per-.go split. Splitting encoding/json is its own unit; `appendString` is anchored here because its BEHAVIOUR changed and the provenance line is worth more than the file boundary is. Claiming an encode.go manifest in a new file would instead demand all 77 of that file's other declarations, which would be a larger lie than this waiver.
 #![allow(non_snake_case, non_upper_case_globals)]
@@ -317,6 +350,21 @@ pub trait FromValue: Sized {
     /// typical Go-shape, with the second value carrying the type-mismatch
     /// or out-of-range error if any.
     fn from_value(v: &Value) -> (Self, error);
+
+    // go: none — goish-only: the OWNING form, so `Unmarshal` can hand
+    // the parsed tree over instead of copying it.
+    /// Same conversion, consuming the parsed `Value`.
+    ///
+    /// The default borrows and delegates, which is right for every
+    /// type that reads a few fields out of the tree. `Value` overrides
+    /// it to MOVE, and that override is what the nesting limit turns
+    /// on: `Unmarshal(data, &mut Value)` used to finish with
+    /// `v.clone()`, one stack frame per level over the whole tree,
+    /// which put the ceiling in the same place the recursive parser
+    /// had it.
+    fn from_value_owned(v: Value) -> (Self, error) {
+        return Self::from_value(&v);
+    }
 }
 
 // Identity — lets `Unmarshal(data, &mut json::Value)` work for the
@@ -324,6 +372,11 @@ pub trait FromValue: Sized {
 impl FromValue for Value {
     fn from_value(v: &Value) -> (Self, error) {
         (v.clone(), nil)
+    }
+    // The identity case, and the one that matters for depth: moving
+    // costs nothing per level where cloning cost a frame.
+    fn from_value_owned(v: Value) -> (Self, error) {
+        return (v, nil);
     }
 }
 
@@ -969,15 +1022,95 @@ struct IndentCfg<'a> {
     indent: &'a str,
 }
 
+// go: none — goish-only: the iterative encoder. Go recurses here and
+// can afford to, because its own limit is enforced on the way IN.
+/// Encode one `Value`, using an EXPLICIT stack for composites.
+///
+/// This used to recurse — `encode_value` into `encode_array`, back
+/// into `encode_value` — one frame per level. Measured in a DEBUG
+/// build on an 8 MiB goroutine stack, a depth-3500 tree encoded and
+/// 4000 faulted, which is LESS THAN HALF what the recursive parser
+/// managed. That made the encoder, not the parser, what
+/// `maxNestingDepth` was really protecting, and it is why raising the
+/// limit needed this as well as the parse and clone work.
+///
+/// The output is byte-for-byte what the recursive version produced:
+/// the same sorted keys, the same separators, the same indentation at
+/// the same depths. `Task::Lit` and `Task::Indent` exist so the
+/// closing bracket and its indent can be QUEUED when a composite is
+/// opened, which is the part recursion was doing implicitly on the
+/// way back up.
 fn encode_value(out: &mut Vec<byte>, v: &Value, cfg: Option<&IndentCfg>, _: &str, depth: usize) {
-    match v {
-        Value::Null => out.extend_from_slice(b"null"),
-        Value::Bool(true) => out.extend_from_slice(b"true"),
-        Value::Bool(false) => out.extend_from_slice(b"false"),
-        Value::Number(n) => encode_number(out, *n),
-        Value::String(s) => encode_string(out, s.as_bytes()),
-        Value::Array(a) => encode_array(out, a, cfg, depth),
-        Value::Object(o) => encode_object(out, o, cfg, depth),
+    enum Task<'a> {
+        Val(&'a Value, usize),
+        Lit(&'static [u8]),
+        Indent(usize),
+        Key(&'a string),
+    }
+    // Reverse order: the stack pops what should be emitted first.
+    let mut stack: Vec<Task> = alloc::vec![Task::Val(v, depth)];
+    while let Some(t) = stack.pop() {
+        match t {
+            Task::Lit(b) => out.extend_from_slice(b),
+            Task::Indent(d) => {
+                if let Some(c) = cfg {
+                    write_newline_indent(out, c, d);
+                }
+            }
+            Task::Key(k) => {
+                encode_string(out, k.as_bytes());
+                out.push(b':');
+                if cfg.is_some() {
+                    out.push(b' ');
+                }
+            }
+            Task::Val(v, d) => match v {
+                Value::Null => out.extend_from_slice(b"null"),
+                Value::Bool(true) => out.extend_from_slice(b"true"),
+                Value::Bool(false) => out.extend_from_slice(b"false"),
+                Value::Number(n) => encode_number(out, *n),
+                Value::String(s) => encode_string(out, s.as_bytes()),
+                Value::Array(a) => {
+                    let raw: &[Value] = a;
+                    if raw.is_empty() {
+                        out.extend_from_slice(b"[]");
+                        continue;
+                    }
+                    out.push(b'[');
+                    let inner = d + 1;
+                    stack.push(Task::Lit(b"]"));
+                    stack.push(Task::Indent(d));
+                    for (i, item) in raw.iter().enumerate().rev() {
+                        stack.push(Task::Val(item, inner));
+                        stack.push(Task::Indent(inner));
+                        if i > 0 {
+                            stack.push(Task::Lit(b","));
+                        }
+                    }
+                }
+                Value::Object(o) => {
+                    if o.Len() == 0 {
+                        out.extend_from_slice(b"{}");
+                        continue;
+                    }
+                    // Go's encoding/json marshals map keys in sorted order.
+                    let mut pairs: alloc::vec::Vec<(&string, &Value)> = o.__iter().collect();
+                    pairs.sort_by(|(a, _), (b, _)| a.as_bytes().cmp(b.as_bytes()));
+                    out.push(b'{');
+                    let inner = d + 1;
+                    stack.push(Task::Lit(b"}"));
+                    stack.push(Task::Indent(d));
+                    for (i, (k, val)) in pairs.iter().enumerate().rev() {
+                        stack.push(Task::Val(val, inner));
+                        stack.push(Task::Key(k));
+                        stack.push(Task::Indent(inner));
+                        if i > 0 {
+                            stack.push(Task::Lit(b","));
+                        }
+                    }
+                }
+            },
+        }
     }
 }
 
@@ -1084,66 +1217,6 @@ fn hex_digit(n: u8) -> u8 {
     return b'a' + n - 10;
 }
 
-fn encode_array(out: &mut Vec<byte>, a: &slice<Value>, cfg: Option<&IndentCfg>, depth: usize) {
-    let raw: &[Value] = a;
-    if raw.is_empty() {
-        out.extend_from_slice(b"[]");
-        return;
-    }
-    out.push(b'[');
-    let inner_depth = depth + 1;
-    for (i, v) in raw.iter().enumerate() {
-        if i > 0 {
-            out.push(b',');
-        }
-        if let Some(c) = cfg {
-            write_newline_indent(out, c, inner_depth);
-        }
-        encode_value(out, v, cfg, "", inner_depth);
-    }
-    if let Some(c) = cfg {
-        write_newline_indent(out, c, depth);
-    }
-    out.push(b']');
-}
-
-fn encode_object(
-    out: &mut Vec<byte>,
-    o: &map<string, Value>,
-    cfg: Option<&IndentCfg>,
-    depth: usize,
-) {
-    if o.Len() == 0 {
-        out.extend_from_slice(b"{}");
-        return;
-    }
-    // Go's encoding/json marshals map keys in sorted order.
-    let mut pairs: alloc::vec::Vec<(&string, &Value)> = o.__iter().collect();
-    pairs.sort_by(|(a, _), (b, _)| a.as_bytes().cmp(b.as_bytes()));
-    out.push(b'{');
-    let inner_depth = depth + 1;
-    let mut first = true;
-    for (k, v) in pairs {
-        if !first {
-            out.push(b',');
-        }
-        first = false;
-        if let Some(c) = cfg {
-            write_newline_indent(out, c, inner_depth);
-        }
-        encode_string(out, k.as_bytes());
-        out.push(b':');
-        if cfg.is_some() {
-            out.push(b' ');
-        }
-        encode_value(out, v, cfg, "", inner_depth);
-    }
-    if let Some(c) = cfg {
-        write_newline_indent(out, c, depth);
-    }
-    out.push(b'}');
-}
-
 fn write_newline_indent(out: &mut Vec<byte>, cfg: &IndentCfg, depth: usize) {
     out.push(b'\n');
     out.extend_from_slice(cfg.prefix.as_bytes());
@@ -1167,7 +1240,10 @@ pub fn Unmarshal<T: FromValue>(data: &[byte], dest: &mut T) -> error {
     if err != nil {
         return err;
     }
-    let (v, err) = T::from_value(&raw);
+    // Owning form: for `T = Value` this MOVES the parsed tree rather
+    // than cloning it, which is what keeps a deeply nested document
+    // off the stack. Every other T takes the borrowing default.
+    let (v, err) = T::from_value_owned(raw);
     // Go: a null into a primitive leaves the target alone and reports
     // no error. See the note on ERR_NULL_NOOP.
     if err == ERR_NULL_NOOP {
@@ -1257,32 +1333,53 @@ fn parse_to_value(data: &[byte]) -> (Value, error) {
 /// Go: "This limits the max nesting depth to prevent stack overflow.
 /// This is permitted by RFC 7159 section 9." Go's value is 10000.
 ///
-/// DIVERGENCE: goish's is 2000, and the reason is the sentence Go
-/// wrote. Go's v1 scanner keeps an explicit `parseState` stack and
-/// does not recurse, so 10000 costs it nothing; this is a recursive
-/// descent, so each level is two stack frames.
+/// goish's is 2000, and there are THREE recursions behind that number,
+/// not the one the note here used to name. Measured in a DEBUG build —
+/// which is what `make e2e` runs — on an 8 MiB goroutine stack.
 ///
-/// Measured in a DEBUG build — which is what `make e2e` runs — on an
-/// 8 MiB goroutine stack:
+///   PARSE — fixed. `parse_value` recursed into
+///   `parse_array`/`parse_object` where Go's scanner keeps an explicit
+///   `parseState` slice. Depth 8000 SIGSEGVd without a `maybe_grow`
+///   pivot, 8500 with one. It is an explicit frame stack now and the
+///   pivot is gone.
 ///
-///   * without a stack pivot at the recursion site, depth 8000
-///     SIGSEGVs;
-///   * with one, 8000 survives and 8500 does not;
-///   * so the implementation's own ceiling is near 8200, BELOW Go's
-///     limit. Setting the limit to Go's number would mean a document
-///     Go accepts crashes the process — which is exactly what
-///     RFC 7159 section 9 permits a parser to refuse instead.
+///   CLONE — avoided. `Unmarshal` ended with `T::from_value(&raw)`,
+///   and for `T = Value` that is `v.clone()`: one frame per level over
+///   the whole tree, failing between 8000 and 9000. `from_value_owned`
+///   moves the tree instead, so this path costs nothing per level.
 ///
-/// 2000 leaves roughly a 4x margin against that ceiling, which matters
-/// because a goroutine spawned with a smaller stack than the main
-/// one's 8 MiB has less room still. Real documents do not approach it:
-/// nesting past a few dozen is already pathological.
+///   ENCODE (Value) — fixed. `encode_value` recursed through
+///   `encode_array`/`encode_object`; it is a work stack now and those
+///   two are gone. This is the encoder behind `Compact`, `Indent` and
+///   `Value::String`.
 ///
-/// The honest fix is Go's design — an explicit state stack instead of
-/// recursion — and it is recorded in ROADMAP.md rather than attempted
-/// at the end of a session. Until then a REFUSAL is the right failure:
-/// rejecting a document Go accepts is a divergence, and crashing on
-/// one is a denial of service.
+///   ENCODE (reflect) — still recursive, and the BINDING one.
+///   `Marshal` does not go through `encode_value` at all: it is
+///   generic over `reflect::Reflect` and walks `encode_reflect`, which
+///   recurses per level. Measured: a depth-3500 tree marshals, 4000
+///   faults. That is less than half the parser's old ceiling, so the
+///   limit was never really about the parser at all.
+///
+/// So 2000 stays, and the margin it buys is about 1.8x against
+/// `encode_reflect` — not the 4x this note once claimed against the
+/// parser. That number was measured on the wrong path.
+///
+/// Note what this constant does NOT cover: `Marshal` has no depth
+/// check, and neither does Go's encoder — Go has
+/// `startDetectingCyclesAfter = 1000`, which is cycle detection. The
+/// designs match; the stacks do not, since Go's grow and goish's are
+/// fixed. Parsing caps at 2000 and marshalling survives 3500, so a
+/// round trip is safe by construction and only a deliberately built
+/// value reaches the encoder's ceiling.
+///
+/// Raising it to Go's 10000 needs `encode_reflect` iterative too.
+/// Until then a REFUSAL is the right failure: rejecting a document Go
+/// accepts is a divergence, and parsing one that then crashes on
+/// re-encode is a denial of service with an extra step.
+///
+/// Checked and NOT a constraint: dropping a deep tree. Rust's Drop
+/// glue recurses, but its frames are small — 2000, 5000 and 10000 all
+/// drop cleanly.
 const maxNestingDepth: usize = 2000;
 
 struct Parser<'a> {
@@ -1339,64 +1436,181 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // go: none — goish-only: the iterative driver Go's v1 scanner gets
+    // from its explicit `parseState` stack.
+    /// Parse one value, using an EXPLICIT stack for composites.
+    ///
+    /// This used to recurse — `parse_value` called `parse_array`, which
+    /// called `parse_value` — where Go's scanner keeps a `parseState`
+    /// slice and does not. That is why Go affords maxNestingDepth =
+    /// 10000 at no stack cost and goish could not: 10000 recursive
+    /// frames overrun an 8 MiB goroutine stack in a debug build
+    /// (measured: without a pivot, depth 8000 SIGSEGVs), so the limit
+    /// was 2000 and a `maybe_grow` pivot onto a fresh stack propped it
+    /// up. With the stack explicit, depth costs a heap frame instead of
+    /// a call frame.
+    ///
+    /// Checked BEFORE the change, because it would otherwise have moved
+    /// the crash rather than removed it: a deep `Value` tree is also
+    /// dropped recursively by Rust's glue. Built one iteratively and
+    /// dropped it at 2000, 5000 and 10000 — all fine. Drop frames are
+    /// small; the parser's were the fat ones.
     fn parse_value(&mut self) -> (Value, error) {
-        self.skip_ws();
-        // Go: scanner.go pushes onto parseState and refuses past
-        // maxNestingDepth. Only the two COMPOSITE arms recurse, so the
-        // check belongs on them and a scalar at any depth is fine.
-        match self.peek() {
-            Some(b'{') | Some(b'[') => {
-                if self.depth >= maxNestingDepth {
-                    let b = self.peek().unwrap_or(b'[');
-                    return (Value::Null, syntax_err(b, "exceeded max depth"));
-                }
-                self.depth += 1;
-                // `maybe_grow_step` because this descent RECURSES where
-                // Go's v1 scanner keeps an explicit parseState stack and
-                // does not. Go can afford maxNestingDepth = 10000 with
-                // no stack cost; here 10000 frames is more than an 8 MiB
-                // goroutine stack holds in a debug build — measured, it
-                // SIGSEGVs — so the limit alone is not enough to make
-                // the bound safe. This pivots to a fresh stack when the
-                // current one runs low, which is what the runtime's own
-                // stack-overflow diagnostic recommends.
-                // This descent RECURSES where Go's v1 scanner keeps an
-                // explicit parseState stack and does not, so Go can
-                // afford maxNestingDepth = 10000 at no stack cost and
-                // this cannot. Measured in a DEBUG build (which is what
-                // `make e2e` runs) on an 8 MiB goroutine stack: without
-                // a pivot, depth 8000 SIGSEGVs; with one, 8000 survives
-                // and 8500 does not. Ten thousand levels of debug frames
-                // is roughly 60-80 MiB, so the pivot stack is sized for
-                // that — it is mmap'd and commits lazily, and only a
-                // document that actually nests deeply ever touches it.
-                //
-                // The 64 KiB red zone is the runtime diagnostic's own
-                // suggested shape. `maybe_grow_step`'s tier-1 zone is
-                // 1 KiB, which `parse_array`'s debug frame overruns
-                // between checks — measured, it still faulted.
-                let r = crate::runtime::sched::maybe_grow(
-                    64 * 1024,
-                    256 * 1024 * 1024,
-                    || {
-                        if self.peek() == Some(b'{') {
-                            self.parse_object()
-                        } else {
-                            self.parse_array()
-                        }
-                    },
-                );
-                self.depth -= 1;
-                return r;
-            }
-            Some(b'"') => self.parse_string_value(),
-            Some(b't') | Some(b'f') => self.parse_bool(),
-            Some(b'n') => self.parse_null(),
-            Some(b'-') | Some(b'0'..=b'9') => self.parse_number(),
-            // Go: "invalid character 'x' looking for beginning of value"
-            Some(b) => (Value::Null, syntax_err(b, "looking for beginning of value")),
-            None => (Value::Null, unexpected_end()),
+        enum Frame {
+            Arr(Vec<Value>),
+            Obj(map<string, Value>, string),
         }
+        let mut stack: Vec<Frame> = Vec::new();
+        let mut done: Value;
+
+        'outer: loop {
+            self.skip_ws();
+            match self.peek() {
+                Some(b'[') | Some(b'{') => {
+                    // Go: scanner.go pushes onto parseState and refuses
+                    // past maxNestingDepth. The stack height IS the
+                    // depth, so the check is the same one.
+                    if stack.len() >= maxNestingDepth {
+                        let b = self.peek().unwrap_or(b'[');
+                        return (Value::Null, syntax_err(b, "exceeded max depth"));
+                    }
+                    let open = self.peek().unwrap_or(b'[');
+                    self.pos += 1;
+                    self.skip_ws();
+                    if open == b'[' {
+                        if self.peek() == Some(b']') {
+                            self.pos += 1;
+                            done = Value::Array(slice::__from_vec(Vec::new()));
+                        } else {
+                            stack.push(Frame::Arr(Vec::new()));
+                            continue 'outer;
+                        }
+                    } else if self.peek() == Some(b'}') {
+                        self.pos += 1;
+                        done = Value::Object(map::new());
+                    } else {
+                        let (k, err) = self.read_object_key();
+                        if err != nil {
+                            return (Value::Null, err);
+                        }
+                        stack.push(Frame::Obj(map::new(), k));
+                        continue 'outer;
+                    }
+                }
+                Some(b'"') => {
+                    let (v, e) = self.parse_string_value();
+                    if e != nil {
+                        return (Value::Null, e);
+                    }
+                    done = v;
+                }
+                Some(b't') | Some(b'f') => {
+                    let (v, e) = self.parse_bool();
+                    if e != nil {
+                        return (Value::Null, e);
+                    }
+                    done = v;
+                }
+                Some(b'n') => {
+                    let (v, e) = self.parse_null();
+                    if e != nil {
+                        return (Value::Null, e);
+                    }
+                    done = v;
+                }
+                Some(b'-') | Some(b'0'..=b'9') => {
+                    let (v, e) = self.parse_number();
+                    if e != nil {
+                        return (Value::Null, e);
+                    }
+                    done = v;
+                }
+                // Go: "invalid character 'x' looking for beginning of value"
+                Some(b) => return (Value::Null, syntax_err(b, "looking for beginning of value")),
+                None => return (Value::Null, unexpected_end()),
+            }
+
+            // `done` is finished. Attach it to the frame beneath and
+            // keep closing frames that end here.
+            loop {
+                let mut frame = match stack.pop() {
+                    None => return (done, nil),
+                    Some(f) => f,
+                };
+                match &mut frame {
+                    Frame::Arr(items) => {
+                        items.push(done);
+                        self.skip_ws();
+                        match self.peek() {
+                            Some(b',') => {
+                                self.pos += 1;
+                                self.skip_ws();
+                                stack.push(frame);
+                                continue 'outer;
+                            }
+                            Some(b']') => {
+                                self.pos += 1;
+                                match frame {
+                                    Frame::Arr(v) => done = Value::Array(slice::__from_vec(v)),
+                                    _ => unreachable!(),
+                                }
+                            }
+                            // Go: "invalid character 'x' after array element"
+                            Some(b) => return (Value::Null, syntax_err(b, "after array element")),
+                            None => return (Value::Null, unexpected_end()),
+                        }
+                    }
+                    Frame::Obj(m, key) => {
+                        m.Set(key.clone(), done);
+                        self.skip_ws();
+                        match self.peek() {
+                            Some(b',') => {
+                                self.pos += 1;
+                                let (k, err) = self.read_object_key();
+                                if err != nil {
+                                    return (Value::Null, err);
+                                }
+                                *key = k;
+                                stack.push(frame);
+                                continue 'outer;
+                            }
+                            Some(b'}') => {
+                                self.pos += 1;
+                                match frame {
+                                    Frame::Obj(m, _) => done = Value::Object(m),
+                                    _ => unreachable!(),
+                                }
+                            }
+                            // Go: "invalid character 'x' after object key:value pair"
+                            Some(b) => {
+                                return (Value::Null, syntax_err(b, "after object key:value pair"))
+                            }
+                            None => return (Value::Null, unexpected_end()),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // go: none — goish-only: the key half of Go's object loop, split so
+    // the driver above can read a key at its two points (the first, and
+    // after each comma) without duplicating the parse.
+    fn read_object_key(&mut self) -> (string, error) {
+        self.skip_ws();
+        let (key_bytes, err) = self.parse_string_bytes();
+        if err != nil {
+            return (string::new(), err);
+        }
+        let key = string::__from_vec(key_bytes);
+        self.skip_ws();
+        // Go: "invalid character 'x' after object key"
+        let err = self.expect_ctx(b':', "after object key");
+        if err != nil {
+            return (string::new(), err);
+        }
+        self.skip_ws();
+        (key, nil)
     }
 
     fn parse_null(&mut self) -> (Value, error) {
@@ -1673,87 +1887,6 @@ impl<'a> Parser<'a> {
         }
         self.pos += 4;
         Some(n)
-    }
-
-    fn parse_array(&mut self) -> (Value, error) {
-        let err = self.expect_ctx(b'[', "looking for beginning of value");
-        if err != nil {
-            return (Value::Null, err);
-        }
-        let mut items: Vec<Value> = Vec::new();
-        self.skip_ws();
-        if self.peek() == Some(b']') {
-            self.pos += 1;
-            return (Value::Array(slice::__from_vec(items)), nil);
-        }
-        loop {
-            let (v, err) = self.parse_value();
-            if err != nil {
-                return (Value::Null, err);
-            }
-            items.push(v);
-            self.skip_ws();
-            match self.peek() {
-                Some(b',') => {
-                    self.pos += 1;
-                    self.skip_ws();
-                }
-                Some(b']') => {
-                    self.pos += 1;
-                    return (Value::Array(slice::__from_vec(items)), nil);
-                }
-                // Go: "invalid character 'x' after array element"
-                Some(b) => return (Value::Null, syntax_err(b, "after array element")),
-                None => return (Value::Null, unexpected_end()),
-            }
-        }
-    }
-
-    fn parse_object(&mut self) -> (Value, error) {
-        let err = self.expect_ctx(b'{', "looking for beginning of value");
-        if err != nil {
-            return (Value::Null, err);
-        }
-        let mut m: map<string, Value> = map::new();
-        self.skip_ws();
-        if self.peek() == Some(b'}') {
-            self.pos += 1;
-            return (Value::Object(m), nil);
-        }
-        loop {
-            self.skip_ws();
-            // Key — must be a string.
-            let (key_bytes, err) = self.parse_string_bytes();
-            if err != nil {
-                return (Value::Null, err);
-            }
-            let key = string::__from_vec(key_bytes);
-            self.skip_ws();
-            // Go: "invalid character 'x' after object key"
-            let err = self.expect_ctx(b':', "after object key");
-            if err != nil {
-                return (Value::Null, err);
-            }
-            self.skip_ws();
-            let (v, err) = self.parse_value();
-            if err != nil {
-                return (Value::Null, err);
-            }
-            m.Set(key, v);
-            self.skip_ws();
-            match self.peek() {
-                Some(b',') => {
-                    self.pos += 1;
-                }
-                Some(b'}') => {
-                    self.pos += 1;
-                    return (Value::Object(m), nil);
-                }
-                // Go: "invalid character 'x' after object key:value pair"
-                Some(b) => return (Value::Null, syntax_err(b, "after object key:value pair")),
-                None => return (Value::Null, unexpected_end()),
-            }
-        }
     }
 }
 

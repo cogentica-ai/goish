@@ -8,7 +8,7 @@
 // Go puts it — so port_deps reported net/http/internal as a SQUATTER at
 // 0/12 while a faithful port of all twelve sat one directory up.
 //
-// goishlint:ignore GOISH021 chunkedReader, chunkedWriter, semi, maxLineLength — chunkedReader/chunkedWriter are exposed as ChunkedReader/ChunkedWriter because Go returns them behind io.Reader/io.WriteCloser and goish's generic wrappers cannot be erased that way; `semi` is a one-byte separator inlined at its single use.
+// goishlint:ignore GOISH021 chunkedReader, chunkedWriter, semi — chunkedReader/chunkedWriter are exposed as ChunkedReader/ChunkedWriter because Go returns them behind io.Reader/io.WriteCloser and goish's generic wrappers cannot be erased that way; `semi` is a one-byte separator inlined at its single use.
 
 #![allow(non_snake_case)]
 #![allow(dead_code)]
@@ -135,6 +135,21 @@ impl<R: Reader> ChunkedReader<R> {
     /// closes its connection down this path.
     pub(crate) fn __bufio_mut(&mut self) -> &mut bufio::Reader<R> {
         return &mut self.r;
+    }
+
+    // go: none — goish-only: hand back the source this reader was
+    // built over, so a fully-consumed chunked body can return its
+    // connection to the idle pool. `Buffered()` is what says that is
+    // safe: anything still in the buffer belongs to whatever comes
+    // next on that connection.
+    pub(crate) fn __buffered(&self) -> crate::types::int {
+        return self.r.Buffered();
+    }
+
+    // go: none — goish-only: the move half of the pair above. Sound
+    // only when `__buffered()` is zero, which the caller checks.
+    pub(crate) fn __into_src(self) -> R {
+        return self.r.__into_rd();
     }
 
     // go: sdk 1.25.5 net/http/internal/chunked.go:46-86 chunkedReader.beginChunk

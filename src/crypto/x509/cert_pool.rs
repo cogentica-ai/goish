@@ -1,4 +1,4 @@
-// go: file crypto/x509/cert_pool.go decls: NewCertPool, len, cert, Clone, SystemCertPool, findPotentialParents, contains, AddCert, addCertFunc, AppendCertsFromPEM, Subjects, Equal, AddCertWithConstraint
+// go: file crypto/x509/cert_pool.go decls: NewCertPool, CertPool.len, CertPool.cert, CertPool.Clone, SystemCertPool, CertPool.findPotentialParents, CertPool.contains, CertPool.AddCert, CertPool.addCertFunc, CertPool.AppendCertsFromPEM, CertPool.Subjects, CertPool.Equal, CertPool.AddCertWithConstraint
 //
 // A set of certificates.
 //

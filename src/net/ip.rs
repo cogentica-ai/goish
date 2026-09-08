@@ -1,6 +1,6 @@
-// go: file net/ip.go decls: IPv4, IPv4Mask, CIDRMask, IP.IsUnspecified, IP.IsLoopback, IP.IsPrivate, IP.IsMulticast, IP.IsInterfaceLocalMulticast, IP.IsLinkLocalMulticast, IP.IsLinkLocalUnicast, IP.IsGlobalUnicast, isZeros, IP.To4, IP.To16, IP.DefaultMask, allFF, IP.Mask, IP.String, hexString, ipEmptyString, IP.appendTo, IP.AppendText, IP.MarshalText, IP.UnmarshalText, IP.Equal, IP.matchAddrFamily, simpleMaskLength, IPMask.Size, IPMask.String, networkNumberAndMask, IPNet.Contains, IPNet.Network, IPNet.String, ParseIP, parseIP, ParseCIDR, copyIP, IP.IsNil, IPMask.IsNil, IPv4bcast, IPv4allsys,
-// go: file net/ip.go decls: IPv4allrouter, IPv4zero, IPv6zero, IPv6unspecified, IPv6loopback,
-// go: file net/ip.go decls: IPv6interfacelocalallnodes, IPv6linklocalallnodes,
+// go: file net/ip.go decls: IPv4, IPv4Mask, CIDRMask, IP.IsUnspecified, IP.IsLoopback, IP.IsPrivate, IP.IsMulticast, IP.IsInterfaceLocalMulticast, IP.IsLinkLocalMulticast, IP.IsLinkLocalUnicast, IP.IsGlobalUnicast, isZeros, IP.To4, IP.To16, IP.DefaultMask, allFF, IP.Mask, IP.String, hexString, ipEmptyString, IP.appendTo, IP.AppendText, IP.MarshalText, IP.UnmarshalText, IP.Equal, IP.matchAddrFamily, simpleMaskLength, IPMask.Size, IPMask.String, networkNumberAndMask, IPNet.Contains, IPNet.Network, IPNet.String, ParseIP, parseIP, ParseCIDR, copyIP, IP.IsNil, IPMask.IsNil, IPv4bcast, IPv4allsys
+// go: file net/ip.go decls: IPv4allrouter, IPv4zero, IPv6zero, IPv6unspecified, IPv6loopback
+// go: file net/ip.go decls: IPv6interfacelocalallnodes, IPv6linklocalallnodes
 // go: file net/ip.go decls: IPv6linklocalallrouters, classAMask, classBMask, classCMask
 //
 // net/ip.go — IP address manipulation. Go's own implementation

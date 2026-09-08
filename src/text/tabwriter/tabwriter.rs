@@ -42,6 +42,8 @@
 
 #![allow(non_snake_case)]
 
+// go: waived Writer.handlePanic — Go translates a write error into a return value with panic(osError)/recover, and handlePanic is that recover; it also re-does b.reset(), because a panic out of format() skips the reset at the end of flushNoDefers. goish records the error in pending_err and never unwinds, so flushNoDefers reaches its reset() on every path and Flush hands the error back through take_error(). Both halves of handlePanic are covered, with nothing left to name.
+
 extern crate alloc;
 use alloc::vec::Vec;
 

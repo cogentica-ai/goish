@@ -34,7 +34,7 @@ pub fn New<H: IntoHashFunc>(h: H, key: slice<byte>) -> HMAC {
 /// Returns false on length mismatch, otherwise compares byte-by-byte
 /// without short-circuiting (no timing leak).
 pub fn Equal(a: slice<byte>, b: slice<byte>) -> bool {
-    // Go (subtle.ConstantTimeCompare, subtle.go:18):
+    // Go (subtle.ConstantTimeCompare, crypto/subtle/constant_time.go:15):
     //   if len(x) != len(y) { return 0 }
     //   var v byte; for i := 0; i < len(x); i++ { v |= x[i] ^ y[i] }
     //   return ConstantTimeByteEq(v, 0)

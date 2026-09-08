@@ -11,7 +11,19 @@
 // into a handshake; it is the parser Go's own tests drive directly.
 //
 // goishlint:ignore GOISH018 decryptECHExtension, encodeOuterExtensions, init, sendECHRetryConfigs — the ClientHello-dependent half; see the banner. ROADMAP.md.
-// goishlint:ignore GOISH019 echExtension, echConfig, echCipher, echConfigErr, echContext, echServerContext, echClientContext — the parser's shapes are here; the handshake-side ones are not.
+// The GOISH019 marker that stood here suppressed nothing and is gone;
+// what it claimed — "the parser's shapes are here; the handshake-side
+// ones are not" — was half right, and the accurate version is worth
+// more in a package spread over twenty-five files:
+//
+//   echExtension, echConfig, echCipher, echConfigErr   here
+//   echServerContext                     handshake_server_tls13.rs
+//   echClientContext                     handshake_client.rs
+//   echContext                           absent from crypto/tls
+//
+// GOISH019 reports a type whose FIELDS differ from Go's, so it can say
+// nothing about a type this file does not declare — that is GOISH021's
+// business — and nothing about the four it does, whose fields match.
 // goishlint:ignore GOISH021 echAcceptConfirmationLabel, echClientContext, echContext, echHRRAcceptConfirmationLabel, echServerContext, errIllegalECHExt, errMalformedECHConfigList, sortedSupportedAEADs — same.
 
 #![allow(non_snake_case, dead_code)]

@@ -674,6 +674,14 @@ name = "http_client_jar_smoke"
 path = "examples/http_client_jar_smoke.rs"
 
 [[example]]
+name = "http_body_sticky_ref_smoke"
+path = "examples/http_body_sticky_ref_smoke.rs"
+
+[[example]]
+name = "http_chunked_reuse_ref_smoke"
+path = "examples/http_chunked_reuse_ref_smoke.rs"
+
+[[example]]
 name = "http_checkredirect_smoke"
 path = "examples/http_checkredirect_smoke.rs"
 
@@ -706,6 +714,10 @@ name = "http_cgi_smoke"
 path = "examples/http_cgi_smoke.rs"
 
 [[example]]
+name = "http_mux_allow_ref_smoke"
+path = "examples/http_mux_allow_ref_smoke.rs"
+
+[[example]]
 name = "http_mux_precedence_smoke"
 path = "examples/http_mux_precedence_smoke.rs"
 
@@ -732,6 +744,10 @@ path = "examples/http_default_mux_smoke.rs"
 [[example]]
 name = "http_dump_smoke"
 path = "examples/http_dump_smoke.rs"
+
+[[example]]
+name = "http_dumpout_ref_smoke"
+path = "examples/http_dumpout_ref_smoke.rs"
 
 [[example]]
 name = "http_error_smoke"
@@ -816,6 +832,10 @@ path = "examples/http_query_semicolons_smoke.rs"
 [[example]]
 name = "http_range_smoke"
 path = "examples/http_range_smoke.rs"
+
+[[example]]
+name = "http_reqbody_close_ref_smoke"
+path = "examples/http_reqbody_close_ref_smoke.rs"
 
 [[example]]
 name = "http_redirect_smoke"
@@ -1036,6 +1056,10 @@ path = "examples/flate_smoke.rs"
 [[example]]
 name = "zlib_smoke"
 path = "examples/zlib_smoke.rs"
+
+[[example]]
+name = "gzip_sticky_ref_smoke"
+path = "examples/gzip_sticky_ref_smoke.rs"
 
 [[example]]
 name = "gzip_smoke"
@@ -1354,6 +1378,10 @@ path = "examples/bufio_available_buffer_smoke.rs"
 [[example]]
 name = "bufio_writeto_readfrom_smoke"
 path = "examples/bufio_writeto_readfrom_smoke.rs"
+
+[[example]]
+name = "duration_string_ref_smoke"
+path = "examples/duration_string_ref_smoke.rs"
 
 [[example]]
 name = "encodedword_smoke"
@@ -1848,6 +1876,10 @@ name = "http_connectmethod_smoke"
 path = "examples/http_connectmethod_smoke.rs"
 
 [[example]]
+name = "http_transport_clone_ref_smoke"
+path = "examples/http_transport_clone_ref_smoke.rs"
+
+[[example]]
 name = "http_transport_opts_smoke"
 path = "examples/http_transport_opts_smoke.rs"
 
@@ -1964,6 +1996,10 @@ name = "http_conn_reuse_smoke"
 path = "examples/http_conn_reuse_smoke.rs"
 
 [[example]]
+name = "http_upgrade_client_ref_smoke"
+path = "examples/http_upgrade_client_ref_smoke.rs"
+
+[[example]]
 name = "http_proxy_upgrade_smoke"
 path = "examples/http_proxy_upgrade_smoke.rs"
 
@@ -2056,6 +2092,66 @@ name = "sched_gosched_fairness_smoke"
 path = "examples/sched_gosched_fairness_smoke.rs"
 
 [[example]]
+name = "flag_failf_ref_smoke"
+path = "examples/flag_failf_ref_smoke.rs"
+
+[[example]]
+name = "flag_usage_ref_smoke"
+path = "examples/flag_usage_ref_smoke.rs"
+
+[[example]]
+name = "os_processstate_string_ref_smoke"
+path = "examples/os_processstate_string_ref_smoke.rs"
+
+[[example]]
+name = "http_trailerprefix_ref_smoke"
+path = "examples/http_trailerprefix_ref_smoke.rs"
+
+[[example]]
+name = "os_process_wait_ref_smoke"
+path = "examples/os_process_wait_ref_smoke.rs"
+
+[[example]]
+name = "exec_processstate_ref_smoke"
+path = "examples/exec_processstate_ref_smoke.rs"
+
+[[example]]
+name = "os_root_ref_smoke"
+path = "examples/os_root_ref_smoke.rs"
+
+[[example]]
+name = "os_root2_ref_smoke"
+path = "examples/os_root2_ref_smoke.rs"
+
+[[example]]
+name = "os_root3_ref_smoke"
+path = "examples/os_root3_ref_smoke.rs"
+
+[[example]]
+name = "os_root4_ref_smoke"
+path = "examples/os_root4_ref_smoke.rs"
+
+[[example]]
+name = "os_removeall_symlink_ref_smoke"
+path = "examples/os_removeall_symlink_ref_smoke.rs"
+
+[[example]]
+name = "os_root5_ref_smoke"
+path = "examples/os_root5_ref_smoke.rs"
+
+[[example]]
+name = "os_file_misc_ref_smoke"
+path = "examples/os_file_misc_ref_smoke.rs"
+
+[[example]]
+name = "flag_func_ref_smoke"
+path = "examples/flag_func_ref_smoke.rs"
+
+[[example]]
+name = "flag_uint64_ref_smoke"
+path = "examples/flag_uint64_ref_smoke.rs"
+
+[[example]]
 name = "flag_ref_smoke"
 path = "examples/flag_ref_smoke.rs"
 
@@ -2082,6 +2178,10 @@ path = "examples/os_error_ref_smoke.rs"
 [[example]]
 name = "os_link_ref_smoke"
 path = "examples/os_link_ref_smoke.rs"
+
+[[example]]
+name = "os_file_readdir_ref_smoke"
+path = "examples/os_file_readdir_ref_smoke.rs"
 
 [[example]]
 name = "os_dirent_ref_smoke"
@@ -2126,6 +2226,10 @@ path = "examples/bits_ref_smoke.rs"
 [[example]]
 name = "rand_ref_smoke"
 path = "examples/rand_ref_smoke.rs"
+
+[[example]]
+name = "url_iplit_ref_smoke"
+path = "examples/url_iplit_ref_smoke.rs"
 
 [[example]]
 name = "url_ref_smoke"
@@ -2848,6 +2952,26 @@ name = "base64_ref_smoke"
 path = "examples/base64_ref_smoke.rs"
 
 [[example]]
+name = "multipart_headers_ref_smoke"
+path = "examples/multipart_headers_ref_smoke.rs"
+
+[[example]]
+name = "multipart_falseboundary_ref_smoke"
+path = "examples/multipart_falseboundary_ref_smoke.rs"
+
+[[example]]
+name = "multipart_disposition_ref_smoke"
+path = "examples/multipart_disposition_ref_smoke.rs"
+
+[[example]]
+name = "multipart_boundary_ref_smoke"
+path = "examples/multipart_boundary_ref_smoke.rs"
+
+[[example]]
+name = "multipart_rawpart_ref_smoke"
+path = "examples/multipart_rawpart_ref_smoke.rs"
+
+[[example]]
 name = "multipart_ref_smoke"
 path = "examples/multipart_ref_smoke.rs"
 
@@ -3394,3 +3518,135 @@ path = "examples/json_map_state_diff.rs"
 [[example]]
 name = "json_scalar_diff"
 path = "examples/json_scalar_diff.rs"
+
+[[example]]
+name = "http_long_header_line_smoke"
+path = "examples/http_long_header_line_smoke.rs"
+
+[[example]]
+name = "http_leading_crlf_smoke"
+path = "examples/http_leading_crlf_smoke.rs"
+
+[[example]]
+name = "http_multirange_smoke"
+path = "examples/http_multirange_smoke.rs"
+
+[[example]]
+name = "https_http_on_https_smoke"
+path = "examples/https_http_on_https_smoke.rs"
+
+[[example]]
+name = "http_readtimeout_body_smoke"
+path = "examples/http_readtimeout_body_smoke.rs"
+
+[[example]]
+name = "multipart_maxheaders_smoke"
+path = "examples/multipart_maxheaders_smoke.rs"
+
+[[example]]
+name = "http_maxheaderbytes_smoke"
+path = "examples/http_maxheaderbytes_smoke.rs"
+
+[[example]]
+name = "http_expect100_server_smoke"
+path = "examples/http_expect100_server_smoke.rs"
+
+[[example]]
+name = "exec_environ_ref_smoke"
+path = "examples/exec_environ_ref_smoke.rs"
+
+[[example]]
+name = "exec_output_ref_smoke"
+path = "examples/exec_output_ref_smoke.rs"
+
+[[example]]
+name = "exec_cmd_ref_smoke"
+path = "examples/exec_cmd_ref_smoke.rs"
+
+[[example]]
+name = "http_jar_cross_host_smoke"
+path = "examples/http_jar_cross_host_smoke.rs"
+
+[[example]]
+name = "http_head_framing_smoke"
+path = "examples/http_head_framing_smoke.rs"
+
+[[example]]
+name = "http_bodyless_status_smoke"
+path = "examples/http_bodyless_status_smoke.rs"
+
+[[example]]
+name = "http_trailer_ref_smoke"
+path = "examples/http_trailer_ref_smoke.rs"
+
+[[example]]
+name = "http_header_order_ref_smoke"
+path = "examples/http_header_order_ref_smoke.rs"
+
+[[example]]
+name = "time_rfc3339_marshal_ref_smoke"
+path = "examples/time_rfc3339_marshal_ref_smoke.rs"
+
+[[example]]
+name = "time_rfc3339_unmarshal_ref_smoke"
+path = "examples/time_rfc3339_unmarshal_ref_smoke.rs"
+
+[[example]]
+name = "http_ctx_cause_ref_smoke"
+path = "examples/http_ctx_cause_ref_smoke.rs"
+
+[[example]]
+name = "http_writeheader_code_ref_smoke"
+path = "examples/http_writeheader_code_ref_smoke.rs"
+
+[[example]]
+name = "fcgi_response_ref_smoke"
+path = "examples/fcgi_response_ref_smoke.rs"
+
+[[example]]
+name = "http_reverseproxy_ref_smoke"
+path = "examples/http_reverseproxy_ref_smoke.rs"
+
+[[example]]
+name = "hmac_reset_marshal_ref_smoke"
+path = "examples/hmac_reset_marshal_ref_smoke.rs"
+
+[[example]]
+name = "jsontext_utf8_ref_smoke"
+path = "examples/jsontext_utf8_ref_smoke.rs"
+
+[[example]]
+name = "os_dirfs_ref_smoke"
+path = "examples/os_dirfs_ref_smoke.rs"
+
+[[example]]
+name = "os_chtimes_ref_smoke"
+path = "examples/os_chtimes_ref_smoke.rs"
+
+[[example]]
+name = "os_readfile_ref_smoke"
+path = "examples/os_readfile_ref_smoke.rs"
+
+[[example]]
+name = "asn1_bitstring_ref_smoke"
+path = "examples/asn1_bitstring_ref_smoke.rs"
+
+[[example]]
+name = "panic_probe_waitgroup"
+path = "examples/panic_probe_waitgroup.rs"
+
+[[example]]
+name = "panic_probe_recover"
+path = "examples/panic_probe_recover.rs"
+
+[[example]]
+name = "panic_probe_bare"
+path = "examples/panic_probe_bare.rs"
+
+[[example]]
+name = "panic_probe_goexit"
+path = "examples/panic_probe_goexit.rs"
+
+[[example]]
+name = "panic_fatal_ref_smoke"
+path = "examples/panic_fatal_ref_smoke.rs"

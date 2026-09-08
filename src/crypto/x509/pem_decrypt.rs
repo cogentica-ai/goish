@@ -1,4 +1,4 @@
-// go: file crypto/x509/pem_decrypt.go decls: deriveKey, IsEncryptedPEMBlock, DecryptPEMBlock, EncryptPEMBlock, cipherByName, cipherByKey
+// go: file crypto/x509/pem_decrypt.go decls: rfc1423Algo.deriveKey, IsEncryptedPEMBlock, DecryptPEMBlock, EncryptPEMBlock, cipherByName, cipherByKey
 //
 // RFC 1423 PEM encryption — the legacy `DEK-Info` scheme OpenSSL writes
 // for password-protected private keys.

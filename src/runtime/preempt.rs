@@ -268,7 +268,7 @@ fn is_in_mcall_asm(pc: u64) -> bool {
 // than `Gosched`: gopark + commit-fn lets the M release locks (none
 // here) post-swap on g0, and the G stays in `Waiting` until
 // `preempt_park_commit` immediately re-makes it Runnable via
-// `goready`. This matches Go's `gopreempt_m` (proc.go:4332) →
+// `goready`. This matches Go's `gopreempt_m` (proc.go:4330) →
 // `goschedImpl(gp, true)` step shape — a yield that the *scheduler*
 // (not the parker) marks runnable so other Ms can dispatch it.
 

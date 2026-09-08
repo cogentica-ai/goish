@@ -630,4 +630,11 @@ pub(crate) fn register_cgi_impls() {
 // go: waived cgiMain — CGI child program for the package's own tests; goish spawns /bin/sh instead.
 // go: waived testCGI — CGI child program for the package's own tests; see cgiMain.
 // go: waived childCGIProcess — CGI child program for the package's own tests; see cgiMain.
-// go: waived Read — `neverEnding.Read`, the infinite body childCGIProcess streams; no caller without it.
+// Both spellings, because the two coverage modes key methods
+// differently and a waiver matches EXACTLY: --by-decl wants
+// `neverEnding.Read`, default mode collapses receivers and wants
+// `Read`. The bare line is only safe because `neverEnding` is the one
+// Read this package declares (checked against 1.25.5); if a second
+// ever lands, the bare line silently waives it too and must go.
+// go: waived neverEnding.Read — the infinite body childCGIProcess streams; no caller without it.
+// go: waived Read — same declaration under default mode's collapsed key; see above.

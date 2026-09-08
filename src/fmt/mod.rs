@@ -102,7 +102,7 @@ macro_rules! Sprintf {
 }
 
 /// `fmt::Sprint!(args...)` — return the concatenated default-format string.
-/// Mirrors `fmt.Sprint` (print.go:267).
+/// Mirrors `fmt.Sprint` (print.go:277).
 #[macro_export]
 macro_rules! Sprint {
     ($($arg:expr),* $(,)?) => {

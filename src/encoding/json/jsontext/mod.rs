@@ -31,11 +31,14 @@
 //                          :232, WithIndentPrefix :265)
 //
 // Goish v1 simplifications (documented deviations):
-//   - `AllowInvalidUTF8` is accepted and recorded but not enforced:
-//     the tokenizer always passes byte content through verbatim (i.e.
-//     behaves as AllowInvalidUTF8(true)), which is the option
-//     typescript-go's json shim sets globally
-//     (internal/json/json.go:12).
+//   - `AllowInvalidUTF8` IS enforced: a string whose bytes are not
+//     valid UTF-8 is rejected unless the option is true, which is
+//     Go's rule. This note used to say the option was "accepted and
+//     recorded but not enforced" — it was, that was a parser
+//     differential (a document goish accepted and Go refused), and it
+//     was fixed at the read site in this file. The note outlived the
+//     defect, which is worse than useless: it tells a reader to expect
+//     a differential that is not there.
 //     `AllowDuplicateNames` IS enforced by the Decoder: names are
 //     tracked per open object frame and a repeat is an error unless
 //     the option is true. An earlier version of this note claimed
@@ -577,8 +580,9 @@ fn is_ws(b: byte) -> bool {
 }
 
 /// Append `s` as a quoted JSON string with the standard escapes
-/// (jsontext quote.go). Non-ASCII bytes pass through verbatim
-/// (AllowInvalidUTF8-true behavior; see module header).
+/// (jsontext quote.go). Non-ASCII bytes pass through verbatim on the
+/// WRITE side; validity is checked on the READ side, where
+/// `AllowInvalidUTF8` is enforced.
 fn append_quoted(out: &mut Vec<u8>, s: &[u8]) {
     out.push(b'"');
     for &b in s {
@@ -831,7 +835,7 @@ impl Encoder {
 
 // ─── Decoder ─────────────────────────────────────────────────────────
 
-/// `jsontext.Decoder` (decode.go:79) — streaming token reader over an
+/// `jsontext.Decoder` (decode.go:78) — streaming token reader over an
 /// `io::Reader` or byte buffer. Fills on demand; consumed bytes are
 /// compacted away at each top-level value boundary so long-lived
 /// stream decoders (LSP stdin) stay bounded by message size.
@@ -1281,7 +1285,29 @@ impl Decoder {
             };
             self.pos += 1;
             match b {
-                b'"' => return Ok(string::from_bytes(&out)),
+                b'"' => {
+                    // RFC 7493 §2.1 and RFC 8259 §8.1: a JSON string is
+                    // UTF-8. Go rejects invalid UTF-8 unless
+                    // AllowInvalidUTF8 is set (options.go:62-65), and
+                    // that option was accepted and stored here and
+                    // never read — so every malformed sequence was
+                    // passed through, which is the option's `true`
+                    // behaviour applied unconditionally.
+                    //
+                    // The consequence is a parser differential: a
+                    // document this accepts and Go refuses. That
+                    // matters most where goish validates or forwards
+                    // JSON to something written in Go, which is the
+                    // usual reason to have a syntax layer at all.
+                    if !self.opts.allow_invalid_utf8.unwrap_or(false)
+                        && core::str::from_utf8(&out).is_err()
+                    {
+                        return Err(crate::errors::New(
+                            "jsontext: invalid UTF-8 within string",
+                        ));
+                    }
+                    return Ok(string::from_bytes(&out));
+                }
                 b'\\' => {
                     let e = match self.peek_at(0) {
                         Some(e) => e,
@@ -1623,6 +1649,11 @@ impl Decoder {
     /// Scan past a quoted string without decoding escapes.
     fn scan_string_raw(&mut self) -> Result<(), error> {
         debug_assert_eq!(self.buf[self.pos], b'"');
+        // Remember where the contents start so the same UTF-8 rule as
+        // `scan_string_decoded` can be applied to the raw span. Escapes
+        // inside are ASCII by construction, so checking the raw bytes
+        // is equivalent to checking the decoded ones for validity.
+        let contents_start = self.pos + 1;
         self.pos += 1;
         loop {
             let b = match self.peek_at(0) {
@@ -1631,7 +1662,17 @@ impl Decoder {
             };
             self.pos += 1;
             match b {
-                b'"' => return Ok(()),
+                b'"' => {
+                    if !self.opts.allow_invalid_utf8.unwrap_or(false) {
+                        let end = self.pos - 1;
+                        if core::str::from_utf8(&self.buf[contents_start..end]).is_err() {
+                            return Err(crate::errors::New(
+                                "jsontext: invalid UTF-8 within string",
+                            ));
+                        }
+                    }
+                    return Ok(());
+                }
                 b'\\' => {
                     if self.peek_at(0).is_none() {
                         return Err(crate::io::ErrUnexpectedEOF.into());

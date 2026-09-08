@@ -75,6 +75,51 @@ def example_imports():
     return out
 
 
+def src_edges():
+    """{package: set(packages it uses)} from `crate::` paths under src/.
+
+    An example that imports the PUBLIC wrapper exercises the internal
+    package behind it. `crypto/pbkdf2` is 30 lines that forward to
+    `crypto/internal/fips140/pbkdf2`, and crypto_kdf_smoke drives both
+    through the first — 13 RFC 6070 vectors, all passing — while a
+    coverage check keyed on import paths alone calls the second
+    untested and sends you to write a smoke that already exists.
+
+    That happened twice in one session before this was added, so
+    coverage now follows reachability: a package is covered if anything
+    covering it transitively uses it.
+    """
+    edges = {}
+    use_re = re.compile(r"crate::([A-Za-z0-9_:]+)")
+    for root, _, files in os.walk(SRC):
+        rel = os.path.relpath(root, SRC)
+        if rel == ".":
+            continue
+        deps = edges.setdefault(rel, set())
+        for f in files:
+            if not f.endswith(".rs"):
+                continue
+            text = open(os.path.join(root, f), errors="replace").read()
+            for m in use_re.finditer(text):
+                parts = m.group(1).split("::")
+                for i in range(1, len(parts) + 1):
+                    deps.add("/".join(parts[:i]))
+    return edges
+
+
+def reachable(seeds, edges):
+    """Everything the seed packages transitively use."""
+    seen = set(seeds)
+    stack = list(seeds)
+    while stack:
+        cur = stack.pop()
+        for nxt in edges.get(cur, ()):
+            if nxt not in seen:
+                seen.add(nxt)
+                stack.append(nxt)
+    return seen
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--min-loc", type=int, default=200,
@@ -86,6 +131,9 @@ def main():
     covered = set()
     for pkgs in imports.values():
         covered |= pkgs
+    # Follow the wrappers: what the imported packages themselves use is
+    # exercised too. See src_edges.
+    covered = reachable(covered, src_edges())
 
     uncovered = []
     for pkg, loc in sorted(package_dirs()):

@@ -36,7 +36,7 @@ use super::reader::{errClosed, IntoErrorExt, Order, LSB, MSB};
 
 // ─── Writer ────────────────────────────────────────────────────────────
 //
-// Line-by-line port of /share/go/src/compress/lzw/writer.go.
+// Line-by-line port of compress/lzw/writer.go.
 //
 // Slim deviations:
 //   * Order-dispatch via enum match (vs Go's `write` function-pointer field).

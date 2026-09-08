@@ -1,11 +1,11 @@
-// go: file encoding/binary/binary.go decls: Uint16, Uint32, Uint64, PutUint16, PutUint32, PutUint64, AppendUint16, AppendUint32, AppendUint64, String, Read, Write, Size, Append, Encode, Decode
+// go: file encoding/binary/binary.go decls: bigEndian.Uint16, littleEndian.Uint16, bigEndian.Uint32, littleEndian.Uint32, bigEndian.Uint64, littleEndian.Uint64, bigEndian.PutUint16, littleEndian.PutUint16, bigEndian.PutUint32, littleEndian.PutUint32, bigEndian.PutUint64, littleEndian.PutUint64, bigEndian.AppendUint16, littleEndian.AppendUint16, bigEndian.AppendUint32, littleEndian.AppendUint32, bigEndian.AppendUint64, littleEndian.AppendUint64, bigEndian.String, littleEndian.String, Read, Write, Size, Append, Encode, Decode
 // goishlint:ignore GOISH018 Decode.dataSize, Encode.dataSize, sizeof, dataSize, intDataSize, decodeFast, encodeFast, value, skip, GoString, ensure, bool, int8, uint8, int16, uint16, int32, uint32, int64, uint64 — Go's REFLECTIVE walk: `dataSize` decides a value's wire size at run time from its `reflect.Value`, and the `encoder`/`decoder` structs move the bytes the same way. goish decides at COMPILE time through the `Fixed` trait below, so an unsupported type is a build error where Go's is a run-time `errors.New("binary.Write: some values are not fixed-sized in type …")`. There is nothing to anchor those against. `GoString` is a fmt helper for the two order values, which goish's printer reaches through `String`.
 // goishlint:ignore GOISH021 AppendByteOrder, coder, decoder, encoder, bigEndian, littleEndian, errBufferTooSmall, structSize — the same reflective machinery: `coder`/`encoder`/`decoder` are its state, `AppendByteOrder` is the append half of ByteOrder which goish folds into the inherent AppendUint* methods, `bigEndian`/`littleEndian` are Go's unexported carriers for the two exported values (goish names them BigEndian/LittleEndian directly), and `errBufferTooSmall` is built at its two call sites.
 //
 // binary.go — the ByteOrder interface, its two implementations, and
 // the fixed-width Read/Write/Size/Append/Encode/Decode family.
 //
-// Reference: /share/go/src/encoding/binary/binary.go.
+// Reference: encoding/binary/binary.go.
 //
 // Public API mirrors Go's:
 //
@@ -732,3 +732,53 @@ pub fn Decode<O: ByteOrder, T: Fixed + ?Sized>(
     data.__get(&order, &buf[..n]);
     return (toint(n), nil);
 }
+
+// The reflective walk, waived out of the coverage denominator rather
+// than left to read as 28 missing declarations.
+//
+// Go decides a value's wire size at RUN time from its reflect.Value
+// (`dataSize`, `sizeof`, `intDataSize`) and moves the bytes with the
+// `encoder`/`decoder` structs and their per-width methods. goish decides
+// at COMPILE time through the `Fixed` trait above, so an unsupported
+// type is a build error where Go's is a run-time
+// `errors.New("binary.Write: some values are not fixed-sized in type …")`.
+// There is no goish counterpart for any of these and there will not be
+// one while `Fixed` is the mechanism.
+//
+// This is already stated in the GOISH018 ignore at the top of the file.
+// It is repeated as waivers because port_coverage.py reads `go: waived`
+// and not goishlint ignores, so without them encoding/binary reads
+// 14/42 = 33.3% and looks like the most tractable gap in encoding/ —
+// which is how it was picked as one on 2026-09-06, before the header
+// was read. Waived declarations leave the denominator but are printed
+// on their own line, so the substitution stays visible.
+//
+// If the reflective path is ever added, delete these.
+// go: waived dataSize — Go sizes a value from its reflect.Value at run time; goish's `Fixed` trait sizes it at compile time.
+// go: waived sizeof — the recursive half of dataSize, same reason.
+// go: waived intDataSize — the fast path of dataSize for the fixed-width scalars, same reason.
+// go: waived decodeFast — reflect-free fast path Go takes before the generic walk; goish's generic path IS the fast path.
+// go: waived encodeFast — as decodeFast.
+// go: waived ensure — grows the coder's buffer during the reflective walk; goish's Fixed impls size exactly up front.
+// go: waived decoder.value — the reflective decode walk itself.
+// go: waived encoder.value — the reflective encode walk itself.
+// go: waived decoder.skip — skips a field the walk cannot decode; a compile-time trait has no such case.
+// go: waived encoder.skip — as decoder.skip.
+// go: waived decoder.bool — per-width decode method of the reflective walk.
+// go: waived decoder.int8 — per-width decode method of the reflective walk.
+// go: waived decoder.uint8 — per-width decode method of the reflective walk.
+// go: waived decoder.int16 — per-width decode method of the reflective walk.
+// go: waived decoder.uint16 — per-width decode method of the reflective walk.
+// go: waived decoder.int32 — per-width decode method of the reflective walk.
+// go: waived decoder.uint32 — per-width decode method of the reflective walk.
+// go: waived decoder.int64 — per-width decode method of the reflective walk.
+// go: waived decoder.uint64 — per-width decode method of the reflective walk.
+// go: waived encoder.bool — per-width encode method of the reflective walk.
+// go: waived encoder.int8 — per-width encode method of the reflective walk.
+// go: waived encoder.uint8 — per-width encode method of the reflective walk.
+// go: waived encoder.int16 — per-width encode method of the reflective walk.
+// go: waived encoder.uint16 — per-width encode method of the reflective walk.
+// go: waived encoder.int32 — per-width encode method of the reflective walk.
+// go: waived encoder.uint32 — per-width encode method of the reflective walk.
+// go: waived encoder.int64 — per-width encode method of the reflective walk.
+// go: waived encoder.uint64 — per-width encode method of the reflective walk.

@@ -6,7 +6,7 @@
 //
 // Public type is `Header`, a thin wrapper over `gomap<string, slice<string>>`
 // with case-insensitive `Get`/`Set`/`Add` matching Go's
-// `net/http.Header` API (Go 1.25 src/net/http/header.go:24).
+// `net/http.Header` API (Go 1.25 src/net/http/header.go:30).
 
 #![allow(non_snake_case)]
 
@@ -188,10 +188,10 @@ impl Header {
         out
     }
 
+    // go: sdk 1.25.5 net/http/header.go:84-87 Header.Write
     /// `h.Write(w)` — write the header in HTTP wire format
     /// (`Key: value\r\n` per line). Mirrors `Header.Write`
     /// (header.go:85).
-    // go: sdk 1.25.5 net/http/header.go:84-87 Header.Write
     /// Write a header in wire format.
     pub fn Write<W: crate::io::Writer>(&self, w: &mut W) -> crate::error {
         return self.write(w);
@@ -206,9 +206,9 @@ impl Header {
         return self.writeSubset(w, &map::<string, bool>::new());
     }
 
+    // go: sdk 1.25.5 net/http/header.go:182-188 Header.WriteSubset
     /// `h.WriteSubset(w, exclude)` — like `Write` but skips keys
     /// where `exclude[key] == true`. Mirrors header.go:186.
-    // go: sdk 1.25.5 net/http/header.go:182-188 Header.WriteSubset
     /// Write a header in wire format, omitting keys for which
     /// `exclude[key]` is true. Keys are NOT canonicalized before the
     /// exclude lookup, matching Go.
@@ -382,6 +382,19 @@ pub fn headerSorterPool() -> &'static crate::sync::Pool<headerSorter> {
 pub const TimeFormat: &str = "Mon, 02 Jan 2006 15:04:05 GMT";
 
 // go: sdk 1.25.5 net/http/header.go:120-124 timeFormats
+//
+// Go's ParseTime loops this table; goish's parses the same three
+// formats with hand-written scanners (parse_imf_fixdate, parse_rfc850)
+// and a time::Parse for ANSIC, so nothing under src/ reads the table.
+// It stays because it is the anchored port of Go's declaration and the
+// one place the three layouts are named together.
+//
+// One divergence follows from not looping: on failure Go returns the
+// last time.Parse error, a *time.ParseError, and goish returns
+// errors::New("http: invalid date format"). Go documents no error type
+// for ParseTime, and http_time_smoke asserts only that an error
+// occurred, so this is left as is — recorded 2026-09-07 so the next
+// reader of dead_port_check does not re-derive it.
 pub fn timeFormats() -> slice<string> {
     return slice::__from_vec(alloc::vec![
         string(TimeFormat),

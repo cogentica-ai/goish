@@ -1,13 +1,17 @@
 // net/textproto/reader.rs — slim line-by-line port of Go 1.25 net/textproto/reader.go.
-// goishlint:ignore GOISH018 Cmd, Dial, Close, Error, DotReader, ReadCodeLine, ReadResponse, ReadDotBytes, ReadDotLines, NewConn, Read, readCodeLine, parseCodeLine, mustHaveFieldNameColon, trim, TrimString, TrimBytes, isASCIISpace, closeDot, initCommonHeader, skipSpace, upcomingHeaderKeys, readLineSlice, readContinuedLineSlice, noValidation — the anchors in this file reach two Go files: reader.go, which it ports, and textproto.go for `isASCIILetter`. Everything listed is the `Conn` CLIENT surface — Dial, Cmd, the numeric-response readers and the dot-encoding reader — which goish does not port; `Error` and `ProtocolError` DO exist, in mod.rs, and `mustHaveFieldNameColon`/`trim` are the `ValidatorKind` enum and `trim_slice` here. `TrimString`, `TrimBytes` and `isASCIISpace` are in mod.rs, `closeDot` belongs to the dot reader, and `initCommonHeader` builds Go's lookup table. `noValidation` is `ValidatorKind::None`.
-// goishlint:ignore GOISH021 Conn, Error, ProtocolError, dotReader, toLower, commonHeader, commonHeaderOnce, dotReaderState, nl — the same split: `Error` and `ProtocolError` are in mod.rs, `Conn`/`dotReader` belong to the unported client surface, and `toLower`/`commonHeader` are Go's lookup tables for a canonicaliser goish computes directly; `nl` is a one-byte literal at its use site.
+// goishlint:ignore GOISH018 trim, noValidation, mustHaveFieldNameColon, Cmd, Dial, Close, Error, NewConn, TrimString, TrimBytes, isASCIISpace, closeDot, initCommonHeader — the anchors in this file reach two Go files: reader.go, which it ports, and textproto.go for `isASCIILetter`. Everything listed is the `Conn` CLIENT surface — Dial, Cmd, the numeric-response readers and the dot-encoding reader — which goish does not port; `Error` and `ProtocolError` DO exist, in mod.rs, and `mustHaveFieldNameColon`/`trim` are the `ValidatorKind` enum and `trim_slice` here. `TrimString`, `TrimBytes` and `isASCIISpace` are in mod.rs, `closeDot` belongs to the dot reader, and `initCommonHeader` builds Go's lookup table. `noValidation` is `ValidatorKind::None`. `trim` is `trim_slice` here and IS anchored, but GOISH018 keys off the anchor attaching by NAME, so a sanctioned rename still reads as dropped; `noValidation` and `mustHaveFieldNameColon` also carry `// go: waived` lines, which is port_coverage's mechanism and not goishlint's — the two are orthogonal and a waived declaration still needs this ignore.
+// goishlint:ignore GOISH021 Conn, Error, ProtocolError, toLower, commonHeader, commonHeaderOnce, dotReaderState, nl — the same split: `Error` and `ProtocolError` are in mod.rs, `Conn`/`dotReader` belong to the unported client surface, and `toLower`/`commonHeader` are Go's lookup tables for a canonicaliser goish computes directly; `nl` is a one-byte literal at its use site.
 //
 // Source: go1.25.5/src/net/textproto/reader.go
 //
 // Slim deviations:
-//   * `dotReader`, `ReadCodeLine`, `ReadResponse`, `ReadDotBytes`, `ReadDotLines`
-//     are NOT ported in v1: SMTP/NNTP framing is out of scope. HTTP server
-//     parsing only needs ReadLine and ReadMIMEHeader.
+//   * This line said `dotReader`, `ReadCodeLine`, `ReadResponse`,
+//     `ReadDotBytes` and `ReadDotLines` "are NOT ported in v1: SMTP/NNTP
+//     framing is out of scope" until 2026-09-06. All five are ported —
+//     `dotReader` with two impl blocks, ReadResponse 28 lines,
+//     ReadDotLines 27 — and the dot-encoding pair is pinned against Go
+//     by examples/textproto_dot_ref_smoke.rs. The scope note outlived
+//     the scope.
 //   * `commonHeader` interning table is omitted — the canonicalizer always
 //     allocates a fresh string. This costs a tiny allocation per header but
 //     keeps the port table-free.
@@ -35,8 +39,8 @@ use super::{MIMEHeader, ProtocolError};
 
 // Go: reader.go:22
 //   var errMessageTooLarge = errors.New("message too large")
-fn errMessageTooLarge() -> error {
-    errors::New(string::from_static("message too large"))
+crate::var! {
+    errMessageTooLarge: error = "message too large";
 }
 
 // Go: reader.go:26-30
@@ -135,7 +139,7 @@ impl<R: io::Reader> Reader<R> {
             }
             // Go: if lim >= 0 && int64(len(line))+int64(len(l)) > lim
             if lim >= 0 && (line.len() as int) + l.Len() > lim {
-                return (slice::__from_vec(Vec::new()), errMessageTooLarge());
+                return (slice::__from_vec(Vec::new()), errMessageTooLarge.into());
             }
             // Go: if line == nil && !more { return l, nil }
             if line.is_empty() && !more {
@@ -236,7 +240,7 @@ impl<R: io::Reader> Reader<R> {
             // Go: r.buf = append(r.buf, ' ')
             self.buf.push(b' ');
             if (self.buf.len() as int) >= lim {
-                return (slice::__from_vec(Vec::new()), errMessageTooLarge());
+                return (slice::__from_vec(Vec::new()), errMessageTooLarge.into());
             }
             let (line2, err2) = self.readLineSlice(lim - self.buf.len() as int);
             if err2 != nil {
@@ -316,8 +320,14 @@ impl<R: io::Reader> Reader<R> {
     }
 }
 
-// Go: reader.go:108-118
-//   func trim(s []byte) []byte { ... }  — leading/trailing space|tab.
+// go: waived noValidation — Go passes readContinuedLineSlice a `func([]byte) error` and declares these two as the only closures it is ever given; goish spells the choice as the `ValidatorKind` enum, so the two constants are `ValidatorKind::None` and `ValidatorKind::MustHaveFieldNameColon` and there is no function to name.
+// go: waived mustHaveFieldNameColon — Go passes readContinuedLineSlice a `func([]byte) error` and declares these two as the only closures it is ever given; goish spells the choice as the `ValidatorKind` enum, so the two constants are `ValidatorKind::None` and `ValidatorKind::MustHaveFieldNameColon` and there is no function to name.
+// go: sdk 1.25.5 net/textproto/reader.go:108-118 trim
+// goishlint:ignore GOISH014 - the anchor names the GO symbol. `trim`
+//     alone would collide with the `trim` this module already uses for
+//     strings, so the byte-slice one is `trim_slice`.
+/// Go: `func trim(s []byte) []byte` — leading/trailing space or tab
+/// removed. Does not assume Unicode or UTF-8.
 fn trim_slice(s: &slice<byte>) -> slice<byte> {
     let raw: &[byte] = s.as_ref();
     let mut i: usize = 0;
@@ -483,7 +493,7 @@ fn readMIMEHeader<R: io::Reader>(
 
         max_headers -= 1;
         if max_headers < 0 {
-            return (map::new(), errMessageTooLarge());
+            return (map::new(), errMessageTooLarge.into());
         }
 
         // Go: value := string(bytes.TrimLeft(v, " \t"))
@@ -498,7 +508,7 @@ fn readMIMEHeader<R: io::Reader>(
         }
         max_memory -= value.Len();
         if max_memory < 0 {
-            return (m, errMessageTooLarge());
+            return (m, errMessageTooLarge.into());
         }
 
         // Go: m[key] = append(vv, value)

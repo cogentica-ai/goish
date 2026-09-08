@@ -30,6 +30,11 @@
 extern crate alloc;
 extern crate goish;
 
+/// Every mismatch below lands here; `main` exits non-zero if it is not
+/// zero. Without it this smoke printed `[!!]` and exited 0, which e2e
+/// reads as a pass (ROADMAP §2b-vii).
+static FAILED: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
 use alloc::vec::Vec;
 
 use goish::crypto::tls::session;
@@ -49,17 +54,19 @@ fn mk(lifetime: u32, received_at_ms: u64) -> session::cachedSession {
     return c;
 }
 
-const GO: [&str; 5] = [
+const GO: [&str; 6] = [
     "fresh                    resumable=true",
     "past-lifetime            resumable=false",
     "zero-lifetime            resumable=false",
     "over-7-days              resumable=false",
     "capacity                 kept=64",
+    "host-capacity            hosts<=64 kept=64",
 ];
 
 fn chk(ln: &mut usize, got: &string) {
     if *ln >= GO.len() {
         fmt::Printf!("[!!] extra line %d: %q\n", *ln as int + 1, got);
+        FAILED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         *ln += 1;
         return;
     }
@@ -67,6 +74,7 @@ fn chk(ln: &mut usize, got: &string) {
         fmt::Printf!("[ok] %s\n", got);
     } else {
         fmt::Printf!("[!!] line %d\n  got  %q\n  want %q\n", *ln as int + 1, got, GO[*ln]);
+        FAILED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     }
     *ln += 1;
 }
@@ -102,8 +110,43 @@ fn main() {
         session::put("many.example", mk(3600 + i, now));
     }
     chk(&mut ln, &fmt::Sprintf!("%-24s kept=%d", "capacity", session::len_total() as int));
+
+    // Host capacity: 200 DISTINCT hosts must not all be kept either.
+    //
+    // The row above bounds tickets per host and passed long before this
+    // one existed, which is exactly why the host dimension went
+    // unnoticed: `put` capped the list it appends to and nothing capped
+    // the number of lists. Go bounds KEYS — lruSessionCache holds at
+    // most 64 and evicts the least-recently-used (common.go:1623) — so
+    // an unbounded key count is the divergence, and a client that dials
+    // many names and resumes none of them is the way to reach it.
+    //
+    // One ticket each, so `kept` is also the host count.
+    {
+        let mut m = session::CACHE.Lock();
+        *m = goish::map::new_no_zero();
+    }
+    for i in 0..200u32 {
+        let host = fmt::Sprintf!("h%d.example", i as int);
+        session::put(host, mk(3600, now + i as u64));
+    }
+    chk(
+        &mut ln,
+        &fmt::Sprintf!(
+            "%-24s hosts<=64 kept=%d",
+            "host-capacity",
+            session::len_total() as int
+        ),
+    );
     let _: byte = 0;
     if ln != GO.len() {
         fmt::Printf!("[!!] produced %d lines, pinned %d\n", ln as int, GO.len() as int);
+        FAILED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     }
+    let __f = FAILED.load(core::sync::atomic::Ordering::Relaxed);
+    if __f != 0 {
+        fmt::Printf!("\nFAILED %d check(s)\n", __f as i64);
+        goish::os::Exit(1);
+    }
+    fmt::Printf!("\nok %d/%d\n", ln as i64, GO.len() as i64);
 }

@@ -180,8 +180,23 @@ impl WaitGroup {
     {
         self.Add(1);
         let body: alloc::boxed::Box<dyn FnOnce() + Send + 'a> = alloc::boxed::Box::new(move || {
+            // Go writes this as `defer wg.Done()` (sync/waitgroup.go:238),
+            // and the `defer` is the point: Done() owes the counter a
+            // decrement whether `f` returns or panics. goish called it
+            // after `f()` — a plain call, so a panicking body abandoned
+            // the frame with the decrement still owed and `Wait()`
+            // blocked forever (issue #6).
+            //
+            // An UNRECOVERED panic no longer reaches that state: the
+            // process exits 2 (see `on_g_panic_aborted`). This covers
+            // the other half — a panic that a deferred `recover!()`
+            // consumes, where the scheduler keeps running and the
+            // abandoned frame's epilogue is still missing. goish's
+            // `defer!` runs its body on the panic cleanup walk as well
+            // as on normal scope exit, which is exactly Go's guarantee
+            // here.
+            crate::defer! { self.Done(); }
             f();
-            self.Done();
         });
 
         // SAFETY: `WaitGroup`'s `Drop` impl calls `Wait()`, which

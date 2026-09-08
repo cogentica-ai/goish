@@ -1,4 +1,4 @@
-// go: file crypto/internal/fips140/sha3/sha3_noasm.go decls: keccakF1600, write, read, sum
+// go: file crypto/internal/fips140/sha3/sha3_noasm.go decls: keccakF1600, Digest.write, Digest.read, Digest.sum
 //
 // The SHA-3 dispatch points. Go builds this file under
 // `(!amd64 && !arm64 && !s390x) || purego`; sha3_amd64[go] substitutes a

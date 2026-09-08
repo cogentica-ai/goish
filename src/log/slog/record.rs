@@ -1,4 +1,4 @@
-// go: file log/slog/record.go decls: argsToAttr, Source, Source.group, Source.isEmpty, Record.Source, Record.Clone, Record.NumAttrs, Record.Attrs, Record.AddAttrs, Record.Add
+// go: file log/slog/record.go decls: argsToAttr, Record.Source, Source.group, Source.isEmpty, Record.Clone, Record.NumAttrs, Record.Attrs, Record.AddAttrs, Record.Add
 //
 // log/slog/record.go — the loose-argument pairing behind the `...any`
 // logging form.
@@ -11,8 +11,8 @@
 // returns how many elements were consumed, so the caller advances
 // rather than re-slicing on every iteration. Same walk, no reallocation
 // per argument pair.
-// goishlint:ignore GOISH018 Add, AddAttrs, Attrs, Clone, NewRecord, NumAttrs, Source, countAttrs, group, isEmpty — Record and its methods are hand-written in mod[rs].
-// goishlint:ignore GOISH021 Record, Source, nAttrsInline — same.
+// goishlint:ignore GOISH018 NewRecord, countAttrs — Record and its methods are hand-written in mod[rs].
+// goishlint:ignore GOISH021 Record, nAttrsInline — same.
 
 #![allow(non_snake_case)]
 

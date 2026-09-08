@@ -28,6 +28,13 @@
 //   * LookupGroupId does no Atoi at all, so a non-numeric gid is simply
 //     an unknown group.
 //   * GroupIds returns decimal ids including the user's primary gid.
+//     Read that narrowly: it is what this smoke PINS, not a diff
+//     against Go. goish returns the primary gid ALONE — the
+//     supplementary enumeration in listgroups_unix.go is deferred (see
+//     the os/user header) — so the checks below assert only that every
+//     id is numeric and that the primary one is present. A Go that
+//     returned four more gids would pass them unchanged. Diffing the
+//     SET needs the deferred enumeration first.
 //
 // The CGO trap, recorded because it cost a full round of investigation
 // and will cost the next person one too: os/user has TWO

@@ -1,4 +1,4 @@
-// go: file crypto/internal/fips140/edwards25519/field/fe.go decls: Zero, One, reduce, Add, Subtract, Negate, Invert, Set, SetBytes, Bytes, bytes, Equal, Select, Swap, IsNegative, Absolute, Multiply, Square, Mult32, Pow22523, SqrtRatio, mask64Bits, mul51
+// go: file crypto/internal/fips140/edwards25519/field/fe.go decls: Element.Zero, Element.One, Element.reduce, Element.Add, Element.Subtract, Element.Negate, Element.Invert, Element.Set, Element.SetBytes, Element.Bytes, Element.bytes, Element.Equal, Element.Select, Element.Swap, Element.IsNegative, Element.Absolute, Element.Multiply, Element.Square, Element.Mult32, Element.Pow22523, Element.SqrtRatio, mask64Bits, mul51
 //
 // crypto/internal/fips140/edwards25519/field — fast constant-time
 // arithmetic modulo 2^255-19.

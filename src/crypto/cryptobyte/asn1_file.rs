@@ -3,11 +3,31 @@
 // The ASN.1 DER layer over Builder and String.
 //
 // **Partial port — the whole String (parsing) half is here; the Builder
-// half is not.** Go's asn1.go is 862 lines. Every `func (s *String)`
+// half is not.** Go's asn1.go is 825 lines. Every `func (s *String)`
 // reader is ported below, which is what `crypto/x509/parser.go` needs;
 // of the `func (b *Builder)` writers only `AddASN1` is ported, the one
 // `crypto/ecdsa`'s encodeSignature reaches. What is here is verbatim;
 // the rest is absent, not stubbed.
+//
+// That gap is measurable from 2026-09-06 and reads 69/85 for the
+// package. It did not read anything before: `port_coverage.py` joins Go
+// packages to goish directories by path, and goish ports this at
+// `crypto/cryptobyte` where Go vendors it at
+// `vendor/golang.org/x/crypto/cryptobyte`, so the package reported
+// 0/85 with rs_files=0 and none of these anchors counted. A RELOCATED
+// map in that script now joins the two.
+//
+// The sixteen still missing are the Builder writers —
+// AddASN1BigInt, AddASN1BitString, AddASN1Boolean, AddASN1Enum,
+// AddASN1GeneralizedTime, AddASN1Int64{,WithTag}, AddASN1NULL,
+// AddASN1ObjectIdentifier, AddASN1OctetString, AddASN1UTCTime,
+// AddASN1Uint64, MarshalASN1, addASN1Signed, addBase128Int,
+// isValidOID. They are absent because nothing in goish calls them, not
+// because they are hard, and they are deliberately NOT waived: a
+// waiver says "resolved elsewhere by design", and these are simply
+// unwritten. Porting them before something needs them would add
+// sixteen uncalled functions, which is the shape ROADMAP §2e exists to
+// discourage.
 //
 // Deviations:
 //

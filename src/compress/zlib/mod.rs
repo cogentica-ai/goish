@@ -2,7 +2,7 @@
 //
 // compress/zlib — zlib compressed data format (RFC 1950).
 //
-// Line-by-line port of Go 1.25 `/share/go/src/compress/zlib/`
+// Line-by-line port of Go 1.25 `compress/zlib/`
 // (`reader.go` + `writer.go`). zlib is a thin framing around
 // `compress/flate`: a 2-byte header (CMF/FLG), an optional 4-byte
 // preset-dictionary id, the raw DEFLATE payload, and a 4-byte

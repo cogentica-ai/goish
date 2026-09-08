@@ -156,6 +156,13 @@ fn main() {
 
     let failed = unsafe { FAILED };
     let n = GO.len() as i64;
+    // Clean up what this made. Litter in /tmp is a signal worth
+    // keeping readable: os::RemoveAll's symlink defect (28367c7)
+    // was found because a PASSING smoke left a tree behind, and a
+    // leftover only means something if the ones left by design are
+    // gone (ROADMAP §2r).
+    let _ = os::RemoveAll(string("/tmp/goish-oswrite-probe"));
+
     if failed == 0 {
         fmt::Printf!("os.File errors: %d/%d match Go\n", n, n);
         goish::os::Exit(0);

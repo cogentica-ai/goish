@@ -128,12 +128,42 @@ impl response {
 
     // go: sdk 1.25.5 net/http/fcgi/child.go:104-120 response.WriteHeader
     pub fn WriteHeader(&self, code: crate::types::int) {
-        let mut st = self.state.Lock();
-        if st.wroteHeader {
-            return;
+        {
+            let mut st = self.state.Lock();
+            if st.wroteHeader {
+                return;
+            }
+            st.wroteHeader = true;
+            st.code = code;
         }
-        st.wroteHeader = true;
-        st.code = code;
+        // Go: a 304 "must not have body", so the three headers that
+        // describe one are deleted (child.go:110-115). goish kept
+        // them, so a 304 went out carrying `Content-Length: 5` AND
+        // `Transfer-Encoding: chunked` from the handler — not merely
+        // redundant on a bodyless response but a framing contradiction
+        // the peer has to resolve.
+        if code == super::super::status::StatusNotModified {
+            let mut h = self.header.Lock();
+            h.Del(crate::string("Content-Type"));
+            h.Del(crate::string("Content-Length"));
+            h.Del(crate::string("Transfer-Encoding"));
+        }
+        // Go: if r.header.Get("Date") == "" { … time.Now().UTC() }
+        // (child.go:116-118). goish set no Date at all, so every
+        // FastCGI response reached the front-end server without one —
+        // the plain server stamps its own, and this path had no
+        // equivalent.
+        {
+            let mut h = self.header.Lock();
+            if h.Get(crate::string("Date")).Len() == 0 {
+                h.Set(
+                    crate::string("Date"),
+                    crate::time::Now()
+                        .UTC()
+                        .Format(crate::string(super::super::header::TimeFormat)),
+                );
+            }
+        }
         return;
     }
 

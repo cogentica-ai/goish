@@ -24,6 +24,7 @@ use goish::io::{Closer, Reader, Writer};
 use goish::net;
 use goish::net::http;
 use goish::time;
+use goish::types::byte;
 use goish::{go, string};
 
 static PASSED: AtomicUsize = AtomicUsize::new(0);
@@ -199,7 +200,78 @@ fn run() {
         );
     }
 
+    // ── the OTHER Close: maxBytesReader.Close (request.go:1253) ──
+    //
+    // Go's MaxBytesReader returns an io.ReadCloser and closes the body
+    // it wrapped, which is what makes the documented idiom work:
+    //
+    //     r.Body = http.MaxBytesReader(w, r.Body, n)
+    //
+    // The handler puts the wrapper BACK, so whoever closes the request
+    // body closes the real one underneath. goish's wrapper implemented
+    // Reader only — it could not be put back at all, since
+    // Body::from_reader wants a ReadCloser — so the idiom was
+    // unwritable and the declaration counted missing.
+    {
+        // A ReadCloser that records its own Close. Using a Body here
+        // would prove nothing: an in-memory Body is Go's NopCloser
+        // shape (NewRequest wraps a bytes.Reader in io.NopCloser), so
+        // its Close is a no-op in Go too.
+        let closed = Arc::new(core::sync::atomic::AtomicBool::new(false));
+        let src = CloseProbe {
+            data: goish::bytes("hello there"),
+            off: 0,
+            closed: closed.clone(),
+        };
+        let wrapped = http::MaxBytesReader(None, src, 100);
+        let mut outer = http::Body::from_reader(alloc::boxed::Box::new(wrapped));
+
+        let mut probe = goish::make!([]byte, 5);
+        let (n0, e0) = outer.Read(&mut probe);
+        check(
+            "the wrapper composes back into a Body and reads",
+            n0 == 5 && e0.IsNil() && goish::string::from_bytes(&probe) == "hello",
+            fmt::Sprintf!("n=%d err=%v got=%q", n0 as i64, e0, goish::string::from_bytes(&probe)),
+        );
+
+        let cerr = Closer::Close(&mut outer);
+        check(
+            "closing the wrapper closes the reader it wrapped",
+            cerr.IsNil() && closed.load(Ordering::Relaxed),
+            fmt::Sprintf!("close=%v inner-closed=%v", cerr, closed.load(Ordering::Relaxed)),
+        );
+    }
+
     finish();
+}
+
+// A minimal ReadCloser that records whether Close reached it — the
+// only way to observe Go's `return l.r.Close()` from outside.
+struct CloseProbe {
+    data: goish::goslice::slice<byte>,
+    off: usize,
+    closed: Arc<core::sync::atomic::AtomicBool>,
+}
+
+impl Reader for CloseProbe {
+    fn Read(&mut self, p: &mut goish::goslice::slice<byte>) -> (goish::types::int, goish::errors::error) {
+        if self.off >= self.data.Len() as usize {
+            return (0, goish::io::EOF.into());
+        }
+        let want = core::cmp::min(p.Len() as usize, self.data.Len() as usize - self.off);
+        for i in 0..want {
+            p[i] = self.data[self.off + i];
+        }
+        self.off += want;
+        return (want as goish::types::int, goish::errors::nil);
+    }
+}
+
+impl Closer for CloseProbe {
+    fn Close(&mut self) -> goish::errors::error {
+        self.closed.store(true, Ordering::Relaxed);
+        return goish::errors::nil;
+    }
 }
 
 fn finish() -> ! {

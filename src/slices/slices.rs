@@ -352,3 +352,56 @@ where
     v.dedup_by(|a, b| eq(a, b));
     return slice::__from_vec(v);
 }
+
+// The 41 declarations below are waived out of the coverage denominator.
+// Both groups are already explained in the GOISH018 ignores above and in
+// mod.rs; they are repeated here because port_coverage.py reads
+// `go: waived` and not goishlint ignores, so without them slices/ reads
+// 40/81 = 49.4% and advertises 41 declarations of unported work that
+// nobody should go looking for. encoding/binary had the same split on
+// 2026-09-06 and cost a wasted start before the header was read.
+//
+// Waived declarations leave the denominator but print on their own
+// line, so the substitution stays visible.
+
+// go: waived breakPatternsCmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived breakPatternsOrdered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived choosePivotCmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived choosePivotOrdered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived heapSortCmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived heapSortOrdered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived insertionSortCmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived insertionSortOrdered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived isNaN — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived medianAdjacentCmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived medianAdjacentOrdered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived medianCmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived medianOrdered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived nextPowerOfTwo — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived order2CmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived order2Ordered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived partialInsertionSortCmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived partialInsertionSortOrdered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived partitionCmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived partitionEqualCmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived partitionEqualOrdered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived partitionOrdered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived pdqsortCmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived pdqsortOrdered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived reverseRangeCmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived reverseRangeOrdered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived rotateCmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived rotateOrdered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived siftDownCmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived siftDownOrdered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived stableCmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived stableOrdered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived swapRangeCmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived swapRangeOrdered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived symMergeCmpFunc — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived symMergeOrdered — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived xorshift.Next — Go's pdqsort engine, generated once per element constraint; goish delegates to Rust's sort_unstable/sort_by, which are the same algorithms, so there is no counterpart to name.
+// go: waived overlaps — an in-place edit helper for Insert/Delete/Replace, which reuse the caller's backing array; goish's take `slice<T>` by value and return a new slice, so there is no aliasing question and no rotate to do.
+// go: waived rotateLeft — an in-place edit helper for Insert/Delete/Replace, which reuse the caller's backing array; goish's take `slice<T>` by value and return a new slice, so there is no aliasing question and no rotate to do.
+// go: waived rotateRight — an in-place edit helper for Insert/Delete/Replace, which reuse the caller's backing array; goish's take `slice<T>` by value and return a new slice, so there is no aliasing question and no rotate to do.
+// go: waived startIdx — an in-place edit helper for Insert/Delete/Replace, which reuse the caller's backing array; goish's take `slice<T>` by value and return a new slice, so there is no aliasing question and no rotate to do.

@@ -15,8 +15,11 @@
 // reusable half: a handler author can assert `hasAttr`, `inGroup` and
 // friends against their own output today.
 //
-// goishlint:ignore GOISH018 Run, withSource — TestHandler and Run need the `cases` table described above; withSource formats a runtime.Caller(1) location into an explanation string and is only used by that table.
-// goishlint:ignore GOISH021 check, wrapper, replace — `cases` and `testCase` come with TestHandler; `check` is a func type, and goish spells it as a closure bound at each helper.
+// `Run` and `withSource` are both declared below, so the GOISH018
+// marker that named them as dropped suppressed nothing. Its remark
+// stands as prose: they need the `cases` table described above, and
+// withSource formats a runtime.Caller(1) location into an explanation
+// string that only that table uses.
 
 #![allow(non_snake_case)]
 
@@ -112,7 +115,9 @@ pub fn inGroup(name: string, c: check) -> check {
     });
 }
 
-// goishlint:ignore GOISH019 wrapper — Go embeds `slog.Handler` in the
+// `wrapper` is declared here and its GOISH019 marker suppressed
+// nothing; the reason is kept because the shape is unobvious.
+// Go embeds `slog.Handler` in the
 // struct and inherits Enabled/WithAttrs/WithGroup for free. Rust has no
 // embedding, so the handler is a named field and the three forwarding
 // methods are written out; `mod` is spelled `md` because `mod` is a
@@ -206,7 +211,7 @@ impl replace {
 
 // ─── the case table and its drivers ──────────────────────────────────
 
-// goishlint:ignore GOISH019 testCase — `mod` is spelled `md` because
+// `testCase` is declared here too, same story. `mod` is spelled `md` because
 // `mod` is a Rust keyword, and the closures are boxed because Rust has
 // no bare function-typed struct fields. Same five fields, same roles.
 // go: sdk 1.25.5 testing/slogtest/slogtest.go:19-34 testCase

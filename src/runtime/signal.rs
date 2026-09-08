@@ -1,7 +1,7 @@
 // runtime::signal — Linux signal handler infrastructure (M23).
 //
-// Reference: /share/go/src/runtime/signal_unix.go,
-// /share/go/src/runtime/sigaction.go.
+// Reference: runtime/signal_unix.go,
+// runtime/sigaction.go.
 //
 // Architecture (Go-faithful):
 //
@@ -212,8 +212,8 @@ pub fn is_ignored(sig: i32) -> bool {
     return old.sa_handler == 1; // SIG_IGN
 }
 
-// go: none — goish-only: the registry half of Go's `cancel`
-// (os/signal/signal.go:141-170), which lives in the os/signal
+// go: none — goish-only: the registry half of Go's `cancel`, at
+// os/signal/signal.go lines 52-81, which lives in the os/signal
 // package there because the handler map does too.
 /// Drop `sigs` from every registration. Mirrors the registry half of
 /// Go's `cancel`, which both `signal.Ignore` and `signal.Reset` run.

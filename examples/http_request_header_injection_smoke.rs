@@ -37,6 +37,11 @@
 extern crate alloc;
 extern crate goish;
 
+/// Every mismatch below lands here; `main` exits non-zero if it is not
+/// zero. Without it this smoke printed `[!!]` and exited 0, which e2e
+/// reads as a pass (ROADMAP §2b-vii).
+static FAILED: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
 use goish::fmt;
 use goish::gostring::string;
 use goish::net::http;
@@ -56,6 +61,7 @@ const GO: [&str; 6] = [
 fn chk(ln: &mut usize, got: &string) {
     if *ln >= GO.len() {
         fmt::Printf!("[!!] extra line %d: %q\n", *ln as int + 1, got);
+        FAILED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         *ln += 1;
         return;
     }
@@ -115,5 +121,12 @@ fn main() {
             ln as int,
             GO.len() as int
         );
+        FAILED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     }
+    let __f = FAILED.load(core::sync::atomic::Ordering::Relaxed);
+    if __f != 0 {
+        fmt::Printf!("\nFAILED %d check(s)\n", __f as i64);
+        goish::os::Exit(1);
+    }
+    fmt::Printf!("\nok %d/%d\n", ln as i64, GO.len() as i64);
 }

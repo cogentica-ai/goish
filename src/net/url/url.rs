@@ -1,5 +1,5 @@
 // go: file net/url/url.go decls: JoinPath, Error.Error, Error.Unwrap, Error.Timeout, Error.Temporary, EscapeError.Error, InvalidHostError.Error, escape, unescape, shouldEscape, QueryUnescape, PathUnescape, QueryEscape, PathEscape, User, UserPassword, Userinfo.Username, Userinfo.Password, Userinfo.String, getScheme, Parse, ParseRequestURI, parse, parseAuthority, parseHost, URL.setPath, URL.EscapedPath, validEncoded, URL.setFragment, URL.EscapedFragment, URL.String, validOptionalPort, ParseQuery, parseQuery, resolvePath, URL.IsAbs, URL.Parse, URL.ResolveReference, URL.RequestURI, URL.Hostname, URL.Port, splitHostPort, URL.Redacted, validUserinfo, stringContainsCTLByte, URL.JoinPath, ParseQueryValues, ValuesGet, ValuesSet, ValuesAdd, ValuesDel, ValuesHas, SetPassword, URL.Query, URL.MarshalBinary, URL.AppendBinary, URL.UnmarshalBinary
-// goishlint:ignore GOISH018 Add, Del, Get, Has, Set, Encode, MarshalBinary, UnmarshalBinary, ishex, unhex, badSetPath, shouldEscape, Encode — Go's `Values` is a NAMED map type carrying methods; goish's is a type alias for `map<string, slice<string>>`, which Rust cannot hang methods on, so the same six are free functions `ValuesAdd`/`ValuesDel`/`ValuesGet`/`ValuesHas`/`ValuesSet`/`ValuesEncode`. `Error`'s net.Error pair (Timeout, Temporary) IS ported now — see the manifest above and examples/url_error_ref_smoke.rs. `ishex`/`unhex` are ported under Rust casing as `is_hex`/`un_hex`, and `badSetPath` is a test-only helper, and `shouldEscape` is `should_escape`. `Encode` is `ValuesEncode`, for the same reason as the other five.
+// goishlint:ignore GOISH018 Add, Del, Get, Has, Set, Encode, ishex, unhex, badSetPath, shouldEscape, Encode — Go's `Values` is a NAMED map type carrying methods; goish's is a type alias for `map<string, slice<string>>`, which Rust cannot hang methods on, so the same six are free functions `ValuesAdd`/`ValuesDel`/`ValuesGet`/`ValuesHas`/`ValuesSet`/`ValuesEncode`. `Error`'s net.Error pair (Timeout, Temporary) IS ported now — see the manifest above and examples/url_error_ref_smoke.rs. `ishex`/`unhex` are ported under Rust casing as `is_hex`/`un_hex`, and `badSetPath` is a test-only helper, and `shouldEscape` is `should_escape`. `Encode` is `ValuesEncode`, for the same reason as the other five.
 // goishlint:ignore GOISH021 encoding, encodePath, encodePathSegment, encodeHost, encodeZone, encodeUserPassword, encodeQueryComponent, encodeFragment — Go's `encoding` is an untyped int const set; goish's is the `Encoding` enum below, whose variants carry the same seven names in Rust casing.
 //
 // url.go — the whole package: parsing, escaping, the URL type and
@@ -1223,13 +1223,12 @@ fn parseAuthority(authority: string) -> (Userinfo, string, error) {
 /// its `%25` in `Host` and `Hostname()` returned `fe80::1%25eth0`
 /// instead of `fe80::1%eth0` — the escaped form where the caller wants
 /// the real one.
-// goishlint:ignore GOISH018 netip.ParseAddr — Go validates the bracketed
-//     literal with `netip.ParseAddr` and rejects an IPv4 in brackets.
-//     goish has no `net/netip` (0% ported), and `net`'s own `ParseIP`
-//     would make `net/url` depend on `net`, which Go's does not. The
-//     check here is the weaker "an IPv6 literal contains a colon",
-//     which accepts every address Go accepts and a few malformed ones
-//     Go would reject.
+// goishlint:ignore GOISH018 netip.ParseAddr — the call IS made now,
+//     to goish's own net/netip (88% by declaration). This ignore stays
+//     because the lint wants an anchored counterpart in THIS file for
+//     a Go function declared in another package. The reason it used to
+//     give — "goish has no net/netip (0% ported)" — went stale, and
+//     the weaker check it justified was accepting hosts Go rejects.
 fn parseHost(host: string) -> (string, error) {
     let open_bracket = strings::LastIndex(host.clone(), "[");
     if open_bracket != -1 {
@@ -1276,7 +1275,26 @@ fn parseHost(host: string) -> (string, error) {
             unescaped_hostname = h;
         }
         // See the waiver above: Go asks netip.ParseAddr here.
-        if !strings::Contains(unescaped_hostname.clone(), ":") {
+        // Go (url.go:674-682): "Per RFC 3986, only a host identified by
+        // a valid IPv6 address can be enclosed by square brackets. This
+        // excludes any IPv4, but notably not IPv4-mapped addresses."
+        // The validation is netip.ParseAddr plus an Is4 rejection.
+        //
+        // This used to be "the hostname contains a colon", on the
+        // reasoning that goish had no net/netip. It has one — 88% by
+        // declaration, ParseAddr included — so the weaker test was
+        // accepting hosts Go rejects: `[not:an:address]`, `[zz::1]`
+        // and `[:::]` all parsed here and all fail there. A URL parser
+        // that accepts more than Go's is the wrong direction for
+        // anything validating one.
+        let (addr, aerr) = crate::net::netip::ParseAddr(unescaped_hostname.clone());
+        if !aerr.IsNil() {
+            return (
+                string::new(),
+                crate::fmt::Errorf!("invalid host: %w", aerr),
+            );
+        }
+        if addr.Is4() {
             return (string::new(), errors::New("invalid IP-literal"));
         }
         return (
@@ -1475,7 +1493,7 @@ pub fn ValuesGet(v: &Values, key: string) -> string {
 }
 
 // go: none — goish idiom: see `ValuesGet`.
-/// `v.Set(key, value)` (url.go:930) — sets key to single value.
+/// `v.Set(key, value)` (url.go:958) — sets key to single value.
 pub fn ValuesSet(v: &mut Values, key: string, value: string) {
     let mut s = Vec::with_capacity(1);
     s.push(value);
@@ -1483,7 +1501,7 @@ pub fn ValuesSet(v: &mut Values, key: string, value: string) {
 }
 
 // go: none — goish idiom: see `ValuesGet`.
-/// `v.Add(key, value)` (url.go:940) — appends value to key's slice.
+/// `v.Add(key, value)` (url.go:964) — appends value to key's slice.
 pub fn ValuesAdd(v: &mut Values, key: string, value: string) {
     let (existing, ok) = v.Get(key.clone());
     if ok {
@@ -1501,13 +1519,13 @@ pub fn ValuesAdd(v: &mut Values, key: string, value: string) {
 }
 
 // go: none — goish idiom: see `ValuesGet`.
-/// `v.Del(key)` (url.go:950) — deletes the key.
+/// `v.Del(key)` (url.go:969) — deletes the key.
 pub fn ValuesDel(v: &mut Values, key: string) {
     v.Delete(key);
 }
 
 // go: none — goish idiom: see `ValuesGet`.
-/// `v.Has(key)` (url.go:960) — reports whether key exists.
+/// `v.Has(key)` (url.go:974) — reports whether key exists.
 pub fn ValuesHas(v: &Values, key: string) -> bool {
     return v.Has(key);
 }

@@ -1,4 +1,4 @@
-// go: file log/slog/handler.go decls: commonHandler.clone, commonHandler.enabled, commonHandler.withAttrs, commonHandler.withGroup, commonHandler.handle, commonHandler.attrSep, handleState.openGroups, handleState.openGroup, handleState.closeGroup, handleState.appendAttrs, handleState.appendAttr, handleState.appendNonBuiltIns, handleState.appendKey, handleState.appendString, handleState.appendTwoStrings, handleState.appendValue, handleState.appendTime, appendRFC3339Millis, newDefaultHandler, defaultHandler.Enabled, defaultHandler.Handle, defaultHandler.WithAttrs, defaultHandler.WithGroup,
+// go: file log/slog/handler.go decls: commonHandler.clone, commonHandler.enabled, commonHandler.withAttrs, commonHandler.withGroup, commonHandler.handle, commonHandler.attrSep, handleState.openGroups, handleState.openGroup, handleState.closeGroup, handleState.appendAttrs, handleState.appendAttr, handleState.appendNonBuiltIns, handleState.appendKey, handleState.appendString, handleState.appendTwoStrings, handleState.appendValue, handleState.appendTime, appendRFC3339Millis, newDefaultHandler, defaultHandler.Enabled, defaultHandler.Handle, defaultHandler.WithAttrs, defaultHandler.WithGroup
 //
 // log/slog/handler.go — the keys the built-in handlers use.
 //
@@ -7,7 +7,7 @@
 // share. `TextHandler` and `JSONHandler` themselves live one file each,
 // as in Go.
 //
-// goishlint:ignore GOISH018 Enabled, Handle, WithAttrs, WithGroup, appendError, free, newHandleState — `Enabled`/`Handle`/`WithAttrs`/`WithGroup` are the Handler impls, which live on TextHandler and JSONHandler in their own files; `free`/`newHandleState` are Go's buffer-pool lifecycle, which goish has no pool for; `appendError` and `newDefaultHandler` belong to the default handler, which is not ported.
+// goishlint:ignore GOISH018 appendError, free, newHandleState — `Enabled`/`Handle`/`WithAttrs`/`WithGroup` are the Handler impls, which live on TextHandler and JSONHandler in their own files; `free`/`newHandleState` are Go's buffer-pool lifecycle, which goish has no pool for; `appendError` and `newDefaultHandler` belong to the default handler, which is not ported.
 // goishlint:ignore GOISH021 DiscardHandler, Handler, discardHandler, groupPool — `Handler` and `discardHandler` are declared in the module root; `groupPool` is Go's sync.Pool, which goish allocates instead; `DiscardHandler` and `defaultHandler` are not ported.
 
 #![allow(non_snake_case)]

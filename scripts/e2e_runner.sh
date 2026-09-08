@@ -22,7 +22,8 @@
 # Env knobs:
 #   LOOPS=N          force a uniform loop count (disables tiers)
 #   TIER1/2/3=N      override a tier's loop count (default 1/10/50)
-#   TIMEOUT=15       per-run timeout (seconds)
+#   TIMEOUT=15       per-run timeout (seconds); see example_timeout
+#                    for the per-example exceptions
 #   ARTIFACTS=...    where to save failure logs (default scripts/.e2e-artifacts)
 #   FILTER=regex     only run examples whose name matches (default: all)
 #   EXCLUDE=regex    skip examples matching this pattern
@@ -61,8 +62,33 @@ loops_for() {
       echo "$TIER1" ;;
   esac
 }
+# Per-example timeout override, in seconds. Defaults to $TIMEOUT.
+#
+# The global budget is tuned for a smoke that starts, asserts and
+# exits. A few examples stand up real servers and drive them, and the
+# expensive part is a DEBUG-build RSA handshake — https_server_smoke's
+# own comment records that one of those can miss a 300ms budget on a
+# loaded box. goginx does several, plus a full static/vhost/proxy
+# self-test, and timed out once on CI while exiting in 2.3s on an idle
+# machine here: measured across the commit it was blamed on, 2.29-2.34s
+# before and 2.30-2.32s after, so the cause was contention, not a
+# change.
+#
+# Raising the GLOBAL timeout would hide real hangs in the other ~840
+# examples, so the exception is named rather than universal. A genuine
+# hang in goginx still fails the suite, just later.
+example_timeout() {
+  case "$1" in
+    goginx) echo 60 ;;
+    *)      echo "$TIMEOUT" ;;
+  esac
+}
+
 ARTIFACTS="${ARTIFACTS:-scripts/.e2e-artifacts}"
 FILTER="${FILTER:-.*}"
+# Ref smokes whose pinned Go behaviour IS a panic; see the note at the
+# rc=0 panic check below. Anchored so a substring cannot match.
+PANIC_EXPECTED='^(http_writeheader_code_ref_smoke)$'
 # Default skips: HTTP servers that don't self-terminate, very-large
 # stress workloads that take >TIMEOUT seconds, and tests whose
 # success requires external drivers.
@@ -71,7 +97,11 @@ FILTER="${FILTER:-.*}"
 # stefanprodan.github.io (a personal GitHub Pages site) and one hung on
 # tls13.1d.pw. It now dials only raw.githubusercontent.com and
 # Cloudflare, and the HRR probe is not run — 6/6 clean, ~11s.
-EXCLUDE="${EXCLUDE:-^(hello_query|http_hello|https_serve|spawn_million|spawn_density|preempt_sysmon|lockfree_ring_bench|segv_diagnostic_smoke)$}"
+# panic_probe_* are driven as SUBPROCESSES by panic_fatal_ref_smoke,
+# which asserts their exit statuses; two of them exit 2 by design
+# (an unrecovered goroutine panic is fatal, issue #6). Running them
+# directly here would report those deliberate exits as failures.
+EXCLUDE="${EXCLUDE:-^(hello_query|http_hello|https_serve|spawn_million|spawn_density|preempt_sysmon|lockfree_ring_bench|segv_diagnostic_smoke|panic_probe_bare|panic_probe_waitgroup|panic_probe_recover|panic_probe_goexit)$}"
 # Tests that talk to the REAL internet: a timeout is network latency,
 # not a runtime bug (the artifact still gets saved). Such a test fails
 # the suite only on panic/fail or if NO iteration succeeded. This
@@ -118,9 +148,9 @@ done <<< "$DECLARED"
 
 NUM_TARGETS=${#TARGETS[@]}
 if [[ -n "$LOOPS" ]]; then
-  echo "e2e suite — $NUM_TARGETS examples × $LOOPS loops (uniform; timeout=${TIMEOUT}s each)"
+  echo "e2e suite — $NUM_TARGETS examples × $LOOPS loops (uniform; timeout=${TIMEOUT}s each, see example_timeout for exceptions)"
 else
-  echo "e2e suite — $NUM_TARGETS examples, tiered loops (functional=$TIER1 memory=$TIER2 stress=$TIER3; timeout=${TIMEOUT}s each)"
+  echo "e2e suite — $NUM_TARGETS examples, tiered loops (functional=$TIER1 memory=$TIER2 stress=$TIER3; timeout=${TIMEOUT}s each, see example_timeout for exceptions)"
 fi
 if [[ ${#SKIPPED[@]} -gt 0 ]]; then
   echo "  skipped (EXCLUDE): ${SKIPPED[*]}"
@@ -151,18 +181,19 @@ for name in "${TARGETS[@]}"; do
   inp=$(example_inputs "$name")
   ex_args="${inp%%||*}"
   ex_stdin="${inp#*||}"
+  ex_timeout=$(example_timeout "$name")
 
   for i in $(seq 1 "$loops"); do
     if [[ -n "$ex_stdin" ]]; then
       # Stdin-driven demo (e.g. json_pretty).
       # shellcheck disable=SC2086
-      out=$(printf '%s' "$ex_stdin" | timeout "$TIMEOUT" "$bin" $ex_args 2>&1)
+      out=$(printf '%s' "$ex_stdin" | timeout "$ex_timeout" "$bin" $ex_args 2>&1)
     elif [[ -n "$ex_args" ]]; then
       # Argv-driven demo.
       # shellcheck disable=SC2086
-      out=$(timeout "$TIMEOUT" "$bin" $ex_args 2>&1)
+      out=$(timeout "$ex_timeout" "$bin" $ex_args 2>&1)
     else
-      out=$(timeout "$TIMEOUT" "$bin" 2>&1)
+      out=$(timeout "$ex_timeout" "$bin" 2>&1)
     fi
     rc=$?
     # rc=0 wins regardless of stdout content. Tests that intentionally
@@ -176,12 +207,43 @@ for name in "${TARGETS[@]}"; do
     # bucketed as a panic, so the summary said "panic: 1" for a run
     # whose only problem was a failed assertion, and the diagnosis
     # started in the wrong place.
-    if [[ $rc -eq 0 ]]; then
+    # ...with ONE exception. A panic inside main is caught by the
+    # scheduler ("goroutine recovered from panic, scheduler
+    # continuing"), main never reaches its exit check, and the process
+    # still returns 0 — so a panicking regression is invisible to this
+    # runner. It cost a real one: asn1's parseBitString shifted a u32 by
+    # 32 or more for any BIT STRING whose padding byte was >= 32, which
+    # panics in a debug build (and e2e builds debug). Its own ref smoke
+    # would have reported rc=0 with the output simply stopping early.
+    #
+    # Narrowed to *_ref_smoke, minus the ones that pin a PANIC as the
+    # Go behaviour under test. PANIC_EXPECTED is that list and every
+    # entry needs a reason:
+    #
+    #   http_writeheader_code_ref_smoke — Go's checkWriteHeaderCode
+    #     panics on an out-of-range status, and the smoke asserts what a
+    #     panicking handler does to the connection. The panic IS the
+    #     pinned behaviour.
+    #
+    # This list exists because the first version of this rule claimed no
+    # ref smoke panics on purpose, on the strength of grepping the
+    # examples for `panic!` and `Recover`. That cannot see a panic
+    # raised by the LIBRARY the example exercises, which is precisely
+    # the case here, and CI found the mistake rather than I did. It also
+    # found two real ones the same run — math/big's Int64 and %G
+    # formatting both trapped on overflow — so the rule stays.
+    if [[ $rc -eq 0 && "$name" == *_ref_smoke && ! "$name" =~ $PANIC_EXPECTED ]] \
+       && echo "$out" | grep -q '^goish: panic$'; then
+      panic=$((panic+1))
+      if [[ ! -s "$first_log" ]]; then
+        { echo "=== iter $i: PANIC (rc=0, ref smoke) ==="; echo "$out"; } > "$first_log"
+      fi
+    elif [[ $rc -eq 0 ]]; then
       pass=$((pass+1))
     elif [[ $rc -eq 124 ]]; then
       tout=$((tout+1))
       if [[ ! -s "$first_log" ]]; then
-        { echo "=== iter $i: TIMEOUT after ${TIMEOUT}s ==="; echo "$out"; } > "$first_log"
+        { echo "=== iter $i: TIMEOUT after ${ex_timeout}s ==="; echo "$out"; } > "$first_log"
       fi
     elif echo "$out" | grep -q '^goish: panic$'; then
       panic=$((panic+1))

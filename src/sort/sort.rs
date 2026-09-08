@@ -3,7 +3,7 @@
 // sort.go — Interface, Sort, Stable, IsSorted, Reverse, the
 // three convenience Slice types, and the *AreSorted predicates.
 //
-// goishlint:ignore GOISH018 Next, nextPowerOfTwo, Ints, Float64s, Strings — `Next` and `nextPowerOfTwo` belong to `xorshift`, the PRNG pdqsort uses to break adversarial patterns, and goish's Sort is a heapsort. `Ints`, `Float64s` and `Strings` are macros in the module root rather than functions: they mutate in place, and goish keeps such call sites free of a visible `&mut`.
+// goishlint:ignore GOISH018 Next, nextPowerOfTwo — `Next` and `nextPowerOfTwo` belong to `xorshift`, the PRNG pdqsort uses to break adversarial patterns, and goish's Sort is a heapsort. `Ints`, `Float64s` and `Strings` were listed here too, described as "macros in the module root rather than functions". They are `pub fn`s in this file, anchored to sort.go, and taking `&mut slice<T>` — so the waiver was suppressing GOISH018 over three ported declarations, on a reason that had stopped being true. Re-checked 2026-09-06.
 // goishlint:ignore GOISH021 sortedHint, unknownHint, increasingHint, decreasingHint, xorshift, lessSwap — pdqsort's internals: the hint it passes down about a partition's existing order, its PRNG, and the closure pair `Slice` builds to drive the generated `zsortfunc.go`. goish's Slice delegates to Rust's sort, which needs none of them.
 
 extern crate alloc;
@@ -29,6 +29,37 @@ pub trait Interface {
     /// `Swap(i, j)` — exchange elements at indices i and j.
     fn Swap(&mut self, i: int, j: int);
 }
+
+// go: waived breakPatterns — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived breakPatterns_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived choosePivot — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived choosePivot_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived heapSort — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived heapSort_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived insertionSort_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived median — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived median_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived medianAdjacent — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived medianAdjacent_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived nextPowerOfTwo — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived order2 — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived order2_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived partialInsertionSort — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived partialInsertionSort_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived partition — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived partitionEqual — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived partitionEqual_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived partition_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived pdqsort — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived pdqsort_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived reverseRange — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived reverseRange_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived rotate_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived siftDown_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived stable_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived swapRange_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived symMerge_func — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
+// go: waived xorshift.Next — Go's pdqsort engine, plus the zsortfunc/zsortinterface copies the generator emits of each piece; goish's Sort is a heapsort (see the deviation note on Sort above), so there is no counterpart to name.
 
 // ─── Sort (sort.go:50) — heapsort fallback ──────────────────────────
 

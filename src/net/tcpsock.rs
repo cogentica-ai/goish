@@ -7,13 +7,16 @@
 // is the reason this file exists now rather than later: the setters
 // had to go somewhere, and tcpsock.go is where Go declares them.
 //
-// goishlint reports the rest of tcpsock.go as unported, which it is.
-// Of its 32 declarations goish had none of these eighteen before this
-// file: SetLinger, SetKeepAlive, SetKeepAlivePeriod, SetNoDelay,
-// ReadFrom, WriteTo, SyscallConn, MultipathTCP, ResolveTCPAddr,
-// TCPAddrFromAddrPort, AcceptTCP, DialTCP, ListenTCP, roundDurationUp,
-// KeepAliveConfig, TCPAddr.AddrPort, isWildcard, opAddr. Four land
-// here; the list is the to-do.
+// Of tcpsock.go's 32 declarations, goish had none of eighteen when
+// this file was written and the banner recorded "Four land here; the
+// list is the to-do". Re-counted 2026-09-06: nine of the eighteen are
+// here now — SetLinger, SetKeepAlive, SetKeepAlivePeriod, SetNoDelay,
+// ResolveTCPAddr, AcceptTCP, DialTCP, ListenTCP, roundDurationUp.
+//
+// The remaining nine are the to-do: ReadFrom, WriteTo, SyscallConn,
+// MultipathTCP, TCPAddrFromAddrPort, KeepAliveConfig, TCPAddr.AddrPort,
+// isWildcard, opAddr. A count in a banner is a fact that rots; re-run
+// the grep before believing this one too.
 
 #![allow(non_snake_case)]
 

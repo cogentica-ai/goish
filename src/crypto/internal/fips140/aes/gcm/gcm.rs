@@ -218,13 +218,13 @@ impl GCM {
 
         // Go: if len(ciphertext) < g.tagSize { return nil, errOpen }
         if ciphertext.Len() < self.tagSize {
-            return (slice::__from_vec(Vec::new()), errOpen());
+            return (slice::__from_vec(Vec::new()), errOpen.into());
         }
         // Go: if uint64(len(ciphertext)) > uint64((1<<32)-2)*gcmBlockSize+uint64(g.tagSize) { … }
         if (ciphertext.Len() as uint64)
             > ((1u64 << 32) - 2) * (gcmBlockSize as uint64) + (self.tagSize as uint64)
         {
-            return (slice::__from_vec(Vec::new()), errOpen());
+            return (slice::__from_vec(Vec::new()), errOpen.into());
         }
 
         // Go: ret, out := sliceForAppend(dst, len(ciphertext)-g.tagSize)
@@ -271,8 +271,8 @@ impl GCM {
 // package-level sentinel. goish builds it on demand; `errors::Is` on the
 // result is not meaningful either way because Go's GCM never wraps it.
 /// Go: `var errOpen = errors.New("cipher: message authentication failed")`
-pub(crate) fn errOpen() -> error {
-    return crate::errors::New("cipher: message authentication failed");
+crate::var! {
+    pub(crate) errOpen: error = "cipher: message authentication failed";
 }
 
 // go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm.go:134-143 sliceForAppend

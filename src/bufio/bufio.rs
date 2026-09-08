@@ -1,4 +1,10 @@
-// go: file bufio/bufio.go decls: errNegativeRead, errNegativeWrite, NewReaderSize, NewReader, Reader.Size, Reader.Reset, Reader.reset, Reader.fill, Reader.readErr, Reader.Peek, Reader.Discard, Reader.Read, Reader.ReadByte, Reader.UnreadByte, Reader.ReadRune, Reader.UnreadRune, Reader.Buffered, Reader.ReadSlice, Reader.ReadLine, Reader.collectFragments, Reader.ReadBytes, Reader.ReadString, Reader.WriteTo, Reader.writeBuf, NewWriterSize, NewWriter, Writer.Size, Writer.Reset, Writer.Flush, Writer.Available, Writer.AvailableBuffer, Writer.Buffered, Writer.Write, Writer.WriteByte, Writer.WriteRune, Writer.WriteString, Writer.ReadFrom, NewReadWriter
+// go: file bufio/bufio.go decls: errNegativeRead, errNegativeWrite, NewReaderSize, NewReader, Reader.Size, Reader.Reset, Reader.fill, Reader.readErr, Reader.Peek, Reader.Discard, Reader.Read, Reader.ReadByte, Reader.UnreadByte, Reader.ReadRune, Reader.UnreadRune, Reader.Buffered, Reader.ReadSlice, Reader.ReadLine, Reader.collectFragments, Reader.ReadBytes, Reader.ReadString, Reader.WriteTo, Reader.writeBuf, NewWriterSize, NewWriter, Writer.Size, Writer.Reset, Writer.Flush, Writer.Available, Writer.AvailableBuffer, Writer.Buffered, Writer.Write, Writer.WriteByte, Writer.WriteRune, Writer.WriteString, Writer.ReadFrom, NewReadWriter
+//
+// goishlint:ignore GOISH018 Reader.reset — Go's `reset` rebuilds the whole
+//     Reader struct (`*b = Reader{buf: buf, rd: r, ...}`) so that both
+//     `NewReaderSize` and `Reset` can share it. goish's `Reset` assigns
+//     the same fields in place and `NewReaderSize` builds the struct
+//     literally, so neither needs the helper.
 //
 // `errNegativeRead` and `errNegativeWrite` are package-level `var`s in
 // Go; they are named in the manifest because goish spells them as
@@ -125,6 +131,16 @@ impl<R: io::Reader> Reader<R> {
     pub(crate) fn __rd_mut(&mut self) -> &mut R {
         return &mut self.rd;
     }
+
+    // go: none — goish-only: Go's callers hold the underlying reader
+    // themselves and let the *bufio.Reader go; goish's wrappers OWN
+    // theirs, so recovering it needs an explicit move. Only sound when
+    // `Buffered() == 0`: read-ahead bytes live in this buffer, not in
+    // the reader, and dropping them would silently truncate whatever
+    // reads next. Callers check.
+    pub(crate) fn __into_rd(self) -> R {
+        return self.rd;
+    }
 }
 
 // go: sdk 1.25.5 bufio/bufio.go:50-59 NewReaderSize
@@ -163,7 +179,7 @@ pub fn NewReaderSize<R: io::Reader>(rd: R, size: int) -> Reader<R> {
 pub struct PoolBuf(pub(crate) Vec<byte>);
 
 // go: none — goish-only: the get half of net/http's bufio reader
-// pool (newBufioReader, server.go:866); sizes a recycled PoolBuf and
+// pool (newBufioReader, net/http/server.go:866); sizes a recycled PoolBuf and
 // builds a Reader around it.
 pub(crate) fn __new_reader_with_buf<R: io::Reader>(rd: R, buf: PoolBuf) -> Reader<R> {
     let mut buf = buf.0;
@@ -208,7 +224,7 @@ impl<R: io::Reader> Reader<R> {
     }
 
     // go: none — goish-only: the put half of Go's bufio reader pool
-    // (putBufioReader, server.go:886).
+    // (putBufioReader, net/http/server.go:886).
     /// Crate-internal: recover the backing buffer for recycling into
     /// the next `__new_reader_with_buf`. Buffered-but-unconsumed
     /// bytes are discarded, matching the previous
@@ -785,7 +801,7 @@ pub fn NewWriterSize<W: io::Writer>(wr: W, size: int) -> Writer<W> {
 }
 
 // go: none — goish-only: the get half of net/http's bufio writer
-// pools (newBufioWriterSize, server.go:900). See `PoolBuf` for why
+// pools (newBufioWriterSize, net/http/server.go:900). See `PoolBuf` for why
 // the buffer, not the Writer, is the pooled unit.
 /// Build a Writer around a recycled backing buffer, resized to
 /// `size`. The put half is `__into_buf`.
@@ -807,11 +823,11 @@ pub(crate) fn __new_writer_with_buf<W: io::Writer>(wr: W, buf: PoolBuf, size: in
 
 impl<W: io::Writer> Writer<W> {
     // go: none — goish-only: the put half of Go's bufio writer pools
-    // (putBufioWriter, server.go:921).
+    // (putBufioWriter, net/http/server.go:921).
     /// Consume the writer, returning its backing buffer for pooling.
     /// Unflushed bytes are DISCARDED — same contract as Go's
     /// `bw.Reset(nil)` before the pool Put (putBufioWriter,
-    /// server.go:922): callers flush first or forfeit the tail.
+    /// net/http/server.go:922): callers flush first or forfeit the tail.
     pub(crate) fn __into_buf(self) -> PoolBuf {
         return PoolBuf(self.buf);
     }
@@ -1132,3 +1148,5 @@ pub fn NewReadWriter<R: io::Reader, W: io::Writer>(r: Reader<R>, w: Writer<W>) -
         writer: w,
     };
 }
+
+// go: waived Reader.reset — Go's shared struct-rebuild for `NewReaderSize` and `Reset`; goish's `Reset` assigns the fields in place and the constructor builds the struct literally.

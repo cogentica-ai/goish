@@ -10,9 +10,11 @@
 // request-write path — a streaming request body with unknown length
 // goes out `Transfer-Encoding: chunked`.
 //
-// Not yet ported from transfer.go (readTransfer's read half):
-//   readTransfer, body.Read/readLocked/readTrailer/Close/
-//   unreadDataSizeLocked, bodyLocked, mergeSetHeader's caller side.
+// Not yet ported from transfer.go (readTransfer's read half),
+// re-counted 2026-09-06: body.readLocked, unreadDataSizeLocked and
+// bodyLocked. The list here also named readTransfer, readTrailer and
+// mergeSetHeader, all three of which are in this file now — a to-do
+// that outlived its work.
 
 #![allow(non_snake_case, non_camel_case_types)]
 
@@ -81,9 +83,15 @@ impl crate::io::Reader for byteReader {
 // ─── transferReader ─────────────────────────────────────────────────
 
 // go: sdk 1.25.5 net/http/transfer.go:440-453 transferReader
-/// The inputs and outputs of reading a message's framing. Only the
-/// header-derived half is populated today: `Body` waits on the Body
-/// redesign, so `readTransfer` (which fills it) is not ported.
+/// The inputs and outputs of reading a message's framing.
+///
+/// This said "Only the header-derived half is populated today: `Body`
+/// waits on the Body redesign, so `readTransfer` (which fills it) is
+/// not ported" until 2026-09-06. `readTransfer` is ported — 147 lines
+/// at the next declaration but one — and is called from both sides,
+/// client.rs and request.rs, on every message read. The struct still
+/// carries `Body` as an `Option<Box<dyn ReadCloser>>`; what changed is
+/// that the function said to be absent is the one doing the work.
 pub struct transferReader {
     // Input
     pub Header: Header,
@@ -898,10 +906,14 @@ impl transferWriter {
 // is this function (framing-dispatched read while the lock is held,
 // EOF bookkeeping included). A second copy here would be the
 // two-implementations drift this codebase keeps getting bitten by.
+// go: waived body.readLocked — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 // go: waived unreadDataSizeLocked — "number of bytes of unread
 // input"; goish's Cl framing carries it as `remaining`, consulted by
 // close_locked's clean-boundary test (the bodyEOFSignal bank gate) —
 // the same consumer Go wires it to.
+// go: waived body.unreadDataSizeLocked — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 // go: waived unwrapNopCloser — reflect.TypeOf against the two
 // io.NopCloser shapes; goish's Body is a closed enum that carries no
 // nopCloser wrapping to detect, so unwrapBody above is already the
@@ -1120,10 +1132,19 @@ impl body {
     }
 
     // go: sdk 1.25.5 net/http/transfer.go:1012-1016 body.didEarlyClose
-    /// Whether Close was called before the source was drained. This is
-    /// what `response.closedRequestBodyEarly` consults to refuse
-    /// connection reuse — an undrained body would desync the next
-    /// keep-alive request.
+    /// Whether Close was called before the source was drained. In Go
+    /// this is what `response.closedRequestBodyEarly` consults to
+    /// refuse connection reuse, because an undrained body desyncs the
+    /// next keep-alive request.
+    ///
+    /// NOT consulted here, and this line used to say it was. goish's
+    /// `closedRequestBodyEarly` returns false unconditionally — not a
+    /// stub but a consequence of the design, since a goish Request owns
+    /// its body as a `slice<byte>`, so there is no `*body` to assert on
+    /// and no early close to detect; the note above that function
+    /// explains it and names MaxBytesReader as what prevents the same
+    /// desync from the other end. This field grows a consumer when
+    /// Request.Body becomes an io.ReadCloser (ROADMAP section 0 A).
     pub fn didEarlyClose(&self) -> bool {
         return self.state.Lock().earlyClose;
     }

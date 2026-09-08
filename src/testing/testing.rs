@@ -20,9 +20,12 @@
 // string and returns the list, so the helper does not depend on flag
 // registration having happened and can be tested on its own.
 // goishlint:ignore GOISH020 Logf, Skipf — Go's signature is `(format string, args ...any)`; goish takes the already-formatted string, since `Sprintf!` formats at the call site. `Errorf`/`Fatalf` keep the runtime-variadic slice for ports that spread one, so both shapes exist in the package.
-// goishlint:ignore GOISH018 after, Attr, before, callSite, CheckCorpus, checkFuzzFn, checkParallel, checkRaces, CoordinateFuzzing, Deadline, destination, flushPartial, flushToParent, frameSkip, Get, ImportPath, InitRuntimeCoverage, listTests, log, Main, MainStart, MatchString, newTestState, Output, Parallel, private, ReadCorpus, release, removeAll, report, ResetCoverage, resetRaces, runCleanup, RunFuzzWorker, runningList, runTests, RunTests, setOutputWriter, SetPanicOnExit0, setRan, shouldFailFast, SnapshotCoverage, startAlarm, StartCPUProfile, StartTestLog, stopAlarm, StopCPUProfile, StopTestLog, TempDir, testingSynctestTest, toOutputDir, waitParallel, Write, writeLine, writeProfiles, WriteProfileTo — the driver is only partly ported; see the note above.
-// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, indent, indenter, initRan, match, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, outputDir, outputWriter, panicHandling, panicOnExit0, parallel, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, short, shuffle, skip, T, TB, testingTesting, testlog, testlogFile, timeout, traceFile — same: the driver's types and package state come with the driver.
-// goishlint:ignore GOISH017 common.FailNow, common.Skip, common.SkipNow — declared on Go's `common`, ported as methods on goish's `T`, which is the only type that embeds it here.
+// goishlint:ignore GOISH018 after, before, log, Main, testingSynctestTest, writeProfiles — the driver is only partly ported; see the note above.
+// goishlint:ignore GOISH021 _, blockProfile, blockProfileRate, chatty, common, count, coverProfile, cpuList, cpuListStr, cpuProfile, errNilPanicOrGoexit, failFast, fullPath, gocoverdir, haveExamples, initRan, match, memProfile, memProfileRate, mutexProfile, mutexProfileFraction, normalPanic, outputDir, panicHandling, panicOnExit0, parallel, parallelStart, parallelStop, realStderr, recoverAndReturnPanic, short, shuffle, skip, T, TB, testingTesting, testlog, testlogFile, timeout, traceFile — same: the driver's types and package state come with the driver.
+// `common.FailNow`, `common.Skip` and `common.SkipNow` are declared on
+// Go's `common` and ported as methods on goish's `T`, the only type
+// that embeds it here — so the manifest finds all three and the
+// GOISH017 marker that stood here suppressed nothing.
 
 #![allow(non_snake_case)]
 
@@ -187,8 +190,12 @@ impl T {
     /// it from `callSite`, which needs `frameSkip`, which walks the
     /// parent chain using `common`'s `runner`, `creator`, `level`,
     /// `cleanupName` and `cleanupPc` — fields goish's `T` does not
-    /// carry yet. So marking a helper is faithful and currently has no
-    /// observable effect; it stops being a no-op when callSite lands.
+    /// carry yet.
+    ///
+    /// This used to add "so marking a helper has no observable effect;
+    /// it stops being a no-op when callSite lands". callSite landed,
+    /// and `frameSkip` consults `helperPCs`, so a helper's frame IS
+    /// skipped when a failure is attributed. The claim outlived it.
     pub fn Helper(&self) {
         // Go: repeating code from callerName here to save walking a
         // stack frame.
@@ -1017,10 +1024,14 @@ impl T {
     /// test that set `HOME=""` and a test that unset `HOME` are
     /// different states, and `LookupEnv` can tell them apart.
     ///
-    /// Deviation: Go also refuses to run in a parallel test ("cannot
-    /// use Setenv in parallel tests"), since the environment is process
-    /// global. goish has no `t.Parallel`, so there is no such state to
-    /// check — when Parallel lands, that guard has to land with it.
+    /// Go refuses to run in a parallel test ("cannot use Setenv in
+    /// parallel tests"), since the environment is process global.
+    ///
+    /// This used to be listed as a DEVIATION, on the grounds that
+    /// goish had no `t.Parallel` and so no state to check. Both
+    /// landed: `Parallel` sets `isParallel`, and the `checkParallel()`
+    /// below walks the parent chain and panics with Go's message. The
+    /// guard is not missing; the note describing it as missing was.
     pub fn Setenv(&self, key: string, value: string) {
         self.checkFuzzFn(string::from_static("Setenv"));
         // Go: T.Setenv calls checkParallel before delegating to
@@ -1168,7 +1179,10 @@ pub fn parseCpuList(cpuListStr: string) -> (crate::goslice::slice<int>, crate::e
 
 // ─── chattyPrinter ───────────────────────────────────────────────────
 
-// goishlint:ignore GOISH019 chattyPrinter — Go carries `lastNameMu
+// `chattyPrinter` is declared below and its fields match, so the
+// GOISH019 marker here silenced nothing; the note is kept because the
+// difference it describes is real.
+// Go carries `lastNameMu
 // sync.Mutex` beside the `lastName` string it guards; goish folds them
 // into `Mutex<string>`, since that field is the only thing the mutex
 // protects. Same protection, one field fewer.
@@ -2079,7 +2093,8 @@ impl TState {
 pub(crate) const parallelConflict: &str =
     "testing: test using t.Setenv or t.Chdir can not use t.Parallel";
 
-// goishlint:ignore GOISH019 testState — `mu`, `running` and
+// `testState` is declared below, same story — marker gone, note kept.
+// `mu`, `running` and
 // `numWaiting` become one Mutex<testStateCounts>: Rust wants the
 // guarded group named, and the two counters are only ever read and
 // written as a pair. `match *matcher` is absent because the matcher is
@@ -2129,9 +2144,13 @@ pub struct testStateCounts {
 
 // go: sdk 1.25.5 testing/testing.go:2098-2105 newTestState
 // goishlint:ignore GOISH020 newTestState — Go's second parameter is
-// the *matcher, which runTests supplies; goish has no runTests yet, so
-// there is nothing to pass and no field to store it in. Restore the
-// parameter when runTests lands.
+// the *matcher, which runTests supplies. This used to say goish "has
+// no runTests yet, so there is nothing to pass and no field to store
+// it in"; both halves are now false. `runTests` exists, and the
+// `matcher` field is right there in testState — `runTestsWithMatch`
+// fills it after construction instead of through the constructor.
+// The ignore stays because the SIGNATURE still differs from Go's; the
+// plumbing does not.
 #[allow(non_snake_case)]
 pub fn newTestState(maxParallel: crate::types::int) -> Arc<testState> {
     return Arc::new(testState {
@@ -2907,9 +2926,10 @@ fn runTestsWithMatch(
     return (ran, ok);
 }
 
-// Go exports both of these for the main package `go test` generates;
-// goish's `M.Run` calls `RunTestsMatch` directly, so nothing in-tree
-// calls either — hence `dead_code`.
+// Go exports both of these for the main package `go test` generates.
+// goish has no `M.Run` (see the note on `M` below); its driver is
+// `testing::Main`, which calls `RunTestsMatch` directly — so nothing
+// in-tree calls either of these, hence `dead_code`.
 #[allow(non_snake_case, dead_code)]
 pub fn runTests(tests: &[InternalTest], deadline: crate::time::Time) -> (bool, bool) {
     return runTestsWithMatch(tests, deadline, None);
@@ -3063,7 +3083,11 @@ pub fn listTests(
 
 // ─── M ───────────────────────────────────────────────────────────────
 
-// goishlint:ignore GOISH019 M — Go's M holds `benchmarks`,
+// `M` is declared below and the GOISH019 marker on it silenced
+// nothing. The paragraph stays: it is the only record of which
+// fields Go's M has and goish's does not, and it is why M.Run is
+// unported.
+// Go's M holds `benchmarks`,
 // `fuzzTargets`, `afterOnce` and `exitCode` for machinery goish does
 // not have (the benchmark and fuzz runners, and an M.Run that would set
 // an exit code). The four fields present are the ones MainStart fills

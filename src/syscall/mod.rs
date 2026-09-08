@@ -6,6 +6,26 @@
 //   syscall.Write(fd, buf)               syscall::Write(fd, buf.as_ptr(), buf.len())
 //   syscall.Exit(0)                      syscall::Exit(0)
 //
+// WHY THE WRAPPERS HERE CARRY NO `// go: sdk` ANCHOR, checked 2026-09-06.
+// Fifty-four of them share a name with a Go declaration — Open, Read,
+// Write, Close, Fstat, Wait4 — and an anchor on any of them would
+// overclaim, because the contracts differ at every point that matters:
+//
+//   Go    func Open(path string, mode int, perm uint32) (fd int, err error)
+//         calls openat(_AT_FDCWD, ..., mode|O_LARGEFILE, perm)
+//   goish pub fn Open(path: *const u8, flags: i32, mode: i32) -> i32
+//         issues SYS_OPEN directly and returns the raw -errno
+//
+// Different signature, different syscall, and an `error` against a
+// negative return. `// go: sdk` says "this declaration is a port of that
+// range", and anchor_check would happily verify the range while the
+// claim itself was false. The layer above — `src/os` — is where the Go
+// contract is reconstructed, and that is where the anchors live: `os`
+// carries 100 of them, all verified.
+//
+// This note exists because the unanchored-declaration scan reports
+// these 54 every time it is run. They are not a gap.
+//
 // Calling convention (SysV / Linux x86-64 syscall):
 //   rax = syscall number
 //   rdi, rsi, rdx, r10, r8, r9 = args 1..6
@@ -18,6 +38,7 @@ use core::arch::asm;
 pub const SYS_READ: usize = 0;
 pub const SYS_WRITE: usize = 1;
 pub const SYS_OPEN: usize = 2;
+pub const SYS_OPENAT: usize = 257;
 pub const SYS_CLOSE: usize = 3;
 pub const SYS_MMAP: usize = 9;
 pub const SYS_MPROTECT: usize = 10;
@@ -618,6 +639,16 @@ pub const O_CLOEXEC: i32 = 0o2_000_000;
 /// the file itself (follows symlinks; needs only search permission).
 pub const O_PATH: i32 = 0o10_000_000;
 
+/// `O_NOFOLLOW` — fail with ELOOP if the final component is a symlink.
+///
+/// This is the whole basis of `os.Root`: resolving a path one component
+/// at a time with openat(2) and O_NOFOLLOW is what makes a symlink
+/// unable to carry the walk out of the root, no matter who wrote it.
+pub const O_NOFOLLOW: i32 = 0o400_000;
+
+/// `O_DIRECTORY` — fail with ENOTDIR unless the target is a directory.
+pub const O_DIRECTORY: i32 = 0o200_000;
+
 /// `open(2)` — open a file. `path` must be a NUL-terminated C string.
 /// Returns the new fd on success, or a negative `-errno` on error.
 #[allow(non_snake_case)]
@@ -736,6 +767,32 @@ pub fn Fstat(fd: i32, out: &mut Stat_t) -> i32 {
     unsafe { syscall2(SYS_FSTAT, fd as usize, out as *mut Stat_t as usize) as i32 }
 }
 
+// go: none — goish-only: Go's `syscall.Openat` takes a Go string and
+// returns `(int, error)`; this takes a NUL-terminated pointer and
+// returns the raw -errno, for the reason the banner at the top of this
+// file gives for every wrapper here.
+/// `openat(dirfd, path, flags, mode)` — open `path` RELATIVE to the
+/// directory `dirfd` refers to, rather than to the process cwd.
+/// `path` must be NUL-terminated; returns the fd or the raw -errno.
+///
+/// The relative resolution is the point. A path resolved against a
+/// directory fd cannot be redirected by anything that happens to the
+/// process cwd, and combined with O_NOFOLLOW it is how `os.Root`
+/// refuses a traversal instead of merely detecting one.
+#[allow(non_snake_case)]
+pub fn Openat(dirfd: i32, path: *const u8, flags: i32, mode: i32) -> i32 {
+    let r = unsafe {
+        syscall4(
+            SYS_OPENAT,
+            dirfd as usize,
+            path as usize,
+            flags as usize,
+            mode as usize,
+        )
+    };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
 /// `fstatat(AT_FDCWD, path, &stat, 0)` — stat a path relative to CWD,
 /// following symlinks. `path` must be NUL-terminated.
 pub const AT_FDCWD: i32 = -100;
@@ -838,12 +895,28 @@ pub const LOCK_NB: i32 = 4;
 
 pub const SYS_MKDIR: usize = 83;
 pub const SYS_UNLINK: usize = 87;
+pub const SYS_MKDIRAT: usize = 258;
+pub const SYS_UNLINKAT: usize = 263;
+pub const SYS_FCHOWNAT: usize = 260;
+pub const SYS_FCHDIR: usize = 81;
+pub const SYS_FCHOWN: usize = 93;
+pub const SYS_RENAMEAT: usize = 264;
+pub const SYS_LINKAT: usize = 265;
+pub const SYS_SYMLINKAT: usize = 266;
+pub const SYS_FCHMODAT: usize = 268;
+
+/// `AT_REMOVEDIR` — make `unlinkat` behave as rmdir(2) instead of
+/// unlink(2). One flag is the whole difference between the two, which
+/// is why `os.Root.Remove` can try a file and fall back to a
+/// directory without a stat in between.
+pub const AT_REMOVEDIR: i32 = 0x200;
 pub const SYS_RMDIR: usize = 84;
 pub const SYS_CHMOD: usize = 90;
 pub const SYS_FCHMOD: usize = 91;
 pub const SYS_MKNOD: usize = 133;
 pub const SYS_SYMLINK: usize = 88;
 pub const SYS_READLINK: usize = 89;
+pub const SYS_READLINKAT: usize = 267;
 pub const SYS_RENAME: usize = 82;
 pub const SYS_LINK: usize = 86;
 pub const SYS_TRUNCATE: usize = 76;
@@ -861,6 +934,171 @@ pub const SYS_UMASK: usize = 95;
 #[allow(non_snake_case)]
 pub fn Mkdir(path: *const u8, mode: u32) -> i32 {
     unsafe { syscall2(SYS_MKDIR, path as usize, mode as usize) as i32 }
+}
+
+// go: none — goish-only: the `at` form, taking a NUL-terminated
+// pointer and returning the raw -errno, for the reason the banner at
+// the top of this file gives for every wrapper here.
+/// `mkdirat(dirfd, path, mode)` — create a directory RELATIVE to
+/// `dirfd`. `os.Root` needs the relative form so the path cannot be
+/// redirected by anything that changes the process cwd.
+#[allow(non_snake_case)]
+pub fn Mkdirat(dirfd: i32, path: *const u8, mode: u32) -> i32 {
+    let r = unsafe { syscall3(SYS_MKDIRAT, dirfd as usize, path as usize, mode as usize) };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `unlinkat(dirfd, path, flags)` — remove a name RELATIVE to `dirfd`.
+/// With `AT_REMOVEDIR` it removes a directory instead.
+///
+/// It removes the NAME, never what a symlink points at, which is what
+/// makes `Root.Remove("link-pointing-outside")` delete the link and
+/// leave the target alone.
+#[allow(non_snake_case)]
+pub fn Unlinkat(dirfd: i32, path: *const u8, flags: i32) -> i32 {
+    let r = unsafe { syscall3(SYS_UNLINKAT, dirfd as usize, path as usize, flags as usize) };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `newfstatat(dirfd, path, &stat, flags)` — stat RELATIVE to `dirfd`.
+/// Pass `AT_SYMLINK_NOFOLLOW` for the Lstat form.
+#[allow(non_snake_case)]
+pub fn Fstatat(dirfd: i32, path: *const u8, out: &mut Stat_t, flags: i32) -> i32 {
+    let r = unsafe {
+        syscall4(
+            SYS_NEWFSTATAT,
+            dirfd as usize,
+            path as usize,
+            out as *mut Stat_t as usize,
+            flags as usize,
+        )
+    };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `renameat(olddirfd, old, newdirfd, new)` — rename RELATIVE to two
+/// directory fds. `os.Root` resolves BOTH names through its walk and
+/// passes the two parent fds here, which is why an escape in either
+/// position is refused.
+#[allow(non_snake_case)]
+pub fn Renameat(olddirfd: i32, oldpath: *const u8, newdirfd: i32, newpath: *const u8) -> i32 {
+    let r = unsafe {
+        syscall4(
+            SYS_RENAMEAT,
+            olddirfd as usize,
+            oldpath as usize,
+            newdirfd as usize,
+            newpath as usize,
+        )
+    };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `linkat(olddirfd, old, newdirfd, new, flags)` — hard-link RELATIVE
+/// to two directory fds. Flags is 0 here: without AT_SYMLINK_FOLLOW a
+/// symlink is linked as itself, never resolved.
+#[allow(non_snake_case)]
+pub fn Linkat(
+    olddirfd: i32,
+    oldpath: *const u8,
+    newdirfd: i32,
+    newpath: *const u8,
+    flags: i32,
+) -> i32 {
+    let r = unsafe {
+        // syscall6 with a zero sixth argument: linkat takes five, and
+        // the kernel ignores the register the sixth would occupy.
+        syscall6(
+            SYS_LINKAT,
+            olddirfd as usize,
+            oldpath as usize,
+            newdirfd as usize,
+            newpath as usize,
+            flags as usize,
+            0,
+        )
+    };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `symlinkat(target, newdirfd, linkpath)` — create a symlink RELATIVE
+/// to `newdirfd`.
+///
+/// The TARGET is not resolved and not checked: it is bytes stored in
+/// the link. That is why `Root.Symlink("/etc/passwd", …)` succeeds and
+/// creates a link the same Root then refuses to follow.
+#[allow(non_snake_case)]
+pub fn Symlinkat(target: *const u8, newdirfd: i32, linkpath: *const u8) -> i32 {
+    let r = unsafe {
+        syscall3(
+            SYS_SYMLINKAT,
+            target as usize,
+            newdirfd as usize,
+            linkpath as usize,
+        )
+    };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `fchdir(fd)` — make the directory `fd` refers to the process cwd.
+/// Returns 0 or the raw -errno.
+#[allow(non_snake_case)]
+pub fn Fchdir(fd: i32) -> i32 {
+    let r = unsafe { syscall1(SYS_FCHDIR, fd as usize) };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `fchown(fd, uid, gid)` — change the owner of an OPEN file, so the
+/// answer cannot be redirected by a rename between the check and the
+/// call.
+#[allow(non_snake_case)]
+pub fn Fchown(fd: i32, uid: u32, gid: u32) -> i32 {
+    let r = unsafe { syscall3(SYS_FCHOWN, fd as usize, uid as usize, gid as usize) };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `fchmodat(dirfd, path, mode, flags)` — chmod RELATIVE to `dirfd`.
+#[allow(non_snake_case)]
+pub fn Fchmodat(dirfd: i32, path: *const u8, mode: u32, flags: i32) -> i32 {
+    let r = unsafe {
+        syscall4(
+            SYS_FCHMODAT,
+            dirfd as usize,
+            path as usize,
+            mode as usize,
+            flags as usize,
+        )
+    };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `Mkdirat` above.
+/// `fchownat(dirfd, path, uid, gid, flags)` — chown RELATIVE to
+/// `dirfd`. `AT_SYMLINK_NOFOLLOW` gives the Lchown form, which changes
+/// the LINK rather than what it points at.
+#[allow(non_snake_case)]
+pub fn Fchownat(dirfd: i32, path: *const u8, uid: u32, gid: u32, flags: i32) -> i32 {
+    let r = unsafe {
+        // syscall6 with a zero sixth argument; see `Linkat`.
+        syscall6(
+            SYS_FCHOWNAT,
+            dirfd as usize,
+            path as usize,
+            uid as usize,
+            gid as usize,
+            flags as usize,
+            0,
+        )
+    };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
 }
 
 /// `unlink(path)`. Returns 0 on success, -errno on failure.
@@ -934,6 +1172,27 @@ pub fn Mknod(path: *const u8, mode: i32, dev: u64) -> i32 {
 #[allow(non_snake_case)]
 pub fn Readlink(path: *const u8, buf: *mut u8, bufsiz: usize) -> isize {
     unsafe { syscall3(SYS_READLINK, path as usize, buf as usize, bufsiz) as isize }
+}
+
+// go: none — goish-only: Go's `unix.Readlinkat` takes a Go string and
+// returns `(int, error)`; this takes a NUL-terminated pointer and
+// returns the raw -errno, for the reason the banner at the top of this
+// file gives for every wrapper here.
+/// `readlinkat(dirfd, path, buf, bufsiz)` — read a symlink target
+/// RELATIVE to `dirfd`. `os.Root` needs the relative form for the same
+/// reason it needs openat: the answer must not depend on the process
+/// cwd, which anything else in the program can change underneath it.
+#[allow(non_snake_case)]
+pub fn Readlinkat(dirfd: i32, path: *const u8, buf: *mut u8, bufsiz: usize) -> isize {
+    return unsafe {
+        syscall4(
+            SYS_READLINKAT,
+            dirfd as usize,
+            path as usize,
+            buf as usize,
+            bufsiz,
+        )
+    };
 }
 
 /// `utimensat(dirfd, path, times, flags)` — set file access/modification

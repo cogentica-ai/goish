@@ -6,29 +6,56 @@ than merely counted. Numbers are regenerated with
 the `compress` row refreshed 2026-08-17 and the `hash` and `encoding`
 rows 2026-08-30.
 
-> **Subtree table re-measured 2026-09-05.** The per-package sections
-> further down were NOT regenerated and still date from 2026-08-15, so
-> read a number in those as a floor. The whole-tree total in the
-> heading below is also from that refresh and has not been recomputed —
-> it would need a pass over every subtree, and the ones measured here
-> have all moved up, so treat it as a floor too.
+> **Whole-tree total recomputed 2026-09-06** — the pass over every
+> subtree this note used to say was needed.
+>
+> The per-package sections further down were written 2026-08-15 and
+> spot-checked 2026-09-06. Their COVERAGE figures are exact, not
+> floors: crypto 1722/1722, net/http 639/639 across twelve packages,
+> testing 217/247, all reproduced to the digit. Their ANCHOR counts
+> had drifted and are corrected — those move with every commit
+> touching an anchored file, which is why a ratio is worth quoting and
+> a count is not.
 
-## The whole tree — 4452 / 11061 functions (40.3%)
+## The whole tree — 5115 / 11017 functions (46.4%)
 
-Across the 169 packages of the Go 1.25.5 standard library that have a
-goish port: **89 are at 100%**. The provenance-line counts were
-re-counted on 2026-09-05: **9602 `// go:` lines**, **6299** of them
-`sdk` anchors citing the exact Go file and line range — up from 5477
-and 3484 at the last refresh.
+Across the 165 packages of the Go 1.25.5 standard library that have a
+goish port: **111 are at 100%**. Was 4452 / 11061 (40.3%) across 169
+packages with 89 at 100% on 2026-08-15, and 5103 / 11026 (46.3%)
+before 2026-09-07.
 
-The package count and the 100% figure are from 2026-08-15 and were not
-recomputed.
+**By DECLARATION the same tree is 5898 / 11819 (49.9%), with 122
+packages at 100%** (re-measured 2026-09-07). Do not read that as "the
+stricter mode is kinder" — the two counts differ in BOTH directions
+and neither dominates. By name, six ported methods called `Read` are
+one ported name; by declaration they are six. By declaration a method
+Go declares and goish does not is visible, where by name a same-named
+sibling hides it — which is exactly how net/http read 639/639 while
+54 declarations had no anchor (§2b-vi). Quote whichever answers the
+question being asked, and say which one it is.
+
+**Two denominators, and they are not interchangeable.** The figure
+above counts only packages that HAVE a port, which is what the older
+number counted and the only basis on which the two can be compared.
+Counting every package `port_coverage.py` can see, ported or not, the
+same 5103 functions are **5103 / 14583 = 35.0% across 314 packages** —
+a lower percentage from a larger denominator, not a regression. Quoting
+one against the other would say coverage fell in a month when it rose.
+
+Reproduce both rather than citing these: run
+`scripts/port_coverage.py <subtree> --json` over the entries in `src/`
+and sum, filtering on `ported > 0` for the first figure and not for the
+second.
 
 The anchors are not spread evenly, and that is the single most
 important thing on this page. `crypto/`, `net/` and `testing/` together
-held **92%** of them at the last refresh; on 2026-09-05 they hold
-**58%** (3627 of 6299). The concentration has broken up because the
+held **92%** of them at the last refresh; on 2026-09-07 they hold
+**57%** (3699 of 6498). The concentration has broken up because the
 rest of the tree gained anchors, not because those three lost any.
+
+The ratio is the durable fact; the two counts drift with every commit
+that touches an anchored file, so re-count them rather than quoting
+these — `grep -rc "// go: sdk" src/` does it.
 
 Coverage says a name exists; an anchor is what lets goishlint diff the
 port against the Go file it came from. The corollary is the one
@@ -269,7 +296,14 @@ at four lengths, the whitespace-before-a-soft-break case, and the
 `checkLastByte` rule that re-encodes a trailing space or tab. `qp_smoke`
 is now declared in Cargo.toml — it never was, so e2e had never run it.
 
-`mime/multipart`'s writer half followed: 18/36 with 8 anchors is now
+**mime is 77/77 by declaration now** — all three packages, the reader
+half included (2026-09-07). Getting there found two defects in the
+reader's "replaced by design" group: a boundary scanner that truncated
+a part at data merely STARTING like the boundary, and a header parser
+that rejected folded continuation lines outright. Both are fixed and
+pinned; ROADMAP §2b-vi has the detail and the order that produced it.
+
+`mime/multipart`'s writer half came first: 18/36 with 8 anchors is now
 24/36 with 29, and writer.go is complete. The six that were missing
 were `CreatePart` and everything that hangs off it — `CreateFormFile`,
 `CreateFormField`, `escapeQuotes`, `randomBoundary`, and the `part`
@@ -775,24 +809,32 @@ until it read past a buffer.
 functions. `iter` is a squatter — goish fakes Go 1.23 iterator support
 with slices wherever it is needed.
 
-## crypto/ — 1722 / 1722 declarations (100.0%)
+## crypto/ — 1720 / 1720 declarations (100.0%)
 
 **All 66 crypto packages are at 100% by receiver-qualified
-declaration**, with 26 declarations waived out of the denominator on
+declaration**, with 28 declarations waived out of the denominator on
 in-tree justifications (24 of them the QUIC transport surface). The
-name-level counter reads 1431/1447 (98.9%) only because the QUIC
+name-level counter reads 1429/1445 (98.9%) only because the QUIC
 waiver is recorded per declaration: the 16 residual *names*
 (`quicSetReadSecret`, `HandleData`, …) are exactly that waived
 surface. There is no unported non-QUIC function left.
 
 | | |
 |---|--:|
-| ported (by declaration) | 1722 |
+| ported (by declaration) | 1720 |
 | remaining, portable | 0 |
 | remaining, assembly stubs | 0 |
-| waived (resolved elsewhere by design) | 26 |
-| provenance anchors | 3041 |
+| waived (resolved elsewhere by design) | 28 |
+| provenance anchors | 3083 |
 | unverified names (see below) | 0 |
+
+Re-measured 2026-09-06. The denominator moved because ed25519's
+`newKeyFromSeed` and `sign` were waived that day — Go's three-layer
+call exists to fill a caller-provided buffer, and goish's exported
+functions reach `fips::` directly — so 1722/1722 became 1720/1720 with
+the waived count going 26 -> 28. Nothing was unported; two declarations
+left the denominator, which is the distinction this table has to keep
+visible.
 
 Complete and byte-checked against Go: `tls` (the full client and
 server handshakes — `handshake_loopback` runs the ported client and
@@ -810,16 +852,103 @@ is not something you port by reading Go. That column is now **zero** —
 turned out to be measurement, not assembly (see the `--by-decl` note
 below).
 
-## net/http — 639 / 639 functions (100.0%)
+That sentence states the criterion correctly and the tool did not
+implement it, which was found on 2026-09-06. `asm_decls` tested whether
+a joined signature ENDS WITH `{` and treated anything else as bodyless —
+but a one-line Go function ends with `}`:
 
-**All twelve packages are at 100.0%**, with 1476 `// go:` lines (the
-root package alone carries 1085) and 33 declarations waived on in-tree
-justifications. This is an anchored port, not a name match: request
+    func errInvalid() error    { return oserror.ErrInvalid }
+
+3937 such functions in the Go tree against 2915 genuinely bodyless
+declarations, so the test was wrong more often than right, and every gap
+column overstated its assembly share. `net` read `635 portable + 20
+assembly` and is `652 portable + 3 assembly`; `io/fs` read `0 portable +
+5 assembly` for five one-line error accessors and is now `5 portable`.
+Seventeen declarations in `net` alone were being written off as needing
+assembly work.
+
+The irony is worth keeping: `asm_decls`'s own docstring says it exists
+because the raw gap column "has produced a wrong leverage claim three
+times in this repo", and it contained a fourth.
+
+## os/ — 213 / 376 by declaration (56.6%)
+
+Measured 2026-09-07 with `scripts/port_coverage.py os --by-decl`; was
+175 / 411 (42.6%) the same morning, and the anchors went 239 to 323.
+The root package alone is 170 / 269 (63.2%), from 132 / 304.
+
+**Read that denominator before the percentage.** It fell from 411 to
+376 because 35 declarations were WAIVED, and waivers move a number
+without porting anything. They are all the same shape: Go splits each
+Root operation into a pair (`rootChmod` calling `chmodat`, `rootStat`
+calling `modeAt`) because its walk takes the final step as a function
+value; goish's walk takes a closure, so each pair is one closure at the
+operation's own definition. Every waiver names the closure that
+replaced it and the smoke row that would catch its loss. The numerator
+moved from 175 to 213 on ported code; the denominator moved on
+bookkeeping, and the two should not be read together.
+
+Most of that day's movement is **`os.Root`**, Go 1.24's
+directory-limited filesystem access, which goish did not have and
+could not have had: the tree carried no `openat` at all, only
+`SYS_OPEN`. Root resolves every path component RELATIVE to a directory
+fd with `O_NOFOLLOW`, so a `..`, an absolute path, or a symlink
+pointing outside cannot leave the root even when an attacker chooses
+the name. It refuses rather than detects — the walk never opens the
+thing it would have to reject.
+
+Everything but `Root.FS` is ported, pinned by five reference smokes
+(89 rows) generated from Go itself. The rows that earn their keep are
+the ones where a plausible implementation differs from Go:
+
+  * `inside_link` and `dir_link/deep.txt` must SUCCEED — Root FOLLOWS
+    symlinks; it refuses escapes, not indirection. "Reject every
+    symlink" passes every escape row and is still wrong.
+  * `out_and_back` (`../inside/ok.txt`) resolves to a file INSIDE the
+    root and is still refused. Go refuses the moment a component
+    escapes; anything that cleans the path lexically and checks the
+    destination allows it.
+  * `remove:escape` succeeds and `secret_survived` proves it removed
+    the LINK, not what it pointed at, while `writefile:escape` is
+    refused because that write WOULD have gone through.
+
+`os.Process.Wait` also landed, with the rusage `Cmd.Wait` had been
+discarding — which is why `ProcessState.UserTime` and `Cmd.ProcessState`
+could not exist before it.
+
+And one defect worth recording here rather than only in the log:
+`os.RemoveAll` stat'ed where Go lstats, so it followed a symlink to a
+directory and deleted the TARGET's contents — `RemoveAll(work)` with
+`work/link -> /somewhere/real` emptied /somewhere/real. Found because a
+passing smoke left its own temp tree on disk, which was the same bug
+seen from its quiet side.
+
+## net/http — 639 / 639 by name, 726 / 742 by declaration (97.8%)
+
+**All twelve packages are at 100.0% by name**, with 1534 `// go:` lines
+(the root package alone carries 1107; both were 1476 and 1085 on
+2026-08-15 and drift upward with ordinary work) and 33 declarations waived on in-tree
+justifications. Much of that is a real anchored port: request
 and response bodies stream both directions through the ported
 `transfer.go` machinery, the client pools connections through Go's
 full `getConn`/`persistConn` call graph (idle reaping, GetBody rewind,
 sentinel-mapped retries, Expect: 100-continue), and the server runs
 `connReader` with Go's total-head byte limit (431/501 paths included).
+
+But read the by-name figure as the coarse one it is. `--by-decl` puts
+the same tree at **726/742 (97.8%)** — root 538/554, `httputil` 55/55 —
+and **none of the 16 short carries an anchor anywhere in its package**.
+They are the connection and body plumbing: `conn.serve`,
+`conn.readRequest`, `chunkWriter.Write`, `persistConn.roundTrip`,
+`Client.send`. The by-name mode hides them because it folds a method
+onto its bare name, so Go's `conn.serve` is credited to goish's
+exported `Serve` — the connection loop credited to the function that
+starts it. The functionality is largely present (goish serves
+keep-alive connections and streams chunked bodies); the provenance is
+not. ROADMAP §2b-vi lists all 16; `httputil` is
+the first package taken off it, and reading the entries one at a time
+has so far found seven live defects, a mislabelled port, and ten
+waivers the by-declaration count could not see.
 
 | package | ported | | package | ported |
 |---|--:|---|---|--:|
@@ -837,16 +966,28 @@ output.
 
 ## testing/ — 217 / 247 functions (87.9%)
 
-The root package is at **141/149 (94.6%)**, and `fstest` (38/38),
-`iotest` (11/11) and `slogtest` (10/10) are complete; 402 `// go:`
-lines across the tree. `testing.B`, `testing.M` and `t.Parallel()` are
-ported. The root's eight missing functions are the fuzzing entry
-points (`testing.F` is not ported), the profiling hooks
-(`writeProfiles`/`before`/`after`) and the synctest bridge — excluding
-fuzzing and profiling, the tree reads 97.3%. Still open: `quick`
-(7/14, blocked on a real `reflect` redesign — goish's `reflect` is a
-value tree), `internal/testdeps` (10/21, the fuzz/profile plumbing),
-and `synctest` (0/4).
+Re-measured 2026-09-07; every figure in this paragraph had drifted,
+and the README's copy of it was corrected a day earlier while this one
+was not.
+
+By declaration the root package is at **150/164 (91.5%)**, and
+`fstest` (43/43), `iotest` (18/18) and `slogtest` (10/10) are complete;
+435 `// go:` lines across the tree. `testing.B`, the `testing.M` TYPE
+and `t.Parallel()` are ported — `M.Run` is not, and neither are
+`M.before`/`M.after`: goish's driver is `testing::Main`, which arms the
+alarm and calls `RunTestsMatch` itself rather than going through an
+`M.Run` that sets an exit code.
+
+The root's fourteen missing declarations are the fuzzing entry points
+(`testing.F` is not ported, so `F.Add`/`F.Fuzz`/`F.Fail`/`F.Helper`/
+`F.Skipped`/`F.report` and `fRunner`/`runFuzzTests`/`runFuzzing` are
+absent), `M.writeProfiles`, the synctest bridge, and the `M.Run` trio
+above. Excluding fuzzing, profiling and synctest the root reads
+150/153, or 98.0%.
+
+Still open: `quick` (9/16, blocked on a real `reflect` redesign —
+goish's `reflect` is a value tree), `internal/testdeps` (5/6, the
+fuzz/profile plumbing), and `synctest` (0/4).
 
 ## The percentages are optimistic, and by how much
 
@@ -873,8 +1014,8 @@ landed with byte-exact vectors and the percentage did not move.
 
 | | by name | by declaration |
 |---|--:|--:|
-| crypto/ | 1431/1447 (98.9%) | **1722/1722 (100.0%)** |
-| crypto/tls | 275/291 (94.5%) | 350/350 (100.0%) |
+| crypto/ | 1429/1445 (98.9%) | **1720/1720 (100.0%)** |
+| crypto/tls | 278/294 (94.6%) | 353/353 (100.0%) |
 
 `--by-decl` had an understating defect of its own, found the same way:
 15 ported, anchored declarations read MISSING because goish ports a Go
@@ -895,7 +1036,7 @@ while missing `CertificateRequest.CheckSignature` and
 169/169 either way.
 
 The anchors do not have this problem — `anchor_by_name.py` keys methods
-by `Recv.Method`, so the 2238 anchors are receiver-qualified and
+by `Recv.Method`, so the 3083 anchors are receiver-qualified and
 GOISH018 diffs each one individually. **Anchor counts are the honest
 signal; percentages are an upper bound.** Fixing the counter is a small
 change to `scan_go` and would restate every figure here downward.
@@ -970,11 +1111,22 @@ the only thing standing between this class of defect and a release.
 
 ## Test suite
 
-417 examples are declared in `Cargo.toml` and run by `make e2e` at
+**852** examples are declared in `Cargo.toml` and run by `make e2e` at
 tiered loop counts — deterministic ones once, memory-subsystem ones ×10,
-and the race-sensitive scheduler/chan/select/timer/server families ×50.
+and the race-sensitive scheduler/chan/select/timer/server families ×50
+(`TIER1`/`TIER2`/`TIER3` in `scripts/e2e_runner.sh`). Count them with
+`grep -c '^\[\[example\]\]' Cargo.toml` rather than trusting this
+number; it was 417 on 2026-08-15 and moves with every smoke added.
+
 **Only declared examples run**; an `examples/*.rs` file without an
-`[[example]]` block is invisible to CI.
+`[[example]]` block is invisible to CI. That is currently true of
+exactly four, and all four are deliberate: `grow_3tier_smoke`,
+`grow_auto_smoke`, `grow_macro_smoke` and `grow_park_smoke` specify
+automatic stack growth for the bare `go!()` form, a feature that does
+not exist, and each says so in its own first line. Checking the claim
+is a one-liner — compare `ls examples/*.rs | wc -l` against the count
+above — and it is worth running, because a smoke that silently never
+runs looks exactly like one that passes.
 
 Local verification is `cargo check --lib`, `cargo build --examples`,
 `make lint`, and the individual binaries a change touches. `make e2e`
@@ -985,30 +1137,72 @@ belongs on CI.
 `scripts/lint_baseline.json` records goishlint's finding count per
 **(file, rule)**; `make lint` fails only when a pair increases. Two
 consequences: a file absent from the baseline must be lint-clean, and
-fixing file A cannot pay for a regression in file B. Current total:
-13081.
+fixing file A cannot pay for a regression in file B. The baseline sums
+to **16504** on 2026-09-06, up from 13081 on 2026-08-15 — it grows as
+ported code arrives, so a rise is not a regression and the per-pair
+ratchet is what enforces that. Sum it rather than quoting either
+figure.
 
 ## Known defects, open
 
-Each is reproduced and recorded rather than worked around. Both need
-`make e2e-full` to validate, so neither is bundled into a port.
-(A third, `Timer::Stop()` leaving its sleeper goroutine pinned, was
-fixed in `3b97cc5` — one goroutine per timer, zero post-Stop lifetime,
-tripwired by `time_stop_no_pin_smoke`.)
+Reproduced and recorded rather than worked around. **One is left**,
+and it needs `make e2e-full` to validate, so it is not bundled into a
+port.
+
+Two of the three this list carried are fixed. `Timer::Stop()` leaving
+its sleeper goroutine pinned went in `3b97cc5` — one goroutine per
+timer, zero post-Stop lifetime, tripwired by `time_stop_no_pin_smoke`;
+its memory ordering was re-verified 2026-09-06 (ROADMAP.md 2).
 
 - **`goish::cast!` cannot succeed on a `goany::Any` carrier.** It
   resolves through the blanket `HasDynAny for T`, probing the wrapper's
   `TypeId` and never the payload's. Silent — a comma-ok assertion
   reports `false`. Use `.As::<dyn Trait + Send + Sync>()`. See
   CONTRIBUTING.md §9b.
-- **`crypto/ecdsa::PrivateKey` does not implement `crypto::Signer`**
-  (Go's does), so an ECDSA key cannot yet sign an X.509 certificate.
+(A second, `crypto/ecdsa::PrivateKey` not implementing
+`crypto::Signer`, is also fixed: `impl crypto::Signer for PrivateKey`
+is at `crypto/ecdsa/ecdsa.rs:508`, and ROADMAP.md 2 has recorded it as
+done for some time. It was still listed here as open on 2026-09-06,
+which is the hazard of keeping the same fact in two documents.)
+
+### The goroutine panic model
+
+An unrecovered panic in any goroutine ends the process with status 2,
+as it ends a Go program. goish used to print "goroutine recovered from
+panic, scheduler continuing" and keep going, whether or not anything
+had recovered it (issue #6). That was wrong twice over: it reported a
+panic as handled when none was, and it continued with the panicked
+frame abandoned mid-flight, so every epilogue that frame still owed was
+skipped. `sync::WaitGroup::Go`'s `Done()` was one, which turned a
+useful panic into a permanent hang — all scheduler threads parked, and
+SIGTERM would not clear it.
+
+The discriminator is `g.panic_value`: `recover!()` TAKES it, so an
+empty slot at the recovery point means a deferred `recover!()` handled
+the panic and the scheduler may continue. A full one means nobody did.
+`runtime::Goexit` lands on the same recovery gobuf and is told apart by
+the `goexiting` flag; it stays non-fatal and is not counted as a panic.
+
+`panic_fatal_ref_smoke` pins all four cases by running probe binaries
+as SUBPROCESSES and asserting their exit statuses, which is the only
+place a process-level outcome can actually be observed.
+
+**The limitation that remains.** A recovered goroutine still cannot
+resume its abandoned Rust stack — that needs compiler-emitted unwind
+tables (nightly + `-Zbuild-std` on no_std). So a recovered panic still
+skips the rest of the closure. Where that matters for a counter,
+the counter has to be settled by a `defer!`, which is what Go does
+anyway: `WaitGroup.Go` is `defer wg.Done()` in Go's own source
+(sync/waitgroup.go:238) and is now a `defer!` here.
 
 ### Structural divergences, pinned by assertions
 
-- `time::Parse` rejects a numeric zone offset where Go accepts one —
-  `time::Time` carries no `Location`. RFC 5280 requires `Z` in
-  certificates, so certificate parsing is unaffected.
+- ~~`time::Parse` rejects a numeric zone offset~~ — **no longer true,
+  checked 2026-09-06.** `time::Time` carries a `Location` now, and both
+  directions round-trip: `2024-03-01T12:34:56-07:00` and
+  `…+05:30` parse without error and format back byte-identically.
+  `time_rfc3339_marshal_ref_smoke` and
+  `time_rfc3339_unmarshal_ref_smoke` pin the offset cases against Go.
 - goish value types collapse two Go states into one: `big::Int` (nil vs
   present-and-zero) and `time::Time` (year 1 vs Unix epoch). The common
   case is correct in both; the rare one is documented at the symptom and
@@ -1016,9 +1210,25 @@ tripwired by `time_stop_no_pin_smoke`.)
 
 ## CI
 
-Two workflows: `e2e.yml` on every push (`make e2e LOOPS=1`) and
-`e2e-race.yml` nightly (stress families ×50). Dispatch the full sweep by
-hand after any scheduler, allocator or `runtime/` change:
+Four workflows, and **two of them gate every push**:
+
+- `e2e.yml` — every declared example, once each (`make e2e LOOPS=1`).
+- `provenance.yml` — re-opens every `// go: sdk` anchor against a real
+  Go 1.25.5 tree. This is what makes the README's provenance claim
+  machine-checked rather than asserted, and it fails independently of
+  e2e: a commit can be green on behaviour and red here for citing a
+  line range that does not hold.
+- `e2e-race.yml` — nightly, stress families ×50.
+- `publish.yml` — crates.io release on a `vX.Y.Z` tag, with guards
+  that refuse a tag disagreeing with `Cargo.toml`.
+
+This section said "two workflows" and named the e2e pair until
+2026-09-06. Missing `provenance.yml` mattered most: it is a gate a
+contributor's push has to pass, and a reader would not have known it
+existed.
+
+Dispatch the full sweep by hand after any scheduler, allocator or
+`runtime/` change:
 
 ```bash
 gh workflow run e2e-race.yml --repo cogentica-ai/goish -f mode=full --ref <branch>

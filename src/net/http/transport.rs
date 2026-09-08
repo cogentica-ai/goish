@@ -91,25 +91,35 @@ pub fn canonicalAddr(url: &URL) -> string {
 // `_ incomparable`, a zero-width marker that makes the struct
 // uncomparable with ==. Rust structs are not comparable unless they
 // derive it, so the marker has no counterpart and no purpose.
-// go: sdk 1.25.5 net/http/transport.go:1994-2004 connectMethod
-/// Go: "connectMethod is the map key (in its String form) for keeping
-/// persistent TCP connections alive for subsequent HTTP requests."
-///
-/// Go's doc table of key shapes is the specification:
-///
-///     |http|foo.com                     http direct, no proxy
-///     |https,h1|foo.com                 https direct, HTTP/2 disabled
-///     http://proxy.com|https|foo.com    http proxy, then CONNECT
-///     http://proxy.com|http             http proxy, http anywhere after
-///     socks5://proxy.com|http|foo.com   socks5, then http
 // go: waived prepareTransportCancel — wraps the request's
 // CancelCause into the reqCanceler map so the DEPRECATED
 // Request.Cancel channel and pre-1.5 CancelRequest keep working.
 // goish's Request carries no Cancel channel by design (see
 // setRequestCancel) and context.CancelCause is unported; the direct
 // CancelRequest path (cancelRequest) IS ported.
+// go: waived Transport.prepareTransportCancel — same declaration under
+// --by-decl's key, which spells a method `Recv.Method`.
 // go: waived awaitLegacyCancel — the goroutine that watches the
 // deprecated Request.Cancel channel; same absent-by-design field.
+// go: waived transportRequest.logf — Go's transport trace hook. It
+// fires only when the request context carries an UNEXPORTED key
+// (`tLogKey{}`) holding a log function, and the only thing that
+// installs one is export_test.go, for net/http's own tests. Nothing
+// outside the package can reach it, so there is no caller-visible
+// behaviour to port.
+// go: waived Transport.CancelRequest — reads the reqCanceler map
+// waived just above as absent by design. Go deprecates it for
+// Request.WithContext and says it "may become a no-op in a future
+// release"; goish's cancellation IS the context path
+// (setRequestCancel + ctx_err_or), which is what Go points callers at.
+// go: waived Transport.protocols — computes the HTTP1/HTTP2 set from
+// `Transport.Protocols`, `TLSNextProto` and `ForceAttemptHTTP2`.
+// goish's Transport has no Protocols or TLSNextProto field: this
+// client speaks HTTP/1.x only, and a field whose answer could never be
+// anything but HTTP1 would be one more option accepted and ignored.
+// go: waived Transport.onceSetNextProtoDefaults — the HTTP/2 bootstrap
+// (bundled h2 vs x/net/http2, GODEBUG http2client), all of it about a
+// protocol this transport does not speak.
 
 // go: sdk 1.25.5 net/http/transport.go:514-524 transportRequest
 /// Go: "transportRequest is a wrapper around a *Request that adds
@@ -293,6 +303,22 @@ pub struct pcLoops {
     pub writeErrCh: crate::gochan::chan<error>,
 }
 
+// go: sdk 1.25.5 net/http/transport.go:1994-2004 connectMethod
+/// Go: "connectMethod is the map key (in its String form) for keeping
+/// persistent TCP connections alive for subsequent HTTP requests."
+///
+/// Go's doc table of key shapes is the specification:
+///
+///     |http|foo.com                     http direct, no proxy
+///     |https,h1|foo.com                 https direct, HTTP/2 disabled
+///     http://proxy.com|https|foo.com    http proxy, then CONNECT
+///     http://proxy.com|http             http proxy, http anywhere after
+///     socks5://proxy.com|http|foo.com   socks5, then http
+///
+/// This anchor and doc sat at the top of the file until 2026-09-06,
+/// above an unrelated pair of waivers and then `transportRequest`'s own
+/// anchor — so `connectMethod` carried no provenance and anchor_check
+/// could not see it. Found by the UNATTACHED report added the same day.
 #[derive(Clone, Default)]
 pub struct connectMethod {
     /// Go: "nil for no proxy, else full proxy URL"
@@ -566,16 +592,6 @@ impl wantConn {
 
 // ─── wantConnQueue ──────────────────────────────────────────────────
 
-// go: sdk 1.25.5 net/http/transport.go:1384-1398 wantConnQueue
-/// Go: "a queue of wantConns", implemented as a head slice consumed
-/// from `headPos` plus a tail slice, so pushes amortise and the front
-/// pops without shifting.
-///
-/// The element type is a placeholder until `wantConn` lands with the
-/// dial machinery; the QUEUE DISCIPLINE is what this slice ports, and
-/// it is pure. `Waiter` is the one method the queue calls on its
-/// elements, so `cleanFrontNotWaiting` keeps Go's arity instead of
-/// taking the predicate as an extra parameter.
 // go: none — goish-only: Go's queue holds `*wantConn` concretely.
 // goish keeps it generic over `Waiter` so the queue stays testable
 // without the dial machinery; `wantConn` above is the real
@@ -603,9 +619,22 @@ impl Waiter for Arc<wantConn> {
     }
 }
 
+// go: sdk 1.25.5 net/http/transport.go:1384-1398 wantConnQueue
 // Go's map holds wantConnQueue BY VALUE — its own comment says "q is
 // a value (like a slice), so we have to store the updated q back into
 // the map". Clone + Default give goish the same get-modify-put shape.
+/// Go: "a queue of wantConns", implemented as a head slice consumed
+/// from `headPos` plus a tail slice, so pushes amortise and the front
+/// pops without shifting.
+///
+/// The element type is a placeholder until `wantConn` lands with the
+/// dial machinery; the QUEUE DISCIPLINE is what this slice ports, and
+/// it is pure. `Waiter` is the one method the queue calls on its
+/// elements, so `cleanFrontNotWaiting` keeps Go's arity instead of
+/// taking the predicate as an extra parameter.
+///
+/// This anchor sat above `pub trait Waiter` until 2026-09-06, so the
+/// queue itself carried no provenance. Found by the UNATTACHED report.
 #[derive(Clone)]
 pub struct wantConnQueue<T: Waiter + Clone> {
     /// Go: "This is a queue, not a deque. It is split into two stages
@@ -939,6 +968,23 @@ crate::var! {
 // Go: "used by Transport.readLoop when the 1 byte peek read fails and
 // we're actually anticipating a response. Usually this is just due to
 // the inherent keep-alive shut down race."
+//
+// Go's is a WRAPPER carrying the peek error; goish's is a sentinel,
+// because the only thing the retry decision needs is identity. What
+// Go's wrapper additionally buys — the cause, returned to the caller
+// on the path where the request will not be retried (transport.go:
+// 716-724, "Issue 16465") — goish does by handing that path the
+// original error directly, so the two methods below have nowhere left
+// to live and nothing left to do.
+//
+// go: waived transportReadFromServerError.Error — the sentinel's own
+// text; the cause reaches the caller unwrapped instead of formatted
+// into a wrapper's message.
+// go: waived transportReadFromServerError.Unwrap — nothing to unwrap:
+// the non-retry path returns the peek error itself.
+// go: waived nothingWrittenError.Unwrap — same shape, same reason,
+// for errNothingWritten below; the write path already returned the
+// underlying error rather than the sentinel.
 crate::var! {
     pub errTransportReadFromServer: error = "http: transport read from server";
 }
@@ -1131,8 +1177,13 @@ impl persistConn {
             return herr;
         }
         let _ = tls_conn.SetDeadline(crate::time::Time::default());
-        self.__put_src(super::client::ConnSrc::Tls(crate::bufio::NewReader(
+        // Go: pconn.br = bufio.NewReaderSize(pconn, t.readBufferSize())
+        // (transport.go:1944). Sized from the Transport, not the bufio
+        // default, or Transport.ReadBufferSize is a field that does
+        // nothing.
+        self.__put_src(super::client::ConnSrc::Tls(crate::bufio::NewReaderSize(
             tls_conn,
+            t.readBufferSize(),
         )));
         return errors::nil;
     }
@@ -1754,7 +1805,8 @@ pub fn cloneTLSConfig(cfg: &crate::crypto::tls::Config) -> crate::crypto::tls::C
 // ─── the per-host connection limiter ────────────────────────────────
 
 // go: none — goish-only: the payload of Go's `connsPerHostMu`, i.e.
-// the two Transport fields it guards (transport.go:278-281). Keyed by
+// the two Transport fields it guards, at transport.go lines 109-111.
+// Keyed by
 // `connectMethodKey.String()` for the same reason the idle pool is.
 pub struct connsPerHost {
     /// Go: `connsPerHost map[connectMethodKey]int`
@@ -1925,6 +1977,22 @@ pub struct idlePool {
     pub closeIdle: bool,
     /// Go: `idleConnWait map[connectMethodKey]wantConnQueue` —
     /// waiters registered for the NEXT conn that becomes idle.
+    //
+    // NOT CONSUMED, established 2026-09-06. `queueForIdleConn` pushes a
+    // waiter here on an idle miss and nothing ever pops it: the only
+    // other mentions of this field in the tree are its declaration and
+    // its initialiser. Go reads it in tryPutIdleConn, which hands a
+    // returning connection to a waiter BEFORE parking it in idleConn —
+    // that step has no counterpart in `__try_put_idle`.
+    //
+    // The push is therefore dead, not wrong: getConn ignores the false
+    // return and calls queueForDial, so every idle miss dials. The
+    // observable difference from Go is that a connection freed while a
+    // request is waiting is parked rather than handed over, so goish
+    // opens a connection where Go reuses one. Left as it is rather than
+    // half-wired — delivering here means popping a queue under the pool
+    // lock and calling tryDeliver, which is concurrent code this pass
+    // cannot exercise. Recorded in ROADMAP 2 instead.
     pub idleConnWait: crate::gomap::map<string, wantConnQueue<Arc<wantConn>>>,
 }
 
@@ -2060,8 +2128,9 @@ impl Transport {
                 return (None, derr);
             }
             let pc = Arc::new(persistConn::__new(key.clone()));
-            pc.__put_src(super::client::ConnSrc::Dyn(crate::bufio::NewReader(
+            pc.__put_src(super::client::ConnSrc::Dyn(crate::bufio::NewReaderSize(
                 super::client::DynConn(conn.unwrap()),
+                self.readBufferSize(),
             )));
             return (Some(pc), errors::nil);
         }
@@ -2095,8 +2164,9 @@ impl Transport {
                 }
                 return (Some(pc), errors::nil);
             }
-            pc.__put_src(super::client::ConnSrc::Dyn(crate::bufio::NewReader(
+            pc.__put_src(super::client::ConnSrc::Dyn(crate::bufio::NewReaderSize(
                 super::client::DynConn(conn),
+                self.readBufferSize(),
             )));
             return (Some(pc), errors::nil);
         }
@@ -2136,7 +2206,10 @@ impl Transport {
             }
             return (Some(pc), errors::nil);
         }
-        pc.__put_src(super::client::ConnSrc::Tcp(crate::bufio::NewReader(conn)));
+        pc.__put_src(super::client::ConnSrc::Tcp(crate::bufio::NewReaderSize(
+            conn,
+            self.readBufferSize(),
+        )));
         return (Some(pc), errors::nil);
     }
 
@@ -2318,10 +2391,15 @@ impl Transport {
     /// Go: "Clone returns a deep copy of t's exported fields."
     ///
     /// PARTIAL, and the omissions are Go fields goish's Transport does
-    /// not have — OnProxyConnectResponse, Dial/DialTLS(Context),
-    /// ResponseHeaderTimeout, ProxyConnectHeader,
-    /// GetProxyConnectHeader, ForceAttemptHTTP2, HTTP2, Protocols,
+    /// not have — OnProxyConnectResponse, ResponseHeaderTimeout,
+    /// ProxyConnectHeader, GetProxyConnectHeader, HTTP2, Protocols,
     /// TLSNextProto. Every field that DOES exist is copied.
+    ///
+    /// That last sentence was false for four of them. This list used
+    /// to name Dial, DialTLS, DialTLSContext and ForceAttemptHTTP2 as
+    /// absent; all four are declared, the three dial hooks are read at
+    /// the dial site, and none was copied. The doc is what kept it
+    /// hidden: it explained the omission instead of describing it.
     ///
     /// Deep in the sense that matters: the clone gets a FRESH idle
     /// pool and its own registered-protocol map, so a mutation on one
@@ -2342,6 +2420,16 @@ impl Transport {
         t2.WriteBufferSize = self.WriteBufferSize;
         t2.ReadBufferSize = self.ReadBufferSize;
         t2.Timeout = self.Timeout;
+        // The dial hooks. These were MISSED, and the doc above said
+        // they did not exist — so a Transport configured to reach the
+        // network a particular way (a custom Dial, a custom TLS dial)
+        // handed its clone none of it, and the clone dialled straight
+        // out. Go's Clone copies every exported field for exactly this
+        // reason.
+        t2.Dial = self.Dial.clone();
+        t2.DialTLS = self.DialTLS.clone();
+        t2.DialTLSContext = self.DialTLSContext.clone();
+        t2.ForceAttemptHTTP2 = self.ForceAttemptHTTP2;
         // Go: `t2.TLSClientConfig = t.TLSClientConfig.Clone()`.
         t2.TLSClientConfig = cloneTLSConfig(&self.TLSClientConfig);
         // Go clones TLSNextProto with maps.Clone. The goish analogue is
@@ -2387,10 +2475,14 @@ impl Transport {
     }
 }
 
-// go: none — goish-only: the body of removeIdleConnLocked, taking the
-// already-locked pool so tryPutIdleConn can call it without
-// re-entering a non-reentrant Mutex. Go relies on `idleMu` already
-// being held by the caller, which the `Locked` suffix announces.
+// go: sdk 1.25.5 net/http/transport.go:1242-1272 Transport.removeIdleConnLocked
+// Go's method, not goish-only — the label said `go: none` and hid a
+// real port from every tier that checks one. It takes the already
+// locked pool rather than a receiver, so tryPutIdleConn can call it
+// without re-entering a non-reentrant Mutex; Go relies on `idleMu`
+// already being held by the caller, which the `Locked` suffix
+// announces. Go's first act is `pconn.idleTimer.Stop()`, absent here
+// because this persistConn carries no idleTimer (see its struct).
 fn removeIdleConnLocked(pool: &mut idlePool, pconn: &Arc<persistConn>) -> bool {
     pool.idleLRU.remove(pconn);
     let key = pconn.cacheKey.String();

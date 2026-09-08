@@ -31,6 +31,11 @@
 extern crate alloc;
 extern crate goish;
 
+/// Every mismatch below lands here; `main` exits non-zero if it is not
+/// zero. Without it this smoke printed `[!!]` and exited 0, which e2e
+/// reads as a pass (ROADMAP §2b-vii).
+static FAILED: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
 use goish::fmt;
 use goish::gostring::string;
 use goish::io::fs;
@@ -43,13 +48,14 @@ const GO: [&str; 7] = [
     "setgid     asked=grwxr-xr-x got=grwxr-xr-x perm=0755 setuid=false setgid=true sticky=false err=<nil>",
     "sticky     asked=trwxrwxrwx got=trwxrwxrwx perm=0777 setuid=false setgid=false sticky=true err=<nil>",
     "all-three  asked=ugtrwx------ got=ugtrwx------ perm=0700 setuid=true setgid=true sticky=true err=<nil>",
-    "mkdir-sticky   perm=0775 sticky=true err=<nil>",
+    "mkdir-sticky   perm=0777 sticky=true err=<nil>",
     "openfile-setgid perm=0640 setgid=true err=<nil>",
 ];
 
 fn chk(ln: &mut usize, got: &string) {
     if *ln >= GO.len() {
         fmt::Printf!("[!!] extra line %d: %q\n", *ln as int + 1, got);
+        FAILED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         *ln += 1;
         return;
     }
@@ -57,12 +63,25 @@ fn chk(ln: &mut usize, got: &string) {
         fmt::Printf!("[ok] %s\n", got);
     } else {
         fmt::Printf!("[!!] line %d\n  got  %q\n  want %q\n", *ln as int + 1, got, GO[*ln]);
+        FAILED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     }
     *ln += 1;
 }
 
 #[goish::main]
 fn main() {
+    // Zero the umask for the duration. Two rows below assert the mode
+    // of a file this smoke CREATES, and a created file's mode is
+    // `mode &^ umask` — so without this they assert the umask of
+    // whoever ran them. The pinned `mkdir-sticky perm=0775` was true
+    // on a umask-002 desktop and false under the 022 CI uses, and it
+    // went unseen because this smoke exited 0 on a mismatch until
+    // ROADMAP §2b-vii gave it a gate. The gate found it on the first
+    // CI run, which is the whole point of having one.
+    //
+    // Chmod is unaffected (umask applies to creation, not to chmod),
+    // which is why only the mkdir and openfile rows moved.
+    let old_umask = goish::syscall::Umask(goish::int(0));
     let mut ln: usize = 0;
     let base = os::TempDir() + "/goish_filemode_bits";
     let _ = os::RemoveAll(&base);
@@ -107,7 +126,15 @@ fn main() {
         fi.Mode().Perm(), (fi.Mode() & fs::ModeSetgid) != fs::FileMode(0), err));
 
     let _ = os::RemoveAll(&base);
+    let _ = goish::syscall::Umask(old_umask);
     if ln != GO.len() {
         fmt::Printf!("[!!] produced %d lines, pinned %d\n", ln as int, GO.len() as int);
+        FAILED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     }
+    let __f = FAILED.load(core::sync::atomic::Ordering::Relaxed);
+    if __f != 0 {
+        fmt::Printf!("\nFAILED %d check(s)\n", __f as i64);
+        goish::os::Exit(1);
+    }
+    fmt::Printf!("\nok %d/%d\n", ln as i64, GO.len() as i64);
 }

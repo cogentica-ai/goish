@@ -81,8 +81,11 @@ fn main() {
         b"time: 5ns String wrong\n",
     );
     check(
-        time::Microseconds(123).String() == "123us",
-        b"time: 123us String wrong\n",
+        // Go writes the MICRO SIGN here (U+00B5), not ASCII "us".
+        // This row asserted the ASCII form, which is how a deliberate
+        // divergence stayed put: the smoke pinned goish to goish.
+        time::Microseconds(123).String() == "123\u{b5}s",
+        b"time: 123 micro String wrong\n",
     );
     check(
         time::Milliseconds(250).String() == "250ms",

@@ -289,8 +289,16 @@ fn zeroPublicKey() -> PublicKey {
 //
 // crypto/tls's TLS 1.3 handshake was written against a goish-only X25519
 // API that predated this port. These forward to the ported code so the
-// handshake keeps working; they have no Go counterpart and should go away
-// once crypto/tls is ported to the real `Curve` interface.
+// handshake keeps working; they have no Go counterpart.
+//
+// The condition for removing them used to read "once crypto/tls is
+// ported to the real `Curve` interface", which now reads as satisfied
+// — crypto/tls is 353/353 by declaration. It is not. What still calls
+// these is the INVENTED client handshake, `do_client_handshake` and
+// `do_client_handshake_tls13` (three call sites, both files), which
+// ROADMAP section 1 slates for retirement and which `tls::Dial` does
+// not go through. So the real dependency is that retirement, not the
+// port; naming it here saves the next reader the trace.
 
 // go: none — goish-only: the fixed-size key wrapper crypto/tls uses.
 #[derive(Clone)]

@@ -6,6 +6,7 @@
     scripts/port_coverage.py crypto --pkg tls  # per-package detail (missing fns)
     scripts/port_coverage.py crypto --md       # markdown table (for tracking docs)
     scripts/port_coverage.py crypto --by-decl  # count Recv.Method, not bare names
+    scripts/port_coverage.py crypto --case-detail  # name the case-only credits
 
 Go source root comes from $GOROOT, else `go env GOROOT`, else --goroot.
 
@@ -79,6 +80,13 @@ def decl_key(recv, name):
 # sniffSig.match methods, `fn r#loop` for testing's B.Loop. Without
 # it the name captured is the bare `r`, so those declarations were
 # invisible to coverage no matter how faithfully they were ported.
+# `pub use <path> as <Name>;` — a declaration published under a Go name.
+ALIAS = re.compile(r"^pub use [\w:]+ as ([A-Za-z_]\w*);", re.M)
+# `pub use super::{Base, Clean, …};` — a declaration this package
+# PROVIDES under Go's name, sourced from a sibling. filepath does this
+# for the nine slash-only functions it shares with `path`.
+REEXPORT = re.compile(r"^pub use [\w:]+::\{([^}]*)\};", re.M)
+
 RSFN = re.compile(
     r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:default\s+)?(?:const\s+)?(?:async\s+)?"
     r"(?:unsafe\s+)?(?:extern\s+\"[^\"]*\"\s+)?fn\s+(?:r#)?([A-Za-z_]\w*)",
@@ -149,6 +157,7 @@ def norm(s):
 
 PUREGO = False
 BY_DECL = False
+CASE_DETAIL = False
 
 
 # GOOS values. A file whose //go:build line mentions ONLY these and does
@@ -276,7 +285,18 @@ def asm_decls(paths):
                     break
                 j += 1
             m = FUNC.match(text)
-            if m and not text.rstrip().endswith("{"):
+            # Bodyless means NO brace at all — `func addOne(x uint64) uint64`.
+            # Testing "does not end with {" instead counted every ONE-LINE
+            # Go function as an assembly stub, because those end with `}`:
+            #
+            #     func errInvalid() error    { return oserror.ErrInvalid }
+            #
+            # 3937 of those in the Go tree against 2915 genuinely bodyless
+            # declarations, so the test was wrong more often than right. It
+            # inflated the assembly share of every gap and understated the
+            # portable remainder — which is the wrong-leverage failure this
+            # function was written to prevent, in the function itself.
+            if m and "{" not in text:
                 out.add(m.group(1))
             i = j + 1
     return out
@@ -448,6 +468,58 @@ def anchored_decl_keys(src):
     return {re.sub(r"^\(\*?(\w+)\)", r"\1", s) for s in syms}
 
 
+# An anchor line, with its symbol, for the attachment test below.
+ANCHOR_LINE_SYM = re.compile(
+    r"//\s*go:\s*sdk\s+\S+\s+\S+\.go:\d+(?:-\d+)?\s+(\S+)")
+# The first real item under an anchor — same shape anchor_check.py uses.
+RS_ITEM = re.compile(r"\b(?:fn|struct|trait|enum|type|const|static)\s+(?:r#)?(\w+)")
+
+
+def anchored_attached_keys(src):
+    """`Recv.Method` keys whose anchor sits directly above a declaration.
+
+    The exact-name and snake_case rules above credit an anchored method
+    only when a fn spelled that way exists. Some renames cannot be
+    derived from the Go name at all, and they are not sloppiness — Rust
+    refuses the original: `archive/tar`'s `Format.String` is
+    `impl Display::fmt`, because Go's String() satisfies fmt.Stringer
+    structurally and the Rust equivalent "cannot be called String"; its
+    `headerGNU.accessTime` is `gnu_accessTime`, because Go reaches those
+    views by casting *block to *headerV7 and Rust will not reinterpret
+    one array type as another.
+
+    Attachment is the evidence, and it is checked twice elsewhere before
+    it reaches here. `anchor_check.py` re-opens the anchor's line range
+    against the Go tree and confirms it names that declaration, and
+    `make lint` gates on it. GOISH014 then requires the Rust item under
+    the anchor to carry the same name, a snake_case fold of it, or an
+    explicit `goishlint:ignore GOISH014 - <reason>` — so a rename is
+    never silent. What is NOT sound is guessing from the name: a rule
+    crediting any fn whose name merely starts with the method would let
+    `write` claim `writeBytes`.
+
+    Only `Recv.Method` keys are returned. Bare names already have their
+    own snake_case rule, and widening this to them would credit a free
+    function from an anchor that happens to precede an unrelated one.
+    """
+    lines = src.split("\n")
+    out = set()
+    for i, line in enumerate(lines):
+        m = ANCHOR_LINE_SYM.search(line)
+        if not m:
+            continue
+        sym = re.sub(r"^\(\*?(\w+)\)", r"\1", m.group(1))
+        if "." not in sym:
+            continue
+        j = i + 1
+        while j < len(lines) and (lines[j].lstrip().startswith(("//", "#["))
+                                  or not lines[j].strip()):
+            j += 1
+        if j < len(lines) and RS_ITEM.search(lines[j]):
+            out.add(sym)
+    return out
+
+
 def draft_syms(src):
     """Every declaration `src` marks as an unreviewed goishc draft.
 
@@ -473,14 +545,68 @@ def draft_syms(src):
     return out
 
 
+def anchor_names(go_decl, anchored):
+    """Does a `// go: sdk` anchor in the package name this declaration?
+
+    An anchor is the authoritative link — anchor_check.py re-opens its
+    line range against the real Go tree and `make lint` gates on it — so
+    an anchored declaration is ported no matter what the Rust fn is
+    called. encoding/asn1 deliberately exports Go's unexported parsers
+    (`parseBigInt` is `pub fn ParseBigInt`), and the anchor above each
+    one still names Go's spelling. Without this, every such rename reads
+    as a case-only credit.
+    """
+    if go_decl in anchored:
+        return True
+    return go_decl.rsplit(".", 1)[-1] in {a.rsplit(".", 1)[-1]
+                                          for a in anchored}
+
+
+def spelled(go_decl, raw):
+    """Does `raw` hold this Go declaration under a spelling goish allows?
+
+    Two are allowed. Verbatim is the rule (CONTRIBUTING.md §5). The one
+    sanctioned rename is snake_case, and only where Go's export rule made
+    two names that Rust cannot: `bytes.splitSeq` is `split_seq` here
+    because `SplitSeq` already took the camel-case spelling.
+
+    The fold goes ONE WAY — Go's name into snake_case, never goish's.
+    Folding both collapses `reset` onto `Reset`, which is the exact
+    substitution this is meant to catch.
+    """
+    if go_decl in raw:
+        return True
+    base = go_decl.rsplit(".", 1)[-1]
+    snake = re.sub(r"(?<!^)(?=[A-Z])", "_", base).lower()
+    return any(r.rsplit(".", 1)[-1] in (base, snake) for r in raw)
+
+
 def _facts(paths):
     idents, loc, anchors, cited, unanchored = set(), 0, 0, set(), set()
-    waived, drafts = set(), set()
+    waived, drafts, anchored = set(), set(), set()
     for p in paths:
         src = open(p, errors="replace").read()
-        waived |= {norm(w) for w in WAIVED.findall(src)}
+        waived |= set(WAIVED.findall(src))
         drafts |= draft_syms(src)
         mine = rust_decl_idents(src) if BY_DECL else set(RSFN.findall(src))
+        # A declaration re-exported under Go's name IS that declaration,
+        # even when the item behind it is not an `fn`. goish spells
+        # `slices.Sort` as a MACRO — Go's Sort mutates in place, which a
+        # Rust fn taking `&mut` cannot express at the call site — and
+        # publishes it as `pub use crate::__goish_slices_sort as Sort;`.
+        # Counting only `fn` items read those as MISSING and made
+        # slices/ look like unported work when the API is there. Fifteen
+        # such aliases tree-wide, all deliberate: slices' four sort
+        # macros, log's Fatal family, http's ResolvePath.
+        # Tracked separately from `mine`: a re-export is evidence that
+        # the API is PUBLISHED, which is what coverage counts, but it is
+        # not evidence about where the body lives. The unanchored report
+        # below needs that distinction — see the comment there.
+        borrowed = set(ALIAS.findall(src))
+        for grp in REEXPORT.findall(src):
+            borrowed |= {x.strip() for x in grp.split(",")
+                         if re.fullmatch(r"[A-Za-z_]\w*", x.strip())}
+        mine |= borrowed
         if BY_DECL:
             # Credit anchored Recv.Method keys whose method exists in this
             # file as a fn under any receiver shape — see anchored_decl_keys.
@@ -489,7 +615,46 @@ def _facts(paths):
             fns = set(RSFN.findall(src))
             mine |= {k for k in anchored_decl_keys(src)
                      if "." in k and k.split(".", 1)[1] in fns}
+            # Same rule for a BARE anchored name whose fn is spelled
+            # snake_case: `// go: sdk … path/match.go:90-135 scanChunk`
+            # over `fn scan_chunk`. 19 tree-wide.
+            #
+            # This is NOT the underscore-folding that `norm` deliberately
+            # refuses. That folded EVERY name and credited crypto/tls's
+            # hand-written `read_record` as a port of Go's `readRecord`
+            # in a file carrying no anchors at all — 15 of tls's 37
+            # "ported" names were that. Here the anchor is the evidence:
+            # anchor_check re-opens its line range against the Go tree
+            # and `make lint` gates on it, so the declaration named is
+            # the declaration that exists. The fn-exists check still
+            # keeps a stray anchor from crediting nothing.
+            mine |= {k for k in anchored_decl_keys(src)
+                     if "." not in k
+                     and k not in fns
+                     and re.sub(r"(?<!^)(?=[A-Z])", "_", k).lower() in fns}
+            # And the same fold for the METHOD half of a `Recv.Method`
+            # key, which the exact-match rule above misses:
+            # `chacha20poly1305.sealGeneric` is anchored on a fn spelled
+            # `seal_generic`. Identical transformation, identical
+            # evidence — the anchor, whose range anchor_check re-opens
+            # against the Go tree — and it stays narrow on purpose. It
+            # credits a camelCase-to-snake_case rename and nothing else,
+            # so archive/tar's `headerGNU.accessTime` on `gnu_accessTime`
+            # and flate's `huffmanBitWriter.write` on `write_buf` are
+            # still reported: those are renames the fold cannot derive,
+            # and ROADMAP §2b-ii keeps them on the list.
+            mine |= {k for k in anchored_decl_keys(src)
+                     if "." in k
+                     and k.split(".", 1)[1] not in fns
+                     and re.sub(r"(?<!^)(?=[A-Z])", "_",
+                                k.split(".", 1)[1]).lower() in fns}
+            # Last: a method whose Rust name neither matches nor folds,
+            # credited on the ANCHOR'S ATTACHMENT rather than on its
+            # name. See anchored_attached_keys for why that is evidence
+            # and not a guess.
+            mine |= anchored_attached_keys(src)
         idents |= mine
+        anchored |= anchored_decl_keys(src)
         # The draft line is itself a `// go:` comment, so it would
         # otherwise inflate the anchor count by one per draft.
         n = len(ANCHOR.findall(src)) - len(DRAFT_LINE.findall(src))
@@ -502,10 +667,21 @@ def _facts(paths):
         # package is invented; one anchorless file inside a partly-ported
         # package slips through. So the names are tracked and reported.
         if n == 0:
-            unanchored |= {norm(i) for i in mine}
+            # Only names this file DEFINES. A `mod.rs` that is nothing
+            # but `pub use` lines has no anchors by construction, and
+            # counting its re-exports here reported anchored work as
+            # unverified: `maps::Keys` is anchored in `maps/iter.rs` and
+            # `sync::NewCond` in `sync/cond.rs`, but both are re-exported
+            # from a zero-anchor `mod.rs`, so both read UNVERIFIED. That
+            # was 24 of the 103 names the tree-wide report listed.
+            # Subtracting `borrowed` costs no coverage: the file that
+            # actually defines the name still contributes it, and if THAT
+            # file has no anchors the name is still reported.
+            unanchored |= {norm(i) for i in mine - borrowed}
         cited |= set(ANCHOR_GO.findall(src))
         loc += src.count("\n")
-    return {"idents": {norm(i) for i in idents}, "loc": loc,
+    return {"idents": {norm(i) for i in idents}, "raw": set(idents),
+            "anchored": anchored, "loc": loc,
             "nfiles": len(paths), "anchors": anchors, "cited": cited,
             "unanchored": unanchored, "waived": waived, "drafts": drafts}
 
@@ -621,6 +797,15 @@ def scan_rs(root):
         for f in drafts:
             out[rel or "."]["drafts"] |= draft_syms(
                 open(os.path.join(dirpath, f), errors="replace").read())
+        # Kept so `build` can recompute this directory's facts without a
+        # file that Go declares as a package of its own. See the
+        # double-count note there; the paths, not the facts, because the
+        # subtraction has to be over source, not over merged sets.
+        out[rel or "."]["_own"] = list(own)
+        out[rel or "."]["_filepkgs"] = {
+            (f"{rel}/{stem}" if rel else stem): list(paths)
+            for stem, paths in filepkgs.items()
+        }
         # Also expose each non-mod file as its own candidate package name,
         # so Go's `crypto/rsa` finds goish's `crypto/rsa.rs`.
         for stem, paths in filepkgs.items():
@@ -629,12 +814,90 @@ def scan_rs(root):
     return out
 
 
+# Go packages goish ports at a path of its own. `build` joins the two
+# trees positionally — `scan_go(GOROOT/src/X)` against `scan_rs(src/X)`
+# — so a package goish deliberately relocated is invisible in BOTH
+# directions: absent from the scan that looks for it, and ignored by
+# the scan that holds it, which has no Go package of that name to match
+# its files to. `vendor/golang.org/x/crypto/cryptobyte` read 0/85 with
+# rs_files=0 while `src/crypto/cryptobyte` held four files and 22
+# anchors in `builder.rs` alone.
+#
+# The three entries are not guessed: they are what the anchors say.
+# `grep '// go: sdk .*vendor/' src/` gives, for each goish directory,
+# the Go package its own anchors cite. Re-run that grep before adding
+# a fourth.
+#
+# That the grep only finds ANCHORED relocations is the safety property,
+# not a limitation to work around. These entries earn their credit from
+# anchors `anchor_check.py` validates against the Go tree. There are
+# four more relocated packages — dnsmessage, term, poly1305,
+# chacha20poly1305 — and every one carries zero anchors. Aliasing those
+# was measured, not assumed: it credits 85 declarations, and all 85
+# report UNVERIFIED, so it would not launder them. They stay out
+# anyway, to keep this map's one property intact — every entry's credit
+# rests on an anchor `anchor_check.py` validates. Anchor them, do not
+# alias them. See ROADMAP §2b for the measurement and the argument on
+# both sides.
+#
+# Keys are subtree-relative, so this only takes effect for the whole
+# tree (`port_coverage.py .`). Running the `vendor` subtree directly
+# still reports zero, because `src/vendor` does not exist.
+RELOCATED = {
+    "vendor/golang.org/x/crypto/cryptobyte": "crypto/cryptobyte",
+    "vendor/golang.org/x/crypto/cryptobyte/asn1": "crypto/cryptobyte/asn1",
+    "vendor/golang.org/x/net/http/httpproxy": "net/http/httpproxy",
+    # Added once term.rs was anchored — the grep above now reports it,
+    # which is the whole entry criterion working as intended.
+    "cmd/vendor/golang.org/x/term": "term",
+    "vendor/golang.org/x/crypto/chacha20poly1305": "crypto/chacha20poly1305",
+    "vendor/golang.org/x/crypto/internal/poly1305": "crypto/poly1305",
+}
+
+
 def build(subtree, gr):
     gp = scan_go(os.path.join(gr, "src", subtree))
     rp = scan_rs(os.path.join("src", subtree))
+
+    # A goish file `X/Y.rs` is exposed both as part of package `X` and as
+    # package `X/Y`, so that Go's `crypto/rsa` finds goish's
+    # `crypto/rsa.rs`. When `X` is ALSO a Go package, the same file
+    # answers to both and one goish function is credited to two Go
+    # declarations: `SetGCPercent`, which lives in `src/runtime/debug.rs`,
+    # counted in `runtime/debug` by name AND in `runtime` by case against
+    # Go's linknamed `setGCPercent`.
+    #
+    # Three files in the tree are in that position — runtime/debug,
+    # runtime/trace and testing/iotest — and only where a name coincides
+    # between the two Go packages does it cost anything. `crypto/rsa.rs`
+    # is NOT one: goish keeps crypto/rsa as a directory, so no file-form
+    # entry exists for it.
+    #
+    # The condition has to be "the file-package is itself a Go package",
+    # not "the file is not mod.rs": `net/http/client.rs` must keep
+    # counting toward `net/http`, because `net/http/client` is not a Go
+    # package. Recomputed from the source paths rather than by
+    # subtracting ident sets, which would also remove a name the parent
+    # legitimately declares elsewhere.
+    for pkg, r in list(rp.items()):
+        subs = r.get("_filepkgs") or {}
+        shadowed = [k for k in subs if k in gp and k != pkg]
+        if not shadowed or pkg not in gp:
+            continue
+        keep = list(r.get("_own") or [])
+        for k, paths in subs.items():
+            if k not in shadowed:
+                keep.extend(paths)
+        merged = _facts(keep)
+        merged["drafts"] = r["drafts"]
+        merged["_own"], merged["_filepkgs"] = r.get("_own"), subs
+        rp[pkg] = merged
+
     rows = []
     for pkg, g in sorted(gp.items()):
         r = rp.get(pkg)
+        if r is None and pkg in RELOCATED:
+            r = rp.get(RELOCATED[pkg])
         have = r["idents"] if r else set()
         # Functions belonging to a build-tag route goish did not take are
         # not remaining work — see other_route.
@@ -645,8 +908,13 @@ def build(subtree, gr):
         # denominator — they are not remaining work — but are carried on
         # the row so they stay visible. See WAIVED.
         wv = r["waived"] if r else set()
-        waived = sorted(f for f in want if norm(f) in wv)
-        want = [f for f in want if norm(f) not in wv]
+        # EXACT, not `norm`. A waiver names one declaration, and `norm`
+        # is `.lower()`: `// go: waived Builder.grow` matched Go's
+        # `Builder.Grow` too and pulled a real, ported, exported
+        # function out of both numerator and denominator. strings read
+        # 108/113 instead of 110/115 from a single waiver line.
+        waived = sorted(f for f in want if f in wv)
+        want = [f for f in want if f not in wv]
         # A draft is present in the tree but unreviewed, so it counts as
         # neither ported nor missing-entirely: it is its own state, and
         # it stays OUT of the percentage. See DRAFT_LINE.
@@ -671,6 +939,15 @@ def build(subtree, gr):
             "gap_portable": len(missing) - len(missing_asm),
             "unanchored": sorted(f for f in hit
                                  if r and norm(f) in r["unanchored"]),
+            # `norm` is `.lower()`, so a Go declaration is credited to a
+            # goish name that differs from it only in case. Go's
+            # unexported `bufio.Reader.reset` was being credited to
+            # goish's public `Reader.Reset` — a DIFFERENT declaration,
+            # and one the package genuinely does not port. This never
+            # shows up as missing, so it is reported here instead.
+            "case_only": sorted(f for f in hit
+                                if r and not spelled(f, r["raw"])
+                                and not anchor_names(f, r["anchored"])),
         })
     return rows
 
@@ -682,6 +959,9 @@ def main():
     global PUREGO, BY_DECL
     PUREGO = "--purego" in argv
     BY_DECL = "--by-decl" in argv
+    global CASE_DETAIL
+    CASE_DETAIL = "--case-detail" in argv
+    argv = [a for a in argv if a != "--case-detail"]
     subtree, gr = argv[0], goroot(argv)
     rows = build(subtree, gr)
 
@@ -768,6 +1048,20 @@ def main():
           f"{len(rows)} packages   {sum(r['go_loc'] for r in rows)} Go LOC vs "
           f"{sum(r['rs_loc'] for r in rows)} goish LOC   {ta} anchors")
     print(f"      {split}")
+    # A credit whose goish name differs from Go's only in case is a
+    # credit to a different declaration. It cannot appear in `missing`,
+    # so without this line nothing in the output would mention it.
+    co = [(r["pkg"], f) for r in rows for f in r["case_only"]]
+    if co:
+        print(f"      {len(co)} counted name(s) differ from Go's in CASE "
+              f"only and carry no anchor — mostly Go's own "
+              f"exported-wraps-unexported pair (`Acos`/`acos`), where the "
+              f"body is here under the exported name. Not all: "
+              f"`bufio.Reader.reset` had no counterpart at all. "
+              f"--case-detail lists them.")
+        if CASE_DETAIL:
+            for pkg, f in co:
+                print(f"        {pkg}: {f}")
 
 
 if __name__ == "__main__":

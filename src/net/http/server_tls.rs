@@ -51,7 +51,7 @@ use crate::types::{byte, int};
 use super::header::Header;
 use super::request::{ReadRequestWithLimit, Request};
 use super::responsewriter::{__goish_register_Flusher_impl, __goish_register_ResponseWriter_impl};
-use super::responsewriter::{build_head, push_hex};
+use super::responsewriter::{build_head, derived_extras, push_hex};
 use super::responsewriter::{Flusher, HeaderHandle, ResponseWriter};
 use super::server::request_keep_alive_pub;
 use super::server::{Handler, Server};
@@ -144,6 +144,16 @@ impl tlsResponse {
 
         let buf = {
             let mut h = self.header.Lock();
+            // Snapshot the handler's own header BEFORE anything the
+            // server derives; the difference is exactly Go's
+            // extraHeader set, and decides the wire order.
+            //
+            // The auto Content-Length below has to fall on the derived
+            // side: Go emits a length it computed itself through
+            // extraHeader, after Date. Taking this snapshot one
+            // statement later put it in the sorted block instead and
+            // a bodied HTTPS response led with Content-Length.
+            let handler_set = h.Clone();
             let hasTE = h.Get(string("Transfer-Encoding")).Len() != 0;
             if bodyAllowedForStatus(g.status)
                 && !hasTE
@@ -163,7 +173,8 @@ impl tlsResponse {
                 true,
                 g.is_head,
             );
-            let mut buf = build_head(g.status, &h, true);
+            let derived = derived_extras(Some(&handler_set), &h);
+            let mut buf = build_head(g.status, &h, true, &derived);
             if !suppress_body {
                 buf.extend_from_slice(&g.body);
             }
@@ -190,6 +201,9 @@ impl tlsResponse {
         let suppress_body = g.is_head || !bodyAllowedForStatus(g.status);
         let head = {
             let mut h = self.header.Lock();
+            // Same snapshot as the buffered path: what the handler set
+            // itself sorts, what finalizeHeaders adds is extraHeader.
+            let handler_set2 = h.Clone();
             // Before the auto `chunked`: Go still sniffs a flushed
             // response (its hasTE guard means a HANDLER-set TE).
             super::responsewriter::finalizeHeaders(
@@ -207,7 +221,8 @@ impl tlsResponse {
                 h.Del(string("Content-Length"));
                 h.Set(string("Transfer-Encoding"), string("chunked"));
             }
-            build_head(g.status, &h, true)
+            let derived = derived_extras(Some(&handler_set2), &h);
+            build_head(g.status, &h, true, &derived)
         };
         let mut c = self.conn.Lock();
         let (_, err) = c.Write(&head);
@@ -273,6 +288,19 @@ impl ResponseWriter for tlsResponse {
     }
 
     fn WriteHeader(&self, statusCode: int) {
+        {
+            let g = self.inner.Lock();
+            if g.wrote_header {
+                return;
+            }
+        }
+        // Go has ONE `response` type serving both http and https, so
+        // its checkWriteHeaderCode (server.go:1195) covers TLS too.
+        // goish's HTTPS writer is a separate type and needs the check
+        // spelled out, or an invalid code reaches the wire over TLS
+        // while the plain path panics — the same split that let the
+        // header-order fix land on one path and not the other.
+        super::server::checkWriteHeaderCode(statusCode);
         let mut g = self.inner.Lock();
         if g.wrote_header {
             return;
@@ -385,7 +413,42 @@ fn serve_tls_conn(
         if hs_ns > 0 {
             let _ = c.SetDeadline(time::Now().Add(time::Duration(hs_ns)));
         }
-        if !c.Handshake().IsNil() {
+        let herr = c.Handshake();
+        if !herr.IsNil() {
+            // Go: if re, ok := err.(tls.RecordHeaderError); ok &&
+            //     re.Conn != nil && tlsRecordHeaderLooksLikeHTTP(
+            //     re.RecordHeader) { io.WriteString(re.Conn,
+            //     "HTTP/1.0 400 Bad Request\r\n\r\nClient sent an HTTP
+            //     request to an HTTPS server.\n") } — at server.go
+            //     lines 1972-1976.
+            //
+            // goish had tlsRecordHeaderLooksLikeHTTP ported and
+            // anchored and called from nowhere, so plaintext HTTP sent
+            // to an HTTPS port got the connection dropped with no
+            // explanation. That is one of the most common mistakes
+            // there is — an `http://` URL against an `https://` port —
+            // and Go answers it in words.
+            //
+            // The check is on the RECORD HEADER, not on the failure:
+            // a genuine TLS record that fails the handshake gets
+            // nothing, which is the third row of the reference.
+            if let Some(re) =
+                crate::errors::As::<crate::crypto::tls::conn::RecordHeaderError>(herr.clone())
+            {
+                if super::server::tlsRecordHeaderLooksLikeHTTP(re.RecordHeader) {
+                    // On the RAW conn, not through the TLS Conn: Go
+                    // writes to `re.Conn` because there is no session
+                    // to encrypt with — the handshake is what failed.
+                    if let Some(raw) = (&mut *c).__net_conn_mut() {
+                        let _ = crate::net::Conn::Write(
+                            raw,
+                            crate::convert::bytes(string::from(
+                                "HTTP/1.0 400 Bad Request\r\n\r\nClient sent an HTTP request to an HTTPS server.\n",
+                            )),
+                        );
+                    }
+                }
+            }
             let _ = c.Close();
             return;
         }
@@ -422,6 +485,8 @@ fn serve_tls_conn(
     let idle_ns = srv.idle_timeout_ns();
     let write_timeout_ns = srv.write_timeout_ns();
     let mut first_request = true;
+    // Go's `c.lastMethod`, at server.go line 1053 — see the plaintext loop.
+    let mut last_method = string::new();
     loop {
         if srv.__state_in_shutdown() {
             let mut c = conn.Lock();
@@ -452,6 +517,18 @@ fn serve_tls_conn(
             // Pooled backing buffer — Go's c.bufr (newBufioReader),
             // same wiring as the plaintext loop.
             let mut br = super::server::newBufioReader(&mut *c);
+            // The same RFC 7230 §3 tolerance the plaintext loop
+            // applies, at server.go lines 1035-1039: after a POST only, drop
+            // stray CR/LF before the request line. Gated on POST
+            // exactly as Go gates it — skipping blank lines
+            // unconditionally is a request-smuggling primitive.
+            if last_method == "POST" {
+                let (peek, _) = br.Peek(4);
+                let n = super::server::numLeadingCRorLF(peek);
+                if n > 0 {
+                    let _ = br.Discard(n);
+                }
+            }
             let out = ReadRequestWithLimit(&mut br, max_header_bytes);
             super::server::putBufioReader(br);
             out
@@ -461,6 +538,7 @@ fn serve_tls_conn(
             let _ = c.Close();
             return;
         }
+        last_method = req.Method.clone();
         // Same HTTP/1-only gate the plaintext loop applies
         // (server.go:1113 / :2069). A TLS conn is exactly where an
         // HTTP/2 preface arrives, so leaving it out here is the half
@@ -608,7 +686,7 @@ impl Server {
                 return super::server::ErrServerClosed.into();
             }
             // Accept raw TCP, then wrap server-side TLS — what
-            // `tls::listener.Accept` (tls.go:77) does, inlined so the
+            // `tls::listener.Accept` (crypto/tls/tls.go:78) does, inlined so the
             // accept parks on the shutdown-tracked fd.
             let (c, err) = ln.Accept();
             if !err.IsNil() {

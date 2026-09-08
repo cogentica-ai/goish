@@ -189,3 +189,18 @@ fn has_meta(path: &string) -> bool {
     }
     return false;
 }
+
+// Waived out of the coverage denominator. Each is already explained in
+// a GOISH018 ignore in this package; repeated here because
+// port_coverage.py reads `go: waived` and not goishlint ignores, so
+// without them filepath reads 30/38 and advertises eight declarations
+// of unported work that do not exist.
+//
+// go: waived scanChunk — Go declares Match's three helpers once per package because on Windows the separator is a backslash, which is also the escape character; on Linux the two copies are identical, so filepath re-exports `path`'s Match and its helpers rather than carrying a second set.
+// go: waived matchChunk — as scanChunk.
+// go: waived getEsc — as scanChunk.
+// go: waived cleanGlobPathWindows — the Windows arm of cleanGlobPath; goish builds linux/amd64 only.
+// go: waived sameWord — `a == b`, which a Windows build needs a name for and Linux does not.
+// go: waived HasPrefix — deprecated in Go and documented there as "not correct for all cases".
+// go: waived unixAbs — a one-line forward, inlined into its only caller `Abs`.
+// go: waived readDirNames — likewise, inlined into `walk_helper`.

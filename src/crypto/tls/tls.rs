@@ -22,7 +22,6 @@ use crate::errors;
 /// deadline elapses. Unexported in Go; it satisfies `net.Error` through
 /// its `Timeout`/`Temporary` methods.
 ///
-/// goishlint:ignore GOISH021 timeoutError — declared here, in mod[rs], because tls.go's dial path lives here
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
 pub struct timeoutError {}
 

@@ -1,4 +1,4 @@
-// go: file crypto/x509/oid.go decls: ParseOID, newOIDFromDER, OIDFromInts, base128IntLength, appendBase128Int, base128BigIntLength, appendBase128BigInt, AppendText, MarshalText, UnmarshalText, unmarshalOIDText, AppendBinary, MarshalBinary, UnmarshalBinary, Equal, parseBase128Int, EqualASN1OID, String, toASN1OID
+// go: file crypto/x509/oid.go decls: ParseOID, newOIDFromDER, OIDFromInts, base128IntLength, appendBase128Int, base128BigIntLength, appendBase128BigInt, OID.AppendText, OID.MarshalText, OID.UnmarshalText, OID.unmarshalOIDText, OID.AppendBinary, OID.MarshalBinary, OID.UnmarshalBinary, OID.Equal, parseBase128Int, OID.EqualASN1OID, OID.String, OID.toASN1OID
 //
 // `x509.OID` — an Object Identifier held in its DER encoding rather than
 // as a component slice, which is what lets it represent components too
@@ -18,9 +18,12 @@
 //     — matching Go, where OID is deliberately not `==`-comparable in a
 //     meaningful sense.
 //   * Go's `AppendText`/`AppendBinary` implement `encoding.TextAppender`
-//     and `encoding.BinaryAppender`. goish has no such interfaces yet, so
-//     these are inherent methods with the same signatures; the four
-//     Marshal/Unmarshal entry points behave identically.
+//     and `encoding.BinaryAppender`. This said goish "has no such
+//     interfaces yet" — both are traits in `encoding/mod.rs`, alongside
+//     `BinaryMarshaler`. These remain inherent methods with the same
+//     signatures rather than trait impls, so the four Marshal/Unmarshal
+//     entry points behave identically but an OID does not satisfy the
+//     traits; wiring them up is now a small change, not a blocked one.
 //   * `(*big.Int).Bits()` returns Go's `[]Word`; goish's returns the same
 //     limb slice, and `appendBase128BigInt` reads limb 0 exactly as Go
 //     does after the shift.

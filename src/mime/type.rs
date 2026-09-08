@@ -1,4 +1,17 @@
 // go: file mime/type.go decls: TypeByExtension, ExtensionsByType, AddExtensionType, set_extension_type
+// The lint ignore below silences the RULE; the coverage count is a
+// separate question. These three are free functions with names Go
+// uses nowhere else, so a bare waiver is unambiguous here — unlike a
+// method name such as `Error` or `String`.
+//
+// go: waived loadMimeFile — reads /etc/mime.types line by line into
+// the type table. goish ships a fixed table (see mod.rs), so there is
+// no file to read; the difference is that Go's answers vary with the
+// host's MIME database and goish's do not.
+// go: waived loadMimeGlobsFile — the freedesktop glob-file half of
+// the same walk.
+// go: waived setMimeTypes — installs a loaded table into the sync.Map
+// cache; with a fixed table there is nothing to install.
 // goishlint:ignore GOISH018 loadMimeFile, loadMimeGlobsFile, setMimeTypes, initMime, initMimeForTests, initMimeUnix, clearSyncMap — Go walks the system MIME databases (/etc/mime.types, the freedesktop glob files) and caches the result in a sync.Map. goish ships a fixed table instead, so there is no file to load and no cache to clear; `set_extension_type` below is the one piece of `setExtensionType` that a table needs.
 // goishlint:ignore GOISH021 mimeTypes, mimeTypesLower, extensions, builtinTypesLower, once, errPhrase, testInitMime, typeFiles, initMimeUnixTest, osInitMime — the same: Go's mutable registry and its lazy-init state, replaced by a fixed table.
 //

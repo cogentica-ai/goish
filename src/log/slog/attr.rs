@@ -6,10 +6,12 @@
 // module root; the typed constructors, `Attr.String`, `Attr.Equal` and
 // `Attr.isEmpty` are ported here.
 //
-// goishlint:ignore GOISH018 Bool, GroupAttrs, Int, String — `Bool`, `Int` and `String` are hand-written in the module root, where the Attr type itself lives; `GroupAttrs` takes a []Attr where goish's `Group` already does.
+// goishlint:ignore GOISH018 Bool, GroupAttrs, Int — `Bool`, `Int` and `String` are hand-written in the module root, where the Attr type itself lives; `GroupAttrs` takes a []Attr where goish's `Group` already does.
 // goishlint:ignore GOISH021 Attr — same.
 
 #![allow(non_snake_case)]
+
+// go: waived GroupAttrs — Go adds GroupAttrs alongside Group because Group takes ...any and cannot accept a []Attr directly; goish's Group already takes the slice, so the second entry point has nothing to add.
 
 extern crate alloc;
 

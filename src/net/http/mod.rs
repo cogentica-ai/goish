@@ -62,7 +62,7 @@ pub use crate::net::url;
 
 pub use client::{
     Body, Client, DialContextFn, ErrUseLastResponse, Get, Head, NewRequest, NewRequestWithContext,
-    Post, PostForm, ProxyFromEnvironment, ProxyResolver, RoundTripper, Transport,
+    Post, PostForm, ProxyFromEnvironment, ProxyResolver, RoundTripper, Transport, UpgradedConn,
 };
 pub use cookie::{
     Cookie, ParseCookie, ParseSetCookie, SameSite, SameSiteDefaultMode, SameSiteLaxMode,
@@ -100,6 +100,7 @@ pub use server::{
     ErrContentLength, ErrHandlerTimeout, ErrHijacked, ErrServerClosed, Error, Handle, HandleFunc,
     Handler, HandlerFunc, ListenAndServe, MaxBytesHandler, NewServeMux, NotFound, NotFoundHandler,
     Redirect, RedirectHandler, Serve, ServeMux, Server, StripPrefix, TimeoutHandler,
+    TrailerPrefix,
 };
 pub use server_tls::ListenAndServeTLS;
 pub use sniff::DetectContentType;

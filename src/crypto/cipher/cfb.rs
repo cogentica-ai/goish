@@ -2,7 +2,7 @@
 //
 // crypto/cipher/cfb — CFB (Cipher Feedback) Mode.
 //
-// Reference: /share/go/src/crypto/cipher/cfb.go (102 LOC).
+// Reference: crypto/cipher/cfb.go (102 LOC).
 //
 // Slim deviations:
 //

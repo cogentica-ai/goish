@@ -449,11 +449,11 @@ fn synth_dir() -> Arc<MapFile> {
     });
 }
 
+// go: sdk 1.25.5 testing/fstest/mapfs.go:218-220 MapFS.ReadFile
 /// Register the fstest `#[goish::interface]` impls in the per-trait
 /// downcast registries. Idempotent; called from `Open` / `Lstat`.
 /// Deliberately does NOT register MapFS for ReadDirFS / StatFS /
 /// ReadFileFS (Go's `fsOnly` semantics — see module header).
-// go: sdk 1.25.5 testing/fstest/mapfs.go:218-220 MapFS.ReadFile
 impl fs::ReadFileFS for MapFS {
     // go: none — goish idiom: `#[goish::interface]` does not model Go's
     //     interface embedding, so every composite interface re-declares

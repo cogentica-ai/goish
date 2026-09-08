@@ -1,10 +1,14 @@
 // net/http/httptest — utilities for HTTP testing.
 //
-// Reference: /share/go/src/net/http/httptest/httptest.go.
+// Reference: net/http/httptest/httptest.go.
 //
-// Phase A (this file): NewRequest + NewRequestWithContext only.
-// Phase B (deferred — task #166): ResponseRecorder, NewServer.
-// ResponseRecorder is blocked on the ResponseWriter trait refactor.
+// This file holds NewRequest + NewRequestWithContext. The rest of the
+// package is in `recorder.rs` (ResponseRecorder, NewRecorder) and
+// `server.rs` (Server, NewServer, NewTLSServer, NewUnstartedServer).
+//
+// Those two were "Phase B (deferred — task #166)" here, with
+// ResponseRecorder "blocked on the ResponseWriter trait refactor". The
+// refactor happened and both landed; the note did not move.
 
 #![allow(non_snake_case)]
 

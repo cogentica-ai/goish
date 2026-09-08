@@ -1,6 +1,6 @@
 // sync — Go's synchronization primitives.
 //
-// Go SDK reference: /share/go/src/sync/{mutex,waitgroup,once,rwmutex}.go
+// Go SDK reference: sync/{mutex,waitgroup,once,rwmutex}.go
 // (with the mutex implementation moved to internal/sync in Go 1.25).
 //
 // Goish v1 implements the user-facing API verbatim (Lock/Unlock,

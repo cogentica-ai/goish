@@ -584,10 +584,10 @@ impl Frames {
     }
 }
 
+// go: sdk 1.25.5 runtime/symtab.go:775-799 FuncForPC
 /// `runtime.FuncForPC(pc)` (Go 1.25 symtab.go) — slim stub returning
 /// `None` for any PC since goish has no symbol table. Callers that
 /// guard `if fp != nil { name = fp.Name() }` get the empty-name path.
-// go: sdk 1.25.5 runtime/symtab.go:775-799 FuncForPC
 /// Go: "FuncForPC returns a *[Func] describing the function that
 /// contains the given program counter address, or else nil. If pc
 /// represents multiple functions because of inlining, it returns the

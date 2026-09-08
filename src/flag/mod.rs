@@ -21,6 +21,18 @@
 //     pub fn PrintDefaults(&self);
 //   }
 //
+// **No ErrorHandling, and that is a behavioural divergence, not a
+// missing accessor.** Go's `NewFlagSet(name, errorHandling)` takes a
+// policy that `Parse` acts on: ContinueOnError returns the error,
+// ExitOnError calls `os.Exit(2)` (or 0 for -help), PanicOnError
+// panics. goish's `NewFlagSet()` takes neither argument and always
+// behaves as ContinueOnError — the error comes back and the process
+// keeps running. A program ported from Go that relied on ExitOnError
+// to stop on a bad flag will CARRY ON here, which is the sort of
+// difference that shows up as odd behaviour rather than a compile
+// error. `flag.CommandLine` is Go's ExitOnError set, so this applies
+// to top-level `flag.Parse()` too.
+//
 // Each `String/Int/Bool/Float64` returns a typed `FlagHandle<T>` whose `Get()`
 // reads the parsed value. Internally backed by `Arc<SpinLock<T>>` so the
 // caller can hold the handle while the `FlagSet` mutates state.
@@ -84,6 +96,14 @@ pub enum FlagKind {
     Int(Arc<SpinLock<int>>),
     Int64(Arc<SpinLock<crate::types::int64>>),
     Uint(Arc<SpinLock<crate::types::uint>>),
+    Uint64(Arc<SpinLock<crate::types::uint64>>),
+    /// Go's `funcValue` — a flag whose "value" is a callback. There is
+    /// no cell: the parser hands each occurrence to the function and
+    /// the function keeps whatever state it wants.
+    Func(Arc<dyn Fn(string) -> crate::errors::error + Send + Sync>),
+    /// Go's `boolFuncValue`: the same, but `IsBoolFlag` is true, so
+    /// `-v` is legal without a value and the callback gets "true".
+    BoolFunc(Arc<dyn Fn(string) -> crate::errors::error + Send + Sync>),
     Duration(Arc<SpinLock<crate::time::Duration>>),
     Float64(Arc<SpinLock<float64>>),
     String(Arc<SpinLock<string>>),
@@ -99,6 +119,9 @@ impl Clone for FlagKind {
             FlagKind::Int(c) => FlagKind::Int(c.clone()),
             FlagKind::Int64(c) => FlagKind::Int64(c.clone()),
             FlagKind::Uint(c) => FlagKind::Uint(c.clone()),
+            FlagKind::Uint64(c) => FlagKind::Uint64(c.clone()),
+            FlagKind::Func(f) => FlagKind::Func(f.clone()),
+            FlagKind::BoolFunc(f) => FlagKind::BoolFunc(f.clone()),
             FlagKind::Duration(c) => FlagKind::Duration(c.clone()),
             FlagKind::Float64(c) => FlagKind::Float64(c.clone()),
             FlagKind::String(c) => FlagKind::String(c.clone()),
@@ -229,6 +252,20 @@ impl FlagSet {
 
     pub fn NArg(&self) -> int {
         self.args.len() as int
+    }
+
+    // go: none — goish-only placement: this FlagSet is hand-written
+    // and lives in a module root, where GOISH015 forbids an anchored
+    // port. Go's is FlagSet.Arg, flag.go line 720.
+    /// `(*FlagSet).Arg(i)` — the i'th remaining
+    /// argument, or "" when out of range. Go returns the empty string
+    /// rather than panicking, which is what lets `flag.Arg(0)` be read
+    /// unguarded.
+    pub fn Arg(&self, i: int) -> string {
+        if i < 0 || i >= crate::int(self.args.len()) {
+            return string::new();
+        }
+        return self.args[i as usize].clone();
     }
 
     pub(crate) fn find_def(&self, name: &string) -> Option<usize> {

@@ -8,8 +8,9 @@
 // provenance anchor — the whole package read as unverified. One file
 // per Go file is what lets each be anchored and diffed.
 //
-// persist.go (ServerConn/ClientConn) is not ported; it is deprecated
-// in Go and needs a pluggable net.Conn.
+// persist.go (ServerConn/ClientConn) IS ported, in persist.rs — the
+// claim that it is not outlived the file by some margin. Deprecated
+// in Go, and pinned against 1.25.5 by examples/http_persist_smoke.rs.
 //
 // This file is a module root, so it carries no `// go:` anchors.
 
@@ -21,7 +22,12 @@ pub mod httputil;
 pub mod persist;
 pub mod reverseproxy;
 
-pub use dump::{dumpConn, outgoingLength, valueOrDefault, DumpRequest, DumpResponse};
+// DumpRequestOut is exported here because Go exports it. It was
+// reachable only as `httputil::dump::DumpRequestOut` before, which is
+// not the name Go users write.
+pub use dump::{
+    dumpConn, outgoingLength, valueOrDefault, DumpRequest, DumpRequestOut, DumpResponse,
+};
 pub use httputil::{ErrLineTooLong, NewChunkedReader, NewChunkedWriter};
 pub(crate) use reverseproxy::register_httputil_impls;
 pub use reverseproxy::{

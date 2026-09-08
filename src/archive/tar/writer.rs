@@ -61,6 +61,13 @@ impl regFileWriter {
         return self.nb;
     }
     // go: sdk 1.25.5 archive/tar/writer.go:569-571 regFileWriter.physicalRemaining
+    //
+    // UNREACHABLE here, and deliberately: Go calls this only from
+    // `sparseFileWriter` (writer.go:611, 638, 668), and the header's
+    // GOISH018 ignore records that this port stubs the sparse half of
+    // the writer. Ported ahead of its caller rather than dead — it
+    // costs nothing and is what the sparse path will need — but nothing
+    // reaches it today, so do not read it as live.
     fn physicalRemaining(&self) -> i64 {
         return self.nb;
     }

@@ -1,6 +1,6 @@
 // math/rand/v2 — pseudo-random number generation.
 //
-// Reference: /share/go/src/math/rand/v2/{rand.go,pcg.go}
+// Reference: math/rand/v2/{rand.go,pcg.go}
 //
 // Slim deviations:
 //   * globalRand is a pair of AtomicU64s seeded lazily from Now().

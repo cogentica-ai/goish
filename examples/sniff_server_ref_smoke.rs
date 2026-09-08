@@ -130,22 +130,18 @@ const GO: [&str; 27] = [
     "explicit-te      ct=-                               cl=-    te=chunked  date=<present>",
     "empty-ct         ct=                                cl=14   te=-        date=<present>",
     "big-body         ct=text/plain; charset=utf-8       cl=614  te=-        date=<present>",
-    // KNOWN GAP. Go's line is:
-    //   "ct-after-write   ct=text/html; charset=utf-8        cl=14   te=-        date=<present>"
-    // Go snapshots the header map when the first Write reaches the
-    // chunkWriter, so a Content-Type set AFTER the handler has already
-    // written is too late and the sniffed type stands. goish buffers
-    // the whole body and builds the head at flush time, so the late
-    // Set is still visible and wins.
+    // This line was a KNOWN GAP and is now Go's. The note here used to
+    // read: "goish buffers the whole body and builds the head at flush
+    // time, so the late Set is still visible and wins", pinning
+    // ct=application/too-late, and it named the fix — "goish's writer
+    // has no 'headers are now frozen' moment".
     //
-    // This is the eager-vs-deferred difference behind the other
-    // structural gaps in this port: goish's writer has no "headers are
-    // now frozen" moment. Closing it means writing the head at the
-    // first Write, which is the buffered design itself. A handler that
-    // sets Content-Type after writing is doing something Go documents
-    // as ineffective, so goish is the more forgiving of the two here
-    // rather than the more wrong.
-    "ct-after-write   ct=application/too-late            cl=14   te=-        date=<present>",
+    // It has one now. `respInner.committed` snapshots the header map
+    // when the head is committed, which is what Go does
+    // (`cw.header = w.handlerHeader.Clone()`), so a Content-Type set
+    // after the handler has written is too late and the SNIFFED type
+    // stands — which is this line.
+    "ct-after-write   ct=text/html; charset=utf-8        cl=14   te=-        date=<present>",
     "304-with-hdrs    ct=-                               cl=-    te=-        date=<present>",
     "cl-too-big       ct=text/plain; charset=utf-8       cl=100  te=-        date=<present>",
     // Was a KNOWN GAP; closed by the Content-Length bound in

@@ -1,6 +1,6 @@
 // sync::Pool — Go's `sync.Pool` (slim).
 //
-// Reference: /share/go/src/sync/pool.go.
+// Reference: sync/pool.go.
 //
 // Slim deviations:
 //

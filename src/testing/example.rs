@@ -1,7 +1,6 @@
 // go: package testing
 //
 // go: file testing/example.go decls: RunExamples, runExamples, InternalExample.processRunResult
-// goishlint:ignore GOISH021 InternalExample — the type is ported; the
 // three funcs beside processRunResult are not.
 // runExample lives in src/testing/run_example.rs, mirroring Go's own
 // split of run_example.go from this file.

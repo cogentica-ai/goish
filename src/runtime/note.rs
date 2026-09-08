@@ -1,7 +1,7 @@
 // runtime::note — one-shot signal modeled after Go's `note` primitive.
 //
 // Verbatim port of the futex-backed implementation at
-// /share/go/src/runtime/lock_futex.go:
+// runtime/lock_futex.go:
 //
 //   func noteclear(n *note)  { n.key = 0 }
 //   func notewakeup(n *note) {

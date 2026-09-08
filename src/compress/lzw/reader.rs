@@ -1,4 +1,4 @@
-// go: file compress/lzw/reader.go decls: errClosed, newReader, Reader.readLSB, Reader.readMSB, Reader.Read, Reader.decode, Reader.Close, Reader.Reset, NewReader, newReader, Reader.init
+// go: file compress/lzw/reader.go decls: errClosed, newReader, Reader.readLSB, Reader.readMSB, Reader.Read, Reader.decode, Reader.Close, Reader.Reset, NewReader, Reader.init
 //
 // The `decls:` manifest above lists reader.go's funcs and methods only.
 // GOISH017 matches a manifest entry against Rust `fn` items, so naming

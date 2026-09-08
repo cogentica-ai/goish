@@ -5,7 +5,32 @@
 //
 // goishlint:ignore GOISH021 emptyCtx — Go embeds `emptyCtx` in `backgroundCtx` and `todoCtx` to share the three no-op methods; Rust has no struct embedding, so the shared body is a macro expanded into each and there is no type left to name.
 // goishlint:ignore GOISH018 contextName, init, propagateCancel, parentCancelCtx, removeChild — `contextName` type-switches over the concrete contexts to find their `String`, which goish reaches through a trait method instead; `init` builds Go's `closedchan`, which goish does not need because a closed `chan` is what `cancel` produces directly; `propagateCancel`, `parentCancelCtx` and `removeChild` serve the parent's `children` map, which goish replaces with a watcher goroutine — see the note on `build_cancel_ctx`.
-// goishlint:ignore GOISH021 backgroundCtx, todoCtx, afterFuncer, afterFuncCtx, stopCtx, goroutines, cancelCtxKey, canceler, closedchan, stringer, timerCtx — `backgroundCtx` and `todoCtx` differ from `emptyCtx` only in their String(), which is not ported; `afterFuncer`/`afterFuncCtx`/`stopCtx`/`canceler`/`timerCtx` are the child-registration machinery the watcher replaces, and `AfterFunc` is written against the watcher instead; `cancelCtxKey` is the unexported key Go's `Cause` walks for, which is a trait method here; `goroutines` is a test-only counter; `closedchan` and `stringer` are covered by the GOISH018 waiver above.
+// Those lint ignores silence the RULES; the coverage count is a
+// separate question, and these three declarations answer it. All
+// three are receiver-qualified and NOT also spelled bare: `String`
+// and `cancel` name methods on half the types in this file, and a
+// bare waiver would take the ported ones out of the denominator too.
+//
+// go: waived timerCtx.String — Go splits cancelCtx and timerCtx, and
+// their Strings differ (".WithCancel" against
+// ".WithDeadline(<when> [<remaining>])"). goish has ONE type with an
+// optional deadline, so its anchored `cancelCtx.String` branches on
+// that and renders both forms; examples/context_string_ref_smoke.rs
+// pins them against Go, the deadline one by prefix because the
+// remaining time is not reproducible.
+// go: waived timerCtx.cancel — the deadline half of Go's
+// child-registration machinery: stop the timer, then delegate to
+// cancelCtx.cancel. goish's watcher replaces that machinery, and the
+// one merged type cancels itself the same way with or without a
+// deadline.
+// go: waived afterFuncCtx.cancel — same machinery, the AfterFunc
+// arm; goish's `AfterFunc` is written against the watcher instead.
+// goishlint:ignore GOISH021 afterFuncer, afterFuncCtx, stopCtx, goroutines, cancelCtxKey, canceler, closedchan, stringer, timerCtx — `backgroundCtx` and `todoCtx` differ from `emptyCtx` only in their String(), which is not ported; `afterFuncer`/`afterFuncCtx`/`stopCtx`/`canceler`/`timerCtx` are the child-registration machinery the watcher replaces, and `AfterFunc` is written against the watcher instead; `cancelCtxKey` is the unexported key Go's `Cause` walks for, which is a trait method here; `goroutines` is a test-only counter; `closedchan` and `stringer` are covered by the GOISH018 waiver above.
+
+// go: waived contextName — contextName type-switches over the concrete contexts to find their String, which goish reaches through a trait method; propagateCancel, parentCancelCtx and removeChild serve the parent's children map, which goish replaces with a watcher goroutine — see the note on build_cancel_ctx.
+// go: waived parentCancelCtx — contextName type-switches over the concrete contexts to find their String, which goish reaches through a trait method; propagateCancel, parentCancelCtx and removeChild serve the parent's children map, which goish replaces with a watcher goroutine — see the note on build_cancel_ctx.
+// go: waived removeChild — contextName type-switches over the concrete contexts to find their String, which goish reaches through a trait method; propagateCancel, parentCancelCtx and removeChild serve the parent's children map, which goish replaces with a watcher goroutine — see the note on build_cancel_ctx.
+// go: waived cancelCtx.propagateCancel — contextName type-switches over the concrete contexts to find their String, which goish reaches through a trait method; propagateCancel, parentCancelCtx and removeChild serve the parent's children map, which goish replaces with a watcher goroutine — see the note on build_cancel_ctx.
 
 extern crate alloc;
 
@@ -337,13 +362,21 @@ impl Context for CancelCtx {
     }
 }
 
-// go: none — goish idiom: Go's `propagateCancel` registers the child
-//     on the parent's `children` map when the parent is itself a
-//     cancelCtx, and falls back to a watcher goroutine otherwise
-//     (context.go:294-323). goish always takes the watcher: one
-//     goroutine per derived context, which exits as soon as EITHER side
-//     fires, so nothing is held alive. `parentCancelCtx` and
-//     `removeChild` exist only to serve the map, so neither is ported.
+// go: none — goish idiom: Go's `propagateCancel` is a METHOD on
+//     `*cancelCtx`, at context.go lines 473-529, and it picks between
+//     THREE registrations: the parent's `children` map when the parent
+//     is itself a cancelCtx, the parent's own `AfterFunc` when it
+//     implements afterFuncer, and a watcher goroutine otherwise. goish
+//     always takes the watcher: one goroutine per derived context,
+//     which exits as soon as EITHER side fires, so nothing is held
+//     alive. `parentCancelCtx` and `removeChild` exist only to serve
+//     the map, so neither is ported.
+//
+//     The early return Go makes before any of that IS ported — a
+//     parent whose Done() is nil never fires, so no watcher is
+//     started; see the guard in `build_cancel_ctx`. Without it every
+//     context derived from Background would carry a goroutine that
+//     could never be woken.
 fn build_cancel_ctx(parent: &Arc<dyn Context>, own_deadline: Option<Time>) -> Arc<CancelCtx> {
     let me = Arc::new(CancelCtx {
         parent: parent.clone(),
@@ -650,7 +683,8 @@ struct ValueCtx {
 impl Context for ValueCtx {
     // go: none — goish idiom: Go's `valueCtx` EMBEDS the parent
     //     Context, so Deadline, Done and Err are promoted for free and
-    //     only Value is written out (context.go:744-748). Rust has no
+    //     only Value is written out; the struct is at context.go lines
+    //     742-745. Rust has no
     //     embedding, so the three forwards are spelled here.
     fn Deadline(&self) -> Option<Time> {
         return self.parent.Deadline();

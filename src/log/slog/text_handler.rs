@@ -12,6 +12,8 @@
 #![allow(non_snake_case)]
 // goishlint:ignore GOISH018 byteSlice — Go's `[]byte` fast path in `appendTextValue` reflects over the boxed `any` to spot a byte slice; goish's `Value` cannot hold one, so there is nothing for the path to match.
 
+// go: waived byteSlice — Go's []byte fast path in appendTextValue reflects over the boxed any to spot a byte slice; goish's Value cannot hold one, so there is nothing for the path to match.
+
 extern crate alloc;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
