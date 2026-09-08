@@ -538,13 +538,46 @@ extern "C" fn on_g_panic_aborted() -> ! {
 
     if !goexiting {
         // Cleanups already ran in the `#[panic_handler]` (where the
-        // panicked stack frames were still valid). Here we're on a
-        // fresh top-of-stack frame; just print, clear the panicking
-        // flag, and exit.
+        // panicked stack frames were still valid). One of those
+        // cleanups may have been a `defer!{ recover!() }`, and
+        // `recover!()` TAKES the value out of `g.panic_value`. So an
+        // empty slot here means the panic was explicitly recovered,
+        // and a full one means nobody handled it.
+        //
+        // That distinction decides whether the process lives. An
+        // unrecovered panic ends a Go program with a nonzero status;
+        // goish used to print "recovered, scheduler continuing" for
+        // BOTH cases and carry on, which is wrong twice over. It
+        // reports a handled panic when none was handled, and it
+        // continues with the panicked goroutine's frame abandoned
+        // mid-flight — every epilogue that frame owed is now missing.
+        // `sync::WaitGroup::Go` is the case that bit: its `Done()`
+        // never ran, so `Wait()` blocked forever and the process hung
+        // with all scheduler threads parked (issue #6). A useful panic
+        // became a deadlock.
+        //
+        // On no curg — which should not be reachable, since the
+        // handler only jumps here for a G with `panic_recover`
+        // installed — treat it as unrecovered. Exiting on an
+        // impossible path is the safe direction.
+        let recovered = current_m()
+            .lock()
+            .curg
+            .map(|g_ptr| unsafe { (*g_ptr.as_ptr()).panic_value.lock().is_none() })
+            .unwrap_or(false);
+
+        if !recovered {
+            const FATAL: &[u8] =
+                b"goish: unrecovered panic in goroutine, exiting with status 2\n";
+            crate::syscall::Write(crate::syscall::STDERR, FATAL.as_ptr(), FATAL.len());
+            crate::syscall::Exit(2);
+        }
+
         const MSG: &[u8] = b"goish: goroutine recovered from panic, scheduler continuing\n";
         crate::syscall::Write(crate::syscall::STDERR, MSG.as_ptr(), MSG.len());
 
-        // Increment the per-process panicked-G counter for diagnostics.
+        // Counts RECOVERED panics now. An unrecovered one no longer
+        // reaches this line, and a Goexit never did.
         G_PANIC_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     }
 

@@ -22,7 +22,7 @@ use core::sync::atomic::{AtomicI64, Ordering};
 
 use goish::runtime::sched;
 use goish::sync::WaitGroup;
-use goish::{defer, go, syscall, KB};
+use goish::{defer, go, recover, syscall, KB};
 
 fn print(s: &[u8]) {
     syscall::Write(syscall::STDOUT, s.as_ptr(), s.len());
@@ -81,8 +81,18 @@ fn main() {
         let wg = WaitGroup::new();
 
         // ── Goroutine A: panics with 3 defers. Should record 3, 2, 1
-        // (LIFO) before recovery + Done().
+        // (LIFO), then recover.
+        //
+        // The `recover!()` is load-bearing now. An UNRECOVERED panic
+        // ends the process with status 2, as it ends a Go program
+        // (issue #6) — this smoke is about defer bodies running on the
+        // panic path, not about surviving an unhandled one, so it says
+        // out loud that the panic is handled. Registered first, so it
+        // runs LAST and the 3-2-1 trace order is untouched.
+        // panic_fatal_ref_smoke covers the unrecovered case, in a
+        // subprocess where an exit status can actually be asserted.
         wg.GoStack(32 * KB, || {
+            defer! { let _ = recover!(); }
             defer! { record(1); }
             defer! { record(2); }
             defer! { record(3); }
@@ -97,10 +107,11 @@ fn main() {
             record(200);
         });
 
-        // Manual Done() to compensate for goroutine A's missing Done()
-        // (its closure was abandoned by panic recovery before Done()
-        // ran).
-        wg.Done();
+        // No compensating Done() any more, and adding one back would
+        // now BREAK this: `WaitGroup::Go` defers its `Done()` the way
+        // Go does (sync/waitgroup.go:238), so goroutine A's decrement
+        // runs on the panic cleanup walk. A manual one would be a
+        // third Done() against two Adds.
         wg.Wait();
 
         // Wait for BOTH halves of the recovery to land: the counter

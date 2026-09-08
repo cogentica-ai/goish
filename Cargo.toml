@@ -3626,3 +3626,23 @@ path = "examples/os_readfile_ref_smoke.rs"
 [[example]]
 name = "asn1_bitstring_ref_smoke"
 path = "examples/asn1_bitstring_ref_smoke.rs"
+
+[[example]]
+name = "panic_probe_waitgroup"
+path = "examples/panic_probe_waitgroup.rs"
+
+[[example]]
+name = "panic_probe_recover"
+path = "examples/panic_probe_recover.rs"
+
+[[example]]
+name = "panic_probe_bare"
+path = "examples/panic_probe_bare.rs"
+
+[[example]]
+name = "panic_probe_goexit"
+path = "examples/panic_probe_goexit.rs"
+
+[[example]]
+name = "panic_fatal_ref_smoke"
+path = "examples/panic_fatal_ref_smoke.rs"

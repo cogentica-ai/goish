@@ -1165,6 +1165,36 @@ is at `crypto/ecdsa/ecdsa.rs:508`, and ROADMAP.md 2 has recorded it as
 done for some time. It was still listed here as open on 2026-09-06,
 which is the hazard of keeping the same fact in two documents.)
 
+### The goroutine panic model
+
+An unrecovered panic in any goroutine ends the process with status 2,
+as it ends a Go program. goish used to print "goroutine recovered from
+panic, scheduler continuing" and keep going, whether or not anything
+had recovered it (issue #6). That was wrong twice over: it reported a
+panic as handled when none was, and it continued with the panicked
+frame abandoned mid-flight, so every epilogue that frame still owed was
+skipped. `sync::WaitGroup::Go`'s `Done()` was one, which turned a
+useful panic into a permanent hang — all scheduler threads parked, and
+SIGTERM would not clear it.
+
+The discriminator is `g.panic_value`: `recover!()` TAKES it, so an
+empty slot at the recovery point means a deferred `recover!()` handled
+the panic and the scheduler may continue. A full one means nobody did.
+`runtime::Goexit` lands on the same recovery gobuf and is told apart by
+the `goexiting` flag; it stays non-fatal and is not counted as a panic.
+
+`panic_fatal_ref_smoke` pins all four cases by running probe binaries
+as SUBPROCESSES and asserting their exit statuses, which is the only
+place a process-level outcome can actually be observed.
+
+**The limitation that remains.** A recovered goroutine still cannot
+resume its abandoned Rust stack — that needs compiler-emitted unwind
+tables (nightly + `-Zbuild-std` on no_std). So a recovered panic still
+skips the rest of the closure. Where that matters for a counter,
+the counter has to be settled by a `defer!`, which is what Go does
+anyway: `WaitGroup.Go` is `defer wg.Done()` in Go's own source
+(sync/waitgroup.go:238) and is now a `defer!` here.
+
 ### Structural divergences, pinned by assertions
 
 - ~~`time::Parse` rejects a numeric zone offset~~ — **no longer true,
