@@ -242,7 +242,7 @@ impl Root {
                     }
                 }
             } else {
-                let fd = syscall::Openat(
+                let fd = syscall::__openat_raw(
                     dirfd,
                     cb.as_ptr(),
                     syscall::O_RDONLY

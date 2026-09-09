@@ -180,7 +180,7 @@ impl Root {
                 let mut cb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
                 cb.extend_from_slice(super::bytes_of(comp));
                 cb.push(0);
-                let fd = syscall::Openat(
+                let fd = syscall::__openat_raw(
                     dirfd,
                     cb.as_ptr(),
                     flag32 | syscall::O_NOFOLLOW | syscall::O_CLOEXEC,

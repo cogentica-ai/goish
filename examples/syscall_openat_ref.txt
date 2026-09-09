@@ -1,0 +1,9 @@
+constants	65536	256	131072	2048	524288
+root	true	true
+child	true	true	true
+file-directory	true	true
+nofollow-directory	true	20
+missing	true	true
+embedded-nul	true	true
+closed-dirfd	true	true
+absolute-ignores-dirfd	true	true

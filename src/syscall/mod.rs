@@ -24,7 +24,9 @@
 // carries 100 of them, all verified.
 //
 // This note exists because the unanchored-declaration scan reports
-// these 54 every time it is run. They are not a gap.
+// these 54 every time it is run. They are not a gap. Openat is the exception:
+// it was added later with the exact Go-shaped string/(fd,error) contract and
+// therefore carries its SDK anchor at the declaration.
 //
 // Calling convention (SysV / Linux x86-64 syscall):
 //   rax = syscall number
@@ -38,7 +40,6 @@ use core::arch::asm;
 pub const SYS_READ: usize = 0;
 pub const SYS_WRITE: usize = 1;
 pub const SYS_OPEN: usize = 2;
-pub const SYS_OPENAT: usize = 257;
 pub const SYS_CLOSE: usize = 3;
 pub const SYS_MMAP: usize = 9;
 pub const SYS_MPROTECT: usize = 10;
@@ -90,6 +91,7 @@ pub const SYS_EXECVE: usize = 59;
 pub const SYS_WAIT4: usize = 61;
 pub const SYS_DUP2: usize = 33;
 pub const SYS_DUP3: usize = 292;
+pub const SYS_OPENAT: usize = 257;
 
 // Signal numbers (Linux). Mirror /usr/include/asm-generic/signal.h.
 pub const SIGHUP: i32 = 1;
@@ -635,25 +637,61 @@ pub const EOPNOTSUPP: Errno = Errno(95);
 /// Open flags. Subset of `<fcntl.h>`.
 pub const O_RDONLY: i32 = 0;
 pub const O_CLOEXEC: i32 = 0o2_000_000;
-/// `O_PATH` — obtain an fd that references a location without opening
-/// the file itself (follows symlinks; needs only search permission).
-pub const O_PATH: i32 = 0o10_000_000;
-
-/// `O_NOFOLLOW` — fail with ELOOP if the final component is a symlink.
+// go: sdk 1.25.5 syscall/zerrors_linux_amd64.go:626 O_DIRECTORY
+/// Fail with ENOTDIR unless the target is a directory.
+pub const O_DIRECTORY: i32 = 0o200_000;
+// go: sdk 1.25.5 syscall/zerrors_linux_amd64.go:633 O_NOCTTY
+pub const O_NOCTTY: i32 = 0o400;
+// go: sdk 1.25.5 syscall/zerrors_linux_amd64.go:634 O_NOFOLLOW
+/// Fail with ELOOP if the final component is a symlink.
 ///
 /// This is the whole basis of `os.Root`: resolving a path one component
 /// at a time with openat(2) and O_NOFOLLOW is what makes a symlink
 /// unable to carry the walk out of the root, no matter who wrote it.
 pub const O_NOFOLLOW: i32 = 0o400_000;
-
-/// `O_DIRECTORY` — fail with ENOTDIR unless the target is a directory.
-pub const O_DIRECTORY: i32 = 0o200_000;
+/// `O_PATH` — obtain an fd that references a location without opening
+/// the file itself (follows symlinks; needs only search permission).
+pub const O_PATH: i32 = 0o10_000_000;
 
 /// `open(2)` — open a file. `path` must be a NUL-terminated C string.
 /// Returns the new fd on success, or a negative `-errno` on error.
 #[allow(non_snake_case)]
 pub fn Open(path: *const u8, flags: i32, mode: i32) -> i32 {
     unsafe { syscall3(SYS_OPEN, path as usize, flags as usize, mode as usize) as i32 }
+}
+
+// go: sdk 1.25.5 syscall/syscall_linux.go:285-287 Openat
+// Go: func Openat(dirfd int, path string, flags int, mode uint32) (fd int, err error)
+/// `syscall.Openat(dirfd, path, flags, mode)` — open `path` relative to
+/// `dirfd`, or relative to the current directory for `AT_FDCWD`. Absolute
+/// paths ignore `dirfd`, as Linux specifies. Kernel failures return
+/// `(-1, error)`; an embedded NUL returns `(0, EINVAL)` before the syscall,
+/// matching Go's named-result zero value.
+#[allow(non_snake_case)]
+pub fn Openat<P: Into<crate::string>>(
+    dirfd: crate::int,
+    path: P,
+    flags: crate::int,
+    mode: u32,
+) -> (crate::int, crate::error) {
+    let path = path.into();
+    if path.as_bytes().contains(&0) {
+        return (0, EINVAL.into());
+    }
+    let path = __c_path(path);
+    let rc = unsafe {
+        syscall4(
+            SYS_OPENAT,
+            dirfd as usize,
+            path.as_ptr() as usize,
+            flags as usize,
+            mode as usize,
+        )
+    };
+    if rc < 0 {
+        return (-1, Errno(-crate::int32(rc)).into());
+    }
+    return (crate::int(rc), crate::errors::nil);
 }
 
 /// `close(2)` — close a file descriptor.
@@ -767,10 +805,13 @@ pub fn Fstat(fd: i32, out: &mut Stat_t) -> i32 {
     unsafe { syscall2(SYS_FSTAT, fd as usize, out as *mut Stat_t as usize) as i32 }
 }
 
-// go: none — goish-only: Go's `syscall.Openat` takes a Go string and
-// returns `(int, error)`; this takes a NUL-terminated pointer and
-// returns the raw -errno, for the reason the banner at the top of this
-// file gives for every wrapper here.
+// go: none — goish-only: the raw form of openat(2), for callers that
+// already hold a NUL-terminated buffer and want the errno rather than
+// an `error`. `Openat` above is the Go-shaped API (Go string in,
+// `(fd, error)` out) and is what a port of Go code should call; this
+// is the internal one `os::Root`'s walk uses, because that walk runs
+// once per path COMPONENT and needs to branch on ELOOP/ENOTDIR
+// directly to decide whether to follow a symlink.
 /// `openat(dirfd, path, flags, mode)` — open `path` RELATIVE to the
 /// directory `dirfd` refers to, rather than to the process cwd.
 /// `path` must be NUL-terminated; returns the fd or the raw -errno.
@@ -780,7 +821,7 @@ pub fn Fstat(fd: i32, out: &mut Stat_t) -> i32 {
 /// process cwd, and combined with O_NOFOLLOW it is how `os.Root`
 /// refuses a traversal instead of merely detecting one.
 #[allow(non_snake_case)]
-pub fn Openat(dirfd: i32, path: *const u8, flags: i32, mode: i32) -> i32 {
+pub fn __openat_raw(dirfd: i32, path: *const u8, flags: i32, mode: i32) -> i32 {
     let r = unsafe {
         syscall4(
             SYS_OPENAT,
