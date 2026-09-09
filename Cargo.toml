@@ -3654,3 +3654,7 @@ path = "examples/panic_probe_goexit.rs"
 [[example]]
 name = "panic_fatal_ref_smoke"
 path = "examples/panic_fatal_ref_smoke.rs"
+
+[[example]]
+name = "errors_valueis_ref_smoke"
+path = "examples/errors_valueis_ref_smoke.rs"

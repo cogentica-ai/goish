@@ -245,6 +245,47 @@ where
     return (T::__goish_nil_ref(), false);
 }
 
+// go: none — goish idiom: Go needs no such helper. Its `errors.Is`
+//     compares two interface values with `==`, which for a COMPARABLE
+//     dynamic type is a type-and-value comparison, so a named `int32`
+//     error matches another of the same value for free. goish's `error`
+//     is an `Arc<dyn ErrorTrait>` and `==` on it is pointer identity,
+//     so converting the same value twice yields two handles that do not
+//     match (issue #12).
+/// The `Is` hook for a COMPARABLE value-typed error: true when `target`
+/// holds the same concrete type with an equal value.
+///
+/// Write it as a one-liner on any value error that Go would compare
+/// with `==`:
+///
+/// ```ignore
+/// #[derive(Clone, Copy, PartialEq, Eq)]
+/// struct ErrorCode(i32);
+///
+/// impl ErrorTrait for ErrorCode {
+///     fn Error(&self) -> string { … }
+///     fn Is(&self, target: &error) -> bool { errors::ValueIs(self, target) }
+/// }
+/// ```
+///
+/// **Why this is not automatic.** Rust cannot derive value equality
+/// from `dyn Any` without specialization, which is unstable. Nor can it
+/// be faked by comparing `Error()` strings: the reproducer in issue #12
+/// has `ErrorCode(7)` and `ErrorCode(9)` BOTH rendering as `"code"`, so
+/// a message comparison would report two distinct codes as equal — a
+/// false positive in exactly the routing decision the hook exists to
+/// make. Opting in per type is the honest option, and it is one line.
+///
+/// The hook is Go's own extension point (`interface{ Is(error) bool }`),
+/// so an error using it stays a faithful port; `syscall.Errno.Is` is the
+/// standard library's example of the same mechanism.
+pub fn ValueIs<T: ErrorTrait + PartialEq>(me: &T, target: &error) -> bool {
+    return match AsConcrete::<T>(target) {
+        Some(other) => me == other,
+        None => false,
+    };
+}
+
 // go: none — goish idiom: Go writes `switch err := err.(type) { case
 //     *PathError: … }` — a SHALLOW type switch on the concrete type,
 //     which does not walk the chain. `errors::As` walks; `AsIface`
