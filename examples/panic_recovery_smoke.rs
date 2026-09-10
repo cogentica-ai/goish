@@ -1,15 +1,23 @@
-// panic_recovery_smoke — verify that a panicking goroutine doesn't
-// kill the process. Spawns N goroutines via WaitGroup; one panics,
-// the rest complete normally; the program exits 0.
+// panic_recovery_smoke — verify that a RECOVERED panic in a goroutine
+// doesn't kill the process. Spawns N goroutines via WaitGroup; one
+// panics and recovers, the rest complete normally; the program exits 0.
+//
+// The `recover!()` is load-bearing. An UNRECOVERED panic ends the
+// process with status 2, as it ends a Go program (issue #6) — this
+// smoke is about the scheduler reclaiming a panicked G and the others
+// carrying on, not about surviving an unhandled panic.
+// panic_fatal_ref_smoke covers the unrecovered case, in subprocesses
+// where an exit status can actually be asserted.
 //
 // What this proves:
 //   - `g_entry` installs the panic_recover gobuf
 //   - `#[panic_handler]` detects user-G panic and `gogo`s to recovery
 //   - `on_g_panic_aborted` chains to `goexit` so the G is reclaimed
-//   - WaitGroup's Add/Done balance still holds — the panicking G's
-//     `Done()` is NOT called (its closure was abandoned), so we use
-//     a separate `survivor_count` counter for "did we complete" rather
-//     than rely on the WG counter to exactly hit 0.
+//   - the panicked G still cannot resume its abandoned Rust stack, so
+//     SURVIVOR_COUNT — not the WG counter — is what says "did we
+//     complete". `WaitGroup::Go` defers its `Done()` the way Go writes
+//     it, so the counter balances on both paths and no compensating
+//     `Done()` is needed (one would now be a decrement too many).
 //   - G_PANIC_COUNT is exactly 1 after the run
 
 #![no_std]
@@ -21,7 +29,7 @@ use core::sync::atomic::{AtomicI64, Ordering};
 
 use goish::runtime::sched;
 use goish::sync::WaitGroup;
-use goish::{go, syscall, KB};
+use goish::{defer, go, recover, syscall, KB};
 
 fn print(s: &[u8]) {
     syscall::Write(syscall::STDOUT, s.as_ptr(), s.len());
@@ -57,18 +65,23 @@ fn main() {
                 if i == 4 {
                     // One specific goroutine panics. The others
                     // should still complete and increment SURVIVOR_COUNT.
+                    //
+                    // It recovers explicitly: an unrecovered panic is
+                    // fatal now (issue #6), and what this smoke is
+                    // about is the scheduler continuing, which only a
+                    // recovered panic entitles it to do.
+                    defer! { let _ = recover!(); }
                     panic!("intentional panic from goroutine #4");
                 }
                 SURVIVOR_COUNT.fetch_add(1, Ordering::AcqRel);
             });
         }
 
-        // Wait for everyone — including the panicked one. The
-        // panicked G's Done() is NOT called (its closure was
-        // abandoned mid-execution by the gogo recovery), so the WG
-        // counter never reaches 0. We work around this by manually
-        // calling Done() once for the panicked G.
-        wg.Done();
+        // Wait for everyone — including the panicked one. Its Done()
+        // runs on the panic cleanup walk, because `WaitGroup::Go`
+        // defers it exactly as Go does (sync/waitgroup.go:238). The
+        // manual compensating `wg.Done()` that used to sit here would
+        // now be a third decrement against two Adds.
         wg.Wait();
 
         // wg.Wait() unblocks once the WG counter hits 0, which can
