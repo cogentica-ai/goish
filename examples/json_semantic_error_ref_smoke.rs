@@ -37,6 +37,14 @@
 // escaping, the `within` clause's presence at a field and absence at
 // the root, the literal-and-cause form for `1.5` into an integer — is
 // byte-for-byte Go, from tools/gen_json_semerr_ref.go.
+//
+// The `field_custom` / `custom_is` pair is the last of issue #10's six
+// requirements: an adapter wrapping a custom pointee error at the
+// decoder's current path "without parsing or replacing the cause
+// text". The cause keeps its own words, gains the kind, the Go type
+// and the pointer, and `errors::Is` still finds the sentinel through
+// the wrap — so a caller can route on the error AND report where it
+// happened.
 
 #![no_std]
 #![no_main]
@@ -57,7 +65,7 @@ use goish::types::int;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
-const GO: [&str; 16] = [
+const GO: [&str; 18] = [
     "root_num_str       json: cannot unmarshal JSON number into Go string",
     "root_bool_str      json: cannot unmarshal JSON boolean into Go string",
     "root_arr_str       json: cannot unmarshal JSON array into Go string",
@@ -79,6 +87,12 @@ const GO: [&str; 16] = [
     "escaped_name       json: cannot unmarshal JSON number into Go string within \"/a~1b\"",
     "repro_text         json: cannot unmarshal JSON number into Go string within \"/trigger\"",
     "repro_nonnil       true",
+    // Go: `... into Go json_test.Custom within "/c": Custom: expected
+    // string or object, got number`. The type name is whatever the
+    // adapter passes, so this one says api.Custom the way the
+    // downstream port's would.
+    "field_custom       json: cannot unmarshal JSON number into Go api.Custom within \"/c\": Custom: expected string or object, got number",
+    "custom_is          true",
 ];
 
 #[goish::reflect]
@@ -95,6 +109,70 @@ struct Outer {
     In: Inner,
     #[tag(r#"json:"sl""#)]
     Sl: slice<Inner>,
+}
+
+/// A process-wide sentinel the caller routes on, the way a Go package
+/// exports `var ErrX = errors.New(...)`.
+static SENTINEL: goish::sync::Mutex<Option<error>> = goish::sync::Mutex::new(None);
+fn err_custom() -> error {
+    let mut g = SENTINEL.Lock();
+    if g.is_none() {
+        *g = Some(goish::errors::New(string::from_static(
+            "Custom: expected string or object, got number",
+        )));
+    }
+    return g.as_ref().unwrap().clone();
+}
+
+/// A custom pointee decoder that rejects with its OWN error, then asks
+/// the runtime to attach the kind, the Go type and the path — issue
+/// #10's fourth requirement, "without parsing or replacing the cause
+/// text".
+#[derive(Default, Clone, PartialEq)]
+struct Custom {
+    N: int,
+}
+
+impl json::UnmarshalerFrom for Custom {
+    fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
+        // Peek BEFORE consuming (the kind is gone afterwards) and wrap
+        // AFTER (StackPointer names the value just read).
+        let kind = dec.PeekKind();
+        let (_, e) = dec.ReadValue();
+        if e != nil {
+            return e;
+        }
+        if kind != '"' && kind != '{' {
+            return json::NewSemanticError(
+                dec,
+                kind,
+                string::from_static("api.Custom"),
+                err_custom(),
+            );
+        }
+        return nil;
+    }
+}
+
+/// A hand-written object adapter holding one — the shape the
+/// downstream generator emits.
+#[derive(Default)]
+struct HasCustom {
+    c: Option<Custom>,
+}
+
+impl json::UnmarshalerFrom for HasCustom {
+    fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
+        let (_, e) = dec.ReadToken(); // {
+        if e != nil {
+            return e;
+        }
+        let (_, e) = dec.ReadToken(); // "c"
+        if e != nil {
+            return e;
+        }
+        return self.c.UnmarshalJSONFrom(dec);
+    }
 }
 
 /// Issue #10's reproducer, verbatim: an object adapter that delegates
@@ -205,6 +283,21 @@ fn main() {
             "%-18s %v",
             string::from_static("repro_nonnil"),
             value.trigger.is_some()
+        ),
+    );
+
+    // A custom pointee error, wrapped with the runtime's context.
+    let mut hc = HasCustom::default();
+    let e = json::Unmarshal(&b"{\"c\":5}"[..], &mut hc, []);
+    row(&mut ln, "field_custom", e.clone());
+    // The cause survives wrapping, so a caller routes on the sentinel
+    // AND reads the path. Go: errors.Is(err, errCustom) == true.
+    chk(
+        &mut ln,
+        &fmt::Sprintf!(
+            "%-18s %v",
+            string::from_static("custom_is"),
+            goish::errors::Is(e, err_custom())
         ),
     );
 

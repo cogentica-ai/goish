@@ -419,6 +419,40 @@ pub(crate) fn __kind_word(k: jsontext::Kind) -> string {
     });
 }
 
+// go: none — goish-only: Go's equivalent constructor is unexported and
+// takes the destination type from reflection. goish has neither, so a
+// hand-written adapter needs a way in.
+/// Wrap a custom decoder's error with Go's context: the arriving JSON
+/// kind, the Go destination type, and the pointer to the value that
+/// failed.
+///
+/// This is the fourth thing issue #10 asks for — a struct-field adapter
+/// wrapping a custom pointee error "at the decoder's current path
+/// without parsing or replacing the cause text". Go produces:
+///
+///     json: cannot unmarshal JSON number into Go api.DocumentIdentifier
+///     within "/file": DocumentIdentifier: expected string or object,
+///     got number
+///
+/// The cause keeps its own text and `errors::Is` still finds it, so a
+/// caller can route on the sentinel AND read the path. Call it with the
+/// kind peeked BEFORE the value is consumed, and after the decoder has
+/// read it — `StackPointer` names the value just read.
+pub fn NewSemanticError<S: Into<string>>(
+    dec: &jsontext::Decoder,
+    kind: jsontext::Kind,
+    go_type: S,
+    cause: error,
+) -> error {
+    return errors::Wrap(SemanticError {
+        JSONKind: __kind_word(kind),
+        JSONValue: string::new(),
+        GoType: go_type.into(),
+        JSONPointer: dec.StackPointer().String(),
+        Err: cause,
+    });
+}
+
 // go: none — goish-only: the constructor Go spells as
 // `newUnmarshalErrorAfter(dec, t, err)`; goish passes the destination
 // type name explicitly because it has no reflection at the codec.
