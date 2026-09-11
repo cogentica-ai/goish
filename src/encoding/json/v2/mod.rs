@@ -26,6 +26,14 @@
 //   - Map marshaling always emits sorted keys (Go sorts only under
 //     `Deterministic(true)`; typescript-go passes Deterministic for
 //     its stable outputs, and stable-by-default costs little here).
+//     Re-measured 2026-09-11: without that option v2 emits Go's map
+//     iteration order, which is randomised — three runs of the same
+//     three-key map gave two different orders — so the divergence is
+//     against something unpinnable, not against a fixed order.
+//   - A map key may be any type implementing `ObjectKey`, which is
+//     how a named string type (`type DocumentUri string`) is used as
+//     an object member name. Go reads the key's Kind from reflection;
+//     goish has none, so the type opts in.
 //   - `null` unmarshals to the target's `Default` zero value
 //     (matching Go's zero-ing behavior for non-pointer targets).
 //   - Fixed arrays use const-generic codecs instead of reflection. `Any`
@@ -719,9 +727,49 @@ impl<T: UnmarshalerFrom + Default + 'static, const N: usize> UnmarshalerFrom for
     }
 }
 
-/// `map<string, V>` ⇄ JSON object (sorted keys; see module header).
-impl<V> MarshalerTo for crate::gomap::map<string, V>
+// go: none — goish-only: Go asks reflection for the key's Kind and
+// encodes a string-kinded key as the member name directly
+// (arshal_default.go:700, `makeMapArshaler`). goish has no reflection,
+// so a named string type says so by implementing this.
+/// A type usable as a JSON object's member name.
+///
+/// Go permits any string-kinded type as a map key — `type DocumentUri
+/// string` is an ordinary `map[DocumentUri]V` — and encodes the key as
+/// the member name with no conversion. A goish newtype over `string`
+/// gets the same treatment by implementing this trait, which is two
+/// delegating lines.
+///
+/// It is deliberately not blanket-implemented over `Into<string>`:
+/// that would also capture types whose Go counterpart is NOT
+/// string-kinded, and Go encodes those differently (a numeric key is
+/// quoted digits, and a `TextMarshaler` key goes through its own
+/// method). Opting in per type keeps the ones that would be wrong out.
+pub trait ObjectKey: Clone + Sized {
+    /// The member name to write for this key.
+    fn __object_key(&self) -> string;
+    /// Rebuild the key from a member name read back.
+    fn __from_object_key(name: string) -> Self;
+}
+
+// go: none — goish-only: see `ObjectKey`. A plain `string` key is the
+// identity case.
+impl ObjectKey for string {
+    // goishlint:ignore GOISH014 — trait method; provenance is on the impl.
+    fn __object_key(&self) -> string {
+        return self.clone();
+    }
+    // goishlint:ignore GOISH014 — trait method; provenance is on the impl.
+    fn __from_object_key(name: string) -> string {
+        return name;
+    }
+}
+
+/// `map<K, V>` ⇄ JSON object, for any string-kinded key (sorted
+/// member names; see the module header for why goish sorts where Go
+/// does so only under `Deterministic(true)`).
+impl<K, V> MarshalerTo for crate::gomap::map<K, V>
 where
+    K: ObjectKey + crate::gomap::GoHash + PartialEq,
     V: MarshalerTo + Clone,
 {
     fn MarshalJSONTo(&self, enc: &mut jsontext::Encoder) -> error {
@@ -731,7 +779,7 @@ where
         }
         let mut pairs: Vec<(string, V)> = Vec::new();
         for (k, v) in self.__iter() {
-            pairs.push((k.clone(), v.clone()));
+            pairs.push((k.__object_key(), v.clone()));
         }
         pairs.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
         for (k, v) in &pairs {
@@ -749,8 +797,9 @@ where
 }
 
 // Go: encoding/json/v2/arshal_default.go:700 — func makeMapArshaler(t reflect.Type) *arshaler
-impl<V> UnmarshalerFrom for crate::gomap::map<string, V>
+impl<K, V> UnmarshalerFrom for crate::gomap::map<K, V>
 where
+    K: ObjectKey + crate::gomap::GoHash + PartialEq,
     V: UnmarshalerFrom + Default + Clone,
 {
     fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
@@ -778,7 +827,7 @@ where
             // Go arshal_default.go:963-985 copies an existing value (or
             // zero for a new key), decodes, then stores EVEN ON ERROR.
             // An error may leave a partially decoded composite, not zero.
-            let key = name.String();
+            let key = K::__from_object_key(name.String());
             let (mut val, _) = self.Get(key.clone());
             let err = val.UnmarshalJSONFrom(dec);
             self.Set(key, val);
