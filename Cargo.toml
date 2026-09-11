@@ -3662,3 +3662,7 @@ path = "examples/errors_valueis_ref_smoke.rs"
 [[example]]
 name = "net_unix_ref_smoke"
 path = "examples/net_unix_ref_smoke.rs"
+
+[[example]]
+name = "json_null_error_ref_smoke"
+path = "examples/json_null_error_ref_smoke.rs"

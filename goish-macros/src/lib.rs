@@ -706,6 +706,16 @@ pub fn reflect(attr: TokenStream, item: TokenStream) -> TokenStream {
     // `v2::JsonOmit` helper trait. Unknown incoming names are skipped
     // (v2 default), and a JSON null resets the struct to its zero
     // value.
+    //
+    // `PeekKind() == 'n'` only says the input STARTS like null, so
+    // `ReadToken` still has to accept it — `nul` and `nulx` peek as 'n'
+    // and are then rejected. The zeroing therefore happens after the
+    // error check, never before: Go leaves the destination untouched
+    // when the token does not parse (measured against
+    // encoding/json/v2 — `nul` into a struct whose Value is 9 returns
+    // the syntax error and leaves it at 9), and doing it in the other
+    // order silently wiped a populated value on malformed input.
+    // Issue #19.
     let _ = write!(
         impl_text,
         "impl ::goish::encoding::json::v2::MarshalerTo for {} {{\n\
@@ -757,8 +767,9 @@ pub fn reflect(attr: TokenStream, item: TokenStream) -> TokenStream {
          \x20   fn UnmarshalJSONFrom(&mut self, __dec: &mut ::goish::encoding::json::jsontext::Decoder) -> ::goish::error {{\n\
          \x20       if __dec.PeekKind() == 'n' {{\n\
          \x20           let (_, __err) = __dec.ReadToken();\n\
+         \x20           if __err != ::goish::errors::nil {{ return __err; }}\n\
          \x20           *self = <Self as ::core::default::Default>::default();\n\
-         \x20           return __err;\n\
+         \x20           return ::goish::errors::nil;\n\
          \x20       }}\n\
          \x20       let (__t, __err) = __dec.ReadToken();\n\
          \x20       if __err != ::goish::errors::nil {{ return __err; }}\n\
