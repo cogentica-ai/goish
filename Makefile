@@ -88,7 +88,7 @@ e2e-clean:
 
 # The lint backlog is grandfathered by scripts/lint_baseline.json; these
 # targets let it shrink and never grow. See scripts/port_lint.py.
-lint: anchors manifests ifaces split-brain
+lint: anchors manifests ifaces split-brain spin-park
 	@python3 scripts/port_lint.py --check --scope $(SCOPE)
 
 # goishlint resolves an anchored symbol by name and never looks at the
@@ -97,6 +97,17 @@ lint: anchors manifests ifaces split-brain
 # was first measured. Cheap to check, so check it every time.
 anchors:
 	@python3 scripts/anchor_check.py $(SCOPE)
+
+# A SpinLock guard held across a park is fatal at run time
+# ("schedule: holding locks"), but only on the contended path that
+# actually parks — which is exactly the path a smoke does not walk.
+# This is the same defect found statically. It FAILS the build: unlike
+# the reporting checks above there is no legitimate instance, and one
+# reached a downstream port before anything here noticed. Allocation
+# under a guard is deliberately not flagged (the allocator masks
+# preemption and cannot park), so a finding here is always real.
+spin-park:
+	@python3 scripts/spin_park_check.py $(SCOPE)
 
 # Go satisfies an interface structurally; goish needs impl + hook +
 # registry entry, and two of the three looks finished while the
