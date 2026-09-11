@@ -47,8 +47,12 @@
 //     where tsc rejects it.
 //   - `WriteValue` emits the raw value verbatim (compact reformat /
 //     re-indent of nested values is not performed).
-//   - StackPointer / StackIndex / OutputOffset / AvailableBuffer /
-//     UnreadBuffer are not ported (unused by the target workloads).
+//   - StackIndex / OutputOffset / AvailableBuffer / UnreadBuffer are
+//     not ported (unused by the target workloads). `StackPointer` WAS
+//     on that list and is now ported on the Decoder — a decode error
+//     that cannot say where it happened is issue #10, and the pointer
+//     was already being built privately for duplicate-name errors. The
+//     Encoder's counterpart is still absent.
 //   - Delimiter lookahead keeps the comma unconsumed on error, rather than
 //     caching Go's peekErr, so repeated PeekKind and the following read agree.
 //   - Raw-value scanning keeps local object namespaces and JSON-pointer paths
@@ -862,6 +866,25 @@ pub struct Decoder {
     opts: Options,
 }
 
+// go: sdk 1.25.5 encoding/json/jsontext/state.go:95 Pointer
+/// Go: "Pointer is a JSON Pointer (RFC 6901) that references a
+/// particular JSON value relative to the root of the top-level JSON
+/// value."
+///
+/// Go declares it as `type Pointer string`; goish makes it a newtype
+/// so it cannot be confused with an ordinary string at a call site.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Pointer(pub string);
+
+impl Pointer {
+    // go: none — goish idiom: Go's Pointer IS a string, so it needs no
+    // accessor; goish's newtype does.
+    /// The pointer text.
+    pub fn String(&self) -> string {
+        return self.0.clone();
+    }
+}
+
 /// `jsontext.NewDecoder(r, opts...)` (decode.go:122).
 pub fn NewDecoder<R: crate::io::Reader + Send + 'static>(
     r: R,
@@ -906,6 +929,61 @@ impl Decoder {
     /// `Decoder.StackDepth()` (decode.go:1131).
     pub fn StackDepth(&self) -> int {
         self.stack.len() as int
+    }
+
+    // go: sdk 1.25.5 encoding/json/jsontext/decode.go:1161-1163 Decoder.StackPointer
+    /// Go: "StackPointer returns a JSON Pointer (RFC 6901) to the most
+    /// recently read value."
+    ///
+    /// The pointer of the value JUST READ, which is the part a port has
+    /// to get right and a happy-path test will not check. Measured
+    /// against Go token by token:
+    ///
+    ///   after `{`       the parent — the frame is open but empty
+    ///   after a NAME    already `/name`, before its value is read
+    ///   after its value still `/name`
+    ///   after `}`       the parent again
+    ///   after `[`       the parent; after the first element `/0`
+    ///
+    /// So an array shows the index of the element just read, not the
+    /// one coming next, and a freshly opened container shows its own
+    /// position rather than anything inside it.
+    ///
+    /// `~` and `/` in a member name are escaped as `~0` / `~1`
+    /// (RFC 6901); without that a name containing `/` would fake a
+    /// path separator and point at a field that does not exist.
+    ///
+    /// This is what lets a decode error say WHERE it happened
+    /// (issue #10); the pointer was already built privately for
+    /// duplicate-name errors.
+    pub fn StackPointer(&self) -> Pointer {
+        let mut out = self.stack_pointer_to_parent();
+        if let Some(&open) = self.stack.last() {
+            let count = self.counts.last().copied().unwrap_or(0);
+            // A container that has not produced a member or element yet
+            // points at itself, not inside itself.
+            if count > 0 {
+                out.push(b'/');
+                if open == b'{' {
+                    if let Some(Some(n)) = self.cur_name.last() {
+                        for &b in n {
+                            match b {
+                                b'~' => out.extend_from_slice(b"~0"),
+                                b'/' => out.extend_from_slice(b"~1"),
+                                _ => out.push(b),
+                            }
+                        }
+                    }
+                } else {
+                    // `counts` is how many elements have been read, so
+                    // the one just read is at count-1.
+                    out.extend_from_slice(
+                        crate::strconv::FormatUint(count - 1, 10).as_bytes(),
+                    );
+                }
+            }
+        }
+        return Pointer(string::from_bytes(&out));
     }
 
     /// Pull more bytes from the source. Returns false at EOF.
