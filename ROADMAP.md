@@ -176,10 +176,30 @@ for `1` round-trips and diverges the moment anything reads the type.
 Why this is not a downcast table: Go dispatches on arbitrary dynamic
 types, including structs and custom marshalers reachable only through
 the interface. goish already has the machinery for a trait surviving
-the `Any` wrap — `#[goish::interface]`'s per-trait registry plus
-`cast!` — so the likely shape is to register `MarshalerTo` /
-`UnmarshalerFrom` that way and have `#[goish::reflect]` emit the
-registration, which covers every generated struct. Not implemented.
+the `Any` wrap — the per-trait registry `#[goish::interface]` emits —
+so `MarshalerTo` is registered that way.
+
+**Marshal: done.** `v2::RegisterAnyMarshaler::<C>()` adds a concrete
+type; `#[goish::reflect]` emits one per struct into `.init_array`, so a
+generated message inside an `any` field needs nothing written by hand.
+`__register_builtin_marshalers` covers the types Go's own decoder
+produces. An unregistered type errors and the message NAMES it, which
+is the difference between a one-line fix and a bisect.
+`json_any_marshal_ref_smoke` pins ten rows against Go.
+
+One trap, found the hard way: `Any` is itself `'static + Sized + Send +
+Sync`, so the blanket `HasDynAny` gives `AsExt::As` a view of the
+NEWTYPE. Every lookup asked the registry about `TypeId::of::<Any>()`
+and missed. Use `self.as_any()`, one level in.
+
+**Still open.**
+
+1. The UNMARSHAL half — the six behaviours above.
+2. `Command.Arguments *[]any` itself still does not compile. A
+   `#[goish::reflect]` struct with an `Option<slice<Any>>` field needs
+   `Any: encoding::json::FromValue`, because the macro also emits the
+   **v1** codec. The v2 work does not reach it; this is the next step
+   for the downstream blocker specifically, and it is smaller than (1).
 
 
 ## 1. `crypto/tls` — the record layer is the last invented code

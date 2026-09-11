@@ -761,6 +761,32 @@ pub fn reflect(attr: TokenStream, item: TokenStream) -> TokenStream {
          }\n",
     );
 
+    // Make the type marshalable when it is held in a `goish::Any`.
+    //
+    // Go's interface arshaler dispatches through reflection and so
+    // reaches every concrete codec for free. goish's registry has to be
+    // told, and the only place that knows both the type and that it HAS
+    // a codec is right here — asking every consumer to register its own
+    // generated structs would be a footgun whose symptom is a runtime
+    // error on one field of one message. Registration is idempotent.
+    let reg_fn = format!("__goish_reg_any_marshal_{}", parsed.name);
+    let reg_slot = format!("__GOISH_REG_ANY_MARSHAL_{}", parsed.name.to_uppercase());
+    let _ = write!(
+        impl_text,
+        "#[doc(hidden)]\n\
+         extern \"C\" fn {reg_fn}() {{\n\
+         \x20   ::goish::encoding::json::v2::RegisterAnyMarshaler::<{name}>();\n\
+         }}\n\
+         #[used]\n\
+         #[doc(hidden)]\n\
+         #[allow(non_upper_case_globals)]\n\
+         #[link_section = \".init_array\"]\n\
+         static {reg_slot}: extern \"C\" fn() = {reg_fn};\n",
+        reg_fn = reg_fn,
+        reg_slot = reg_slot,
+        name = parsed.name
+    );
+
     let _ = write!(
         impl_text,
         "impl ::goish::encoding::json::v2::UnmarshalerFrom for {} {{\n\

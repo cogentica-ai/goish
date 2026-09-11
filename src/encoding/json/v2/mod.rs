@@ -943,3 +943,142 @@ impl UnmarshalerFrom for jsontext::Value {
         nil
     }
 }
+
+// ─── `Any` (Go's `interface{}`) ─────────────────────────────────────
+//
+// Go marshals an interface by dispatching on its DYNAMIC value, which
+// reflection makes free: the interface header already carries the type
+// descriptor, so `arshal_default.go`'s interface arshaler just looks up
+// the concrete type's codec. goish erases into `Arc<dyn AnyVal>`, whose
+// vtable is whatever `AnyVal` declares — and `AnyVal`'s blanket impl
+// cannot conjure a `MarshalerTo` for a `T` that may not have one.
+//
+// So the codec is DECLARED to survive the wrap, the same way reflection
+// is: a per-trait registry keyed on TypeId, exactly what
+// `#[goish::interface]` emits for any other trait. A concrete type
+// becomes marshalable through an `Any` by registering, which
+// `#[goish::reflect]` now does for every struct it generates.
+//
+// Why not a downcast table over the built-in scalars: Go accepts
+// arbitrary dynamically held structs and custom marshalers, so a fixed
+// table would silently refuse exactly the values a port puts in an
+// `any` field. The registry has no such ceiling.
+
+// go: none — goish-only: the reflection Go gets for free. See the
+// block comment above.
+/// Registry of concrete types that can be marshaled through an `Any`.
+#[doc(hidden)]
+pub static __MARSHALER_REGISTRY: crate::sync::Mutex<
+    crate::any::TraitRegistry<dyn MarshalerTo + Send + Sync>,
+> = crate::sync::Mutex::new(crate::any::TraitRegistry::new());
+
+// go: none — goish-only: see `__MARSHALER_REGISTRY`.
+/// Make `C` marshalable when it is held in an `Any`. Idempotent.
+///
+/// `#[goish::reflect]` emits a call for every struct it generates, and
+/// `__register_builtin_marshalers` covers the types Go's own decoder
+/// produces. A hand-written type that goes into an `any` field
+/// registers itself the same way.
+pub fn RegisterAnyMarshaler<C: 'static + MarshalerTo + Send + Sync + Sized>() {
+    // go: none — goish-only: the probe's immutable arm.
+    fn cast<C: 'static + MarshalerTo + Send + Sync>(
+        v: &(dyn ::core::any::Any + Send + Sync),
+    ) -> &(dyn MarshalerTo + Send + Sync + 'static) {
+        return v.downcast_ref::<C>().unwrap();
+    }
+    // go: none — goish-only: the probe's mutable arm.
+    fn cast_mut<C: 'static + MarshalerTo + Send + Sync>(
+        v: &mut (dyn ::core::any::Any + Send + Sync),
+    ) -> &mut (dyn MarshalerTo + Send + Sync + 'static) {
+        return v.downcast_mut::<C>().unwrap();
+    }
+    crate::any::register_with(
+        &__MARSHALER_REGISTRY,
+        crate::any::TraitProbe {
+            concrete: ::core::any::TypeId::of::<C>(),
+            cast: cast::<C>,
+            cast_mut: cast_mut::<C>,
+        },
+    );
+}
+
+// go: none — goish-only: see `__MARSHALER_REGISTRY`.
+impl crate::any::DowncastableFromAny for dyn MarshalerTo + Send + Sync {
+    // goishlint:ignore GOISH014 — trait method; provenance is on the impl.
+    #[inline]
+    fn from_any(
+        any_ref: &(dyn ::core::any::Any + Send + Sync),
+    ) -> Option<&(dyn MarshalerTo + Send + Sync + 'static)> {
+        return crate::any::lookup_with(&__MARSHALER_REGISTRY, any_ref);
+    }
+}
+
+// go: none — goish-only: registering what Go's reflection already
+// knows. Go's interface arshaler can encode ANY dynamic type because
+// reflection reaches every concrete codec; goish's registry has to be
+// told, so at minimum it is told about the types Go's own DECODER
+// produces (bool, string, float64, []any, map[string]any) plus the
+// scalars a port is likely to put in an `any` by hand.
+//
+// Called from `Any`'s marshal path behind a `Once`, not from a package
+// init: `#[goish::reflect]` types register from `.init_array`, and
+// ordering between the two would otherwise be a thing to get right for
+// no benefit.
+fn __register_builtin_marshalers() {
+    static ONCE: crate::sync::Once = crate::sync::Once::new();
+    ONCE.Do(|| {
+        RegisterAnyMarshaler::<bool>();
+        RegisterAnyMarshaler::<string>();
+        RegisterAnyMarshaler::<f32>();
+        RegisterAnyMarshaler::<f64>();
+        RegisterAnyMarshaler::<i8>();
+        RegisterAnyMarshaler::<i16>();
+        RegisterAnyMarshaler::<i32>();
+        RegisterAnyMarshaler::<i64>();
+        RegisterAnyMarshaler::<u8>();
+        RegisterAnyMarshaler::<u16>();
+        RegisterAnyMarshaler::<u32>();
+        RegisterAnyMarshaler::<u64>();
+        RegisterAnyMarshaler::<jsontext::Value>();
+        // The two composites Go's decoder builds, so a decoded `any`
+        // re-marshals without the caller registering anything.
+        RegisterAnyMarshaler::<slice<crate::Any>>();
+        RegisterAnyMarshaler::<crate::gomap::map<string, crate::Any>>();
+    });
+}
+
+// Go: encoding/json/v2/arshal_default.go — the interface arshaler
+// dispatches on the dynamic value; a nil interface writes null.
+impl MarshalerTo for crate::Any {
+    // goishlint:ignore GOISH014 — trait method; provenance is on the impl.
+    // goishlint:ignore GOISH023 — the trailing `match` is a dispatch whose every arm returns.
+    fn MarshalJSONTo(&self, enc: &mut jsontext::Encoder) -> error {
+        // Go: a nil interface is `null`, and this must come first —
+        // the nil marker is a concrete type like any other and would
+        // otherwise miss the registry and be reported unsupported.
+        if self.IsNil() {
+            return enc.WriteToken(jsontext::Null);
+        }
+        __register_builtin_marshalers();
+        // `self.as_any()`, NOT `AsExt::As(self)`. `Any` is itself
+        // 'static + Sized + Send + Sync, so the blanket `HasDynAny`
+        // hands out a view of the NEWTYPE — the registry would be
+        // asked about `TypeId::of::<Any>()` and never match anything.
+        // The wrapped value's view is one level in.
+        match <dyn MarshalerTo + Send + Sync as crate::goany::DowncastableFromAny>::from_any(
+            self.as_any(),
+        ) {
+            Some(m) => return m.MarshalJSONTo(enc),
+            None => {
+                // Naming the type is the whole value of this error:
+                // the fix is a one-line registration for THAT type,
+                // and without the name the caller cannot tell which.
+                let mut msg = string::from_static(
+                    "json: no v2 codec registered for the type held in this Any: ",
+                );
+                msg = msg + string::from_bytes(self.0.__goish_type_name().as_bytes());
+                return errors::New(msg);
+            }
+        }
+    }
+}
