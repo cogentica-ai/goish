@@ -812,12 +812,14 @@ fn test_handshake_canned_server(t: &mut testing::T) {
             goish::net::TCPAddr {
                 IP: [0, 0, 0, 0],
                 Port: 0,
+                Unix: None,
             }
         }
         fn RemoteAddr(&self) -> goish::net::TCPAddr {
             goish::net::TCPAddr {
                 IP: [0, 0, 0, 0],
                 Port: 0,
+                Unix: None,
             }
         }
         fn SetDeadline(&self, _: goish::time::Time) -> goish::errors::error {

@@ -60,6 +60,7 @@ fn addr(a: u8, b: u8, c: u8, d: u8, port: i64) -> Arc<dyn Addr> {
     return Arc::new(TCPAddr {
         IP: [a, b, c, d],
         Port: port,
+        Unix: None,
     });
 }
 
