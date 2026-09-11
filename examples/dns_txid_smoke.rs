@@ -52,11 +52,25 @@ fn main() {
         }
         ids.push(id);
     }
-    // Distinct?
+    // Mostly distinct. NOT all-distinct: that is the birthday problem,
+    // and asserting it was a ~3% flake by construction.
+    //
+    // A DNS transaction ID is 16 bits, so 64 draws from 65536 values
+    // collide with probability 1 - exp(-64*63/(2*65536)) ~= 3.0%. The
+    // old assertion therefore failed about one run in 33 with a
+    // perfectly good generator, and it duly went red on e2e-race, which
+    // runs each example up to 50 times a night.
+    //
+    // Allowing up to three collisions puts the false-failure rate near
+    // 1e-6 while still catching what this exists to catch: a constant
+    // generator gives 63 duplicates, and a counter is caught by the
+    // same-delta test below, not by this one.
+    const MAX_DUPES: usize = 3;
     let mut sorted = ids.clone();
     sorted.sort();
     sorted.dedup();
-    if ids.len() == sorted.len() {
+    let dupes = ids.len() - sorted.len();
+    if dupes <= MAX_DUPES {
         fmt::Printf!("[ok] %-22s %d draws, %d distinct\n", "unpredictable", ids.len() as int, sorted.len() as int);
     } else {
         fmt::Printf!("[!!] %-22s %d draws, only %d distinct\n", "unpredictable", ids.len() as int, sorted.len() as int);

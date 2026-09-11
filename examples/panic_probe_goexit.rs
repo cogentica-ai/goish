@@ -19,7 +19,7 @@ extern crate goish;
 use core::sync::atomic::{AtomicI64, Ordering};
 
 use goish::runtime::sched;
-use goish::{go, runtime, syscall, KB};
+use goish::{go, runtime, syscall, time, KB};
 
 static REACHED: AtomicI64 = AtomicI64::new(0);
 
@@ -50,9 +50,8 @@ fn main() {
             break;
         }
     }
-    for _ in 0..200_000 {
-        sched::Gosched();
-    }
+    // Wall clock, not a spin budget — see panic_probe_bare.
+    time::Sleep(time::Second);
     let m = b"probe: after goexit panics=";
     syscall::Write(syscall::STDOUT, m.as_ptr(), m.len());
     print_dec(sched::G_PANIC_COUNT.load(Ordering::Acquire) as i64);

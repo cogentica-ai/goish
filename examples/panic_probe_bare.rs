@@ -16,7 +16,7 @@
 extern crate goish;
 
 use goish::runtime::sched;
-use goish::{go, syscall, KB};
+use goish::{go, syscall, time, KB};
 
 #[goish::main]
 fn main() {
@@ -24,9 +24,15 @@ fn main() {
         panic!("unhandled panic in a bare goroutine");
     });
     // Give the panicking G time to run and take the process down.
-    for _ in 0..2_000_000 {
-        sched::Gosched();
-    }
+    //
+    // This was a bounded spin of 2_000_000 Gosched()s, which is a
+    // budget rather than a wait: on a loaded CI runner the main G can
+    // exhaust it BEFORE the panicking G is ever scheduled, and then
+    // this probe prints "still alive" and exits 0 — reporting the
+    // opposite of what happened. It cost a red e2e-race on a commit
+    // whose e2e was green. A wall-clock sleep does not care how
+    // contended the machine is.
+    time::Sleep(3 * time::Second);
     let m = b"probe: still alive (BUG: should not reach here)\n";
     syscall::Write(syscall::STDOUT, m.as_ptr(), m.len());
     syscall::Exit(0);
