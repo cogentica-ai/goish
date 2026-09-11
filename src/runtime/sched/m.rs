@@ -158,6 +158,21 @@ pub struct MStorage {
     /// `g0`'s stack (returns `g0`) or on the user G's stack (returns
     /// `m.curg`). Read by `mcall` asm to find the stack to switch to.
     pub g0: AtomicPtr<crate::runtime::sched::g::G>,
+    /// Source location of the OUTERMOST SpinLock acquisition currently
+    /// held by this M, for the `schedule: holding locks` report.
+    ///
+    /// The fatal message used to name only the goroutine's SPAWN site,
+    /// which for anything spawned through `WaitGroup.Go` is a line in
+    /// `runtime/mod.rs` — the same line for every caller in the
+    /// program, so it identified nothing. The lock that was taken is
+    /// the fact worth having.
+    ///
+    /// Debug-only: recording it costs a `#[track_caller]` argument on
+    /// `SpinLock::lock`, which is the hottest path in the scheduler.
+    /// e2e builds debug, so the diagnostic exists exactly where it is
+    /// read.
+    #[cfg(debug_assertions)]
+    pub first_lock_site: AtomicPtr<core::panic::Location<'static>>,
 }
 
 // MStorage holds a raw pointer in UnsafeCell. We assert thread-
@@ -179,6 +194,8 @@ impl MStorage {
             start_running_ns: AtomicI64::new(0),
             current_p: AtomicPtr::new(core::ptr::null_mut()),
             g0: AtomicPtr::new(core::ptr::null_mut()),
+            #[cfg(debug_assertions)]
+            first_lock_site: AtomicPtr::new(core::ptr::null_mut()),
         }
     }
 
@@ -418,6 +435,41 @@ pub fn current_m_locks() -> u32 {
         return 0;
     }
     current_m_storage().locks.load(Ordering::Relaxed)
+}
+
+// go: none — goish-only: Go's lock ranking (runtime/lockrank_off.go)
+// carries the equivalent information; goish records just the one
+// location the fatal report needs.
+/// Remember where the outermost still-held SpinLock was taken.
+/// Called by `runtime::spin` when `m.locks` goes 0 -> 1; a nested
+/// acquisition does not overwrite it, because the outermost guard is
+/// the one whose scope spans the park.
+#[cfg(debug_assertions)]
+pub fn set_first_lock_site(loc: &'static core::panic::Location<'static>) {
+    if !is_tls_ready() {
+        return;
+    }
+    current_m_storage().first_lock_site.store(
+        loc as *const _ as *mut core::panic::Location<'static>,
+        Ordering::Relaxed,
+    );
+}
+
+// go: none — goish-only: see `set_first_lock_site`.
+/// The location stored by `set_first_lock_site`, if any.
+#[cfg(debug_assertions)]
+pub fn first_lock_site() -> Option<&'static core::panic::Location<'static>> {
+    if !is_tls_ready() {
+        return None;
+    }
+    let p = current_m_storage().first_lock_site.load(Ordering::Relaxed);
+    if p.is_null() {
+        return None;
+    }
+    // SAFETY: only ever stored from a `&'static Location`, which the
+    // compiler places in read-only static memory for the lifetime of
+    // the program.
+    return Some(unsafe { &*(p as *const core::panic::Location<'static>) });
 }
 
 /// Per-M signal stack size (M18b-δ.3 — SA_ONSTACK). 32 KiB is well

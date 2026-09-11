@@ -967,32 +967,76 @@ fn check_no_locks_at_schedule(g_ptr: *mut G, what: &[u8]) {
     if locks == 0 {
         return;
     }
-    let w = |s: &[u8]| {
-        crate::syscall::Write(crate::syscall::STDERR, s.as_ptr(), s.len());
+    // Built in one buffer and written once. Several Ms can reach this
+    // in the same instant — that is what a contended lock bug looks
+    // like — and the previous version emitted the message as eight
+    // separate `Write`s, so two Ms produced interleaved nonsense
+    // exactly when the report mattered most. A single write is
+    // atomic enough on a pipe for the lines to stay whole.
+    //
+    // Stack buffer, no allocation: this runs on g0 with m.locks
+    // non-zero, and the allocator masks preemption, so a heap
+    // round-trip here would be one more thing to get wrong while
+    // already reporting a fatal.
+    let mut buf = [0u8; 512];
+    let mut n = 0usize;
+    let mut put = |b: &[u8]| {
+        let room = buf.len() - n;
+        let k = if b.len() < room { b.len() } else { room };
+        buf[n..n + k].copy_from_slice(&b[..k]);
+        n += k;
     };
-    w(b"goish: fatal: schedule: holding locks (in ");
-    w(what);
-    w(b") - a SpinLock guard is held across a park/yield; G spawned at ");
-    if let Some((file, line)) = crate::runtime::segv::lookup(g_ptr) {
-        w(file.as_bytes());
-        w(b":");
-        let mut buf = [0u8; 20];
-        let mut i = buf.len();
-        let mut v = line;
+    let mut put_num = |v: u32, put: &mut dyn FnMut(&[u8])| {
+        let mut d = [0u8; 10];
+        let mut i = d.len();
+        let mut v = v;
         if v == 0 {
             i -= 1;
-            buf[i] = b'0';
+            d[i] = b'0';
         }
         while v > 0 {
             i -= 1;
-            buf[i] = b'0' + (v % 10) as u8;
+            d[i] = b'0' + (v % 10) as u8;
             v /= 10;
         }
-        w(&buf[i..]);
-    } else {
-        w(b"<unknown>");
+        put(&d[i..]);
+    };
+
+    put(b"goish: fatal: schedule: holding locks (in ");
+    put(what);
+    put(b") - a SpinLock guard is held across a park/yield\n");
+    // The lock's own acquisition site, which is the fact that names
+    // the bug. The spawn site alone does not: anything started through
+    // `WaitGroup.Go` reports the same line inside runtime/mod.rs no
+    // matter who called it.
+    //
+    // Debug builds only — recording it costs `SpinLock::lock` a
+    // `#[track_caller]` argument, and that is the scheduler's hottest
+    // path. e2e builds debug, so it is present where it is read.
+    #[cfg(debug_assertions)]
+    {
+        put(b"  outermost lock taken at ");
+        match super::m::first_lock_site() {
+            Some(loc) => {
+                put(loc.file().as_bytes());
+                put(b":");
+                put_num(loc.line(), &mut put);
+            }
+            None => put(b"<unknown>"),
+        }
+        put(b"\n");
     }
-    w(b"\n");
+    put(b"  G spawned at ");
+    if let Some((file, line)) = crate::runtime::segv::lookup(g_ptr) {
+        put(file.as_bytes());
+        put(b":");
+        put_num(line, &mut put);
+    } else {
+        put(b"<unknown>");
+    }
+    put(b"\n");
+
+    crate::syscall::Write(crate::syscall::STDERR, buf.as_ptr(), n);
     crate::syscall::Exit(2);
 }
 

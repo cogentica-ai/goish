@@ -49,6 +49,28 @@ use core::sync::atomic::{AtomicBool, Ordering};
 // ready, so it is safe to take SpinLocks during early `__goish_rt0`
 // (`args::__set`, etc.) without touching `fs:0`.
 
+// go: none — goish-only: Go's equivalent bookkeeping is lock ranking
+// (runtime/lockrank_off.go), which is compiled out unless the runtime
+// is built with the lockrank experiment. goish records one location.
+//
+// In a debug build, remember WHERE the outermost guard was taken, so
+// `schedule: holding locks` can name the lock rather than only the
+// goroutine's spawn site. Only the 0 -> 1 transition records: the
+// outermost guard is the one whose scope spans the park, and a nested
+// acquisition overwriting it would name the innermost instead.
+#[cfg(debug_assertions)]
+#[inline]
+#[track_caller]
+fn bump_m_locks() {
+    if crate::runtime::sched::current_m_locks() == 0 {
+        crate::runtime::sched::set_first_lock_site(core::panic::Location::caller());
+    }
+    crate::runtime::sched::acquirem();
+}
+
+// go: none — goish-only: the release twin of the above, with the
+// location bookkeeping compiled out.
+#[cfg(not(debug_assertions))]
 #[inline]
 fn bump_m_locks() {
     crate::runtime::sched::acquirem();
@@ -179,6 +201,7 @@ impl<T> SpinLock<T> {
     /// is inside the core CAS.
     #[inline(never)]
     #[link_section = "goish_rt_text"]
+    #[cfg_attr(debug_assertions, track_caller)]
     pub fn lock(&self) -> Guard<'_, T> {
         bump_m_locks();
         while self
@@ -226,6 +249,7 @@ impl<T> SpinLock<T> {
 /// `raw_unlock(atom)` exactly once before the SpinLock is dropped.
 #[inline(never)]
 #[link_section = "goish_rt_text"]
+#[cfg_attr(debug_assertions, track_caller)]
 pub unsafe fn raw_lock(atom: *const AtomicBool) {
     // Bump m.locks BEFORE the CAS — same reasoning as `SpinLock::lock`:
     // closes the SIGURG-on-core-CAS deadlock window.
