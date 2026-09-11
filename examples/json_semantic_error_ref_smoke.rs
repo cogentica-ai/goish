@@ -25,13 +25,14 @@
 //                 the codec cannot tell a Go `int` field from an
 //                 `int64` one. Same for `byte`/`uint8`, `rune`/`int32`.
 //                 Closing it needs newtypes for the aliases.
-//   div_slice     Go says `into Go []int`; goish says `slice`. The
-//                 element type is a generic parameter with no name at
-//                 the codec. A `GoTypeName` trait would fix it, but it
-//                 would have to be a bound on every codec impl and
-//                 implemented for every field type — the same shape of
-//                 breaking change that `RegisterAnyUnmarshaler` was
-//                 kept out of, so it is not done on a guess.
+//   div_slice     and div_map: only the ELEMENT name differs, for the
+//                 same alias reason. The composition itself is Go's —
+//                 `[]string`, `[][]string`, `map[string][]int64` — via
+//                 a defaulted `__go_type_name` on `UnmarshalerFrom`,
+//                 which composites override to build from their
+//                 element's. Defaulted rather than a new bound, so an
+//                 existing implementor that says nothing still
+//                 compiles and reports `value`.
 //
 // Everything else — every kind word, every pointer including RFC 6901
 // escaping, the `within` clause's presence at a field and absence at
@@ -65,7 +66,7 @@ use goish::types::int;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
-const GO: [&str; 18] = [
+const GO: [&str; 20] = [
     "root_num_str       json: cannot unmarshal JSON number into Go string",
     "root_bool_str      json: cannot unmarshal JSON boolean into Go string",
     "root_arr_str       json: cannot unmarshal JSON array into Go string",
@@ -78,10 +79,15 @@ const GO: [&str; 18] = [
     "div_int            json: cannot unmarshal JSON string into Go int64",
     // Go: `json: cannot unmarshal JSON number 1.5 into Go int: invalid syntax`
     "div_frac_int       json: cannot unmarshal JSON number 1.5 into Go int64: invalid syntax",
-    // Go: `json: cannot unmarshal JSON object into Go []int`
-    "div_slice          json: cannot unmarshal JSON object into Go slice",
-    // Go: `json: cannot unmarshal JSON array into Go map[string]int`
-    "div_map            json: cannot unmarshal JSON array into Go map",
+    // Go: `... into Go []int` / `map[string]int`. The STRUCTURE is
+    // Go's now; only the element name carries the same int alias, so
+    // a slice of any other type is byte-exact — `slice_string` proves
+    // that, and it is the row that would catch the composition
+    // regressing.
+    "div_slice          json: cannot unmarshal JSON object into Go []int64",
+    "div_map            json: cannot unmarshal JSON array into Go map[string]int64",
+    "slice_string       json: cannot unmarshal JSON object into Go []string",
+    "nested_slice       json: cannot unmarshal JSON object into Go [][]string",
     "field_nested_str   json: cannot unmarshal JSON number into Go string within \"/in/s\"",
     "field_slice_deep   json: cannot unmarshal JSON number into Go string within \"/sl/0/s\"",
     "escaped_name       json: cannot unmarshal JSON number into Go string within \"/a~1b\"",
@@ -248,6 +254,11 @@ fn main() {
     row(&mut ln, "div_slice", json::Unmarshal(&b"{}"[..], &mut v, []));
     let mut v: map<string, int> = map::new();
     row(&mut ln, "div_map", json::Unmarshal(&b"[]"[..], &mut v, []));
+    // Byte-exact: no int in sight, so the composition alone is on show.
+    let mut v: slice<string> = slice::new();
+    row(&mut ln, "slice_string", json::Unmarshal(&b"{}"[..], &mut v, []));
+    let mut v: slice<slice<string>> = slice::new();
+    row(&mut ln, "nested_slice", json::Unmarshal(&b"{}"[..], &mut v, []));
 
     // The pointer, which is the whole point.
     let mut o = Outer::default();

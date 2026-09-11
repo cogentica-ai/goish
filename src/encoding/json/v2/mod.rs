@@ -131,6 +131,22 @@ pub trait MarshalerTo {
 /// error`.
 pub trait UnmarshalerFrom {
     fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error;
+
+    // go: none — goish-only: Go reads the destination's name from
+    // `reflect.Type.String()` at the point of failure. goish has no
+    // reflection in the codec, so the type carries its own Go name.
+    /// Go's spelling of this type, for the `into Go <type>` clause of a
+    /// semantic decode error (issue #10).
+    ///
+    /// Defaulted so this is not a breaking change: an existing
+    /// implementor that says nothing reports `value`, which is what the
+    /// old generic messages amounted to anyway. The builtin codecs
+    /// override, and the composites compose — `slice<T>` is
+    /// `"[]" + T`, so `[]int` comes out right without either type
+    /// knowing about the other.
+    fn __go_type_name() -> string where Self: Sized {
+        return string::from_static("value");
+    }
 }
 
 impl<T: MarshalerTo + ?Sized> MarshalerTo for &T {
@@ -476,6 +492,24 @@ pub(crate) fn __semantic_error_value(
     });
 }
 
+// go: none — goish-only: see `__semantic_error`. Go needs no variant
+// because reflection names a composite as readily as a scalar.
+/// As [`__semantic_error`], but for a type whose Go name is computed
+/// rather than a literal — a composite naming its element type.
+pub(crate) fn __semantic_error_name(
+    dec: &jsontext::Decoder,
+    kind: jsontext::Kind,
+    go_type: string,
+) -> error {
+    return errors::Wrap(SemanticError {
+        JSONKind: __kind_word(kind),
+        JSONValue: string::new(),
+        GoType: go_type,
+        JSONPointer: dec.StackPointer().String(),
+        Err: nil,
+    });
+}
+
 /// Build Go's message for "this JSON value cannot become that Go type".
 pub(crate) fn __semantic_error(
     dec: &jsontext::Decoder,
@@ -511,6 +545,14 @@ impl UnmarshalerFrom for bool {
         }
         nil
     }
+
+    // goishlint:ignore GOISH014 — trait method; provenance is on the impl.
+    // Placed AFTER UnmarshalJSONFrom on purpose: a method inserted
+    // above it takes the anchor position its comment block held, and
+    // GOISH014 then reports the innocent neighbour.
+    fn __go_type_name() -> string {
+        return string::from_static("bool");
+    }
 }
 
 impl MarshalerTo for string {
@@ -545,6 +587,14 @@ impl UnmarshalerFrom for string {
         }
         nil
     }
+
+    // goishlint:ignore GOISH014 — trait method; provenance is on the impl.
+    // Placed AFTER UnmarshalJSONFrom on purpose: a method inserted
+    // above it takes the anchor position its comment block held, and
+    // GOISH014 then reports the innocent neighbour.
+    fn __go_type_name() -> string {
+        return string::from_static("string");
+    }
 }
 
 /// Signed/unsigned integers (covers the goish aliases int / int8… /
@@ -557,6 +607,8 @@ macro_rules! impl_json_int {
             }
         }
         impl UnmarshalerFrom for $t {
+            // goishlint:ignore GOISH014 — trait method; provenance is on the impl.
+            fn __go_type_name() -> string { crate::gostring::string::from_static($name) }
             fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
                 // Go: arshal_default.go:461 — makeIntArshaler reads a complete
                 // raw value, even when rejecting a composite type.
@@ -656,6 +708,14 @@ impl UnmarshalerFrom for u64 {
         }
         nil
     }
+
+    // goishlint:ignore GOISH014 — trait method; provenance is on the impl.
+    // Placed AFTER UnmarshalJSONFrom on purpose: a method inserted
+    // above it takes the anchor position its comment block held, and
+    // GOISH014 then reports the innocent neighbour.
+    fn __go_type_name() -> string {
+        return string::from_static("uint64");
+    }
 }
 
 // go: sdk 1.25.5 encoding/json/v2/arshal_default.go:595-698 makeFloatArshaler
@@ -670,6 +730,8 @@ macro_rules! impl_json_float {
             }
         }
         impl UnmarshalerFrom for $t {
+            // goishlint:ignore GOISH014 — trait method; provenance is on the impl.
+            fn __go_type_name() -> string { crate::gostring::string::from_static($fname) }
             fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
                 let (value, err) = dec.ReadValue();
                 if err != nil {
@@ -715,6 +777,10 @@ impl<T: MarshalerTo + Clone> MarshalerTo for slice<T> {
 
 // Go: encoding/json/v2/arshal_default.go:1388 — func makeSliceArshaler(t reflect.Type) *arshaler
 impl<T: UnmarshalerFrom + Default + Clone> UnmarshalerFrom for slice<T> {
+    // goishlint:ignore GOISH014 — trait method; provenance is on the impl.
+    fn __go_type_name() -> string {
+        return string::from_static("[]") + T::__go_type_name();
+    }
     // goishlint:ignore GOISH014 — trait body ports makeSliceArshaler's unmarshal closure; provenance is on the impl.
     fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
         let (t, err) = dec.ReadToken();
@@ -726,7 +792,7 @@ impl<T: UnmarshalerFrom + Default + Clone> UnmarshalerFrom for slice<T> {
             return nil;
         }
         if t.Kind() != '[' {
-            return __semantic_error(dec, t.Kind(), "slice");
+            return __semantic_error_name(dec, t.Kind(), Self::__go_type_name());
         }
         // Go zeroes each slot before decode and sets Len(i) even when the
         // element decoder fails (arshal_default.go:1490-1508). An owned
@@ -955,6 +1021,13 @@ where
     K: ObjectKey + crate::gomap::GoHash + PartialEq,
     V: UnmarshalerFrom + Default + Clone,
 {
+    // goishlint:ignore GOISH014 — trait method; provenance is on the impl.
+    fn __go_type_name() -> string {
+        // A JSON object's member names are always strings, so Go's
+        // spelling of the key type here is `string` whatever newtype
+        // `K` is — which is also what the ObjectKey contract says.
+        return string::from_static("map[string]") + V::__go_type_name();
+    }
     fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
         if dec.PeekKind() == 'n' {
             let (_, err) = dec.ReadToken();
@@ -967,7 +1040,7 @@ where
             return err;
         }
         if t.Kind() != '{' {
-            return __semantic_error(dec, t.Kind(), "map");
+            return __semantic_error_name(dec, t.Kind(), Self::__go_type_name());
         }
         while dec.PeekKind() != '}' {
             if dec.PeekKind() == jsontext::Kind(0) {
