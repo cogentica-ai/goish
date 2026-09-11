@@ -34,6 +34,9 @@ pub(crate) const defaultTCPKeepAliveCount: i32 = 9;
 // go: sdk 1.25.5 net/dial.go:469-472 Dial
 /// `net.Dial` — connect to `addr`. No deadline: the connect waits as
 /// long as the kernel does. `DialTimeout` bounds it.
+///
+/// `network` is `"tcp"` / `"tcp4"` (`addr` is `"host:port"`) or
+/// `"unix"` (`addr` is the socket path).
 pub fn Dial<N: Into<string>, A: Into<string>>(network: N, addr: A) -> (TCPConn, error) {
     return dial_deadline(network.into(), addr.into(), 0);
 }

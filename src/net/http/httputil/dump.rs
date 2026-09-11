@@ -502,6 +502,7 @@ where
         return crate::net::TCPAddr {
             IP: [0, 0, 0, 0],
             Port: 0,
+            Unix: None,
         };
     }
 
@@ -510,6 +511,7 @@ where
         return crate::net::TCPAddr {
             IP: [0, 0, 0, 0],
             Port: 0,
+            Unix: None,
         };
     }
 

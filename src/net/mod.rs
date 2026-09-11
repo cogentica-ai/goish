@@ -125,6 +125,12 @@ pub struct Listener {
     /// idempotency and by `Drop` to skip the close on a Listener
     /// that the user already closed explicitly.
     closed: AtomicBool,
+    /// The AF_UNIX socket path to unlink on Close, when this listener
+    /// is a Unix one. Go's `UnixListener` carries `unlink bool` and
+    /// sets it for a listener `Listen` created (unixsock.go), which is
+    /// why `ln.Close()` removes the socket file — measured against Go,
+    /// not assumed.
+    unix_unlink: Option<string>,
 }
 
 unsafe impl Send for Listener {}
@@ -197,18 +203,42 @@ impl Listener {
     /// ENOMEM). ECONNABORTED never surfaces — retried inline below,
     /// mirroring Go's `internal/poll.FD.Accept`.
     pub(crate) fn __accept_classified(&self) -> (TCPConn, error, bool) {
+        let is_unix = self.addr.Unix.is_some();
         loop {
             let mut peer = syscall::SockaddrIn::loopback(0);
             let mut peer_len: u32 = core::mem::size_of::<syscall::SockaddrIn>() as u32;
-            let fd = syscall::Accept4(
-                self.fd,
-                &mut peer,
-                &mut peer_len,
-                syscall::SOCK_CLOEXEC | syscall::SOCK_NONBLOCK,
-            );
+            let fd = if is_unix {
+                // A connecting AF_UNIX client is unbound, so the
+                // kernel writes back a sockaddr_un whose path is all
+                // zeroes. Asking for nothing says the same thing
+                // without letting a sockaddr_in-shaped buffer be read
+                // as an IP address. Go names that peer "@": its
+                // `anyToSockaddr` rewrites a leading NUL to '@' for
+                // display (syscall/syscall_linux.go), so the accepted
+                // conn's RemoteAddr().String() is "@", not "" —
+                // pinned in examples/net_unix_ref_smoke.rs.
+                syscall::__accept4_raw(
+                    self.fd,
+                    core::ptr::null_mut(),
+                    core::ptr::null_mut(),
+                    syscall::SOCK_CLOEXEC | syscall::SOCK_NONBLOCK,
+                )
+            } else {
+                syscall::Accept4(
+                    self.fd,
+                    &mut peer,
+                    &mut peer_len,
+                    syscall::SOCK_CLOEXEC | syscall::SOCK_NONBLOCK,
+                )
+            };
             if fd >= 0 {
+                let remote = if is_unix {
+                    TCPAddr::unix(string("@"))
+                } else {
+                    TCPAddr::from_sockaddr_in(&peer)
+                };
                 return (
-                    TCPConn::from_accepted(fd, self.addr.clone(), TCPAddr::from_sockaddr_in(&peer)),
+                    TCPConn::from_accepted(fd, self.addr.clone(), remote),
                     errors::nil,
                     false,
                 );
@@ -279,6 +309,19 @@ impl Listener {
             // tracked separately.)
             netpoll::set_deadline(&arc, -1, b'r');
             netpoll::close(arc);
+        }
+        // Go: `(*UnixListener).close` removes the socket file before
+        // closing the fd (net/unixsock_posix.go:179) — "the operating
+        // system doesn't clean up the file that announcing created".
+        // A caller that skipped this would see its second Listen on
+        // the same path fail with EADDRINUSE.
+        if let Some(path) = self.unix_unlink.as_ref() {
+            let mut buf: [u8; 109] = [0u8; 109];
+            let pb = path.as_bytes();
+            if pb.len() < buf.len() {
+                buf[..pb.len()].copy_from_slice(pb);
+                let _ = syscall::Unlink(buf.as_ptr());
+            }
         }
         let r = syscall::Close(self.fd);
         if r < 0 {
@@ -1073,12 +1116,19 @@ impl ListenConfig {
     }
 }
 
-/// `net.Listen` — open a listening socket. `network` must be `"tcp"`
-/// or `"tcp4"`; other values return an error. `addr` is in
-/// `"host:port"` form. `host` may be empty (binds wildcard) or an
-/// IPv4 dotted literal; hostname resolution is not implemented in
-/// v1. Port `:0` lets the kernel pick a free port (recovered via
-/// `Listener.Addr()`).
+/// `net.Listen` — open a listening socket. `network` must be `"tcp"`,
+/// `"tcp4"` or `"unix"`; other values return an error.
+///
+/// For the TCP networks `addr` is in `"host:port"` form. `host` may be
+/// empty (binds wildcard) or an IPv4 dotted literal; hostname
+/// resolution is not implemented in v1. Port `:0` lets the kernel pick
+/// a free port (recovered via `Listener.Addr()`).
+///
+/// For `"unix"` `addr` is a filesystem path. Closing the listener
+/// removes the socket file, as Go's does; binding a path that already
+/// exists fails with `address already in use`, also as Go's does, so a
+/// caller that wants to reclaim a stale socket must `os.Remove` it
+/// first. The abstract namespace (a leading `@`) is not implemented.
 ///
 /// Go-shape: a zero `ListenConfig` delegating to
 /// `ListenConfig.Listen` (dial.go:897).
@@ -1095,10 +1145,13 @@ fn listen_with_config(
     addr: string,
     control: Option<&ControlFn>,
 ) -> (Listener, error) {
+    if (network.as_ref() as &str) == "unix" {
+        return listen_unix(addr);
+    }
     if !is_tcp_network(&network) {
         return (
             dead_listener(),
-            errors::New(string("net: only \"tcp\" / \"tcp4\" supported")),
+            errors::New(string("net: only \"tcp\" / \"tcp4\" / \"unix\" supported")),
         );
     }
     let parsed = match parse::parse_listen_addr(&addr) {
@@ -1180,9 +1233,79 @@ fn listen_with_config(
             addr: TCPAddr::from_sockaddr_in(&got),
             pd: AtomicPtr::new(ptr::null_mut()),
             closed: AtomicBool::new(false),
+            unix_unlink: None,
         },
         errors::nil,
     )
+}
+
+// go: none — goish-only: Go reaches AF_UNIX through
+// `sysListener.listenUnix` → `unixSocket` (net/unixsock_posix.go:16),
+// selected by `Listen`'s network switch. goish's listen path is one
+// function, so the Unix arm is its own helper called from there.
+/// `net.Listen("unix", path)` — bind and listen on an AF_UNIX socket.
+///
+/// Go removes a stale socket file? It does NOT: bind(2) fails with
+/// EADDRINUSE on an existing path and Go surfaces that, which is why
+/// every caller — including the typescript-go pipe transport this
+/// unblocks — does its own `os.Remove(path)` first. goish matches, so
+/// that idiom keeps working rather than being silently unnecessary.
+fn listen_unix(path: string) -> (Listener, error) {
+    let pb = path.as_bytes();
+    let sa = match syscall::SockaddrUn::__for_path(pb) {
+        Some(sa) => sa,
+        None => {
+            // 108 bytes is a kernel limit on sun_path, not a
+            // convention: a longer path cannot be represented, so
+            // refusing beats truncating to a different socket.
+            return (
+                dead_listener(),
+                errors::New(string("net: unix socket path too long")),
+            );
+        }
+    };
+    let network = string("unix");
+    let fail = |syscall_name: &str, errno: i32| -> error {
+        op_error(
+            "listen",
+            &network,
+            Some(alloc::sync::Arc::new(TCPAddr::unix(path.clone()))),
+            syscall_name,
+            errno,
+        )
+    };
+    let fd = syscall::Socket(
+        syscall::AF_UNIX,
+        syscall::SOCK_STREAM | syscall::SOCK_CLOEXEC | syscall::SOCK_NONBLOCK,
+        0,
+    );
+    if fd < 0 {
+        return (dead_listener(), fail("socket", -fd));
+    }
+    // Go does NOT remove a stale socket file here: bind(2) refuses a
+    // live path with EADDRINUSE and `listen unix <path>: bind: address
+    // already in use` is what the caller sees. Measured, not assumed —
+    // it is why every caller's own os.Remove before Listen matters.
+    let r = syscall::__bind_raw(fd, &sa as *const _ as *const u8, sa.__len());
+    if r < 0 {
+        let _ = syscall::Close(fd);
+        return (dead_listener(), fail("bind", -r));
+    }
+    let r = syscall::Listen(fd, 128);
+    if r < 0 {
+        let _ = syscall::Close(fd);
+        return (dead_listener(), fail("listen", -r));
+    }
+    return (
+        Listener {
+            fd,
+            addr: TCPAddr::unix(path.clone()),
+            pd: AtomicPtr::new(ptr::null_mut()),
+            closed: AtomicBool::new(false),
+            unix_unlink: Some(path),
+        },
+        errors::nil,
+    );
 }
 
 /// Go-parity TCP connection defaults, applied to every dialed and
@@ -1263,10 +1386,13 @@ fn set_tcp_conn_defaults(fd: i32) {
 // `netpoll::set_deadline` takes directly (0 = none).
 /// The body shared by `Dial` and `DialTimeout`.
 fn dial_deadline(network: string, addr: string, deadline_ns: i64) -> (TCPConn, error) {
+    if (network.as_ref() as &str) == "unix" {
+        return dial_unix(addr, deadline_ns);
+    }
     if !is_tcp_network(&network) {
         return (
             TCPConn::dead(),
-            errors::New(string("net: only \"tcp\" / \"tcp4\" supported")),
+            errors::New(string("net: only \"tcp\" / \"tcp4\" / \"unix\" supported")),
         );
     }
     let parsed = match parse::parse_dial_addr(&addr) {
@@ -1414,6 +1540,118 @@ fn dial_deadline(network: string, addr: string, deadline_ns: i64) -> (TCPConn, e
     )
 }
 
+// go: none — goish-only: Go's AF_UNIX dial is `sysDialer.dialUnix` →
+// `unixSocket` (net/unixsock_posix.go:16), reached from `Dial`'s
+// network switch. goish's dial is one function, so the Unix arm is a
+// helper called from it; the error shapes below are the ones Go
+// produces, transcribed from a run (see examples/net_unix_ref_smoke.rs).
+/// `net.Dial("unix", path)` — connect to an AF_UNIX stream socket.
+fn dial_unix(path: string, deadline_ns: i64) -> (TCPConn, error) {
+    let network = string("unix");
+    let sa = match syscall::SockaddrUn::__for_path(path.as_bytes()) {
+        Some(sa) => sa,
+        None => {
+            return (
+                TCPConn::dead(),
+                errors::New(string("net: unix socket path too long")),
+            )
+        }
+    };
+    let peer = TCPAddr::unix(path);
+    let fd = syscall::Socket(
+        syscall::AF_UNIX,
+        syscall::SOCK_STREAM | syscall::SOCK_CLOEXEC | syscall::SOCK_NONBLOCK,
+        0,
+    );
+    if fd < 0 {
+        return (TCPConn::dead(), errno_error("socket", -fd));
+    }
+    let r = syscall::__connect_raw(fd, &sa as *const _ as *const u8, sa.__len());
+    if r < 0 {
+        let errno = -r;
+        if errno != EINPROGRESS {
+            let _ = syscall::Close(fd);
+            return (
+                TCPConn::dead(),
+                op_error(
+                    "dial",
+                    &network,
+                    Some(alloc::sync::Arc::new(peer)),
+                    "connect",
+                    errno,
+                ),
+            );
+        }
+        // A Unix connect completes inline unless the listener's
+        // backlog is full, in which case it is EAGAIN, not
+        // EINPROGRESS — so this arm is rare. It is still the same
+        // park-on-writable dance TCP uses, because the kernel reports
+        // the outcome the same way.
+        let arc = match netpoll::open(fd) {
+            Some(a) => a,
+            None => {
+                let _ = syscall::Close(fd);
+                return (TCPConn::dead(), errno_error("connect/poll_open", 0));
+            }
+        };
+        if deadline_ns != 0 {
+            netpoll::set_deadline(&arc, deadline_ns, b'w');
+        }
+        if let BlockResult::Timedout = netpoll::block(&arc, b'w') {
+            netpoll::close(arc);
+            let _ = syscall::Close(fd);
+            return (TCPConn::dead(), dial_timeout_error(&network, peer));
+        }
+        if deadline_ns != 0 {
+            netpoll::set_deadline(&arc, 0, b'w');
+        }
+        let mut so_err: i32 = 0;
+        let mut so_err_len: u32 = crate::convert::uint32(core::mem::size_of::<i32>());
+        let _ = syscall::Getsockopt(
+            fd,
+            syscall::SOL_SOCKET,
+            syscall::SO_ERROR,
+            &mut so_err as *mut i32 as *mut u8,
+            &mut so_err_len,
+        );
+        if so_err != 0 {
+            netpoll::close(arc);
+            let _ = syscall::Close(fd);
+            return (
+                TCPConn::dead(),
+                op_error(
+                    "dial",
+                    &network,
+                    Some(alloc::sync::Arc::new(peer)),
+                    "connect",
+                    so_err,
+                ),
+            );
+        }
+        let pd_raw = Arc::into_raw(arc) as *mut PollDesc;
+        return (
+            TCPConn {
+                fd,
+                // The dialing end is unbound; Go renders that as
+                // "@" (see the Accept path above).
+                local: TCPAddr::unix(string("@")),
+                remote: peer,
+                pd: AtomicPtr::new(pd_raw),
+            },
+            errors::nil,
+        );
+    }
+    return (
+        TCPConn {
+            fd,
+            local: TCPAddr::unix(string("@")),
+            remote: peer,
+            pd: AtomicPtr::new(ptr::null_mut()),
+        },
+        errors::nil,
+    );
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────
 
 fn is_tcp_network(s: &string) -> bool {
@@ -1429,6 +1667,7 @@ pub(crate) fn dead_listener() -> Listener {
         // Mark as already-closed so Drop skips the syscall::Close(-1)
         // round-trip — fd is the sentinel, not a real handle.
         closed: AtomicBool::new(true),
+        unix_unlink: None,
     }
 }
 

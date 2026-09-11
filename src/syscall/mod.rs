@@ -2074,6 +2074,95 @@ pub fn Bind(fd: i32, addr: *const SockaddrIn, addrlen: u32) -> i32 {
     unsafe { syscall3(SYS_BIND, fd as usize, addr as usize, addrlen as usize) as i32 }
 }
 
+// go: none — goish-only: Go's `syscall.Sockaddr` is an interface and
+// `SockaddrUnix` one of its implementations, chosen at run time by
+// `bind`/`connect`. goish's wrappers are typed to `SockaddrIn`, so the
+// AF_UNIX address gets its own struct and the raw-pointer entry points
+// below. Layout is the kernel's `struct sockaddr_un`.
+/// `struct sockaddr_un` — an AF_UNIX address.
+///
+/// `sun_path` is 108 bytes on Linux and that is a hard kernel limit,
+/// not a convention: a longer path cannot be represented at all, which
+/// is why `Listen("unix", …)` has to reject one rather than truncate.
+#[repr(C)]
+#[derive(Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct SockaddrUn {
+    pub sun_family: u16,
+    pub sun_path: [u8; 108],
+}
+
+impl SockaddrUn {
+    // go: none — goish-only: Go builds the same bytes inside
+    // `SockaddrUnix.sockaddr()` (syscall/syscall_linux.go), which is a
+    // method on the interface implementation goish does not have.
+    /// Build an AF_UNIX address for `path`, or None when it does not
+    /// fit in `sun_path` with room for the NUL the kernel expects.
+    pub fn __for_path(path: &[u8]) -> Option<SockaddrUn> {
+        if path.is_empty() || path.len() >= 108 {
+            return None;
+        }
+        let mut sa = SockaddrUn {
+            sun_family: crate::convert::uint16(AF_UNIX),
+            sun_path: [0u8; 108],
+        };
+        sa.sun_path[..path.len()].copy_from_slice(path);
+        return Some(sa);
+    }
+
+    // go: none — goish-only: the second return of Go's
+    // `SockaddrUnix.sockaddr()`, split out because goish's callers take
+    // the pointer and the length separately.
+    /// The length to pass to bind/connect: the family word plus the
+    /// path plus its NUL. Passing `size_of::<SockaddrUn>()` also works
+    /// on Linux, but this is what Go computes and keeps abstract
+    /// sockets representable later.
+    pub fn __len(&self) -> u32 {
+        let n = self
+            .sun_path
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(self.sun_path.len());
+        return crate::convert::uint32(2 + n + 1);
+    }
+}
+
+// go: none — goish-only: the address-family-agnostic forms. The typed
+// wrappers above stay as they are; these take the raw pointer the
+// syscall actually wants, so an AF_UNIX address can reach it.
+/// `bind(2)` with an arbitrary sockaddr.
+#[allow(non_snake_case)]
+pub fn __bind_raw(fd: i32, addr: *const u8, addrlen: u32) -> i32 {
+    let r = unsafe { syscall3(SYS_BIND, fd as usize, addr as usize, addrlen as usize) };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `__bind_raw`.
+/// `connect(2)` with an arbitrary sockaddr.
+#[allow(non_snake_case)]
+pub fn __connect_raw(fd: i32, addr: *const u8, addrlen: u32) -> i32 {
+    let r = unsafe { syscall3(SYS_CONNECT, fd as usize, addr as usize, addrlen as usize) };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
+// go: none — goish-only: see `__bind_raw`. A NULL `addr` is legal and
+// means "do not report the peer", which is what a Unix listener wants:
+// a client that did not bind has no path to report anyway.
+/// `accept4(2)` with an arbitrary sockaddr, or NULL.
+#[allow(non_snake_case)]
+pub fn __accept4_raw(fd: i32, addr: *mut u8, addrlen: *mut u32, flags: i32) -> i32 {
+    let r = unsafe {
+        syscall4(
+            SYS_ACCEPT4,
+            fd as usize,
+            addr as usize,
+            addrlen as usize,
+            flags as usize,
+        )
+    };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
+}
+
 /// `listen(2)` — mark a socket as accepting connections. Returns
 /// `0` on success, `-errno` on failure.
 #[allow(non_snake_case)]

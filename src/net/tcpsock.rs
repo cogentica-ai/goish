@@ -152,6 +152,7 @@ pub fn ResolveTCPAddr<N: Into<string>, A: Into<string>>(
             crate::nilable::new(crate::net::TCPAddr {
                 IP: [0, 0, 0, 0],
                 Port: int::from(0),
+                Unix: None,
             }),
             crate::errors::nil,
         );
@@ -176,6 +177,7 @@ pub fn ResolveTCPAddr<N: Into<string>, A: Into<string>>(
             crate::nilable::new(crate::net::TCPAddr {
                 IP: [0, 0, 0, 0],
                 Port: port,
+                Unix: None,
             }),
             crate::errors::nil,
         );
@@ -187,6 +189,7 @@ pub fn ResolveTCPAddr<N: Into<string>, A: Into<string>>(
             crate::nilable::new(crate::net::TCPAddr {
                 IP: ipv4_octets(&ip),
                 Port: port,
+                Unix: None,
             }),
             crate::errors::nil,
         );
@@ -208,6 +211,7 @@ pub fn ResolveTCPAddr<N: Into<string>, A: Into<string>>(
         crate::nilable::new(crate::net::TCPAddr {
             IP: ipv4_octets(&rip),
             Port: port,
+            Unix: None,
         }),
         crate::errors::nil,
     );
@@ -269,6 +273,7 @@ pub fn ListenTCP<N: Into<string>>(
         None => crate::net::TCPAddr {
             IP: [0, 0, 0, 0],
             Port: int::from(0),
+            Unix: None,
         }
         .String(),
     };

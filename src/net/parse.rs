@@ -28,6 +28,16 @@ pub struct TCPAddr {
     /// for `127.0.0.1`).
     pub IP: [u8; 4],
     pub Port: int,
+    /// Set when this address names an AF_UNIX socket, in which case
+    /// IP/Port are meaningless and `String()` is the filesystem path.
+    ///
+    /// Go keeps `UnixAddr` a separate type and returns it through the
+    /// `net.Addr` INTERFACE. goish's `Listener::Addr` returns the
+    /// concrete `TCPAddr`, so the two live in one type rather than
+    /// changing that signature and every caller of it. The cost is
+    /// this field; the alternative was a `net.Addr` refactor reaching
+    /// 35 construction sites and every consumer of `Addr()`.
+    pub Unix: Option<string>,
 }
 
 impl TCPAddr {
@@ -35,6 +45,7 @@ impl TCPAddr {
         TCPAddr {
             IP: [0, 0, 0, 0],
             Port: 0,
+            Unix: None,
         }
     }
 
@@ -51,11 +62,16 @@ impl TCPAddr {
                 (host & 0xFF) as u8,
             ],
             Port: s.port_host() as int,
+            Unix: None,
         }
     }
 
-    /// `String()` — render as `"a.b.c.d:port"`.
+    /// `String()` — render as `"a.b.c.d:port"`, or the socket path
+    /// for an AF_UNIX address (Go's `UnixAddr.String()` is `a.Name`).
     pub fn String(&self) -> string {
+        if let Some(p) = self.Unix.as_ref() {
+            return p.clone();
+        }
         let mut buf: Vec<u8> = Vec::with_capacity(24);
         push_dec(&mut buf, self.IP[0] as u32);
         buf.push(b'.');
@@ -71,7 +87,21 @@ impl TCPAddr {
 
     /// Network family. Always `"tcp"` in v1.
     pub fn Network(&self) -> string {
-        string("tcp")
+        if self.Unix.is_some() {
+            return string("unix");
+        }
+        return string("tcp");
+    }
+
+    // go: none — goish-only: the AF_UNIX constructor, since Go builds
+    // a separate `UnixAddr` here.
+    /// An address naming the AF_UNIX socket at `path`.
+    pub(crate) fn unix(path: string) -> Self {
+        return TCPAddr {
+            IP: [0, 0, 0, 0],
+            Port: 0,
+            Unix: Some(path),
+        };
     }
 }
 

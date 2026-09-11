@@ -1891,6 +1891,7 @@ impl crate::net::Conn for memConn {
         return crate::net::TCPAddr {
             IP: [0, 0, 0, 0],
             Port: 0,
+            Unix: None,
         };
     }
     // go: none — goish-only: see `memConn`.
@@ -1898,6 +1899,7 @@ impl crate::net::Conn for memConn {
         return crate::net::TCPAddr {
             IP: [0, 0, 0, 0],
             Port: 0,
+            Unix: None,
         };
     }
     // go: none — goish-only: see `memConn`.
@@ -2351,6 +2353,7 @@ impl crate::net::Conn for feedConn {
         return crate::net::TCPAddr {
             IP: [0, 0, 0, 0],
             Port: 0,
+            Unix: None,
         };
     }
     // go: none — goish-only: see `feedConn`.
@@ -2358,6 +2361,7 @@ impl crate::net::Conn for feedConn {
         return crate::net::TCPAddr {
             IP: [0, 0, 0, 0],
             Port: 0,
+            Unix: None,
         };
     }
     // go: none — goish-only: see `feedConn`.

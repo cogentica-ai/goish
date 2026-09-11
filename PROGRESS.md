@@ -1208,6 +1208,21 @@ anyway: `WaitGroup.Go` is `defer wg.Done()` in Go's own source
   case is correct in both; the rare one is documented at the symptom and
   at the cause, with the `goref.sh` bytes for each.
 
+### `net` — AF_UNIX (issue #8)
+
+`net.Listen("unix", path)` and `net.Dial("unix", path)` work; the
+listener removes its socket file on `Close` and the addresses on both
+ends match Go's, including the `"@"` Go renders for an unbound peer.
+`net_unix_ref_smoke` pins all fourteen rows against a `goref.sh`
+transcript of `tools/gen_net_unix_ref.go`.
+
+Not implemented: `unixgram` / `unixpacket`, the abstract namespace (a
+leading `@`), `UnixConn`'s out-of-band methods
+(`ReadMsgUnix`/`WriteMsgUnix`, so no fd passing), and
+`SetUnlinkOnClose`. goish has one concrete `Listener`/`TCPConn` pair
+rather than Go's per-network types, so a Unix listener is a `Listener`
+whose `Addr()` reports network `"unix"`, not a `*UnixListener`.
+
 ## CI
 
 Four workflows, and **two of them gate every push**:
