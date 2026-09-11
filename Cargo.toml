@@ -3670,3 +3670,7 @@ path = "examples/json_null_error_ref_smoke.rs"
 [[example]]
 name = "sync_map_concurrent_smoke"
 path = "examples/sync_map_concurrent_smoke.rs"
+
+[[example]]
+name = "json_array_ref_smoke"
+path = "examples/json_array_ref_smoke.rs"
