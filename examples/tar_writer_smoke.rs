@@ -34,7 +34,7 @@ use goish::bytes;
 use goish::errors::{self, error};
 use goish::fmt;
 use goish::io::fs;
-use goish::runtime::spin::SpinLock;
+use goish::sync::Mutex;
 use goish::types::{byte, int};
 use goish::{io, nil, slice, string, syscall};
 
@@ -388,7 +388,7 @@ impl fs::DirEntry for mapDirEntry {
 struct mapRegularFile {
     name: string,
     content: Vec<u8>,
-    pos: SpinLock<usize>,
+    pos: Mutex<usize>,
 }
 
 impl fs::File for mapRegularFile {
@@ -403,7 +403,7 @@ impl fs::File for mapRegularFile {
         )
     }
     fn Read(&self, p: &mut slice<byte>) -> (int, error) {
-        let mut g = self.pos.lock();
+        let mut g = self.pos.Lock();
         if *g >= self.content.len() {
             return (0, io::EOF.into());
         }
@@ -568,7 +568,7 @@ impl fs::FS for mapFS {
                 let f = mapRegularFile {
                     name: mapFS::base_name(&n.path),
                     content: n.content.clone(),
-                    pos: SpinLock::new(0),
+                    pos: Mutex::new(0),
                 };
                 (Arc::new(f), errors::nil)
             }

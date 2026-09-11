@@ -59,7 +59,7 @@ fn main() {
     let mut m = MapFS::new();
     m.0.Set("a/b.txt", mf("", FileMode(0o666)));
     m.0.Set(".", mf("", FileMode(0o777 | ModeDir.0)));
-    let buf = goish::runtime::spin::SpinLock::new(RustString::new());
+    let buf = goish::sync::Mutex::new(RustString::new());
     let err = fs::WalkDir(
         &m,
         ".",
@@ -71,7 +71,7 @@ fn main() {
             if err != errors::nil {
                 return err;
             }
-            let mut g = buf.lock();
+            let mut g = buf.Lock();
             g.push_str(core::str::from_utf8(path.as_bytes()).unwrap());
             g.push_str(": ");
             g.push_str(core::str::from_utf8(fi.Mode().String().as_bytes()).unwrap());
@@ -82,7 +82,7 @@ fn main() {
     check(err == errors::nil, b"chmoddot: walk error\n");
     // Go want: ".: drwxrwxrwx\na: dr-xr-xr-x\na/b.txt: -rw-rw-rw-\n"
     check(
-        buf.lock().as_bytes() == b".: drwxrwxrwx\na: dr-xr-xr-x\na/b.txt: -rw-rw-rw-\n",
+        buf.Lock().as_bytes() == b".: drwxrwxrwx\na: dr-xr-xr-x\na/b.txt: -rw-rw-rw-\n",
         b"chmoddot: mode walk mismatch\n",
     );
 

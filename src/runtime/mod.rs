@@ -33,7 +33,7 @@ pub mod rt_section;
 pub mod sched;
 pub mod segv;
 pub mod signal;
-pub mod spin;
+pub(crate) mod spin;
 pub mod symbolize;
 pub mod sysmon;
 pub mod trace;

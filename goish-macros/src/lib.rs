@@ -319,14 +319,14 @@ pub fn var_emit_error_marker(input: TokenStream) -> TokenStream {
 
         #[doc(hidden)]
         #[allow(non_upper_case_globals)]
-        static {slot}: ::goish::runtime::spin::SpinLock<
+        static {slot}: ::goish::sync::Mutex<
             ::core::option::Option<::goish::error>,
-        > = ::goish::runtime::spin::SpinLock::new(::core::option::Option::None);
+        > = ::goish::sync::Mutex::new(::core::option::Option::None);
 
         #[doc(hidden)]
         #[allow(non_snake_case)]
         fn {resolve}() -> ::goish::error {{
-            let mut g = {slot}.lock();
+            let mut g = {slot}.Lock();
             if g.is_none() {{
                 *g = ::core::option::Option::Some({init_expr});
             }}
@@ -1864,9 +1864,9 @@ pub fn interface(attr: TokenStream, item: TokenStream) -> TokenStream {
         out,
         "#[doc(hidden)]\n\
          pub static {registry_name}: \
-         ::goish::runtime::spin::SpinLock<::goish::any::TraitRegistry<\
+         ::goish::sync::Mutex<::goish::any::TraitRegistry<\
          dyn {name} + ::core::marker::Send + ::core::marker::Sync>> = \
-         ::goish::runtime::spin::SpinLock::new(::goish::any::TraitRegistry::new());"
+         ::goish::sync::Mutex::new(::goish::any::TraitRegistry::new());"
     );
     out.push('\n');
 
@@ -2083,7 +2083,7 @@ struct IfaceMethod {
     /// closure-form rewrite).
     arg_names: Vec<String>,
     /// Receiver shape — either "&self" or "&mut self". The
-    /// forwarding impl uses this to lock the SpinLock with `.lock()`
+    /// forwarding impl uses this to lock the Mutex with `.Lock()`
     /// and call through the appropriate guard projection
     /// (`as_ref()` for &self, `as_mut()` for &mut self).
     receiver: String,

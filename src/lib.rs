@@ -369,6 +369,26 @@ extern "C" {
     static __init_array_end: extern "C" fn();
 }
 
+// go: none — goish-only: the two raw operations `select!`'s expansion
+// needs from `runtime::spin`, and nothing else.
+//
+// `runtime::spin` is crate-private (issue #20): its guard is a
+// non-preemptible `m.locks` region, not a general lock, and exporting
+// `SpinLock<T>` as an ordinary safe API let downstream code protect an
+// allocating container with it and kill the scheduler. But `select!`
+// expands in the CALLER's crate and genuinely needs to lock several
+// chan atoms at once and release them from the park's commit fn, so
+// those two functions — and only those two — are re-exported here.
+//
+// Neither one hands out a lock a caller could put data behind:
+// `SpinLock<T>` stays unnameable, so there is nothing to construct and
+// nothing to guard. Both take a `*const AtomicBool` a caller can only
+// get from a `chan`, and both are `unsafe`.
+#[doc(hidden)]
+pub mod __select_spin {
+    pub use crate::runtime::spin::{raw_lock, raw_unlock};
+}
+
 #[doc(hidden)]
 pub fn __run_pkg_inits() {
     // SAFETY: `__init_array_*` symbols come from the linker; the

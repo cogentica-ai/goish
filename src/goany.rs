@@ -844,7 +844,7 @@ where
 // a Trait-specific vtable). A trait-agnostic registry storing
 // `*const ()` would lose the vtable on cast.
 
-use crate::runtime::spin::SpinLock;
+use crate::sync::Mutex;
 use alloc::vec::Vec;
 use core::any::TypeId;
 
@@ -866,7 +866,7 @@ pub struct TraitProbe<Trait: ?Sized + 'static> {
 }
 
 /// Per-trait registry. The macro creates a `static`
-/// `SpinLock<TraitRegistry<dyn Trait + Send + Sync>>` and exposes a
+/// `sync::Mutex<TraitRegistry<dyn Trait + Send + Sync>>` and exposes a
 /// `register_<trait>_impl(probe)` free function. The `from_any` impl
 /// for `dyn Trait + Send + Sync` scans this registry.
 #[doc(hidden)]
@@ -924,20 +924,25 @@ impl<Trait: ?Sized + 'static> TraitRegistry<Trait> {
 /// probe. The macro emits one of these per trait, named like
 /// `register_<trait>_impl`.
 pub fn register_with<Trait: ?Sized + 'static>(
-    registry: &SpinLock<TraitRegistry<Trait>>,
+    registry: &Mutex<TraitRegistry<Trait>>,
     probe: TraitProbe<Trait>,
 ) {
-    let mut guard = registry.lock();
+    // `register` pushes into a Vec, so this critical section can
+    // ALLOCATE. That is why it is a `sync::Mutex` and not the runtime's
+    // SpinLock: a spin guard is an `m.locks` region, and allocating
+    // inside one aborts the process with `schedule: holding locks` the
+    // moment the allocator has to park. Issue #20.
+    let mut guard = registry.Lock();
     guard.register(probe);
 }
 
 /// Convenience for the proc-macro: locks the registry, scans for a
 /// match. Used by the `from_any` impl emitted per trait.
 pub fn lookup_with<'a, Trait: ?Sized + 'static>(
-    registry: &SpinLock<TraitRegistry<Trait>>,
+    registry: &Mutex<TraitRegistry<Trait>>,
     any_ref: &'a (dyn CoreAny + Send + Sync),
 ) -> Option<&'a Trait> {
-    let guard = registry.lock();
+    let guard = registry.Lock();
     // SAFETY of the lifetime: `guard` borrows the registry's Vec; the
     // returned `&Trait` is a fresh pointer constructed from `any_ref`
     // (lifetime 'a, distinct from the registry). The vtable is
@@ -947,7 +952,7 @@ pub fn lookup_with<'a, Trait: ?Sized + 'static>(
     // lifetime extension via the `cast` fn pointer signature.
     guard.lookup(any_ref).map(|t| {
         // The `&Trait` we got has lifetime tied to `guard`'s borrow
-        // of the SpinLock. Re-cast through the trait's data pointer
+        // of the Mutex. Re-cast through the trait's data pointer
         // + 'static vtable to detach. cast fn doesn't capture
         // `guard`-bound state, so the result is sound.
         let raw = t as *const Trait;
@@ -959,10 +964,10 @@ pub fn lookup_with<'a, Trait: ?Sized + 'static>(
 /// match, returns `&mut Trait`. Used by the `from_any_mut` impl the
 /// macro emits per trait.
 pub fn lookup_with_mut<'a, Trait: ?Sized + 'static>(
-    registry: &SpinLock<TraitRegistry<Trait>>,
+    registry: &Mutex<TraitRegistry<Trait>>,
     any_ref: &'a mut (dyn CoreAny + Send + Sync),
 ) -> Option<&'a mut Trait> {
-    let guard = registry.lock();
+    let guard = registry.Lock();
     // Same lifetime-detach rationale as `lookup_with`: the returned
     // `&mut Trait` is built from `any_ref` (lifetime 'a) with a
     // 'static vtable; it does not borrow the guard's storage.

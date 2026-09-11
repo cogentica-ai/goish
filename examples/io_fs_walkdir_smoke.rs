@@ -27,7 +27,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use goish::errors::{self, error};
 use goish::fmt;
 use goish::io::fs;
-use goish::runtime::spin::SpinLock;
+use goish::sync::Mutex;
 use goish::slice;
 use goish::string;
 use goish::syscall;
@@ -142,7 +142,7 @@ impl fs::DirEntry for mapDirEntry {
 struct mapRegularFile {
     name: string,
     content: Vec<u8>,
-    pos: SpinLock<usize>,
+    pos: Mutex<usize>,
 }
 
 impl fs::File for mapRegularFile {
@@ -157,7 +157,7 @@ impl fs::File for mapRegularFile {
         )
     }
     fn Read(&self, p: &mut slice<byte>) -> (int, error) {
-        let mut g = self.pos.lock();
+        let mut g = self.pos.Lock();
         if *g >= self.content.len() {
             return (0, goish::io::EOF.into());
         }
@@ -319,7 +319,7 @@ impl fs::FS for mapFS {
                 let f = mapRegularFile {
                     name: mapFS::base_name(&n.path),
                     content: n.content.clone(),
-                    pos: SpinLock::new(0),
+                    pos: Mutex::new(0),
                 };
                 (Arc::new(f), errors::nil)
             }
@@ -484,15 +484,15 @@ fn run_tests() {
 
     // 4. WalkDir visits everything, root first, lexical order.
     {
-        let visited: Arc<SpinLock<Vec<RustString>>> = Arc::new(SpinLock::new(Vec::new()));
+        let visited: Arc<Mutex<Vec<RustString>>> = Arc::new(Mutex::new(Vec::new()));
         let v2 = visited.clone();
         let err = fs::WalkDir(&fsys, ".", move |path, _d, e| {
             if e == errors::nil {
-                v2.lock().push(to_rust(&path));
+                v2.Lock().push(to_rust(&path));
             }
             errors::nil
         });
-        let order = join(&visited.lock());
+        let order = join(&visited.Lock());
         check(err == errors::nil, b"WalkDir returns nil error");
         check(
             order == ".,a.txt,dir1,dir1/b.txt,dir1/sub,dir1/sub/c.txt,dir2,dir2/d.txt",
@@ -502,20 +502,20 @@ fn run_tests() {
 
     // 5. SkipDir prunes a subtree.
     {
-        let visited: Arc<SpinLock<Vec<RustString>>> = Arc::new(SpinLock::new(Vec::new()));
+        let visited: Arc<Mutex<Vec<RustString>>> = Arc::new(Mutex::new(Vec::new()));
         let v2 = visited.clone();
         let err = fs::WalkDir(&fsys, ".", move |path, d, e| {
             if e != errors::nil {
                 return errors::nil;
             }
-            v2.lock().push(to_rust(&path));
+            v2.Lock().push(to_rust(&path));
             // Skip everything under dir1.
             if d.IsDir() && path == "dir1" {
                 return fs::SkipDir.into();
             }
             errors::nil
         });
-        let order = join(&visited.lock());
+        let order = join(&visited.Lock());
         check(err == errors::nil, b"WalkDir+SkipDir returns nil error");
         check(
             order == ".,a.txt,dir1,dir2,dir2/d.txt",
@@ -525,19 +525,19 @@ fn run_tests() {
 
     // 6. SkipAll stops the whole walk.
     {
-        let visited: Arc<SpinLock<Vec<RustString>>> = Arc::new(SpinLock::new(Vec::new()));
+        let visited: Arc<Mutex<Vec<RustString>>> = Arc::new(Mutex::new(Vec::new()));
         let v2 = visited.clone();
         let err = fs::WalkDir(&fsys, ".", move |path, _d, e| {
             if e != errors::nil {
                 return errors::nil;
             }
-            v2.lock().push(to_rust(&path));
+            v2.Lock().push(to_rust(&path));
             if path == "a.txt" {
                 return fs::SkipAll.into();
             }
             errors::nil
         });
-        let order = join(&visited.lock());
+        let order = join(&visited.Lock());
         check(err == errors::nil, b"WalkDir+SkipAll returns nil error");
         check(order == ".,a.txt", b"SkipAll stops the walk early");
     }
@@ -545,18 +545,18 @@ fn run_tests() {
     // 7. A non-existent root surfaces the error to fn exactly once.
     {
         let calls: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
-        let saw_err: Arc<SpinLock<bool>> = Arc::new(SpinLock::new(false));
+        let saw_err: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
         let c2 = calls.clone();
         let s2 = saw_err.clone();
         let err = fs::WalkDir(&fsys, "missing", move |_p, _d, e| {
             c2.fetch_add(1, Ordering::AcqRel);
             if e != errors::nil {
-                *s2.lock() = true;
+                *s2.Lock() = true;
             }
             e
         });
         check(
-            calls.load(Ordering::Acquire) == 1 && *saw_err.lock(),
+            calls.load(Ordering::Acquire) == 1 && *saw_err.Lock(),
             b"missing root: fn called once with the error",
         );
         check(

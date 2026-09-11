@@ -414,7 +414,7 @@ macro_rules! __select_emit {
             while __i < __sel_unique {
                 let __atom = __sel_atoms[__i];
                 if !__atom.is_null() {
-                    unsafe { $crate::runtime::spin::raw_lock(__atom); }
+                    unsafe { $crate::__select_spin::raw_lock(__atom); }
                 }
                 __i += 1;
             }
@@ -557,7 +557,7 @@ macro_rules! __select_release_all {
             let __atom = $atoms[__ui];
             if !__atom.is_null() {
                 unsafe {
-                    $crate::runtime::spin::raw_unlock(__atom);
+                    $crate::__select_spin::raw_unlock(__atom);
                 }
             }
             __ui += 1;
