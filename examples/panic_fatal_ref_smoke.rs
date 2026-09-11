@@ -20,7 +20,17 @@
 //
 //   bare       an unhandled panic in a plain goroutine exits 2
 //   waitgroup  an unhandled panic inside WaitGroup.Go exits 2 PROMPTLY
-//              rather than hanging — the reported failure
+//              rather than hanging — the reported failure. This one
+//              asserted more than Go guarantees at first and flaked in
+//              CI for it: `Done()` is DEFERRED, so it runs while the
+//              panic is still unwinding, and `Wait()` can return
+//              before the dying goroutine reaches the exit. Measured
+//              on real Go: exit 0 in 29 of 200 runs when main exits
+//              immediately after Wait, and "Wait returned" printed in
+//              53 of 100 when it does not. The probe now sleeps after
+//              Wait, which makes Go 100/100 status 2, and the
+//              assertion is that the process did not survive — not
+//              which of the two goroutines got there first.
 //   recover    a deferred `recover!()` consumes the panic, and the
 //              scheduler continues, which is the one case where
 //              "recovered ... continuing" is a true statement
@@ -56,7 +66,7 @@ const GO: [&str; 8] = [
     "bare:rc          2",
     "bare:continued   false",
     "waitgroup:rc     2",
-    "waitgroup:continued false",
+    "waitgroup:still_alive false",
     "recover:rc       0",
     "recover:wait_returned true",
     "goexit:rc        0",
@@ -132,8 +142,13 @@ fn main() {
 
     let (rc, out) = run_probe("panic_probe_waitgroup");
     chk(&mut ln, &fmt::Sprintf!("%-16s %d", string::from_static("waitgroup:rc"), rc));
-    chk(&mut ln, &fmt::Sprintf!("%s %v", string::from_static("waitgroup:continued"),
-        strings::Contains(&out, "Wait returned")));
+    // NOT "Wait returned": `Done()` is deferred, so it runs while the
+    // panic is still unwinding and Wait can legitimately return before
+    // the process dies. Go behaves the same way — 53 of 100 runs print
+    // it — so the assertion is that the panic won the race to the exit
+    // status, not that Wait lost it.
+    chk(&mut ln, &fmt::Sprintf!("%s %v", string::from_static("waitgroup:still_alive"),
+        strings::Contains(&out, "still alive")));
 
     let (rc, out) = run_probe("panic_probe_recover");
     chk(&mut ln, &fmt::Sprintf!("%-16s %d", string::from_static("recover:rc"), rc));
