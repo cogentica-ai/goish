@@ -3680,5 +3680,5 @@ name = "json_mapkey_ref_smoke"
 path = "examples/json_mapkey_ref_smoke.rs"
 
 [[example]]
-name = "json_any_marshal_ref_smoke"
-path = "examples/json_any_marshal_ref_smoke.rs"
+name = "json_any_ref_smoke"
+path = "examples/json_any_ref_smoke.rs"

@@ -763,6 +763,14 @@ pub fn reflect(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // Make the type marshalable when it is held in a `goish::Any`.
     //
+    // Marshal ONLY. The decode counterpart needs `Clone + PartialEq`
+    // to copy the held value and put the result back, and a
+    // `#[goish::reflect]` struct is not required to have either —
+    // emitting it unconditionally broke three existing examples that
+    // derive neither. So decoding INTO a held value of a generated
+    // type is opt-in via `v2::RegisterAnyUnmarshaler::<C>()`, and the
+    // error when it is missing names both the type and the call.
+    //
     // Go's interface arshaler dispatches through reflection and so
     // reaches every concrete codec for free. goish's registry has to be
     // told, and the only place that knows both the type and that it HAS

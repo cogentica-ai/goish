@@ -2445,3 +2445,51 @@ impl crate::fmt::Stringer for Number {
         return Number::String(v);
     }
 }
+
+// go: none — goish-only: Go's v1 decoder fills an `interface{}`
+// destination from `reflect`, which needs no trait; goish's v1 decode
+// goes through `FromValue`, so `Any` has to say how.
+//
+// The mapping is Go's documented default set for decoding into an
+// `interface{}` (encoding/json's "To unmarshal JSON into an interface
+// value" list): bool, float64, string, []interface{},
+// map[string]interface{}, nil. A JSON number is ALWAYS float64 — there
+// is no integer case — so a whole number round-trips and still has the
+// wrong dynamic type if a port picks int.
+//
+// This exists because `#[goish::reflect]` emits a v1 codec as well as
+// a v2 one, so a struct with an `Any`-typed field does not compile
+// without it, whatever v2 can do (issue #15).
+impl FromValue for crate::Any {
+    // goishlint:ignore GOISH014 — trait method; provenance is on the impl.
+    fn from_value(v: &Value) -> (Self, error) {
+        return match v {
+            Value::Null => (crate::Any::default(), crate::errors::nil),
+            Value::Bool(b) => (crate::Any::new(*b), crate::errors::nil),
+            Value::Number(n) => (crate::Any::new(*n), crate::errors::nil),
+            Value::String(s) => (crate::Any::new(s.clone()), crate::errors::nil),
+            Value::Array(a) => {
+                let mut out: slice<crate::Any> = crate::make!([]crate::Any, 0);
+                for i in 0..a.Len() {
+                    let (item, err) = crate::Any::from_value(&a[i as usize]);
+                    if err != crate::errors::nil {
+                        return (crate::Any::default(), err);
+                    }
+                    out = crate::append!(out, item);
+                }
+                (crate::Any::new(out), crate::errors::nil)
+            }
+            Value::Object(o) => {
+                let mut out: map<string, crate::Any> = map::new();
+                for (k, val) in o.__iter() {
+                    let (item, err) = crate::Any::from_value(val);
+                    if err != crate::errors::nil {
+                        return (crate::Any::default(), err);
+                    }
+                    out.Set(k.clone(), item);
+                }
+                (crate::Any::new(out), crate::errors::nil)
+            }
+        };
+    }
+}

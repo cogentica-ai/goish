@@ -192,14 +192,25 @@ Sync`, so the blanket `HasDynAny` gives `AsExt::As` a view of the
 NEWTYPE. Every lookup asked the registry about `TypeId::of::<Any>()`
 and missed. Use `self.as_any()`, one level in.
 
-**Still open.**
+**Unmarshal: done**, and `Command.Arguments *[]any` round-trips —
+which also needed `impl FromValue for Any`, since `#[goish::reflect]`
+emits a v1 codec as well as a v2 one.
 
-1. The UNMARSHAL half — the six behaviours above.
-2. `Command.Arguments *[]any` itself still does not compile. A
-   `#[goish::reflect]` struct with an `Option<slice<Any>>` field needs
-   `Any: encoding::json::FromValue`, because the macro also emits the
-   **v1** codec. The v2 work does not reach it; this is the next step
-   for the downstream blocker specifically, and it is smaller than (1).
+Into an EMPTY interface the default types need no registration.
+Decoding into a HELD value does, through
+`v2::RegisterAnyUnmarshaler::<C>()` — and that one is deliberately NOT
+emitted by the reflect macro: it needs `Clone + PartialEq` to copy the
+held value and put the result back, and a generated struct is not
+required to have either. Emitting it unconditionally broke three
+existing examples (`reflect_json`'s `Person`, `Bag`, `Bare`), so it
+stays opt-in and the error names both the type and the call. Marshaling
+is automatic either way.
+
+`json_any_ref_smoke` pins 27 rows.
+
+**Still open:** nothing known. Issue #15's remaining acceptance items
+are `options` and deeper malformed-input parity, which ride on the
+surrounding v2 contracts rather than on `Any` itself.
 
 
 ## 1. `crypto/tls` — the record layer is the last invented code

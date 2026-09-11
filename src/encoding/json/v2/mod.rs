@@ -1082,3 +1082,193 @@ impl MarshalerTo for crate::Any {
         }
     }
 }
+
+// go: none — goish-only: the decode mirror of `__MARSHALER_REGISTRY`.
+//
+// Decoding into an interface that ALREADY holds a value cannot go
+// through `cast_mut`: `Any` is `Arc`-based and shared, so there is no
+// reliable `&mut` to the payload. Go does not mutate in place either —
+// an interface's value is not addressable, so reflection makes a COPY
+// of the dynamic value, decodes into that, and stores it back.
+//
+// The copy matters and is not an implementation detail. Measured:
+// `{"x":1}` into an `any` holding `P{9,9}` yields `{1 9}`, so fields
+// the document omits keep their previous values. Decoding into a fresh
+// zero would give `{1 0}` and would pass a full-object test
+// identically. That is why the probe carries a `decode` that clones,
+// and why registration needs `Clone`.
+#[doc(hidden)]
+pub struct __AnyDecodeProbe {
+    pub concrete: ::core::any::TypeId,
+    pub decode: fn(&crate::Any, &mut jsontext::Decoder) -> (crate::Any, error),
+}
+
+// go: none — goish-only: see `__AnyDecodeProbe`.
+#[doc(hidden)]
+pub static __UNMARSHALER_REGISTRY: crate::sync::Mutex<Vec<__AnyDecodeProbe>> =
+    crate::sync::Mutex::new(Vec::new());
+
+// go: none — goish-only: see `__AnyDecodeProbe`.
+/// Make `C` decodable when an `Any` already holds one. Idempotent.
+///
+/// Separate from [`RegisterAnyMarshaler`], and NOT emitted by
+/// `#[goish::reflect]`, because it needs more of the type: `Clone` to
+/// copy the held value and `PartialEq + Reflect` to put the result
+/// back through `Any::new`. A generated struct is not required to have
+/// any of those — emitting this unconditionally broke three existing
+/// examples — so a type that wants the held-value decode path says so.
+/// Marshaling is automatic either way.
+///
+/// Only the HELD-value path needs this. Decoding into an empty `Any`
+/// builds Go's default dynamic types and needs no registration at
+/// all.
+pub fn RegisterAnyUnmarshaler<
+    C: 'static + Send + Sync + Clone + PartialEq + crate::reflect::Reflect + UnmarshalerFrom,
+>() {
+    // go: none — goish-only: the probe body.
+    fn decode<
+        C: 'static + Send + Sync + Clone + PartialEq + crate::reflect::Reflect + UnmarshalerFrom,
+    >(
+        held: &crate::Any,
+        dec: &mut jsontext::Decoder,
+    ) -> (crate::Any, error) {
+        let mut copy: C = match held.as_any().downcast_ref::<C>() {
+            Some(v) => v.clone(),
+            // Unreachable: the caller matched on this probe's TypeId.
+            None => return (held.clone(), errors::New("json: Any decode probe type mismatch")),
+        };
+        let err = copy.UnmarshalJSONFrom(dec);
+        return (crate::Any::new(copy), err);
+    }
+    let mut g = __UNMARSHALER_REGISTRY.Lock();
+    let id = ::core::any::TypeId::of::<C>();
+    if g.iter().any(|p| p.concrete == id) {
+        return;
+    }
+    g.push(__AnyDecodeProbe {
+        concrete: id,
+        decode: decode::<C>,
+    });
+}
+
+// go: none — goish-only: see `__AnyDecodeProbe`.
+fn __any_decode_held(
+    held: &crate::Any,
+    dec: &mut jsontext::Decoder,
+) -> Option<(crate::Any, error)> {
+    let id = (*held.as_any()).type_id();
+    let f = {
+        let g = __UNMARSHALER_REGISTRY.Lock();
+        match g.iter().find(|p| p.concrete == id) {
+            Some(p) => p.decode,
+            None => return None,
+        }
+    };
+    return Some(f(held, dec));
+}
+
+// Go: encoding/json/v2/arshal_default.go — the interface arshaler's
+// unmarshal closure. Six behaviours, all measured (ROADMAP §2s):
+//
+//   null                        -> nils the interface, whatever it held
+//   into an EMPTY interface     -> Go's default dynamic types
+//   into a HELD value, kind ok  -> decodes into a COPY of it, keeping
+//                                  the dynamic type and any fields the
+//                                  document does not mention
+//   into a HELD value, kind bad -> error, the held value UNCHANGED
+//
+// The default types are the part a round-trip test cannot catch: a
+// JSON number is always float64, never an int. Storing an int
+// round-trips `1` perfectly and diverges the moment anything reads the
+// type or does arithmetic.
+impl UnmarshalerFrom for crate::Any {
+    // goishlint:ignore GOISH014 — trait method; provenance is on the impl.
+    fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
+        // `null` first: it replaces the interface itself rather than
+        // decoding into whatever is held, so a held value must not get
+        // a say. Go nils the interface even when it held a struct.
+        if dec.PeekKind() == 'n' {
+            let (_, err) = dec.ReadToken();
+            if err != nil {
+                return err;
+            }
+            *self = crate::Any::default();
+            return nil;
+        }
+
+        // A held value decodes through its own codec, into a copy.
+        if !self.IsNil() {
+            __register_builtin_unmarshalers();
+            if let Some((next, err)) = __any_decode_held(self, dec) {
+                // Stored even on error: Go leaves the partially
+                // decoded value in place, which is what the surrounding
+                // v2 contracts do everywhere else. The exception is a
+                // kind mismatch, where the codec rejects before
+                // touching anything and the copy still equals the
+                // original — so assigning it is the same value.
+                *self = next;
+                return err;
+            }
+            // Falls through: an unregistered held type decodes as if
+            // the interface were empty, which is the closest thing to
+            // Go that goish can do without the type's codec. Say so
+            // rather than silently replacing.
+            let mut msg = string::from_static(
+                "json: cannot decode into the value held in this Any; call                  encoding::json::v2::RegisterAnyUnmarshaler for the type: ",
+            );
+            msg = msg + string::from_bytes(self.0.__goish_type_name().as_bytes());
+            return errors::New(msg);
+        }
+
+        // Empty interface: Go's default dynamic types.
+        let k = dec.PeekKind();
+        if k == 't' || k == 'f' {
+            let mut v = false;
+            let err = v.UnmarshalJSONFrom(dec);
+            *self = crate::Any::new(v);
+            return err;
+        }
+        if k == '"' {
+            let mut v = string::new();
+            let err = v.UnmarshalJSONFrom(dec);
+            *self = crate::Any::new(v);
+            return err;
+        }
+        if k == '0' {
+            // ALWAYS float64. Go's decoder has no integer case for an
+            // interface destination, so a port that picked int for a
+            // whole number would round-trip and still be wrong.
+            let mut v: f64 = 0.0;
+            let err = v.UnmarshalJSONFrom(dec);
+            *self = crate::Any::new(v);
+            return err;
+        }
+        if k == '[' {
+            let mut v: slice<crate::Any> = slice::new();
+            let err = v.UnmarshalJSONFrom(dec);
+            *self = crate::Any::new(v);
+            return err;
+        }
+        if k == '{' {
+            let mut v: crate::gomap::map<string, crate::Any> = crate::gomap::map::new();
+            let err = v.UnmarshalJSONFrom(dec);
+            *self = crate::Any::new(v);
+            return err;
+        }
+        return crate::io::ErrUnexpectedEOF.into();
+    }
+}
+
+// go: none — goish-only: the decode mirror of
+// `__register_builtin_marshalers`, for the composites Go's own decoder
+// produces — so a decoded `any` re-decodes into itself.
+fn __register_builtin_unmarshalers() {
+    static ONCE: crate::sync::Once = crate::sync::Once::new();
+    ONCE.Do(|| {
+        RegisterAnyUnmarshaler::<bool>();
+        RegisterAnyUnmarshaler::<string>();
+        RegisterAnyUnmarshaler::<f64>();
+        RegisterAnyUnmarshaler::<slice<crate::Any>>();
+        RegisterAnyUnmarshaler::<crate::gomap::map<string, crate::Any>>();
+    });
+}
