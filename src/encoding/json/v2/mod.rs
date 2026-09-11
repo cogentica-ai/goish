@@ -336,6 +336,127 @@ pub fn UnmarshalDecode<T: UnmarshalerFrom + ?Sized>(
 
 // ─── Builtin impls (compile-time arshal_default.go) ──────────────────
 
+// ─── SemanticError ──────────────────────────────────────────────────
+
+// go: sdk 1.25.5 encoding/json/v2/errors.go:66-88 SemanticError
+/// Go: the error a v2 codec returns when a JSON value cannot be
+/// represented by the Go destination.
+///
+/// goish's scalar codecs used to say `json: cannot unmarshal non-string
+/// into string`, which names neither what arrived nor where. Go's
+/// message is three facts a caller routes on (issue #10):
+///
+///     json: cannot unmarshal JSON number into Go string within "/trigger"
+///                             ^^^^^^      ^^^^^^        ^^^^^^^^^
+///                             kind        Go type       JSON pointer
+///
+/// The pointer is the one a consumer cannot reconstruct for itself —
+/// nested objects, arrays, escaped names and streaming decodes all need
+/// decoder state — which is why it is built here rather than downstream.
+pub struct SemanticError {
+    /// The JSON kind that arrived, spelled as Go spells it in the
+    /// message: "number", "boolean", "string", "array", "object".
+    /// Empty when the value's kind is not the problem.
+    pub JSONKind: string,
+    /// The offending literal, included only when the VALUE rather than
+    /// the kind is what fails — `1.5` into an int, `-1` into a uint.
+    /// Go prints `JSON number 1.5 into Go int: invalid syntax`.
+    pub JSONValue: string,
+    /// The Go destination type as Go spells it: `string`, `[]int`,
+    /// `map[string]int`, `json_test.Custom`. Not the Rust path.
+    pub GoType: string,
+    /// RFC 6901 pointer to the failing value, empty at the root —
+    /// which is exactly where Go omits the `within` clause.
+    pub JSONPointer: string,
+    /// The wrapped cause, if any. Go keeps the cause's own text and
+    /// prefixes its context rather than replacing it, and `errors.Is`
+    /// finds through it.
+    pub Err: error,
+}
+
+impl crate::errors::ErrorTrait for SemanticError {
+    // goishlint:ignore GOISH014 — trait method; provenance is on the impl.
+    fn Error(&self) -> string {
+        let mut out = string::from_static("json: cannot unmarshal");
+        if self.JSONKind.as_bytes().len() > 0 {
+            out = out + string::from_static(" JSON ") + self.JSONKind.clone();
+            if self.JSONValue.as_bytes().len() > 0 {
+                out = out + string::from_static(" ") + self.JSONValue.clone();
+            }
+        }
+        out = out + string::from_static(" into Go ") + self.GoType.clone();
+        if self.JSONPointer.as_bytes().len() > 0 {
+            out = out
+                + string::from_static(" within ")
+                + string::from_bytes(&crate::strconv::Quote(self.JSONPointer.clone()).as_bytes());
+        }
+        if !self.Err.IsNil() {
+            out = out + string::from_static(": ") + self.Err.Error();
+        }
+        return out;
+    }
+
+    // goishlint:ignore GOISH014 — trait method; provenance is on the impl.
+    fn Unwrap(&self) -> error {
+        return self.Err.clone();
+    }
+}
+
+// go: none — goish-only: Go reads the arriving kind from the decoder's
+// own state inside `newUnmarshalErrorAfter`; goish's codecs already
+// have the Kind in hand, so the mapping to Go's WORD is the only part
+// that needs saying.
+/// Go's spelling of a `jsontext.Kind` in an error message.
+pub(crate) fn __kind_word(k: jsontext::Kind) -> string {
+    return string::from_static(match k.0 {
+        b'n' => "null",
+        b'f' | b't' => "boolean",
+        b'"' => "string",
+        b'0' => "number",
+        b'[' => "array",
+        b'{' => "object",
+        _ => "value",
+    });
+}
+
+// go: none — goish-only: the constructor Go spells as
+// `newUnmarshalErrorAfter(dec, t, err)`; goish passes the destination
+// type name explicitly because it has no reflection at the codec.
+/// Build Go's message for the case where the LITERAL is the problem —
+/// `1.5` into an int, `-1` into a uint. Go includes the literal and
+/// appends strconv's reason: `JSON number 1.5 into Go int: invalid
+/// syntax`.
+pub(crate) fn __semantic_error_value(
+    dec: &jsontext::Decoder,
+    kind: jsontext::Kind,
+    literal: string,
+    go_type: &str,
+    cause: error,
+) -> error {
+    return errors::Wrap(SemanticError {
+        JSONKind: __kind_word(kind),
+        JSONValue: literal,
+        GoType: string::from_bytes(go_type.as_bytes()),
+        JSONPointer: dec.StackPointer().String(),
+        Err: cause,
+    });
+}
+
+/// Build Go's message for "this JSON value cannot become that Go type".
+pub(crate) fn __semantic_error(
+    dec: &jsontext::Decoder,
+    kind: jsontext::Kind,
+    go_type: &str,
+) -> error {
+    return errors::Wrap(SemanticError {
+        JSONKind: __kind_word(kind),
+        JSONValue: string::new(),
+        GoType: string::from_bytes(go_type.as_bytes()),
+        JSONPointer: dec.StackPointer().String(),
+        Err: nil,
+    });
+}
+
 impl MarshalerTo for bool {
     fn MarshalJSONTo(&self, enc: &mut jsontext::Encoder) -> error {
         enc.WriteToken(jsontext::Bool(*self))
@@ -352,7 +473,7 @@ impl UnmarshalerFrom for bool {
             b't' => *self = true,
             b'f' => *self = false,
             b'n' => *self = false,
-            _ => return errors::New("json: cannot unmarshal non-bool into bool"),
+            _ => return __semantic_error(dec, t.Kind(), "bool"),
         }
         nil
     }
@@ -370,9 +491,14 @@ impl UnmarshalerFrom for string {
         // even for rejected composites. Strings/null retain the equivalent
         // token path so the existing JSON unquote implementation is reused.
         if dec.PeekKind() != '"' && dec.PeekKind() != 'n' {
+            let bad = dec.PeekKind();
             let (_, err) = dec.ReadValue();
             if err != nil { return err; }
-            return errors::New("json: cannot unmarshal non-string into string");
+            // Read the value FIRST, then build the error: the pointer
+            // is only correct once the decoder has consumed the thing
+            // being rejected, which is also why Go reads it even
+            // though it is about to throw it away.
+            return __semantic_error(dec, bad, "string");
         }
         let (t, err) = dec.ReadToken();
         if err != nil {
@@ -381,7 +507,7 @@ impl UnmarshalerFrom for string {
         match t.Kind().0 {
             b'"' => *self = t.String(),
             b'n' => *self = string::new(),
-            _ => return errors::New("json: cannot unmarshal non-string into string"),
+            _ => return __semantic_error(dec, t.Kind(), "string"),
         }
         nil
     }
@@ -423,27 +549,17 @@ macro_rules! impl_json_int {
                             e
                         };
                         if e != nil {
-                            return errors::New(
-                                crate::gostring::string::from_static(
-                                    "json: unable to unmarshal JSON number ")
-                                    + raw
-                                    + " into Go "
-                                    + $name
-                                    + ": "
-                                    + numeric_reason(&e),
+                            return __semantic_error_value(
+                                dec,
+                                t.Kind(),
+                                raw,
+                                $name,
+                                errors::New(numeric_reason(&e)),
                             );
                         }
                     }
                     b'n' => *self = 0,
-                    _ => {
-                        return errors::New(
-                            crate::gostring::string::from_static(
-                                "json: unable to unmarshal JSON ")
-                                + t.Kind().String()
-                                + " into Go "
-                                + $name,
-                        )
-                    }
+                    _ => return __semantic_error(dec, t.Kind(), $name),
                 }
                 nil
             }
@@ -469,14 +585,21 @@ fn numeric_reason(e: &error) -> crate::gostring::string {
 // names the underlying Rust primitive. The BEHAVIOUR — which inputs
 // are accepted, which rejected, and with which of the two reasons — is
 // Go's, and that is what examples/json_int_diff.rs compares.
+// The names are Go's, not Rust's — an error message saying `into Go
+// i64` is not the contract a caller routes on. goish's `int`, `uint`,
+// `byte` and `rune` are ALIASES of these primitives rather than
+// distinct types, so a field a Go program declares as `int` reports as
+// `int64` here (and `byte` as `uint8`). Go would print the alias. That
+// is a real divergence and the only one left in these messages; it
+// cannot be closed without newtypes for the aliases.
 impl_json_int!(
-    i8, 8, true, "i8";
-    i16, 16, true, "i16";
-    i32, 32, true, "i32";
-    i64, 64, true, "i64";
-    u8, 8, false, "u8";
-    u16, 16, false, "u16";
-    u32, 32, false, "u32";
+    i8, 8, true, "int8";
+    i16, 16, true, "int16";
+    i32, 32, true, "int32";
+    i64, 64, true, "int64";
+    u8, 8, false, "uint8";
+    u16, 16, false, "uint16";
+    u32, 32, false, "uint32";
 );
 
 /// u64 keeps full range via the Uint token.
@@ -495,7 +618,7 @@ impl UnmarshalerFrom for u64 {
         match t.Kind().0 {
             b'0' => *self = t.Int() as u64,
             b'n' => *self = 0,
-            _ => return errors::New("json: cannot unmarshal non-number into integer"),
+            _ => return __semantic_error(dec, t.Kind(), "uint64"),
         }
         nil
     }
@@ -503,7 +626,7 @@ impl UnmarshalerFrom for u64 {
 
 // go: sdk 1.25.5 encoding/json/v2/arshal_default.go:595-698 makeFloatArshaler
 macro_rules! impl_json_float {
-    ($($t:ty => $bits:expr),*) => {$(
+    ($($t:ty => $bits:expr, $fname:expr);* $(;)?) => {$(
         impl MarshalerTo for $t {
             fn MarshalJSONTo(&self, enc: &mut jsontext::Encoder) -> error {
                 // makeFloatArshaler rejects non-finite values before writing
@@ -530,18 +653,14 @@ macro_rules! impl_json_float {
                         if err != nil { return err; }
                     }
                     b'n' => *self = 0.0,
-                    _ => {
-                        return errors::New(
-                            "json: cannot unmarshal non-number into float",
-                        )
-                    }
+                    _ => return __semantic_error(dec, value.Kind(), $fname),
                 }
                 nil
             }
         }
     )*};
 }
-impl_json_float!(f32 => 32, f64 => 64);
+impl_json_float!(f32 => 32, "float32"; f64 => 64, "float64");
 
 /// `slice<T>` ⇄ JSON array.
 impl<T: MarshalerTo + Clone> MarshalerTo for slice<T> {
@@ -573,7 +692,7 @@ impl<T: UnmarshalerFrom + Default + Clone> UnmarshalerFrom for slice<T> {
             return nil;
         }
         if t.Kind() != '[' {
-            return errors::New("json: cannot unmarshal non-array into slice");
+            return __semantic_error(dec, t.Kind(), "slice");
         }
         // Go zeroes each slot before decode and sets Len(i) even when the
         // element decoder fails (arshal_default.go:1490-1508). An owned
@@ -636,7 +755,7 @@ impl<T: UnmarshalerFrom + Default + 'static, const N: usize> UnmarshalerFrom for
                 return nil;
             }
             if value.Kind() != '"' {
-                return errors::New("json: cannot unmarshal non-string into byte array");
+                return __semantic_error(dec, value.Kind(), "byte array");
             }
             let mut encoded = string::new();
             let err = Unmarshal(&value.0, &mut encoded, []);
@@ -692,7 +811,7 @@ impl<T: UnmarshalerFrom + Default + 'static, const N: usize> UnmarshalerFrom for
             return nil;
         }
         if token.Kind() != '[' {
-            return errors::New("json: cannot unmarshal non-array into array");
+            return __semantic_error(dec, token.Kind(), "array");
         }
         let mut i = 0;
         let mut length_error = nil;
@@ -814,7 +933,7 @@ where
             return err;
         }
         if t.Kind() != '{' {
-            return errors::New("json: cannot unmarshal non-object into map");
+            return __semantic_error(dec, t.Kind(), "map");
         }
         while dec.PeekKind() != '}' {
             if dec.PeekKind() == jsontext::Kind(0) {

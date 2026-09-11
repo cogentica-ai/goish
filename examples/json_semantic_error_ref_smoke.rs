@@ -1,0 +1,221 @@
+// json_semantic_error_ref_smoke — what a v2 decode error SAYS
+// (issue #10).
+//
+// goish's scalar codecs used to say
+//
+//     json: cannot unmarshal non-string into string
+//
+// which names neither what arrived nor where. Go names three things a
+// caller routes on:
+//
+//     json: cannot unmarshal JSON number into Go string within "/trigger"
+//                             ^^^^^^      ^^^^^^        ^^^^^^^^^
+//                             kind        Go type       JSON pointer
+//
+// The pointer is the part a consumer cannot reconstruct for itself —
+// nested objects, arrays, escaped names and streaming decodes all need
+// decoder state — which is why it is built in the runtime. The
+// `repro_*` rows are issue #10's own reproducer, verbatim.
+//
+// TWO ROWS BELOW ARE NOT GO'S TEXT, and are pinned as goish's with
+// Go's quoted beside them so the gap is visible rather than absent:
+//
+//   div_int       Go says `into Go int`; goish says `int64`. goish's
+//                 `int` IS `i64` — an alias, not a distinct type — so
+//                 the codec cannot tell a Go `int` field from an
+//                 `int64` one. Same for `byte`/`uint8`, `rune`/`int32`.
+//                 Closing it needs newtypes for the aliases.
+//   div_slice     Go says `into Go []int`; goish says `slice`. The
+//                 element type is a generic parameter with no name at
+//                 the codec. A `GoTypeName` trait would fix it, but it
+//                 would have to be a bound on every codec impl and
+//                 implemented for every field type — the same shape of
+//                 breaking change that `RegisterAnyUnmarshaler` was
+//                 kept out of, so it is not done on a guess.
+//
+// Everything else — every kind word, every pointer including RFC 6901
+// escaping, the `within` clause's presence at a field and absence at
+// the root, the literal-and-cause form for `1.5` into an integer — is
+// byte-for-byte Go, from tools/gen_json_semerr_ref.go.
+
+#![no_std]
+#![no_main]
+#![allow(non_snake_case)]
+
+extern crate alloc;
+extern crate goish;
+
+use core::sync::atomic::{AtomicUsize, Ordering};
+use goish::encoding::json::jsontext;
+use goish::encoding::json::v2 as json;
+use goish::errors::{error, nil};
+use goish::fmt;
+use goish::gomap::map;
+use goish::gostring::string;
+use goish::slice;
+use goish::types::int;
+
+static FAILED: AtomicUsize = AtomicUsize::new(0);
+
+const GO: [&str; 16] = [
+    "root_num_str       json: cannot unmarshal JSON number into Go string",
+    "root_bool_str      json: cannot unmarshal JSON boolean into Go string",
+    "root_arr_str       json: cannot unmarshal JSON array into Go string",
+    "root_obj_str       json: cannot unmarshal JSON object into Go string",
+    "root_num_bool      json: cannot unmarshal JSON number into Go bool",
+    "root_str_bool      json: cannot unmarshal JSON string into Go bool",
+    "root_str_float     json: cannot unmarshal JSON string into Go float64",
+    // Go: `json: cannot unmarshal JSON string into Go int` — see the
+    // header; goish's `int` is an alias of `i64`.
+    "div_int            json: cannot unmarshal JSON string into Go int64",
+    // Go: `json: cannot unmarshal JSON number 1.5 into Go int: invalid syntax`
+    "div_frac_int       json: cannot unmarshal JSON number 1.5 into Go int64: invalid syntax",
+    // Go: `json: cannot unmarshal JSON object into Go []int`
+    "div_slice          json: cannot unmarshal JSON object into Go slice",
+    // Go: `json: cannot unmarshal JSON array into Go map[string]int`
+    "div_map            json: cannot unmarshal JSON array into Go map",
+    "field_nested_str   json: cannot unmarshal JSON number into Go string within \"/in/s\"",
+    "field_slice_deep   json: cannot unmarshal JSON number into Go string within \"/sl/0/s\"",
+    "escaped_name       json: cannot unmarshal JSON number into Go string within \"/a~1b\"",
+    "repro_text         json: cannot unmarshal JSON number into Go string within \"/trigger\"",
+    "repro_nonnil       true",
+];
+
+#[goish::reflect]
+#[derive(Default, Clone, PartialEq)]
+struct Inner {
+    #[tag(r#"json:"s""#)]
+    S: string,
+}
+
+#[goish::reflect]
+#[derive(Default, Clone, PartialEq)]
+struct Outer {
+    #[tag(r#"json:"in""#)]
+    In: Inner,
+    #[tag(r#"json:"sl""#)]
+    Sl: slice<Inner>,
+}
+
+/// Issue #10's reproducer, verbatim: an object adapter that delegates
+/// a nullable field to goish's own pointer/string codec.
+#[derive(Default)]
+struct Request {
+    trigger: Option<string>,
+}
+
+impl json::UnmarshalerFrom for Request {
+    fn UnmarshalJSONFrom(&mut self, dec: &mut jsontext::Decoder) -> error {
+        let (_, err) = dec.ReadToken(); // {
+        if err != nil {
+            return err;
+        }
+        let (_, err) = dec.ReadToken(); // "trigger"
+        if err != nil {
+            return err;
+        }
+        return self.trigger.UnmarshalJSONFrom(dec);
+    }
+}
+
+fn chk(ln: &mut usize, got: &string) {
+    if *ln >= GO.len() {
+        fmt::Printf!("[!!] extra line %d: %q\n", *ln as int + 1, got);
+        FAILED.fetch_add(1, Ordering::Relaxed);
+        *ln += 1;
+        return;
+    }
+    if got == GO[*ln] {
+        fmt::Printf!("[ok] %s\n", got);
+    } else {
+        fmt::Printf!("[!!] line %d\n  got  %q\n  want %q\n", *ln as int + 1, got, GO[*ln]);
+        FAILED.fetch_add(1, Ordering::Relaxed);
+    }
+    *ln += 1;
+}
+
+fn row(ln: &mut usize, name: &'static str, e: error) {
+    let text = if e.IsNil() {
+        string::from_static("<nil>")
+    } else {
+        e.Error()
+    };
+    chk(ln, &fmt::Sprintf!("%-18s %s", string::from_static(name), text));
+}
+
+#[goish::main]
+fn main() {
+    let mut ln: usize = 0;
+
+    let mut v = string::new();
+    row(&mut ln, "root_num_str", json::Unmarshal(&b"1"[..], &mut v, []));
+    let mut v = string::new();
+    row(&mut ln, "root_bool_str", json::Unmarshal(&b"true"[..], &mut v, []));
+    let mut v = string::new();
+    row(&mut ln, "root_arr_str", json::Unmarshal(&b"[]"[..], &mut v, []));
+    let mut v = string::new();
+    row(&mut ln, "root_obj_str", json::Unmarshal(&b"{}"[..], &mut v, []));
+    let mut v = false;
+    row(&mut ln, "root_num_bool", json::Unmarshal(&b"1"[..], &mut v, []));
+    let mut v = false;
+    row(&mut ln, "root_str_bool", json::Unmarshal(&b"\"x\""[..], &mut v, []));
+    let mut v: f64 = 0.0;
+    row(&mut ln, "root_str_float", json::Unmarshal(&b"\"x\""[..], &mut v, []));
+
+    let mut v: int = int::from(0);
+    row(&mut ln, "div_int", json::Unmarshal(&b"\"x\""[..], &mut v, []));
+    let mut v: int = int::from(0);
+    row(&mut ln, "div_frac_int", json::Unmarshal(&b"1.5"[..], &mut v, []));
+    let mut v: slice<int> = slice::new();
+    row(&mut ln, "div_slice", json::Unmarshal(&b"{}"[..], &mut v, []));
+    let mut v: map<string, int> = map::new();
+    row(&mut ln, "div_map", json::Unmarshal(&b"[]"[..], &mut v, []));
+
+    // The pointer, which is the whole point.
+    let mut o = Outer::default();
+    row(
+        &mut ln,
+        "field_nested_str",
+        json::Unmarshal(&b"{\"in\":{\"s\":1}}"[..], &mut o, []),
+    );
+    let mut o = Outer::default();
+    row(
+        &mut ln,
+        "field_slice_deep",
+        json::Unmarshal(&b"{\"sl\":[{\"s\":1}]}"[..], &mut o, []),
+    );
+    // RFC 6901: a `/` in a member name must not fake a path separator.
+    let mut m: map<string, string> = map::new();
+    row(
+        &mut ln,
+        "escaped_name",
+        json::Unmarshal(&b"{\"a/b\":1}"[..], &mut m, []),
+    );
+
+    // Issue #10's reproducer.
+    let mut value = Request::default();
+    let err = json::Unmarshal(&br#"{"trigger":1}"#[..], &mut value, []);
+    row(&mut ln, "repro_text", err);
+    // The already-fixed pointer-state contract must survive: a nil
+    // pointer is allocated before decoding, so it is non-nil and
+    // zero-valued after the error.
+    chk(
+        &mut ln,
+        &fmt::Sprintf!(
+            "%-18s %v",
+            string::from_static("repro_nonnil"),
+            value.trigger.is_some()
+        ),
+    );
+
+    if ln != GO.len() {
+        fmt::Printf!("[!!] produced %d lines, pinned %d\n", ln as int, GO.len() as int);
+        FAILED.fetch_add(1, Ordering::Relaxed);
+    }
+    let f = FAILED.load(Ordering::Relaxed);
+    if f != 0 {
+        fmt::Printf!("\nFAILED %d check(s)\n", f as i64);
+        goish::os::Exit(1);
+    }
+    fmt::Printf!("\nok %d/%d\n", ln as i64, GO.len() as i64);
+}
