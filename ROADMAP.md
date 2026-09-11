@@ -149,6 +149,38 @@ and the only one that is purely an API choice.
 see below.) 2f is no longer a worklist: every FIPS CAST is inert
 because `Enabled_` is a `const false`, so the twelve unported files are
 a structural-fidelity decision, not twelve fixes.
+### §2s — `goish::Any` has no JSON v2 codec (issue #15)
+
+`Command.Arguments *[]any` and `ExecuteCommandParams.Arguments *[]any`
+are unportable with their real shape, because `slice<T>` requires its
+element to implement the v2 traits and `Any` does not.
+
+Go's contract is captured in `tools/gen_json_any_ref.go` (run it under
+`GOEXPERIMENT=jsonv2 scripts/goref.sh encoding/json/v2 …`). The
+transcript is more demanding than the issue's summary. Decoding into an
+interface that ALREADY holds a value is six distinct behaviours, not
+one:
+
+    {"x":1,"y":2} -> any(Point{9,9})           decodes INTO the Point;
+                                               the dynamic type is kept
+    5             -> any(Point{9,9})           error, Point unchanged
+    5             -> any("old")                error, string unchanged
+    {"x":1}       -> any(map[string]any{k:1})  MERGES
+    [9]           -> any([]any{1,2,3})         REPLACES
+    null          -> any(Point{9,9})           nils the whole interface
+
+Into an empty interface Go picks nil / bool / string / float64 /
+[]any / map[string]any — a number is ALWAYS float64, so storing an int
+for `1` round-trips and diverges the moment anything reads the type.
+
+Why this is not a downcast table: Go dispatches on arbitrary dynamic
+types, including structs and custom marshalers reachable only through
+the interface. goish already has the machinery for a trait surviving
+the `Any` wrap — `#[goish::interface]`'s per-trait registry plus
+`cast!` — so the likely shape is to register `MarshalerTo` /
+`UnmarshalerFrom` that way and have `#[goish::reflect]` emit the
+registration, which covers every generated struct. Not implemented.
+
 
 ## 1. `crypto/tls` — the record layer is the last invented code
 
