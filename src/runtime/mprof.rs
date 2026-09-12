@@ -198,6 +198,8 @@ fn fastlog2(x: f64) -> f64 {
 /// real program are periodic, so a fixed stride aliases with them and
 /// systematically samples the same site. Go randomizes for that reason
 /// and so does this.
+#[inline(never)]
+#[cold]
 fn next_sample(rate: i64) -> i64 {
     if rate <= 1 {
         // Rate 1 profiles every allocation, which is what a test wants.
@@ -241,6 +243,8 @@ fn stack_hash(pcs: &[u64]) -> u64 {
 /// at READ time instead, by name, where symbolization is happening
 /// anyway. They also do not split buckets — every allocation carries
 /// the same prefix.
+#[inline(never)]
+#[cold]
 fn record_alloc(ptr: *mut u8, size: usize) {
     let mut frames = [0u64; MAX_STACK];
     let n = crate::runtime::collect_frames_for_profile(&mut frames);
@@ -314,6 +318,8 @@ fn record_alloc(ptr: *mut u8, size: usize) {
 // reached from the sweeper when a span with a profile special is freed.
 /// Credit a free back to the bucket that allocated it, if the pointer
 /// was one of the sampled ones.
+#[inline(never)]
+#[cold]
 fn record_free(ptr: *mut u8) {
     let mut t = TABLES.lock();
     let amask = NADDRS - 1;
@@ -353,7 +359,7 @@ fn record_free(ptr: *mut u8) {
 /// a segment-relative load and store — no atomic, no contention. A
 /// single global counter would put a `lock xadd` on every allocation in
 /// the program.
-#[inline]
+#[inline(always)]
 pub(crate) fn malloc_hook(ptr: *mut u8, size: usize) {
     let rate = MEM_PROFILE_RATE.load(Ordering::Relaxed);
     if rate <= 0 || ptr.is_null() {
@@ -371,11 +377,50 @@ pub(crate) fn malloc_hook(ptr: *mut u8, size: usize) {
         st.mprof_next.store(left, Ordering::Relaxed);
         return;
     }
-    // Suppress sampling of anything the recorder itself allocates, by
+    sample_now(ptr, size, rate);
+}
+
+// go: none — goish-only: the cold half of `malloc_hook`.
+/// Take one sample. Split out and marked `#[cold]` so the countdown
+/// that runs on EVERY allocation stays small enough to inline into the
+/// allocator without disturbing its register allocation.
+///
+/// Measured in release, 20M 64-byte alloc/free pairs, six runs per
+/// configuration:
+///
+///   no hook at all        76-80 ns   (baseline)
+///   hook, all inline      87-89 ns   (+~10 ns, 13%)
+///   hook, this split      81-85 ns   (+~6 ns, 8%)
+///
+/// So the split buys back about four of the ten nanoseconds, not all of
+/// them — the rest is the four loads and one store the countdown needs
+/// on every allocation. `rate = 0` measures the same as the 512 KiB
+/// default, which is the expected answer: the sampling itself runs once
+/// per 8192 allocations of this size, so what is being measured is the
+/// countdown, not the recording.
+///
+/// And that 8% is the ceiling, not the typical cost: the benchmark does
+/// nothing between allocations, so it is the densest allocation
+/// workload that exists. Reproduce with `examples/alloc_hook_bench.rs`
+/// — in RELEASE, since a debug build spends ~1400 ns per pair and buries
+/// the difference, and with `black_box`, since without it LLVM deletes
+/// the allocation outright and 20M of them "take" 5 ms.
+#[inline(never)]
+#[cold]
+fn sample_now(ptr: *mut u8, size: usize, rate: i64) {
+    // Re-read the M here rather than taking `&MStorage` as a parameter:
+    // that type is private to `sched`, and widening its visibility to
+    // shave one segment load off a path that runs once per 512 KiB
+    // would be a bad trade.
+    if !crate::runtime::sched::is_tls_ready() {
+        return;
+    }
+    let st = crate::runtime::sched::current_m_storage();
+    // Suppress sampling of anything the recorder itself allocates by
     // parking the countdown out of reach for the duration. A per-M
-    // boolean would do the same job with an extra TLS field; this
-    // needs none, and it cannot leave a flag set if the recorder
-    // returns early. It matters because the SpinLock below is NOT
+    // boolean would do the same job with an extra TLS field; this needs
+    // none, and it cannot leave a flag set if the recorder returns
+    // early. It matters because the SpinLock in `record_alloc` is NOT
     // reentrant: a nested sample on this M would deadlock, not merely
     // double-count.
     st.mprof_next.store(i64::MAX, Ordering::Relaxed);
@@ -389,7 +434,7 @@ pub(crate) fn malloc_hook(ptr: *mut u8, size: usize) {
 /// The `LIVE_SAMPLED` check is what keeps this off the hot path: with
 /// no sampled object alive there is nothing to find, so the free path
 /// costs one relaxed load and a branch.
-#[inline]
+#[inline(always)]
 pub(crate) fn free_hook(ptr: *mut u8) {
     if ptr.is_null() || LIVE_SAMPLED.load(Ordering::Relaxed) == 0 {
         return;

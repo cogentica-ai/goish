@@ -43,6 +43,29 @@ use goish::strings;
 
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
+/// Drive the workload from its OWN frame, not from `__goish_main`.
+///
+/// This is load-bearing for the `frame 0 is the interrupted pc` row
+/// below, which asserts that NO sample has `__goish_main` as its leaf.
+/// With the loop inline in main, a SIGPROF landing on the loop's own
+/// increment or on the `wrapping_add` has frame 0 legitimately inside
+/// `__goish_main`, and the row fails. Observed once in 28 runs, which is
+/// exactly often enough to be a CI flake and not often enough to debug.
+///
+/// Loosening the row to "95% of samples" would also have worked and
+/// would have been worse: the row exists to catch a missing leaf splice,
+/// which drops the count to roughly zero, so a threshold keeps the teeth
+/// — but it leaves the probability claim in the test. Giving the loop its
+/// own frame removes the claim instead.
+#[inline(never)]
+fn drive() -> u64 {
+    let mut acc = 0u64;
+    for _ in 0..400 {
+        acc = acc.wrapping_add(burn(200_000));
+    }
+    return acc;
+}
+
 fn check(cond: bool, what: &str) {
     if cond {
         fmt::Printf!("[ok] %s\n", string::from_bytes(what.as_bytes()));
@@ -75,10 +98,7 @@ fn name_of(pc: u64) -> string {
 fn main() {
     check(pprof::__sample_start(100), "setitimer(ITIMER_PROF) armed at 100 Hz");
 
-    let mut acc = 0u64;
-    for _ in 0..400 {
-        acc = acc.wrapping_add(burn(200_000));
-    }
+    let acc = drive();
     check(acc != 0, "the workload actually ran");
 
     pprof::__sample_stop();

@@ -288,6 +288,27 @@ So the stack side is DONE. What remains:
                         `#[inline]`, so the frame depth depends on the
                         optimizer. That only became possible once v0
                         symbols demangled.
+                        MEASURED COST of the sampler's hook on the
+                        allocator, release, 20M 64-byte alloc/free
+                        pairs, six runs each
+                        (examples/alloc_hook_bench):
+                          no hook at all     76-80 ns
+                          hook, all inline   87-89 ns  (+~10 ns, 13%)
+                          hook, cold split   81-85 ns  (+~6 ns, 8%)
+                        Pushing the recording out of line behind
+                        `#[cold]` bought back four of the ten; the rest
+                        is the four loads and one store the per-M
+                        countdown needs on every allocation. `rate = 0`
+                        measures the same as the 512 KiB default, so
+                        what the 8% pays for is the countdown, not the
+                        recording. It is a CEILING — the benchmark does
+                        nothing between allocations. A debug build
+                        cannot see any of it: ~1400 ns per pair there,
+                        and rate 0 measured SLOWER than rate 512 KiB.
+                        Also note e2e elapsed is useless for this: it
+                        ranged 1009s-1622s across six consecutive
+                        commits, so runner variance swamps a 8%
+                        allocator change.
                         Still open: the debug>=1 legacy TEXT format for
                         these two, which returns an error rather than
                         writing an empty file; and the four builtins

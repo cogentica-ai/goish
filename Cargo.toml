@@ -3732,5 +3732,9 @@ name = "pprof_heap_ref_smoke"
 path = "examples/pprof_heap_ref_smoke.rs"
 
 [[example]]
+name = "alloc_hook_bench"
+path = "examples/alloc_hook_bench.rs"
+
+[[example]]
 name = "sync_notifylist_smoke"
 path = "examples/sync_notifylist_smoke.rs"

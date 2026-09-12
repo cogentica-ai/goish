@@ -109,7 +109,7 @@ PANIC_EXPECTED='^(http_writeheader_code_ref_smoke)$'
 # which asserts their exit statuses; two of them exit 2 by design
 # (an unrecovered goroutine panic is fatal, issue #6). Running them
 # directly here would report those deliberate exits as failures.
-EXCLUDE="${EXCLUDE:-^(hello_query|http_hello|https_serve|spawn_million|spawn_density|preempt_sysmon|lockfree_ring_bench|segv_diagnostic_smoke|panic_probe_bare|panic_probe_waitgroup|panic_probe_recover|panic_probe_goexit)$}"
+EXCLUDE="${EXCLUDE:-^(hello_query|http_hello|https_serve|spawn_million|spawn_density|preempt_sysmon|lockfree_ring_bench|alloc_hook_bench|segv_diagnostic_smoke|panic_probe_bare|panic_probe_waitgroup|panic_probe_recover|panic_probe_goexit)$}"
 # Tests that talk to the REAL internet: a timeout is network latency,
 # not a runtime bug (the artifact still gets saved). Such a test fails
 # the suite only on panic/fail or if NO iteration succeeded. This
