@@ -159,32 +159,43 @@ What already exists:
   net/http/pprof        exists
   MemStats              declares Mallocs / TotalAlloc / HeapAlloc
 
-What does NOT exist, and each is its own piece of work:
+**CORRECTION to the first version of this note.** It claimed "nothing
+returns a PC list for the current G" and listed a stack walker as the
+load-bearing gap. Both wrong, and checking before writing code would
+have caught it — `runtime::Callers` has existed all along, Go-shaped,
+over `collect_frames` → `segv::walk_frames`, with the skip semantics
+right. I wrote ~100 lines of duplicate before finding it. What was
+missing was not the capability but the EVIDENCE: it had never been
+diffed against Go. It is now, by `runtime_callers_ref_smoke` against
+`tools/gen_callers_ref.go` — seven rows including every skip value,
+which is the part an off-by-one breaks while the frame count still
+looks right.
+
+So the stack side is DONE. What remains:
 
   SIGPROF + setitimer   no ITIMER_PROF, no SIGPROF anywhere in syscall.
-                        A CPU profile is a sampling timer plus a signal
-                        handler that captures the interrupted stack, and
-                        goish has the signal plumbing (os/signal, the
-                        SIGURG preempt path) but not this timer.
-  a stack walker        nothing returns a PC list for the current G.
-                        `runtime/segv.rs` symbolises for panics via a
-                        different route. A profile sample IS a stack, so
-                        this is the load-bearing gap, not the protobuf.
+                        A CPU profile is a sampling timer plus a handler
+                        that captures the interrupted stack; goish has
+                        the signal plumbing (os/signal, the SIGURG
+                        preempt path) and now a verified walker, but not
+                        this timer. NOTE: `Callers` walks the CURRENT
+                        stack from a normal call; a sampler needs the
+                        INTERRUPTED stack out of the signal's ucontext,
+                        which is a different entry point —
+                        `segv::walk_frames` already takes an explicit
+                        RBP, so the piece is there.
   protobuf encoding     no proto3 writer anywhere. profile.proto needs
                         varints, length-delimited fields and a string
-                        table — small and self-contained, the easiest
-                        piece despite sounding like the hardest.
+                        table — small, self-contained, and testable
+                        against `go tool pprof` with a hand-built
+                        profile.
   allocator accounting  Mallocs/TotalAlloc are DECLARED in MemStats but
                         heap.rs does not appear to maintain them; a heap
-                        profile needs per-size-class counts with stacks,
-                        which is more than a counter.
+                        profile needs per-size-class counts carrying
+                        stacks, which is more than a counter.
 
-So the order that gets something verifiable soonest is: protobuf writer
-(testable against `go tool pprof` with a hand-built profile), then the
-stack walker (testable on its own), then the sampler, then heap
-accounting. Nothing useful can be demonstrated until the walker exists,
-which is worth knowing before starting at the protobuf end and
-declaring progress.
+Order: protobuf writer, then the sampler (the timer plus a ucontext
+entry to the existing walker), then heap accounting.
 
 The issue is explicit that a downstream shim "would only create files
 with misleading or invalid contents", so a partial implementation must
