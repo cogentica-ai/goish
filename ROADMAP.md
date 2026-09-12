@@ -149,6 +149,48 @@ and the only one that is purely an API choice.
 see below.) 2f is no longer a worklist: every FIPS CAST is inert
 because `Enabled_` is a `const false`, so the twelve unported files are
 a structural-fidelity decision, not twelve fixes.
+### §2v — runtime/pprof protobuf profiles (issue #9): what is missing
+
+The largest remaining issue, and the inventory decides how it is staged.
+What already exists:
+
+  compress/gzip        ported (gzip.rs, gunzip.rs) — the outer envelope
+  runtime/pprof         282 lines, the Profile/Lookup surface
+  net/http/pprof        exists
+  MemStats              declares Mallocs / TotalAlloc / HeapAlloc
+
+What does NOT exist, and each is its own piece of work:
+
+  SIGPROF + setitimer   no ITIMER_PROF, no SIGPROF anywhere in syscall.
+                        A CPU profile is a sampling timer plus a signal
+                        handler that captures the interrupted stack, and
+                        goish has the signal plumbing (os/signal, the
+                        SIGURG preempt path) but not this timer.
+  a stack walker        nothing returns a PC list for the current G.
+                        `runtime/segv.rs` symbolises for panics via a
+                        different route. A profile sample IS a stack, so
+                        this is the load-bearing gap, not the protobuf.
+  protobuf encoding     no proto3 writer anywhere. profile.proto needs
+                        varints, length-delimited fields and a string
+                        table — small and self-contained, the easiest
+                        piece despite sounding like the hardest.
+  allocator accounting  Mallocs/TotalAlloc are DECLARED in MemStats but
+                        heap.rs does not appear to maintain them; a heap
+                        profile needs per-size-class counts with stacks,
+                        which is more than a counter.
+
+So the order that gets something verifiable soonest is: protobuf writer
+(testable against `go tool pprof` with a hand-built profile), then the
+stack walker (testable on its own), then the sampler, then heap
+accounting. Nothing useful can be demonstrated until the walker exists,
+which is worth knowing before starting at the protobuf end and
+declaring progress.
+
+The issue is explicit that a downstream shim "would only create files
+with misleading or invalid contents", so a partial implementation must
+keep `StartCPUProfile` returning its current honest error rather than
+emitting an empty-but-valid profile.
+
 ### §2u — map value semantics (issue #7): measured, and sized
 
 Go's map is a header referencing backing state, so a copy aliases.
