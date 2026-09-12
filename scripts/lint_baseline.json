@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 8252,
+ "total": 7924,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -47,10 +47,7 @@
    "GOISH023": 7
   },
   "src/crypto/chacha20poly1305/mod.rs": {
-   "GOISH005": 3,
-   "GOISH014": 9,
-   "GOISH016": 1,
-   "GOISH023": 7
+   "GOISH016": 1
   },
   "src/crypto/crypto.rs": {
    "GOISH022": 4
@@ -168,10 +165,7 @@
    "GOISH005": 4
   },
   "src/crypto/poly1305/mod.rs": {
-   "GOISH005": 4,
-   "GOISH014": 19,
-   "GOISH016": 1,
-   "GOISH023": 11
+   "GOISH016": 1
   },
   "src/crypto/sha1/sha1.rs": {
    "GOISH005": 29,
@@ -212,9 +206,9 @@
    "GOISH023": 16
   },
   "src/crypto/tls/mod.rs": {
-   "GOISH014": 32,
+   "GOISH014": 31,
    "GOISH016": 1,
-   "GOISH023": 24
+   "GOISH023": 22
   },
   "src/crypto/tls/record.rs": {
    "GOISH014": 16,
@@ -251,8 +245,8 @@
    "GOISH017": 18
   },
   "src/encoding/asn1/mod.rs": {
-   "GOISH005": 24,
-   "GOISH014": 27,
+   "GOISH005": 23,
+   "GOISH014": 11,
    "GOISH015": 1,
    "GOISH023": 27
   },
@@ -270,10 +264,10 @@
   "src/encoding/json/mod.rs": {
    "GOISH005": 11,
    "GOISH010": 2,
-   "GOISH014": 95,
+   "GOISH014": 90,
    "GOISH016": 1,
    "GOISH022": 2,
-   "GOISH023": 80
+   "GOISH023": 79
   },
   "src/encoding/json/v2/mod.rs": {
    "GOISH005": 2,
@@ -396,7 +390,7 @@
    "GOISH016": 1
   },
   "src/io/pipe.rs": {
-   "GOISH014": 20,
+   "GOISH014": 5,
    "GOISH023": 19
   },
   "src/iter/mod.rs": {
@@ -422,15 +416,13 @@
    "GOISH023": 13
   },
   "src/maps/mod.rs": {
-   "GOISH014": 6,
-   "GOISH016": 1,
-   "GOISH023": 4
+   "GOISH016": 1
   },
   "src/math/big/mod.rs": {
-   "GOISH005": 209,
+   "GOISH005": 208,
    "GOISH014": 287,
    "GOISH016": 1,
-   "GOISH023": 264
+   "GOISH023": 263
   },
   "src/math/bits/bits.rs": {
    "GOISH005": 28
@@ -499,21 +491,20 @@
   },
   "src/net/http/client.rs": {
    "GOISH014": 64,
-   "GOISH018": 3,
+   "GOISH018": 2,
    "GOISH021": 3,
    "GOISH023": 59
   },
   "src/net/http/cookie.rs": {
    "GOISH005": 20,
-   "GOISH014": 1,
    "GOISH023": 24
   },
   "src/net/http/cookiejar/mod.rs": {
    "GOISH016": 1
   },
   "src/net/http/csrf.rs": {
-   "GOISH014": 4,
-   "GOISH023": 10
+   "GOISH014": 2,
+   "GOISH023": 8
   },
   "src/net/http/fcgi/fcgi.rs": {
    "GOISH021": 1
@@ -524,7 +515,7 @@
   },
   "src/net/http/header.rs": {
    "GOISH005": 9,
-   "GOISH014": 18,
+   "GOISH014": 16,
    "GOISH023": 18
   },
   "src/net/http/httptest/server.rs": {
@@ -553,8 +544,8 @@
   },
   "src/net/http/request.rs": {
    "GOISH005": 5,
-   "GOISH014": 31,
-   "GOISH018": 15,
+   "GOISH014": 28,
+   "GOISH018": 12,
    "GOISH021": 1,
    "GOISH023": 41
   },
@@ -567,8 +558,8 @@
   },
   "src/net/http/server.rs": {
    "GOISH005": 6,
-   "GOISH014": 61,
-   "GOISH018": 61,
+   "GOISH014": 48,
+   "GOISH018": 44,
    "GOISH021": 16,
    "GOISH022": 1,
    "GOISH023": 31
@@ -586,12 +577,12 @@
    "GOISH021": 6
   },
   "src/net/http/transport.rs": {
-   "GOISH018": 22,
+   "GOISH018": 21,
    "GOISH021": 19
   },
   "src/net/lookup.rs": {
-   "GOISH014": 23,
-   "GOISH018": 34,
+   "GOISH014": 6,
+   "GOISH018": 16,
    "GOISH021": 5,
    "GOISH023": 23
   },
@@ -612,7 +603,7 @@
    "GOISH005": 30,
    "GOISH007": 2,
    "GOISH014": 10,
-   "GOISH023": 9
+   "GOISH023": 8
   },
   "src/net/port_unix.rs": {
    "GOISH021": 1
@@ -635,9 +626,9 @@
   },
   "src/net/textproto/reader.rs": {
    "GOISH005": 4,
-   "GOISH014": 4,
+   "GOISH014": 2,
    "GOISH015": 1,
-   "GOISH023": 19
+   "GOISH023": 18
   },
   "src/net/textproto/writer.rs": {
    "GOISH018": 1,
@@ -649,16 +640,16 @@
   },
   "src/os/exec/mod.rs": {
    "GOISH005": 2,
-   "GOISH014": 25,
+   "GOISH014": 24,
    "GOISH016": 1,
-   "GOISH023": 17
+   "GOISH023": 16
   },
   "src/os/exec_posix.rs": {
-   "GOISH018": 7
+   "GOISH018": 6
   },
   "src/os/mod.rs": {
    "GOISH005": 32,
-   "GOISH014": 102,
+   "GOISH014": 49,
    "GOISH015": 1,
    "GOISH016": 1,
    "GOISH023": 97
@@ -671,12 +662,7 @@
    "GOISH021": 5
   },
   "src/os/user/mod.rs": {
-   "GOISH005": 2,
-   "GOISH013": 1,
-   "GOISH014": 22,
-   "GOISH015": 1,
-   "GOISH016": 1,
-   "GOISH023": 21
+   "GOISH016": 1
   },
   "src/range.rs": {
    "GOISH005": 2,
@@ -694,7 +680,7 @@
   },
   "src/regexp/mod.rs": {
    "GOISH005": 8,
-   "GOISH014": 43,
+   "GOISH014": 42,
    "GOISH015": 1,
    "GOISH016": 1
   },
@@ -765,7 +751,7 @@
   },
   "src/runtime/mod.rs": {
    "GOISH005": 1,
-   "GOISH014": 18,
+   "GOISH014": 17,
    "GOISH015": 1,
    "GOISH016": 1,
    "GOISH023": 10
@@ -855,7 +841,7 @@
    "GOISH023": 4
   },
   "src/runtime/spin.rs": {
-   "GOISH014": 14,
+   "GOISH014": 13,
    "GOISH023": 8
   },
   "src/runtime/symbolize/aranges.rs": {
@@ -922,7 +908,7 @@
    "GOISH021": 2
   },
   "src/sync/cond.rs": {
-   "GOISH014": 6,
+   "GOISH014": 2,
    "GOISH022": 1,
    "GOISH023": 1
   },
@@ -975,14 +961,11 @@
    "GOISH023": 111
   },
   "src/term/mod.rs": {
-   "GOISH005": 7,
-   "GOISH014": 7,
-   "GOISH016": 1,
-   "GOISH023": 7
+   "GOISH016": 1
   },
   "src/testing/iotest.rs": {
    "GOISH005": 3,
-   "GOISH014": 6,
+   "GOISH014": 1,
    "GOISH015": 1,
    "GOISH023": 11
   },
@@ -1013,7 +996,7 @@
    "GOISH021": 1
   },
   "src/time/time.rs": {
-   "GOISH018": 29,
+   "GOISH018": 27,
    "GOISH021": 29
   },
   "src/time/zoneinfo.rs": {
