@@ -3740,5 +3740,9 @@ name = "map_hint_ref_smoke"
 path = "examples/map_hint_ref_smoke.rs"
 
 [[example]]
+name = "language_base_ref_smoke"
+path = "examples/language_base_ref_smoke.rs"
+
+[[example]]
 name = "sync_notifylist_smoke"
 path = "examples/sync_notifylist_smoke.rs"

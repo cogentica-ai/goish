@@ -14,8 +14,13 @@
 // paradigm/origScript). Data tables (`language_tables.rs`) are the
 // string-keyed forms of x/text's compact-ID tables, extracted from the
 // module cache via dump shims plus a behavioral likely-subtags dump
-// (internal Tag.Maximize over the full id space); regen recipe in the
-// scratch harness (xtext_ref/).
+// (internal Tag.Maximize over the full id space).
+//
+// The base-language tables have a recipe IN THE REPO: the header of
+// tools/gen_language_base_ref.go, driving scripts/gen_language_tables.py.
+// This used to point at "the scratch harness (xtext_ref/)", a directory
+// that is not in the repository — so the one thing a regen note exists
+// for, being able to regenerate, it could not do.
 //
 // Documented deviations from x/text:
 //   * Match returns the matched supported tag as-is: the region-
@@ -629,7 +634,23 @@ fn parse_inner(input: &str) -> (WTag, bool) {
         return (w, ok);
     }
     if (2..=3).contains(&t0.len()) && is_alpha(t0) {
-        match lookup2(tables::VALID_LANGS, t0) {
+        // Two sources, one canonicalisation. VALID_LANGS is consulted
+        // FIRST and wins; the bitmap is x/text's `langNoIndex` path
+        // (internal/language.getLangISO3), where a three-letter code
+        // with no indexed entry is still recognised and canonicalises to
+        // itself.
+        //
+        // goish had only the indexed table, so it rejected 6054 codes
+        // x/text accepts — every private-use `qaa`..`qtz` among them
+        // (#22). Order matters and is not a detail: 307 three-letter
+        // codes canonicalise to something ELSE (`eng` is `en`), so a
+        // bitmap consulted first would answer `eng` with `eng`.
+        let canon = match lookup2(tables::VALID_LANGS, t0) {
+            Some(c) => Some(c),
+            None if t0.len() == 3 && tables::lang3_accepted(t0) => Some(t0),
+            None => None,
+        };
+        match canon {
             // The canonical form is a full tag for legacy/deprecated
             // codes whose replacement carries a script or region
             // (sh -> sr-Latn, mo/mol -> ro-MD): merge those parts.
