@@ -32,6 +32,33 @@ static IMPORT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[proc_macro_attribute]
 pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    return expand_entry_point(item, false);
+}
+
+// ─── #[goish::test_main] — the entry point of a TEST binary ──────────
+//
+// Identical to `#[goish::main]` except that it marks the process as a
+// test binary before anything else runs.
+//
+// This is goish's stand-in for what cmd/go does at link time,
+// `-X testing.testBinary=1`. The mark has to be set at the ENTRY POINT
+// rather than by a setter the user calls, because Go's value is already
+// correct while package initialisers run — measured: in a `go test`
+// binary `testing.Testing()` is true both in the test body and at
+// package-variable init time. `#[goish::main]` runs `::goish::init()`
+// and `::goish::__run_pkg_inits()` before the user's body, so a setter
+// at the top of that body would already be too late for any
+// `#[goish::init]`.
+//
+// An ordinary `#[goish::main]` binary is unaffected and reports false.
+#[proc_macro_attribute]
+pub fn test_main(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    return expand_entry_point(item, true);
+}
+
+// The shared body of `main` and `test_main`. `test_binary` splices the
+// `testing` mark ahead of the init prelude.
+fn expand_entry_point(item: TokenStream, test_binary: bool) -> TokenStream {
     // The body is the last token tree of `fn main(...) [-> T] { ... }` —
     // a brace-delimited Group. Pull it off; the rest (signature) we
     // discard and rewrite to `pub extern "C" fn __goish_main()`.
@@ -97,11 +124,21 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
     //
     // We rebuild the brace group rather than doing string surgery so
     // any non-ASCII tokens inside body stay untouched.
-    let init_call: TokenStream = r#"
+    // The mark goes FIRST — ahead of `init()` and the package-init walk
+    // — so a `#[goish::init]` body already sees `testing::Testing()` as
+    // true, which is what Go does.
+    let init_src = if test_binary {
+        r#"
+        { ::goish::testing::__set_test_binary(); ::goish::init(); ::goish::__run_pkg_inits(); }
+        "#
+    } else {
+        r#"
         { ::goish::init(); ::goish::__run_pkg_inits(); }
-    "#
-    .parse()
-    .expect("goish::main: invalid init prelude");
+        "#
+    };
+    let init_call: TokenStream = init_src
+        .parse()
+        .expect("goish::main: invalid init prelude");
 
     let body_with_init = {
         let mut inner = init_call.into_iter().collect::<Vec<_>>();

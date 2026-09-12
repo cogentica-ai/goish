@@ -3744,5 +3744,13 @@ name = "language_base_ref_smoke"
 path = "examples/language_base_ref_smoke.rs"
 
 [[example]]
+name = "testing_probe_main"
+path = "examples/testing_probe_main.rs"
+
+[[example]]
+name = "testing_probe_testmain"
+path = "examples/testing_probe_testmain.rs"
+
+[[example]]
 name = "sync_notifylist_smoke"
 path = "examples/sync_notifylist_smoke.rs"

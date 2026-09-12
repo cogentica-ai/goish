@@ -233,6 +233,12 @@ pub use types::{
 
 // Re-export the entry-point attribute so users write `#[goish::main]`.
 pub use goish_macros::main;
+// The entry point of a TEST binary. Same expansion as `main`, plus the
+// mark that makes `testing::Testing()` true — goish's stand-in for
+// cmd/go's link-time `-X testing.testBinary=1` (#24). The mark is set
+// before `init()` and the package-init walk, because Go's value is
+// already correct while package initialisers run.
+pub use goish_macros::test_main;
 // Re-export the package-init attribute — port authors use
 // `#[goish::init] fn init() { … }` instead of the manual
 // `pkg_init_once!("crate", { … })` boilerplate. The attribute lives

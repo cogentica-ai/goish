@@ -67,6 +67,7 @@ pub use testing::{
     __shim_ran_done, callerName, chattyFlag, chattyPrinter, fmtDuration, indenter, listTests,
     marker, newChattyPrinter, newTestState, outputWriter, parseCpuList, pcToName, prefix,
     runningList, shouldFailFast, testBinary, testState, testStateCounts, toOutputDir,
+    __set_test_binary,
     CleanupHandle, CoverMode, Init, Short, Testing, Verbose,
 };
 

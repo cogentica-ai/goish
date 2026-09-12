@@ -11,7 +11,9 @@
 //   - Short() panics before Init, and panics again if flag.Parse has
 //     not run. A Short() that quietly answered false would make a
 //     `-short` CI run silently do the long thing.
-//   - Testing() is false unless the binary was built by `go test`.
+//   - Testing() is false in a `#[goish::main]` binary. The positive
+//     case needs a different PROCESS and lives in
+//     testing_probe_testmain; see #24.
 
 #![no_std]
 #![no_main]
@@ -141,8 +143,17 @@ fn main() {
         }
     }
 
-    // 8. Testing() is false: nothing sets testBinary, because goish has
-    //    no cmd/go to set it.
+    // 8. Testing() is false — because THIS binary's entry point is
+    //    `#[goish::main]`, not because test identity is unsettable.
+    //
+    //    That distinction is the whole of #24. This row used to read
+    //    "nothing sets testBinary, because goish has no cmd/go to set
+    //    it", which documented a gap as though it were the contract and
+    //    left `testing.Testing()` unsatisfiable for any goish test
+    //    binary. `#[goish::test_main]` now sets it, and the pair
+    //    `testing_probe_main` / `testing_probe_testmain` establishes
+    //    both answers in separate PROCESSES — which is the only way,
+    //    since test identity is a property of the binary.
     {
         if !testing::Testing() {
             fmt::Println!("[ 8] Testing() false           PASS");

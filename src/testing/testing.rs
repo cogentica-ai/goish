@@ -1,4 +1,4 @@
-// go: file testing/testing.go decls: common.resetRaces, common.checkRaces, MainStart, M.startAlarm, M.stopAlarm, listTests, toOutputDir, runTests, RunTests, runningList, T.report, shouldFailFast, common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
+// go: file testing/testing.go decls: common.resetRaces, common.checkRaces, MainStart, M.startAlarm, M.stopAlarm, listTests, toOutputDir, runTests, RunTests, runningList, T.report, shouldFailFast, common.TempDir, removeAll, common.frameSkip, common.callSite, common.runCleanup, T.Parallel, T.Deadline, newTestState, testState.waitParallel, testState.release, T.checkParallel, common.setRan, common.destination, common.flushToParent, indenter.Write, common.setOutputWriter, common.flushPartial, common.Output, outputWriter.Write, outputWriter.writeLine, chattyFlag.Get, chattyFlag.prefix, common.private, common.Attr, common.checkFuzzFn, matchStringOnly.MatchString, matchStringOnly.StartCPUProfile, matchStringOnly.StopCPUProfile, matchStringOnly.WriteProfileTo, matchStringOnly.ImportPath, matchStringOnly.StartTestLog, matchStringOnly.StopTestLog, matchStringOnly.SetPanicOnExit0, matchStringOnly.CoordinateFuzzing, matchStringOnly.RunFuzzWorker, matchStringOnly.ReadCorpus, matchStringOnly.CheckCorpus, matchStringOnly.ResetCoverage, matchStringOnly.SnapshotCoverage, matchStringOnly.InitRuntimeCoverage, callerName, pcToName, newChattyPrinter, chattyPrinter.Updatef, chattyPrinter.Printf, common.Setenv, common.Chdir, common.Context, parseCpuList, CoverMode, Init, Short, Verbose, Testing, testBinary, chattyFlag.IsBoolFlag, chattyFlag.Set, chattyFlag.String, fmtDuration, common.Name, common.Log, common.Logf, common.Error, common.Errorf, common.Fail, common.FailNow, common.Failed, common.Fatal, common.Fatalf, common.Skip, common.Skipf, common.SkipNow, common.Skipped, common.Helper, common.Cleanup, T.Run, tRunner
 //
 // testing/testing.go — the parts of Go's test driver that are ported.
 //
@@ -738,15 +738,47 @@ pub fn fmtDuration(d: crate::time::Duration) -> string {
 
 // ─── package state and Init ──────────────────────────────────────────
 
+// go: none — goish-only: the storage behind `testBinary`. Go's linker
+// rewrites a string; goish sets a bit at the entry point.
+static TEST_BINARY: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
+// go: none — goish-only: goish's stand-in for cmd/go's
+// `-X testing.testBinary=1`. Called by `#[goish::test_main]` as the
+// FIRST thing in the entry point, before `init()` and before the
+// package-init walk.
+/// Mark this binary as a test binary. Hidden and runtime-owned: a port
+/// should only ever read the Go-shaped `Testing()`.
+///
+/// Not a public setter by design. A setter a consumer calls is easy to
+/// call too late — Go's value is already correct while package
+/// initialisers run, measured — and it turns production/test identity
+/// into mutable application state.
+#[doc(hidden)]
+pub fn __set_test_binary() {
+    TEST_BINARY.store(true, core::sync::atomic::Ordering::Relaxed);
+}
+
 // go: sdk 1.25.5 testing/testing.go:698-698 testBinary
 /// Go: `var testBinary = "0"` — "testBinary is set by cmd/go to "1" if
 /// this is a test binary."
 ///
-/// Deviation: Go's is a `var` that the linker overwrites at build time
-/// (`-X testing.testBinary=1`). goish has no cmd/go and no linker
-/// rewrite, so nothing can ever set it; a `const` says that plainly
-/// rather than implying a mutability that does not exist.
-pub const testBinary: &str = "0";
+/// Deviation: Go's is a package `var` the linker overwrites at build
+/// time (`-X testing.testBinary=1`). goish has no cmd/go, so the same
+/// one bit lives in an atomic that `#[goish::test_main]` sets, and this
+/// renders it as Go's string so `Testing()` below stays Go's line.
+///
+/// This used to be `pub const testBinary: &str = "0"`, with a comment
+/// saying a const "says plainly" that nothing can ever set it. That was
+/// accurate about goish and wrong about the API: it made
+/// `testing.Testing()` unsatisfiable for any goish test binary, which
+/// is #24.
+pub fn testBinary() -> &'static str {
+    if TEST_BINARY.load(core::sync::atomic::Ordering::Relaxed) {
+        return "1";
+    }
+    return "0";
+}
 
 /// Go's package-level flag values, as `flag.Flag` handles.
 ///
@@ -912,11 +944,14 @@ pub fn Verbose() -> bool {
 /// of a test. This will report true in programs created by "go test",
 /// false in programs created by "go build"."
 ///
-/// Always false here: nothing sets `testBinary`, because goish has no
-/// cmd/go to set it. See the var above.
+/// True in a binary whose entry point is `#[goish::test_main]`, false
+/// under `#[goish::main]`. Measured against Go, which is true in both
+/// the test body AND at package-variable init time in a `go test`
+/// binary, and false in both for `go build`; goish matches because
+/// `test_main` sets the bit before the package-init walk.
 pub fn Testing() -> bool {
     // Go: return testBinary == "1"
-    return testBinary == "1";
+    return testBinary() == "1";
 }
 
 // go: none — goish-only: read the parsed `-test.run` / `-test.skip`
