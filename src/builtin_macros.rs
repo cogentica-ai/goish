@@ -120,10 +120,20 @@ macro_rules! make {
     (map[$kt:ty]$vt:ty) => {
         $crate::gomap::map::<$kt, $vt>::new()
     };
-    // make!(map[K]V, hint) — hint accepted for parity, currently ignored.
+    // make!(map[K]V, hint) — Go's size hint, honoured (#23).
+    //
+    // The hint binds to a `let` first so it is evaluated EXACTLY ONCE,
+    // which Go also guarantees and which a caller passing a counting
+    // closure can observe.
+    //
+    // NOT routed through `builtin::__make_size`: that panics on a
+    // negative, which is right for a slice — Go panics there too — and
+    // wrong for a map. Measured: `make(map[int]int, n)` with `n = -1`
+    // and with `n = 1<<60` both succeed in Go and behave like an
+    // unhinted map.
     (map[$kt:ty]$vt:ty, $hint:expr) => {{
-        let _ = $hint;
-        $crate::gomap::map::<$kt, $vt>::new()
+        let __hint: $crate::types::int = $crate::types::int::from($hint);
+        $crate::gomap::map::<$kt, $vt>::with_capacity(__hint)
     }};
     // make!([]T, 0)  — empty, no Default needed.
     ([] $t:ty, 0) => {{

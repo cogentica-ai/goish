@@ -54,6 +54,15 @@ const BUCKET_COUNT: usize = 8;
 const LOAD_FACTOR_NUM: usize = 13;
 const LOAD_FACTOR_DEN: usize = 2;
 
+/// Largest bucket-array byte size a size hint may ask for. Go compares
+/// `hint * bucketSize` against `maxAlloc`; this is the same guard with a
+/// fixed ceiling, so an absurd hint clamps to an unhinted map instead of
+/// attempting the allocation.
+const MAX_HINT_BYTES: usize = 1usize << 40;
+/// Ceiling on the shift, so `1usize << b` can never wrap even if the
+/// byte guard above is ever loosened.
+const MAX_HINT_B: u8 = 40;
+
 /// Tophash sentinel: cell is empty and no more non-empty cells follow.
 const _EMPTY_REST: u8 = 0;
 /// Tophash sentinel: cell is empty (but following cells may be used).
@@ -317,6 +326,127 @@ where
             buckets: Vec::new(),
             zero: Some(Box::new(V::default())),
         }
+    }
+}
+
+// go: none — goish-only: Go picks `B` inside `makemap` (runtime/map.go);
+// goish needs it as a function because two constructors share it.
+/// The smallest `b` whose bucket array holds `hint` entries without
+/// tripping the growth rule in `Set`, and the bucket array to go with
+/// it.
+///
+/// The rule is `Set`'s, not a second copy of it: an entry count is over
+/// the limit when it exceeds BUCKET_COUNT *and* exceeds
+/// `LOAD_FACTOR_NUM * (1 << b) / LOAD_FACTOR_DEN`. Duplicating that
+/// arithmetic with a different rounding is how a hinted map ends up
+/// growing on the very insertion the hint was meant to cover.
+///
+/// `b == 0` returns an EMPTY vector, keeping Go's lazy allocation: a map
+/// that is made and never written allocates nothing. For `b > 0` the
+/// buckets are allocated here, because `Set` only ever pushes ONE bucket
+/// when it finds the vector empty, and a `b` of 3 with one bucket would
+/// index out of bounds through `bucket_mask`.
+///
+/// Negative and absurd hints become zero rather than panicking.
+/// Measured against Go: `make(map[int]int, n)` with `n = -1` and with
+/// `n = 1<<60` both succeed and behave like an unhinted map. That rules
+/// out reusing `builtin::__make_size`, which panics on a negative — it
+/// is right for slices, where Go panics too, and wrong here.
+fn __buckets_for_hint<K, V>(hint: crate::types::int) -> (u8, Vec<Box<Bucket<K, V>>>)
+where
+    K: GoHash + PartialEq,
+{
+    let want = match usize::try_from(hint) {
+        Ok(n) => n,
+        // Negative.
+        Err(_) => 0,
+    };
+    // Go clamps on `hint * bucketSize` overflowing or exceeding
+    // maxAlloc. Same shape here, against the real bucket size.
+    let bucket_size = core::mem::size_of::<Bucket<K, V>>();
+    let want = match want.checked_mul(bucket_size.max(1)) {
+        Some(bytes) if bytes <= MAX_HINT_BYTES => want,
+        _ => 0,
+    };
+
+    let mut b: u8 = 0;
+    while b < MAX_HINT_B
+        && want > BUCKET_COUNT
+        && want > (LOAD_FACTOR_NUM * (1usize << b)) / LOAD_FACTOR_DEN
+    {
+        b += 1;
+    }
+    if b == 0 {
+        return (0, Vec::new());
+    }
+    let n = 1usize << b;
+    let mut buckets: Vec<Box<Bucket<K, V>>> = Vec::with_capacity(n);
+    let mut i = 0usize;
+    while i < n {
+        buckets.push(Box::new(Bucket::new()));
+        i += 1;
+    }
+    return (b, buckets);
+}
+
+impl<K, V> map<K, V>
+where
+    K: GoHash + PartialEq,
+    V: Default,
+{
+    // go: none — goish-only: Go has no named constructor; this is the
+    // `make(map[K]V, hint)` form, which `make!` routes here.
+    /// `make!(map[K]V, hint)` — a map sized so that inserting `hint`
+    /// entries does not grow the table.
+    ///
+    /// The hint is a hint: the map is still empty (`len` is 0) and still
+    /// grows past it. Go's own contract, confirmed by measurement — a
+    /// map made with a hint of 1000 reports `len == 0` and holds all
+    /// 1000 afterwards.
+    pub fn with_capacity(hint: crate::types::int) -> Self {
+        let (b, buckets) = __buckets_for_hint::<K, V>(hint);
+        return Self {
+            count: 0,
+            b: b,
+            noverflow: 0,
+            hash0: rand::cheaprand(),
+            buckets: buckets,
+            zero: Some(Box::new(V::default())),
+        };
+    }
+}
+
+impl<K, V> map<K, V>
+where
+    K: GoHash + PartialEq,
+{
+    // go: none — goish-only: see `with_capacity`; this is the
+    // non-`Default` V twin, as `new_no_zero` is to `new`.
+    /// `with_capacity` for value types with no natural zero. Missing-key
+    /// access panics, exactly as with `new_no_zero`.
+    pub fn with_capacity_no_zero(hint: crate::types::int) -> Self {
+        let (b, buckets) = __buckets_for_hint::<K, V>(hint);
+        return Self {
+            count: 0,
+            b: b,
+            noverflow: 0,
+            hash0: rand::cheaprand(),
+            buckets: buckets,
+            zero: None,
+        };
+    }
+
+    // go: none — goish-only: test hook, so a unit test can assert the
+    // chosen bucket count without a public introspection API.
+    #[doc(hidden)]
+    pub fn __b(&self) -> u8 {
+        return self.b;
+    }
+
+    // go: none — goish-only: see `__b`.
+    #[doc(hidden)]
+    pub fn __bucket_len(&self) -> usize {
+        return self.buckets.len();
     }
 }
 
