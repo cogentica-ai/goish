@@ -149,6 +149,53 @@ and the only one that is purely an API choice.
 see below.) 2f is no longer a worklist: every FIPS CAST is inert
 because `Enabled_` is a `const false`, so the twelve unported files are
 a structural-fidelity decision, not twelve fixes.
+### §2t — nil vs allocated-empty slice (issue #14): the JSON criterion is v1's
+
+Measured before implementing, because the issue's acceptance criteria
+would have pointed the work at a DIVERGENCE:
+
+                       nil slice   empty slice
+    v1 json.Marshal    null        []
+    v2 json.Marshal    []          []
+
+v2 formats a nil slice as `[]`. So "marshal nil slice as null", which
+issue #14 lists as required, is v1's contract; goish's current `[]` is
+already right for v2, and the downstream report of a zero-value record
+marshaling as `[]` where Go gives `null` can only be about v1 (or about
+a record whose field is `omitzero`).
+
+Where v2 DOES observe the distinction, from
+`tools/gen_slice_nil_ref.go`:
+
+    omitzero_nil    {}            nil IS the zero value, so omitted
+    omitzero_empty  {"s":[]}      allocated-empty is NOT
+    omitempty_*     {}            both omitted — no distinction here
+    dec null  -> nil        (true)
+    dec []    -> non-nil    (false)
+    dec null over [1,2] -> nil
+    dec []   over [1,2] -> non-nil
+
+And the operational rules a representation has to preserve:
+
+    nil == nil           true
+    []int{} == nil       false      (and make([]int,0) likewise)
+    append(nil, 1)       non-nil
+    nilSlice[:0]         STILL nil
+    emptyLiteral[:0]     non-nil
+    three[:0]            non-nil    (keeps its backing array)
+    copy of nil          nil
+
+So the work is still needed — a nilness bit, honest construction paths,
+`== nil` testing identity rather than `Len() == 0`, omitzero, and
+decode — but NOT "nil marshals as null" under v2.
+
+WHY THIS IS STAGED. Flipping `PartialEq<Nil>` from `Len() == 0` to nil
+identity is a semantic change with NO compile error: all 64 candidate
+`== nil` sites in src/ keep compiling and quietly change meaning, and
+e2e passing would only say the examples still pass. The representation,
+the construction paths and the JSON integration land first and are
+verifiable on their own; the comparison flip needs each site read.
+
 ### §2s — `goish::Any` has no JSON v2 codec (issue #15)
 
 `Command.Arguments *[]any` and `ExecuteCommandParams.Arguments *[]any`
