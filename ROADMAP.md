@@ -265,41 +265,35 @@ So the stack side is DONE. What remains:
                         checked by a hand-rolled protobuf reader so the
                         decode does not share code with the encode.
 
-  heap profile stacks   SUBSTRATE DONE (`src/runtime/mprof.rs`), the
-                        profiles themselves still to come. Go's own
-                        output settles the requirement: `heap` and
-                        `allocs` carry the SAME four value types —
-                        alloc_objects, alloc_space, inuse_objects,
-                        inuse_space — and differ only in
-                        default_sample_type ("" vs "alloc_space"). So
-                        counting allocations is not enough; inuse means
-                        tracking frees.
-                        Shape: a fixed 2048-bucket table keyed by stack
-                        hash, plus an 8192-slot table of live sampled
-                        pointers so a free finds its bucket. Nothing
-                        allocates — it runs inside the global
-                        allocator, so a Vec would recurse. Sampling is
-                        a per-M countdown in the TLS block (Go's
-                        `mcache.nextSample`) drawn from Go's
-                        exponential `fastexprand`, so an unsampled
-                        allocation costs a load, a subtract and a
-                        store. MemProfileRate defaults to Go's 512 KiB.
-                        Three defects found by building it, all of
-                        which present as "inuse never falls":
-                          - `ptr >> 4` put every 4 KiB object into
-                            sixteen slots; same-size allocations come
-                            back at a fixed stride.
-                          - deleting from the open-addressed table cut
-                            the probe chains behind it. 300 frees
-                            reported 11. Needs tombstones.
-                          - `GlobalAlloc::dealloc` INLINED
-                            `dealloc_routed`'s body instead of calling
-                            it, so the free path had two entry points
-                            and the hook caught one.
-                        Still to do: `Lookup("heap")` / `Lookup("allocs")`
-                        as registered builtins, WriteTo(w, 0) emitting
-                        the four value types, and Go's
-                        `scaleHeapSample` for rates above 1.
+  heap and allocs       DONE. `Lookup("heap")` and `Lookup("allocs")`
+                        return registered builtins and
+                        `WriteTo(w, 0)` emits a gzipped profile.proto
+                        that `go tool pprof -top` accepts — validated
+                        out of band, reporting `Type: inuse_space` and
+                        `Type: alloc_space` respectively and attributing
+                        1212 kB of 300 x 4096 to the workload function
+                        by name.
+                        Go's output settled the design before any code:
+                        both profiles carry the SAME four value types
+                        and differ ONLY in default_sample_type ("" vs
+                        "alloc_space"), so "allocs needs no free
+                        tracking" was wrong and inuse is why
+                        `runtime/mprof.rs` exists. Also measured: a heap
+                        profile sets time_nanos and leaves
+                        duration_nanos at zero (it is a snapshot), and
+                        `scaleHeapSample` keeps reported bytes-per-object
+                        near 4096 even at rate 4096.
+                        Allocator frames are stripped from the top of a
+                        stack BY NAME, not by a skip count — the hook is
+                        `#[inline]`, so the frame depth depends on the
+                        optimizer. That only became possible once v0
+                        symbols demangled.
+                        Still open: the debug>=1 legacy TEXT format for
+                        these two, which returns an error rather than
+                        writing an empty file; and the four builtins
+                        with no substrate (block, mutex, goroutine,
+                        threadcreate), which Lookup returns nil for
+                        rather than registering empty.
 
   a v0 demangler        DONE (`src/runtime/symbolize/demangle_v0.rs`).
                         goish demangled only the LEGACY `_ZN…E` form

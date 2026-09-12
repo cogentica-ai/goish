@@ -3728,5 +3728,9 @@ name = "demangle_v0_ref_smoke"
 path = "examples/demangle_v0_ref_smoke.rs"
 
 [[example]]
+name = "pprof_heap_ref_smoke"
+path = "examples/pprof_heap_ref_smoke.rs"
+
+[[example]]
 name = "sync_notifylist_smoke"
 path = "examples/sync_notifylist_smoke.rs"

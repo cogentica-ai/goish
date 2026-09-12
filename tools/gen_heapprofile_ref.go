@@ -87,3 +87,62 @@ func TestGoishRef(t *testing.T) {
 		fmt.Printf("profile_name %s\n", p.Name())
 	}
 }
+
+// Second pass: the facts the first one did not ask for — whether a heap
+// profile carries timestamps, and how Go SCALES a sampled profile back
+// up to an estimate of the whole heap.
+func TestGoishRefScale(t *testing.T) {
+	old := runtime.MemProfileRate
+	defer func() { runtime.MemProfileRate = old }()
+
+	// Timestamps.
+	runtime.MemProfileRate = 1
+	keep := allocSite(50)
+	runtime.GC()
+	var buf bytes.Buffer
+	if err := Lookup("heap").WriteTo(&buf, 0); err != nil {
+		t.Fatal(err)
+	}
+	pr, err := profile.Parse(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Printf("heap_time_nanos_set %v\n", pr.TimeNanos > 0)
+	fmt.Printf("heap_duration_set %v\n", pr.DurationNanos > 0)
+	runtime.KeepAlive(keep)
+
+	// Scaling. At rate 1 every allocation is recorded and the numbers
+	// are exact. Above 1, Go scales each sample by
+	// 1/(1-exp(-avgSize/rate)) so the profile estimates the whole heap
+	// from the part it saw.
+	for _, rate := range []int{1, 4096} {
+		runtime.MemProfileRate = rate
+		k2 := allocSite(2000)
+		runtime.GC()
+		var b2 bytes.Buffer
+		if err := Lookup("allocs").WriteTo(&b2, 0); err != nil {
+			t.Fatal(err)
+		}
+		p2, err := profile.Parse(bytes.NewReader(b2.Bytes()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var objs, space int64
+		for _, s := range p2.Sample {
+			for _, loc := range s.Location {
+				for _, ln := range loc.Line {
+					if ln.Function != nil && ln.Function.Name == "runtime/pprof.allocSite" {
+						objs += s.Value[0]
+						space += s.Value[1]
+					}
+				}
+			}
+		}
+		// 2000 objects of 4096 bytes were allocated by this site in
+		// this round; earlier rounds add to the cumulative total, so
+		// the assertion is a lower bound and a sanity ceiling.
+		fmt.Printf("rate%d_objects_at_least_2000 %v\n", rate, objs >= 2000)
+		fmt.Printf("rate%d_space_per_object_near_4096 %v\n", rate, objs > 0 && space/objs >= 3000 && space/objs <= 6000)
+		runtime.KeepAlive(k2)
+	}
+}

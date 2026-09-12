@@ -190,6 +190,11 @@ pub struct Profile {
     pub duration_nanos: i64,
     pub period_type: Option<ValueType>,
     pub period: i64,
+    /// Which sample_type a viewer should show first. The ONLY thing
+    /// that distinguishes Go's `heap` profile from its `allocs`
+    /// profile: measured, both carry the same four value types, and
+    /// heap leaves this empty while allocs sets "alloc_space".
+    pub default_sample_type: crate::gostring::string,
 }
 
 impl Profile {
@@ -205,6 +210,7 @@ impl Profile {
             duration_nanos: 0,
             period_type: None,
             period: 0,
+            default_sample_type: crate::gostring::string::new(),
         };
     }
 
@@ -248,6 +254,11 @@ impl Profile {
             add(&mut st, pt.ty.as_ref());
             add(&mut st, pt.unit.as_ref());
         }
+        // Comments would be interned here. `default_sample_type` is
+        // LAST in Go's traversal (encode.go), after them — and for the
+        // heap profile it is the empty string, which is already index 0,
+        // so this adds a slot only for `allocs`.
+        add(&mut st, self.default_sample_type.as_ref());
         return st;
     }
 
@@ -325,6 +336,16 @@ impl Profile {
             put_bytes(&mut b, 11, &m);
         }
         put_int64_opt(&mut b, 12, self.period);
+        // Field 13 is `comment`; goish emits none. Field 14 is
+        // `default_sample_type`, written in the _opt form because Go's
+        // own encoder omits it when the index is 0 — the reference
+        // bytes in pprof_proto_ref_smoke end at field 12, which is how
+        // that is known rather than assumed.
+        put_int64_opt(
+            &mut b,
+            14,
+            Self::idx(&st, self.default_sample_type.as_ref()),
+        );
         return crate::goslice::slice::__from_vec(b);
     }
 }

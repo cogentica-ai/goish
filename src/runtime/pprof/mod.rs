@@ -68,6 +68,11 @@ use crate::types::{int, uintptr};
 pub struct Profile {
     name: gostring_ty,
     m: crate::sync::Mutex<Vec<(usize, Vec<uintptr>)>>,
+    /// Go's `write func(io.Writer, int) error`, set for a BUILTIN
+    /// profile and nil for a registry one. Go also carries a `count`
+    /// func; goish's two builtins both count buckets, so `Count`
+    /// branches on this one field rather than carrying a second.
+    write: Option<fn(&mut dyn crate::io::Writer, int) -> error>,
 }
 
 // go: none — goish-only: the process-wide registry cell (Go's
@@ -76,7 +81,37 @@ pub struct Profile {
 // `pub const` and a const registry silently rebuilds per use.
 static PROFILES: crate::lazy::Lazy<
     crate::sync::Mutex<crate::gomap::map<gostring_ty, Option<Arc<Profile>>>>,
-> = crate::lazy::Lazy::new(|| crate::sync::Mutex::new(crate::gomap::map::new()));
+> = crate::lazy::Lazy::new(|| {
+    let mut m = crate::gomap::map::new();
+    // Go registers its six builtins in `lockProfiles`; goish registers
+    // the two it can actually answer. The other four still have no
+    // substrate — block and mutex profiling, and a goroutine registry —
+    // so they stay absent and `Lookup` keeps returning nil for them,
+    // which is Go's answer for a name it does not know. An empty
+    // profile would be worse: a caller cannot tell it from a quiet
+    // program.
+    for (name, w) in [
+        (
+            "heap",
+            write_heap as fn(&mut dyn crate::io::Writer, int) -> error,
+        ),
+        (
+            "allocs",
+            write_alloc as fn(&mut dyn crate::io::Writer, int) -> error,
+        ),
+    ] {
+        let n = gostring_ty::from_static(name);
+        m.Set(
+            n.clone(),
+            Some(Arc::new(Profile {
+                name: n,
+                m: crate::sync::Mutex::new(Vec::new()),
+                write: Some(w),
+            })),
+        );
+    }
+    crate::sync::Mutex::new(m)
+});
 
 // go: sdk 1.25.5 runtime/pprof/pprof.go:247-262 NewProfile
 /// Go: "NewProfile creates a new profile with the given name. If a
@@ -92,6 +127,7 @@ pub fn NewProfile(name: gostring_ty) -> Arc<Profile> {
     let p = Arc::new(Profile {
         name: name.clone(),
         m: crate::sync::Mutex::new(Vec::new()),
+        write: None,
     });
     m.Set(name, Some(p.clone()));
     return p;
@@ -133,6 +169,19 @@ impl Profile {
     /// Go consults the builtin's `count` func first; the registry
     /// kind answers the map length.
     pub fn Count(&self) -> int {
+        if self.write.is_some() {
+            // Go's builtin heap/allocs `count` is the number of
+            // allocation records.
+            let mut n: int = 0;
+            let mut i = 0usize;
+            while i < crate::runtime::mprof::__bucket_slots() {
+                if crate::runtime::mprof::__bucket_at(i).is_some() {
+                    n += 1;
+                }
+                i += 1;
+            }
+            return n;
+        }
         return crate::int(crate::int64(self.m.Lock().len()));
     }
 
@@ -146,6 +195,10 @@ impl Profile {
     pub fn Add(&self, value: usize, skip: int) {
         if self.name.Len() == 0 {
             panic!("pprof: use of uninitialized Profile");
+        }
+        if self.write.is_some() {
+            // Go: "Add called on built-in Profile".
+            panic!("pprof: Add called on built-in Profile");
         }
         let mut stk = crate::make!([]uintptr, 32);
         let n = crate::runtime::Callers(skip + 1, &mut stk);
@@ -182,12 +235,17 @@ impl Profile {
     /// debug=1 writes the legacy text format with comments
     /// translating addresses to function names".
     ///
-    /// The debug=0 protobuf arm needs the profileBuilder this slice
-    /// does not carry; it reports so instead of writing a lie a
-    /// pprof reader would choke on.
+    /// For a BUILTIN profile the work is the builtin's own writer. For
+    /// a registry profile, debug>=1 writes Go's legacy text format;
+    /// debug=0 still reports unsupported there, because the registry
+    /// kind's protobuf form needs labels and a mapping table that the
+    /// heap path does not.
     pub fn WriteTo(&self, w: &mut dyn crate::io::Writer, debug: int) -> error {
         if self.name.Len() == 0 {
             panic!("pprof: use of zero Profile");
+        }
+        if let Some(f) = self.write {
+            return f(w, debug);
         }
         // Go: obtain a consistent snapshot under lock, process without.
         let mut all: Vec<Vec<uintptr>> = self.m.Lock().iter().map(|(_, s)| s.clone()).collect();
@@ -483,6 +541,224 @@ fn __build_cpu_profile(start_ns: int, stop_ns: int) -> proto::Profile {
         });
     }
     return p;
+}
+
+// go: none — goish-only: Go's `scaleHeapSample`
+// (runtime/pprof/protomem.go).
+/// Scale a sampled (count, bytes) pair back up to an estimate of the
+/// whole, given the sampling rate.
+///
+/// Go's own comment: the profiler samples one allocation per `rate`
+/// bytes, so a record of `count` objects averaging `avg` bytes stands
+/// for `count / (1 - exp(-avg/rate))` of them. At rate 1 every
+/// allocation was recorded and no scaling applies — which is why a test
+/// that sets the rate to 1 cannot tell whether this function exists.
+/// Measured against Go at rate 4096: reported space per object stays
+/// near 4096 for 4096-byte allocations, which is only true with the
+/// scaling.
+fn scale_heap_sample(count: i64, size: i64, rate: i64) -> (i64, i64) {
+    if count == 0 || size == 0 {
+        return (0, 0);
+    }
+    if rate <= 1 {
+        return (count, size);
+    }
+    let avg = crate::float64(size) / crate::float64(count);
+    let scale = 1.0 / (1.0 - crate::math::Exp(-avg / crate::float64(rate)));
+    return (
+        crate::int64(crate::float64(count) * scale),
+        crate::int64(crate::float64(size) * scale),
+    );
+}
+
+// go: none — goish-only: Go's profileBuilder strips its own allocator
+// frames with `hideRuntime` (runtime/pprof/pprof.go); goish has to name
+// the Rust ones.
+/// True if `name` is allocator or profiler plumbing rather than the
+/// code that asked for memory.
+///
+/// Stripped BY NAME and not by a skip count: `alloc_masked` and
+/// `malloc_hook` are `#[inline]`, so the number of frames between the
+/// stack walk and the caller depends on the optimizer. This only became
+/// possible once v0 symbols demangled — before that every name was
+/// `_RNvNt…` and a name-based rule would have had to match mangled
+/// substrings.
+fn is_allocator_frame(name: &str) -> bool {
+    return name.starts_with("goish::runtime::mprof::")
+        || name.starts_with("goish::runtime::heap::")
+        || name.starts_with("goish::runtime::collect_frames_for_profile")
+        || name.starts_with("goish::runtime::segv::walk_frames")
+        || name.starts_with("__rustc::")
+        || name.starts_with("alloc::")
+        || name.starts_with("<alloc::")
+        || name.starts_with("core::alloc::")
+        || name.starts_with("<goish::runtime::heap::");
+}
+
+// go: none — goish-only: Go's `writeHeapInternal`
+// (runtime/pprof/pprof.go) plus `writeHeapProto`
+// (runtime/pprof/protomem.go).
+/// Build the heap/allocs profile out of the mprof bucket table.
+///
+/// `heap` and `allocs` are the SAME profile with a different default
+/// view — measured against Go, both carry alloc_objects, alloc_space,
+/// inuse_objects and inuse_space, and only `default_sample_type`
+/// differs. So one builder serves both.
+fn build_heap_profile(default_sample_type: &'static str) -> proto::Profile {
+    let rate = crate::runtime::mprof::MemProfileRate();
+    let mut p = proto::Profile::new();
+    for (ty, unit) in [
+        ("alloc_objects", "count"),
+        ("alloc_space", "bytes"),
+        ("inuse_objects", "count"),
+        ("inuse_space", "bytes"),
+    ] {
+        p.sample_type.push(proto::ValueType {
+            ty: string(ty),
+            unit: string(unit),
+        });
+    }
+    p.period_type = Some(proto::ValueType {
+        ty: string("space"),
+        unit: string("bytes"),
+    });
+    p.period = rate;
+    p.time_nanos = crate::time::Now().UnixNano();
+    // Go leaves duration_nanos at zero for a heap profile — it is a
+    // snapshot, not an interval. Measured: heap_duration_set false.
+    p.default_sample_type = gostring_ty::from_static(default_sample_type);
+
+    let mut pcs: Vec<u64> = Vec::new();
+    let mut i = 0usize;
+    let slots = crate::runtime::mprof::__bucket_slots();
+    while i < slots {
+        let b = match crate::runtime::mprof::__bucket_at(i) {
+            Some(b) => b,
+            None => {
+                i += 1;
+                continue;
+            }
+        };
+        i += 1;
+
+        // Symbolize first, so the allocator frames can be dropped
+        // before any location id is assigned to them.
+        let mut keep: Vec<(u64, string, string, int)> = Vec::new();
+        let mut k = 0usize;
+        while k < b.depth {
+            let mut one: Vec<uintptr> = Vec::new();
+            one.push(b.pcs[k]);
+            let mut fr = crate::runtime::CallersFrames(crate::goslice::slice::__from_vec(one));
+            let (f, _) = fr.Next();
+            keep.push((b.pcs[k], f.Function.clone(), f.File.clone(), f.Line));
+            k += 1;
+        }
+        // Drop only a LEADING run, and never the last frame — a stack
+        // that is allocator frames all the way down still has to appear
+        // somewhere rather than vanish from the profile.
+        let mut first = 0usize;
+        while first + 1 < keep.len() && is_allocator_frame(keep[first].1.as_ref()) {
+            first += 1;
+        }
+
+        let mut ids: Vec<u64> = Vec::new();
+        let mut j = first;
+        while j < keep.len() {
+            let pc = keep[j].0;
+            let id = match pcs.iter().position(|q| *q == pc) {
+                Some(x) => crate::uint64(x) + 1,
+                None => {
+                    pcs.push(pc);
+                    let id = crate::uint64(pcs.len());
+                    let mut loc = proto::Location {
+                        id: id,
+                        address: pc,
+                        line: Vec::new(),
+                    };
+                    let name = keep[j].1.clone();
+                    if name.Len() > 0 {
+                        let fid = match p.function.iter().position(|g| g.name == name) {
+                            Some(y) => p.function[y].id,
+                            None => {
+                                let fid = crate::uint64(p.function.len()) + 1;
+                                p.function.push(proto::Function {
+                                    id: fid,
+                                    name: name.clone(),
+                                    system_name: name.clone(),
+                                    filename: keep[j].2.clone(),
+                                    start_line: 0,
+                                });
+                                fid
+                            }
+                        };
+                        loc.line.push(proto::Line {
+                            function_id: fid,
+                            line: keep[j].3,
+                        });
+                    }
+                    p.location.push(loc);
+                    id
+                }
+            };
+            ids.push(id);
+            j += 1;
+        }
+
+        let allocs = crate::int64(b.allocs);
+        let alloc_bytes = crate::int64(b.alloc_bytes);
+        let inuse = crate::int64(b.allocs - b.frees);
+        let inuse_bytes = crate::int64(b.alloc_bytes - b.free_bytes);
+        let (ao, ab) = scale_heap_sample(allocs, alloc_bytes, rate);
+        let (io_, ib) = scale_heap_sample(inuse, inuse_bytes, rate);
+        let mut value: Vec<i64> = Vec::new();
+        value.push(ao);
+        value.push(ab);
+        value.push(io_);
+        value.push(ib);
+        p.sample.push(proto::Sample {
+            location_id: ids,
+            value: value,
+        });
+    }
+    return p;
+}
+
+// go: none — goish-only: the `write` func for the `heap` builtin.
+/// Go's heap profile. debug=0 is the gzipped protobuf; debug>=1 is Go's
+/// legacy text format, which this does not emit yet and says so.
+fn write_heap(w: &mut dyn crate::io::Writer, debug: int) -> error {
+    return write_heap_internal(w, debug, "");
+}
+
+// go: none — goish-only: the `write` func for the `allocs` builtin.
+/// Identical to `heap` but defaulting the view to total allocations.
+fn write_alloc(w: &mut dyn crate::io::Writer, debug: int) -> error {
+    return write_heap_internal(w, debug, "alloc_space");
+}
+
+// go: none — goish-only: Go's `writeHeapInternal`.
+/// The shared body. Below both callers so neither loses its comment.
+fn write_heap_internal(w: &mut dyn crate::io::Writer, debug: int, dst: &'static str) -> error {
+    if debug != 0 {
+        // Go writes its legacy `heap profile: …` text here. goish does
+        // not, and returns an error rather than an empty file, so a
+        // caller is told instead of given something that parses as
+        // "nothing was allocated".
+        return errors::New(string(
+            "pprof: the heap profile's debug>=1 text format is not ported; use debug=0",
+        ));
+    }
+    let p = build_heap_profile(dst);
+    // Grow the stack for the same reason StopCPUProfile does: gzip's
+    // deflate windows do not fit a 64 KiB handler goroutine stack.
+    let (b, err) = crate::runtime::sched::maybe_grow(64 * 1024, 4 * 1024 * 1024, || {
+        return proto::marshal_gzip(&p);
+    });
+    if err != errors::nil {
+        return err;
+    }
+    let (_, werr) = w.Write(b);
+    return werr;
 }
 
 // go: none — goish-only: test hooks onto the sampler's raw ring, so a
