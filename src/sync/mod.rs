@@ -19,7 +19,8 @@
 
 #![allow(non_snake_case)]
 
-pub(crate) mod notifylist;
+#[doc(hidden)]
+pub mod notifylist;
 pub mod atomic;
 mod cond;
 pub mod errgroup;

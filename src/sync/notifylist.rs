@@ -66,7 +66,7 @@ unsafe impl Send for ListState {}
 // other half of that Go file — does the same, and an anchor would make
 // this file owe every declaration in sema.go.
 /// Go: "a ticket-based notification list used to implement sync.Cond."
-pub(crate) struct NotifyList {
+pub struct NotifyList {
     /// Tickets handed out so far. Go keeps this atomic because
     /// `Add` runs under the CALLER's lock, which a `RWMutex` in read
     /// mode makes concurrent.
@@ -81,7 +81,7 @@ impl NotifyList {
     // go: none — goish-only: Go zero-values a notifyList; goish needs a
     // const constructor for a `static`/field initialiser.
     /// An empty list.
-    pub(crate) const fn new() -> Self {
+    pub const fn new() -> Self {
         return NotifyList {
             wait: AtomicU32::new(0),
             notify: AtomicU32::new(0),
@@ -103,7 +103,7 @@ impl NotifyList {
     /// the whole point. The ticket is taken before the unlock, so a
     /// notification that lands during the unlock is still addressed to
     /// this waiter.
-    pub(crate) fn Add(&self) -> u32 {
+    pub fn Add(&self) -> u32 {
         return self.wait.fetch_add(1, Ordering::AcqRel);
     }
 
@@ -114,7 +114,7 @@ impl NotifyList {
     /// Go: "waits for a notification. If one has been sent since
     /// notifyListAdd was called, it returns immediately. Otherwise, it
     /// blocks."
-    pub(crate) fn Wait(&self, t: u32) {
+    pub fn Wait(&self, t: u32) {
         let lock_atom = self.state.lock_atom();
         unsafe {
             crate::runtime::spin::raw_lock(lock_atom);
@@ -152,7 +152,7 @@ impl NotifyList {
     // type prefix. Same treatment as `sync/sema.rs`, which models
     // semacquire/semrelease as `Sema::acquire`/`release`.
     /// Go: "notifies all entries in the list."
-    pub(crate) fn NotifyAll(&self) {
+    pub fn NotifyAll(&self) {
         // Fast path: no new waiters since the last notification.
         if self.wait.load(Ordering::Acquire) == self.notify.load(Ordering::Acquire) {
             return;
@@ -199,7 +199,7 @@ impl NotifyList {
     /// still be between `Add` and `Wait` and therefore absent from the
     /// list — in which case bumping `notify` is the whole job and that
     /// waiter will notice in `Wait`.
-    pub(crate) fn NotifyOne(&self) {
+    pub fn NotifyOne(&self) {
         if self.wait.load(Ordering::Acquire) == self.notify.load(Ordering::Acquire) {
             return;
         }

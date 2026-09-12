@@ -317,6 +317,15 @@ The diagnostic accessors are kept (`Cond::__debug_state`,
 `Sema::__debug_state`, `NotifyList::__debug_state`): they are what
 turned an unfalsifiable theory into one decisive sample.
 
+REGRESSION TEST. `sync_cond_smoke`'s ping-pong is how the bug was found
+but it is a poor guard — it needs the race to land, about once in fifty
+runs. `sync_notifylist_smoke` drives `NotifyList` directly and forces
+the window open by hand: `Add`, then `NotifyAll`, then `Wait`, which
+must return without parking. Measured both ways — 5/5 pass with the
+watermark check, 3/3 TIMEOUT without it. Deterministic rather than
+probabilistic, and a timeout rather than a diff, which is the honest
+shape for "a wakeup was lost".
+
 ### §2u — map value semantics (issue #7): measured, and sized
 
 Go's map is a header referencing backing state, so a copy aliases.
