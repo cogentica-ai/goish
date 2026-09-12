@@ -777,6 +777,9 @@ pub enum Value {
     Slice {
         elem_type: fn() -> Type,
         items: Vec<Value>,
+        /// Go's nil slice header. Distinct from allocated-empty: v1 JSON
+        /// marshals nil as `null` and empty as `[]` (#14).
+        is_nil: bool,
     },
     Map {
         key_type: fn() -> Type,
@@ -785,6 +788,9 @@ pub enum Value {
         /// BTreeMap-backed, so this list is key-sorted; that's also the
         /// order we use for json.Marshal output.
         entries: Vec<(Value, Value)>,
+        /// Go's nil map header. v1 JSON marshals nil as `null` and an
+        /// allocated-empty map as `{}` (#7).
+        is_nil: bool,
     },
     Struct {
         ty: Type,
@@ -842,10 +848,12 @@ impl PartialEq for Value {
                 Value::Slice {
                     elem_type: ea,
                     items: ia,
+                    ..
                 },
                 Value::Slice {
                     elem_type: eb,
                     items: ib,
+                    ..
                 },
             ) => ea() == eb() && ia == ib,
             (
@@ -853,11 +861,13 @@ impl PartialEq for Value {
                     key_type: ka,
                     value_type: va,
                     entries: ea,
+                    ..
                 },
                 Value::Map {
                     key_type: kb,
                     value_type: vb,
                     entries: eb,
+                    ..
                 },
             ) => ka() == kb() && va() == vb() && ea == eb,
             (Value::Struct { ty: ta, fields: fa }, Value::Struct { ty: tb, fields: fb }) => {
@@ -1046,8 +1056,8 @@ impl Value {
             return inner.IsNil();
         }
         match self {
-            Value::Slice { .. } => false,
-            Value::Map { .. } => false,
+            Value::Slice { is_nil, .. } => *is_nil,
+            Value::Map { is_nil, .. } => *is_nil,
             Value::Pointer(inner) => matches!(**inner, Value::Invalid),
             // Func / Chan / Interface / UnsafePointer don't have a
             // primitive variant in goish v1; reflect-driven IsNil
@@ -1096,7 +1106,7 @@ impl Value {
             return inner.Bytes();
         }
         match self {
-            Value::Slice { items, elem_type } if elem_type().Kind() == Kind::Uint8 => {
+            Value::Slice { items, elem_type, .. } if elem_type().Kind() == Kind::Uint8 => {
                 let mut out: Vec<byte> = Vec::with_capacity(items.len());
                 for item in items {
                     out.push(match item {
@@ -1114,13 +1124,15 @@ impl Value {
     /// `Value.Slice` for slice/string. Panics for other kinds.
     pub fn Slice(&self, low: int, high: int) -> Value {
         match self {
-            Value::Slice { elem_type, items } => {
+            Value::Slice { elem_type, items, .. } => {
                 let lo = low as usize;
                 let hi = high as usize;
                 let sub = items[lo..hi].to_vec();
                 Value::Slice {
                     elem_type: *elem_type,
                     items: sub,
+                    // Go: re-slicing a nil slice preserves nil.
+                    is_nil: matches!(self, Value::Slice { is_nil: true, .. }),
                 }
             }
             Value::String(s) => {
@@ -1635,6 +1647,8 @@ pub fn Zero(t: Type) -> Value {
             Some(elem_type) => Value::Slice {
                 elem_type,
                 items: Vec::new(),
+                // reflect.Zero of a slice type is a NIL slice.
+                is_nil: true,
             },
             None => Value::Invalid,
         },
@@ -1643,6 +1657,8 @@ pub fn Zero(t: Type) -> Value {
                 key_type,
                 value_type,
                 entries: Vec::new(),
+                // reflect.Zero of a map type is a NIL map.
+                is_nil: true,
             },
             _ => Value::Invalid,
         },
@@ -1829,6 +1845,7 @@ pub fn Append(s: Value, items: &[Value]) -> Value {
         Value::Slice {
             elem_type,
             items: mut existing,
+            ..
         } => {
             existing.reserve(items.len());
             for x in items {
@@ -1837,6 +1854,8 @@ pub fn Append(s: Value, items: &[Value]) -> Value {
             Value::Slice {
                 elem_type,
                 items: existing,
+                // Appending allocates, so the result is never nil.
+                is_nil: false,
             }
         }
         _ => panic!("reflect.Append: not a slice"),
@@ -2158,6 +2177,7 @@ impl<T: Reflect + Clone> Reflect for slice<T> {
         Value::Slice {
             elem_type: <T as Reflect>::__reflect_type,
             items,
+            is_nil: *self == crate::nilval::nil,
         }
     }
 }
@@ -2265,6 +2285,7 @@ where
             key_type: <K as Reflect>::__reflect_type,
             value_type: <V as Reflect>::__reflect_type,
             entries,
+            is_nil: *self == crate::nilval::nil,
         }
     }
 }

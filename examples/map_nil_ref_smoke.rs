@@ -140,6 +140,32 @@ fn main() {
         );
     }
 
+    // ── v1 marshal: a nil map is null, an empty one is {} ──
+    //
+    // Measured: v1 gives `null` / `{}`, v2 gives `{}` for both. Needed
+    // `reflect` to carry nil-ness, the same change #14's slice half
+    // required.
+    {
+        let nm: map<string, int> = Default::default();
+        let (b, e) = goish::encoding::json::Marshal(&nm);
+        let got = string::from_bytes(b.as_ref());
+        check(
+            "v1 marshals a nil map as null",
+            e.IsNil() && got == "null",
+            fmt::Sprintf!("got %s", got),
+        );
+    }
+    {
+        let em: map<string, int> = goish::make!(map[string]int);
+        let (b, e) = goish::encoding::json::Marshal(&em);
+        let got = string::from_bytes(b.as_ref());
+        check(
+            "v1 marshals an allocated-empty map as {}",
+            e.IsNil() && got == "{}",
+            fmt::Sprintf!("got %s", got),
+        );
+    }
+
     // ── unmarshalling into a nil map ──
     //
     // Go: "To unmarshal a JSON object into a map, Unmarshal first
@@ -231,8 +257,8 @@ fn main() {
 
     let ran = ROWS.load(Ordering::Relaxed);
     let bad = FAILED.load(Ordering::Relaxed);
-    if ran != 18 {
-        fmt::Printf!("\nFAILED: %d rows ran, expected 18\n", ran as i64);
+    if ran != 20 {
+        fmt::Printf!("\nFAILED: %d rows ran, expected 20\n", ran as i64);
         os::Exit(1);
     }
     if bad != 0 {

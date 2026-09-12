@@ -667,6 +667,9 @@ impl crate::reflect::Reflect for Value {
                 RV::Slice {
                     elem_type: <Value as crate::reflect::Reflect>::__reflect_type,
                     items,
+                    // A json::Value::Array is a PRESENT array; JSON null
+                    // is Value::Null and maps to RV::Invalid above.
+                    is_nil: false,
                 }
             }
             Value::Object(o) => {
@@ -681,6 +684,7 @@ impl crate::reflect::Reflect for Value {
                     key_type: <string as crate::reflect::Reflect>::__reflect_type,
                     value_type: <Value as crate::reflect::Reflect>::__reflect_type,
                     entries,
+                    is_nil: false,
                 }
             }
         }
@@ -852,6 +856,14 @@ fn encode_reflect(out: &mut Vec<byte>, v: &reflect::Value) {
         K::Float32 | K::Float64 => encode_number(out, v.Float()),
         K::String => encode_string(out, v.String().as_bytes()),
         K::Slice => {
+            // v1 marshals a NIL slice as `null` and an allocated-empty
+            // one as `[]` — measured; v2 gives `[]` for both. This
+            // could not be expressed before slices had a nil header
+            // (#14), and `IsNil()` on a slice was hard-coded false.
+            if v.IsNil() {
+                out.extend_from_slice(b"null");
+                return;
+            }
             let n = v.Len();
             if n == 0 {
                 out.extend_from_slice(b"[]");
@@ -866,7 +878,15 @@ fn encode_reflect(out: &mut Vec<byte>, v: &reflect::Value) {
             }
             out.push(b']');
         }
-        K::Map => encode_map(out, v, None, 0),
+        K::Map => {
+            // Same for maps: v1 gives `null` for nil and `{}` for an
+            // allocated-empty map (#7).
+            if v.IsNil() {
+                out.extend_from_slice(b"null");
+                return;
+            }
+            encode_map(out, v, None, 0)
+        }
         K::Struct => encode_struct(out, v, None, 0),
         _ => out.extend_from_slice(b"null"),
     }
@@ -876,6 +896,10 @@ fn encode_reflect_indent(out: &mut Vec<byte>, v: &reflect::Value, cfg: &IndentCf
     use reflect::Kind as K;
     match v.Kind() {
         K::Slice => {
+            if v.IsNil() {
+                out.extend_from_slice(b"null");
+                return;
+            }
             let n = v.Len();
             if n == 0 {
                 out.extend_from_slice(b"[]");
@@ -892,7 +916,13 @@ fn encode_reflect_indent(out: &mut Vec<byte>, v: &reflect::Value, cfg: &IndentCf
             write_newline_indent(out, cfg, depth);
             out.push(b']');
         }
-        K::Map => encode_map(out, v, Some(cfg), depth),
+        K::Map => {
+            if v.IsNil() {
+                out.extend_from_slice(b"null");
+                return;
+            }
+            encode_map(out, v, Some(cfg), depth)
+        }
         K::Struct => encode_struct(out, v, Some(cfg), depth),
         _ => encode_reflect(out, v),
     }

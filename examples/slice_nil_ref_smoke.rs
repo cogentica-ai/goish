@@ -36,11 +36,12 @@
 //    byte-exact JSON differentials are the only detector. That is the
 //    reason for the narrow scope, not an oversight.
 //
-// 2. v1 marshal of a nil slice as `null` is NOT here yet. It needs
-//    `reflect` to carry nil-ness — `Value::Slice`'s `IsNil()` is
-//    hard-coded false, with a comment saying goish does not track the
-//    distinction — across about eight construction sites. Named rather
-//    than left implied.
+// 2. v1 marshal of a nil slice as `null` IS here, and it needed
+//    `reflect` to carry nil-ness: `Value::Slice` gained an `is_nil`
+//    header and `IsNil()` stopped being hard-coded false. Seventeen
+//    construction sites across five files; all but two are synthesised
+//    values that are non-nil by construction, and `reflect::Zero` of a
+//    slice or map type is NIL, which is Go's zero value.
 
 #![no_std]
 #![no_main]
@@ -178,6 +179,36 @@ fn main() {
         );
     }
 
+    // ── v1 marshal: nil is null, empty is [] ──
+    {
+        let (b, e) = goish::encoding::json::Marshal(&z);
+        let got = string::from_bytes(b.as_ref());
+        check(
+            "v1 marshals a nil slice as null",
+            e.IsNil() && got == "null",
+            fmt::Sprintf!("got %s", got),
+        );
+    }
+    {
+        let (b, e) = goish::encoding::json::Marshal(&made);
+        let got = string::from_bytes(b.as_ref());
+        check(
+            "v1 marshals an allocated-empty slice as []",
+            e.IsNil() && got == "[]",
+            fmt::Sprintf!("got %s", got),
+        );
+    }
+    {
+        let zero = Rec { S: Default::default() };
+        let (b, _) = goish::encoding::json::Marshal(&zero);
+        let got = string::from_bytes(b.as_ref());
+        check(
+            "v1 marshals a zero-value record's slice field as null",
+            got == "{\"s\":null}",
+            fmt::Sprintf!("got %s", got),
+        );
+    }
+
     // ── decoders put null back as nil ──
     {
         let mut s: slice<int> = Default::default();
@@ -233,8 +264,8 @@ fn main() {
 
     let ran = ROWS.load(Ordering::Relaxed);
     let bad = FAILED.load(Ordering::Relaxed);
-    if ran != 17 {
-        fmt::Printf!("\nFAILED: %d rows ran, expected 17\n", ran as i64);
+    if ran != 20 {
+        fmt::Printf!("\nFAILED: %d rows ran, expected 20\n", ran as i64);
         os::Exit(1);
     }
     if bad != 0 {

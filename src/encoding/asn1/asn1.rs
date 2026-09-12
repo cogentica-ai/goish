@@ -287,7 +287,11 @@ pub fn parseSequenceOf(bytes: slice<byte>, sliceType: &Type, elemType: &Type) ->
         Some(f) => f,
         None => return (Value::Invalid, structural("unknown Go type for slice")),
     };
-    let ret = Value::Slice { elem_type, items };
+    let ret = Value::Slice {
+        elem_type,
+        items,
+        is_nil: false,
+    };
     if sliceType.Name().Len() > 0 {
         return (
             Value::Named {

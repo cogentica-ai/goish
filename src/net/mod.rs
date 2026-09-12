@@ -1817,6 +1817,7 @@ impl crate::reflect::Reflect for IP {
         crate::reflect::Value::Slice {
             elem_type: <byte as crate::reflect::Reflect>::__reflect_type,
             items: alloc::vec::Vec::new(),
+            is_nil: false,
         }
     }
 }

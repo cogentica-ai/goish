@@ -1133,6 +1133,7 @@ impl crate::reflect::Reflect for ObjectIdentifier {
             inner: alloc::boxed::Box::new(crate::reflect::Value::Slice {
                 elem_type: <int as crate::reflect::Reflect>::__reflect_type,
                 items,
+                is_nil: false,
             }),
         };
     }
