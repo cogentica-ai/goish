@@ -58,11 +58,15 @@ const GO: [&str; 7] = [
     "notify-additive            got=[user defined signal 2]",
     "full-channel-drops         got=1",
     "stop-one-channel           c1=[user defined signal 1] c2=[]",
-    "notify-all                 got=[user defined signal 1 user defined signal 2 window changed]",
+    "notify-all                 got={user defined signal 1, user defined signal 2, window changed}",
 ];
 
 static mut FAILED: i64 = 0;
 static mut LINE: usize = 0;
+/// What the last `drain` pulled off the channel, so `drain_set` can ask
+/// which signals arrived without a second Recv on an empty channel.
+/// Single-threaded probe; `static mut` matches the two above.
+static mut ARRIVED: Vec<i32> = Vec::new();
 /// Wait for the delivered set to go QUIET, then drain it.
 ///
 /// This used to be a flat `Sleep(ms)` and then a drain of whatever had
@@ -128,11 +132,13 @@ fn drain(c: &goish::gochan::chan<i32>, ms: i64, want: i64) -> string {
     let mut names: Vec<string> = Vec::new();
     // Len() is the buffered count; drain exactly that many so the
     // probe never blocks on an empty channel.
+    unsafe { ARRIVED.clear() };
     while c.Len() > 0 {
         let (s, ok) = c.Recv();
         if !ok {
             break;
         }
+        unsafe { ARRIVED.push(s) };
         names.push(SignalString(goish::int::from(s as i64)));
     }
     let mut out = string("[");
@@ -144,6 +150,61 @@ fn drain(c: &goish::gochan::chan<i32>, ms: i64, want: i64) -> string {
     }
     return out + string("]");
 }
+/// `drain`, but reporting which of `want` arrived as an ORDER-FREE set.
+///
+/// ── why this is not a list ──
+///
+/// The `notify-all` row used to pin Go's exact sequence,
+/// `[USR1 USR2 WINCH]`, and that is not a guarantee. Measured
+/// (tools/gen_signal_order_ref.go, 200 trials each under goref.sh):
+///
+///   raising 10, 12, 28 in that order — FOUR distinct orders
+///     USR1|USR2|WINCH        191
+///     USR1|WINCH|USR2          6
+///     USR1|USR2|WINCH|URG      2   (Go's own runtime SIGURG, caught
+///                                   because notify-all means ALL)
+///     USR2|USR1|WINCH          1
+///
+///   raising 28, 12, 10 — SIX distinct orders, including
+///     USR2|WINCH|USR1         20
+///
+/// That last one is EXACTLY the sequence this row failed CI on. Go's
+/// usual order is ascending by signal number because its `sigqueue`
+/// snapshots the whole pending mask in one atomic word swap and then
+/// serves the snapshot; but a signal landing during the serve still
+/// comes out late, so the order is a tendency and not a contract.
+/// POSIX does not specify it either.
+///
+/// So the row asserts the SET. A signal that never arrives still fails
+/// it. Signals outside `want` are excluded rather than failing the row,
+/// because notify-all legitimately catches the runtime's own — Go's
+/// SIGURG showed up in 2 of 200 trials above.
+///
+/// goish's relay does NOT do Go's atomic snapshot: `dispatch_pending`
+/// reads one per-signal counter at a time while scanning ascending, so
+/// a signal arriving mid-scan is served a whole pass late. That makes
+/// goish's order more variable than Go's without being outside what Go
+/// permits. Recorded in ROADMAP rather than changed here, because
+/// matching the snapshot also means matching Go's COALESCING, which is
+/// a semantic change to every signal delivery.
+fn drain_set(c: &goish::gochan::chan<i32>, ms: i64, want: &[i32]) -> string {
+    let _ = drain(c, ms, want.len() as i64);
+    let mut seen: Vec<i32> = Vec::new();
+    for w in want.iter() {
+        if unsafe { ARRIVED.contains(w) } {
+            seen.push(*w);
+        }
+    }
+    let mut out = string("{");
+    for (i, sig) in seen.iter().enumerate() {
+        if i > 0 {
+            out = out + string(", ");
+        }
+        out = out + SignalString(goish::int::from(*sig as i64));
+    }
+    return out + string("}");
+}
+
 fn me(sig: i32) {
     let _ = syscall::Kill(syscall::Getpid(), sig);
 }
@@ -231,7 +292,7 @@ fn main() {
     chk(fmt::Sprintf!(
         "%-26s got=%s",
         string("notify-all"),
-        drain(&c4, 300, 3)
+        drain_set(&c4, 300, &[syscall::SIGUSR1, syscall::SIGUSR2, 28])
     ));
     signal::Stop(&c4);
     signal::Stop(&c1);

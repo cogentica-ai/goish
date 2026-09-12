@@ -20,6 +20,7 @@ use crate::syscall;
 
 pub mod aranges;
 pub mod demangle;
+pub mod demangle_v0;
 pub mod dwarf_util;
 pub mod elf;
 pub mod info;
@@ -187,7 +188,18 @@ pub fn symbolize(pc: u64, out: &mut SymInfo) -> bool {
     // Symbol name.
     if let Some(r) = sym.lookup(pc) {
         let raw = symtab::name_at(str_bytes, r.name_off);
-        let n = demangle::demangle(raw, &mut out.fn_name);
+        // Two manglings, tried in order. The legacy one first because
+        // its check is a three-byte prefix; v0 second.
+        //
+        // Until v0 was wired in here, this function demangled NOTHING
+        // in a normal build: rustc emits v0, `demangle` only reads
+        // `_ZN…E`, so every backtrace, panic report and pprof text
+        // profile printed `_RNvNtNtCs…`. One example binary defines
+        // 19231 v0 symbols.
+        let mut n = demangle::demangle(raw, &mut out.fn_name);
+        if n == 0 {
+            n = demangle_v0::demangle_v0(raw, &mut out.fn_name);
+        }
         if n > 0 {
             out.fn_name_len = n;
         } else {

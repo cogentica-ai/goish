@@ -301,19 +301,55 @@ So the stack side is DONE. What remains:
                         the four value types, and Go's
                         `scaleHeapSample` for rates above 1.
 
-  a v0 demangler        Found while reading profile stacks: goish
-                        demangles only the LEGACY `_ZN…E` mangling.
-                        This build emits rustc's v0 (`_RNvNt…`), so
-                        NOTHING is demangled — panics, SIGSEGV
-                        backtraces, `runtime.Callers` output and pprof
-                        text profiles all print
-                        `_RNvNtNtCs…5goish7runtime5pprof14StopCPUProfile`.
-                        It has been that way in every crash report in
-                        this session. Pure function, easy to diff
-                        against rustc-demangle, improves every
-                        backtrace — and the heap profile needs readable
-                        names to strip allocator frames by name rather
-                        than by a fragile skip count.
+  a v0 demangler        DONE (`src/runtime/symbolize/demangle_v0.rs`).
+                        goish demangled only the LEGACY `_ZN…E` form
+                        while this build emits v0, so NOTHING was
+                        demangled: every panic, SIGSEGV backtrace,
+                        `runtime.Callers` result and pprof text profile
+                        printed `_RNvNtNtCs…`. 19231 v0 symbols in one
+                        example binary, none readable.
+                        Verified by compiling the SHIPPING source as a
+                        std program and diffing it against
+                        rustc-demangle over every v0 symbol in seven
+                        example binaries: 24127 exact, 0 bails, 0
+                        disagreements. Four bugs the corpus found that
+                        a hand-written table would not have: the
+                        discard pass failing on a zero-length buffer
+                        (14363 symbols), the disambiguator needing
+                        `+ 1` (1142 wrong closure indices), unnamed
+                        lifetime binders making two different `for<>`
+                        types print identically, and v0's leading-zero
+                        length rule (the last 227, all nested
+                        closures).
+                        This also unblocks stripping allocator frames
+                        from a heap profile BY NAME instead of by a
+                        skip count that inlining can shift.
+
+  signal relay ordering goish's `dispatch_pending` (runtime/signal.rs)
+                        reads one per-signal counter at a time while
+                        scanning signal numbers ascending, so a signal
+                        arriving mid-scan is served a whole pass late.
+                        Go's `sigqueue` instead swaps the entire pending
+                        MASK out in one atomic word operation and serves
+                        that snapshot, which is why Go's order is
+                        ascending-by-number 191 times in 200.
+                        NOT a correctness bug: measured over 200 trials
+                        (tools/gen_signal_order_ref.go), Go produces
+                        four distinct orders for three signals raised
+                        low-to-high and six for high-to-low — including
+                        the exact `USR2|WINCH|USR1` that goish's e2e
+                        failed on, 20 times in 200. POSIX does not
+                        specify the order either. So
+                        `signal_notify_ref_smoke` now asserts the SET,
+                        and this entry records that goish's order is
+                        more variable than Go's while staying inside
+                        what Go permits.
+                        Matching the snapshot would also mean matching
+                        Go's COALESCING — `sigsend` drops a signal whose
+                        bit is already pending, measured 97 of 100
+                        trials collapsing five SIGUSR1 into one — which
+                        is a semantic change to every delivery, so it is
+                        a decision and not a tidy-up.
 
   a goroutine registry  Needed by `GoroutineProfile`, which is a stub.
                         Its own comment blamed a missing stack walker;
