@@ -268,6 +268,27 @@ for name in "${TARGETS[@]}"; do
     printf "  %-40s %d/%d  (panic=%d timeout=%d fail=%d) → %s\n" \
       "$name" "$pass" "$loops" "$panic" "$tout" "$fail" "$first_log"
     FAILED_EXAMPLES+=("$name:p=$panic,t=$tout,f=$fail")
+    # Echo the captured output into the RUN LOG as well as the file.
+    #
+    # The file alone is not enough on CI. The artifact directory starts
+    # with a dot, and actions/upload-artifact has skipped hidden files
+    # by default since v4.4, so the upload step reports success while
+    # uploading nothing — a red run then has no readable output at all.
+    # That cost a diagnosis twice: once on a panic_fatal flake, and
+    # again on signal_notify_ref_smoke, where the failing ROW was
+    # unknowable from CI and could not be reproduced in 12 local runs
+    # under load.
+    #
+    # Capped, because a smoke that prints hundreds of rows would bury
+    # the summary — the file still holds all of it for a local run.
+    if [[ -s "$first_log" ]]; then
+      echo "    ── first failure output (first ${E2E_INLINE_LINES:-40} lines) ──"
+      head -n "${E2E_INLINE_LINES:-40}" "$first_log" | sed 's/^/    /'
+      lines=$(wc -l < "$first_log")
+      if (( lines > ${E2E_INLINE_LINES:-40} )); then
+        echo "    ── $((lines - ${E2E_INLINE_LINES:-40})) more lines in $first_log ──"
+      fi
+    fi
   fi
 
   TOTAL_PASS=$((TOTAL_PASS+pass))
