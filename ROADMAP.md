@@ -184,18 +184,34 @@ So the stack side is DONE. What remains:
                         which is a different entry point —
                         `segv::walk_frames` already takes an explicit
                         RBP, so the piece is there.
-  protobuf encoding     no proto3 writer anywhere. profile.proto needs
-                        varints, length-delimited fields and a string
-                        table — small, self-contained, and testable
-                        against `go tool pprof` with a hand-built
-                        profile.
+  protobuf encoding     DONE. `runtime/pprof/proto.rs` encodes
+                        profile.proto and is BYTE-IDENTICAL to Go's
+                        `internal/profile` encoder for the same profile
+                        (182 bytes), pinned by pprof_proto_ref_smoke
+                        against tools/gen_pprof_proto_ref.go. gzip
+                        envelope included. `go tool pprof -top` reads
+                        both the raw and gzipped forms and reports the
+                        encoded numbers.
+
+                        The trap worth knowing: the first version let
+                        the CALLER intern strings. Output was the same
+                        182 bytes, pprof printed the right numbers, and
+                        every string index was permuted — because Go's
+                        `preEncode` builds the table in its own
+                        traversal order ("" , sample_type type/unit,
+                        mappings, function name/system/filename,
+                        drop/keep frames, period_type). pprof resolves
+                        indexes, so the tool CANNOT see the difference.
+                        Only a byte comparison can.
   allocator accounting  Mallocs/TotalAlloc are DECLARED in MemStats but
                         heap.rs does not appear to maintain them; a heap
                         profile needs per-size-class counts carrying
                         stacks, which is more than a counter.
 
-Order: protobuf writer, then the sampler (the timer plus a ucontext
-entry to the existing walker), then heap accounting.
+Remaining order: the sampler (the timer plus a ucontext entry to the
+existing walker), then heap accounting. With `Callers` verified and the
+encoder byte-exact, a CPU profile is now the timer and a signal handler
+away.
 
 The issue is explicit that a downstream shim "would only create files
 with misleading or invalid contents", so a partial implementation must

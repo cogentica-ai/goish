@@ -3706,3 +3706,7 @@ path = "examples/errors_multiwrap_ref_smoke.rs"
 [[example]]
 name = "runtime_callers_ref_smoke"
 path = "examples/runtime_callers_ref_smoke.rs"
+
+[[example]]
+name = "pprof_proto_ref_smoke"
+path = "examples/pprof_proto_ref_smoke.rs"

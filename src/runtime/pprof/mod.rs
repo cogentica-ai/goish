@@ -33,6 +33,9 @@
 
 #![allow(non_snake_case)]
 
+#[doc(hidden)]
+pub mod proto;
+
 extern crate alloc;
 
 use alloc::sync::Arc;
