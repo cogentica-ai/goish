@@ -173,7 +173,32 @@ looks right.
 
 So the stack side is DONE. What remains:
 
-  SIGPROF + setitimer   no ITIMER_PROF, no SIGPROF anywhere in syscall.
+  SIGPROF + setitimer   DONE as machinery, NOT wired to the public API.
+                        `syscall` gains SIGPROF, ITIMER_*, Itimerval and
+                        Setitimer; `runtime/pprof/sample.rs` arms
+                        ITIMER_PROF and its SIGPROF handler walks the
+                        INTERRUPTED stack out of the ucontext, splicing
+                        the interrupted PC in as frame 0 (the walk
+                        returns RETURN addresses, so without it the
+                        innermost function is missing from every sample
+                        and its time lands on the caller).
+                        pprof_sampler_smoke verifies real stacks at
+                        100 Hz.
+
+                        `StartCPUProfile` STILL returns its unsupported
+                        error, on purpose. Joining the sampler to the
+                        encoder needs an API decision: Go keeps `w` in a
+                        package global from Start to Stop, and
+                        `&mut dyn Writer` cannot be stored past the
+                        call. Either the parameter becomes
+                        `Box<dyn Writer + Send>` (diverges from Go's
+                        `io.Writer`) or a raw pointer carries Go's own
+                        "must outlive the profile" contract as an
+                        explicit unsafe. Issue #9 is explicit that a
+                        partial implementation must not emit misleading
+                        files, so the error stands until that is chosen.
+
+  (was) SIGPROF          no ITIMER_PROF, no SIGPROF anywhere in syscall.
                         A CPU profile is a sampling timer plus a handler
                         that captures the interrupted stack; goish has
                         the signal plumbing (os/signal, the SIGURG
@@ -208,15 +233,38 @@ So the stack side is DONE. What remains:
                         profile needs per-size-class counts carrying
                         stacks, which is more than a counter.
 
-Remaining order: the sampler (the timer plus a ucontext entry to the
-existing walker), then heap accounting. With `Callers` verified and the
-encoder byte-exact, a CPU profile is now the timer and a signal handler
-away.
+Remaining: the writer-lifetime decision above, then heap accounting
+(MemStats declares Mallocs/TotalAlloc that heap.rs does not maintain; a
+heap profile needs per-size-class counts carrying stacks). Every other
+piece — walker, sampler, encoder, gzip — exists and is verified.
 
 The issue is explicit that a downstream shim "would only create files
 with misleading or invalid contents", so a partial implementation must
 keep `StartCPUProfile` returning its current honest error rather than
 emitting an empty-but-valid profile.
+
+### §2w — sync.Cond ping-pong hangs about 1 run in 40
+
+`sync_cond_smoke` timed out on CI (2026-09-12, 8016235) after passing
+its first three cases, and REPRODUCES locally: 1 hang in 40 runs, rc=124.
+Not caused by the commit it appeared on — that added only a pure
+encoder module — and it does not appear in the four e2e runs before it,
+so it is rare rather than new.
+
+Case 4 is a bounded ping-pong: two goroutines alternate `phase` under a
+Mutex, each `cond.Wait()`ing while the parity is wrong and
+`cond.Broadcast()`ing after unlocking. That is legal Go, and the
+logic cannot deadlock on its own terms — A waits only on odd, B only on
+even, so they cannot both be waiting.
+
+So the hang is in the primitives, not the test. The shape to look at:
+`Cond::Wait` increments `waiters` BEFORE `l.Unlock()` and only then
+calls `sema.acquire()`, while `Broadcast` does `waiters.swap(0)` then
+`release_n`. The comment on Wait claims the sema's
+credit-store-on-no-waiter closes the window, and for a single waiter it
+appears to — which is why finding the real interleaving needs care
+rather than a guess. NOT fixed; a speculative change to a
+synchronisation primitive is worse than a documented rare hang.
 
 ### §2u — map value semantics (issue #7): measured, and sized
 

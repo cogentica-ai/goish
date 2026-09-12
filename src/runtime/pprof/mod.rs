@@ -35,6 +35,7 @@
 
 #[doc(hidden)]
 pub mod proto;
+pub(crate) mod sample;
 
 extern crate alloc;
 
@@ -268,18 +269,63 @@ pub fn lostProfileEvent() {
 
 // go: sdk 1.25.5 runtime/pprof/pprof.go:825-850 StartCPUProfile
 /// Go: "enables CPU profiling for the current process … Use
-/// StopCPUProfile to stop". CPU profiling needs SIGPROF-driven
-/// sampling the goish runtime does not have; this is the honest
-/// unsupported arm — the same error-returning shape Go ships on
-/// platforms without profiling support — and net/http/pprof's
-/// Profile handler serves it exactly as Go serves profiler failures.
+/// StopCPUProfile to stop".
+///
+/// STILL RETURNS THE UNSUPPORTED ERROR, deliberately, even though the
+/// sampler below it works. Issue #9 is explicit that a partial
+/// implementation must not emit "files with misleading or invalid
+/// contents", and an error is the only honest answer until the profile
+/// actually reaches `w`.
+///
+/// What exists: `sample::start` arms `setitimer(ITIMER_PROF)` and the
+/// SIGPROF handler walks the interrupted stack — verified capturing
+/// real stacks at 100 Hz — and `proto::Profile` encodes byte-identically
+/// to Go. What is missing is joining them, and the obstacle is the
+/// signature rather than the plumbing: Go keeps `w` in a package
+/// global from Start until Stop, and `&mut dyn Writer` cannot be
+/// stored past this call. The options are a `Box<dyn Writer + Send>`
+/// parameter (diverges from Go's `io.Writer`), or a raw pointer with
+/// Go's own "must outlive the profile" contract made unsafe-explicit.
+/// That is an API decision, so it is not made in passing.
 pub fn StartCPUProfile(_w: &mut dyn crate::io::Writer) -> error {
     return errors::New(string("cpu profiling not supported by the goish runtime"));
 }
 
 // go: sdk 1.25.5 runtime/pprof/pprof.go:884-894 StopCPUProfile
 /// Go: "stops the current CPU profile, if any". With StartCPUProfile
-/// unable to start one, there is never one to stop.
+/// declining to start one, there is never one to stop.
 pub fn StopCPUProfile() {
     return;
+}
+
+// go: none — goish-only: test hooks onto the sampler's raw ring, so a
+// smoke can assert that samples were taken and that their stacks are
+// real before the protobuf path exists to show them.
+#[doc(hidden)]
+pub fn __taken() -> usize {
+    return sample::taken();
+}
+
+// go: none — goish-only: see `__taken`.
+#[doc(hidden)]
+pub fn __period_ns() -> u64 {
+    return sample::period_ns();
+}
+
+// go: none — goish-only: see `__taken`.
+#[doc(hidden)]
+pub fn __for_each<F: FnMut(&[u64])>(f: F) {
+    sample::for_each(f);
+}
+
+// go: none — goish-only: see `__taken`.
+#[doc(hidden)]
+pub fn __sample_start(hz: i64) -> bool {
+    return sample::start(hz);
+}
+
+// go: none — goish-only: see `__taken`.
+#[doc(hidden)]
+pub fn __sample_stop() {
+    sample::stop();
 }

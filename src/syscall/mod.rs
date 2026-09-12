@@ -51,6 +51,12 @@ pub const SYS_SCHED_YIELD: usize = 24;
 pub const SYS_NANOSLEEP: usize = 35;
 pub const SYS_ARCH_PRCTL: usize = 158;
 pub const SYS_GETTID: usize = 186;
+// go: none — goish-only: Go's syscall package names these in
+// zerrors_linux_amd64.go; goish declares the two it uses.
+/// `setitimer(2)`.
+pub const SYS_SETITIMER: usize = 38;
+/// `getitimer(2)`.
+pub const SYS_GETITIMER: usize = 36;
 pub const SYS_CLOCK_GETTIME: usize = 228;
 pub const SYS_EXIT_GROUP: usize = 231;
 pub const SYS_SCHED_GETAFFINITY: usize = 204;
@@ -117,6 +123,8 @@ pub const SIGTTOU: i32 = 22;
 pub const SIGURG: i32 = 23;
 pub const SIGXCPU: i32 = 24;
 pub const SIGXFSZ: i32 = 25;
+pub const SIGVTALRM: i32 = 26;
+pub const SIGPROF: i32 = 27;
 pub const SIGWINCH: i32 = 28;
 
 // sigaction flags. SA_RESTORER tells the kernel to use the
@@ -2737,4 +2745,50 @@ pub fn Statfs<P: Into<crate::string>>(path: P, buf: &mut Statfs_t) -> crate::err
         return Errno(-(rc as i32)).into();
     }
     crate::errors::nil
+}
+
+// ─── interval timers (runtime/pprof CPU sampling) ────────────────────
+
+// go: none — goish-only: the ITIMER_* selectors, which live in the Go
+// runtime's own itimer constants rather than package syscall.
+/// `ITIMER_REAL` — counts wall-clock time, delivers SIGALRM.
+pub const ITIMER_REAL: i32 = 0;
+/// `ITIMER_VIRTUAL` — counts CPU time in user mode only, SIGVTALRM.
+pub const ITIMER_VIRTUAL: i32 = 1;
+/// `ITIMER_PROF` — counts CPU time in user AND system mode, delivering
+/// SIGPROF. This is the one a CPU profile uses: a profile that ignored
+/// kernel time would attribute nothing to a syscall-heavy function.
+pub const ITIMER_PROF: i32 = 2;
+
+// go: none — goish-only: Go's `syscall.Timeval` exists, but
+// `setitimer` takes a PAIR of them and Go's runtime uses its own
+// `itimerval` rather than exporting one.
+/// `struct itimerval` — the reload interval and the time until the
+/// next expiry. Setting `it_value` to zero DISARMS the timer, which is
+/// how a profile stops.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct Itimerval {
+    pub it_interval: crate::os::exec_posix::Timeval,
+    pub it_value: crate::os::exec_posix::Timeval,
+}
+
+// go: none — goish-only: Go declares `setitimer` in the RUNTIME
+// (runtime/os_linux.go line 437), unexported and //go:noescape, not in
+// package syscall — a Go program cannot call it. goish's profiler
+// needs it, so it is a syscall wrapper here with the errno convention
+// the rest of this file uses.
+/// `setitimer(which, new, old)` — arm or disarm an interval timer.
+/// Returns 0 or a negative `-errno`.
+#[allow(non_snake_case)]
+pub fn Setitimer(which: i32, new: *const Itimerval, old: *mut Itimerval) -> i32 {
+    let r = unsafe {
+        syscall3(
+            SYS_SETITIMER,
+            which as usize,
+            new as usize,
+            old as usize,
+        )
+    };
+    return r as i32; // goishlint:ignore GOISH005 — syscall ABI returns a machine word.
 }
