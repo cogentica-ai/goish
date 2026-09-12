@@ -278,6 +278,15 @@ where
     hash0: u32,
     /// Bucket array — length is `1 << b`.
     buckets: Vec<Box<Bucket<K, V>>>,
+    /// Go's nil map: a header whose backing pointer is null. DISTINCT
+    /// from an allocated-empty map, which `buckets.is_empty()` cannot
+    /// express because a non-nil map also allocates its first bucket
+    /// lazily.
+    ///
+    /// Reads, `len`, ranging, `delete` and `clear` are all legal on nil
+    /// — measured against Go, which panics only on a WRITE. See
+    /// ROADMAP §2u.
+    nil: bool,
     /// Sentinel returned from `Index::index` when key is missing.
     /// `None` for value types that don't impl `Default` (e.g.
     /// `Box<dyn Trait>` for Go interface-typed maps) — Index/Get/etc.
@@ -307,6 +316,7 @@ where
             hash0: rand::cheaprand(),
             buckets: Vec::new(),
             zero: None,
+            nil: false,
         }
     }
 }
@@ -325,6 +335,7 @@ where
             hash0: rand::cheaprand(),
             buckets: Vec::new(),
             zero: Some(Box::new(V::default())),
+            nil: false,
         }
     }
 }
@@ -412,6 +423,7 @@ where
             hash0: rand::cheaprand(),
             buckets: buckets,
             zero: Some(Box::new(V::default())),
+            nil: false,
         };
     }
 }
@@ -433,6 +445,7 @@ where
             hash0: rand::cheaprand(),
             buckets: buckets,
             zero: None,
+            nil: false,
         };
     }
 
@@ -583,6 +596,12 @@ where
     /// literals against `map<string, …>` without wrapping each key.
     #[allow(non_snake_case)]
     pub fn Set<KI: Into<K>, VI: Into<V>>(&mut self, k: KI, v: VI) {
+        // Go: "assignment to entry in nil map". Measured: only a WRITE
+        // panics — reads, len, range, delete and clear are all legal on
+        // a nil map.
+        if self.nil {
+            panic!("assignment to entry in nil map");
+        }
         let k = k.into();
         let v = v.into();
         if self.buckets.is_empty() {
@@ -604,6 +623,11 @@ where
     /// call sites for the Go-shaped syntax.
     #[allow(non_snake_case)]
     pub fn Delete<KI: Into<K>>(&mut self, k: KI) {
+        // Legal on a nil map, and a no-op. Measured: `delete(nilMap, k)`
+        // does not panic in Go.
+        if self.nil {
+            return;
+        }
         let k: K = k.into();
         if self.count == 0 || self.buckets.is_empty() {
             return;
@@ -624,6 +648,10 @@ where
     /// stays usable.
     #[allow(non_snake_case)]
     pub fn Clear(&mut self) {
+        // Legal on a nil map too, same as delete.
+        if self.nil {
+            return;
+        }
         if self.count == 0 {
             return;
         }
@@ -872,6 +900,13 @@ where
     V: Default,
 {
     fn index_mut(&mut self, key: K) -> &mut V {
+        // `m[k] = v` inserts, so it is a write.
+        // Go: "assignment to entry in nil map". Measured: only a WRITE
+        // panics — reads, len, range, delete and clear are all legal on
+        // a nil map.
+        if self.nil {
+            panic!("assignment to entry in nil map");
+        }
         if self.buckets.is_empty() {
             self.buckets.push(Box::new(Bucket::new()));
         }
@@ -1070,7 +1105,9 @@ where
 {
     #[inline]
     fn from(_: crate::nilval::Nil) -> Self {
-        Self::new()
+        let mut m = Self::new();
+        m.nil = true;
+        return m;
     }
 }
 
@@ -1081,7 +1118,10 @@ where
 {
     #[inline]
     fn eq(&self, _: &crate::nilval::Nil) -> bool {
-        self.count == 0
+        // NOT `count == 0`. An allocated-empty map is not nil — measured,
+        // `map[string]int{} == nil` is false in Go, and goish answered
+        // true.
+        return self.nil;
     }
 }
 
@@ -1092,7 +1132,7 @@ where
 {
     #[inline]
     fn eq(&self, other: &map<K, V>) -> bool {
-        other.count == 0
+        return other.nil;
     }
 }
 
@@ -1120,11 +1160,19 @@ where
     V: Default + Clone,
 {
     fn clone(&self) -> Self {
+        if self.nil {
+            // A copy of a nil map is nil. Without this the clone would
+            // be an allocated-empty map, which compares unequal to nil
+            // and accepts writes.
+            let mut out = Self::new();
+            out.nil = true;
+            return out;
+        }
         let mut out = Self::new();
         for (k, v) in self.__iter() {
             out.Set(k.clone(), v.clone());
         }
-        out
+        return out;
     }
 }
 
@@ -1137,8 +1185,15 @@ where
     K: GoHash + PartialEq,
     V: Default,
 {
+    /// Go's zero value for a map is NIL, not an allocated-empty map.
+    /// So a struct field of map type that is default-constructed is nil
+    /// and panics on write — which is Go's behaviour, and is why the
+    /// five structs deriving `Default` with a map field had to be
+    /// audited (ROADMAP §2u).
     fn default() -> Self {
-        Self::new()
+        let mut m = Self::new();
+        m.nil = true;
+        return m;
     }
 }
 

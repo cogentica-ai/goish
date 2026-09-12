@@ -57,6 +57,13 @@ where
     K: crate::gomap::GoHash + PartialEq + Clone,
     V: Default + Clone,
 {
+    // Measured: `maps.Clone(nil)` is NIL, not an allocated-empty map.
+    // This is the row most easily got wrong — "start from a fresh table
+    // and insert every entry" is the obvious reading and gives an empty
+    // map — and the issue's acceptance list does not mention it.
+    if *m == crate::nil {
+        return crate::nil.into();
+    }
     let mut out: map<K, V> = map::new();
     for (k, v) in m.__iter() {
         out.Set(k.clone(), v.clone());

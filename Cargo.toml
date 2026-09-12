@@ -3752,5 +3752,13 @@ name = "testing_probe_testmain"
 path = "examples/testing_probe_testmain.rs"
 
 [[example]]
+name = "map_nil_ref_smoke"
+path = "examples/map_nil_ref_smoke.rs"
+
+[[example]]
+name = "map_nil_write_probe"
+path = "examples/map_nil_write_probe.rs"
+
+[[example]]
 name = "sync_notifylist_smoke"
 path = "examples/sync_notifylist_smoke.rs"

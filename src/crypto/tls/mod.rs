@@ -3427,6 +3427,14 @@ pub fn common_getCertificate(
         cfg.Certificates = crate::goslice::slice::__from_vec(alloc::vec![one.clone(), two.clone()]);
         chi.ServerName = crate::gostring::string::from_static("x.example.com");
     }
+    // Go's zero-value Config has a NIL NameToCertificate, so the Go
+    // equivalent of the two branches below needs this make — Go's own
+    // code reaches it through `BuildNameToCertificate`, which opens with
+    // `c.NameToCertificate = make(map[string]*Certificate)`. It was
+    // absent here only because goish's map had no nil state (#7).
+    if which == 3 || which == 4 {
+        cfg.NameToCertificate = crate::gomap::map::new();
+    }
     if which == 3 {
         cfg.NameToCertificate.Set(
             crate::gostring::string::from_static("a.example.com"),

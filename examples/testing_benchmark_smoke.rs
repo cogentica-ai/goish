@@ -162,6 +162,13 @@ fn main() {
         let mut e = BenchmarkResult::default();
         e.N = 10;
         e.T = time::Duration(1_000_000_000);
+        // Go's zero-value BenchmarkResult has a NIL Extra, so the real Go
+        // equivalent of this block needs the make too —
+        // `var e BenchmarkResult; e.Extra["ns/op"] = 42` panics with
+        // "assignment to entry in nil map". It was absent here only
+        // because goish's map had no nil state (#7), which made this
+        // example's shape unreachable in Go.
+        e.Extra = goish::make!(map[string]goish::types::float64);
         e.Extra.Set(s("ns/op"), 42.0);
         e.Extra.Set(s("allocs/op"), 7.0);
         e.Extra.Set(s("B/op"), 9.0);

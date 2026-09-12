@@ -1084,7 +1084,13 @@ where
         if dec.PeekKind() == 'n' {
             let (_, err) = dec.ReadToken();
             if err != nil { return err; }
-            *self = crate::gomap::map::new();
+            // JSON null leaves a nil map NIL — it does not allocate.
+            // Measured in both v1 and v2: `Unmarshal("null", &m)` with
+            // `var m map[string]string` leaves `m == nil` true. This used
+            // to assign `map::new()`, which was indistinguishable from
+            // nil before map nil identity (#7) and is an allocated-empty
+            // map after it.
+            *self = crate::nil.into();
             return err;
         }
         let (t, err) = dec.ReadToken();
@@ -1093,6 +1099,18 @@ where
         }
         if t.Kind() != '{' {
             return __semantic_error_name(dec, t.Kind(), Self::__go_type_name());
+        }
+        // Go: "To unmarshal a JSON object into a map, Unmarshal first
+        // establishes a map to use. If the map is nil, Unmarshal
+        // allocates a new map." An EMPTY object allocates too — measured,
+        // `Unmarshal("{}", &m)` leaves `m == nil` false with len 0.
+        //
+        // goish relied on the destination already being writable, which
+        // held only while a default-constructed map was an empty one.
+        // `var m map[string]string` is `Default::default()` here, so
+        // without this a faithful port panics.
+        if *self == crate::nil {
+            *self = crate::gomap::map::new();
         }
         while dec.PeekKind() != '}' {
             if dec.PeekKind() == jsontext::Kind(0) {

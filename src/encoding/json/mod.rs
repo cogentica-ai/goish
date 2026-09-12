@@ -605,9 +605,14 @@ impl<V: FromValue + Default + Clone> FromValue for map<string, V> {
                 }
                 (out, nil)
             }
-            Value::Null => (map::<string, V>::new(), nil),
+            // JSON null leaves a nil map NIL rather than allocating —
+            // measured against v1 and v2 alike. `from_value` BUILDS the
+            // destination rather than filling one, so the nil map is what
+            // it returns.
+            Value::Null => (crate::nil.into(), nil),
+            // An error yields the zero value, which for a map is nil.
             _ => (
-                map::<string, V>::new(),
+                crate::nil.into(),
                 errors::New("json: cannot unmarshal into map"),
             ),
         }

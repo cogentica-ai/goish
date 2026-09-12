@@ -102,6 +102,19 @@ impl routingIndex {
         if pat.lastSegment().multi {
             self.multis.push(pat.clone());
         } else {
+            // Go (routing_index.go:35-37):
+            //   if idx.segments == nil {
+            //       idx.segments = map[routingIndexKey][]*pattern{}
+            //   }
+            // These three lines were DROPPED from this port, and nothing
+            // noticed because goish's map had no nil state — a
+            // default-constructed map was already writable. The anchor
+            // above claims lines 31-46, which include them. With map nil
+            // identity (#7) the omission is a panic on the first
+            // registered pattern.
+            if self.segments == crate::nil {
+                self.segments = crate::gomap::map::new();
+            }
             let mut pos: int = 0;
             while pos < pat.segments.Len() {
                 let seg = pat.segments[pos].clone();

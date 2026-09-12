@@ -331,23 +331,51 @@ impl Request {
                 err = e;
             }
             // Go: if r.PostForm == nil { r.PostForm = make(url.Values) }
-            // (already initialized to empty map by default; nothing to do)
+            //
+            // This comment used to read "(already initialized to empty
+            // map by default; nothing to do)". That was true only while
+            // goish's map had no nil state; Go's zero-value map is nil,
+            // so with map nil identity (#7) the make is load-bearing and
+            // its absence is a panic on the first write below.
+            if s.post_form == crate::nil {
+                s.post_form = crate::gomap::map::new();
+            }
         }
         // Go: if r.Form == nil { … }
         if !s.parsed {
             s.parsed = true;
-            // Go: if len(r.PostForm) > 0 { copyValues(r.Form, r.PostForm) }
+            // Go: if len(r.PostForm) > 0 {
+            //         r.Form = make(url.Values)
+            //         copyValues(r.Form, r.PostForm)
+            //     }
+            // The make was missing here for the same reason as above.
             if s.post_form.Len() > 0 {
+                if s.form == crate::nil {
+                    s.form = crate::gomap::map::new();
+                }
                 let post_form = s.post_form.clone();
                 copyValues(&mut s.form, &post_form);
             }
             // Go: newValues, e := url.ParseQuery(r.URL.RawQuery)
-            let (new_values, e) = super::url::ParseQuery(self.URL.RawQuery.clone());
+            let (mut new_values, e) = super::url::ParseQuery(self.URL.RawQuery.clone());
             if err.IsNil() {
                 err = e;
             }
-            // Go: copyValues(r.Form, newValues)
-            copyValues(&mut s.form, &new_values);
+            // Go: if newValues == nil { newValues = make(url.Values) }
+            if new_values == crate::nil {
+                new_values = crate::gomap::map::new();
+            }
+            // Go: if r.Form == nil { r.Form = newValues } else { copyValues(r.Form, newValues) }
+            //
+            // Go ASSIGNS rather than copying when Form is still nil, which
+            // this port had collapsed into an unconditional copy. With a
+            // nil Form that copy is a panic; it is also one allocation and
+            // a full walk more than Go does.
+            if s.form == crate::nil {
+                s.form = new_values;
+            } else {
+                copyValues(&mut s.form, &new_values);
+            }
         }
         err
     }
