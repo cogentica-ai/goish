@@ -228,10 +228,28 @@ So the stack side is DONE. What remains:
                         drop/keep frames, period_type). pprof resolves
                         indexes, so the tool CANNOT see the difference.
                         Only a byte comparison can.
-  allocator accounting  Mallocs/TotalAlloc are DECLARED in MemStats but
-                        heap.rs does not appear to maintain them; a heap
-                        profile needs per-size-class counts carrying
-                        stacks, which is more than a counter.
+  allocator accounting  CORRECTION: the counters DO work. A probe shows
+                        Mallocs, TotalAlloc, HeapAlloc and Sys all
+                        moving correctly across 200 x 4 KiB allocations.
+                        The earlier claim here was written from a grep
+                        and was wrong — the third such claim in this
+                        section, after the stack walker and `Callers`.
+                        A heap PROFILE still needs what MemStats does
+                        not have: per-allocation-site STACKS, i.e. Go's
+                        mprof hash of stack -> (allocs, frees, bytes).
+                        Counters are not a profile.
+
+  a goroutine registry  Needed by `GoroutineProfile`, which is a stub.
+                        Its own comment blamed a missing stack walker;
+                        that is no longer true. A parked G's `gobuf`
+                        holds the rsp/rbp/pc a walk needs, exactly as
+                        the SIGPROF handler reads them from a ucontext.
+                        What is absent is a LIST: `live_g_count` is a
+                        counter. A registry is not just a Vec — a G in
+                        it must not be freed while a profiler walks it,
+                        which is why Go pairs `allgs` with
+                        stop-the-world. New runtime state with a
+                        use-after-free failure mode.
 
 Remaining: the writer-lifetime decision above, then heap accounting
 (MemStats declares Mallocs/TotalAlloc that heap.rs does not maintain; a

@@ -262,11 +262,23 @@ pub fn GOROOT() -> crate::gostring::string {
 }
 
 /// `runtime.GoroutineProfile(p)` (mprof.go:889) — collect a stack
-/// trace of every active goroutine. Slim returns `(0, false)` —
-/// no profile collected, never enough room in any caller buffer —
-/// so users branch on the "not enough room" path and skip profiling.
+/// trace of every active goroutine. Still returns `(0, false)`, the
+/// "not enough room" answer, so a caller branches away from profiling.
+///
+/// The reason is NOT a missing stack walker any more, which is what
+/// this comment used to say. `segv::walk_frames` walks an arbitrary RBP
+/// chain, `Callers` is diffed against Go, and a parked G's `gobuf`
+/// already holds the `rsp`/`rbp`/`pc` a walk of ANOTHER goroutine
+/// needs — the SIGPROF sampler does the same thing from a ucontext.
+///
+/// What is missing is an ALL-GOROUTINES REGISTRY. `live_g_count` is a
+/// counter, not a list, so there is nothing to iterate. Adding one is
+/// not just a Vec: a G in the list must not be freed while a profiler
+/// walks it, so it needs the lifetime discipline Go gets from `allgs`
+/// plus stop-the-world. That is new runtime state with a
+/// use-after-free failure mode, so it is recorded rather than
+/// improvised — ROADMAP §2v.
 pub fn GoroutineProfile(_p: crate::goslice::slice<()>) -> (crate::types::int, bool) {
-    // Slim: profile collection deferred — no goroutine stack walker.
     (0, false)
 }
 
