@@ -21,13 +21,14 @@
 package json_test
 
 import (
+	v1 "encoding/json"
 	"encoding/json/v2"
 	"fmt"
 	"testing"
 )
 
 func TestGoishRef(t *testing.T) {
-	row := func(name string, v any) {
+	row := func(name string, v ...any) {
 		fmt.Printf("%-20s %v\n", name, v)
 	}
 	jrow := func(name string, v any) {
@@ -92,4 +93,35 @@ func TestGoishRef(t *testing.T) {
 	d4 := []int{1, 2}
 	_ = json.Unmarshal([]byte(`[]`), &d4)
 	row("dec_empty_over_is_nil", d4 == nil)
+
+	// ── v1, because issue #14's acceptance criterion is v1's contract ──
+	//
+	// v2 marshals a nil slice as `[]`; v1 marshals it as `null`. Without
+	// both versions here it is impossible to tell which behaviour a
+	// report is describing, and a port built to the wrong one is a
+	// divergence introduced on purpose.
+	j1 := func(name string, v any) {
+		out, err := v1.Marshal(v)
+		fmt.Printf("%-20s err=%-5v got=%s\n", name, err != nil, out)
+	}
+	j1("v1_marshal_nil", nilSlice)
+	j1("v1_marshal_literal", emptyLiteral)
+	j1("v1_marshal_make", emptyMake)
+	j1("v1_marshal_zero_rec", Rec{})
+	j1("v1_marshal_empty_rec", Rec{S: []int{}})
+	j1("v1_omitempty_nil", OmitEmpty{})
+	j1("v1_omitempty_empty", OmitEmpty{S: []int{}})
+
+	var e1 []int
+	_ = v1.Unmarshal([]byte(`null`), &e1)
+	row("v1_dec_null_is_nil", e1 == nil)
+	var e2 []int
+	_ = v1.Unmarshal([]byte(`[]`), &e2)
+	row("v1_dec_empty_is_nil", e2 == nil)
+	e3 := []int{1, 2}
+	_ = v1.Unmarshal([]byte(`null`), &e3)
+	row("v1_dec_null_over_is_nil", e3 == nil)
+	e4 := []int{1, 2}
+	_ = v1.Unmarshal([]byte(`[]`), &e4)
+	row("v1_dec_empty_over_is_nil", e4 == nil, len(e4))
 }

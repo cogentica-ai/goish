@@ -684,6 +684,44 @@ Where v2 DOES observe the distinction, from
 
     omitzero_nil    {}            nil IS the zero value, so omitted
     omitzero_empty  {"s":[]}      allocated-empty is NOT
+
+FULL CONTRACT, both versions, after extending the generator on
+2026-09-12 so the v1-versus-v2 question is settled by data rather than
+by reading a report:
+
+    language level
+      nil_is_nil            true
+      literal_is_nil        false     []int{}
+      make_is_nil           false     make([]int, 0)
+      nil_len / literal_len 0 / 0
+      append_nil_is_nil     false     appending allocates
+      nil_slice0_is_nil     TRUE      nilSlice[:0] stays nil
+      empty_slice0_is_nil   false     emptyLiteral[:0] does not
+      copy_nil_is_nil       true
+      three_slice0_is_nil   false
+
+    marshal                 v1        v2
+      nil                   null      []
+      []int{}               []        []
+      make([]int, 0)        []        []
+      Rec{}                 {"s":null} {"s":[]}
+      Rec{S: []int{}}       {"s":[]}  {"s":[]}
+      omitempty nil         {}        {}
+      omitempty empty       {}        {}
+      omitzero nil          -         {}
+      omitzero empty        -         {"s":[]}
+
+    unmarshal (identical in v1 and v2)
+      null  -> nil, INCLUDING over an existing non-empty slice
+      []    -> allocated-empty, not nil
+
+So #14's "marshal nil slice as null" is v1's contract and goish's `[]` is
+already right for v2. An implementation must do BOTH, which is what
+removes the need for an answer on which version the downstream uses.
+
+`nil_slice0_is_nil` is the row a flag-based implementation will get
+wrong: re-slicing a nil slice to zero length has to PRESERVE nil, while
+the same expression on an allocated-empty slice must not.
     omitempty_*     {}            both omitted — no distinction here
     dec null  -> nil        (true)
     dec []    -> non-nil    (false)
