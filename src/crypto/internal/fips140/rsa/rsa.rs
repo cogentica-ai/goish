@@ -713,10 +713,18 @@ pub(super) fn drbg_read(b: &mut [byte]) {
 
 // ─── zero-value constructors ──────────────────────────────────────────
 
-// go: none — Go returns a nil `[]byte`; goish's slice has no nil header,
-// so an empty slice is its `nil` (`s == nil` is `len(s) == 0`).
+// go: none — Go returns a nil `[]byte`, and goish's slice now HAS a nil
+// header (#14), so this returns a real one.
+//
+// It used to return `slice::new()` with a comment saying "goish's slice
+// has no nil header, so an empty slice is its nil (`s == nil` is
+// `len(s) == 0`)". That was accurate and it was load-bearing: `dP == nil`
+// is the discriminator for a CRT-less multi-prime key, so the moment
+// `slice::new()` stopped comparing equal to nil, such a key took the CRT
+// path with an empty dP and `ExpandFor` built a zero-limb modulus —
+// `index out of bounds` in bigmod. fips_rsa_smoke caught it.
 pub(super) fn nil_bytes() -> slice<byte> {
-    return slice::<byte>::new();
+    return crate::nil.into();
 }
 
 // go: none — Go returns a nil `*bigmod.Modulus` on the error path; goish

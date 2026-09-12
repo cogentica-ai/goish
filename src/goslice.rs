@@ -32,13 +32,31 @@ use crate::types::int;
 #[derive(Clone)]
 pub struct slice<T> {
     inner: Vec<T>,
+    /// Go's nil slice: a header whose data pointer is null. DISTINCT from
+    /// `[]T{}` and `make([]T, 0)`, which are allocated and empty —
+    /// measured, `[]int{} == nil` is false in Go.
+    ///
+    /// Nothing about a nil slice panics: reads, `len`, ranging and
+    /// `append` are all legal, which is why this needs no API migration.
+    /// What it changes is `== nil` and v1 JSON, where a nil slice
+    /// marshals as `null` and an empty one as `[]`. See ROADMAP §2t.
+    nil: bool,
 }
 
 impl<T> slice<T> {
-    /// Empty slice. Matches Go's `nil` slice for length/cap purposes;
-    /// goish slices are never literally nil — empty owned Vec instead.
+    /// An ALLOCATED-EMPTY slice — Go's `[]T{}` and `make([]T, 0)`, not
+    /// `var s []T`.
+    ///
+    /// The zero value is nil and is spelled `Default::default()` or
+    /// `nil.into()`. Keeping `new()` non-nil is deliberate: it has 648
+    /// call sites, a mistaken one changes JSON output SILENTLY rather
+    /// than panicking the way the map equivalent did, and every site that
+    /// ports `[]T{}` or `make` is already correct. See ROADMAP §2t.
     pub fn new() -> Self {
-        Self { inner: Vec::new() }
+        Self {
+            inner: Vec::new(),
+            nil: false,
+        }
     }
 
     /// Internal hook used by `slice!`/`make!`/`append!` macros and by
@@ -47,7 +65,10 @@ impl<T> slice<T> {
     /// at user call sites.
     #[doc(hidden)]
     pub fn __from_vec(v: Vec<T>) -> Self {
-        Self { inner: v }
+        Self {
+            inner: v,
+            nil: false,
+        }
     }
 
     /// Internal hook for `append!`. Same caveats as `__from_vec`.
@@ -92,9 +113,14 @@ impl<T: Clone> slice<T> {
     pub fn slice(&self, low: int, high: int) -> Self {
         let lo = low as usize;
         let hi = high as usize;
-        Self {
+        // Re-slicing a NIL slice preserves nil. Measured:
+        // `nilSlice[:0] == nil` is true while `emptyLiteral[:0] == nil`
+        // is false, so the flag rides along rather than being recomputed
+        // from emptiness — which would make both of them nil.
+        return Self {
             inner: self.inner[lo..hi].to_vec(),
-        }
+            nil: self.nil,
+        };
     }
 
     /// `xs[low:high:max]` — Go's three-index ("full") slice expression.
@@ -122,13 +148,28 @@ impl<T: Clone> slice<T> {
         }
         let mut v: Vec<T> = Vec::with_capacity(mx - lo);
         v.extend_from_slice(&self.inner[lo..hi]);
-        Self { inner: v }
+        // Re-slicing a NIL slice preserves nil: measured,
+        // `nilSlice[:0] == nil` is true while `emptyLiteral[:0] == nil`
+        // is false. The flag rides along rather than being recomputed
+        // from emptiness, which would make both nil.
+        let keep_nil = self.nil;
+        let mut out = Self {
+            inner: v,
+            nil: false,
+        };
+        out.nil = keep_nil;
+        return out;
     }
 }
 
 impl<T> Default for slice<T> {
+    /// Go's zero value for a slice is NIL. This is the reported bug in
+    /// #14: a zero-value record with a slice field marshalled as `[]`
+    /// where v1 Go gives `null`.
     fn default() -> Self {
-        Self::new()
+        let mut s = Self::new();
+        s.nil = true;
+        return s;
     }
 }
 
@@ -175,14 +216,18 @@ impl<T: Clone> From<&slice<T>> for slice<T> {
 impl<T: Clone> From<crate::nilval::Nil> for slice<T> {
     #[inline]
     fn from(_: crate::nilval::Nil) -> Self {
-        slice::<T>::__from_vec(alloc::vec::Vec::new())
+        let mut s = slice::<T>::__from_vec(alloc::vec::Vec::new());
+        s.nil = true;
+        return s;
     }
 }
 
 impl<T> PartialEq<crate::nilval::Nil> for slice<T> {
     #[inline]
     fn eq(&self, _: &crate::nilval::Nil) -> bool {
-        self.Len() == 0
+        // NOT `Len() == 0`. Measured: `[]int{} == nil` and
+        // `make([]int, 0) == nil` are both FALSE in Go.
+        return self.nil;
     }
 }
 

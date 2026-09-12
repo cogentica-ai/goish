@@ -22,10 +22,16 @@
 // for decoding.
 //
 // Go returns nil rather than an empty slice whenever the result is
-// empty, with the comment "This is what we've historically done." A
-// goish `slice<byte>` is never literally nil — `s == nil` reports
-// `len == 0` — so that distinction has nothing to attach to here and
-// the empty slice is the whole of it.
+// empty, with the comment "This is what we've historically done."
+//
+// This used to say a goish `slice<byte>` "is never literally nil — so
+// that distinction has nothing to attach to". It does now (#14): nil and
+// allocated-empty are distinguishable, and `s == nil` reports the header
+// rather than the length. These functions still return an
+// allocated-empty slice where Go returns nil, so the divergence is now
+// OBSERVABLE rather than unrepresentable — a named remaining gap, not an
+// absence of one. It matters for a caller that branches on `== nil` or
+// marshals the result with v1 JSON, where Go gives `null`.
 
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 

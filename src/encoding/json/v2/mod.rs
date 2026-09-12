@@ -186,11 +186,18 @@ impl JsonOmit for bool {
 }
 
 impl<T: Clone> JsonOmit for slice<T> {
+    /// `omitempty` omits BOTH a nil and an allocated-empty slice —
+    /// measured, `omitempty_nil` and `omitempty_empty` are both `{}`.
     fn __json_empty(&self) -> bool {
-        self.as_ref().is_empty()
+        return self.as_ref().is_empty();
     }
+    /// `omitzero` omits only NIL, because nil is the zero value. Measured:
+    /// `omitzero_nil` is `{}` and `omitzero_empty` is `{"s":[]}`.
+    ///
+    /// These two were the same expression before #14, because an
+    /// allocated-empty slice was indistinguishable from nil.
     fn __json_zero(&self) -> bool {
-        self.as_ref().is_empty()
+        return *self == crate::nil;
     }
 }
 
@@ -840,7 +847,13 @@ impl<T: UnmarshalerFrom + Default + Clone> UnmarshalerFrom for slice<T> {
             return err;
         }
         if t.Kind() == 'n' {
-            *self = slice::new();
+            // JSON null decodes to a NIL slice, including over an
+            // existing non-empty one. Measured in v1 and v2 alike:
+            // `dec_null_is_nil` and `dec_null_over_is_nil` are both true,
+            // while `[]` gives an allocated-empty slice. `slice::new()`
+            // was indistinguishable from nil before #14 and is an
+            // allocated-empty slice after it.
+            *self = crate::nil.into();
             return nil;
         }
         if t.Kind() != '[' {

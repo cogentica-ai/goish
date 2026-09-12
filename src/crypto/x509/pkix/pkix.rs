@@ -34,14 +34,16 @@
 //     `atv.Value.(string)` assertion in FillFromRDNSequence becomes
 //     `As::<string>()`, which is the same comma-ok test, and
 //     `asn1.Marshal(tv.Value)` becomes `asn1::MarshalAny(&tv.Value)`.
-//   * `Name.String` branches on `n.ExtraNames == nil`. goish's
-//     `slice<T>` has no nil-versus-empty distinction (goslice.rs:167 —
-//     `s == nil` is `len(s) == 0`), so a Name carrying a non-nil but
-//     EMPTY ExtraNames takes the Names branch here and does not in Go.
-//     Verified against the reference: Go prints `"CN=cn"` for that
-//     shape, goish prints the Names entries too. Every other shape
-//     agrees. Closing it needs a nil-vs-empty slice header runtime
-//     wide, not a change here.
+//   * `Name.String` branches on `n.ExtraNames == nil`, and that now
+//     behaves like Go. It did not: `slice<T>` had no nil-versus-empty
+//     distinction, so a Name carrying a non-nil but EMPTY ExtraNames
+//     took the Names branch here and does not in Go. This note used to
+//     say "closing it needs a nil-vs-empty slice header runtime wide,
+//     not a change here" — which was right, and that header landed with
+//     #14. Measured after: a nil ExtraNames gives
+//     `"CN=cn,2.5.4.99=#130176"` and a non-nil EMPTY one gives
+//     `"CN=cn"`, which is Go's answer for each shape. No change was
+//     needed here, because the condition was already Go's.
 //   * Go's escaping switch is over rune literals (`case ',', '+', …`).
 //     `rune` is an integer type in goish and AGENTS.md §2a rules out
 //     `',' as rune`, so the RFC 2253 metacharacters are matched at

@@ -574,15 +574,18 @@ impl<T: FromValue + Default + Clone> FromValue for slice<T> {
                 for i in 0..items.Len() {
                     let (elem, err) = T::from_value(&items[i]);
                     if err != nil {
-                        return (slice::__from_vec(Vec::new()), err);
+                        return (crate::nil.into(), err);
                     }
                     out.push(elem);
                 }
                 (slice::__from_vec(out), nil)
             }
-            Value::Null => (slice::__from_vec(Vec::new()), nil),
+            // JSON null decodes to a NIL slice, not an allocated-empty
+            // one. Identical in v1 and v2 — measured.
+            Value::Null => (crate::nil.into(), nil),
+            // An error yields the zero value, which for a slice is nil.
             _ => (
-                slice::__from_vec(Vec::new()),
+                crate::nil.into(),
                 errors::New("json: cannot unmarshal into slice"),
             ),
         }
