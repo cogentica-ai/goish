@@ -19,6 +19,7 @@
 
 #![allow(non_snake_case)]
 
+pub(crate) mod notifylist;
 pub mod atomic;
 mod cond;
 pub mod errgroup;

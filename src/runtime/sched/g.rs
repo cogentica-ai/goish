@@ -103,6 +103,12 @@ pub struct G {
     /// `unsafe impl Send`s, and access is serialized by the Sema
     /// lock.
     pub sema_next: *mut G,
+    /// The notify-list TICKET this G is waiting on, when it is parked in
+    /// a `sync::Cond`. Go keeps this on the sudog (`sudog.ticket`);
+    /// goish parks the G directly, so it lives here. Meaningless unless
+    /// the G is on a NotifyList chain, and serialized by that list's
+    /// SpinLock exactly as `sema_next` is.
+    pub notify_ticket: u32,
     /// M28-α: bottom of the goroutine's currently-active stack region.
     /// Equals `stack.lo()` until `runtime::sched::maybe_grow` pivots
     /// onto a fresh region; reset on grow exit. Used by `maybe_grow`
@@ -209,6 +215,7 @@ impl G {
             locked_m: AtomicUsize::new(0),
             locked_m_count: AtomicU32::new(0),
             sema_next: core::ptr::null_mut(),
+            notify_ticket: 0,
             active_stack_lo: AtomicUsize::new(lo),
             active_stack_hi: AtomicUsize::new(hi),
             growth_chain: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
@@ -275,6 +282,7 @@ impl G {
             locked_m: AtomicUsize::new(0),
             locked_m_count: AtomicU32::new(0),
             sema_next: core::ptr::null_mut(),
+            notify_ticket: 0,
             active_stack_lo: AtomicUsize::new(stack_base as usize),
             active_stack_hi: AtomicUsize::new(stack_base as usize + stack_size),
             growth_chain: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),

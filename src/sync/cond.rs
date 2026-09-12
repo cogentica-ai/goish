@@ -10,14 +10,19 @@
 //
 // Slim deviations:
 //
-//   * `notifyList` replaced by an `AtomicI64` waiter count + the
-//     internal `Sema`. Wait increments the count then sema.acquires;
-//     Signal decrements + sema.releases; Broadcast swaps the count
-//     to zero and sema.releases that many at once.
+//   * `notifyList` IS ported now — see `sync/notifylist.rs`. It used to
+//     be "an AtomicI64 waiter count plus the internal Sema", and that
+//     deviation was a BUG rather than a simplification: a Broadcast
+//     whose count read zero did nothing at all, so a notification
+//     arriving while a waiter sat between its count bump and its park
+//     left no record. sync_cond_smoke hung about once in fifty runs.
+//     Go's ticket-and-watermark scheme has no such window, and the
+//     ablation is recorded in ROADMAP §2w: disable the
+//     `less(t, notify)` early return and the hang returns at 1 in 25.
 //
 //   * No `copyChecker` — Rust's borrow rules already prevent the
 //     by-value copy that the checker catches in Go. Cond is a
-//     `pub struct` whose only field types (`AtomicI64`, `Sema`,
+//     `pub struct` whose only field types (`NotifyList`,
 //     `Box<dyn Locker>`) deliberately exclude the manual Clone /
 //     Copy that would let the user trip the original error.
 //
@@ -30,9 +35,8 @@
 
 extern crate alloc;
 
-use core::sync::atomic::{AtomicI64, Ordering};
+use core::sync::atomic::Ordering;
 
-use super::sema::Sema;
 
 /// Locker — anything with `Lock` / `Unlock`. Mirrors Go's
 /// `sync.Locker` interface. `sync::Mutex` and `sync::RWMutex`
@@ -52,8 +56,13 @@ pub trait Locker {
 ///   * `Broadcast()` wakes all parked waiters.
 pub struct Cond<'a, L: Locker + ?Sized> {
     l: &'a L,
-    waiters: AtomicI64,
-    sema: Sema,
+    /// Go's `notifyList` (cond.go:23). It replaced a waiter COUNT plus
+    /// the semaphore's credit, which lost notifications: a `Broadcast`
+    /// whose count read zero did nothing at all, so one arriving while a
+    /// waiter sat between its bump and its park left no record.
+    /// sync_cond_smoke hung about once in fifty runs on that. See
+    /// `sync/notifylist.rs` and ROADMAP §2w.
+    notify: crate::sync::notifylist::NotifyList,
 }
 
 // go: sdk 1.25.5 sync/cond.go:48-50 NewCond
@@ -61,8 +70,7 @@ pub struct Cond<'a, L: Locker + ?Sized> {
 pub fn NewCond<L: Locker + ?Sized>(l: &L) -> Cond<'_, L> {
     Cond {
         l,
-        waiters: AtomicI64::new(0),
-        sema: Sema::new(),
+        notify: crate::sync::notifylist::NotifyList::new(),
     }
 }
 
@@ -72,14 +80,13 @@ impl<'a, L: Locker + ?Sized> Cond<'a, L> {
     /// suspends the calling goroutine. After resuming, re-acquires
     /// `L` before returning.
     pub fn Wait(&self) {
-        // Increment waiter count BEFORE Unlock, so a Signal that
-        // fires between Unlock and sema.acquire still counts us.
-        self.waiters.fetch_add(1, Ordering::AcqRel);
+        // The ticket is taken while the caller's lock is STILL HELD —
+        // that ordering is the fix. A notification landing during the
+        // Unlock below bumps `notify` past this ticket, and `Wait` sees
+        // it instead of parking forever.
+        let t = self.notify.Add();
         self.l.Unlock();
-        // Park. Sema's credit-store-on-no-waiter behavior closes the
-        // lost-wakeup race against a concurrent Signal that arrives
-        // before we finish queueing.
-        self.sema.acquire();
+        self.notify.Wait(t);
         self.l.Lock();
     }
 
@@ -89,42 +96,25 @@ impl<'a, L: Locker + ?Sized> Cond<'a, L> {
     // `waiters > 0` with an EMPTY queue and ZERO credit, a wakeup was
     // lost between the two — which is the window Wait's own comment
     // claims is closed.
-    /// `(waiters, sema_credit, sema_queue_len)`, immediately stale.
+    /// `(tickets_issued, tickets_notified, queue_len)`, immediately
+    /// stale. A hang with `issued > notified` and an EMPTY queue would
+    /// mean a waiter holding a ticket never parked and never returned,
+    /// which the ticket check is there to make impossible.
     #[doc(hidden)]
-    pub fn __debug_state(&self) -> (i64, i64, usize) {
-        let w = self.waiters.load(Ordering::Acquire);
-        let (credit, qlen) = self.sema.__debug_state();
-        return (w, credit, qlen);
+    pub fn __debug_state(&self) -> (u32, u32, usize) {
+        return self.notify.__debug_state();
     }
 
     // go: sdk 1.25.5 sync/cond.go:82-85 Cond.Signal
     /// `(*Cond).Signal()` (cond.go:82) — wake one waiter, if any.
     pub fn Signal(&self) {
-        // Decrement only if there's a waiter to consume; avoid
-        // incrementing the sema's credit when there are none.
-        loop {
-            let w = self.waiters.load(Ordering::Acquire);
-            if w <= 0 {
-                return;
-            }
-            if self
-                .waiters
-                .compare_exchange(w, w - 1, Ordering::AcqRel, Ordering::Acquire)
-                .is_ok()
-            {
-                self.sema.release();
-                return;
-            }
-        }
+        self.notify.NotifyOne();
     }
 
     // go: sdk 1.25.5 sync/cond.go:91-94 Cond.Broadcast
     /// `(*Cond).Broadcast()` (cond.go:91) — wake all waiters.
     pub fn Broadcast(&self) {
-        let n = self.waiters.swap(0, Ordering::AcqRel);
-        if n > 0 {
-            self.sema.release_n(n);
-        }
+        self.notify.NotifyAll();
     }
 }
 

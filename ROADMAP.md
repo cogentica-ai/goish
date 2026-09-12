@@ -243,7 +243,7 @@ with misleading or invalid contents", so a partial implementation must
 keep `StartCPUProfile` returning its current honest error rather than
 emitting an empty-but-valid profile.
 
-### §2w — sync.Cond ping-pong hangs about 1 run in 40
+### §2w — sync.Cond lost notifications (FIXED)
 
 `sync_cond_smoke` timed out on CI (2026-09-12, 8016235) after passing
 its first three cases, and REPRODUCES locally: 1 hang in 40 runs, rc=124.
@@ -289,10 +289,33 @@ the unlock and a notify watermark — rather than patching the counter.
 Patching cannot close it: any scheme where a notification is dropped
 when the counter reads zero has the same hole.
 
-NOT FIXED. The diagnostic accessors (`Cond::__debug_state`,
-`Sema::__debug_state`) are kept, since they are what turned an
-unfalsifiable theory into the sample above. Reproduction is ~1 in 50;
-a watchdog build catches it much sooner than the smoke's 30s timeout.
+FIXED by porting `notifyList` (`sync/notifylist.rs`), with evidence in
+three directions rather than "it stopped happening":
+
+    before (count + credit)          1/40 and 1/51 hangs
+    after (notifyList)               0 / 150
+    after, less(t, notify) disabled  1/25 hangs
+
+The ablation is the part that matters. Disabling that one early return
+brings the hang straight back, with exactly the predicted state —
+`issued=5 notified=4 qlen=2`, one ticket outstanding and both goroutines
+parked. So the ticket check is what fixes it, not a timing accident.
+
+Two header comments were corrected, both of which had actively misled
+me while reading the code:
+
+  cond.rs  listed "notifyList replaced by an AtomicI64 waiter count +
+           the internal Sema" under "Slim deviations". It was not a slim
+           deviation, it was the bug.
+  sema.rs  claimed its credit rule "is what makes this race-free against
+           the classic lost-wakeup pattern". True for PAIRED
+           acquire/release and nothing more — reading it as a general
+           shield is what let Cond be built on it. It now says when this
+           type is the wrong primitive.
+
+The diagnostic accessors are kept (`Cond::__debug_state`,
+`Sema::__debug_state`, `NotifyList::__debug_state`): they are what
+turned an unfalsifiable theory into one decisive sample.
 
 ### §2u — map value semantics (issue #7): measured, and sized
 

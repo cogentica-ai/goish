@@ -20,6 +20,16 @@
 // arrives before the matching acquire has finished queuing itself
 // becomes a credit, which the acquire then consumes without parking.
 //
+// THAT GUARANTEE IS ABOUT PAIRED acquire/release AND NOTHING MORE, and
+// reading it as a general lost-wakeup shield cost a real bug.
+// `sync::Cond` used to count its waiters in a separate atomic and skip
+// `release` entirely when that count read zero — so a notification
+// could be dropped before any credit existed, and the credit rule had
+// nothing to say about it. Cond hung roughly once in fifty runs until
+// it moved to a ported `notifyList` (sync/notifylist.rs); see ROADMAP
+// §2w. If a caller's notification can be addressed to a waiter that has
+// not called `acquire` yet, this type is the wrong primitive.
+//
 // **Allocation-free intrusive queue (task #110).** Earlier versions
 // used `VecDeque<NonNull<G>>` for the waiter list, which on first
 // push triggered an allocator path 24+ frames deep — overflowing
