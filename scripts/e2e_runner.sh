@@ -80,6 +80,14 @@ loops_for() {
 example_timeout() {
   case "$1" in
     goginx) echo 60 ;;
+    # Waits for ASYNCHRONOUS signal delivery, so its drains are
+    # quiescence-based with a ceiling rather than fixed sleeps. Normal
+    # runtime is ~4s, but if every row that expects a signal had to
+    # spend its ceiling the total approaches 12s — too close to 15s,
+    # and this file has already traded a flake for a timeout once
+    # (see its own drain() comment). 45s is room for the ceilings on a
+    # loaded runner without hiding a genuine hang.
+    signal_notify_ref_smoke) echo 45 ;;
     *)      echo "$TIMEOUT" ;;
   esac
 }
