@@ -19,10 +19,23 @@
 //
 // A statistical test cannot prove unpredictability, and this does not
 // pretend to. What it checks is what the OLD code would fail: 64 draws
-// all distinct, and no constant spacing between them. The zero check
-// is a cheap sanity assertion, not a guard against a real failure
-// mode — `crypto::rand::Read` fatals rather than returning a
-// half-filled buffer, as Go's does.
+// all distinct (within a birthday margin), and no constant spacing
+// between them.
+//
+// The zero row asserts only that they are not ALL zero, and that is
+// deliberate. It used to demand NO zeros, which is a coin that comes up
+// wrong about once in a thousand runs — P(at least one zero in 64 draws
+// of a 16-bit value) = 1 - (65535/65536)^64 ~= 0.098% — and it failed
+// CI on 2026-09-12 for exactly that reason. A single zero id is a legal
+// DNS transaction id and says nothing about the generator.
+//
+// It could not detect its stated failure mode either: a half-filled
+// buffer cannot reach here, because `crypto::rand::Read` fatals rather
+// than returning one, as Go's does. And the signal it was reaching for
+// — a generator stuck on a constant — is already caught by the
+// distinctness row above, where 64 identical draws give 63 duplicates
+// against a margin of 3. So the strict form added a flake and no
+// coverage.
 #![no_std]
 #![no_main]
 #![allow(non_snake_case)]
@@ -88,12 +101,14 @@ fn main() {
         fmt::Printf!("[!!] %-22s constant spacing — a counter\n", "spacing");
         bad += 1;
     }
-    // Any zeros (a failed draw left as zero)?
+    // Not ALL zero — see the header for why this is the bound rather
+    // than "no zeros". The count is printed either way so a generator
+    // drifting toward zero is still visible to a reader.
     let zeros = ids.iter().filter(|x| **x == 0).count();
-    if zeros == 0 {
-        fmt::Printf!("[ok] %-22s no zero ids\n", "draws");
+    if zeros < ids.len() {
+        fmt::Printf!("[ok] %-22s %d zero ids of %d\n", "draws", zeros as int, ids.len() as int);
     } else {
-        fmt::Printf!("[!!] %-22s %d zero ids\n", "draws", zeros as int);
+        fmt::Printf!("[!!] %-22s every id is zero — dead generator\n", "draws");
         bad += 1;
     }
     if bad == 0 {

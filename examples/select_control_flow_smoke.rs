@@ -249,6 +249,40 @@ fn pass3_unlabeled_continue() -> usize {
     return seen;
 }
 
+/// Shapes the restructure could have broken but no existing example
+/// covers: a select with ONLY a default arm, arms of mixed
+/// diverging/valued type, and a send case as the winner. The bodies now
+/// run in a `match` whose arms must unify, where before they were the
+/// break values of a `loop` — the same constraint, but re-established
+/// by different code, so it is worth an assertion rather than an
+/// assumption.
+fn expression_shapes() -> (u8, u8, u8, usize) {
+    let empty: chan<u8> = chan::new_buffered(1);
+    let default_only: u8 = select! {
+        let (_v, _) = (empty).Recv() => 1u8,
+        default => 9u8,
+    };
+
+    // One arm yields, the other diverges.
+    let c: chan<u8> = chan::new_buffered(4);
+    c.Send(3);
+    let mixed: u8 = loop {
+        let got: u8 = select! {
+            let (v, _) = (c).Recv() => v,
+            default => { break 0u8; },
+        };
+        break got;
+    };
+
+    // A send case winning, and its value actually landing.
+    let s: chan<u8> = chan::new_buffered(2);
+    let send_arm: u8 = select! {
+        (s).Send(7u8) => 5u8,
+        default => 0u8,
+    };
+    return (default_only, mixed, send_arm, s.Len());
+}
+
 #[goish::main]
 fn main() {
     check(pass1_unlabeled_continue() == 5, "pass-1: UNLABELED continue x5 then break");
@@ -259,6 +293,11 @@ fn main() {
     check(pass3_continue() == 4, "pass-3: woken body continues");
     check(body_parks_then_continues() == 4, "body parks, then continue 'outer");
     check(returns_from_body() == 7, "return out of a selected body");
+
+    let (d, m, sa, slen) = expression_shapes();
+    check(d == 9, "select with only a default arm yields its body");
+    check(m == 3, "arms of mixed diverging/valued type unify");
+    check(sa == 5 && slen == 1, "a send arm wins and its value lands");
 
     // Several rounds, so an epoch that leaks by one per select is
     // visible as an abort rather than absorbed.
