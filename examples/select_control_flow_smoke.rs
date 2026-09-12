@@ -10,10 +10,14 @@
 // released and the m.locks epoch already closed, so the next
 // `__select_release_all` called `raw_unlock` at `m.locks == 0`.
 //
-// Nothing ever iterated that loop; it was one only to get
-// `break 'select_blk value`. It is a labeled BLOCK now, which cannot
-// be continued, so an unlabeled `continue` is rustc's E0695 at compile
-// time rather than scheduler corruption at run time.
+// The bodies run OUTSIDE the select machinery now. Every dispatch site
+// stores its received value and breaks with a case index; the body runs
+// after the block and after the trailing `releasem`, inside nothing but
+// a `match`. A match arm is neither a loop nor a labeled block, so
+// `continue`, `break` and `return` reach the user's own enclosing
+// construct — which is what Go's `continue` in a select case means.
+// No mask is open across user code at all, so there is no epoch left
+// for a parking body to split.
 //
 // What this file pins is that the LABELED forms — which are what Go's
 // `continue` in a select case corresponds to here — stay balanced
@@ -23,10 +27,11 @@
 //   default a select with a default arm and nothing ready
 //   pass-3  a case that had to park and was woken
 //
-// Each is exercised with `continue 'outer`, `break 'outer` and
-// `return`, and one body parks (a channel send that blocks) before
-// escaping — the case the issue asks for, because a body that parks
-// can resume on a different M and that is what splits a bump/drop
+// Each is exercised with UNLABELED `continue`/`break` — the form the
+// issue reported and the form Go permits — as well as the labeled ones
+// and `return`. One body parks (a channel send that blocks) before
+// escaping, the case the issue asks for, because a body that parks can
+// resume on a different M and that is what used to split a bump/drop
 // pair.
 //
 // The assertion is the exit status and the loop's own arithmetic: an
@@ -34,15 +39,11 @@
 // answer, so reaching the end at all is most of the test. The counts
 // catch control flow going to the wrong place while staying balanced.
 //
-// WHAT THIS FILE DOES NOT DO, checked rather than assumed: it does not
-// regression-test issue #21. Run it against the pre-fix macro and it
-// PASSES — the labeled forms were always balanced, and only the
-// unlabeled `continue` bound to the wrong loop. The test for that fix
-// is that the bad form no longer compiles, which no runtime example
-// can assert. What this file adds is coverage that did not exist
-// before: escapes from all three dispatch paths, and a body that
-// parks. Treating a green run here as evidence about #21 would be
-// wrong.
+// The `unlabeled_*` rows ARE the regression test for #21: against the
+// pre-fix macro they abort the process with `releasem UNDERFLOW`. The
+// labeled rows are not — they were balanced all along, and an earlier
+// version of this file consisted only of those and passed against the
+// unfixed macro, which is why the distinction is spelled out here.
 
 #![no_std]
 #![no_main]
@@ -183,8 +184,76 @@ fn returns_from_body() -> usize {
     }
 }
 
+/// pass-1 with an UNLABELED `continue` — issue #21's exact shape.
+/// Against the pre-fix macro this aborts with `releasem UNDERFLOW`.
+fn pass1_unlabeled_continue() -> usize {
+    let c: chan<u8> = chan::new_buffered(16);
+    for i in 0..6u8 {
+        c.Send(i);
+    }
+    let mut seen = 0usize;
+    loop {
+        select! {
+            let (v, _) = (c).Recv() => {
+                if v < 5 {
+                    seen += 1;
+                    continue;
+                }
+                break;
+            },
+        }
+    }
+    return seen;
+}
+
+/// The default arm, unlabeled.
+fn default_unlabeled_continue() -> usize {
+    let empty: chan<u8> = chan::new_buffered(1);
+    let mut rounds = 0usize;
+    loop {
+        select! {
+            let (_v, _) = (empty).Recv() => { break; },
+            default => {
+                rounds += 1;
+                if rounds < 4 {
+                    continue;
+                }
+                break;
+            },
+        }
+    }
+    return rounds;
+}
+
+/// pass-3 — the woken body — unlabeled.
+fn pass3_unlabeled_continue() -> usize {
+    let c: chan<u8> = chan::new_unbuffered();
+    let w = c.clone();
+    go!(move || {
+        for i in 0..4u8 {
+            w.Send(i);
+        }
+    });
+    let mut seen = 0usize;
+    loop {
+        select! {
+            let (v, _) = (c).Recv() => {
+                seen += 1;
+                if v < 3 {
+                    continue;
+                }
+                break;
+            },
+        }
+    }
+    return seen;
+}
+
 #[goish::main]
 fn main() {
+    check(pass1_unlabeled_continue() == 5, "pass-1: UNLABELED continue x5 then break");
+    check(default_unlabeled_continue() == 4, "default: UNLABELED continue then break");
+    check(pass3_unlabeled_continue() == 4, "pass-3: UNLABELED continue in a woken body");
     check(pass1_continue_and_break() == 5, "pass-1: continue 'outer x5 then break");
     check(default_continue() == 4, "default: continue 'outer then break");
     check(pass3_continue() == 4, "pass-3: woken body continues");

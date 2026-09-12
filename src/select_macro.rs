@@ -434,25 +434,29 @@ macro_rules! __select_emit {
         }
 
         // ─── single labeled loop for the whole select ────────────
-        // A labeled BLOCK, not a `loop`. It was a `loop` purely to get
-        // `break 'select_blk value`, and nothing ever iterated it — but
-        // a `loop` is what an unlabeled `continue` in a user body
-        // binds to. That bound the user's `continue` to the SELECT's
-        // loop instead of theirs, re-running pass-1 with the chan locks
-        // already released and the m.locks epoch already closed, so the
-        // next `__select_release_all` called `raw_unlock` at
-        // `m.locks == 0` and the process died with `releasem UNDERFLOW`
-        // (issue #21). A block cannot be continued, so the mistake is
-        // now rustc's E0695 at compile time — "`continue` statements
-        // that would diverge to or through a labeled block need to bear
-        // a label" — instead of scheduler corruption at run time.
+        // A labeled BLOCK yielding a case INDEX, not a `loop` yielding
+        // the body's value.
         //
-        // A labeled `continue 'outer` / `break 'outer` / `return` from
-        // a body is what Go's `continue` in a select case corresponds
-        // to here, and those stay balanced: the pair is
-        // [top-acquirem, pre-body-releasem], and an escape skips both
-        // the re-`acquirem` and the trailing `releasem`.
-        let __select_out = 'select_blk: {
+        // It was a `loop` purely to get `break 'select_blk value`, and
+        // nothing ever iterated it — but a `loop` is what an unlabeled
+        // `continue` in a user body binds to. That bound the user's
+        // `continue` to the SELECT's loop instead of theirs, re-running
+        // pass-1 with the chan locks already released and the m.locks
+        // epoch already closed, so the next `__select_release_all`
+        // called `raw_unlock` at `m.locks == 0` and the process died
+        // with `releasem UNDERFLOW` (issue #21).
+        //
+        // The body no longer runs in here at all — see the `match` at
+        // the bottom. This block only DECIDES, and hands out an index.
+        // Per-recv-case value slots. The parse phase already threads a
+        // spare ident per case ($vn — used by send cases for the value
+        // to send, unused by recv until now), so the slot costs no new
+        // hygiene. The dispatch sites fill one and break with a case
+        // INDEX; the bodies run after the block, from the slot.
+        $( let mut $br_vn = ::core::option::Option::None; )*
+        $( let mut $pr_vn = ::core::option::Option::None; )*
+
+        let __select_idx: u8 = 'select_blk: {
             // Pass-1: try each case in random order, under the
             // already-held chan locks. Use *_locked variants that
             // don't re-acquire.
@@ -468,9 +472,8 @@ macro_rules! __select_emit {
                         {
                             $crate::__select_release_all!(__sel_unique, __sel_atoms);
                             let _ = __ok;
-                            let $br_v = __v;
-                            #[allow(unreachable_code)]
-                            break 'select_blk ($crate::__select_run_body!($br_body));
+                            $br_vn = ::core::option::Option::Some(__v);
+                            break 'select_blk $br_idx;
                         }
                     }
                 )*
@@ -482,9 +485,8 @@ macro_rules! __select_emit {
                             $crate::gochan::chan::__try_recv_locked(__s)
                         {
                             $crate::__select_release_all!(__sel_unique, __sel_atoms);
-                            let ($($pr_p)+) = (__v, __ok);
-                            #[allow(unreachable_code)]
-                            break 'select_blk ($crate::__select_run_body!($pr_body));
+                            $pr_vn = ::core::option::Option::Some((__v, __ok));
+                            break 'select_blk $pr_idx;
                         }
                     }
                 )*
@@ -498,8 +500,7 @@ macro_rules! __select_emit {
                         match $crate::gochan::chan::__try_send_locked(__s, __take) {
                             ::core::result::Result::Ok(()) => {
                                 $crate::__select_release_all!(__sel_unique, __sel_atoms);
-                                #[allow(unreachable_code)]
-                                break 'select_blk ($crate::__select_run_body!($s_body));
+                                break 'select_blk $s_idx;
                             }
                             ::core::result::Result::Err(__returned) => {
                                 $s_vn = ::core::option::Option::Some(__returned);
@@ -516,8 +517,8 @@ macro_rules! __select_emit {
                 'select_blk,
                 __sel_unique, __sel_atoms,
                 [ $( $d_body )* ],
-                [ $( ($br_idx $br_cn $br_sn $br_v ($br_body)) )* ]
-                [ $( ($pr_idx $pr_cn $pr_sn ($($pr_p)+) ($pr_body)) )* ]
+                [ $( ($br_idx $br_cn $br_vn $br_sn $br_v ($br_body)) )* ]
+                [ $( ($pr_idx $pr_cn $pr_vn $pr_sn ($($pr_p)+) ($pr_body)) )* ]
                 [ $( ($s_idx $s_cn $s_vn $s_sn ($s_body)) )* ]
             );
         };
@@ -531,36 +532,47 @@ macro_rules! __select_emit {
         // raw_unlock — so dropping m.locks here re-arms async preempt
         // for subsequent code.
         $crate::runtime::sched::releasem();
-        __select_out
-    }};
-}
 
-// ─── helper: run a user case body outside the m.locks mask ────────
-//
-// Every dispatch site reaches the body with all chan locks already
-// released (pass-1 success → `__select_release_all`; default →
-// same; pass-3 → per-`__cancel_*` raw_unlock), so the mask protects
-// nothing the body needs — and a body that *parks* (chan op,
-// `time::Sleep`, nested select) can resume on a different M, which
-// would split the select's bump/drop pair across two Ms exactly
-// like the pass-2 straddle (see the epoch-split comment there).
-// Close the epoch, run the body, reopen for the trailing
-// `releasem()` at the bottom of `__select_emit`.
-//
-// User control flow escaping the body (`break`/`continue`/`return`)
-// skips both the re-`acquirem()` here *and* the trailing
-// `releasem()` — the [top-acquirem, pre-body-releasem] pair is
-// already balanced, so escapes stay balanced too.
-
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __select_run_body {
-    ($body:expr) => {{
-        $crate::runtime::sched::releasem();
-        #[allow(unreachable_code)]
-        let __select_body_val = { $body };
-        $crate::runtime::sched::acquirem();
-        __select_body_val
+        // ─── the user body, outside EVERYTHING of ours ────────────
+        //
+        // This is the fix for issue #21. The bodies used to run inside
+        // `'select_blk`, which was a `loop` — so an unlabeled
+        // `continue` bound to the SELECT's loop, re-entered pass-1 with
+        // the chan locks already released and the m.locks epoch already
+        // closed, and the next release_all called `raw_unlock` at
+        // `m.locks == 0`.
+        //
+        // Now every dispatch site stores its value and breaks with a
+        // case index, and the body runs HERE: after the block, after
+        // the trailing `releasem`, inside nothing but a `match`. A
+        // `match` arm is not a loop and not a labeled block, so
+        // `continue`, `break` and `return` all reach the user's own
+        // enclosing construct — which is what Go's `continue` in a
+        // select case means.
+        //
+        // It also means NO mask is open across user code at all, which
+        // is why `__select_run_body`'s releasem/acquirem pair is gone
+        // rather than moved. A body that parks can no longer split an
+        // m.locks epoch across two Ms, because there is no epoch to
+        // split.
+        match __select_idx {
+            $( $br_idx => {
+                let $br_v = $br_vn.take().expect("goish: select recv slot empty");
+                $br_body
+            } )*
+            $( $pr_idx => {
+                let ($($pr_p)+) = $pr_vn.take().expect("goish: select recv slot empty");
+                $pr_body
+            } )*
+            $( $s_idx => { $s_body } )*
+            // 255 is the default arm. With no default arm there is no
+            // body to run and the sentinel is never produced, so the
+            // catch-all is unreachable — spelled as a panic rather
+            // than `()` so a future dispatch path that forgets to set
+            // an index says so instead of silently yielding unit.
+            $( 255u8 => { $d_body } )*
+            _ => ::core::panic!("goish: select dispatched an unknown case index"),
+        }
     }};
 }
 
@@ -596,13 +608,15 @@ macro_rules! __select_default_or_park {
     ( $blk:lifetime,
       $sel_unique:ident, $sel_atoms:ident,
       [ $d_body:expr ],
-      [ $( ($br_idx:tt $br_cn:ident $br_sn:ident $br_v:tt ($br_body:expr)) )* ]
-      [ $( ($pr_idx:tt $pr_cn:ident $pr_sn:ident ($($pr_p:tt)+) ($pr_body:expr)) )* ]
+      [ $( ($br_idx:tt $br_cn:ident $br_vn:ident $br_sn:ident $br_v:tt ($br_body:expr)) )* ]
+      [ $( ($pr_idx:tt $pr_cn:ident $pr_vn:ident $pr_sn:ident ($($pr_p:tt)+) ($pr_body:expr)) )* ]
       [ $( ($s_idx:tt $s_cn:ident $s_vn:ident $s_sn:ident ($s_body:expr)) )* ]
     ) => {
         $crate::__select_release_all!($sel_unique, $sel_atoms);
-        #[allow(unreachable_code)]
-        break $blk ($crate::__select_run_body!($d_body));
+        // 255 is the default arm's sentinel: case indexes are
+        // declaration-order and capped at 32 by the ident pool, so it
+        // cannot collide.
+        break $blk 255u8;
     };
 
     // ─── no default → register sudogs (under held locks), then
@@ -611,8 +625,8 @@ macro_rules! __select_default_or_park {
     ( $blk:lifetime,
       $sel_unique:ident, $sel_atoms:ident,
       [],
-      [ $( ($br_idx:tt $br_cn:ident $br_sn:ident $br_v:tt ($br_body:expr)) )* ]
-      [ $( ($pr_idx:tt $pr_cn:ident $pr_sn:ident ($($pr_p:tt)+) ($pr_body:expr)) )* ]
+      [ $( ($br_idx:tt $br_cn:ident $br_vn:ident $br_sn:ident $br_v:tt ($br_body:expr)) )* ]
+      [ $( ($pr_idx:tt $pr_cn:ident $pr_vn:ident $pr_sn:ident ($($pr_p:tt)+) ($pr_body:expr)) )* ]
       [ $( ($s_idx:tt $s_cn:ident $s_vn:ident $s_sn:ident ($s_body:expr)) )* ]
     ) => {
         // Per-select coord on the stack.
@@ -783,25 +797,22 @@ macro_rules! __select_default_or_park {
                 let __ok = $br_sn.success;
                 let __v = $br_sn.value.take().unwrap_or_default();
                 let _ = __ok;
-                let $br_v = __v;
-                #[allow(unreachable_code)]
-                break $blk ($crate::__select_run_body!($br_body));
+                $br_vn = ::core::option::Option::Some(__v);
+                break $blk $br_idx;
             }
         )*
         $( if __select_winners[$pr_idx as usize] {
                 let __ok = $pr_sn.success;
                 let __v = $pr_sn.value.take().unwrap_or_default();
-                let ($($pr_p)+) = (__v, __ok);
-                #[allow(unreachable_code)]
-                break $blk ($crate::__select_run_body!($pr_body));
+                $pr_vn = ::core::option::Option::Some((__v, __ok));
+                break $blk $pr_idx;
             }
         )*
         $( if __select_winners[$s_idx as usize] {
                 if !$s_sn.success {
                     ::core::panic!("goish: select send winner: chan closed");
                 }
-                #[allow(unreachable_code)]
-                break $blk ($crate::__select_run_body!($s_body));
+                break $blk $s_idx;
             }
         )*
 
