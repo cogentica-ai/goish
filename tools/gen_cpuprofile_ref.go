@@ -13,11 +13,17 @@ package pprof
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"internal/profile"
 	"testing"
 	"time"
 )
+
+// A writer that refuses every Write, for the failing-writer case.
+type failWriter struct{}
+
+func (failWriter) Write(p []byte) (int, error) { return 0, errors.New("boom") }
 
 func TestGoishRef(t *testing.T) {
 	// 1. Stop without a start must be a silent no-op, not a panic.
@@ -70,6 +76,32 @@ func TestGoishRef(t *testing.T) {
 	// 5. Stopping twice is also a no-op.
 	StopCPUProfile()
 	fmt.Println("double_stop ok")
+
+	// 5b. A writer that fails every Write. StopCPUProfile has nowhere
+	//     to report an error, so the question is only whether it
+	//     panics or hangs. Issue #9 lists this as a differential.
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("failing_writer_panicked true (%v)\n", r)
+			} else {
+				fmt.Println("failing_writer_panicked false")
+			}
+		}()
+		if err := StartCPUProfile(failWriter{}); err != nil {
+			t.Fatalf("start with failing writer: %v", err)
+		}
+		d := time.Now().Add(150 * time.Millisecond)
+		x := 0
+		for time.Now().Before(d) {
+			for i := 0; i < 100000; i++ {
+				x += i
+			}
+		}
+		_ = x
+		StopCPUProfile()
+		fmt.Println("failing_writer_stop_returned true")
+	}()
 
 	// 6. And a profile can be started again after being stopped.
 	var buf2 bytes.Buffer

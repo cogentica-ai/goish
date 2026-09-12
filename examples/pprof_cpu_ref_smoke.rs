@@ -45,7 +45,7 @@ static FAILED: AtomicUsize = AtomicUsize::new(0);
 static ROWS: AtomicUsize = AtomicUsize::new(0);
 
 /// Go's output, from tools/gen_cpuprofile_ref.go.
-const GO: [&str; 15] = [
+const GO: [&str; 17] = [
     "stop_without_start ok",
     "double_start_err \"cpu profiling already in use\"",
     "gzip_magic 1f8b",
@@ -60,6 +60,8 @@ const GO: [&str; 15] = [
     "duration_set true",
     "value1_is_value0_times_period true",
     "double_stop ok",
+    "failing_writer_stop_returned true",
+    "failing_writer_panicked false",
     "restart_err true",
 ];
 
@@ -263,6 +265,16 @@ fn parse(b: &[u8]) -> Parsed {
 
 // --------------------------------------------------------------------
 
+/// A writer that refuses every Write, mirroring the reference's
+/// `failWriter`.
+struct FailWriter {}
+
+impl goish::io::Writer for FailWriter {
+    fn Write(&mut self, _p: goish::slice<byte>) -> (goish::types::int, goish::error) {
+        return (0, goish::errors::New(gostr("boom")));
+    }
+}
+
 /// Spin for roughly `ms` milliseconds of CPU. `time.Sleep` would not
 /// do: ITIMER_PROF counts CPU time, so a sleeping process is sampled
 /// zero times and the profile comes back empty.
@@ -421,11 +433,35 @@ fn main() {
         goish::fmt::Sprintf!("value1_is_value0_times_period %v", ok),
     );
 
-    // 3. Stopping twice, and starting again after a stop.
+    // 3. Stopping twice.
     pprof::StopCPUProfile();
     row(13, "double_stop ok");
+
+    // 4. A writer that fails every Write. `StopCPUProfile` has nowhere
+    //    to report an error — Go's returns nothing — so the only
+    //    question is whether it panics or hangs. Measured against Go:
+    //    neither. Issue #9 lists this as a differential, and it was
+    //    measured before this row existed but never asserted, which is
+    //    the same as not having measured it.
+    {
+        let sink = FailWriter {};
+        let e4 = pprof::StartCPUProfile(sink);
+        if !e4.IsNil() {
+            fmt::Printf!("start with failing writer: %s\n", e4.Error());
+            os::Exit(1);
+        }
+        burn(150);
+        pprof::StopCPUProfile();
+        rowf(14, goish::fmt::Sprintf!("failing_writer_stop_returned %v", true));
+        // Reaching here at all is the no-panic half: an unrecovered
+        // panic in goish is fatal (issue #6), so the process would be
+        // gone rather than printing a false.
+        rowf(15, goish::fmt::Sprintf!("failing_writer_panicked %v", false));
+    }
+
+    // 5. Starting again after all that.
     let e3 = pprof::StartCPUProfile(goish::bytes::Buffer::default());
-    rowf(14, goish::fmt::Sprintf!("restart_err %v", e3.IsNil()));
+    rowf(16, goish::fmt::Sprintf!("restart_err %v", e3.IsNil()));
     pprof::StopCPUProfile();
 
     // A leftover in /tmp is a defect report, not tidiness.
