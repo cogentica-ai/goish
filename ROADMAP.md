@@ -627,6 +627,28 @@ goroutines would let safe goish code cause Rust UB, and goish's own
 `schedule: holding locks` work this cycle is the reminder that "Go
 permits the race" is not the same as "Rust may have UB".
 
+WHAT THE BORROWED APIs SHOULD BECOME, settled by precedent rather than
+left as a design question — the mistake §2u nearly repeated after #9
+taught it (see the note on StartCPUProfile):
+
+  `Index`    Go's `m[k]` yields a COPY of the value, so an owned
+             accessor IS Go's contract. `Get(k) -> (V, bool)` already
+             exists and already returns owned, so the convention is
+             established; Rust's `Index` trait cannot return an owned
+             value anyway. The 24 sites become `.Get(k).0`, and the
+             `Index` impls go.
+  `__iter`   Go's `range` yields COPIES of key and value, so an
+             owned-yielding iterator is the faithful shape, not a
+             concession. It currently yields `(&K, &V)`.
+  `GetRef`   No Go counterpart at all — Go has no way to take a
+             reference into a map. It is a goish-only optimisation, so
+             its 7 sites fold into `Get`.
+
+So none of the three needs a new API to be invented; each has either a
+Go contract that is already owned or no Go counterpart. That is roughly
+90 call sites of mechanical change, and the representation underneath
+can then be a lock without fighting any signature.
+
 DECOMPOSITION. The four gaps do not all need the header:
 
   nil identity   `empty_eq_nil` and the missing write-panic need only an
