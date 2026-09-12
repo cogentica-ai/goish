@@ -78,6 +78,25 @@ func TestGoishRef(t *testing.T) {
 		delete(nilMap, "x") // legal on nil, a no-op
 		return true
 	}())
+	row("nil_clear_ok", func() bool {
+		clear(nilMap) // legal on nil, a no-op — like delete, unlike a write
+		return true
+	}())
+	// The panic MESSAGE, not just that one happened. The row below used
+	// to be `recover() != nil`, which any panic satisfies; a port has to
+	// emit Go's exact text, so pin the text.
+	func() {
+		defer func() {
+			row("nil_write_panic_msg", fmt.Sprint(recover()))
+		}()
+		nilMap["k"] = 1
+	}()
+	// maps.Clone of a nil map is NIL, not an allocated empty map. An
+	// implementation whose deep copy starts from a fresh table gets this
+	// wrong, and nothing else in this file would catch it.
+	row("mapsclone_of_nil_is_nil", maps.Clone(nilMap) == nil)
+	// nil survives being passed and returned.
+	row("nil_through_call_still_nil", identity(nilMap) == nil)
 	func() {
 		defer func() {
 			row("nil_write_panic", recover() != nil)

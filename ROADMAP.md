@@ -499,6 +499,37 @@ The last two together are the subtle pair: sharing the outer table must
 not deep-copy values, and a value that is itself a map must still
 alias, because it is a header too.
 
+Four rows added 2026-09-12, after re-reading the list against what an
+implementer would actually trip over:
+
+    nil_clear_ok            true     clear on nil is legal too, like delete
+    nil_write_panic_msg     "assignment to entry in nil map"
+    mapsclone_of_nil_is_nil true     Clone of nil is NIL, not empty
+    nil_through_call_still_nil true
+
+The second replaces a `recover() != nil` bool. Any panic satisfied that,
+and goish has to emit Go's exact text, so the text is what the row pins
+now. The third is the one most likely to be got wrong: a deep copy that
+starts from a fresh table returns an allocated-empty map where Go
+returns nil, and nothing else in the file would have caught it.
+
+WHERE goish ACTUALLY STANDS, measured rather than inferred from the
+issue (a throwaway probe against current dev):
+
+    row                      Go       goish     
+    clone_aliases            true     false     GAP
+    return_aliases           true     false     GAP
+    mapsclone_independent    true     true      ok
+    empty_eq_nil             false    true      GAP
+    nil_eq_nil               true     true      ok
+    len_empty / len_nil      0 / 0    0 / 0     ok
+    nil_read                 0,false  0,false   ok
+    nil_write panics         yes      NO        GAP
+
+So four gaps, exactly the four the issue names, and the three rows that
+already agree are worth knowing too: whatever the new representation
+does, it must not regress them.
+
 SCOPE, since the issue names the blocker itself. The borrowed APIs
 cannot survive a lock-backed `Arc` unchanged, because a reference
 cannot outlive a guard:
@@ -517,6 +548,43 @@ Send/Sync, which the issue also calls out: copied handles crossing
 goroutines would let safe goish code cause Rust UB, and goish's own
 `schedule: holding locks` work this cycle is the reminder that "Go
 permits the race" is not the same as "Rust may have UB".
+
+DECOMPOSITION. The four gaps do not all need the header:
+
+  nil identity   `empty_eq_nil` and the missing write-panic need only an
+                 explicit nil FLAG on the existing owning map. No API
+                 migration: reads, len, range and delete stay legal on
+                 nil, so no borrowed signature changes. `maps::Clone` of
+                 nil returning nil falls out of the same flag.
+  aliasing       `clone_aliases` and `return_aliases` need the shared
+                 header, and therefore the `__iter` / `Index` / `GetRef`
+                 migration above.
+
+Doing nil identity first is not a way of avoiding the hard half — it is
+independently correct, it unblocks a second consumer already waiting on
+it, and the flag survives the later header change unchanged.
+
+That second consumer is `net/http/clone.rs`, whose own header says
+"Three of these five exist to preserve Go's nil-map-versus-empty-map
+distinction, and goish's `map` does not have one … fixing it belongs
+there." `cloneURLValues` cannot return nil for nil and
+`cloneOrMakeHeader`'s make-a-fresh-one branch is unreachable. Both
+become real with the flag, and that comment becomes stale with it.
+
+THE MIGRATION COST of the nil flag, measured rather than assumed. Go's
+zero-value map IS nil, so `Default for map` must produce nil and a write
+to it must panic — which is correct Go behaviour and can still turn
+working goish code into a panic. Five structs derive `Default` with a
+`map` field and are the sites to audit:
+
+    mime/multipart/formdata.rs   Form
+    net/http/fcgi/child.rs       request
+    crypto/x509/cert_pool.rs     CertPool
+    crypto/tls/mod.rs            Config
+    testing/benchmark.rs         BenchmarkResult
+
+`map::new()` stays NON-nil, because that is what `make` produces; only
+`Default` and `From<Nil>` are nil.
 
 ### §2t — nil vs allocated-empty slice (issue #14): the JSON criterion is v1's
 
