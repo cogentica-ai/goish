@@ -83,6 +83,20 @@ impl<'a, L: Locker + ?Sized> Cond<'a, L> {
         self.l.Lock();
     }
 
+    // go: none — goish-only: a diagnostic read for the rare hang in
+    // ROADMAP §2w. `waiters` is the count Wait bumps before unlocking;
+    // the sema pair is its queue and credit. If a hang shows
+    // `waiters > 0` with an EMPTY queue and ZERO credit, a wakeup was
+    // lost between the two — which is the window Wait's own comment
+    // claims is closed.
+    /// `(waiters, sema_credit, sema_queue_len)`, immediately stale.
+    #[doc(hidden)]
+    pub fn __debug_state(&self) -> (i64, i64, usize) {
+        let w = self.waiters.load(Ordering::Acquire);
+        let (credit, qlen) = self.sema.__debug_state();
+        return (w, credit, qlen);
+    }
+
     // go: sdk 1.25.5 sync/cond.go:82-85 Cond.Signal
     /// `(*Cond).Signal()` (cond.go:82) — wake one waiter, if any.
     pub fn Signal(&self) {

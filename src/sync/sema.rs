@@ -166,6 +166,35 @@ impl Sema {
             }
         }
     }
+
+    // go: none — goish-only: a diagnostic read of the queue, for
+    // investigating the rare sync.Cond hang in ROADMAP §2w. Placed
+    // AFTER release_n on purpose: inserted above it, this comment block
+    // took the anchor position release_n's own docs held, and GOISH014
+    // then reported the innocent `Sema::new`. Takes the
+    // SpinLock, so it must NOT be called from a signal handler or while
+    // the lock is held.
+    /// `(credit, queue_len)` — a snapshot, immediately stale.
+    #[doc(hidden)]
+    pub fn __debug_state(&self) -> (i64, usize) {
+        let lock_atom = self.state.lock_atom();
+        let credit: i64;
+        let mut n = 0usize;
+        unsafe {
+            raw_lock(lock_atom);
+            let s = self.state.data_unchecked();
+            credit = s.credit;
+            let mut g = s.head;
+            // Bounded: a corrupt chain must not spin the diagnostic
+            // forever, which would hide the very hang it is reading.
+            while !g.is_null() && n < 1024 {
+                n += 1;
+                g = (*g).sema_next;
+            }
+            raw_unlock(lock_atom);
+        }
+        return (credit, n);
+    }
 }
 
 /// Pop the head of the intrusive waiter chain. Caller must hold the

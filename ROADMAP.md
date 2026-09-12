@@ -257,14 +257,42 @@ Mutex, each `cond.Wait()`ing while the parity is wrong and
 logic cannot deadlock on its own terms — A waits only on odd, B only on
 even, so they cannot both be waiting.
 
-So the hang is in the primitives, not the test. The shape to look at:
-`Cond::Wait` increments `waiters` BEFORE `l.Unlock()` and only then
-calls `sema.acquire()`, while `Broadcast` does `waiters.swap(0)` then
-`release_n`. The comment on Wait claims the sema's
-credit-store-on-no-waiter closes the window, and for a single waiter it
-appears to — which is why finding the real interleaving needs care
-rather than a guess. NOT fixed; a speculative change to a
-synchronisation primitive is worse than a documented rare hang.
+DIAGNOSED, with one decisive state sample. A watchdog build that dumps
+the Cond's internals when `phase` stops advancing caught it:
+
+    STALL phase=2 waiters=2 credit=0 qlen=2
+
+Both goroutines are parked on the semaphore, no credit, at an EVEN
+phase — where only B's predicate can hold. A is waiting at a phase
+where it should be running, so a notification was lost.
+
+ROOT CAUSE: goish's Cond counts waiters in a separate atomic and leans
+on the semaphore's credit, where Go uses `notifyList` TICKETS
+(runtime/sema.go:571-588). The difference is what a notification leaves
+behind:
+
+  Go       `notifyListAdd` returns t = wait++ BEFORE the unlock;
+           `notifyAll` sets notify = wait. `notifyListWait(l, t)`
+           returns IMMEDIATELY if less(t, notify). The notification is
+           a WATERMARK, so a waiter holding a ticket that has not
+           parked yet still sees it.
+  goish    `Broadcast` does `waiters.swap(0)` and, when that reads 0,
+           DOES NOTHING AT ALL. A notification that arrives while a
+           waiter is between `waiters.fetch_add` and `sema.acquire`
+           leaves no record for it to find. The sema's
+           credit-store-on-no-waiter papers over the single-waiter case,
+           which is why Wait's comment claims the window is closed and
+           why this survives ~50 runs out of 51.
+
+FIX DIRECTION: port Go's notifyList discipline — a ticket taken before
+the unlock and a notify watermark — rather than patching the counter.
+Patching cannot close it: any scheme where a notification is dropped
+when the counter reads zero has the same hole.
+
+NOT FIXED. The diagnostic accessors (`Cond::__debug_state`,
+`Sema::__debug_state`) are kept, since they are what turned an
+unfalsifiable theory into the sample above. Reproduction is ~1 in 50;
+a watchdog build catches it much sooner than the smoke's 30s timeout.
 
 ### §2u — map value semantics (issue #7): measured, and sized
 
