@@ -3716,5 +3716,9 @@ name = "pprof_sampler_smoke"
 path = "examples/pprof_sampler_smoke.rs"
 
 [[example]]
+name = "pprof_cpu_ref_smoke"
+path = "examples/pprof_cpu_ref_smoke.rs"
+
+[[example]]
 name = "sync_notifylist_smoke"
 path = "examples/sync_notifylist_smoke.rs"

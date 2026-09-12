@@ -191,13 +191,46 @@ impl crate::io::Writer for __RwSink<'_> {
     }
 }
 
+// go: none — goish-only: a Clone + Send + 'static byte sink, placed
+// BELOW __RwSink so it does not steal that type's comment block.
+//
+// `StartCPUProfile` takes its writer by value and holds it until
+// `StopCPUProfile`, so __RwSink — which borrows the handler's
+// ResponseWriter — cannot be handed to it. This collects instead, and
+// `Profile` copies the bytes to the ResponseWriter afterwards.
+#[derive(Clone)]
+struct __ByteSink {
+    b: alloc::sync::Arc<crate::sync::Mutex<alloc::vec::Vec<crate::types::byte>>>,
+}
+
+impl crate::io::Writer for __ByteSink {
+    // go: none — goish-only, see __ByteSink.
+    fn Write(&mut self, p: slice<crate::types::byte>) -> (int, error) {
+        let mut g = self.b.Lock();
+        let mut i: int = 0;
+        while i < p.Len() {
+            g.push(p[i]);
+            i += 1;
+        }
+        return (p.Len(), crate::errors::nil);
+    }
+}
+
 // go: sdk 1.25.5 net/http/pprof/pprof.go:144-165 Profile
-/// Go: "Profile responds with the pprof-formatted cpu profile." The
-/// Content-Type is set optimistically because a successful
-/// StartCPUProfile begins writing immediately; the goish runtime's
-/// StartCPUProfile reports its unsupported error, so this serves
-/// Go's exact profiler-failure arm (500, "Could not enable CPU
-/// profiling: …").
+/// Go: "Profile responds with the pprof-formatted cpu profile."
+///
+/// Go sets the Content-Type optimistically "because if it does
+/// [StartCPUProfile succeeds] it starts writing", and the 500 arm is
+/// reachable only before any byte has gone out. goish keeps that
+/// order, but the reasoning behind it no longer applies: the runtime's
+/// StartCPUProfile now really starts a profile, and the whole thing is
+/// written in StopCPUProfile. So nothing is streamed — the profile is
+/// collected in memory and copied to the ResponseWriter below. For a
+/// 30-second profile at 100 Hz that is a few hundred kilobytes.
+///
+/// This doc used to say StartCPUProfile "reports its unsupported
+/// error, so this serves Go's exact profiler-failure arm". That was
+/// true when it was written and is not any more.
 pub fn Profile(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
     w.Header()
         .Set(string("X-Content-Type-Options"), string("nosniff"));
@@ -216,8 +249,10 @@ pub fn Profile(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
         string("Content-Disposition"),
         string("attachment; filename=\"profile\""),
     );
-    let mut sink = __RwSink { w };
-    let serr = crate::runtime::pprof::StartCPUProfile(&mut sink);
+    let sink = __ByteSink {
+        b: alloc::sync::Arc::new(crate::sync::Mutex::new(alloc::vec::Vec::new())),
+    };
+    let serr = crate::runtime::pprof::StartCPUProfile(sink.clone());
     if !serr.IsNil() {
         // Go: "StartCPUProfile failed, so no writes yet."
         serveError(
@@ -229,6 +264,8 @@ pub fn Profile(w: &(dyn ResponseWriter + Send + Sync + 'static), r: &Request) {
     }
     sleep(r, crate::time::Duration(sec * 1_000_000_000));
     crate::runtime::pprof::StopCPUProfile();
+    let out = sink.b.Lock().clone();
+    let _ = w.Write(slice::__from_vec(out));
     return;
 }
 

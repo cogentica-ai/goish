@@ -22,14 +22,23 @@
 // What lands: NewProfile/Lookup/Profiles and the Profile methods,
 // with Add capturing REAL stacks via runtime::Callers and WriteTo's
 // debug>=1 arm printing Go's legacy text format with symbolized
-// frames (runtime::CallersFrames is live symbolization). What does
-// not: the six builtin profiles (each needs a runtime sampling
-// substrate — SIGPROF for cpu, mprof for heap/allocs, blockprof for
-// block/mutex, a G-registry walker for goroutine/threadcreate), the
-// debug=0 protobuf builder, and labels. StartCPUProfile reports the
-// honest unsupported error — the same shape Go itself returns on
-// platforms without profiling — so net/http/pprof's Profile handler
-// ports verbatim through its error arm.
+// frames (runtime::CallersFrames is live symbolization). Plus the CPU
+// profile end to end — StartCPUProfile arms SIGPROF and StopCPUProfile
+// writes a gzipped profile.proto, pinned against Go by
+// `pprof_cpu_ref_smoke`.
+//
+// What does not: the other five builtin profiles. Each needs a
+// sampling substrate that is still absent — mprof for heap/allocs
+// (the MemStats COUNTERS work; per-allocation-site stacks do not),
+// blockprof for block/mutex, and a goroutine REGISTRY for
+// goroutine/threadcreate (see `runtime::GoroutineProfile`, whose gap
+// is the list, not the walker). Labels are also unported.
+//
+// This header used to say StartCPUProfile "reports the honest
+// unsupported error … so net/http/pprof's Profile handler ports
+// verbatim through its error arm". Both halves are now false: the
+// profile starts, and that handler was rewritten to collect and
+// forward the bytes.
 
 #![allow(non_snake_case)]
 
@@ -267,35 +276,213 @@ pub fn lostProfileEvent() {
     return;
 }
 
+// go: none — goish-only: the CPU profiler's process-wide cell. Go's is
+// `var cpu struct { sync.Mutex; profiling bool; done chan bool }` plus a
+// `profileWriter` goroutine holding `w`; goish keeps `w` here because
+// the drain happens in `StopCPUProfile` — see the note there.
+struct CpuState {
+    profiling: bool,
+    w: Option<alloc::boxed::Box<dyn crate::io::Writer + Send>>,
+    start_ns: int,
+}
+
+// go: none — goish-only: see `CpuState`. A `Lazy` static, not `var!`,
+// for the reason spelled out on `PROFILES`.
+static CPU: crate::lazy::Lazy<crate::sync::Mutex<CpuState>> = crate::lazy::Lazy::new(|| {
+    crate::sync::Mutex::new(CpuState {
+        profiling: false,
+        w: None,
+        start_ns: 0,
+    })
+});
+
 // go: sdk 1.25.5 runtime/pprof/pprof.go:825-850 StartCPUProfile
-/// Go: "enables CPU profiling for the current process … Use
-/// StopCPUProfile to stop".
+/// Go: "enables CPU profiling for the current process. While profiling,
+/// the profile will be buffered and written to w. StartCPUProfile
+/// returns an error if profiling is already enabled." Go's rate is a
+/// `const hz = 100`, and goish uses the same one.
 ///
-/// STILL RETURNS THE UNSUPPORTED ERROR, deliberately, even though the
-/// sampler below it works. Issue #9 is explicit that a partial
-/// implementation must not emit "files with misleading or invalid
-/// contents", and an error is the only honest answer until the profile
-/// actually reaches `w`.
+/// The writer is taken BY VALUE, where Go takes an `io.Writer`
+/// interface. Go can keep the interface value in a package variable
+/// from Start until Stop; `&mut dyn Writer` cannot outlive this call,
+/// so ownership moves in. That is the same shape `flag.SetOutput` and
+/// `log.SetOutput` already use for a writer stored past the call, so
+/// callers do what they do in Go — hand over the `os.File` — and read
+/// the file back afterwards.
 ///
-/// What exists: `sample::start` arms `setitimer(ITIMER_PROF)` and the
-/// SIGPROF handler walks the interrupted stack — verified capturing
-/// real stacks at 100 Hz — and `proto::Profile` encodes byte-identically
-/// to Go. What is missing is joining them, and the obstacle is the
-/// signature rather than the plumbing: Go keeps `w` in a package
-/// global from Start until Stop, and `&mut dyn Writer` cannot be
-/// stored past this call. The options are a `Box<dyn Writer + Send>`
-/// parameter (diverges from Go's `io.Writer`), or a raw pointer with
-/// Go's own "must outlive the profile" contract made unsafe-explicit.
-/// That is an API decision, so it is not made in passing.
-pub fn StartCPUProfile(_w: &mut dyn crate::io::Writer) -> error {
-    return errors::New(string("cpu profiling not supported by the goish runtime"));
+/// DEVIATION, and it is the one worth knowing: Go streams samples to
+/// `w` from a `profileWriter` goroutine as they are produced, so a
+/// long profile costs bounded memory and loses nothing. goish records
+/// into the sampler's fixed 8192-entry ring and encodes the whole
+/// profile in `StopCPUProfile`. At 100 Hz that is about 82 seconds of
+/// wall clock; past it the ring wraps and the OLDEST samples are the
+/// ones lost. `runtime::pprof::__taken` reports the true count, so a
+/// caller can tell that it happened.
+pub fn StartCPUProfile<W: crate::io::Writer + Send + 'static>(w: W) -> error {
+    const HZ: i64 = 100;
+    let mut cpu = CPU.Lock();
+    if cpu.profiling {
+        // Go's exact string, via fmt.Errorf; net/http/pprof shows it to
+        // the user, so it is a contract and not a diagnostic.
+        return errors::New(string("cpu profiling already in use"));
+    }
+    if !sample::start(HZ) {
+        // Go cannot fail here — SetCPUProfileRate returns nothing — but
+        // goish arms a real `setitimer`, and a refusal must not leave a
+        // caller believing a profile is running.
+        return errors::New(string("cpu profiling: could not arm the sampling timer"));
+    }
+    cpu.profiling = true;
+    cpu.start_ns = crate::time::Now().UnixNano();
+    cpu.w = Some(alloc::boxed::Box::new(w));
+    return errors::nil;
 }
 
 // go: sdk 1.25.5 runtime/pprof/pprof.go:884-894 StopCPUProfile
-/// Go: "stops the current CPU profile, if any". With StartCPUProfile
-/// declining to start one, there is never one to stop.
+/// Go: "stops the current CPU profile, if any. StopCPUProfile only
+/// returns after all the writes for the profile have completed."
+/// Stopping when nothing is running is a no-op, and so is stopping
+/// twice — both verified against Go in `pprof_cpu_ref_smoke`.
+///
+/// The whole encode-and-write happens here, under the same lock, which
+/// is what makes Go's "only returns after all the writes have
+/// completed" hold trivially. A write error is DISCARDED, because
+/// `StopCPUProfile` has nowhere to report one; Go does the same — a
+/// writer returning an error from every Write neither panics nor
+/// hangs it, which the reference test confirmed rather than assumed.
 pub fn StopCPUProfile() {
-    return;
+    let mut cpu = CPU.Lock();
+    if !cpu.profiling {
+        return;
+    }
+    cpu.profiling = false;
+    // Disarm before reading the ring: `sample::stop` clears its ACTIVE
+    // flag first, so a signal already in flight declines to write.
+    sample::stop();
+    let stop_ns = crate::time::Now().UnixNano();
+    let start_ns = cpu.start_ns;
+    let mut w = match cpu.w.take() {
+        Some(w) => w,
+        None => return,
+    };
+    // Grow the stack around the encode. Go grows goroutine stacks on
+    // demand, so `StopCPUProfile` costs its caller nothing; goish needs
+    // the hint, and without it this faults on any caller with a small
+    // stack. It is not hypothetical — `net/http/pprof.Profile` calls
+    // here from a handler goroutine on the 64 KiB default, and gzip's
+    // deflate windows overflowed it (SIGSEGV in gzip.rs, reported by
+    // `http_pprof_smoke`). Growing HERE rather than at the handler is
+    // deliberate: the requirement belongs to this function, not to
+    // whoever calls it.
+    let (b, err) = crate::runtime::sched::maybe_grow(64 * 1024, 4 * 1024 * 1024, || {
+        let p = __build_cpu_profile(start_ns, stop_ns);
+        return proto::marshal_gzip(&p);
+    });
+    if err != errors::nil {
+        return;
+    }
+    let _ = w.Write(b);
+}
+
+// go: none — goish-only: Go builds the profile incrementally in
+// `profileBuilder` as samples arrive (proto.go); goish has the whole
+// ring in hand at Stop, so it aggregates in one pass here.
+/// Turn the sampler's ring into a `profile.proto` message.
+///
+/// The two sample values are Go's: `[count, count*period]`, so the
+/// second is CPU nanoseconds. `pprof_cpu_ref_smoke` pins that identity
+/// against Go rather than against arithmetic that looks right.
+fn __build_cpu_profile(start_ns: int, stop_ns: int) -> proto::Profile {
+    let period = crate::int64(sample::period_ns());
+    let mut p = proto::Profile::new();
+    p.sample_type.push(proto::ValueType {
+        ty: string("samples"),
+        unit: string("count"),
+    });
+    p.sample_type.push(proto::ValueType {
+        ty: string("cpu"),
+        unit: string("nanoseconds"),
+    });
+    p.period_type = Some(proto::ValueType {
+        ty: string("cpu"),
+        unit: string("nanoseconds"),
+    });
+    p.period = period;
+    p.time_nanos = start_ns;
+    p.duration_nanos = stop_ns - start_ns;
+
+    // One location per distinct PC (id is its 1-based index, which is
+    // what `marshal` expects), and one aggregated sample per distinct
+    // stack — pprof counts repeats rather than repeating them.
+    let mut pcs: Vec<u64> = Vec::new();
+    let mut stacks: Vec<(Vec<u64>, i64)> = Vec::new();
+    sample::for_each(|frame_pcs| {
+        let mut ids: Vec<u64> = Vec::new();
+        for pc in frame_pcs.iter() {
+            let id = match pcs.iter().position(|q| *q == *pc) {
+                Some(i) => crate::uint64(i) + 1,
+                None => {
+                    pcs.push(*pc);
+                    crate::uint64(pcs.len())
+                }
+            };
+            ids.push(id);
+        }
+        match stacks.iter_mut().find(|(s, _)| *s == ids) {
+            Some((_, c)) => *c += 1,
+            None => stacks.push((ids, 1)),
+        }
+    });
+
+    for (i, pc) in pcs.iter().enumerate() {
+        let mut loc = proto::Location {
+            id: crate::uint64(i) + 1,
+            address: *pc,
+            line: Vec::new(),
+        };
+        // Symbolize through the same path `Profile.WriteTo` uses, so a
+        // frame that prints in the text format also names a function
+        // here. An unsymbolizable PC keeps its address and no line —
+        // `go tool pprof` renders that as a hex frame rather than
+        // rejecting the profile.
+        let mut one: Vec<uintptr> = Vec::new();
+        one.push(*pc);
+        let mut frames = crate::runtime::CallersFrames(crate::goslice::slice::__from_vec(one));
+        let (f, _) = frames.Next();
+        if f.Function.Len() > 0 {
+            let name = f.Function.clone();
+            let fid = match p.function.iter().position(|g| g.name == name) {
+                Some(j) => p.function[j].id,
+                None => {
+                    let id = crate::uint64(p.function.len()) + 1;
+                    p.function.push(proto::Function {
+                        id: id,
+                        name: name.clone(),
+                        system_name: name.clone(),
+                        filename: f.File.clone(),
+                        start_line: 0,
+                    });
+                    id
+                }
+            };
+            loc.line.push(proto::Line {
+                function_id: fid,
+                line: f.Line,
+            });
+        }
+        p.location.push(loc);
+    }
+
+    for (ids, count) in stacks.into_iter() {
+        let mut value: Vec<i64> = Vec::new();
+        value.push(count);
+        value.push(count * period);
+        p.sample.push(proto::Sample {
+            location_id: ids,
+            value: value,
+        });
+    }
+    return p;
 }
 
 // go: none — goish-only: test hooks onto the sampler's raw ring, so a

@@ -364,16 +364,26 @@ fn run() -> ! {
         );
     }
 
-    // 5. Profile / Trace: the honest unsupported arms.
+    // 5. Profile serves a real gzipped profile now; Trace still takes
+    //    the honest unsupported arm.
+    //
+    //    This block used to assert 500 / "Could not enable CPU
+    //    profiling" for BOTH. That stopped being right the moment
+    //    runtime/pprof learned to start a profile — and the failure it
+    //    produced was worth more than the assertion: the handler
+    //    goroutine's 64 KiB stack could not hold gzip's deflate, so
+    //    the first honest run was a SIGSEGV, not a wrong body.
+    //    StopCPUProfile now grows the stack itself.
     {
         let (code, body) = get(
             &client,
             base.clone() + string("/debug/pprof/profile?seconds=1"),
         );
+        let bb = body.as_bytes();
         check(
-            "CPU profile serves Go's could-not-enable arm",
-            code == 500 && (body.as_ref() as &str).contains("Could not enable CPU profiling"),
-            fmt::Sprintf!("code=%d body=%q", code, body),
+            "CPU profile serves a gzipped profile.proto",
+            code == 200 && bb.len() > 2 && bb[0] == 0x1f && bb[1] == 0x8b,
+            fmt::Sprintf!("code=%d len=%d", code, body.Len()),
         );
         let (code, body) = get(
             &client,

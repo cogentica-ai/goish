@@ -239,6 +239,32 @@ So the stack side is DONE. What remains:
                         mprof hash of stack -> (allocs, frees, bytes).
                         Counters are not a profile.
 
+  StartCPUProfile       DONE. `StartCPUProfile` starts a real profile
+                        and `StopCPUProfile` writes a gzipped
+                        profile.proto to the writer. The obstacle
+                        recorded here was "an API decision" about the
+                        writer's lifetime; it was not one. goish has a
+                        settled convention for a writer stored past the
+                        call — take it by value, box it inside — used by
+                        `flag.SetOutput`, `log.SetOutput`,
+                        `jsontext.Encoder` and `os/exec`. Treating a
+                        settled convention as an open question is the
+                        same failure as the absence claims above, one
+                        step removed.
+                        DEVIATION: Go streams to `w` from a
+                        `profileWriter` goroutine; goish buffers in the
+                        sampler's 8192-entry ring and encodes at Stop.
+                        Past ~82s at 100 Hz the ring wraps and the
+                        OLDEST samples are lost. `__taken` reports the
+                        true count so a caller can see it happened.
+                        `net/http/pprof.Profile` is wired through and
+                        collects into a shared byte sink, since its
+                        ResponseWriter is borrowed.
+                        Pinned by `pprof_cpu_ref_smoke`: 15 rows from
+                        `internal/profile` parsing Go's own output,
+                        checked by a hand-rolled protobuf reader so the
+                        decode does not share code with the encode.
+
   a goroutine registry  Needed by `GoroutineProfile`, which is a stub.
                         Its own comment blamed a missing stack walker;
                         that is no longer true. A parked G's `gobuf`
