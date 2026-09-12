@@ -149,6 +149,53 @@ and the only one that is purely an API choice.
 see below.) 2f is no longer a worklist: every FIPS CAST is inert
 because `Enabled_` is a `const false`, so the twelve unported files are
 a structural-fidelity decision, not twelve fixes.
+### §2u — map value semantics (issue #7): measured, and sized
+
+Go's map is a header referencing backing state, so a copy aliases.
+goish's `map<K, V>` owns its table and `Clone` copies every entry, so
+two handles diverge silently. `tools/gen_map_alias_ref.go` generates
+the contract:
+
+    assign_alias        m["b"]=2, len 2 both       a copy sees later writes
+    return_alias        3, len 3                   returning aliases
+    arg_alias           9, len 4                   passing aliases
+    clone_no_alias      false, 4 vs 5              maps.Clone is the ONE that does not
+    delete_visible      false                      delete through one header shows in the other
+    clear_visible       0, 0                       so does clear
+    nil_is_nil          true
+    empty_is_nil        false
+    nil_read            0                          reading a nil map is legal
+    nil_read_ok         0, false
+    nil_len             0
+    nil_range_iters     0                          ranging a nil map is legal
+    nil_delete_ok       true                       deleting FROM a nil map is legal
+    nil_write_panic     true                       only writing panics
+    value_is_copy       1                          a value read out is a copy
+    inner_map_aliases   2, len 2                   but an inner MAP value aliases
+
+The last two together are the subtle pair: sharing the outer table must
+not deep-copy values, and a value that is itself a map must still
+alias, because it is a header too.
+
+SCOPE, since the issue names the blocker itself. The borrowed APIs
+cannot survive a lock-backed `Arc` unchanged, because a reference
+cannot outlive a guard:
+
+    __iter    54 sites in src, 7 in examples
+    Index     17 sites in src, 7 in examples
+    GetRef     5 sites in src, 2 in examples
+
+225 `map<…>` declarations in src. So the representation change is one
+commit and the API migration is the bulk of the work; `__iter` is the
+one to design first, since a snapshot-returning form is cheap for small
+maps and wrong for large hot ones.
+
+Explicitly NOT to be done with `Arc<UnsafeCell<_>>` plus blanket
+Send/Sync, which the issue also calls out: copied handles crossing
+goroutines would let safe goish code cause Rust UB, and goish's own
+`schedule: holding locks` work this cycle is the reminder that "Go
+permits the race" is not the same as "Rust may have UB".
+
 ### §2t — nil vs allocated-empty slice (issue #14): the JSON criterion is v1's
 
 Measured before implementing, because the issue's acceptance criteria
