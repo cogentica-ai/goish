@@ -3694,3 +3694,7 @@ path = "examples/json_semantic_error_ref_smoke.rs"
 [[example]]
 name = "json_marshal_error_ref_smoke"
 path = "examples/json_marshal_error_ref_smoke.rs"
+
+[[example]]
+name = "select_control_flow_smoke"
+path = "examples/select_control_flow_smoke.rs"

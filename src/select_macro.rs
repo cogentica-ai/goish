@@ -434,7 +434,25 @@ macro_rules! __select_emit {
         }
 
         // ─── single labeled loop for the whole select ────────────
-        let __select_out = 'select_blk: loop {
+        // A labeled BLOCK, not a `loop`. It was a `loop` purely to get
+        // `break 'select_blk value`, and nothing ever iterated it — but
+        // a `loop` is what an unlabeled `continue` in a user body
+        // binds to. That bound the user's `continue` to the SELECT's
+        // loop instead of theirs, re-running pass-1 with the chan locks
+        // already released and the m.locks epoch already closed, so the
+        // next `__select_release_all` called `raw_unlock` at
+        // `m.locks == 0` and the process died with `releasem UNDERFLOW`
+        // (issue #21). A block cannot be continued, so the mistake is
+        // now rustc's E0695 at compile time — "`continue` statements
+        // that would diverge to or through a labeled block need to bear
+        // a label" — instead of scheduler corruption at run time.
+        //
+        // A labeled `continue 'outer` / `break 'outer` / `return` from
+        // a body is what Go's `continue` in a select case corresponds
+        // to here, and those stay balanced: the pair is
+        // [top-acquirem, pre-body-releasem], and an escape skips both
+        // the re-`acquirem` and the trailing `releasem`.
+        let __select_out = 'select_blk: {
             // Pass-1: try each case in random order, under the
             // already-held chan locks. Use *_locked variants that
             // don't re-acquire.
