@@ -3690,3 +3690,7 @@ path = "examples/jsontext_pointer_ref_smoke.rs"
 [[example]]
 name = "json_semantic_error_ref_smoke"
 path = "examples/json_semantic_error_ref_smoke.rs"
+
+[[example]]
+name = "json_marshal_error_ref_smoke"
+path = "examples/json_marshal_error_ref_smoke.rs"

@@ -370,6 +370,12 @@ pub fn UnmarshalDecode<T: UnmarshalerFrom + ?Sized>(
 /// nested objects, arrays, escaped names and streaming decodes all need
 /// decoder state — which is why it is built here rather than downstream.
 pub struct SemanticError {
+    /// Go's own `action` field: "marshal" or "unmarshal". It changes
+    /// the sentence rather than just a word — Go writes `cannot
+    /// unmarshal JSON number into Go string` one way and `cannot
+    /// marshal from Go T` the other, with no JSON kind on the marshal
+    /// side because no value arrived.
+    pub Action: string,
     /// The JSON kind that arrived, spelled as Go spells it in the
     /// message: "number", "boolean", "string", "array", "object".
     /// Empty when the value's kind is not the problem.
@@ -393,14 +399,27 @@ pub struct SemanticError {
 impl crate::errors::ErrorTrait for SemanticError {
     // goishlint:ignore GOISH014 — trait method; provenance is on the impl.
     fn Error(&self) -> string {
-        let mut out = string::from_static("json: cannot unmarshal");
-        if self.JSONKind.as_bytes().len() > 0 {
+        let marshaling = (self.Action.as_ref() as &str) == "marshal";
+        let mut out = if marshaling {
+            string::from_static("json: cannot marshal")
+        } else {
+            string::from_static("json: cannot unmarshal")
+        };
+        if !marshaling && self.JSONKind.as_bytes().len() > 0 {
             out = out + string::from_static(" JSON ") + self.JSONKind.clone();
             if self.JSONValue.as_bytes().len() > 0 {
                 out = out + string::from_static(" ") + self.JSONValue.clone();
             }
         }
-        out = out + string::from_static(" into Go ") + self.GoType.clone();
+        // `from Go T` when writing, `into Go T` when reading — the
+        // direction of the failure, not a cosmetic difference.
+        out = out
+            + if marshaling {
+                string::from_static(" from Go ")
+            } else {
+                string::from_static(" into Go ")
+            }
+            + self.GoType.clone();
         if self.JSONPointer.as_bytes().len() > 0 {
             out = out
                 + string::from_static(" within ")
@@ -435,6 +454,35 @@ pub(crate) fn __kind_word(k: jsontext::Kind) -> string {
     });
 }
 
+// go: none — goish-only: Go builds this inside `newMarshalErrorBefore`
+// from reflection; goish's marshaler passes its own name.
+/// Wrap a failing marshaler's error with Go's context: the Go type and
+/// the pointer to the member being written.
+///
+/// Go's text, which a caller routes on (issue #13):
+///
+///     json: cannot marshal from Go lsproto.Params within "/params":
+///     deferred params failure
+///
+/// Note `from Go`, not `into Go`, and no JSON kind — nothing arrived.
+/// The bytes written before the failure come back from `Marshal`
+/// alongside the error, so a caller can see exactly how far it got;
+/// this names the member it stopped at.
+pub fn NewMarshalSemanticError<S: Into<string>>(
+    enc: &jsontext::Encoder,
+    go_type: S,
+    cause: error,
+) -> error {
+    return errors::Wrap(SemanticError {
+        Action: string::from_static("marshal"),
+        JSONKind: string::new(),
+        JSONValue: string::new(),
+        GoType: go_type.into(),
+        JSONPointer: enc.StackPointer().String(),
+        Err: cause,
+    });
+}
+
 // go: none — goish-only: Go's equivalent constructor is unexported and
 // takes the destination type from reflection. goish has neither, so a
 // hand-written adapter needs a way in.
@@ -461,6 +509,7 @@ pub fn NewSemanticError<S: Into<string>>(
     cause: error,
 ) -> error {
     return errors::Wrap(SemanticError {
+        Action: string::from_static("unmarshal"),
         JSONKind: __kind_word(kind),
         JSONValue: string::new(),
         GoType: go_type.into(),
@@ -484,6 +533,7 @@ pub(crate) fn __semantic_error_value(
     cause: error,
 ) -> error {
     return errors::Wrap(SemanticError {
+        Action: string::from_static("unmarshal"),
         JSONKind: __kind_word(kind),
         JSONValue: literal,
         GoType: string::from_bytes(go_type.as_bytes()),
@@ -502,6 +552,7 @@ pub(crate) fn __semantic_error_name(
     go_type: string,
 ) -> error {
     return errors::Wrap(SemanticError {
+        Action: string::from_static("unmarshal"),
         JSONKind: __kind_word(kind),
         JSONValue: string::new(),
         GoType: go_type,
@@ -517,6 +568,7 @@ pub(crate) fn __semantic_error(
     go_type: &str,
 ) -> error {
     return errors::Wrap(SemanticError {
+        Action: string::from_static("unmarshal"),
         JSONKind: __kind_word(kind),
         JSONValue: string::new(),
         GoType: string::from_bytes(go_type.as_bytes()),

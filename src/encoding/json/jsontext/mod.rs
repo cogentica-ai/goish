@@ -49,10 +49,12 @@
 //     re-indent of nested values is not performed).
 //   - StackIndex / OutputOffset / AvailableBuffer / UnreadBuffer are
 //     not ported (unused by the target workloads). `StackPointer` WAS
-//     on that list and is now ported on the Decoder — a decode error
-//     that cannot say where it happened is issue #10, and the pointer
-//     was already being built privately for duplicate-name errors. The
-//     Encoder's counterpart is still absent.
+//     on that list and is now ported on BOTH the Decoder (issue #10: a
+//     decode error that cannot say where it happened) and the Encoder
+//     (issue #13: a marshal error likewise). The decoder already built
+//     the pointer privately for duplicate-name errors; the encoder
+//     needed a `cur_name` field first, since it had no reason to
+//     remember written names before.
 //   - Delimiter lookahead keeps the comma unconsumed on error, rather than
 //     caching Go's peekErr, so repeated PeekKind and the following read agree.
 //   - Raw-value scanning keeps local object namespaces and JSON-pointer paths
@@ -635,6 +637,11 @@ pub struct Encoder {
     /// Top-level values completed (streaming mode separates them
     /// with a newline, encode.go WriteToken).
     top_values: u64,
+    /// Most recent member name WRITTEN in each open object frame, so
+    /// `StackPointer` can name the value being written. The decoder
+    /// has the same field for the same reason; the encoder needed it
+    /// once a marshal error had to say which member failed (#13).
+    cur_name: Vec<Option<Vec<u8>>>,
     opts: Options,
 }
 
@@ -649,6 +656,7 @@ pub fn NewEncoder<W: crate::io::Writer + Send + 'static>(
         stack: Vec::new(),
         counts: Vec::new(),
         top_values: 0,
+        cur_name: Vec::new(),
         opts: Options::__merged(opts.as_ref()),
     }
 }
@@ -662,6 +670,7 @@ impl Encoder {
             stack: Vec::new(),
             counts: Vec::new(),
             top_values: 0,
+        cur_name: Vec::new(),
             opts,
         }
     }
@@ -674,6 +683,62 @@ impl Encoder {
     /// `Encoder.StackDepth()` (encode.go:935).
     pub fn StackDepth(&self) -> int {
         self.stack.len() as int
+    }
+
+    // go: sdk 1.25.5 encoding/json/jsontext/encode.go:965-967 Encoder.StackPointer
+    /// Go: "StackPointer returns a JSON Pointer (RFC 6901) to the most
+    /// recently written value."
+    ///
+    /// The write-side mirror of `Decoder::StackPointer`, with the same
+    /// timing — measured against Go token by token, and identical to
+    /// the read side at every step:
+    ///
+    ///   after `{`       the parent
+    ///   after a NAME    already `/name`
+    ///   after its value still `/name`
+    ///   after `[`       the parent; after the first element `/0`
+    ///
+    /// This exists so a marshal error can say WHICH member failed
+    /// (issue #13): Go reports `cannot marshal from Go T within
+    /// "/params"`, and without the pointer a caller gets the bare
+    /// cause and has to guess.
+    pub fn StackPointer(&self) -> Pointer {
+        let mut out: Vec<u8> = Vec::new();
+        // Frames above the innermost contribute their current member
+        // name (objects) or element index (arrays).
+        if self.stack.len() >= 2 {
+            for i in 0..self.stack.len() - 1 {
+                out.push(b'/');
+                if self.stack[i] == b'{' {
+                    if let Some(Some(n)) = self.cur_name.get(i) {
+                        __append_escaped(&mut out, n);
+                    }
+                } else {
+                    let idx = self.counts.get(i).copied().unwrap_or(0);
+                    out.extend_from_slice(crate::strconv::FormatUint(idx, 10).as_bytes());
+                }
+            }
+        }
+        if let Some(&open) = self.stack.last() {
+            let count = self.counts.last().copied().unwrap_or(0);
+            if count > 0 {
+                out.push(b'/');
+                if open == b'{' {
+                    if let Some(Some(n)) = self.cur_name.last() {
+                        __append_escaped(&mut out, n);
+                    }
+                } else {
+                    // An object frame counts names AND values, so its
+                    // parent index above is halved by `cur_name`
+                    // instead; an array frame counts elements, and the
+                    // one just written is at count-1.
+                    out.extend_from_slice(
+                        crate::strconv::FormatUint(count - 1, 10).as_bytes(),
+                    );
+                }
+            }
+        }
+        return Pointer(string::from_bytes(&out));
     }
 
     fn indented(&self) -> bool {
@@ -763,13 +828,33 @@ impl Encoder {
             b'{' | b'[' => {
                 self.stack.push(k.0);
                 self.counts.push(0);
+                self.cur_name.push(None);
             }
             b'}' | b']' => {
                 self.stack.pop();
                 self.counts.pop();
+                self.cur_name.pop();
                 self.bump_count();
             }
             _ => self.bump_count(),
+        }
+    }
+
+    // go: none — goish-only: Go's encoder keeps the written names in a
+    // shared buffer its state machine already owns; goish records just
+    // the current one per frame, which is all `StackPointer` reads.
+    /// Remember a member name at the moment it is written, so the
+    /// pointer can name the value that follows it.
+    fn note_name(&mut self, name: &[u8]) {
+        let at_name_position = match (self.stack.last(), self.counts.last()) {
+            (Some(b'{'), Some(c)) => c % 2 == 0,
+            _ => false,
+        };
+        if !at_name_position {
+            return;
+        }
+        if let Some(slot) = self.cur_name.last_mut() {
+            *slot = Some(name.to_vec());
         }
     }
 
@@ -798,6 +883,10 @@ impl Encoder {
         let err = self.before_token(k);
         if err != nil {
             return err;
+        }
+        if k == Kind(b'"') {
+            let name = t.String();
+            self.note_name(name.as_bytes());
         }
         t.append_text(&mut self.buf);
         self.after_token(k);
@@ -864,6 +953,21 @@ pub struct Decoder {
     /// idempotent for the strict `:` case).
     sep_done: bool,
     opts: Options,
+}
+
+// go: none — goish-only: RFC 6901's two escapes, factored out so the
+// encoder's and decoder's pointer builders cannot drift apart. `~`
+// must become `~0` and `/` must become `~1`, or a member name
+// containing either fakes a path separator and the pointer names a
+// field that does not exist.
+fn __append_escaped(out: &mut Vec<u8>, name: &[u8]) {
+    for &b in name {
+        match b {
+            b'~' => out.extend_from_slice(b"~0"),
+            b'/' => out.extend_from_slice(b"~1"),
+            _ => out.push(b),
+        }
+    }
 }
 
 // go: sdk 1.25.5 encoding/json/jsontext/state.go:95 Pointer
