@@ -255,7 +255,7 @@ pub(crate) static TOTAL_ALLOC: core::sync::atomic::AtomicU64 =
     core::sync::atomic::AtomicU64::new(0);
 
 #[inline]
-unsafe fn alloc_masked(size: usize, align: usize) -> *mut u8 {
+unsafe fn alloc_masked_raw(size: usize, align: usize) -> *mut u8 {
     MALLOCS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     TOTAL_ALLOC.fetch_add(crate::uint64(size), core::sync::atomic::Ordering::Relaxed);
     let layout = Layout::from_size_align_unchecked(size, align);
@@ -288,6 +288,26 @@ unsafe fn alloc_masked(size: usize, align: usize) -> *mut u8 {
     mheap_alloc(layout)
 }
 
+// go: none — goish-only: the heap profiler's allocation hook.
+/// `alloc_masked_raw` plus the sampler. Every allocation in the process
+/// funnels through here — GlobalAlloc::alloc, the free `alloc`, and
+/// realloc's growth path — which is why the hook sits at the funnel
+/// rather than at each entry point. Hooking the entry points instead
+/// left realloc's free unrecorded, and a sampled pointer freed by
+/// realloc would sit in the live table forever, inflating inuse.
+///
+/// Below `alloc_masked_raw`, not above it, so the routing comment stays
+/// attached to the function it describes.
+#[inline]
+unsafe fn alloc_masked(size: usize, align: usize) -> *mut u8 {
+    let p = alloc_masked_raw(size, align);
+    // Inside the caller's preemption mask, as Go's `profilealloc` is:
+    // the sampler reads per-M state and walks this goroutine's stack,
+    // neither of which survives being preempted mid-way.
+    crate::runtime::mprof::malloc_hook(p, size);
+    return p;
+}
+
 /// Reallocate via alloc + memcpy + free. Preempt-masked end to end —
 /// `Vec` growth funnels through here, and the copy runs against span
 /// state the mask keeps owner-consistent.
@@ -314,6 +334,10 @@ pub unsafe fn free(ptr: *mut u8, size: usize) {
 
 /// Internal dealloc dispatch consulting mheap then mcentral.
 unsafe fn dealloc_routed(ptr: *mut u8, size: usize, align: usize) {
+    // The free funnel, so realloc's discard is recorded too. Costs one
+    // relaxed load when nothing sampled is live, which is every
+    // program that never allocates a full MemProfileRate.
+    crate::runtime::mprof::free_hook(ptr);
     let layout = Layout::from_size_align_unchecked(size, align);
     if route_to_mheap(layout) {
         mheap_free(ptr, layout);
@@ -363,16 +387,14 @@ unsafe impl GlobalAlloc for GoishAllocator {
         // last-slot release path re-reads span state across several
         // steps; keep the same non-preemptible discipline as alloc
         // (Go's `mfree` paths run under the same acquirem).
-        if route_to_mheap(layout) {
-            mheap_free(ptr, layout);
-            crate::runtime::sched::releasem();
-            return;
-        }
-        if crate::runtime::mcentral::ready() && crate::runtime::mcentral::free(ptr) {
-            crate::runtime::sched::releasem();
-            return;
-        }
-        mheap_free(ptr, layout);
+        //
+        // This used to inline `dealloc_routed`'s three branches
+        // verbatim instead of calling it. The duplicate was not merely
+        // untidy: it meant the free path had TWO entry points, and the
+        // heap profiler hooked only one. Every Rust-level drop went
+        // unrecorded, so `inuse` never fell — 300 freed objects showed
+        // 11 frees. One funnel, one hook.
+        dealloc_routed(ptr, layout.size(), layout.align());
         crate::runtime::sched::releasem();
     }
 

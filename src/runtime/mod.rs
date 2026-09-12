@@ -23,6 +23,7 @@ pub mod lockfree_ring;
 pub mod mcentral;
 mod mem;
 pub mod mheap;
+pub mod mprof;
 pub mod netpoll;
 pub mod note;
 pub mod pkginit;
@@ -365,6 +366,30 @@ fn collect_frames(out: &mut [u64; segv::MAX_FRAMES]) -> usize {
         i += 1;
     }
     kept
+}
+
+// go: none — goish-only: the heap profiler's stack walk. `Callers`
+// cannot serve here — it takes a `slice<uintptr>`, and allocating one
+// inside the allocator would recurse.
+/// Walk the calling goroutine's stack into `out`. Returns the number
+/// of PCs written. Allocator frames are left in — see `record_alloc`
+/// for why they are stripped by name at read time instead.
+///
+/// Placed below `collect_frames` deliberately: inserting above it
+/// would take over its comment block.
+pub(crate) fn collect_frames_for_profile(
+    out: &mut [u64; crate::runtime::mprof::MAX_STACK],
+) -> usize {
+    let mut frames = [0u64; segv::MAX_FRAMES];
+    let n = collect_frames(&mut frames);
+    let cap = out.len();
+    let want = if n < cap { n } else { cap };
+    let mut i = 0usize;
+    while i < want {
+        out[i] = frames[i];
+        i += 1;
+    }
+    return want;
 }
 
 /// `runtime.Caller(skip)` (Go 1.25 extern.go:315) — reports file/line

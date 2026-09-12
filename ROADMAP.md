@@ -265,6 +265,56 @@ So the stack side is DONE. What remains:
                         checked by a hand-rolled protobuf reader so the
                         decode does not share code with the encode.
 
+  heap profile stacks   SUBSTRATE DONE (`src/runtime/mprof.rs`), the
+                        profiles themselves still to come. Go's own
+                        output settles the requirement: `heap` and
+                        `allocs` carry the SAME four value types —
+                        alloc_objects, alloc_space, inuse_objects,
+                        inuse_space — and differ only in
+                        default_sample_type ("" vs "alloc_space"). So
+                        counting allocations is not enough; inuse means
+                        tracking frees.
+                        Shape: a fixed 2048-bucket table keyed by stack
+                        hash, plus an 8192-slot table of live sampled
+                        pointers so a free finds its bucket. Nothing
+                        allocates — it runs inside the global
+                        allocator, so a Vec would recurse. Sampling is
+                        a per-M countdown in the TLS block (Go's
+                        `mcache.nextSample`) drawn from Go's
+                        exponential `fastexprand`, so an unsampled
+                        allocation costs a load, a subtract and a
+                        store. MemProfileRate defaults to Go's 512 KiB.
+                        Three defects found by building it, all of
+                        which present as "inuse never falls":
+                          - `ptr >> 4` put every 4 KiB object into
+                            sixteen slots; same-size allocations come
+                            back at a fixed stride.
+                          - deleting from the open-addressed table cut
+                            the probe chains behind it. 300 frees
+                            reported 11. Needs tombstones.
+                          - `GlobalAlloc::dealloc` INLINED
+                            `dealloc_routed`'s body instead of calling
+                            it, so the free path had two entry points
+                            and the hook caught one.
+                        Still to do: `Lookup("heap")` / `Lookup("allocs")`
+                        as registered builtins, WriteTo(w, 0) emitting
+                        the four value types, and Go's
+                        `scaleHeapSample` for rates above 1.
+
+  a v0 demangler        Found while reading profile stacks: goish
+                        demangles only the LEGACY `_ZN…E` mangling.
+                        This build emits rustc's v0 (`_RNvNt…`), so
+                        NOTHING is demangled — panics, SIGSEGV
+                        backtraces, `runtime.Callers` output and pprof
+                        text profiles all print
+                        `_RNvNtNtCs…5goish7runtime5pprof14StopCPUProfile`.
+                        It has been that way in every crash report in
+                        this session. Pure function, easy to diff
+                        against rustc-demangle, improves every
+                        backtrace — and the heap profile needs readable
+                        names to strip allocator frames by name rather
+                        than by a fragile skip count.
+
   a goroutine registry  Needed by `GoroutineProfile`, which is a stub.
                         Its own comment blamed a missing stack walker;
                         that is no longer true. A parked G's `gobuf`

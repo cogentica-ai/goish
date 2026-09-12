@@ -132,6 +132,14 @@ pub struct MStorage {
     /// the M's own thread, so accesses are race-free at the hardware
     /// level on x86-64; AtomicU32 is for lint compliance.
     pub locks: AtomicU32,
+    /// Bytes this M may still allocate before the heap profiler takes
+    /// a sample. Mirrors Go's `mcache.nextSample` (runtime/mcache.go),
+    /// which lives on the mcache for the same reason it lives here:
+    /// a single global counter would put a `lock xadd` on every
+    /// allocation in the program. Per-M and only touched by the M's
+    /// own thread; AtomicI64 for lint compliance, as with `locks`.
+    /// Starts at 0 so the first allocation draws a real interval.
+    pub mprof_next: AtomicI64,
     /// CLOCK_MONOTONIC nanosecond timestamp when the M last
     /// transitioned `current_g` from None to Some(g). 0 means "no G
     /// is currently running on this M" (between dispatches, or when
@@ -191,6 +199,7 @@ impl MStorage {
             m: SpinLock::new(M::new(id)),
             park: Note::new(),
             locks: AtomicU32::new(0),
+            mprof_next: AtomicI64::new(0),
             start_running_ns: AtomicI64::new(0),
             current_p: AtomicPtr::new(core::ptr::null_mut()),
             g0: AtomicPtr::new(core::ptr::null_mut()),
