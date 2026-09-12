@@ -1674,9 +1674,18 @@ pub(crate) fn do_format(
                     if !e.IsNil() {
                         wrap_targets = crate::append!(wrap_targets, e.clone());
                     }
-                    // Go: nil error formats as "<nil>".
                     if e.IsNil() {
-                        f.extend(b"<nil>");
+                        // Go treats a nil operand for %w as a BAD verb
+                        // argument, not as a formatted nil: it writes
+                        // `%!w(<nil>)`. This said `<nil>` and cited Go
+                        // for it; measured, Go does not
+                        // (tools/gen_multiwrap_ref.go, row nil_msg).
+                        // The distinction matters because `%!w(...)` is
+                        // how fmt says "this operand was wrong", which
+                        // a bare `<nil>` hides — and a nil %w wraps
+                        // nothing, so the caller's `errors.Is` will
+                        // silently never match it.
+                        f.extend(b"%!w(<nil>)");
                     } else {
                         let s = e.Error();
                         f.extend(s.as_bytes());
