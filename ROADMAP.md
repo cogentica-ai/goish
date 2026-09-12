@@ -471,6 +471,84 @@ watermark check, 3/3 TIMEOUT without it. Deterministic rather than
 probabilistic, and a timeout rather than a diff, which is the honest
 shape for "a wakeup was lost".
 
+### §2v1 — slice backing-array sharing (issue #26): measured, and sized
+
+Go's slice is a header over a backing array, so a copy aliases and an
+append that FITS writes into the shared array. goish's `slice<T>` owns a
+`Vec<T>`; `Clone` deep-copies and `slice()` / `slice3()` each document
+returning "an independent copy, not a view".
+
+`tools/gen_slice_alias_ref.go` generates the contract. The issue's own
+oracle, reproduced:
+
+    two_appends_base    [1 2] len 2 cap 3
+    two_appends_first   [1 2 9]        both appends wrote index 2,
+    two_appends_second  [1 2 9]        and the SECOND won
+
+    header_copy_aliases           99
+    sub_len_cap                   len 2 cap 7    s[1:3] of len5/cap8
+    sub_write_visible             77
+    sub_append_overwrites_parent  s[3] = 88
+    sub3_len_cap                  len 2 cap 2    s[1:3:3] caps it
+    sub3_append_detaches          s[3] still 3, sub[2] = 88
+    beyond_cap_detaches           base[0] 1, grown[0] 42
+    independent_lengths           len 2/4, cap 4/4   cap is the ARRAY's
+    copy_through_subslice         s = [8 9 3 4]
+    overlapping_copy_forward      [1 1 2 3 4]
+    overlapping_copy_backward     [2 3 4 5 5]
+    tail_len_cap                  s[2:2] of len2/cap4 -> len 0 cap 2
+    tail_append_into_parent_array cap(s) 4, len(s) 2, tail[0] 7
+    append_nil_leaves_nil_nil     true, 0, [1]
+
+TWO ROWS THE ISSUE DOES NOT LIST, both of which an implementation can
+get wrong while satisfying every row it does list:
+
+  overlapping copy   `copy` is MEMMOVE, not a forward element loop.
+                     `copy(s[1:], s[0:4])` is `[1 1 2 3 4]`; a naive
+                     forward loop gives `[1 1 1 1 1]`. Unreachable today
+                     because subslices are detached, so it becomes
+                     reachable exactly when the sharing lands.
+  cap after s[lo:hi] `cap` runs to the END of the backing array, so
+                     `s[1:3]` of a len5/cap8 is cap 7. goish gives cap 2.
+
+WHERE goish STANDS, measured:
+
+    row                        Go          goish        
+    two_appends_first          [1 2 9]     [1 2 7]      GAP
+    two_appends_second         [1 2 9]     [1 2 9]      ok (by luck)
+    sub_len_cap                2 / 7       2 / 2        GAP
+    copy through a subslice    propagates  invisible    GAP
+    overlapping copy           memmove     unreachable  blocked
+
+`two_appends_second` agreeing is worth naming as luck: the last writer
+wins in Go, and in goish it is simply the only writer of its own copy.
+
+A JUDGMENT, recorded so it is not revisited as an easy win: do NOT fix
+`cap` on its own. With detached copies, a larger cap makes the
+divergence LESS visible, not more — an append that fits would stop
+reallocating and still fail to propagate, so the symptom changes from
+"obviously a different array" to "silently dropped write". Capacity has
+to land with the sharing.
+
+SIZING, and this is the larger of the two value-semantics changes:
+
+    __from_vec   2310 sites in src, 1545 in examples
+    __into_vec    400 sites in src,  218 in examples
+    as_ref        601 sites in src,  499 in examples
+
+`__from_vec` mostly survives — a shared representation can still build a
+slice from an owned Vec. The two that do not are the problem. `__into_vec`
+CONSUMES the slice for its Vec, which a shared backing cannot hand over;
+and `as_ref() -> &[T]` cannot be returned from behind a lock, which is
+the same wall #7 hits with `Index` and `GetRef` but 1100 call sites wide
+instead of 24.
+
+So the mutation strategy the issue asks for is the whole problem, not a
+detail of it. `Arc<UnsafeCell<[T]>>` with blanket Send/Sync is what #7
+rules out for maps and the same objection applies here. Unlike the map
+case, there is no "return owned copies instead" escape: `as_ref` is how
+every `&[u8]` in the crypto and encoding paths is obtained.
+
 ### §2u — map value semantics (issue #7): measured, and sized
 
 Go's map is a header referencing backing state, so a copy aliases.
