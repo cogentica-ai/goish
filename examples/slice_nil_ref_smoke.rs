@@ -179,6 +179,29 @@ fn main() {
         );
     }
 
+    // ── Clone preserves nil-ness, and reflect agrees ──
+    //
+    // `slice<T>` derives Clone, so the flag rides along; asserted rather
+    // than assumed, because a hand-written Clone is exactly where it
+    // would get dropped.
+    check(
+        "cloning a nil slice keeps it nil",
+        z.clone() == goish::nil && !(made.clone() == goish::nil),
+        fmt::Sprintf!("nil.clone()={} made.clone()={}",
+            z.clone() == goish::nil, made.clone() == goish::nil),
+    );
+    {
+        use goish::reflect::Reflect;
+        let rn = goish::reflect::ValueOf(&z);
+        let re = goish::reflect::ValueOf(&made);
+        check(
+            "reflect IsNil answers for slices, both ways",
+            rn.IsNil() && !re.IsNil(),
+            fmt::Sprintf!("nil={} empty={}", rn.IsNil(), re.IsNil()),
+        );
+        let _ = <slice<int> as Reflect>::__reflect_type;
+    }
+
     // ── v1 marshal: nil is null, empty is [] ──
     {
         let (b, e) = goish::encoding::json::Marshal(&z);
@@ -264,8 +287,8 @@ fn main() {
 
     let ran = ROWS.load(Ordering::Relaxed);
     let bad = FAILED.load(Ordering::Relaxed);
-    if ran != 20 {
-        fmt::Printf!("\nFAILED: %d rows ran, expected 20\n", ran as i64);
+    if ran != 22 {
+        fmt::Printf!("\nFAILED: %d rows ran, expected 22\n", ran as i64);
         os::Exit(1);
     }
     if bad != 0 {
