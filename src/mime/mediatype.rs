@@ -60,9 +60,9 @@ pub fn FormatMediaType<T: Into<string>>(t: T, param: map<string, string>) -> str
 
     // Go: for _, attribute := range slices.Sorted(maps.Keys(param))
     let mut attributes: Vec<string> = Vec::new();
-    for (k, _) in param.__iter() {
+    param.__for_each(|k, _| {
         attributes.push(k.clone());
-    }
+    });
     attributes.sort_by(|a, c| a.as_bytes().cmp(c.as_bytes()));
 
     for attribute in attributes.iter() {
@@ -270,9 +270,9 @@ pub fn ParseMediaType<V: Into<string>>(v: V) -> (string, map<string, string>, er
     // Stitch together any continuations or things with stars — RFC 2231
     // things with stars: "foo*0" or "foo*".
     let mut cont_keys: Vec<string> = Vec::new();
-    for (k, _) in continuation.__iter() {
+    continuation.__for_each(|k, _| {
         cont_keys.push(k.clone());
-    }
+    });
     for key in cont_keys.iter() {
         let (pieceMap, _) = continuation.Get(key.clone());
         let mut singlePartKey = key.clone();

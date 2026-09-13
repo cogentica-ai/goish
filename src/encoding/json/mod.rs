@@ -674,12 +674,12 @@ impl crate::reflect::Reflect for Value {
             }
             Value::Object(o) => {
                 let mut entries: Vec<(RV, RV)> = Vec::with_capacity(o.Len() as usize);
-                for (k, v) in o.__iter() {
+                o.__for_each(|k, v| {
                     entries.push((
                         RV::String(k.clone()),
                         <Value as crate::reflect::Reflect>::__reflect_value(v),
                     ));
-                }
+                });
                 RV::Map {
                     key_type: <string as crate::reflect::Reflect>::__reflect_type,
                     value_type: <Value as crate::reflect::Reflect>::__reflect_type,

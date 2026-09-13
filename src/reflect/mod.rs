@@ -2278,9 +2278,9 @@ where
     }
     fn __reflect_value(&self) -> Value {
         let mut entries: Vec<(Value, Value)> = Vec::with_capacity(self.Len() as usize);
-        for (k, v) in self.__iter() {
+        self.__for_each(|k, v| {
             entries.push((k.__reflect_value(), v.__reflect_value()));
-        }
+        });
         Value::Map {
             key_type: <K as Reflect>::__reflect_type,
             value_type: <V as Reflect>::__reflect_type,

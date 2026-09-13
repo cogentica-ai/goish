@@ -150,11 +150,11 @@ pub fn Lookup(name: gostring_ty) -> Option<Arc<Profile>> {
 pub fn Profiles() -> crate::goslice::slice<Arc<Profile>> {
     let m = PROFILES.Lock();
     let mut all: Vec<Arc<Profile>> = Vec::new();
-    for (_, v) in m.__iter() {
+    m.__for_each(|_, v| {
         if let Some(p) = v {
             all.push(p.clone());
         }
-    }
+    });
     all.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
     return crate::goslice::slice::__from_vec(all);
 }

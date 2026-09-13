@@ -46,10 +46,10 @@ where
     // #26.
     let mismatch = m1.__try_for_each(|k, v1| {
         use core::ops::ControlFlow;
-        match find_key(m2, k) {
-            Some(v2) if v2 == v1 => ControlFlow::Continue(()),
-            _ => ControlFlow::Break(()),
+        if key_matches(m2, k, |v2| v2 == v1) {
+            return ControlFlow::Continue(());
         }
+        return ControlFlow::Break(());
     });
     return mismatch.is_none();
 }
@@ -104,13 +104,14 @@ where
         return false;
     }
     // Go: for k, v1 := range m1 { v2, ok := m2[k]; if !ok || !eq(v1, v2) { return false } }
-    for (k, v1) in m1.__iter() {
-        match find_key(m2, k) {
-            Some(v2) if eq(v1, v2) => continue,
-            _ => return false,
+    let mismatch = m1.__try_for_each(|k, v1| {
+        use core::ops::ControlFlow;
+        if key_matches(m2, k, |v2| eq(v1, v2)) {
+            return ControlFlow::Continue(());
         }
-    }
-    return true;
+        return ControlFlow::Break(());
+    });
+    return mismatch.is_none();
 }
 
 // go: sdk 1.25.5 maps/maps.go:69-75 DeleteFunc
@@ -127,11 +128,14 @@ where
     // Go: for k, v := range m { if del(k, v) { delete(m, k) } }
     // Slim: collect first to keep BTreeMap iteration stable.
     let mut to_remove: Vec<K> = Vec::new();
-    for (k, v) in m.__iter() {
+    // Collect first, delete after: the visitor borrows the map, so it
+    // cannot mutate it. Go's DeleteFunc has the same two-phase shape for
+    // the same reason — deleting during a range is defined but fragile.
+    m.__for_each(|k, v| {
         if del(k, v) {
             to_remove.push(k.clone());
         }
-    }
+    });
     for k in to_remove {
         m.Delete(k);
     }
@@ -144,15 +148,27 @@ where
 // would be re-exposing more of BTreeMap's API.
 // m2[k]`); goish's map needs a lookup that borrows, and three of these
 // functions want the same one.
-fn find_key<'a, K, V>(m: &'a map<K, V>, key: &K) -> Option<&'a V>
+/// True when `m` holds `key` and `pred` accepts its value.
+///
+/// This replaced a `find_key` that returned `Option<&'a V>`. A borrowed
+/// return cannot survive #7's shared header — the reference would
+/// outlive the guard — so the comparison folds into the lookup instead.
+/// It also avoids putting a `V: Clone` bound on `Equal`, which an owned
+/// lookup would have required and which Go's `maps.Equal` does not ask
+/// for.
+fn key_matches<K, V, P>(m: &map<K, V>, key: &K, mut pred: P) -> bool
 where
     K: crate::gomap::GoHash + PartialEq,
     V: Default,
+    P: FnMut(&V) -> bool,
 {
-    for (k, v) in m.__iter() {
-        if k == key {
-            return Some(v);
-        }
-    }
-    return None;
+    return m
+        .__try_for_each(|k, v| {
+            use core::ops::ControlFlow;
+            if k == key {
+                return ControlFlow::Break(pred(v));
+            }
+            return ControlFlow::Continue(());
+        })
+        .unwrap_or(false);
 }
