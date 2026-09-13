@@ -688,10 +688,28 @@ where
         };
     }
 
-    /// Hidden hook used by `maps::Equal`, `maps::Copy`, `maps::Clone`
-    /// to walk pairs without exposing implementation details.
-    #[doc(hidden)]
-    pub fn __iter(&self) -> MapRefIter<'_, K, V> {
+    // go: none — goish-only: the bucket walk itself.
+    /// `pub(crate)` ON PURPOSE (#7). This yields `(&K, &V)`, references
+    /// into the bucket array, which is exactly what a shared header
+    /// behind a lock cannot lend — a reference cannot outlive the guard.
+    ///
+    /// It was `pub` (doc-hidden) with 61 callers across the tree. All
+    /// but ONE are gone, to `__for_each` / `__try_for_each` (borrowed,
+    /// guard-scoped) or `__into_iter` (owned, what `range!` walks).
+    /// Narrowing it to `pub(crate)` is what
+    /// stops a new one appearing: the borrowed walk is no longer part
+    /// of the public API, so no downstream caller can be created and no
+    /// in-crate one can appear without editing this crate.
+    ///
+    /// The one survivor is `encoding/json`'s `encode_value`, and it is
+    /// documented at the site. Measured, so the cheap fix is ruled out
+    /// rather than untried: making that stack own its values costs one
+    /// recursive `Value::clone` of the root, which drops the encoder's
+    /// depth ceiling from >100000 to ~12200 — 8x — because `Value`'s
+    /// derived `Clone` recurses one frame per level. That is the same
+    /// regression `Unmarshal` already removed once (see the note on
+    /// `maxNestingDepth`), so it is not the answer.
+    pub(crate) fn __iter(&self) -> MapRefIter<'_, K, V> {
         MapRefIter::new(self)
     }
 

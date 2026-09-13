@@ -706,7 +706,50 @@ each other:
                  FOUR defensive whole-map `.clone()`s go — the ones
                  written only so the loop body could mutate the map it
                  was walking (`verify.rs` ×3, `cert_pool.rs`).
-  json/mod.rs    NOT mechanical. See below.
+  json/mod.rs    NOT mechanical, and now MEASURED rather than assumed.
+                 See below. `__iter` is `pub(crate)` so this stays the
+                 only borrowed walk while the design is decided: the
+                 public API no longer has one at all.
+
+THE OWNED-STACK FIX WAS TRIED, AND MEASUREMENT REJECTED IT. Writing
+it down because the reasoning below reads like it should work.
+
+`Task::Val(Value, usize)` plus a consuming map drain gives exactly ONE
+clone — the root — and every deeper level then MOVES rather than
+copies, so it is O(n) and not the O(n·d) a per-level snapshot costs.
+That much is true. What it misses is that `Value`'s derived `Clone`
+RECURSES, one frame per level, so the single clone reimposes the very
+ceiling the work stack exists to remove:
+
+    examples/json_encode_depth_smoke, debug build, 8 MiB stack
+      baseline (borrowed stack)   encodes depth 100000
+      owned stack (root clone)    faults between 12000 and 12500
+
+An 8x loss, and the same regression `Unmarshal` already removed once —
+see the `maxNestingDepth` note, "CLONE — avoided … one frame per level
+over the whole tree". It would trade a representation problem for a
+denial-of-service one. Reverted; the consuming drain went with it,
+since keeping an API with no caller is how dead code gets mistaken for
+progress.
+
+AND MEASURING IT FOUND SOMETHING ELSE. Three things here recurse, and
+the encoder is no longer the tightest:
+
+    Value::clone    faults 12000..12500    derived, one frame/level
+    Value::drop     faults 19000..20000    derived, one frame/level
+    encode_value    survives 100000        explicit work stack
+
+So making the encoder iterative moved the bound onto `Value`'s own
+derived `Clone` and `Drop`, and nothing had noticed because nothing
+measured it. Both are far above the v1 parser's cap of 2000, which is
+what keeps a ROUND TRIP safe — only a hand-built `Value` reaches
+either. It is worth knowing that `let v = deep_value; drop(v);` faults
+around 19000 all by itself, with no encoder involved.
+
+`json_encode_depth_smoke` now pins the encoder at 2000 (every depth a
+round trip can reach) and 16000 (clear of the clone ceiling, below the
+drop one, so the row cannot report the wrong recursion). Reintroducing
+the root clone turns it red.
 
 THE JSON INDENT ENCODER IS THE ONE STRUCTURAL BLOCKER. `encode_indent`
 is an explicit work stack of `Task<'a>` holding `&'a Value` and
@@ -714,13 +757,25 @@ is an explicit work stack of `Task<'a>` holding `&'a Value` and
 iteration that filled it. A guard-scoped closure cannot serve that, and
 a shared header cannot hand the references out at all.
 
-A snapshot at the call site is the wrong fix: cloning `(string, Value)`
-per level deep-copies each subtree once per level of nesting, so a
-document of depth d costs O(n·d). The right fix is for the stack to own
-what it carries, which means `Value::Object` holding a shareable
-pointer rather than a `map<string, Value>` the encoder borrows into.
-That is a change to `Value` itself, so it is its own commit and its own
-risk, and it is now the thing standing between #7 and the header.
+The fix has to remove the RECURSION, not the borrow. Two candidates,
+both changing a public payload type, so both get their own commit and
+their own call-site sweep (19 `Value::Object` sites, 9 of them in
+examples):
+
+  `Value::Object(map<string, Arc<Value>>)` — cloning becomes O(width)
+  and FLAT, since cloning an `Arc` does not descend. `Value::Array`
+  needs the same or a deep array chain still recurses on clone.
+
+  Drop `gomap` from `Value::Object` altogether, for a
+  `slice<(string, Value)>`. `Value` is a goish-only DOM — Go's
+  encoding/json has no `Value` type, it uses `map[string]any` — so
+  nothing here requires Go map semantics, and the encoder sorts the
+  keys anyway, so the hash ordering buys nothing. This REMOVES the #7
+  problem rather than working around it, and it is the smaller change
+  of the two.
+
+The second looks right, and the reason to say so rather than just do it
+is that it also decides what a JSON object is in goish's public API.
 
 OWNED RANGE MADE A #26 DIVERGENCE OBSERVABLE, which is worth having in
 writing before someone hits it. Measured against Go 1.25.5:

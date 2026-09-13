@@ -1150,20 +1150,56 @@ fn encode_value(out: &mut Vec<byte>, v: &Value, cfg: Option<&IndentCfg>, _: &str
                     }
                     // Go's encoding/json marshals map keys in sorted order.
                     //
-                    // THE LAST BORROWED MAP WALK, and the only one that
-                    // is not a mechanical rewrite (#7). `Task` holds
-                    // `&'a Value` and `&'a string` borrowed out of this
-                    // map, and the work stack outlives this iteration —
-                    // so a guard-scoped closure cannot serve it and a
-                    // shared header cannot hand the references out.
+                    // THE LAST BORROWED MAP WALK IN THE TREE (#7), and
+                    // the one that is not a mechanical rewrite. `Task`
+                    // holds `&'a Value` and `&'a string` borrowed out of
+                    // this map, and the work stack outlives the
+                    // iteration that fills it — so a guard-scoped
+                    // closure cannot serve it and a shared header cannot
+                    // lend the references at all.
                     //
-                    // The fix is not a snapshot here: cloning
-                    // `(string, Value)` per level deep-copies each
-                    // subtree once per level of nesting. It is to make
-                    // the encoder's stack own what it carries, which
-                    // means `Value::Object` holding a shareable
-                    // pointer. That is a change to `Value`, so it gets
-                    // its own commit rather than riding along here.
+                    // MAKING THE STACK OWN ITS VALUES WAS TRIED AND
+                    // MEASURED, and it is the wrong answer. With
+                    // `Task::Val(Value, usize)` the root must be cloned
+                    // once; a consuming drain on the map, plus
+                    // `slice::__into_vec`, then moves every deeper level,
+                    // so the cost is ONE clone and not the O(n·d) a
+                    // per-level snapshot would cost. But `Value`'s derived `Clone` RECURSES, one
+                    // frame per level, and that single clone drops this
+                    // encoder's depth ceiling from >100000 to ~12200.
+                    // Measured with examples/json_encode_depth_probe,
+                    // debug build: baseline encodes depth 100000; the
+                    // owned stack faults between 12000 and 12500.
+                    //
+                    // An 8x loss, and it is the SAME regression
+                    // `Unmarshal` already removed once — see the note on
+                    // `maxNestingDepth`, "CLONE — avoided … one frame
+                    // per level over the whole tree". Reintroducing it
+                    // here to satisfy #7 would trade a representation
+                    // problem for a denial-of-service one.
+                    //
+                    // So the fix has to remove the recursion, not the
+                    // borrow. Two candidates, neither cheap:
+                    //
+                    //   `Value::Object(map<string, Arc<Value>>)` — the
+                    //   clone becomes O(width) and FLAT, since cloning
+                    //   an `Arc` does not descend. `Array` needs the
+                    //   same treatment or a deep array chain still
+                    //   recurses on clone.
+                    //
+                    //   Drop `gomap` from `Value::Object` entirely, for
+                    //   a `slice<(string, Value)>`. `Value` is a
+                    //   goish-only DOM — Go's encoding/json has no
+                    //   `Value` type, it uses `map[string]any` — so
+                    //   nothing requires Go map semantics here, and the
+                    //   encoder sorts the keys anyway, so the hash
+                    //   ordering buys nothing. This removes the #7
+                    //   problem rather than working around it.
+                    //
+                    // Both change a public payload type, so both get
+                    // their own commit with their own call-site sweep.
+                    // `__iter` is `pub(crate)` so that this stays the
+                    // only such walk while that is decided.
                     let mut pairs: alloc::vec::Vec<(&string, &Value)> = o.__iter().collect();
                     pairs.sort_by(|(a, _), (b, _)| a.as_bytes().cmp(b.as_bytes()));
                     out.push(b'{');
