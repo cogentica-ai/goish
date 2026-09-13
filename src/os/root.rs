@@ -208,7 +208,19 @@ impl Root {
         if !err.IsNil() {
             return (crate::nilval::nil.into(), err);
         }
-        return (nilable::new(File::NewFile(int::from(i64::from(fd)), name)), errors::nil);
+        // Go: newFile(fd, joinPath(root.Name(), name), …) at
+        // os/root_unix.go line 106 — the File is named by its FULL
+        // path, not the name relative to the root. It shows: a
+        // `readdirent` on a Root-opened file names the path Go names,
+        // and goish named a fragment that resolves against the process
+        // cwd instead.
+        return (
+            nilable::new(File::NewFile(
+                int::from(i64::from(fd)),
+                super::tempfile::joinPath(&self.name, &name),
+            )),
+            errors::nil,
+        );
     }
 }
 
@@ -345,7 +357,11 @@ impl Root {
                 inner: alloc::sync::Arc::new(RootInner {
                     fd: crate::sync::Mutex::new(fd),
                 }),
-                name,
+                // Go: newRoot(fd, joinPath(r.Name(), name)) at
+                // os/root_unix.go line 78 — a nested Root's Name is
+                // the full path too, so it composes: Name is what the
+                // next joinPath builds on.
+                name: super::tempfile::joinPath(&self.name, &name),
             }),
             errors::nil,
         );
@@ -1061,4 +1077,297 @@ impl Root {
         }
         return self.Remove(path);
     }
+}
+
+// ─── Root.FS and the rootFS adapter (os/root.go:353-447) ─────────────
+
+impl Root {
+    // go: sdk 1.25.5 os/root.go:353-359 Root.FS
+    /// Go: "FS returns a file system (an fs.FS) for the tree of files
+    /// in the root. The result implements io/fs.StatFS,
+    /// io/fs.ReadFileFS, io/fs.ReadDirFS, and io/fs.ReadLinkFS."
+    ///
+    /// Go writes `(*rootFS)(r)` — a type conversion, so the adapter IS
+    /// the Root, sharing its fd. The clone here shares the same
+    /// `Arc<RootInner>`, so it behaves the same way: closing either
+    /// closes both, and every method on the FS then reports
+    /// `file already closed`.
+    pub fn FS(&self) -> alloc::sync::Arc<dyn crate::io::fs::FS + Send + Sync> {
+        register_rootfs_impls();
+        return alloc::sync::Arc::new(rootFS { r: self.clone() });
+    }
+}
+
+// go: sdk 1.25.5 os/root.go:361-361 rootFS
+/// Go: `type rootFS Root`.
+#[allow(non_camel_case_types)] // Go name
+struct rootFS {
+    r: Root,
+}
+
+// go: sdk 1.25.5 os/root.go:437-451 isValidRootFSPath
+/// Go: "isValidRootFSPath reports whether name is a valid filename to
+/// pass a Root.FS method."
+///
+/// `fs::ValidPath` plus a Windows-only backslash check, which this
+/// port does not need. Note what it does NOT catch: `ValidPath("f\0j")`
+/// is true, in Go too. The NUL is refused further in, at the syscall
+/// boundary — see `syscall::ByteSliceFromString` and issue #29.
+fn isValidRootFSPath(name: &string) -> bool {
+    return crate::io::fs::ValidPath(name.clone());
+}
+
+// go: none — goish-only: Go's guard is `&PathError{Op: op, Path: name,
+//     Err: ErrInvalid}` written out at each of the six methods. One
+//     helper, because the only thing that varies is the op.
+/// The `invalid argument` a rejected `Root.FS` name produces.
+fn rootFSInvalid(op: &'static str, name: &string) -> error {
+    return errors::Wrap(PathError {
+        Op: string::from_static(op),
+        Path: name.clone(),
+        Err: super::ErrInvalid.into(),
+    });
+}
+
+impl rootFS {
+    // go: none — goish-only: every rootFS method opens through
+    //     `Root.Open`, and each wants the *os.File wrapped as an
+    //     `fs::File`. Go returns `*File` directly because it already
+    //     satisfies `fs.File`.
+    /// `Root.Open(name)`, wrapped.
+    fn __open(&self, name: &string) -> (alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>, error) {
+        let (f, err) = self.r.Open(name.clone());
+        if !err.IsNil() {
+            return (crate::nil.into(), err);
+        }
+        return (super::dirFSFile::__wrap(f.MustTake()), errors::nil);
+    }
+}
+
+impl crate::io::fs::FS for rootFS {
+    // go: sdk 1.25.5 os/root.go:363-373 rootFS.Open
+    fn Open(
+        &self,
+        name: string,
+    ) -> (
+        alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>,
+        error,
+    ) {
+        if !isValidRootFSPath(&name) {
+            return (crate::nil.into(), rootFSInvalid("open", &name));
+        }
+        return self.__open(&name);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides so a type
+    //     assertion can reach this type. Go's itabs make it
+    //     unnecessary.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl crate::io::fs::StatFS for rootFS {
+    // go: none — goish idiom: Go's composite fs interfaces EMBED
+    //     `fs.FS`, so `Open` comes for free. goish's
+    //     `#[goish::interface]` does not model embedding, so each
+    //     composite re-declares it and every impl forwards. See the
+    //     note at the top of io/fs/fs.rs.
+    fn Open(
+        &self,
+        name: string,
+    ) -> (
+        alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>,
+        error,
+    ) {
+        return crate::io::fs::FS::Open(self, name);
+    }
+    // go: sdk 1.25.5 os/root.go:420-426 rootFS.Stat
+    fn Stat(
+        &self,
+        name: string,
+    ) -> (
+        alloc::sync::Arc<dyn crate::io::fs::FileInfo + Send + Sync>,
+        error,
+    ) {
+        if !isValidRootFSPath(&name) {
+            return (crate::nil.into(), rootFSInvalid("stat", &name));
+        }
+        let (info, err) = self.r.Stat(name);
+        if !err.IsNil() {
+            return (crate::nil.into(), err);
+        }
+        return (alloc::sync::Arc::new(info), errors::nil);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides so a type
+    //     assertion can reach this type. Go's itabs make it
+    //     unnecessary.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl crate::io::fs::ReadFileFS for rootFS {
+    // go: none — goish idiom: Go's composite fs interfaces EMBED
+    //     `fs.FS`, so `Open` comes for free. goish's
+    //     `#[goish::interface]` does not model embedding, so each
+    //     composite re-declares it and every impl forwards. See the
+    //     note at the top of io/fs/fs.rs.
+    fn Open(
+        &self,
+        name: string,
+    ) -> (
+        alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>,
+        error,
+    ) {
+        return crate::io::fs::FS::Open(self, name);
+    }
+    // go: sdk 1.25.5 os/root.go:399-410 rootFS.ReadFile
+    fn ReadFile(&self, name: string) -> (crate::goslice::slice<super::byte>, error) {
+        if !isValidRootFSPath(&name) {
+            return (
+                crate::goslice::slice::new(),
+                rootFSInvalid("readfile", &name),
+            );
+        }
+        return self.r.ReadFile(name);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides so a type
+    //     assertion can reach this type. Go's itabs make it
+    //     unnecessary.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl crate::io::fs::ReadDirFS for rootFS {
+    // go: none — goish idiom: Go's composite fs interfaces EMBED
+    //     `fs.FS`, so `Open` comes for free. goish's
+    //     `#[goish::interface]` does not model embedding, so each
+    //     composite re-declares it and every impl forwards. See the
+    //     note at the top of io/fs/fs.rs.
+    fn Open(
+        &self,
+        name: string,
+    ) -> (
+        alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>,
+        error,
+    ) {
+        return crate::io::fs::FS::Open(self, name);
+    }
+    // go: sdk 1.25.5 os/root.go:375-397 rootFS.ReadDir
+    /// Go: "This isn't efficient: We just open a regular file and
+    /// ReadDir it. Ideally, we would skip creating a *File entirely and
+    /// operate directly on the file descriptor, but that will require
+    /// some extensive reworking of directory reading in general. This
+    /// suffices for the moment." — ported as written, inefficiency and
+    /// all, because the walk is what makes it a Root and reading the
+    /// dirfd directly would go around it.
+    ///
+    /// Note the sort is Go's, not `os::ReadDir`'s: `File::ReadDir`
+    /// returns entries in getdents order, and Go sorts here.
+    fn ReadDir(
+        &self,
+        name: string,
+    ) -> (
+        crate::goslice::slice<alloc::sync::Arc<dyn crate::io::fs::DirEntry + Send + Sync>>,
+        error,
+    ) {
+        if !isValidRootFSPath(&name) {
+            return (crate::goslice::slice::new(), rootFSInvalid("readdir", &name));
+        }
+        let (f, err) = self.r.Open(name);
+        if !err.IsNil() {
+            return (crate::goslice::slice::new(), err);
+        }
+        let mut f = f;
+        let fh = f.MustMut();
+        // Go: dirs, err := f.ReadDir(-1) — and the error is returned
+        // ALONGSIDE whatever was read, after the sort, not instead of
+        // it.
+        let (dirs, rerr) = fh.ReadDir(int::from(-1));
+        let _ = fh.Close();
+        let mut v: Vec<alloc::sync::Arc<dyn crate::io::fs::DirEntry + Send + Sync>> = Vec::new();
+        let n = crate::len(&dirs);
+        let mut i: int = 0;
+        while i < n {
+            v.push(dirs[i].clone());
+            i += 1;
+        }
+        // Go: slices.SortFunc(dirs, bytealg.CompareString on Name).
+        v.sort_by(|a, b| a.Name().as_bytes().cmp(b.Name().as_bytes()));
+        return (crate::goslice::slice::__from_vec(v), rerr);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides so a type
+    //     assertion can reach this type. Go's itabs make it
+    //     unnecessary.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+impl crate::io::fs::ReadLinkFS for rootFS {
+    // go: none — goish idiom: Go's composite fs interfaces EMBED
+    //     `fs.FS`, so `Open` comes for free. goish's
+    //     `#[goish::interface]` does not model embedding, so each
+    //     composite re-declares it and every impl forwards. See the
+    //     note at the top of io/fs/fs.rs.
+    fn Open(
+        &self,
+        name: string,
+    ) -> (
+        alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>,
+        error,
+    ) {
+        return crate::io::fs::FS::Open(self, name);
+    }
+    // go: sdk 1.25.5 os/root.go:412-418 rootFS.ReadLink
+    fn ReadLink(&self, name: string) -> (string, error) {
+        if !isValidRootFSPath(&name) {
+            return (string::new(), rootFSInvalid("readlink", &name));
+        }
+        return self.r.Readlink(name);
+    }
+    // go: sdk 1.25.5 os/root.go:428-434 rootFS.Lstat
+    fn Lstat(
+        &self,
+        name: string,
+    ) -> (
+        alloc::sync::Arc<dyn crate::io::fs::FileInfo + Send + Sync>,
+        error,
+    ) {
+        if !isValidRootFSPath(&name) {
+            return (crate::nil.into(), rootFSInvalid("lstat", &name));
+        }
+        let (info, err) = self.r.Lstat(name);
+        if !err.IsNil() {
+            return (crate::nil.into(), err);
+        }
+        return (alloc::sync::Arc::new(info), errors::nil);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides so a type
+    //     assertion can reach this type. Go's itabs make it
+    //     unnecessary.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
+    }
+}
+
+// go: none — goish idiom: fill the `#[goish::interface]` downcast
+// registries so `cast!(fsys, StatFS)` finds `rootFS`. Without it
+// `fs::ReadFile` and friends fall back to the generic Open+read path
+// and the specialised ops — and their error strings — never run.
+// See AGENTS.md §9b.
+/// Register `rootFS` into the io/fs interface registries. Idempotent.
+fn register_rootfs_impls() {
+    super::register_os_fs_impls();
+    crate::io::fs::__goish_register_StatFS_impl::<rootFS>();
+    crate::io::fs::__goish_register_ReadFileFS_impl::<rootFS>();
+    crate::io::fs::__goish_register_ReadDirFS_impl::<rootFS>();
+    crate::io::fs::__goish_register_ReadLinkFS_impl::<rootFS>();
+    crate::io::fs::__goish_register_File_impl::<super::dirFSFile>();
 }

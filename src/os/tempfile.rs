@@ -85,7 +85,7 @@ crate::var! {
 }
 
 // go: sdk 1.25.5 os/tempfile.go:119-124 joinPath
-fn joinPath(dir: &string, name: &string) -> string {
+pub(crate) fn joinPath(dir: &string, name: &string) -> string {
     let db = bytes_of(dir);
     if !db.is_empty() && IsPathSeparator(db[db.len() - 1]) {
         return dir.clone() + name.clone();

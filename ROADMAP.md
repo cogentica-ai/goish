@@ -4404,9 +4404,38 @@ Rename Link Symlink Chmod Chown Lchown Chtimes`. Pinned by five ref
 smokes (20+21+15+19+14 rows), each rule verified by its own
 perturbation.
 
-STILL UNPORTED: `Root.FS` and the `rootFS` adapter, which want io/fs
-plumbing rather than syscalls, and the `dirFS.Lstat`/`dirFS.ReadLink`
-pair Go 1.25 added for io/fs.ReadLinkFS.
+**COMPLETE 2026-09-13.** `Root.FS` and the `rootFS` adapter landed with
+all four optional interfaces — `StatFS ReadFileFS ReadDirFS
+ReadLinkFS` — and `dirFS` gained the `Lstat`/`ReadLink` pair Go 1.25
+added for `io/fs.ReadLinkFS`. `examples/root_fs_ref_smoke.rs` pins 77
+rows; perturbing `isValidRootFSPath` to accept everything turns 11 red.
+
+The reference is worth reading for the contrast in its last row: the
+same symlink out of the tree is refused by `Root.FS()` (`statat escape:
+path escapes from parent`) and followed by `os::DirFS` (`data=
+"SECRET"`). Both are Go's answers. One is a boundary and one is a
+prefix.
+
+Four defects the reference found, none NUL-related:
+
+  * `os::ReadDir` opened without `O_DIRECTORY`, so a regular file was
+    opened happily and failed at the first getdents. Go's `openDir`
+    lets the KERNEL refuse it, which is why Go says `open ok.txt: not
+    a directory` where goish said `readdirent`.
+  * Worse, in the same function: the fd was closed BEFORE the error was
+    built, and `fdErr` reports `ErrClosed` whenever `fd < 0`. Every
+    getdents failure — every one, not just this input — came back as
+    "file already closed" with the real errno thrown away.
+  * `Root.Open` named the `File` by the name relative to the root. Go
+    uses `joinPath(root.Name(), name)`, so every File-level error from
+    a Root-opened file (`readdirent`, `stat`, `read`) named a fragment
+    that resolves against the process cwd instead. `Root.OpenRoot` had
+    the same bug, and there it compounds: a nested Root's Name is what
+    the next `joinPath` builds on.
+  * `dirFS` did none of Go's five `err.(*PathError).Path = name`
+    rewrites, so its errors named the joined path. Go does it in
+    `Open ReadFile ReadDir Stat Lstat` and deliberately NOT in
+    `ReadLink` — measured, and now pinned both ways.
 
 **AND A DEFECT FOUND WHILE PREPARING THAT PORT, 2026-09-13 — issue
 #29.** `Root.FS`'s guard in Go is `isValidRootFSPath`, which is

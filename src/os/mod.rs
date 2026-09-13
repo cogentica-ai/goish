@@ -311,6 +311,28 @@ fn emptyFileInfo(name: &string) -> FileInfoData {
     };
 }
 
+// go: none — goish-only: the same in-place rewrite as `__with_op`, on
+//     the other field. Go writes `err.(*PathError).Path = name` at five
+//     `dirFS` methods (os/file.go lines 765, 787, 803, 819, 833).
+/// Replace a `*PathError`'s path, leaving op and cause alone.
+///
+/// `dirFS` joins its root onto the caller's name before the syscall, so
+/// the kernel's error names a path the caller never wrote — and on a
+/// GOOS with a different separator, one in the wrong syntax. Go undoes
+/// that for reporting. A non-`PathError` is returned unchanged, which
+/// is Go's `if e, ok := …` at three of the five sites.
+fn withPath(err: error, path: &string) -> error {
+    let pe = match errors::As::<PathError>(err.clone()) {
+        Some(pe) => pe,
+        None => return err,
+    };
+    return errors::Wrap(PathError {
+        Op: pe.Op.clone(),
+        Path: path.clone(),
+        Err: pe.Err.clone(),
+    });
+}
+
 // go: none — goish-only: Go does this in place, `pe := err.(*PathError);
 //     pe.Op = "chdir"` at os/exec_posix.go line 33, because it holds
 //     the pointer. goish's `error` is opaque, so the rewrite rebuilds.
@@ -458,8 +480,12 @@ impl FileInfo for FileInfoData {
         // empty tuple every time.
         return FileInfoData::Sys(self);
     }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides so a type
+    //     assertion can reach this type. Go's itabs make it
+    //     unnecessary.
     fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
-        Some(self)
+        return Some(self);
     }
 }
 
@@ -1991,17 +2017,43 @@ impl DirEntry for unixDirent {
         }
         (alloc::sync::Arc::new(info), nil)
     }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides so a type
+    //     assertion can reach this type. Go's itabs make it
+    //     unnecessary.
     fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
-        Some(self)
+        return Some(self);
     }
 }
 
 /// Register the `os` concrete `#[goish::interface]` impls into their
 /// per-trait downcast registries (so `goish::cast!` can find them).
 /// Idempotent and cheap; called at the head of `ReadDir`.
-fn register_os_fs_impls() {
+pub(crate) fn register_os_fs_impls() {
     crate::io::fs::__goish_register_FileInfo_impl::<FileInfoData>();
     crate::io::fs::__goish_register_DirEntry_impl::<unixDirent>();
+}
+
+// go: sdk 1.25.5 os/file_unix.go:283-304 openDirNolog
+/// Go: open `name` with `O_DIRECTORY`, so the kernel — not a later
+/// getdents — is what refuses a non-directory.
+///
+/// The error is `&PathError{Op: "open", …}`, which is why
+/// `os::ReadDir` of a regular file says `open` and not `readdirent`.
+fn openDirNolog(name: string) -> (nilable<File>, error) {
+    let (buf, nul) = syscall::ByteSliceFromString(&name);
+    if !nul.IsNil() {
+        return (crate::nilval::nil.into(), nulPathErr("open", name));
+    }
+    let fd = syscall::Open(
+        buf.as_ptr(),
+        syscall::O_RDONLY | syscall::O_CLOEXEC | syscall::O_DIRECTORY,
+        0,
+    );
+    if fd < 0 {
+        return (crate::nilval::nil.into(), pathErr("open", name, fd));
+    }
+    return (nilable::new(File::NewFile(int::from(i64::from(fd)), name)), nil);
 }
 
 // go: sdk 1.25.5 os/dir.go:114-126 ReadDir
@@ -2014,11 +2066,18 @@ pub fn ReadDir<N: Into<string>>(
 ) -> (slice<alloc::sync::Arc<dyn DirEntry + Send + Sync>>, error) {
     register_os_fs_impls();
     let name: string = name.into();
-    let (mut f, err) = Open(name.clone());
+    // Go: f, err := openDir(name) — O_DIRECTORY, not a plain Open
+    // (os/file_unix.go line 289). It matters for what the caller is
+    // told: with O_DIRECTORY the kernel refuses a regular file at OPEN,
+    // so Go answers `open ok.txt: not a directory`. goish opened it
+    // happily and failed at the first getdents, answering `readdirent`
+    // — and then, because the fd was closed before the error was
+    // built, `file already closed` instead of the errno.
+    let (mut f, err) = openDirNolog(name.clone());
     if !err.IsNil() {
         return (slice::new(), err);
     }
-    // err is nil ⇒ Open returned a non-nil File. Narrow.
+    // err is nil ⇒ openDirNolog returned a non-nil File. Narrow.
     let f = f.MustMut();
     let mut entries: Vec<alloc::sync::Arc<dyn DirEntry + Send + Sync>> = Vec::new();
     // 4 KiB buffer matches the kernel's per-call output size sweet spot.
@@ -2026,9 +2085,14 @@ pub fn ReadDir<N: Into<string>>(
     loop {
         let n = syscall::Getdents64(f.fd, buf.as_mut_ptr(), buf.len());
         if n < 0 {
+            // Build the error BEFORE the close: `fdErr` reports
+            // `ErrClosed` whenever `self.fd < 0`, so closing first
+            // turned every getdents failure into "file already closed"
+            // and threw the errno away.
+            let e = f.fdErr("readdirent", n);
             let _ = f.Close();
             // Go: &PathError{Op: "readdirent", Path: f.name, Err: errno}
-            return (slice::__from_vec(entries), f.fdErr("readdirent", n));
+            return (slice::__from_vec(entries), e);
         }
         if n == 0 {
             // EOD
@@ -2637,8 +2701,22 @@ pub fn Exit(code: int) -> ! {
 // Close takes it out. Reads hold the lock across the read(2); a
 // single fs::File handle is never shared hot, so a spinlock is fine.
 #[allow(non_camel_case_types)] // Go name (os/file.go)
-struct dirFSFile {
+pub(crate) struct dirFSFile {
     inner: runtime::spin::SpinLock<Option<File>>,
+}
+
+impl dirFSFile {
+    // go: none — goish-only: Go returns the `*os.File` itself, because
+    //     `*File` already satisfies `fs.File`. goish's `File::Read`
+    //     takes `&mut self` and an `Arc<dyn fs::File>` yields no
+    //     `&mut`, so the cursor has to live behind a lock. `rootFS`
+    //     hands back the same wrapper `dirFS` does.
+    /// Wrap an open `File` as an `fs::File`.
+    pub(crate) fn __wrap(f: File) -> alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync> {
+        return alloc::sync::Arc::new(dirFSFile {
+            inner: runtime::spin::SpinLock::new(Some(f)),
+        });
+    }
 }
 
 impl crate::io::fs::File for dirFSFile {
@@ -2668,8 +2746,12 @@ impl crate::io::fs::File for dirFSFile {
             None => ErrClosed.into(),
         }
     }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides so a type
+    //     assertion can reach this type. Go's itabs make it
+    //     unnecessary.
     fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
-        Some(self)
+        return Some(self);
     }
 }
 
@@ -2753,21 +2835,28 @@ impl crate::io::fs::FS for dirFS {
         }
         let (f, err) = Open(full);
         if !err.IsNil() {
-            return (crate::nil.into(), err);
+            // Go: "DirFS takes a string appropriate for GOOS, while the
+            // name argument here is always slash separated. dir.join
+            // will have mixed the two; undo that for error reporting."
+            return (crate::nil.into(), withPath(err, &name));
         }
-        (
-            alloc::sync::Arc::new(dirFSFile {
-                inner: runtime::spin::SpinLock::new(Some(f.MustTake())),
-            }),
-            nil,
-        )
+        (dirFSFile::__wrap(f.MustTake()), nil)
     }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides so a type
+    //     assertion can reach this type. Go's itabs make it
+    //     unnecessary.
     fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
-        Some(self)
+        return Some(self);
     }
 }
 
 impl crate::io::fs::StatFS for dirFS {
+    // go: none — goish idiom: Go's composite fs interfaces EMBED
+    //     `fs.FS`, so `Open` comes for free. goish's
+    //     `#[goish::interface]` does not model embedding, so each
+    //     composite re-declares it and every impl forwards. See the
+    //     note at the top of io/fs/fs.rs.
     fn Open(
         &self,
         name: string,
@@ -2775,7 +2864,7 @@ impl crate::io::fs::StatFS for dirFS {
         alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>,
         error,
     ) {
-        crate::io::fs::FS::Open(self, name)
+        return crate::io::fs::FS::Open(self, name);
     }
     // Go: dirFS.Stat (os/file.go:806).
     fn Stat(&self, name: string) -> (alloc::sync::Arc<dyn FileInfo + Send + Sync>, error) {
@@ -2785,16 +2874,26 @@ impl crate::io::fs::StatFS for dirFS {
         }
         let (info, err) = Stat(full);
         if !err.IsNil() {
-            return (crate::nil.into(), err);
+            // See the comment in `dirFS::Open`.
+            return (crate::nil.into(), withPath(err, &name));
         }
         (alloc::sync::Arc::new(info), nil)
     }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides so a type
+    //     assertion can reach this type. Go's itabs make it
+    //     unnecessary.
     fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
-        Some(self)
+        return Some(self);
     }
 }
 
 impl crate::io::fs::ReadFileFS for dirFS {
+    // go: none — goish idiom: Go's composite fs interfaces EMBED
+    //     `fs.FS`, so `Open` comes for free. goish's
+    //     `#[goish::interface]` does not model embedding, so each
+    //     composite re-declares it and every impl forwards. See the
+    //     note at the top of io/fs/fs.rs.
     fn Open(
         &self,
         name: string,
@@ -2802,7 +2901,7 @@ impl crate::io::fs::ReadFileFS for dirFS {
         alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>,
         error,
     ) {
-        crate::io::fs::FS::Open(self, name)
+        return crate::io::fs::FS::Open(self, name);
     }
     // Go: dirFS.ReadFile (os/file.go:782).
     fn ReadFile(&self, name: string) -> (slice<byte>, error) {
@@ -2810,14 +2909,28 @@ impl crate::io::fs::ReadFileFS for dirFS {
         if !err.IsNil() {
             return (slice::new(), err);
         }
-        ReadFile(full)
+        let (b, err) = ReadFile(full);
+        if !err.IsNil() {
+            // See the comment in `dirFS::Open`.
+            return (slice::new(), withPath(err, &name));
+        }
+        (b, nil)
     }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides so a type
+    //     assertion can reach this type. Go's itabs make it
+    //     unnecessary.
     fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
-        Some(self)
+        return Some(self);
     }
 }
 
 impl crate::io::fs::ReadDirFS for dirFS {
+    // go: none — goish idiom: Go's composite fs interfaces EMBED
+    //     `fs.FS`, so `Open` comes for free. goish's
+    //     `#[goish::interface]` does not model embedding, so each
+    //     composite re-declares it and every impl forwards. See the
+    //     note at the top of io/fs/fs.rs.
     fn Open(
         &self,
         name: string,
@@ -2825,7 +2938,7 @@ impl crate::io::fs::ReadDirFS for dirFS {
         alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>,
         error,
     ) {
-        crate::io::fs::FS::Open(self, name)
+        return crate::io::fs::FS::Open(self, name);
     }
     // Go: dirFS.ReadDir (os/file.go:794).
     fn ReadDir(
@@ -2836,10 +2949,75 @@ impl crate::io::fs::ReadDirFS for dirFS {
         if !err.IsNil() {
             return (slice::new(), err);
         }
-        ReadDir(full)
+        let (entries, err) = ReadDir(full);
+        if !err.IsNil() {
+            // See the comment in `dirFS::Open`.
+            return (slice::new(), withPath(err, &name));
+        }
+        (entries, nil)
     }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides so a type
+    //     assertion can reach this type. Go's itabs make it
+    //     unnecessary.
     fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
-        Some(self)
+        return Some(self);
+    }
+}
+
+// go: sdk 1.25.5 os/file.go:826-838 dirFS.Lstat
+impl crate::io::fs::ReadLinkFS for dirFS {
+    // go: none — goish idiom: Go's composite fs interfaces EMBED
+    //     `fs.FS`, so `Open` comes for free. goish's
+    //     `#[goish::interface]` does not model embedding, so each
+    //     composite re-declares it and every impl forwards. See the
+    //     note at the top of io/fs/fs.rs.
+    fn Open(
+        &self,
+        name: string,
+    ) -> (
+        alloc::sync::Arc<dyn crate::io::fs::File + Send + Sync>,
+        error,
+    ) {
+        return crate::io::fs::FS::Open(self, name);
+    }
+    // Go: dirFS.ReadLink (os/file.go:840).
+    //
+    // The ONE method that does not rewrite the Path: it returns
+    // `Readlink(fullname)` verbatim, so a failure here names the joined
+    // path where every sibling names the caller's. Measured, not
+    // assumed — Go answers `readlink <dir>/ok.txt: invalid argument`
+    // for a non-link while `Lstat` of a missing name answers
+    // `lstat nope: no such file or directory`.
+    fn ReadLink(&self, name: string) -> (string, error) {
+        let (full, err) = self.join("readlink", &name);
+        if !err.IsNil() {
+            return (string::new(), err);
+        }
+        return Readlink(full);
+    }
+    // Go: dirFS.Lstat (os/file.go:826).
+    fn Lstat(
+        &self,
+        name: string,
+    ) -> (alloc::sync::Arc<dyn FileInfo + Send + Sync>, error) {
+        let (full, err) = self.join("lstat", &name);
+        if !err.IsNil() {
+            return (crate::nil.into(), err);
+        }
+        let (info, err) = Lstat(full);
+        if !err.IsNil() {
+            // See the comment in `dirFS::Open`.
+            return (crate::nil.into(), withPath(err, &name));
+        }
+        return (alloc::sync::Arc::new(info), nil);
+    }
+    // go: none — goish idiom: the hidden Any-view hook every
+    //     `#[goish::interface]` concrete impl overrides so a type
+    //     assertion can reach this type. Go's itabs make it
+    //     unnecessary.
+    fn __goish_as_dyn_any(&self) -> Option<&(dyn core::any::Any + Send + Sync)> {
+        return Some(self);
     }
 }
 
@@ -2847,6 +3025,7 @@ fn register_dirfs_impls() {
     crate::io::fs::__goish_register_StatFS_impl::<dirFS>();
     crate::io::fs::__goish_register_ReadFileFS_impl::<dirFS>();
     crate::io::fs::__goish_register_ReadDirFS_impl::<dirFS>();
+    crate::io::fs::__goish_register_ReadLinkFS_impl::<dirFS>();
     crate::io::fs::__goish_register_File_impl::<dirFSFile>();
 }
 
