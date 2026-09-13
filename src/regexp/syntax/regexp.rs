@@ -32,7 +32,7 @@ use crate::gomap::map;
 use crate::gostring::string;
 use crate::{int, rune};
 
-use super::parse::{Flags, FoldCase, NonGreedy, WasDollar};
+use super::parse::{inCharClass, maxFold, minFold, Flags, FoldCase, NonGreedy, WasDollar};
 
 // goishlint:ignore GOISH019 Sub0, Rune0 — Go's inline storage for the
 // common one-subexpression and two-rune cases (`re.Sub = re.Sub0[:0]`),
@@ -120,36 +120,6 @@ pub const OpAlternate: Op = Op(19);
 /// Go: "where pseudo-ops start". The parser's stack markers live above
 /// it; nothing in a finished tree carries one.
 pub const opPseudo: Op = Op(128);
-
-// go: none — goish-only: parse.go's `minFold`/`maxFold`, needed here by
-//     `calcFlags` and nowhere else yet. They move to parse.rs with the
-//     parser in stage 2b, along with `inCharClass` below.
-/// The lowest rune with a non-trivial simple fold.
-pub(crate) const minFold: rune = 0x0041;
-// go: none — goish-only: see `minFold`.
-/// The highest rune with a non-trivial simple fold.
-pub(crate) const maxFold: rune = 0x1e943;
-
-// go: none — goish-only: parse.go's `inCharClass`, hoisted for
-//     `calcFlags` in stage 2a. Go binary-searches with `sort.Find`;
-//     goish's `sort` has no `Find`, so the search is written out. It
-//     moves to parse.rs in stage 2b.
-/// Whether `r` falls in the range-pair list `class`.
-pub(crate) fn inCharClass(r: rune, class: &[rune]) -> bool {
-    let mut lo = 0usize;
-    let mut hi = class.len() / 2;
-    while lo < hi {
-        let m = (lo + hi) / 2;
-        if r > class[2 * m + 1] {
-            lo = m + 1;
-        } else if r < class[2 * m] {
-            hi = m;
-        } else {
-            return true;
-        }
-    }
-    return false;
-}
 
 impl Regexp {
     // go: none — goish idiom: Go writes `&Regexp{Op: op}` inline. A

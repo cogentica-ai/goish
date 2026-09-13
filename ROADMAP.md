@@ -3380,7 +3380,8 @@ The remaining stages, and the reason for this order:
 | stage | files | Go lines | state |
 |---|---|---|---|
 | 2a | `syntax/regexp.rs` (the AST), `syntax/op_string.rs` | ~520 | **done** |
-| 2b | `syntax/parse.rs` (the parser) | ~2,200 | next |
+| 2b-i | `syntax/parse.rs` — the character-class layer | ~400 | **done** |
+| 2b-ii | `syntax/parse.rs` — `Parse` and the `parser` state machine | ~1,800 | next |
 | 3 | `syntax/simplify.rs`, `syntax/compile.rs` | ~450 | |
 | 4 | `regexp/exec.rs` (the NFA) and the swap | ~1,900 | |
 
@@ -3425,6 +3426,42 @@ sparse values and a REAL binary-search bug — `c <= r` written as
 turned exactly one row red. Reprobing every range start and end, plus
 one either side, took that to thirteen. A perturbation that barely
 fails is a table that barely tests.
+
+**STAGE 2b-i LANDED 2026-09-13.** The character-class layer:
+`appendRange`, `appendFoldedRange`, `appendClass`,
+`appendFoldedClass`, `appendNegatedClass`, `appendTable`,
+`appendNegatedTable`, `negateClass`, `cleanClass`, `inCharClass`,
+`minFoldRune` and the `ranges` comparator.
+`examples/regexp_class_ref_smoke.rs` pins 118 rows.
+
+This half comes before the parser because it is the half that can be
+tested without one — rune lists in, rune lists out, no state machine
+and no input string. Every `[...]`, `\d`, `\pL` and case-fold in a
+pattern is built by it, and the class it produces is the shape a match
+ultimately binary-searches.
+
+**A dependency, not a deferral: `\p{Han}` is BLOCKED.** `unicodeTable`
+and `canonicalName` read `unicode.Categories`, `unicode.Scripts` and
+their Fold twins, and goish's `unicode` does not have those maps — see
+the GOISH021 waiver at the top of src/unicode/letter.rs. That is a
+unicode-package item that regexp inherits, and stage 2b-ii will have to
+either carry it or refuse `\p` explicitly rather than silently.
+
+**And a comment that was wrong before it was committed.** The port
+claimed `cleanClass`'s hi-DECREASING tie-break was load-bearing — that
+it puts the widest range of a tied lo first so the forward merge
+subsumes the narrower ones. The smoke's perturbation deleting the
+tie-break came back GREEN, and rather than widen the table, the claim
+got checked: two million random classes cleaned both ways, zero
+differences. It cannot matter, because the merge tracks a running
+maximum `hi`, so a tied pair extends it in whichever order the two
+arrive. The tie-break is reproduced because it is Go's; the comment now
+says that and says it was measured.
+
+That is the counterpart to the lesson below, and worth stating as its
+own rule: a perturbation that comes back green is EITHER a thin table
+OR a wrong belief about the code, and the two are told apart by
+measuring, not by adding rows.
 
 Stage 2a repeated the lesson twice, which is why it is written down
 here rather than left in a commit message. `sub.Op > OpCapture` → `>=`
