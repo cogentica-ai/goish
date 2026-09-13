@@ -64,7 +64,7 @@ fn main() {
 fn run() {
     for args in [["-nope"], ["-s"]].iter() {
         let buf = Arc::new(goish::sync::Mutex::new(bytes::Buffer::new()));
-        let mut fs = flag::NewFlagSet();
+        let mut fs = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
         fs.SetOutput(buf.clone());
         let _ = fs.String("s", "def", "a string");
         let mut a = goish::make!([]string, 0);

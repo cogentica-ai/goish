@@ -2108,6 +2108,14 @@ name = "exported_api_smoke"
 path = "examples/exported_api_smoke.rs"
 
 [[example]]
+name = "flag_errorhandling_probe"
+path = "examples/flag_errorhandling_probe.rs"
+
+[[example]]
+name = "flag_errorhandling_smoke"
+path = "examples/flag_errorhandling_smoke.rs"
+
+[[example]]
 name = "flag_usage_ref_smoke"
 path = "examples/flag_usage_ref_smoke.rs"
 

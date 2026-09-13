@@ -3146,7 +3146,7 @@ with section 2o's NewFlagSet work, since both touch the same file for
 the same reason: this FlagSet was written before the port and its
 shape, not its behaviour, is what diverges.
 
-## 2o. `flag` always continues on a parse error
+## 2o. `flag` always continues on a parse error — FIXED 2026-09-13
 
 Found 2026-09-07 while porting flag.Uint64.
 
@@ -3170,6 +3170,40 @@ Closing it means giving NewFlagSet Go's two parameters and the
 ErrorHandling enum, then honouring it in Parse — a public API change to
 a hand-written type, so it wants doing deliberately rather than as a
 side effect of the next flag port.
+
+**DONE, and the missing `name` came with it.** `NewFlagSet(name,
+errorHandling)` now matches Go, `Parse` switches on the policy, and
+`CommandLine` is ExitOnError as Go's is. The two omissions were the
+same omission: `usage()` carried a comment saying it could only take
+Go's unnamed "Usage:" branch and pointed at this very parameter, so
+adding the policy fixed the header too.
+
+Measured against Go 1.25.5 rather than read off the source:
+
+    ContinueOnError=0 ExitOnError=1 PanicOnError=2
+    ContinueOnError, bad flag  err + message + usage on Output
+    -help                      flag.ErrHelp, "flag: help requested"
+    PanicOnError               panics with the error VALUE
+    ExitOnError                os.Exit(2), or Exit(0) for -h/-help
+
+`flag_errorhandling_smoke` drives the exit cases as a SUBPROCESS,
+because a process that stops cannot assert anything about itself and
+goish's `recover!()` does not resume, so the panic case cannot be
+caught in-process either. Three details worth keeping:
+
+  * a clean parse exits 7, as the CONTROL. "Exited 2" proves nothing if
+    the probe always exits 2.
+  * ExitOnError and PanicOnError BOTH exit 2, so the exit code cannot
+    tell them apart; the runtime's panic banner is the discriminator,
+    and one row asserts the ExitOnError case does NOT print it.
+  * the probe is in e2e's EXCLUDE list — it exits 7 and 2 by design.
+
+Three names came off the GOISH018 waiver — NewFlagSet, Name,
+ErrorHandling — which had been listing declarations goish now has. That
+is §2b-iii's pattern for the second time in this file.
+
+Left for §2p: `Var`/`TextVar`, which need the open trait, not a
+parameter.
 
 **Two neighbouring defects, found while reading this and FIXED.** Both
 were about what a user SEES, and both hid the same way — the error

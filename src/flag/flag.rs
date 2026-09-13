@@ -1,4 +1,4 @@
-// go: file flag/flag.go decls: FlagSet.Uint64, Uint64, Arg, FlagSet.Func, FlagSet.BoolFunc, Func, BoolFunc, FlagSet.sprintf, FlagSet.failf, FlagSet.Int64, FlagSet.Uint, FlagSet.Duration, Parsed, Bool, Int, Int64, Uint, String, Duration, Parse, Set, FlagSet.Lookup, FlagSet.VisitAll, numError, UnquoteUsage, isZeroValue, FlagSet.Parse, FlagSet.parseOne, FlagSet.usage, FlagSet.NFlag, FlagSet.Visit, FlagSet.set, FlagSet.PrintDefaults, FlagSet.SetOutput
+// go: file flag/flag.go decls: FlagSet.Uint64, Uint64, Arg, FlagSet.Func, FlagSet.BoolFunc, Func, BoolFunc, FlagSet.sprintf, FlagSet.failf, FlagSet.Int64, FlagSet.Uint, FlagSet.Duration, Parsed, Bool, Int, Int64, Uint, String, Duration, Parse, Set, FlagSet.Lookup, FlagSet.VisitAll, numError, UnquoteUsage, isZeroValue, FlagSet.Parse, FlagSet.parseOne, FlagSet.usage, FlagSet.NFlag, FlagSet.Visit, FlagSet.set, FlagSet.PrintDefaults, FlagSet.SetOutput, NewFlagSet, FlagSet.Name, FlagSet.ErrorHandling
 //
 // flag — the package-level CommandLine set, and the flag types goish's
 // hand-written FlagSet did not have.
@@ -8,7 +8,7 @@
 // holds what has been ported verbatim, kept separate because GOISH015
 // forbids anchored code in a module root.
 //
-// goishlint:ignore GOISH018 NewFlagSet, Var, Func, BoolFunc, TextVar, Args, NArg, Arg, Usage, Init, Output, Name, defaultUsage, sortFlags, newBoolValue, newIntValue, newInt64Value, newUintValue, newUint64Value, newStringValue, newFloat64Value, newDurationValue, newTextValue, newFuncValue, newBoolFuncValue, Get, IsBoolFlag, Float64, Uint64, BoolVar, IntVar, Int64Var, UintVar, Uint64Var, StringVar, Float64Var, DurationVar, failf, panicOnError, sprintf, commandLineUsage, Error, ErrorHandling— the FlagSet parser is hand-written; these are the declarations of Go's flag.go that goish does not have. Twelve names that WERE on this list — Parse, parseOne, PrintDefaults, UnquoteUsage, isZeroValue, numError, usage, NFlag, Visit, Set, String, SetOutput — are ported AND anchored in this file, so the waiver was suppressing GOISH018 over declarations that exist. Re-checked 2026-09-06.
+// goishlint:ignore GOISH018 Var, Func, BoolFunc, TextVar, Args, NArg, Arg, Usage, Init, Output, defaultUsage, sortFlags, newBoolValue, newIntValue, newInt64Value, newUintValue, newUint64Value, newStringValue, newFloat64Value, newDurationValue, newTextValue, newFuncValue, newBoolFuncValue, Get, IsBoolFlag, Float64, Uint64, BoolVar, IntVar, Int64Var, UintVar, Uint64Var, StringVar, Float64Var, DurationVar, failf, panicOnError, sprintf, commandLineUsage, Error— the FlagSet parser is hand-written; these are the declarations of Go's flag.go that goish does not have. Twelve names that WERE on this list — Parse, parseOne, PrintDefaults, UnquoteUsage, isZeroValue, numError, usage, NFlag, Visit, Set, String, SetOutput — are ported AND anchored in this file, so the waiver was suppressing GOISH018 over declarations that exist. Re-checked 2026-09-06. Three MORE came off on 2026-09-13 — NewFlagSet, Name and ErrorHandling — when §2o gave NewFlagSet Go's two parameters; the waiver was again naming declarations that exist.
 // goishlint:ignore GOISH021 Getter, ErrorHandling, ContinueOnError, ExitOnError, PanicOnError, FlagSet, boolValue, intValue, int64Value, uintValue, uint64Value, stringValue, float64Value, durationValue, textValue, funcValue, boolFuncValue, errParse, errRange, ErrHelp, Usage, numError, boolFlag, commandLineUsage — same.
 
 #![allow(non_snake_case)]
@@ -29,7 +29,7 @@ use crate::errors::{self, nil};
 use crate::strconv;
 use crate::types::byte;
 
-use super::{FlagDef, FlagHandle, FlagKind, FlagSet, NewFlagSet};
+use super::{FlagDef, FlagHandle, FlagKind, FlagSet};
 
 impl FlagSet {
     // go: sdk 1.25.5 flag/flag.go:812-816 FlagSet.Int64
@@ -170,6 +170,61 @@ impl FlagSet {
     }
 }
 
+// go: sdk 1.25.5 flag/flag.go:375-375 ErrorHandling
+/// Go: "ErrorHandling defines how [FlagSet.Parse] behaves if the parse
+/// fails."
+///
+/// Go declares the type at flag.go line 375 and its three values in a
+/// separate `const` block at lines 378-381; a Rust enum is one
+/// declaration, so the anchor names the type and the values ride with
+/// it. The discriminants are Go's, measured rather than assumed:
+/// ContinueOnError=0, ExitOnError=1, PanicOnError=2.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ErrorHandling {
+    /// Go: "Return a descriptive error."
+    ContinueOnError = 0,
+    /// Go: "Call os.Exit(2) or for -h/-help Exit(0)."
+    ExitOnError = 1,
+    /// Go: "Call panic with a descriptive error."
+    PanicOnError = 2,
+}
+
+// go: sdk 1.25.5 flag/flag.go:1223-1232 NewFlagSet
+/// Go: "NewFlagSet returns a new, empty flag set with the specified
+/// name and error handling property. If the name is not empty, it will
+/// be printed in the default usage message and in error messages."
+///
+/// Both parameters were missing. `errorHandling` is the behavioural
+/// one — see `ErrorHandling` — and `name` is what `defaultUsage`
+/// prints, so an unnamed set was the only kind goish could make.
+pub fn NewFlagSet<N: Into<string>>(name: N, errorHandling: ErrorHandling) -> FlagSet {
+    return FlagSet {
+        defs: alloc::vec::Vec::new(),
+        args: alloc::vec::Vec::new(),
+        parsed: false,
+        name: Some(name.into()),
+        errorHandling: errorHandling,
+        output: None,
+    };
+}
+
+// go: none — goish-only: `CommandLine` is a `static`, so it needs a
+//     const initialiser, and `NewFlagSet` cannot be one — Go itself
+//     only learns the name from `os.Args[0]` at package init.
+/// The empty set behind `CommandLine`: ExitOnError, as Go's is. The
+/// name is filled in by the package-level `Parse`, which is the first
+/// moment goish knows it and still before any usage line can print.
+pub(crate) const fn command_line_set() -> FlagSet {
+    return FlagSet {
+        defs: alloc::vec::Vec::new(),
+        args: alloc::vec::Vec::new(),
+        parsed: false,
+        name: None,
+        errorHandling: ErrorHandling::ExitOnError,
+        output: None,
+    };
+}
+
 // ─── package-level CommandLine ───────────────────────────────────────
 //
 // Go's `flag` keeps a default FlagSet in `CommandLine` and exposes
@@ -195,7 +250,8 @@ impl FlagSet {
 /// then reject `-test.short` as undefined. It compiles, it type-checks,
 /// and it is silently useless.
 #[allow(non_upper_case_globals)]
-pub static CommandLine: crate::sync::Mutex<FlagSet> = crate::sync::Mutex::new(NewFlagSet());
+pub static CommandLine: crate::sync::Mutex<FlagSet> =
+    crate::sync::Mutex::new(command_line_set());
 
 // go: sdk 1.25.5 flag/flag.go:768-772 Bool
 /// Go: "Bool defines a bool flag with specified name, default value,
@@ -427,7 +483,16 @@ pub fn Parse() -> error {
     } else {
         slice::new()
     };
-    return CommandLine.Lock().Parse(&rest);
+    let mut cl = CommandLine.Lock();
+    // Go builds `CommandLine = NewFlagSet(os.Args[0], ExitOnError)` at
+    // package init, so its usage header names the program. goish's is a
+    // `static` with a const initialiser and cannot read argv there, so
+    // the name is filled in HERE — the first moment goish knows it, and
+    // still before anything can print a usage line.
+    if cl.__name_unset() && n > 0 {
+        cl.__set_name(args[0i64].clone());
+    }
+    return cl.Parse(&rest);
 }
 
 // go: sdk 1.25.5 flag/flag.go:1192-1194 Parsed
@@ -806,10 +871,28 @@ impl FlagSet {
             if err == nil {
                 break;
             }
-            // goish's FlagSet is ContinueOnError only — there is no
-            // ErrorHandling field to switch on, so the error comes back
-            // to the caller rather than exiting the process.
-            return err;
+            // Go: `switch f.errorHandling` (flag.go line 1164). This
+            // used to `return err` unconditionally, which is
+            // ContinueOnError for every set — including `CommandLine`,
+            // which Go makes ExitOnError. A program with a bad flag
+            // therefore ran on with a default value where Go stops.
+            match self.errorHandling {
+                ErrorHandling::ContinueOnError => return err,
+                ErrorHandling::ExitOnError => {
+                    // Go: `if err == ErrHelp { os.Exit(0) }; os.Exit(2)`
+                    // — -h is a request that was honoured, not a failure.
+                    if crate::errors::Is(err.clone(), ErrHelp.clone()) {
+                        crate::os::Exit(0);
+                    }
+                    crate::os::Exit(2);
+                }
+                ErrorHandling::PanicOnError => {
+                    // Go panics with the error VALUE; goish's panic
+                    // carries a string, so it carries the error's text.
+                    let msg = err.Error();
+                    panic!("{}", msg.as_ref() as &str);
+                }
+            }
         }
         return nil;
     }
@@ -966,8 +1049,49 @@ impl FlagSet {
     /// missing NewFlagSet parameter is the cause — so it always takes
     /// Go's empty-name branch.
     fn usage(&self) {
-        self.__write_output(b"Usage:\n".to_vec());
+        // Go: "Usage of <name>:" for a named set, "Usage:" otherwise
+        // (flag.go lines 684-690). goish could only produce the second,
+        // because `NewFlagSet` took no name; it takes one now.
+        match &self.name {
+            Some(n) if n.Len() > 0 => {
+                let mut line: alloc::vec::Vec<u8> = b"Usage of ".to_vec();
+                line.extend_from_slice(n.as_bytes());
+                line.extend_from_slice(b":\n");
+                self.__write_output(line);
+            }
+            _ => self.__write_output(b"Usage:\n".to_vec()),
+        }
         self.PrintDefaults();
+    }
+
+    // go: sdk 1.25.5 flag/flag.go:438-441 FlagSet.Name
+    /// Go: "Name returns the name of the flag set."
+    pub fn Name(&self) -> string {
+        return match &self.name {
+            Some(n) => n.clone(),
+            None => string::new(),
+        };
+    }
+
+    // go: sdk 1.25.5 flag/flag.go:443-446 FlagSet.ErrorHandling
+    /// Go: "ErrorHandling returns the error handling behavior of the
+    /// flag set."
+    pub fn ErrorHandling(&self) -> ErrorHandling {
+        return self.errorHandling;
+    }
+
+    // go: none — goish-only: `CommandLine` is const-initialised and
+    //     cannot read `os.Args[0]` there; the package-level `Parse`
+    //     fills the name in on first use.
+    #[doc(hidden)]
+    pub fn __name_unset(&self) -> bool {
+        return self.name.is_none();
+    }
+
+    // go: none — goish-only: see `__name_unset`.
+    #[doc(hidden)]
+    pub fn __set_name(&mut self, n: string) {
+        self.name = Some(n);
     }
 
     // go: sdk 1.25.5 flag/flag.go:712-712 FlagSet.NFlag

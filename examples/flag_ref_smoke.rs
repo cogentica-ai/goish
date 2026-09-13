@@ -272,7 +272,7 @@ fn main() {
         let mut i = 0usize;
         while i < CASES.len() {
             let (argv, want_err, want_s, want_n, want_b, want_f, want_d, want_args) = CASES[i];
-            let mut fs = flag::NewFlagSet();
+            let mut fs = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
             // The `-h` rows print the defaults, as Go's do; the Go
             // reference sent them to a buffer and so does this.
             fs.SetOutput(Arc::new(goish::sync::Mutex::new(bytes::Buffer::new())));
@@ -356,7 +356,7 @@ fn main() {
     //    fits in four columns, and the default in parentheses unless it
     //    is the type's zero.
     {
-        let mut fs = flag::NewFlagSet();
+        let mut fs = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
         let buf = Arc::new(goish::sync::Mutex::new(bytes::Buffer::new()));
         fs.SetOutput(buf.clone());
         fs.String("s", "def", "a string");
@@ -379,7 +379,7 @@ fn main() {
     //    Visit even though it never appeared on the command line.
     {
         let mut ok = true;
-        let mut fs = flag::NewFlagSet();
+        let mut fs = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
         fs.String("a", "1", "u");
         fs.Int("c", 2, "u");
         let mut v: alloc::vec::Vec<string> = alloc::vec::Vec::new();

@@ -77,20 +77,20 @@ fn join(v: &Vec<string>) -> string {
 
 fn run() {
     let got: Arc<goish::sync::Mutex<Vec<string>>> = Arc::new(goish::sync::Mutex::new(Vec::new()));
-    let mut fs = flag::NewFlagSet();
+    let mut fs = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
     { let g = got.clone();
       fs.Func("tag", "add a tag", move |s: string| { g.Lock().push(s); goish::errors::nil }); }
     let err = fs.Parse(&argv(&["-tag", "a", "-tag", "b", "rest"]));
     chk(fmt::Sprintf!("func err=%v got=%s nargs=%d a0=%q", err, join(&got.Lock()), fs.NArg() as i64, fs.Arg(0)));
 
     let seen: Arc<goish::sync::Mutex<Vec<string>>> = Arc::new(goish::sync::Mutex::new(Vec::new()));
-    let mut fs2 = flag::NewFlagSet();
+    let mut fs2 = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
     { let g = seen.clone();
       fs2.BoolFunc("v", "verbose", move |s: string| { g.Lock().push(s); goish::errors::nil }); }
     let err2 = fs2.Parse(&argv(&["-v", "-v=false", "positional"]));
     chk(fmt::Sprintf!("boolfunc err=%v seen=%s nargs=%d a0=%q", err2, join(&seen.Lock()), fs2.NArg() as i64, fs2.Arg(0)));
 
-    let mut fs3 = flag::NewFlagSet();
+    let mut fs3 = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
     fs3.Func("x", "fails", |_s: string| goish::errors::New(string::from_static("boom")));
     let err3 = fs3.Parse(&argv(&["-x", "v"]));
     chk(fmt::Sprintf!("func-error err=%v", err3));

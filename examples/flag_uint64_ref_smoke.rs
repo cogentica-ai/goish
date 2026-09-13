@@ -65,7 +65,7 @@ fn argv(v: &[&'static str]) -> goish::goslice::slice<string> {
 }
 
 fn run() {
-    let mut fs = flag::NewFlagSet();
+    let mut fs = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
     let n = fs.Uint64("n", 7, "a uint64");
     let s = fs.String("s", "d", "a string");
     let err = fs.Parse(&argv(&["-n", "18446744073709551615", "-s", "x", "one", "two"]));
@@ -73,12 +73,12 @@ fn run() {
     chk(fmt::Sprintf!("args nargs=%d a0=%q a1=%q a2=%q a-1=%q",
         fs.NArg() as i64, fs.Arg(0), fs.Arg(1), fs.Arg(2), fs.Arg(-1)));
 
-    let mut fs2 = flag::NewFlagSet();
+    let mut fs2 = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
     let d = fs2.Uint64("d", 42, "a uint64");
     let _ = fs2.Parse(&goish::make!([]string, 0));
     chk(fmt::Sprintf!("default n=%d", d.Get()));
 
-    let mut fs3 = flag::NewFlagSet();
+    let mut fs3 = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
     let _ = fs3.Uint64("n", 1, "a uint64");
     let e3 = fs3.Parse(&argv(&["-n", "-5"]));
     chk(fmt::Sprintf!("negative err=%v", !e3.IsNil()));

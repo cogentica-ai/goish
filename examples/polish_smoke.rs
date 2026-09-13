@@ -86,7 +86,7 @@ fn main() {
 
     // ─── flag — basic Parse ─────────────────────────────────────────
 
-    let mut fs = flag::NewFlagSet();
+    let mut fs = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
     let name = fs.String("name", "default", "name of the user");
     let count = fs.Int("count", 0, "iteration count");
     let verbose = fs.Bool("verbose", false, "verbose mode");
@@ -116,7 +116,7 @@ fn main() {
 
     // ─── flag — `--` separator ──────────────────────────────────────
 
-    let mut fs = flag::NewFlagSet();
+    let mut fs = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
     let _ = fs.String("x", "", "");
     let argv: slice<string> = goish::slice!([]string{
         "--", "--x=should-be-positional",
@@ -127,7 +127,7 @@ fn main() {
 
     // ─── flag — unknown flag errors ─────────────────────────────────
 
-    let mut fs = flag::NewFlagSet();
+    let mut fs = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
     let _ = fs.String("known", "", "");
     let argv: slice<string> = goish::slice!([]string{ "--unknown=42" });
     let err = fs.Parse(&argv);

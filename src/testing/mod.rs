@@ -421,6 +421,11 @@ pub fn Main(tests: &[(&'static str, TestFn)]) -> int {
     // after a fatal device error poisons the current CUDA context.
     if !crate::flag::Parsed() {
         let err = crate::flag::Parse();
+        // `CommandLine` is an ExitOnError set now, as Go's is, so a bad
+        // flag exits(2) inside `Parse` and this branch does not run.
+        // Kept because the exit code it returns is the same 2, so the
+        // observable behaviour is identical either way, and because a
+        // caller that swaps in a ContinueOnError set would need it.
         if err != crate::nil {
             return 2;
         }

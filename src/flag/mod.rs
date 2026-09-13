@@ -55,6 +55,7 @@
 
 mod flag;
 pub(crate) use flag::__defstr;
+pub use flag::{ErrorHandling, NewFlagSet};
 // `Arg`, `BoolFunc`, `Func` and `Uint64` were ported, anchored and
 // counted, and then left out of this list — so `flag::Arg(0)` did not
 // compile even though the function existed and worked. `port_coverage`
@@ -160,6 +161,17 @@ pub struct FlagSet {
     pub(crate) defs: Vec<FlagDef>,
     pub(crate) args: Vec<string>, // positional, after parse
     pub(crate) parsed: bool,
+    /// Go's `name`, which `defaultUsage` prints as "Usage of <name>:".
+    ///
+    /// `Option` because `CommandLine` is a `static` needing a const
+    /// initialiser and goish's `string` is an `Arc<[u8]>`, which has no
+    /// const empty. `None` and `Some("")` both mean Go's unnamed set.
+    pub(crate) name: Option<string>,
+    /// Go's `errorHandling`, which `Parse` acts on. Without it every
+    /// set behaved as ContinueOnError — including `CommandLine`, which
+    /// Go makes ExitOnError, so a bad flag left the program running on
+    /// a default value.
+    pub(crate) errorHandling: flag::ErrorHandling,
     /// Go's `output io.Writer`, nil meaning os.Stderr.
     pub(crate) output: Option<
         Arc<
@@ -170,18 +182,11 @@ pub struct FlagSet {
     >,
 }
 
-pub const fn NewFlagSet() -> FlagSet {
-    FlagSet {
-        defs: Vec::new(),
-        args: Vec::new(),
-        parsed: false,
-        output: None,
-    }
-}
-
 impl Default for FlagSet {
+    /// Go's zero `FlagSet` is ContinueOnError — the zero
+    /// `ErrorHandling` — with an empty name.
     fn default() -> Self {
-        NewFlagSet()
+        return flag::NewFlagSet(string::new(), flag::ErrorHandling::ContinueOnError);
     }
 }
 

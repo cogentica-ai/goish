@@ -71,7 +71,7 @@ fn main() {
 
 fn run() {
     let buf = Arc::new(goish::sync::Mutex::new(bytes::Buffer::new()));
-    let mut fs = flag::NewFlagSet();
+    let mut fs = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
     fs.SetOutput(buf.clone());
     let _ = fs.String("s", "def", "a string");
     let mut args = goish::make!([]string, 0);

@@ -111,11 +111,11 @@ fn main() {
     // 6. A Duration flag takes a unit suffix, as time.ParseDuration
     //    requires — "-test.timeout=30" would be an error, not 30ns.
     {
-        let mut fs = flag::NewFlagSet();
+        let mut fs = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
         let d = fs.Duration("d", goish::time::Duration(0), "");
         let ok1 = fs.Parse(&argv(&["-d=1500ms"])) == errors::nil && d.Get().0 == 1_500_000_000;
 
-        let mut fs2 = flag::NewFlagSet();
+        let mut fs2 = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
         let d2 = fs2.Duration("d", goish::time::Duration(0), "");
         let bad = fs2.Parse(&argv(&["-d=30"])) != errors::nil;
         let _ = d2;
@@ -131,7 +131,7 @@ fn main() {
     // 7. Uint and Int64 parse with base 0, so 0x/0b literals work the
     //    way Go's strconv.ParseInt(value, 0, 64) accepts them.
     {
-        let mut fs = flag::NewFlagSet();
+        let mut fs = flag::NewFlagSet("", flag::ErrorHandling::ContinueOnError);
         let u = fs.Uint("u", 0, "");
         let i = fs.Int64("i", 0, "");
         let err = fs.Parse(&argv(&["-u=42", "-i=0x10"]));
