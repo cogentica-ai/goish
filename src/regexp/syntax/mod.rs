@@ -24,6 +24,7 @@
 
 pub mod op_string;
 pub mod parse;
+pub mod perl_groups;
 pub mod prog;
 pub mod regexp;
 

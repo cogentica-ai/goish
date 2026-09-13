@@ -145,6 +145,434 @@ pub const Perl: Flags = Flags(ClassNL.0 | OneLine.0 | PerlX.0 | UnicodeGroups.0)
 /// POSIX syntax.
 pub const POSIX: Flags = Flags(0);
 
+// ─── the error type (stage 2b-ii) ────────────────────────────────────
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:15-20 Error
+/// Go: "An Error describes a failure to parse a regular expression and
+/// gives the offending expression."
+///
+/// `Expr` is the REMAINDER at the point of failure, not the whole
+/// pattern, which is why `Parse("a**")`'s error quotes `a**` but
+/// `Parse("(?P<>a)")`'s quotes only the offending name.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Error {
+    pub Code: ErrorCode,
+    pub Expr: crate::gostring::string,
+}
+
+impl crate::errors::ErrorTrait for Error {
+    // go: sdk 1.25.5 regexp/syntax/parse.go:22-24 Error.Error
+    fn Error(&self) -> crate::gostring::string {
+        return crate::gostring::string::from_static("error parsing regexp: ")
+            + self.Code.String()
+            + crate::gostring::string::from_static(": `")
+            + self.Expr.clone()
+            + crate::gostring::string::from_static("`");
+    }
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:26-27 ErrorCode
+/// Go: "An ErrorCode describes a failure to parse a regular
+/// expression." A `string` in Go, so the code IS the message.
+#[allow(non_camel_case_types)] // Go name
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ErrorCode(pub &'static str);
+
+impl ErrorCode {
+    // go: sdk 1.25.5 regexp/syntax/parse.go:51-53 ErrorCode.String
+    /// Go: `return string(e)` — the code and its message are the same
+    /// value.
+    pub fn String(&self) -> crate::gostring::string {
+        return crate::gostring::string::from_static(self.0);
+    }
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:31 ErrInternalError
+/// Unexpected error.
+pub const ErrInternalError: ErrorCode = ErrorCode("regexp/syntax: internal error");
+// go: none — goish-only placement: Go declares the fifteen parse errors
+//     below in the same const block as `ErrInternalError` (parse.go
+//     lines 29-49).
+/// `invalid character class`
+pub const ErrInvalidCharClass: ErrorCode = ErrorCode("invalid character class");
+/// `invalid character class range`
+pub const ErrInvalidCharRange: ErrorCode = ErrorCode("invalid character class range");
+/// `invalid escape sequence`
+pub const ErrInvalidEscape: ErrorCode = ErrorCode("invalid escape sequence");
+/// `invalid named capture`
+pub const ErrInvalidNamedCapture: ErrorCode = ErrorCode("invalid named capture");
+/// `invalid or unsupported Perl syntax`
+pub const ErrInvalidPerlOp: ErrorCode = ErrorCode("invalid or unsupported Perl syntax");
+/// `invalid nested repetition operator`
+pub const ErrInvalidRepeatOp: ErrorCode = ErrorCode("invalid nested repetition operator");
+/// `invalid repeat count`
+pub const ErrInvalidRepeatSize: ErrorCode = ErrorCode("invalid repeat count");
+/// `invalid UTF-8`
+pub const ErrInvalidUTF8: ErrorCode = ErrorCode("invalid UTF-8");
+/// `missing closing ]`
+pub const ErrMissingBracket: ErrorCode = ErrorCode("missing closing ]");
+/// `missing closing )`
+pub const ErrMissingParen: ErrorCode = ErrorCode("missing closing )");
+/// `missing argument to repetition operator`
+pub const ErrMissingRepeatArgument: ErrorCode =
+    ErrorCode("missing argument to repetition operator");
+/// `trailing backslash at end of expression`
+pub const ErrTrailingBackslash: ErrorCode =
+    ErrorCode("trailing backslash at end of expression");
+/// `unexpected )`
+pub const ErrUnexpectedParen: ErrorCode = ErrorCode("unexpected )");
+/// `expression nests too deeply`
+pub const ErrNestingDepth: ErrorCode = ErrorCode("expression nests too deeply");
+/// `expression too large`
+pub const ErrLarge: ErrorCode = ErrorCode("expression too large");
+
+// ─── the parser's limits ─────────────────────────────────────────────
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:94-94 maxHeight
+/// Go: "the maximum height of a regexp parse tree… large enough that no
+/// one will actually hit in real use but at the same time small enough
+/// that recursion on the Regexp tree will not hit the 1GB Go stack
+/// limit."
+pub(crate) const maxHeight: crate::int = 1000;
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:102-105 maxSize
+/// Go: "the maximum size of a compiled regexp in Insts… 128 MB is
+/// enough for a 3.3 million Inst structures, which roughly corresponds
+/// to a 3.3 MB regexp."
+pub(crate) const maxSize: i64 = (128 << 20) / instSize;
+// go: none — goish-only placement: parse.go line 104, same const block.
+/// Go: "byte, 2 uint32, slice is 5 64-bit words".
+pub(crate) const instSize: i64 = 5 * 8;
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:122-125 maxRunes
+/// Go: "the maximum number of runes allowed in a regexp tree counting
+/// the runes in all the nodes… each `\pL` adds 1292 runes."
+///
+/// Go's comment explains why a cache would not remove the problem:
+/// "consider something like `[\pL01234][\pL01235][\pL01236]…`. And
+/// because the Rune slice is exposed directly in the Regexp, there is
+/// not an opportunity to change the representation to allow partial
+/// sharing between different character classes. So the limit is the
+/// best we can do."
+pub(crate) const maxRunes: i64 = (128 << 20) / runeSize;
+// go: none — goish-only placement: parse.go line 124, same const block.
+/// Go: "rune is int32".
+pub(crate) const runeSize: i64 = 4;
+
+// ─── stateless helpers (stage 2b-ii) ─────────────────────────────────
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:1260-1270 isValidCaptureName
+/// Whether `(?P<name>…)` may use this name.
+///
+/// Go 1.22 widened this from "must look like a Go identifier" to
+/// "anything but `_` and alphanumerics is out" — note it does NOT
+/// reject a leading digit, so `(?P<1>a)` parses.
+pub(crate) fn isValidCaptureName(name: &crate::gostring::string) -> bool {
+    if name.Len() == 0 {
+        return false;
+    }
+    let rs = crate::runes(name.clone());
+    let n = crate::len(&rs);
+    let mut i: crate::int = 0;
+    while i < n {
+        let c = rs[i];
+        if c != rune('_') && !isalnum(c) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:2212-2214 isalnum
+/// ASCII alphanumeric. Not `unicode.IsLetter`: this is the capture-name
+/// rule, and it is deliberately ASCII.
+pub(crate) fn isalnum(c: rune) -> bool {
+    return rune('0') <= c && c <= rune('9')
+        || rune('A') <= c && c <= rune('Z')
+        || rune('a') <= c && c <= rune('z');
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:1302-1308 isCharClass
+/// Whether `re` matches exactly one rune from a set — the shape
+/// `mergeCharClass` can fold into another.
+pub(crate) fn isCharClass(re: &super::regexp::Regexp) -> bool {
+    use super::regexp::*;
+    return re.Op == OpLiteral && re.Rune.len() == 1
+        || re.Op == OpCharClass
+        || re.Op == OpAnyCharNotNL
+        || re.Op == OpAnyChar;
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:1310-1328 matchRune
+/// Whether the single-rune `re` matches `r`.
+///
+/// A LINEAR scan of the class, not the binary search `Inst.MatchRunePos`
+/// does: at parse time the class is not yet sorted.
+pub(crate) fn matchRune(re: &super::regexp::Regexp, r: rune) -> bool {
+    use super::regexp::*;
+    if re.Op == OpLiteral {
+        return re.Rune.len() == 1 && re.Rune[0] == r;
+    }
+    if re.Op == OpCharClass {
+        let mut i = 0usize;
+        while i < re.Rune.len() {
+            if re.Rune[i] <= r && r <= re.Rune[i + 1] {
+                return true;
+            }
+            i += 2;
+        }
+        return false;
+    }
+    if re.Op == OpAnyCharNotNL {
+        return r != rune('\n');
+    }
+    if re.Op == OpAnyChar {
+        return true;
+    }
+    return false;
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:1970-1976 appendLiteral
+/// Append one rune to a class, folded if the flags say so.
+fn appendLiteral(r: Vec<rune>, x: rune, flags: Flags) -> Vec<rune> {
+    if flags.__has(FoldCase) {
+        return appendFoldedRange(r, x, x);
+    }
+    return appendRange(r, x, x);
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:523-547 cleanAlt
+/// Normalise a character class that came out of an alternation.
+///
+/// The two recognitions matter for `String()` and for the compiler:
+/// a class covering every rune becomes `OpAnyChar`, and one covering
+/// everything but `\n` becomes `OpAnyCharNotNL`, so `[^\n]` and `.`
+/// are the same node.
+///
+/// Go's third branch reclaims storage when `cap - len > 100` by copying
+/// into `Rune0`. goish has no `Rune0` (see the note in regexp.rs) and a
+/// `Vec` that over-allocated is not a leak of the same shape, so there
+/// is nothing to reclaim.
+pub(crate) fn cleanAlt(re: &mut super::regexp::Regexp) {
+    use super::regexp::*;
+    if re.Op != OpCharClass {
+        return;
+    }
+    re.Rune = cleanClass(&mut re.Rune);
+    if re.Rune.len() == 2 && re.Rune[0] == 0 && re.Rune[1] == crate::unicode::MaxRune {
+        re.Rune = Vec::new();
+        re.Op = OpAnyChar;
+        return;
+    }
+    if re.Rune.len() == 4
+        && re.Rune[0] == 0
+        && re.Rune[1] == rune('\n') - 1
+        && re.Rune[2] == rune('\n') + 1
+        && re.Rune[3] == crate::unicode::MaxRune
+    {
+        re.Rune = Vec::new();
+        re.Op = OpAnyCharNotNL;
+        return;
+    }
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:1345-1373 mergeCharClass
+/// Fold `src` into `dst`, both being single-rune matchers.
+///
+/// The four arms are ordered by how much `dst` already matches: an
+/// `OpAnyChar` absorbs anything, an `OpAnyCharNotNL` widens only if
+/// `src` matches `\n`, and two literals become a class only when they
+/// actually differ — `a|a` stays one literal.
+pub(crate) fn mergeCharClass(
+    dst: &mut super::regexp::Regexp,
+    src: &super::regexp::Regexp,
+) {
+    use super::regexp::*;
+    if dst.Op == OpAnyChar {
+        // Go: "src doesn't add anything."
+        return;
+    }
+    if dst.Op == OpAnyCharNotNL {
+        // Go: "src might add \n"
+        if matchRune(src, rune('\n')) {
+            dst.Op = OpAnyChar;
+        }
+        return;
+    }
+    if dst.Op == OpCharClass {
+        // Go: "src is simpler, so either literal or char class"
+        if src.Op == OpLiteral {
+            let r = core::mem::take(&mut dst.Rune);
+            dst.Rune = appendLiteral(r, src.Rune[0], src.Flags);
+        } else {
+            let r = core::mem::take(&mut dst.Rune);
+            dst.Rune = appendClass(r, &src.Rune);
+        }
+        return;
+    }
+    if dst.Op == OpLiteral {
+        // Go: "both literal"
+        if src.Rune[0] == dst.Rune[0] && src.Flags == dst.Flags {
+            return;
+        }
+        dst.Op = OpCharClass;
+        let (d0, df) = (dst.Rune[0], dst.Flags);
+        dst.Rune = appendLiteral(Vec::new(), d0, df);
+        let r = core::mem::take(&mut dst.Rune);
+        dst.Rune = appendLiteral(r, src.Rune[0], src.Flags);
+    }
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:867-885 literalRegexp
+/// An `OpLiteral` node holding every rune of `s`.
+///
+/// Go's loop exists only to fill `Rune0` before falling back to a heap
+/// slice; goish has no `Rune0`, so the decode is direct.
+pub(crate) fn literalRegexp(s: &crate::gostring::string, flags: Flags) -> super::regexp::Regexp {
+    let mut re = super::regexp::Regexp::__new(super::regexp::OpLiteral);
+    re.Flags = flags;
+    let mut v: Vec<rune> = Vec::new();
+    let rs = crate::runes(s.clone());
+    let n = crate::len(&rs);
+    let mut i: crate::int = 0;
+    while i < n {
+        v.push(rs[i]);
+        i += 1;
+    }
+    re.Rune = v;
+    return re;
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:452-475 repeatIsValid
+/// Whether the counted repetitions in `re` multiply out to at most `n`.
+///
+/// Go's guard against `((a{100}){100}){100}`: each `OpRepeat` divides
+/// the budget by its own count before recursing, so the product is
+/// bounded without ever computing it.
+pub(crate) fn repeatIsValid(re: &super::regexp::Regexp, n: crate::int) -> bool {
+    use super::regexp::*;
+    let mut n = n;
+    if re.Op == OpRepeat {
+        let mut m = re.Max;
+        if m == 0 {
+            return true;
+        }
+        if m < 0 {
+            m = re.Min;
+        }
+        if m > n {
+            return false;
+        }
+        if m > 0 {
+            n /= m;
+        }
+    }
+    for sub in re.Sub.iter() {
+        if !repeatIsValid(sub, n) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:2193-2202 checkUTF8
+/// Refuse a pattern that is not valid UTF-8.
+///
+/// `Expr` on the error is the REMAINDER from the bad byte on, not the
+/// whole pattern.
+pub(crate) fn checkUTF8(s: &crate::gostring::string) -> crate::errors::error {
+    let b = s.as_bytes();
+    let mut i = 0usize;
+    while i < b.len() {
+        let (r, size) = crate::unicode::utf8::DecodeRune(&b[i..]);
+        if r == crate::unicode::utf8::RuneError && i64::from(size) == 1 {
+            return crate::errors::Wrap(Error {
+                Code: ErrInvalidUTF8,
+                Expr: crate::gostring::string::from_bytes(&b[i..]),
+            });
+        }
+        i += i64::from(size) as usize;
+    }
+    return crate::errors::nil;
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:1575-1578 charGroup
+/// Go: `type charGroup struct { sign int; class []rune }` — one named
+/// class and whether the name was the negated spelling.
+#[allow(non_camel_case_types)] // Go name
+#[derive(Clone, Copy)]
+pub(crate) struct charGroup {
+    pub sign: crate::int,
+    pub class: &'static [rune],
+}
+
+// ─── the three synthetic tables (stage 2b-ii) ────────────────────────
+
+// go: none — goish-only: Go writes these as `&unicode.RangeTable{…}`
+//     composite literals (parse.go lines 1638-1656). A Rust `static`
+//     cannot hold a reference to a temporary, so each table's two
+//     halves are named first.
+/// `anyTable`'s 16-bit half.
+static anyTableR16: [crate::unicode::Range16; 1] = [crate::unicode::Range16 {
+    Lo: 0,
+    Hi: 0xffff,
+    Stride: 1,
+}];
+// go: none — goish-only: see `anyTableR16`.
+/// `anyTable`'s 32-bit half.
+static anyTableR32: [crate::unicode::Range32; 1] = [crate::unicode::Range32 {
+    Lo: 1 << 16,
+    Hi: 0x10FFFF,
+    Stride: 1,
+}];
+// go: none — goish-only: see `anyTableR16`.
+/// The 0x00-0x7F half `asciiTable` and `asciiFoldTable` share the shape
+/// of.
+static asciiTableR16: [crate::unicode::Range16; 1] = [crate::unicode::Range16 {
+    Lo: 0,
+    Hi: 0x7F,
+    Stride: 1,
+}];
+// go: none — goish-only: see `anyTableR16`.
+/// `asciiFoldTable`'s three ranges.
+static asciiFoldTableR16: [crate::unicode::Range16; 3] = [
+    crate::unicode::Range16 { Lo: 0, Hi: 0x7F, Stride: 1 },
+    // Go: Old English long s (ſ), folds to S/s.
+    crate::unicode::Range16 { Lo: 0x017F, Hi: 0x017F, Stride: 1 },
+    // Go: Kelvin K, folds to K/k.
+    crate::unicode::Range16 { Lo: 0x212A, Hi: 0x212A, Stride: 1 },
+];
+// go: none — goish-only: see `anyTableR16`.
+/// The empty 32-bit half the two ASCII tables need.
+static noR32: [crate::unicode::Range32; 0] = [];
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:1638-1641 anyTable
+/// Every rune, as a `RangeTable` — what `\p{Any}` resolves to.
+pub(crate) static anyTable: crate::unicode::RangeTable = crate::unicode::RangeTable {
+    R16: &anyTableR16,
+    R32: &anyTableR32,
+    LatinOffset: 0,
+};
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:1643-1645 asciiTable
+/// `\p{ASCII}`.
+pub(crate) static asciiTable: crate::unicode::RangeTable = crate::unicode::RangeTable {
+    R16: &asciiTableR16,
+    R32: &noR32,
+    LatinOffset: 0,
+};
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:1647-1655 asciiFoldTable
+/// `\p{ASCII}` under `(?i)`: ASCII plus the two non-ASCII runes that
+/// fold INTO it. Getting this wrong makes `(?i)\p{ASCII}` fail to match
+/// a Kelvin sign that `(?i)K` does match.
+pub(crate) static asciiFoldTable: crate::unicode::RangeTable = crate::unicode::RangeTable {
+    R16: &asciiFoldTableR16,
+    R32: &noR32,
+    LatinOffset: 0,
+};
+
 // ─── the character-class layer (stage 2b-i) ──────────────────────────
 //
 // Everything below operates on a "class": a flat `Vec<rune>` of
@@ -655,4 +1083,106 @@ fn __u(r: &[rune]) -> Vec<rune> {
 /// `Vec<rune>` to the `slice<rune>` a caller outside the crate sees.
 fn __v(r: Vec<rune>) -> crate::goslice::slice<rune> {
     return crate::goslice::slice::__from_vec(r);
+}
+
+// go: none — goish-only: test hook for `isValidCaptureName`.
+/// See [`isValidCaptureName`].
+#[doc(hidden)]
+pub fn __isValidCaptureName(name: &crate::gostring::string) -> bool {
+    return isValidCaptureName(name);
+}
+
+// go: none — goish-only: test hook for `isalnum`.
+/// See [`isalnum`].
+#[doc(hidden)]
+pub fn __isalnum(c: rune) -> bool {
+    return isalnum(c);
+}
+
+// go: none — goish-only: test hook for `isCharClass`.
+/// See [`isCharClass`].
+#[doc(hidden)]
+pub fn __isCharClass(re: &super::regexp::Regexp) -> bool {
+    return isCharClass(re);
+}
+
+// go: none — goish-only: test hook for `matchRune`.
+/// See [`matchRune`].
+#[doc(hidden)]
+pub fn __matchRune(re: &super::regexp::Regexp, r: rune) -> bool {
+    return matchRune(re, r);
+}
+
+// go: none — goish-only: test hook for `appendLiteral`.
+/// See [`appendLiteral`].
+#[doc(hidden)]
+pub fn __appendLiteral(r: &[rune], x: rune, flags: Flags) -> crate::goslice::slice<rune> {
+    return __v(appendLiteral(__u(r), x, flags));
+}
+
+// go: none — goish-only: test hook for `cleanAlt`.
+/// See [`cleanAlt`].
+#[doc(hidden)]
+pub fn __cleanAlt(re: &mut super::regexp::Regexp) {
+    cleanAlt(re);
+}
+
+// go: none — goish-only: test hook for `mergeCharClass`.
+/// See [`mergeCharClass`].
+#[doc(hidden)]
+pub fn __mergeCharClass(dst: &mut super::regexp::Regexp, src: &super::regexp::Regexp) {
+    mergeCharClass(dst, src);
+}
+
+// go: none — goish-only: test hook for `literalRegexp`.
+/// See [`literalRegexp`].
+#[doc(hidden)]
+pub fn __literalRegexp(s: &crate::gostring::string, flags: Flags) -> super::regexp::Regexp {
+    return literalRegexp(s, flags);
+}
+
+// go: none — goish-only: test hook for `repeatIsValid`.
+/// See [`repeatIsValid`].
+#[doc(hidden)]
+pub fn __repeatIsValid(re: &super::regexp::Regexp, n: crate::int) -> bool {
+    return repeatIsValid(re, n);
+}
+
+// go: none — goish-only: test hook for `checkUTF8`.
+/// See [`checkUTF8`].
+#[doc(hidden)]
+pub fn __checkUTF8(s: &crate::gostring::string) -> crate::errors::error {
+    return checkUTF8(s);
+}
+
+// go: none — goish-only: test hook for `perl_groups::perlGroup`.
+/// The group's sign and class, or `None` if the name is not one.
+#[doc(hidden)]
+pub fn __perlGroup(name: &crate::gostring::string) -> Option<(crate::int, crate::goslice::slice<rune>)> {
+    return super::perl_groups::perlGroup(name).map(|g| (g.sign, __v(__u(g.class))));
+}
+
+// go: none — goish-only: test hook for `perl_groups::posixGroup`.
+/// See [`__perlGroup`].
+#[doc(hidden)]
+pub fn __posixGroup(name: &crate::gostring::string) -> Option<(crate::int, crate::goslice::slice<rune>)> {
+    return super::perl_groups::posixGroup(name).map(|g| (g.sign, __v(__u(g.class))));
+}
+
+// go: none — goish-only: test hooks for the four parser limits.
+/// `(maxHeight, maxSize, instSize, maxRunes, runeSize)`.
+#[doc(hidden)]
+pub fn __limits() -> (crate::int, i64, i64, i64, i64) {
+    return (maxHeight, maxSize, instSize, maxRunes, runeSize);
+}
+
+// go: none — goish-only: test hooks for the three synthetic tables.
+/// `(anyTable, asciiTable, asciiFoldTable)`.
+#[doc(hidden)]
+pub fn __tables() -> (
+    &'static crate::unicode::RangeTable,
+    &'static crate::unicode::RangeTable,
+    &'static crate::unicode::RangeTable,
+) {
+    return (&anyTable, &asciiTable, &asciiFoldTable);
 }

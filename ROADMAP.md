@@ -3381,7 +3381,8 @@ The remaining stages, and the reason for this order:
 |---|---|---|---|
 | 2a | `syntax/regexp.rs` (the AST), `syntax/op_string.rs` | ~520 | **done** |
 | 2b-i | `syntax/parse.rs` — the character-class layer | ~400 | **done** |
-| 2b-ii | `syntax/parse.rs` — `Parse` and the `parser` state machine | ~1,800 | next |
+| 2b-ii | `syntax/parse.rs` — the error type, limits, stateless helpers, group tables | ~450 | **done** |
+| 2b-iii | `syntax/parse.rs` — `Parse` and the `parser` state machine | ~1,350 | next |
 | 3 | `syntax/simplify.rs`, `syntax/compile.rs` | ~450 | |
 | 4 | `regexp/exec.rs` (the NFA) and the swap | ~1,900 | |
 
@@ -3462,6 +3463,41 @@ That is the counterpart to the lesson below, and worth stating as its
 own rule: a perturbation that comes back green is EITHER a thin table
 OR a wrong belief about the code, and the two are told apart by
 measuring, not by adding rows.
+
+**STAGE 2b-ii LANDED 2026-09-13.** Everything the parser is BUILT FROM
+that does not need the parser to exercise: the `Error`/`ErrorCode` pair
+it returns and its sixteen codes, the four limits it enforces
+(`maxHeight` `maxSize` `maxRunes` and their unit sizes), the seven pure
+functions it calls on nodes — `isValidCaptureName`, `isalnum`,
+`isCharClass`, `matchRune`, `appendLiteral`, `cleanAlt`,
+`mergeCharClass`, `literalRegexp`, `repeatIsValid`, `checkUTF8` — the
+`\d`/`[:alpha:]` group tables from perl_groups.go, and the three
+synthetic `RangeTable`s. `examples/regexp_helpers_ref_smoke.rs` pins
+251 rows.
+
+Worth knowing from the rows:
+
+  * `Error.Expr` is the REMAINDER at the point of failure, not the
+    whole pattern: `checkUTF8("a\xffb")` quotes `\xffb`.
+  * `cleanAlt` turns a class covering every rune into `OpAnyChar` and
+    one covering everything but `\n` into `OpAnyCharNotNL`, so `[^\n]`
+    and `.` become the same node.
+  * `mergeCharClass` of two literals differing only in FLAGS still
+    makes a class — `a` and `(?i)a` are not the same literal.
+  * `asciiFoldTable` is ASCII plus the long s and the Kelvin sign, the
+    two non-ASCII runes that fold into it. Without them
+    `(?i)\p{ASCII}` would fail to match a K that `(?i)K` matches.
+
+`perlGroup` and `posixGroup` are linear scans where Go has map
+literals. Six and twenty-eight entries, reached once per `\d` in a
+pattern; the lookup is not where either spends its time.
+
+**A padding bug the reference caught, worth stating once for every
+future smoke:** Go's `fmt` measures a string's `%-8s` width in RUNES,
+not bytes — "For strings, byte slices and byte arrays … width is
+measured in runes." Padding by byte length puts `"é"` one space short.
+Six rows red, and every earlier smoke got away with it only because
+every input was ASCII.
 
 Stage 2a repeated the lesson twice, which is why it is written down
 here rather than left in a commit message. `sub.Op > OpCapture` → `>=`
