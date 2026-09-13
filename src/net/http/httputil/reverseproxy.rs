@@ -272,11 +272,11 @@ impl super::super::server::Handler for reverseProxyHandler {
             w.Header().Add(string("Trailer"), joined);
         }
         let r_inner = resp.Header.__inner();
-        for (k, vs) in r_inner.__iter() {
+        r_inner.__for_each(|k, vs| {
             for i in 0..vs.Len() {
                 w.Header().Add(k.clone(), vs[i].clone());
             }
-        }
+        });
 
         // Go: rw.WriteHeader(res.StatusCode)
         w.WriteHeader(resp.StatusCode);

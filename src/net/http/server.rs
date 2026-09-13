@@ -981,11 +981,15 @@ impl timeoutWriter {
         let g = self.state.lock();
         let hdr = self.header.snapshot();
         let dst = w.Header();
-        for (k, vv) in hdr.__inner().__iter() {
+        // Borrowed walk, not owned: this runs on every response and
+        // only reads. Owned iteration would clone each value slice, and
+        // `slice::clone` is a deep copy until #26 (see gomap's
+        // `__for_each`).
+        hdr.__inner().__for_each(|k, vv| {
             for i in 0..vv.Len() {
                 dst.Add(k.clone(), vv[i].clone());
             }
-        }
+        });
         let code = if g.wrote_header {
             g.code
         } else {
@@ -3670,19 +3674,23 @@ impl Server {
             // request's shape, which is the shape of a smuggled
             // request.
             {
-                let mut bad: Option<&'static str> = None;
-                'outer: for (k, vals) in req.Header.__inner().__iter() {
-                    if !super::http::isToken(&k) {
-                        bad = Some("invalid header name");
-                        break 'outer;
-                    }
-                    for j in 0..vals.Len() {
-                        if !super::http::ValidHeaderFieldValue(&vals[j]) {
-                            bad = Some("invalid header value");
-                            break 'outer;
+                // Borrowed walk with an early exit — the shape a plain
+                // closure cannot express, which is why `__try_for_each`
+                // exists. Owned iteration would deep-copy every header
+                // value slice on every request until #26.
+                let bad: Option<&'static str> =
+                    req.Header.__inner().__try_for_each(|k, vals| {
+                        use core::ops::ControlFlow;
+                        if !super::http::isToken(k) {
+                            return ControlFlow::Break("invalid header name");
                         }
-                    }
-                }
+                        for j in 0..vals.Len() {
+                            if !super::http::ValidHeaderFieldValue(&vals[j]) {
+                                return ControlFlow::Break("invalid header value");
+                            }
+                        }
+                        return ControlFlow::Continue(());
+                    });
                 if let Some(text) = bad {
                     let _ = crate::io::Writer::Write(
                         &mut conn,

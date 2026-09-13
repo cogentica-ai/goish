@@ -740,14 +740,16 @@ pub fn rangesMIMESize(ranges: &slice<httpRange>, contentType: string, contentSiz
         while i < n {
             let mh = ranges[i].mimeHeader(contentType.clone(), contentSize);
             let mut h = super::header::Header::new();
-            for (k, vs) in mh.__iter() {
+            // Borrowed walk: reads only, and owned iteration would deep-
+            // copy each value slice until #26 (see gomap's `__for_each`).
+            mh.__for_each(|k, vs| {
                 let vn = len(vs);
                 let mut j: int = 0;
                 while j < vn {
                     h.Add(k.clone(), vs[j].clone());
                     j += 1;
                 }
-            }
+            });
             let _ = mw.WritePart(h, slice::new());
             encSize += ranges[i].length;
             i += 1;
@@ -1458,14 +1460,16 @@ pub fn serveContent<C: crate::io::Reader + crate::io::Seeker>(
             }
             let mh = ra.mimeHeader(ctype.clone(), size);
             let mut h = super::header::Header::new();
-            for (k, vs) in mh.__iter() {
+            // Borrowed walk: reads only, and owned iteration would deep-
+            // copy each value slice until #26 (see gomap's `__for_each`).
+            mh.__for_each(|k, vs| {
                 let vn = len(vs);
                 let mut j: int = 0;
                 while j < vn {
                     h.Add(k.clone(), vs[j].clone());
                     j += 1;
                 }
-            }
+            });
             let _ = mw.WritePart(h, part.slice(0, rn));
         }
         let _ = mw.Close();
