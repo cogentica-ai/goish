@@ -3377,11 +3377,12 @@ engines — the drift §0.B exists to warn about.
 
 The remaining stages, and the reason for this order:
 
-| stage | files | Go lines |
-|---|---|---|
-| 2 | `syntax/regexp.rs` (the AST), `syntax/parse.rs` (the parser) | ~2,700 |
-| 3 | `syntax/simplify.rs`, `syntax/compile.rs` | ~450 |
-| 4 | `regexp/exec.rs` (the NFA) and the swap | ~1,900 |
+| stage | files | Go lines | state |
+|---|---|---|---|
+| 2a | `syntax/regexp.rs` (the AST), `syntax/op_string.rs` | ~520 | **done** |
+| 2b | `syntax/parse.rs` (the parser) | ~2,200 | next |
+| 3 | `syntax/simplify.rs`, `syntax/compile.rs` | ~450 | |
+| 4 | `regexp/exec.rs` (the NFA) and the swap | ~1,900 | |
 
 `parse.rs` opens with GOISH018 and GOISH021 lines naming all 100 of
 parse.go's other declarations, in the shape `root_openat.rs`
@@ -3389,12 +3390,50 @@ established: **unported, NOT waived**. That list is stage 2's
 checklist, and it shrinks as the port advances rather than sitting
 there as a permanent excuse.
 
+**STAGE 2a LANDED 2026-09-13.** The `Regexp` AST, `Op`, `Equal`,
+`MaxCap`, `CapNames` and — the hard one — `String()`.
+`examples/regexp_ast_ref_smoke.rs` pins 500 rows.
+
+`String()` is harder than it looks, and worth the space: Go does not
+print the pattern it was given, it prints a CANONICAL form, and
+reaching one takes a whole flag-placement pass. `calcFlags` walks the
+tree computing which of `(?i` `(?m` `(?s` must and cannot be active
+around each node, finds the conflicts, and inserts spans; `writeRegexp`
+renders them. So `(?i)a(?-i)b` comes back as `(?i:a)b`, and
+`(?i)[a-z]` as `[A-Za-zſK]` — the fold compiled into the class, the two
+extra runes being the long s and the Kelvin sign.
+
+**The trees in the smoke are GENERATED, not written.** The reference
+dumps each parsed tree as an s-expression and a script turns that into
+the Rust constructors, because goish has no parser yet and hand-writing
+91 trees is how this port has already produced one false divergence.
+
+Two structural notes:
+
+  * `Sub` is `Vec<Arc<Regexp>>` and the print-flags map is keyed on the
+    Arc's address, because Go's `map[*Regexp]printFlags` is keyed on
+    POINTER identity — including the aliasing case, where a node the
+    parser reuses is one pointer in Go and one Arc here.
+  * `Sub0`/`Rune0` are not ported and carry a GOISH019 suppression
+    saying so. They are Go's inline storage for the short cases and
+    hold nothing `Sub` and `Rune` do not; a Vec cannot borrow from its
+    own struct, so the optimisation does not translate.
+
 One thing the reference already earned. The first probe table used
 sparse values and a REAL binary-search bug — `c <= r` written as
 `c < r`, which differs only when the subject equals a range START —
 turned exactly one row red. Reprobing every range start and end, plus
 one either side, took that to thirteen. A perturbation that barely
 fails is a table that barely tests.
+
+Stage 2a repeated the lesson twice, which is why it is written down
+here rather than left in a commit message. `sub.Op > OpCapture` → `>=`
+(the precedence rule) started at 2 red and reached 11 once every Op
+either side of that boundary was quantified in the table.
+`must&subCant || subMust&cant` with the second half deleted started at
+2 and reached 7 once the table had patterns whose CANT comes before
+their MUST — `k(?i)k`, not only `(?i)k(?-i)k`. Both times the first
+number was the table's fault, not the code's.
 
 ## 2d. Three recursions stand between the JSON limit and Go's
 

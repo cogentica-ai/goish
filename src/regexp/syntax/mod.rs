@@ -17,12 +17,15 @@
 //
 //   stage 1 (here)  prog.rs — the Prog/Inst representation,
 //                   parse.rs — the Flags bitset it reads
-//   stage 2         regexp.rs, parse.rs — the AST and the parser
+//   stage 2a (here) regexp.rs, op_string.rs — the AST and Op.String
+//   stage 2b        parse.rs — the parser (and Flags moves back to it)
 //   stage 3         simplify.rs, compile.rs — AST -> Prog
 //   stage 4         regexp/exec.rs — the NFA, and the swap
 
+pub mod op_string;
 pub mod parse;
 pub mod prog;
+pub mod regexp;
 
 pub use parse::{
     ClassNL, DotNL, Flags, FoldCase, Literal, MatchNL, NonGreedy, OneLine, POSIX, Perl, PerlX,
@@ -33,4 +36,9 @@ pub use prog::{
     EmptyOpContext, EmptyWordBoundary, Inst, InstAlt, InstAltMatch, InstCapture, InstEmptyWidth,
     InstFail, InstMatch, InstNop, InstOp, InstRune, InstRune1, InstRuneAny, InstRuneAnyNotNL,
     IsWordChar, Prog,
+};
+pub use regexp::{
+    Op, OpAlternate, OpAnyChar, OpAnyCharNotNL, OpBeginLine, OpBeginText, OpCapture, OpCharClass,
+    OpConcat, OpEmptyMatch, OpEndLine, OpEndText, OpLiteral, OpNoMatch, OpNoWordBoundary, OpPlus,
+    OpQuest, OpRepeat, OpStar, OpWordBoundary, Regexp,
 };
