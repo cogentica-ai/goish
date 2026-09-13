@@ -3308,6 +3308,54 @@ tree. Rust's Drop glue recurses too, but its frames are small — 2000,
 `jsontext` keeps Go's 10000 and is unaffected; its decoder was already
 iterative.
 
+## 2e-i. Ported, anchored, correct — and NOT REACHABLE (2026-09-13)
+
+A sharper variant of §2e below, found by sweeping
+`#![allow(dead_code)]` off all 34 files that carried it.
+
+`flag::Arg`, `flag::Func`, `flag::BoolFunc` and `flag::Uint64` are
+ported, anchored to their Go lines, counted by `port_coverage` — and
+were missing from `flag/mod.rs`'s `pub use` list. `flag::Arg(0)` did
+not compile. Proven by writing the call, not inferred from the export
+list.
+
+Two things make this worth its own entry:
+
+`port_coverage` cannot see it. It matches a Go `func` against an `fn`
+of the same name ANYWHERE in the package directory, so a declaration
+that no user can reach counts exactly like one they can. The tier
+reports 100% and the API is not there.
+
+AND THE SMOKES WERE GREEN. `flag_func_ref_smoke` and
+`flag_uint64_ref_smoke` exist and pass — they call `fs.Func(…)`,
+`fs.Uint64(…)`, `fs.Arg(0)`, the METHODS on a FlagSet. The feature was
+tested; the package-level surface never was. A smoke proves the unit
+works, not that anything can reach it.
+
+`flag_exported_api_smoke` now calls all four through `goish::flag::`,
+so the failure mode is a compile error rather than a silent absence.
+
+WHAT THE SWEEP COST AND RETURNED, since the same trick paid much better
+one commit earlier: 34 files, 57 dead items, and only 6 were fields or
+constants — the shape that has hidden real defects before. Of those:
+`TLS_FALLBACK_SCSV` in handshake_messages.rs was a DUPLICATE of the one
+in cipher_suites.rs that both server handshakes actually read (a change
+to one would silently not reach the check); `Parser::depth` in
+encoding/json was vestigial, and its doc still claimed "this parser
+recurses, so the same bound is … the only thing standing between a
+document and the stack" when the parser is an explicit stack and the
+field was never read — a field that does nothing, described as the only
+thing preventing a stack overflow, is how a later reader deletes the
+check that works. `maxInt64` and `STACK_SIZE` are deliberate and
+documented as such (the second is `#[deprecated]`), and the
+`omithttp2.rs` cluster is the HTTP/2-omitted stub by design.
+
+So: no security defect this time. `allow(dead_code)` is mostly
+load-bearing in a port — Go declarations carried for symmetry with
+consumers not yet written — which is the opposite of
+`allow(unused_variables)`, where two of three files sat on a real bug.
+Worth knowing before the next sweep.
+
 ## 2e. Ported, anchored, correct — and never called
 
 The defect shape every tier passes. `anchor_check` sees a well-formed

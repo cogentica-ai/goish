@@ -1505,7 +1505,7 @@ fn unexpected_end() -> error {
 }
 
 fn parse_to_value(data: &[byte]) -> (Value, error) {
-    let mut p = Parser { data, pos: 0, depth: 0 };
+    let mut p = Parser { data, pos: 0 };
     p.skip_ws();
     let (v, err) = p.parse_value();
     if err != nil {
@@ -1578,20 +1578,6 @@ const maxNestingDepth: usize = 2000;
 struct Parser<'a> {
     data: &'a [byte],
     pos: usize,
-    /// Nesting depth of the composite currently being parsed.
-    ///
-    /// Go: encoding/json/scanner.go:148 —
-    ///   `// This limits the max nesting depth to prevent stack
-    ///    overflow. This is permitted by RFC 7159 section 9.
-    ///    const maxNestingDepth = 10000`
-    ///
-    /// Go's v1 scanner keeps an explicit parseState stack and checks
-    /// its length; this parser recurses, so the same bound is not an
-    /// optimisation but the only thing standing between a document and
-    /// the stack. Measured without it: depth 10001 parsed where Go
-    /// refuses, and 500000 printed "goish: runtime error: stack
-    /// overflow".
-    depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -1660,9 +1646,22 @@ impl<'a> Parser<'a> {
             self.skip_ws();
             match self.peek() {
                 Some(b'[') | Some(b'{') => {
-                    // Go: scanner.go pushes onto parseState and refuses
-                    // past maxNestingDepth. The stack height IS the
-                    // depth, so the check is the same one.
+                    // Go: scanner.go:148 — "This limits the max nesting
+                    // depth to prevent stack overflow. This is permitted
+                    // by RFC 7159 section 9." Go pushes onto parseState
+                    // and refuses past maxNestingDepth; the stack height
+                    // here IS the depth, so this is the same check.
+                    //
+                    // This used to live in a `Parser::depth` field whose
+                    // doc said "this parser recurses, so the same bound
+                    // is … the only thing standing between a document
+                    // and the stack". Both halves went stale when the
+                    // parser became an explicit stack: it does not
+                    // recurse, and the field was never read — the bound
+                    // was always `stack.len()`. A field that does
+                    // nothing, described as the only thing preventing a
+                    // stack overflow, is how a later reader deletes the
+                    // check that actually works.
                     if stack.len() >= maxNestingDepth {
                         let b = self.peek().unwrap_or(b'[');
                         return (Value::Null, syntax_err(b, "exceeded max depth"));

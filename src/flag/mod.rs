@@ -55,9 +55,17 @@
 
 mod flag;
 pub(crate) use flag::__defstr;
+// `Arg`, `BoolFunc`, `Func` and `Uint64` were ported, anchored and
+// counted, and then left out of this list — so `flag::Arg(0)` did not
+// compile even though the function existed and worked. `port_coverage`
+// counts a declaration by name and cannot see reachability, which is
+// exactly the gap ROADMAP §2e is about. Found by removing this file's
+// `#![allow(dead_code)]`: a `pub fn` that nothing can reach is dead
+// code, and the suppression was the only reason the compiler stayed
+// quiet about it.
 pub use flag::{
-    Bool, CommandLine, Duration, ErrHelp, Flag, Int, Int64, Parse, Parsed, Set, String, Uint,
-    UnquoteUsage, Value,
+    Arg, Bool, BoolFunc, CommandLine, Duration, ErrHelp, Flag, Func, Int, Int64, Parse, Parsed,
+    Set, String, Uint, Uint64, UnquoteUsage, Value,
 };
 
 extern crate alloc;

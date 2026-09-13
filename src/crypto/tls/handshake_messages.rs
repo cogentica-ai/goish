@@ -75,7 +75,10 @@ pub(crate) const extensionEncryptedClientHello: u16 = 0xfe0d;
 
 /// TLS signaling cipher suite values (common.go:136).
 pub(crate) const scsvRenegotiation: u16 = 0x00ff;
-pub(crate) const TLS_FALLBACK_SCSV: u16 = 0x5600;
+// TLS_FALLBACK_SCSV lives in `cipher_suites.rs`, which is where both
+// server handshakes read it from. The duplicate that used to sit here
+// was never read, so a change to one would silently not reach the
+// check.
 
 /// TLS compression types (common.go:105).
 pub(crate) const compressionNone: byte = 0;

@@ -2104,6 +2104,10 @@ name = "flag_failf_ref_smoke"
 path = "examples/flag_failf_ref_smoke.rs"
 
 [[example]]
+name = "flag_exported_api_smoke"
+path = "examples/flag_exported_api_smoke.rs"
+
+[[example]]
 name = "flag_usage_ref_smoke"
 path = "examples/flag_usage_ref_smoke.rs"
 
