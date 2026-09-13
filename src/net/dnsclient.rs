@@ -93,11 +93,13 @@ macro_rules! dns_debug {
 
 extern crate alloc;
 use alloc::string::String;
+use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
 use super::dnsconfig::{dns_read_config, DnsConfig};
 use super::dnsmessage as dns;
+use crate::context;
 use crate::errors::{self, error};
 use crate::gostring::string;
 use crate::syscall;
@@ -287,6 +289,126 @@ fn parse_server_addr(server: &str) -> Option<([u8; 4], u16)> {
     Some((octets, port))
 }
 
+// go: none — goish-only: the error a dead context produces.
+/// Go's resolver reports a context that died during the query as the
+/// DIAL failing, not as a bare "context canceled" — measured against
+/// Go 1.25.5:
+///
+///   cancelled ctx     `dial udp <ns>:53: operation was canceled`
+///                     IsTimeout=false IsTemporary=true
+///   expired deadline  `dial udp <ns>:53: i/o timeout`
+///                     IsTimeout=true  IsTemporary=true
+///
+/// `<ns>` is filled in by the caller that knows the server, so this
+/// carries only the suffix; `lookup.rs` wraps the result in a
+/// `DNSError` with `Name` and `Server` and the flags below.
+fn ctx_query_error(why: &'static str, is_timeout: bool) -> error {
+    return errors::Wrap(crate::net::net::DNSError {
+        UnwrapErr: errors::nil,
+        Err: string::from_static(why),
+        Name: string::new(),
+        Server: string::new(),
+        IsTimeout: is_timeout,
+        IsTemporary: true,
+        IsNotFound: false,
+    });
+}
+
+// go: none — goish-only: Go carries a `context.Context` into the
+//     resolver's dialer, so cancellation and deadlines fall out of the
+//     dial. goish's dnsclient talks to the socket directly, so the two
+//     things Go gets from the context — when to stop, and why — have to
+//     be carried explicitly. See ROADMAP §2b.
+/// What bounds one DNS query: the caller's context, plus the absolute
+/// deadline derived from it once.
+///
+/// `Deadline()` is read at construction rather than per attempt because
+/// it cannot move, and re-reading it through the trait object on every
+/// loop iteration would be the only cost of the sliced wait below.
+#[derive(Clone)]
+pub struct QueryBound {
+    ctx: Arc<dyn context::Context>,
+    deadline: Option<crate::time::Time>,
+}
+
+impl QueryBound {
+    // go: none — goish-only: see `QueryBound`.
+    /// The bound imposed by `ctx`.
+    pub fn of(ctx: &Arc<dyn context::Context>) -> QueryBound {
+        return QueryBound {
+            ctx: ctx.clone(),
+            deadline: ctx.Deadline(),
+        };
+    }
+
+    // go: none — goish-only: see `QueryBound`.
+    /// No bound at all — `context.Background()`. Every pre-context
+    /// entry point delegates through this, so the path taken by every
+    /// caller that does not pass a context is unchanged.
+    pub fn none() -> QueryBound {
+        return QueryBound::of(&context::Background());
+    }
+
+    // go: none — goish-only: see `QueryBound`.
+    /// Milliseconds left before the deadline, or `None` when unbounded.
+    /// Zero means the deadline has passed.
+    fn remaining_ms(&self) -> Option<i64> {
+        let dl = match self.deadline {
+            Some(d) => d,
+            None => return None,
+        };
+        let left = dl.Sub(crate::time::Now()).Milliseconds();
+        if left < 0 {
+            return Some(0);
+        }
+        return Some(left);
+    }
+
+    // go: none — goish-only: see `QueryBound`.
+    /// Non-nil once the caller has given up. Shaped the way Go shapes
+    /// it — measured, `(&net.Resolver{PreferGo:true}).LookupHost` with
+    /// a dead context reports `dial udp <ns>:53: operation was
+    /// canceled` (IsTimeout false) or `... : i/o timeout` (IsTimeout
+    /// true), never a bare "context canceled".
+    ///
+    /// The caller turns this into the `DNSError`; here it is only the
+    /// suffix and which of the two it is.
+    fn expired(&self) -> Option<(&'static str, bool)> {
+        if self.remaining_ms() == Some(0) {
+            return Some(("i/o timeout", true));
+        }
+        let e = self.ctx.Err();
+        if e != errors::nil {
+            if errors::Is(e.clone(), context::DeadlineExceeded.clone()) {
+                return Some(("i/o timeout", true));
+            }
+            return Some(("operation was canceled", false));
+        }
+        return None;
+    }
+
+    // go: none — goish-only: see `QueryBound`.
+    /// The `SO_RCVTIMEO` to use for one wait, in (secs, usecs).
+    ///
+    /// SLICED, and that is the point: a cancel that arrives while
+    /// `recvfrom` is blocked is invisible until the socket wakes, so
+    /// the socket must wake often enough to look. 100 ms bounds how
+    /// late a cancellation is noticed without making an idle lookup
+    /// spin — a 5-second query wakes 50 times, which is nothing next to
+    /// the syscall it is already blocked in.
+    fn slice_timeout(&self, budget_ms: i64) -> (i64, i64) {
+        const SLICE_MS: i64 = 100;
+        let mut ms = budget_ms.min(SLICE_MS);
+        if let Some(left) = self.remaining_ms() {
+            ms = ms.min(left);
+        }
+        if ms <= 0 {
+            ms = 1;
+        }
+        return (ms / 1000, (ms % 1000) * 1000);
+    }
+}
+
 /// Perform a UDP DNS packet round trip.
 /// Returns (Parser, Header, error).
 fn dns_packet_round_trip(
@@ -295,6 +417,7 @@ fn dns_packet_round_trip(
     query: &dns::Question,
     udp_req: &[u8],
     timeout_secs: u64,
+    bound: &QueryBound,
 ) -> (dns::Parser, dns::Header, error) {
     let fd = syscall::Socket(syscall::AF_INET, syscall::SOCK_DGRAM, syscall::IPPROTO_UDP);
     if fd < 0 {
@@ -305,19 +428,27 @@ fn dns_packet_round_trip(
         );
     }
 
-    // Set receive timeout
-    let tv: [i64; 2] = [timeout_secs as i64, 0];
-    unsafe {
-        syscall::syscall6(
-            syscall::SYS_SETSOCKOPT,
-            fd as usize,
-            1,
-            20,
-            tv.as_ptr() as usize,
-            16,
-            0,
-        );
-    }
+    // Receive timeout, SLICED — see `QueryBound::slice_timeout`. The
+    // budget is the config's per-attempt timeout; each wait is at most
+    // 100 ms of it so a cancelled context is noticed while `recvfrom`
+    // would otherwise still be blocked.
+    let budget_ms: i64 = (timeout_secs as i64) * 1000;
+    let set_rcvtimeo = |secs: i64, usecs: i64| -> isize {
+        let tv: [i64; 2] = [secs, usecs];
+        unsafe {
+            syscall::syscall6(
+                syscall::SYS_SETSOCKOPT,
+                fd as usize,
+                1,
+                20,
+                tv.as_ptr() as usize,
+                16,
+                0,
+            )
+        }
+    };
+    let (s0, u0) = bound.slice_timeout(budget_ms);
+    set_rcvtimeo(s0, u0);
 
     let sent = unsafe {
         syscall::syscall6(
@@ -342,6 +473,7 @@ fn dns_packet_round_trip(
     }
 
     let mut buf = vec![0u8; MAX_DNS_PACKET_SIZE];
+    let deadline = crate::time::Now().Add(crate::time::Millisecond * budget_ms);
     loop {
         let n = unsafe {
             syscall::syscall6(
@@ -354,9 +486,47 @@ fn dns_packet_round_trip(
                 0,
             )
         };
-        if n == -4 {
+        // EINTR AND EAGAIN LAND IN THE SAME PLACE, and that is the
+        // whole point of this loop.
+        //
+        // `SO_RCVTIMEO` does NOT survive a signal: a `recvfrom`
+        // interrupted before any data returns EINTR, and the retry
+        // starts the timeout again from zero. goish's own scheduler
+        // preempts with signals far more often than any DNS timeout, so
+        // the receive was interrupted, restarted, interrupted … and the
+        // timeout never expired. Measured on a blackhole resolver: 1688
+        // EINTRs in 20 seconds and not one EAGAIN, against a socket
+        // whose timeout was 100 ms.
+        //
+        // That is why the deadline is tracked HERE rather than left to
+        // the kernel. Retrying on EINTR without re-checking it is an
+        // unbounded wait wearing a timeout's clothes.
+        if n == -4 || n == -11 || n == -(syscall::EWOULDBLOCK.0 as isize) {
+            if let Some((why, is_timeout)) = bound.expired() {
+                unsafe {
+                    syscall::syscall1(syscall::SYS_CLOSE, fd as usize);
+                }
+                return (
+                    dns::Parser::new(),
+                    dns::Header::default(),
+                    ctx_query_error(why, is_timeout),
+                );
+            }
+            if !crate::time::Now().Before(deadline) {
+                unsafe {
+                    syscall::syscall1(syscall::SYS_CLOSE, fd as usize);
+                }
+                return (
+                    dns::Parser::new(),
+                    dns::Header::default(),
+                    errors::New("recvfrom: timeout"),
+                );
+            }
+            let left = deadline.Sub(crate::time::Now()).Milliseconds();
+            let (sn, un) = bound.slice_timeout(left);
+            set_rcvtimeo(sn, un);
             continue;
-        } // EINTR — Go auto-retries
+        }
         if n < 0 {
             unsafe {
                 syscall::syscall1(syscall::SYS_CLOSE, fd as usize);
@@ -419,6 +589,7 @@ fn dns_stream_round_trip(
     query: &dns::Question,
     tcp_req: &[u8],
     timeout_secs: u64,
+    bound: &QueryBound,
 ) -> (dns::Parser, dns::Header, error) {
     let fd = syscall::Socket(
         syscall::AF_INET,
@@ -433,7 +604,28 @@ fn dns_stream_round_trip(
         );
     }
 
-    let tv: [i64; 2] = [timeout_secs as i64, 0];
+    // The TCP path is a single blocking connect/write/read rather than
+    // a poll loop, so the context bounds it by CAPPING the socket
+    // timeouts rather than by slicing. A cancel is therefore noticed at
+    // the end of the wait, not during it — which is the honest limit of
+    // not having the netpoller here, and is still bounded by the
+    // caller's deadline instead of by `timeout_secs` alone.
+    let mut tmo_ms: i64 = (timeout_secs as i64) * 1000;
+    if let Some(left) = bound.remaining_ms() {
+        tmo_ms = tmo_ms.min(left);
+    }
+    if tmo_ms <= 0 {
+        unsafe {
+            syscall::syscall1(syscall::SYS_CLOSE, fd as usize);
+        }
+        let (why, is_timeout) = bound.expired().unwrap_or(("i/o timeout", true));
+        return (
+            dns::Parser::new(),
+            dns::Header::default(),
+            ctx_query_error(why, is_timeout),
+        );
+    }
+    let tv: [i64; 2] = [tmo_ms / 1000, (tmo_ms % 1000) * 1000];
     unsafe {
         syscall::syscall6(
             syscall::SYS_SETSOCKOPT,
@@ -595,6 +787,7 @@ fn exchange(
     timeout_secs: u64,
     use_tcp: bool,
     ad: bool,
+    bound: &QueryBound,
 ) -> (dns::Parser, dns::Header, error) {
     let mut q = q;
     q.Class = dns::ClassINET;
@@ -622,7 +815,7 @@ fn exchange(
 
     if use_tcp {
         // TCP only
-        let (mut p, h, e) = dns_stream_round_trip(&ns_addr, id, &q, &tcp_req, timeout_secs);
+        let (mut p, h, e) = dns_stream_round_trip(&ns_addr, id, &q, &tcp_req, timeout_secs, bound);
         if e != errors::nil {
             return (p, h, e);
         }
@@ -638,7 +831,7 @@ fn exchange(
     }
 
     // Try UDP first
-    let (mut p, h, e) = dns_packet_round_trip(&ns_addr, id, &q, &udp_req, timeout_secs);
+    let (mut p, h, e) = dns_packet_round_trip(&ns_addr, id, &q, &udp_req, timeout_secs, bound);
     if e != errors::nil {
         dns_debug!(
             crate::gostring::string::from_static("[dns-debug] UDP failed: ")
@@ -646,7 +839,7 @@ fn exchange(
                 + crate::gostring::string::from_static(" — trying TCP fallback")
         );
         // UDP failed — try TCP
-        let (mut p2, h2, e2) = dns_stream_round_trip(&ns_addr, id, &q, &tcp_req, timeout_secs);
+        let (mut p2, h2, e2) = dns_stream_round_trip(&ns_addr, id, &q, &tcp_req, timeout_secs, bound);
         if e2 != errors::nil {
             return (dns::Parser::new(), dns::Header::default(), e2);
         }
@@ -672,7 +865,7 @@ fn exchange(
 
     // UDP truncated → retry over TCP (RFC 5966)
     if h.Truncated {
-        let (mut p2, h2, e2) = dns_stream_round_trip(&ns_addr, id, &q, &tcp_req, timeout_secs);
+        let (mut p2, h2, e2) = dns_stream_round_trip(&ns_addr, id, &q, &tcp_req, timeout_secs, bound);
         if e2 != errors::nil {
             // Go: dnsclient_unix.go:236 — the TCP attempt's error is
             // returned. It does NOT fall back to the truncated UDP
@@ -782,6 +975,17 @@ fn skip_to_answer(p: &mut dns::Parser, qtype: dns::Type) -> error {
 /// Try a single FQDN against all configured nameservers × attempts.
 /// Returns (Parser, server_used, error).
 pub fn try_one_name(cfg: &DnsConfig, name: &str, qtype: dns::Type) -> (dns::Parser, String, error) {
+    return try_one_name_ctx(cfg, name, qtype, &QueryBound::none());
+}
+
+// go: none — goish-only: the context-aware form. See `QueryBound`.
+/// `try_one_name`, bounded by the caller's context.
+pub fn try_one_name_ctx(
+    cfg: &DnsConfig,
+    name: &str,
+    qtype: dns::Type,
+    bound: &QueryBound,
+) -> (dns::Parser, String, error) {
     let mut last_err: error = errors::New("dns: no servers");
     let server_offset = cfg.server_offset();
     let s_len = cfg.servers.len() as u32;
@@ -810,12 +1014,24 @@ pub fn try_one_name(cfg: &DnsConfig, name: &str, qtype: dns::Type) -> (dns::Pars
             let idx = ((server_offset + j) % s_len) as usize;
             let server = &cfg.servers[idx];
 
+            // Between attempts as well as inside them: `attempts x
+            // servers` rounds of `timeout_secs` is what made a bounded
+            // caller wait unbounded, and bounding only the socket wait
+            // would still let the RETRIES run past the deadline.
+            if let Some((why, is_timeout)) = bound.expired() {
+                return (
+                    dns::Parser::new(),
+                    server.clone(),
+                    ctx_query_error(why, is_timeout),
+                );
+            }
             let (mut p, h, e) = exchange(
                 server,
                 q.clone(),
                 cfg.timeout_secs,
                 cfg.use_tcp,
                 cfg.trust_ad,
+                bound,
             );
             if e != errors::nil {
                 last_err = e;
@@ -854,6 +1070,17 @@ pub fn try_one_name(cfg: &DnsConfig, name: &str, qtype: dns::Type) -> (dns::Pars
 
 /// Look up `name` for record type `qtype`, applying search-domain expansion.
 pub fn lookup(cfg: &DnsConfig, name: &str, qtype: dns::Type) -> (dns::Parser, String, error) {
+    return lookup_ctx(cfg, name, qtype, &QueryBound::none());
+}
+
+// go: none — goish-only: the context-aware form. See `QueryBound`.
+/// `lookup`, bounded by the caller's context.
+pub fn lookup_ctx(
+    cfg: &DnsConfig,
+    name: &str,
+    qtype: dns::Type,
+    bound: &QueryBound,
+) -> (dns::Parser, String, error) {
     if !is_domain_name(name) {
         return (dns::Parser::new(), String::new(), errNoSuchHost.into());
     }
@@ -863,7 +1090,7 @@ pub fn lookup(cfg: &DnsConfig, name: &str, qtype: dns::Type) -> (dns::Parser, St
     let mut last_err: error = errNoSuchHost.into();
 
     for fqdn in cfg.name_list(name) {
-        let (p, server, e) = try_one_name(cfg, &fqdn, qtype);
+        let (p, server, e) = try_one_name_ctx(cfg, &fqdn, qtype, bound);
         if e == errors::nil {
             return (p, server, errors::nil);
         }
@@ -957,8 +1184,19 @@ impl IPAddr {
 /// Returns (addrs, cname_str, error).
 pub fn go_lookup_ip_cname_order(
     cfg: &DnsConfig,
+    network: &str,
+    name: &str,
+) -> (Vec<IPAddr>, String, error) {
+    return go_lookup_ip_cname_order_ctx(cfg, network, name, &QueryBound::none());
+}
+
+// go: none — goish-only: the context-aware form. See `QueryBound`.
+/// `go_lookup_ip_cname_order`, bounded by the caller's context.
+pub fn go_lookup_ip_cname_order_ctx(
+    cfg: &DnsConfig,
     network: &str, // "ip", "ip4", "ip6", or "CNAME"
     name: &str,
+    bound: &QueryBound,
 ) -> (Vec<IPAddr>, String, error) {
     // Determine which qtypes to query
     let qtypes: &[dns::Type] = match network_ip_version(network) {
@@ -976,7 +1214,7 @@ pub fn go_lookup_ip_cname_order(
         let mut got_answer = false;
 
         for &qtype in qtypes {
-            let (mut p, _server, e) = try_one_name(cfg, fqdn, qtype);
+            let (mut p, _server, e) = try_one_name_ctx(cfg, fqdn, qtype, bound);
             if e != errors::nil {
                 // Check if fqdn_str == name + "."
                 let name_dot = {
@@ -1095,16 +1333,22 @@ pub fn get_system_dns_config() -> DnsConfig {
 /// LookupHost resolves `host` to a list of IP address strings.
 /// Returns (["ip1", "ip2", ...], error).
 pub fn lookup_host(host: &str) -> (Vec<String>, error) {
+    return lookup_host_ctx(host, &QueryBound::none());
+}
+
+// go: none — goish-only: the context-aware form. See `QueryBound`.
+/// `lookup_host`, bounded by the caller's context.
+pub fn lookup_host_ctx(host: &str, bound: &QueryBound) -> (Vec<String>, error) {
     if host.is_empty() {
         return (Vec::new(), errNoSuchHost.into());
     }
-    // Already an IP literal?
+    // Already an IP literal? No query, so no context to honour.
     if let Some(ip) = parse_ip_literal(host) {
         let s = ip_to_string(&ip);
         return (vec![s], errors::nil);
     }
     let cfg = get_system_dns_config();
-    let (addrs, _cname, e) = go_lookup_ip_cname_order(&cfg, "ip", host);
+    let (addrs, _cname, e) = go_lookup_ip_cname_order_ctx(&cfg, "ip", host, bound);
     if e != errors::nil {
         return (Vec::new(), e);
     }

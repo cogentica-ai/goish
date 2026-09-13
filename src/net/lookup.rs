@@ -5,12 +5,24 @@
 //
 // These wrap the lower-level dnsclient functions and present a Goish
 // public API using `string`, `slice<T>`, and the goish `IP` type.
-// Context parameters are accepted but not yet wired into cancellation
-// (the underlying dnsclient is context-free in this port).
+//
+// The context parameters ARE wired now (ROADMAP §2b). Every `Resolver`
+// method passes its context to `dnsclient`, which bounds both the
+// socket wait and the retry loop by it. What this file no longer says,
+// because it stopped being true: "Context parameters are accepted but
+// not yet wired into cancellation". Nine methods took a context and
+// read none of it, so a caller who bounded a lookup with a one-second
+// context got an unbounded lookup — and `#![allow(unused_variables)]`
+// below is what kept the compiler from saying so on every build. It is
+// gone for that reason: the warning it suppressed was the only
+// automatic signal that the parameters were dead.
+//
+// The package-level `LookupHost` / `LookupIP` / `LookupCNAME` take no
+// context and stay unbounded, which is Go — they are the
+// `context.Background()` forms.
 
 #![allow(non_snake_case)]
 #![allow(dead_code)]
-#![allow(unused_variables)]
 #![allow(unused_mut)]
 
 extern crate alloc;
@@ -173,7 +185,7 @@ impl Resolver {
             return (r, errors::nil);
         }
 
-        let (raw_strs, e) = dnsclient::lookup_host(h);
+        let (raw_strs, e) = dnsclient::lookup_host_ctx(h, &dnsclient::QueryBound::of(ctx));
         if e != errors::nil {
             return (slice::<string>::new(), e);
         }
@@ -219,7 +231,12 @@ impl Resolver {
             return (slice::<super::IP>::new(), new_dns_error("no such host", h));
         }
         let (raw_addrs, _cname, e) =
-            dnsclient::go_lookup_ip_cname_order(&dnsclient::get_system_dns_config(), net_ref, h);
+            dnsclient::go_lookup_ip_cname_order_ctx(
+                &dnsclient::get_system_dns_config(),
+                net_ref,
+                h,
+                &dnsclient::QueryBound::of(ctx),
+            );
         if e != errors::nil {
             return (slice::<super::IP>::new(), e);
         }
@@ -240,7 +257,7 @@ impl Resolver {
         let host = host.into();
         let h: &str = host.as_ref();
         let cfg = dnsclient::get_system_dns_config();
-        let (mut p, _server, e) = dnsclient::lookup(&cfg, h, dns::TypeCNAME);
+        let (mut p, _server, e) = dnsclient::lookup_ctx(&cfg, h, dns::TypeCNAME, &dnsclient::QueryBound::of(ctx));
         if e != errors::nil {
             return (string::from_static(""), e);
         }
@@ -305,7 +322,7 @@ impl Resolver {
             }
         };
         let cfg = dnsclient::get_system_dns_config();
-        let (mut p, _server, e) = dnsclient::lookup(&cfg, &arpa, dns::TypePTR);
+        let (mut p, _server, e) = dnsclient::lookup_ctx(&cfg, &arpa, dns::TypePTR, &dnsclient::QueryBound::of(ctx));
         if e != errors::nil {
             return (slice::<string>::new(), e);
         }
@@ -353,7 +370,7 @@ impl Resolver {
         let name = name.into();
         let n: &str = name.as_ref();
         let cfg = dnsclient::get_system_dns_config();
-        let (mut p, _server, e) = dnsclient::lookup(&cfg, n, dns::TypeTXT);
+        let (mut p, _server, e) = dnsclient::lookup_ctx(&cfg, n, dns::TypeTXT, &dnsclient::QueryBound::of(ctx));
         if e != errors::nil {
             return (slice::<string>::new(), e);
         }
@@ -398,7 +415,7 @@ impl Resolver {
         let name = name.into();
         let n: &str = name.as_ref();
         let cfg = dnsclient::get_system_dns_config();
-        let (mut p, _server, e) = dnsclient::lookup(&cfg, n, dns::TypeNS);
+        let (mut p, _server, e) = dnsclient::lookup_ctx(&cfg, n, dns::TypeNS, &dnsclient::QueryBound::of(ctx));
         if e != errors::nil {
             return (slice::<nilable<NS>>::new(), e);
         }
@@ -441,7 +458,7 @@ impl Resolver {
         let name = name.into();
         let n: &str = name.as_ref();
         let cfg = dnsclient::get_system_dns_config();
-        let (mut p, _server, e) = dnsclient::lookup(&cfg, n, dns::TypeMX);
+        let (mut p, _server, e) = dnsclient::lookup_ctx(&cfg, n, dns::TypeMX, &dnsclient::QueryBound::of(ctx));
         if e != errors::nil {
             return (slice::<nilable<MX>>::new(), e);
         }
@@ -515,7 +532,7 @@ impl Resolver {
         };
 
         let cfg = dnsclient::get_system_dns_config();
-        let (mut p, _server, e) = dnsclient::lookup(&cfg, &target, dns::TypeSRV);
+        let (mut p, _server, e) = dnsclient::lookup_ctx(&cfg, &target, dns::TypeSRV, &dnsclient::QueryBound::of(ctx));
         if e != errors::nil {
             return (string::from_static(""), slice::<nilable<SRV>>::new(), e);
         }
@@ -589,7 +606,7 @@ impl Resolver {
 
     fn lookup_ip_addr_inner(
         &self,
-        _ctx: &Arc<dyn context::Context>,
+        ctx: &Arc<dyn context::Context>,
         network: &str,
         host: string,
     ) -> (slice<IPAddr>, error) {
@@ -611,7 +628,7 @@ impl Resolver {
             return (r, errors::nil);
         }
         let cfg = dnsclient::get_system_dns_config();
-        let (raw_addrs, _cname, e) = dnsclient::go_lookup_ip_cname_order(&cfg, network, h);
+        let (raw_addrs, _cname, e) = dnsclient::go_lookup_ip_cname_order_ctx(&cfg, network, h, &dnsclient::QueryBound::of(ctx));
         if e != errors::nil {
             return (slice::<IPAddr>::new(), e);
         }

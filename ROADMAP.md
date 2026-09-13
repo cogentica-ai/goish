@@ -1448,9 +1448,43 @@ A smoke for this cannot pin the error text verbatim — it contains the
 resolver's address, which differs per machine — but the three flags and
 the message suffix are stable and are what to compare.
 
-**Still live, re-checked 2026-09-13.** Ten methods take
-`ctx: &Arc<dyn context::Context>` and the file contains ZERO calls to
-`ctx.Done()`, `ctx.Err()` or `ctx.Deadline()`. Nothing has drifted.
+**FIXED 2026-09-13, and wiring the context is not the headline.**
+Going to thread the context turned up a defect underneath it: goish's
+DNS UDP query DID NOT TIME OUT AT ALL. Measured on the commit before
+the fix, against a resolver that never answers, with
+`timeout_secs = 1`: still blocked after 60 seconds.
+
+`SO_RCVTIMEO` does not survive a signal. A `recvfrom` interrupted
+before any data returns EINTR, and the retry restarts the timeout from
+zero. goish's scheduler preempts with signals far more often than any
+DNS timeout, so the receive was interrupted, restarted, interrupted —
+**1688 EINTRs in 20 seconds, and not one EAGAIN**, against a socket
+whose timeout was 100 ms. The loop's `if n == -4 { continue }` was
+correct about EINTR and silent about the clock, which is an unbounded
+wait wearing a timeout's clothes.
+
+No attacker needed: a nameserver whose UDP/53 is firewalled to DROP
+rather than REJECT is ordinary, and it hung every goish program that
+resolved a hostname. The fix tracks the deadline in the loop rather
+than leaving it to the kernel, so EINTR and EAGAIN both land on the
+same check.
+
+That is also why the sliced wait below is not optional. It looked like
+a refinement for cancellation latency; it is what makes the timeout
+exist.
+
+**The context wiring, also done.** Ten methods take
+`ctx: &Arc<dyn context::Context>` and the file contained ZERO calls to
+`ctx.Done()`, `ctx.Err()` or `ctx.Deadline()`. Every `Resolver` method
+now passes its context to `dnsclient`, which bounds the socket wait AND
+the retry loop by it — bounding only the socket would still let
+`attempts x servers` rounds run past the deadline. The package-level
+`LookupHost` / `LookupIP` / `LookupCNAME` take no context and stay
+unbounded, which is Go: they are the `Background()` forms.
+
+`#![allow(unused_variables)]` is gone from lookup.rs. It was the only
+automatic signal that the parameters were dead, and it was suppressing
+it.
 
 RE-MEASURED against Go 1.25.5 rather than trusting the note above,
 `(&net.Resolver{PreferGo: true}).LookupHost`:
