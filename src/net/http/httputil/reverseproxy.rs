@@ -640,7 +640,7 @@ pub fn upgradeType(h: &super::super::header::Header) -> string {
 /// and forth have nice names in stacks." Go's two fields are shared
 /// io.ReadWriter interface values, one struct copy per goroutine;
 /// Rust ownership splits each conn into a read half and a dup(2)'d
-/// write half (see `TCPConn::__dup_handle` / `ConnSrc::
+/// write half (see `TCPConn::TryClone` / `ConnSrc::
 /// split_for_upgrade`), and each copier method takes the pair it
 /// owns.
 struct switchProtocolCopier {
@@ -1145,7 +1145,7 @@ fn upgrade_response_impl(
         )));
         return;
     }
-    let (user_w, duperr) = conn.__dup_handle();
+    let (user_w, duperr) = conn.TryClone();
     if !duperr.IsNil() {
         report(duperr);
         return;

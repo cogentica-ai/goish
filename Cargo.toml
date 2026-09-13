@@ -2328,6 +2328,10 @@ name = "conn_deadline_smoke"
 path = "examples/conn_deadline_smoke.rs"
 
 [[example]]
+name = "conn_tryclone_smoke"
+path = "examples/conn_tryclone_smoke.rs"
+
+[[example]]
 name = "conn_drop_no_leak"
 path = "examples/conn_drop_no_leak.rs"
 

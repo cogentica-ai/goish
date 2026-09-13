@@ -1536,7 +1536,7 @@ impl persistConn {
         let mut src = src;
         let wh = match &mut src {
             super::client::ConnSrc::Tcp(br) => {
-                let (w, e) = br.__rd_mut().__dup_handle();
+                let (w, e) = br.__rd_mut().TryClone();
                 if !e.IsNil() {
                     self.__put_src(src);
                     return (None, e);

@@ -483,16 +483,39 @@ impl TCPConn {
         }
     }
 
-    // go: none — goish-only: full-duplex sharing for protocol-switch
-    // pumps (httputil's switchProtocolCopier). Go hands ONE net.Conn
-    // interface value to two goroutines; Rust ownership wants two
-    // OWNED handles. F_DUPFD_CLOEXEC shares the open socket
-    // description — reads, writes and shutdown(2) act on the same
-    // socket (O_NONBLOCK lives on the description, so the new handle
-    // is non-blocking too), each handle lazily registers its own fd
-    // with the netpoller, and the socket dies when the LAST handle
-    // closes.
-    pub(crate) fn __dup_handle(&self) -> (TCPConn, error) {
+    // go: none — goish-only: Go hands ONE `net.Conn` interface value to
+    // two goroutines and lets them share it; Rust ownership wants two
+    // OWNED handles, and there is no Go call that spells this. The
+    // nearest Go path is `TCPConn.File()` plus `net.FileConn()`, which
+    // also dups the fd — neither is ported yet, and naming this
+    // `TryClone` leaves both free to arrive later.
+    //
+    /// A second, independently owned handle on the same socket (#28).
+    ///
+    /// `F_DUPFD_CLOEXEC` duplicates the descriptor, so both handles
+    /// share one open socket description: reads, writes and
+    /// `shutdown(2)` all act on the same socket, `O_NONBLOCK` lives on
+    /// the description so the new handle is non-blocking too, each
+    /// handle lazily registers its OWN fd with the netpoller, and the
+    /// socket is released when the LAST handle closes.
+    ///
+    /// This is what a shared `Arc<Mutex<TCPConn>>` cannot do: a
+    /// blocking read would hold the mutex and stop the writer, which
+    /// deadlocks any full-duplex protocol. Two handles park
+    /// independently on the netpoller.
+    ///
+    /// Deliberately NOT `Clone`. Duplication is a syscall and can
+    /// fail, and `Clone` has nowhere to report that; a shallow copy of
+    /// the fd would also give two owners the right to close it. On
+    /// failure this returns a dead conn beside a non-nil error, which
+    /// is the runtime's concrete-value-plus-error convention — the
+    /// conn must not be used.
+    ///
+    /// Works for anything represented as a `TCPConn`, which includes
+    /// connections accepted from a `"unix"` listener: the operation is
+    /// on the descriptor, not on the address family.
+    #[allow(non_snake_case)]
+    pub fn TryClone(&self) -> (TCPConn, error) {
         const F_DUPFD_CLOEXEC: i32 = 1030;
         let nfd = syscall::Fcntl(self.fd, F_DUPFD_CLOEXEC, 0);
         if nfd < 0 {

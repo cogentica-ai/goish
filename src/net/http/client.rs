@@ -198,7 +198,7 @@ impl ConnSrc {
     pub(crate) fn split_for_upgrade(self) -> (Option<(ConnSrc, crate::net::TCPConn)>, error) {
         let out = match self {
             ConnSrc::Tcp(mut br) => {
-                let (w, e) = br.__rd_mut().__dup_handle();
+                let (w, e) = br.__rd_mut().TryClone();
                 if !e.IsNil() {
                     (None, e)
                 } else {
