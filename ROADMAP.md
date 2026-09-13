@@ -1317,13 +1317,52 @@ Checked and found CORRECT, so the next reader need not redo it:
   * the downgrade canary (RFC 8446 4.1.3) is checked on the LIVE path,
     a faithful port including the operator precedence.
 
-Scope worth carrying: none of the three defects is reachable from
+**A FOURTH, found 2026-09-13, in the same function's caller.** The
+audit above fixed `verify_cert_verify` accepting an unlisted signature
+algorithm. It did not look one level up: when
+`parse_tls13_cert_verify` returned `None`, the caller CONTINUED —
+
+    None => {
+        // Continue — don't abort for parse failure
+        //            (shouldn't happen with well-formed servers)
+    }
+
+— skipping the signature check entirely. The parser returns `None` for
+anything truncated, so a one-byte body was enough, which makes this
+strictly easier to trigger than the algorithm case: an attacker need
+not choose an algorithm at all. CertificateVerify is the only thing in
+TLS 1.3 binding the certificate to the connection, and a MITM already
+holds the handshake secret from its own key exchange, so skipping it
+means any public certificate can be presented and believed. Go never
+reaches the decision — `readHandshake` fails to unmarshal and aborts.
+
+"Shouldn't happen with well-formed servers" is true and beside the
+point. A hostile server is the case this code exists to survive, and
+that comment is the whole defect in one line.
+
+Found by sweeping `#![allow(unused_variables)]`, which is how the
+`net/lookup.rs` context defect had just been found. The suppression
+here was a benign no-op three lines below the bug — it did not hide it,
+it pointed at it. Both suppressions in that sweep sat on top of a real
+defect; only `dnsmessage/mod.rs` is left unexamined.
+
+The decision is now `cert_verify_decision`, extracted so the refusal is
+testable, with a `__cert_verify_decision` hook and
+`tls13_certverify_refuse_smoke`. The smoke asserts THREE DISTINCT
+refusal causes, not just three refusals: every row rejects something,
+so a decision function that refused everything would pass them all.
+
+Scope worth carrying: none of the FOUR defects is reachable from
 `tls::Dial`. That runs Conn::Handshake -> handshakeContext ->
 clientHandshake -> the ported clientHandshakeStateTLS13, which was
 traced rather than assumed. handshake_client_tls13.rs's header claimed
 the invented client was "the live TLS 1.3 client"; it is not, and that
 is corrected. The invented family is public API, which is why the
 defects were worth fixing rather than waiting for retirement.
+
+The lesson repeats: the audit that fixed the algorithm case listed
+what it had checked CLEAN, which is the right habit, and the caller was
+in neither list. Auditing a function is not auditing its callers.
 
 `handshake_client.rs` and `handshake_server_tls13.rs` are no longer
 squatters — they carry 22 and 19 anchors.

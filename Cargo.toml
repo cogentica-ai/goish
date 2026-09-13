@@ -1097,6 +1097,10 @@ name = "tls12_smoke"
 path = "examples/tls12_smoke.rs"
 
 [[example]]
+name = "tls13_certverify_refuse_smoke"
+path = "examples/tls13_certverify_refuse_smoke.rs"
+
+[[example]]
 name = "p256_ecdh_smoke"
 path = "examples/p256_ecdh_smoke.rs"
 

@@ -295,6 +295,60 @@ fn parse_tls13_cert_verify(plain: &[u8]) -> Option<(u16, Vec<u8>)> {
     Some((sig_alg, plain[pos..pos + sig_len].to_vec()))
 }
 
+// go: none — goish-only: the invented TLS 1.3 client's
+//     CertificateVerify step, extracted so the REFUSAL is testable.
+/// Parse and verify a CertificateVerify message. Nil means the server
+/// proved it holds the certificate's private key.
+///
+/// A message that will not parse is a REFUSAL, not a skip. It used to
+/// be a skip: the caller matched `None` and continued with a comment
+/// saying it "shouldn't happen with well-formed servers". A malformed
+/// CertificateVerify is precisely what an attacker sends — the parser
+/// returns `None` for anything truncated, so a one-byte body was
+/// enough — and skipping it removes the only thing in TLS 1.3 binding
+/// the certificate to the connection. A man-in-the-middle has the
+/// handshake secret from its own key exchange, so with this step gone
+/// it can present any server's certificate, which is public, and be
+/// believed.
+///
+/// Go never reaches such a state: `readHandshake` fails to unmarshal
+/// the message and the handshake aborts before any verification
+/// decision is made.
+///
+/// This is a sibling of the defect ROADMAP §1 already fixed here —
+/// `verify_cert_verify` returning success for an unlisted signature
+/// algorithm — and strictly easier to trigger, since it needs no
+/// algorithm to be chosen at all. That audit listed what it had
+/// checked clean; this path was in neither list.
+fn cert_verify_decision(pubkey: &ServerPubKey, plain: &[u8], transcript_hash: &[u8]) -> error {
+    let parsed = parse_tls13_cert_verify(plain);
+    if parsed.is_none() {
+        return crate::errors::New("tls13: malformed CertificateVerify message");
+    }
+    let (sig_alg, signature) = parsed.unwrap();
+    return verify_cert_verify(pubkey, sig_alg, &signature, transcript_hash);
+}
+
+// go: none — goish-only: test hook for `cert_verify_decision`.
+/// The handshake's CertificateVerify decision, reachable from a smoke.
+///
+/// Takes the two handshake messages as bytes rather than exposing
+/// `ServerPubKey`, and derives the key exactly as the handshake does —
+/// including the `Unknown` fallback for a Certificate that will not
+/// parse, which every arm of `verify_cert_verify` then refuses.
+#[doc(hidden)]
+pub fn __cert_verify_decision(
+    cert_msg: &[u8],
+    cert_verify_msg: &[u8],
+    transcript_hash: &[u8],
+) -> error {
+    let pk = match parse_tls13_cert_message_leaf(cert_msg) {
+        Some(der) => parse_server_pubkey(&der),
+        None => ServerPubKey::Unknown,
+    };
+    return cert_verify_decision(&pk, cert_verify_msg, transcript_hash);
+}
+
 /// Verify a TLS 1.3 CertificateVerify signature.
 /// transcript_hash = hash(ClientHello || ServerHello || EncryptedExtensions || Certificate)
 /// Returns nil on success.
@@ -1349,41 +1403,28 @@ fn do_client_handshake_tls13_inner_impl(
                 );
             }
 
-            // Parse sig_alg and signature from the message
-            match parse_tls13_cert_verify(&plain) {
-                Some((sig_alg, signature)) => {
-                    // Compute transcript hash BEFORE adding CertificateVerify
-                    let cert_verify_th =
-                        key_schedule::transcript_hash_fn(hash_fn, &local_transcript);
-                    let verify_err =
-                        verify_cert_verify(&server_pubkey, sig_alg, &signature, &cert_verify_th);
-                    if !verify_err.IsNil() {
-                        tls_debug!(
-                            "[tls13-debug] CertificateVerify sig_alg=0x%04x FAILED: %v\n",
-                            sig_alg as u64,
-                            verify_err
-                        );
-                        // RFC 8446: verification failure → abort with decrypt_error
-                        return (dummy, verify_err);
-                    }
-                    tls_debug!(
-                        "[tls13-debug] CertificateVerify verified OK sig_alg=0x%04x\n",
-                        sig_alg as u64
-                    );
-                }
-                None => {
-                    tls_debug!(
-                        "[tls13-debug] WARNING: could not parse CertificateVerify message\n"
-                    );
-                    // Continue — don't abort for parse failure (shouldn't happen with well-formed servers)
-                }
+            // Compute transcript hash BEFORE adding CertificateVerify.
+            //
+            // A parse failure aborts here, same as a verification
+            // failure. It used to fall through with "shouldn't happen
+            // with well-formed servers" — but a malformed message is
+            // what a hostile server sends, and continuing skipped the
+            // only step that binds the certificate to this connection.
+            // See `cert_verify_decision`.
+            let cert_verify_th = key_schedule::transcript_hash_fn(hash_fn, &local_transcript);
+            let verify_err = cert_verify_decision(&server_pubkey, &plain, &cert_verify_th);
+            if !verify_err.IsNil() {
+                tls_debug!(
+                    "[tls13-debug] CertificateVerify REFUSED: %v\n",
+                    verify_err
+                );
+                // RFC 8446: verification failure → abort with decrypt_error
+                return (dummy, verify_err);
             }
+            tls_debug!("[tls13-debug] CertificateVerify verified OK\n");
 
             local_transcript.extend_from_slice(&plain);
         }
-        // server_pubkey is used within the inner blocks above; suppress unused warning
-        #[allow(unused_variables)]
-        let _pk_used = &server_pubkey;
     } else {
         tls_debug!("[tls13-debug] PSK mode: skipping Certificate + CertificateVerify\n");
     }
