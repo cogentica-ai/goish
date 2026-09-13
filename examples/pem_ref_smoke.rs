@@ -258,9 +258,7 @@ fn main() {
             Some(b) => b,
         };
         let mut keys: Vec<string> = Vec::new();
-        for (k, _) in b.Headers.__iter() {
-            keys.push(k.clone());
-        }
+        b.Headers.__for_each(|k, _| keys.push(k.clone()));
         let mut ks = slice::<string>::__from_vec(keys);
         sort::Strings(&mut ks);
         let mut hs: Vec<string> = Vec::new();

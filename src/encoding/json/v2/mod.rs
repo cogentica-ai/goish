@@ -1061,10 +1061,8 @@ where
         if err != nil {
             return err;
         }
-        let mut pairs: Vec<(string, V)> = Vec::new();
-        for (k, v) in self.__iter() {
-            pairs.push((k.__object_key(), v.clone()));
-        }
+        let mut pairs: Vec<(string, V)> = Vec::with_capacity(self.Len() as usize);
+        self.__for_each(|k, v| pairs.push((k.__object_key(), v.clone())));
         pairs.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
         for (k, v) in &pairs {
             let err = enc.WriteToken(jsontext::String(k.clone()));

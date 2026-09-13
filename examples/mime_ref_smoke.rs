@@ -78,9 +78,7 @@ fn eq(ok: &mut bool, input: &str, what: &str, got: string, want: &str) {
 //     map whose iteration order is randomised still compares.
 fn render(m: &map<string, string>) -> string {
     let mut keys: alloc::vec::Vec<string> = alloc::vec::Vec::new();
-    for (k, _) in m.__iter() {
-        keys.push(k.clone());
-    }
+    m.__for_each(|k, _| keys.push(k.clone()));
     keys.sort();
     let mut out = string::new();
     let mut i = 0usize;

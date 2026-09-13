@@ -190,13 +190,18 @@ impl PartialEq for Value {
                 if a.Len() != b.Len() {
                     return false;
                 }
-                for (k, va) in a.__iter() {
-                    let (vb, ok) = b.Get(k.clone());
-                    if !ok || vb != *va {
-                        return false;
-                    }
-                }
-                true
+                // Go's loop returns early; the walk needs the
+                // early-exit form.
+                return a
+                    .__try_for_each(|k, va| {
+                        use core::ops::ControlFlow;
+                        let (vb, ok) = b.Get(k.clone());
+                        if !ok || vb != *va {
+                            return ControlFlow::Break(());
+                        }
+                        return ControlFlow::Continue(());
+                    })
+                    .is_none();
             }
             _ => false,
         }
@@ -599,12 +604,24 @@ impl<V: FromValue + Default + Clone> FromValue for map<string, V> {
         match v {
             Value::Object(o) => {
                 let mut out = map::<string, V>::new();
-                for (k, val) in o.__iter() {
+                let mut decoded: alloc::vec::Vec<(string, V)> =
+                    alloc::vec::Vec::with_capacity(o.Len() as usize);
+                // Go returns on the first element error, so the walk
+                // needs the early-exit form.
+                let failed = o.__try_for_each(|k, val| {
+                    use core::ops::ControlFlow;
                     let (vv, err) = V::from_value(val);
                     if err != nil {
-                        return (out, err);
+                        return ControlFlow::Break(err);
                     }
-                    out.Set(k.clone(), vv);
+                    decoded.push((k.clone(), vv));
+                    return ControlFlow::Continue(());
+                });
+                if let Some(err) = failed {
+                    return (out, err);
+                }
+                for (k, vv) in decoded {
+                    out.Set(k, vv);
                 }
                 (out, nil)
             }
@@ -1132,6 +1149,21 @@ fn encode_value(out: &mut Vec<byte>, v: &Value, cfg: Option<&IndentCfg>, _: &str
                         continue;
                     }
                     // Go's encoding/json marshals map keys in sorted order.
+                    //
+                    // THE LAST BORROWED MAP WALK, and the only one that
+                    // is not a mechanical rewrite (#7). `Task` holds
+                    // `&'a Value` and `&'a string` borrowed out of this
+                    // map, and the work stack outlives this iteration —
+                    // so a guard-scoped closure cannot serve it and a
+                    // shared header cannot hand the references out.
+                    //
+                    // The fix is not a snapshot here: cloning
+                    // `(string, Value)` per level deep-copies each
+                    // subtree once per level of nesting. It is to make
+                    // the encoder's stack own what it carries, which
+                    // means `Value::Object` holding a shareable
+                    // pointer. That is a change to `Value`, so it gets
+                    // its own commit rather than riding along here.
                     let mut pairs: alloc::vec::Vec<(&string, &Value)> = o.__iter().collect();
                     pairs.sort_by(|(a, _), (b, _)| a.as_bytes().cmp(b.as_bytes()));
                     out.push(b'{');
@@ -2519,12 +2551,24 @@ impl FromValue for crate::Any {
             }
             Value::Object(o) => {
                 let mut out: map<string, crate::Any> = map::new();
-                for (k, val) in o.__iter() {
+                let mut decoded: alloc::vec::Vec<(string, crate::Any)> =
+                    alloc::vec::Vec::with_capacity(o.Len() as usize);
+                // Go returns on the first element error, so the walk
+                // needs the early-exit form.
+                let failed = o.__try_for_each(|k, val| {
+                    use core::ops::ControlFlow;
                     let (item, err) = crate::Any::from_value(val);
                     if err != crate::errors::nil {
-                        return (crate::Any::default(), err);
+                        return ControlFlow::Break(err);
                     }
-                    out.Set(k.clone(), item);
+                    decoded.push((k.clone(), item));
+                    return ControlFlow::Continue(());
+                });
+                if let Some(err) = failed {
+                    return (crate::Any::default(), err);
+                }
+                for (k, item) in decoded {
+                    out.Set(k, item);
                 }
                 (crate::Any::new(out), crate::errors::nil)
             }

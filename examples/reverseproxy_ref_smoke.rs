@@ -150,9 +150,7 @@ fn s(x: &str) -> string {
 }
 fn hdrDump(h: &http::Header) -> string {
     let mut keys: Vec<string> = Vec::new();
-    for (k, _) in h.__inner().__iter() {
-        keys.push(k.clone());
-    }
+    h.__inner().__for_each(|k, _| keys.push(k.clone()));
     let mut ks = slice::<string>::__from_vec(keys);
     sort::Strings(&mut ks);
     let mut parts: Vec<string> = Vec::new();
@@ -461,12 +459,13 @@ fn main() {
         p.ServeHTTP(&w, &r);
         let hm = w.HeaderMap();
         let mut keys: Vec<string> = Vec::new();
-        for (k, _) in hm.__inner().__iter() {
+        hm.__inner().__for_each(|k, _| {
+            // `continue` in the loop body is `return` from the visitor.
             if k == "Date" || k == "Content-Length" {
-                continue;
+                return;
             }
             keys.push(k.clone());
-        }
+        });
         let mut ks = slice::<string>::__from_vec(keys);
         sort::Strings(&mut ks);
         let mut parts: Vec<string> = Vec::new();

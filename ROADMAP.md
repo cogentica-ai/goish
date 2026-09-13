@@ -689,6 +689,53 @@ afterwards. goish clones, so it does not. That is #26, not #7.
   `__iter`   Go's `range` yields COPIES of key and value, so an
              owned-yielding iterator is the faithful shape, not a
              concession. It currently yields `(&K, &V)`.
+
+STATUS: 61 sites down to 3. Everything that was a `for (k, v) in
+m.__iter()` is now `__for_each` or, where Go's body returns or breaks,
+`__try_for_each`. The three that remain are not the same problem as
+each other:
+
+  range.rs (2)   the `range!(m)` impls. These are the OWNED form, and
+                 they are the last mechanical step: `range!` over a map
+                 currently yields `(&K, &V)` where Go yields copies, so
+                 making it owned is a faithfulness fix as well as an
+                 unblock. Left to its own commit because it changes
+                 every `range!(map)` call site in the tree.
+  json/mod.rs    NOT mechanical. See below.
+
+THE JSON INDENT ENCODER IS THE ONE STRUCTURAL BLOCKER. `encode_indent`
+is an explicit work stack of `Task<'a>` holding `&'a Value` and
+`&'a string` borrowed out of the object map, and the stack outlives the
+iteration that filled it. A guard-scoped closure cannot serve that, and
+a shared header cannot hand the references out at all.
+
+A snapshot at the call site is the wrong fix: cloning `(string, Value)`
+per level deep-copies each subtree once per level of nesting, so a
+document of depth d costs O(n·d). The right fix is for the stack to own
+what it carries, which means `Value::Object` holding a shareable
+pointer rather than a `map<string, Value>` the encoder borrows into.
+That is a change to `Value` itself, so it is its own commit and its own
+risk, and it is now the thing standing between #7 and the header.
+
+TWO THINGS FOUND WHILE WALKING THE SITES:
+
+`reflect`'s map impl carried the comment "Goish's map<K,V> is
+BTreeMap-backed, so __iter() walks keys in sorted order … which means
+json.Marshal output is deterministic for free." All three clauses were
+false: the map is bucket-based with a randomized start bucket, the walk
+is not sorted, and json.Marshal is deterministic because `encode_map`
+sorts the keys itself. No live defect — `encode_map` is the only
+consumer of that order, and Go's own `reflect.Value.MapKeys` promises
+nothing either — but the comment invited the next caller to rely on an
+order that was never there.
+
+`http.Header.Clone`, `cloneMultipartForm`, `maps::Clone`, `maps::Copy`
+and `sync.Map.Range` all had to grow a staging Vec: the visitor borrows
+the source map, so the destination cannot be written from inside it
+when the two are the same map or when the borrow checker cannot prove
+they are not. That allocation is real and it is the price of the
+borrowed form; it disappears again for the sites that move to owned
+iteration.
   `GetRef`   No Go counterpart at all — Go has no way to take a
              reference into a map. It is a goish-only optimisation, so
              its 7 sites fold into `Get`.

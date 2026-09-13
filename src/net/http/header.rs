@@ -180,10 +180,12 @@ impl Header {
     /// through Set() so each value slice is independently owned.
     pub fn Clone(&self) -> Header {
         let mut out = Header::new();
-        for (k, v) in self.inner.__iter() {
-            // Go: h2[k] = sv[:n:n]  (independent slice copy)
-            let copied = v.clone();
-            out.inner.Set(k.clone(), copied);
+        // Go: h2[k] = sv[:n:n]  (independent slice copy)
+        let mut pairs: alloc::vec::Vec<(string, slice<string>)> =
+            alloc::vec::Vec::with_capacity(self.inner.Len() as usize);
+        self.inner.__for_each(|k, v| pairs.push((k.clone(), v.clone())));
+        for (k, v) in pairs {
+            out.inner.Set(k, v);
         }
         out
     }
@@ -292,7 +294,7 @@ impl Header {
     pub fn sortedKeyValues(&self, exclude: &map<string, bool>) -> headerSorter {
         let mut hs = headerSorterPool().Get();
         let mut kvs: alloc::vec::Vec<keyValues> = alloc::vec::Vec::new();
-        for (k, vv) in self.inner.__iter() {
+        self.inner.__for_each(|k, vv| {
             let (skip, _) = exclude.Get(k.clone());
             if !skip {
                 kvs.push(keyValues {
@@ -300,7 +302,7 @@ impl Header {
                     values: vv.clone(),
                 });
             }
-        }
+        });
         // Go: slices.SortFunc(hs.kvs, func(a, b) int {
         //         return strings.Compare(a.key, b.key) })
         // Sorted before wrapping: goish's sort::Slice is index-based

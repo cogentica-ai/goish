@@ -156,9 +156,7 @@ struct Echo(chan<string>);
 impl Handler for Echo {
     fn ServeHTTP(&self, w: &(dyn ResponseWriter + Send + Sync + 'static), r: &http::Request) {
         let mut keys: Vec<string> = Vec::new();
-        for (k, _) in r.Header.__inner().__iter() {
-            keys.push(k.clone());
-        }
+        r.Header.__inner().__for_each(|k, _| keys.push(k.clone()));
         let mut ks = slice::<string>::__from_vec(keys);
         sort::Strings(&mut ks);
         let mut hs: Vec<string> = Vec::new();

@@ -104,7 +104,7 @@ pub fn ExtensionsByType<T: Into<string>>(typ: T) -> (crate::goslice::slice<strin
     {
         let guard = mime_overrides().Lock();
         if let Some(map) = guard.as_ref() {
-            for (k, v) in map.__iter() {
+            map.__for_each(|k, v| {
                 let (vt, _, vt_err) = ParseMediaType(v.clone());
                 if vt_err.IsNil() && strings::EqualFold(vt, just_type.clone()) {
                     // Only count case-insensitive (lowercase) registrations
@@ -114,7 +114,7 @@ pub fn ExtensionsByType<T: Into<string>>(typ: T) -> (crate::goslice::slice<strin
                         out.push(lowered);
                     }
                 }
-            }
+            });
         }
     }
 

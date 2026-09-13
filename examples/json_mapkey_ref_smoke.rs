@@ -102,9 +102,7 @@ fn uri(s: &'static str) -> DocumentUri {
 /// stable to compare (Go's own print sorts too).
 fn show(m: &map<DocumentUri, int>) -> string {
     let mut keys: Vec<string> = Vec::new();
-    for (k, _) in m.__iter() {
-        keys.push(k.__object_key());
-    }
+    m.__for_each(|k, _| keys.push(k.__object_key()));
     keys.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
     let mut out = string::from_static("map[");
     for (i, k) in keys.iter().enumerate() {

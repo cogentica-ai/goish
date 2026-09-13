@@ -161,10 +161,13 @@ where
     {
         let snapshot: alloc::vec::Vec<(K, V)> = {
             let g = self.inner.Lock();
-            // gomap doesn't expose a public iterator in goish v1;
-            // use the internal __iter helper. If unavailable, fall
-            // back to per-key Get under the lock.
-            g.__iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+            // gomap has no public iterator; the guard-scoped
+            // `__for_each` is the borrowed walk that survives #7's
+            // shared header, and this snapshot is what escapes it.
+            let mut out: alloc::vec::Vec<(K, V)> =
+                alloc::vec::Vec::with_capacity(g.Len() as usize);
+            g.__for_each(|k, v| out.push((k.clone(), v.clone())));
+            out
         };
         for (k, v) in snapshot {
             if !f(k, v) {

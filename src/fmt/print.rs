@@ -840,9 +840,7 @@ where
     // go: none — goish idiom: see above.
     fn fmt_prec(&self, verb: byte, prec: i64, f: &mut FmtBuf) {
         let mut pairs: Vec<(K, V)> = Vec::with_capacity(self.Len() as usize);
-        for (k, v) in self.__iter() {
-            pairs.push((k.clone(), v.clone()));
-        }
+        self.__for_each(|k, v| pairs.push((k.clone(), v.clone())));
         pairs.sort_by(|a, b| a.0.cmp(&b.0));
         f.extend(b"map[");
         let mut i = 0usize;
@@ -870,9 +868,7 @@ where
         f: &mut FmtBuf,
     ) -> bool {
         let mut pairs: Vec<(K, V)> = Vec::with_capacity(self.Len() as usize);
-        for (k, v) in self.__iter() {
-            pairs.push((k.clone(), v.clone()));
-        }
+        self.__for_each(|k, v| pairs.push((k.clone(), v.clone())));
         pairs.sort_by(|a, b| a.0.cmp(&b.0));
         f.extend(b"map[");
         let mut i = 0usize;

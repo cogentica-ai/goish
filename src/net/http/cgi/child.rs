@@ -138,9 +138,10 @@ pub fn RequestFromMap(params: &map<string, string>) -> (Request, error) {
 
     // Go: copy "HTTP_FOO_BAR" variables to "Foo-Bar" headers.
     // HTTP_HOST is skipped because it is already r.Host.
-    for (k, v) in params.__iter() {
+    // `continue` in Go's loop body is `return` from the visitor.
+    params.__for_each(|k, v| {
         if k == "HTTP_HOST" {
-            continue;
+            return;
         }
         let (after, found) = strings::CutPrefix(k.clone(), string("HTTP_"));
         if found {
@@ -149,7 +150,7 @@ pub fn RequestFromMap(params: &map<string, string>) -> (Request, error) {
                 v.clone(),
             );
         }
-    }
+    });
 
     let mut uriStr = get("REQUEST_URI");
     if uriStr == "" {

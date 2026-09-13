@@ -290,9 +290,7 @@ fn main() {
         h.ServeHTTP(&w, r);
         let hm = w.HeaderMap();
         let mut keys: Vec<string> = Vec::new();
-        for (k, _) in hm.__inner().__iter() {
-            keys.push(k.clone());
-        }
+        hm.__inner().__for_each(|k, _| keys.push(k.clone()));
         let mut ks = slice::<string>::__from_vec(keys);
         sort::Strings(&mut ks);
         let mut hs: Vec<string> = Vec::new();

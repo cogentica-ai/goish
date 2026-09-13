@@ -100,7 +100,8 @@ impl MapFS {
         let mut list: Vec<mapFileInfo> = Vec::new();
         let mut need: map<string, bool> = map::new();
         if real_name.as_bytes() == b"." {
-            for (fname, f) in self.0.__iter() {
+            let mut dirs: Vec<string> = Vec::new();
+            self.0.__for_each(|fname, f| {
                 let i = strings::Index(fname.clone(), "/");
                 if i < 0 {
                     if fname.as_bytes() != b"." {
@@ -110,15 +111,19 @@ impl MapFS {
                         });
                     }
                 } else {
-                    need.Set(string::from_bytes(&fname.as_bytes()[..i as usize]), true);
+                    dirs.push(string::from_bytes(&fname.as_bytes()[..i as usize]));
                 }
+            });
+            for d in dirs {
+                need.Set(d, true);
             }
         } else {
             // Go: prefix := realName + "/"
             let mut prefix = real_name.clone().to_string();
             prefix.push('/');
             let prefix_b = prefix.as_bytes();
-            for (fname, f) in self.0.__iter() {
+            let mut dirs: Vec<string> = Vec::new();
+            self.0.__for_each(|fname, f| {
                 let fb = fname.as_bytes();
                 if fb.starts_with(prefix_b) {
                     let felem = &fb[prefix_b.len()..];
@@ -127,9 +132,12 @@ impl MapFS {
                             name: string::from_bytes(felem),
                             f: f.clone(),
                         }),
-                        Some(i) => need.Set(string::from_bytes(&felem[..i]), true),
+                        Some(i) => dirs.push(string::from_bytes(&felem[..i])),
                     }
                 }
+            });
+            for d in dirs {
+                need.Set(d, true);
             }
             // Go: if file == nil && list == nil && len(need) == 0 { ErrNotExist }
             if file.is_none() && list.is_empty() && need.Len() == 0 {
@@ -299,16 +307,26 @@ impl MapFS {
         // Go: Maybe a directory.
         let mut prefix = real_name.to_string();
         prefix.push('/');
-        for (fname, _) in self.0.__iter() {
-            if fname.as_bytes().starts_with(prefix.as_bytes()) {
-                return (
-                    Some(mapFileInfo {
-                        name: elem,
-                        f: synth_dir(),
-                    }),
-                    errors::nil,
-                );
-            }
+        // Go returns from inside the loop, so the walk needs the
+        // early-exit form: the first matching prefix wins.
+        let found = self
+            .0
+            .__try_for_each(|fname, _| {
+                use core::ops::ControlFlow;
+                if fname.as_bytes().starts_with(prefix.as_bytes()) {
+                    return ControlFlow::Break(());
+                }
+                return ControlFlow::Continue(());
+            })
+            .is_some();
+        if found {
+            return (
+                Some(mapFileInfo {
+                    name: elem,
+                    f: synth_dir(),
+                }),
+                errors::nil,
+            );
         }
         return (None, fs::ErrNotExist.clone().into());
     }

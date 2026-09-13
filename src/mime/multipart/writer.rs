@@ -297,7 +297,8 @@ impl<W: IoWriter> Writer<W> {
 
         // Go: for _, k := range slices.Sorted(maps.Keys(header))
         let inner = header.__inner();
-        let mut keys: Vec<string> = inner.__iter().map(|(k, _)| k.clone()).collect();
+        let mut keys: Vec<string> = Vec::with_capacity(inner.Len() as usize);
+        inner.__for_each(|k, _| keys.push(k.clone()));
         keys.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
         for k in keys.iter() {
             let (vs, _) = inner.Get(k.clone());

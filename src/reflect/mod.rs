@@ -2260,9 +2260,15 @@ impl<T: FromReflectValue> FromReflectValue for crate::gonilable::nilable<T> {
 
 // ─── map<K, V: Reflect> — generic Reflect impl ────────────────────────
 //
-// Goish's map<K,V> is BTreeMap-backed, so __iter() walks keys in sorted
-// order. We preserve that order in the Map variant, which means
-// json.Marshal output is deterministic for free.
+// The order of `entries` is UNSPECIFIED. goish's map is bucket-based
+// with a randomized start bucket, exactly like Go's, so the walk is not
+// sorted and not stable between runs — and `reflect.Value.MapKeys` in
+// Go promises nothing either. An earlier comment here claimed the map
+// was BTreeMap-backed and that json.Marshal was "deterministic for
+// free"; neither was true. Determinism comes from `encode_map`, which
+// sorts the keys itself (encoding/json/mod.rs, "Go's encoding/json
+// marshals map keys in sorted order"). Any new consumer that needs an
+// order must sort too.
 
 use crate::gomap::map as gomap_map;
 

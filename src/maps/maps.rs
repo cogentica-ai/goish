@@ -68,9 +68,12 @@ where
     if *m == crate::nil {
         return crate::nil.into();
     }
+    let mut pairs: alloc::vec::Vec<(K, V)> =
+        alloc::vec::Vec::with_capacity(m.Len() as usize);
+    m.__for_each(|k, v| pairs.push((k.clone(), v.clone())));
     let mut out: map<K, V> = map::new();
-    for (k, v) in m.__iter() {
-        out.Set(k.clone(), v.clone());
+    for (k, v) in pairs {
+        out.Set(k, v);
     }
     return out;
 }
@@ -83,8 +86,11 @@ where
     K: crate::gomap::GoHash + PartialEq + Clone,
     V: Default + Clone,
 {
-    for (k, v) in src.__iter() {
-        dst.Set(k.clone(), v.clone());
+    let mut pairs: alloc::vec::Vec<(K, V)> =
+        alloc::vec::Vec::with_capacity(src.Len() as usize);
+    src.__for_each(|k, v| pairs.push((k.clone(), v.clone())));
+    for (k, v) in pairs {
+        dst.Set(k, v);
     }
 }
 

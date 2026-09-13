@@ -53,8 +53,11 @@ pub fn cloneURLValues(v: &map<string, slice<string>>) -> map<string, slice<strin
     // means len == 0, so an empty in gives an empty out — which is the
     // same answer under goish's definition.
     let mut out: map<string, slice<string>> = map::new();
-    for (k, vv) in v.__iter() {
-        out.Set(k.clone(), vv.clone());
+    let mut pairs: alloc::vec::Vec<(string, slice<string>)> =
+        alloc::vec::Vec::with_capacity(v.Len() as usize);
+    v.__for_each(|k, vv| pairs.push((k.clone(), vv.clone())));
+    for (k, vv) in pairs {
+        out.Set(k, vv);
     }
     return out;
 }
@@ -87,7 +90,9 @@ pub fn cloneMultipartForm(f: Option<&Form>) -> Option<Form> {
     let mut f2 = Form::default();
     f2.Value = cloneURLValues(&f.Value);
     let mut m: map<string, slice<FileHeader>> = map::new();
-    for (k, vv) in f.File.__iter() {
+    let mut cloned: alloc::vec::Vec<(string, slice<FileHeader>)> =
+        alloc::vec::Vec::with_capacity(f.File.Len() as usize);
+    f.File.__for_each(|k, vv| {
         let mut vv2: alloc::vec::Vec<FileHeader> =
             alloc::vec::Vec::with_capacity(crate::builtin::__make_size(vv.Len()));
         let mut i: int = 0;
@@ -99,7 +104,10 @@ pub fn cloneMultipartForm(f: Option<&Form>) -> Option<Form> {
             }
             i += 1;
         }
-        m.Set(k.clone(), slice::__from_vec(vv2));
+        cloned.push((k.clone(), slice::__from_vec(vv2)));
+    });
+    for (k, vv2) in cloned {
+        m.Set(k, vv2);
     }
     f2.File = m;
     return Some(f2);

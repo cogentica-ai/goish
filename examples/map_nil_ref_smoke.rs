@@ -101,9 +101,7 @@ fn main() {
         );
         check("len of a nil map is 0", goish::len(&z) == 0, fmt::Sprintf!("len=%d", goish::len(&z)));
         let mut iters = 0;
-        for _ in z.__iter() {
-            iters += 1;
-        }
+        z.__for_each(|_, _| iters += 1);
         check("ranging a nil map yields nothing", iters == 0, fmt::Sprintf!("iters=%d", iters as i64));
         z.Delete(string::from_static("k"));
         check("deleting from a nil map is legal", z == goish::nil, string::from_static("delete changed nil-ness"));

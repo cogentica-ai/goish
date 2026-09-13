@@ -128,8 +128,11 @@ impl FileHeader {
 // the copy across.
 fn __to_mime_header(h: &crate::net::http::Header) -> crate::net::textproto::MIMEHeader {
     let mut out: crate::net::textproto::MIMEHeader = crate::gomap::map::new();
-    for (k, v) in h.__inner().__iter() {
-        out.Set(k.clone(), v.clone());
+    let mut pairs: alloc::vec::Vec<(crate::gostring::string, crate::goslice::slice<crate::gostring::string>)> =
+        alloc::vec::Vec::new();
+    h.__inner().__for_each(|k, v| pairs.push((k.clone(), v.clone())));
+    for (k, v) in pairs {
+        out.Set(k, v);
     }
     return out;
 }

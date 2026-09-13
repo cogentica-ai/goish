@@ -56,7 +56,8 @@ pub fn Keys<K, V>(m: &map<K, V>) -> impl crate::iter::Seq<K>
 where
     K: crate::gomap::GoHash + PartialEq + Clone + Send + Sync + 'static,
 {
-    let snap: Vec<K> = m.__iter().map(|(k, _)| k.clone()).collect();
+    let mut snap: Vec<K> = Vec::with_capacity(m.Len() as usize);
+    m.__for_each(|k, _| snap.push(k.clone()));
     return move |yield_: &mut dyn FnMut(K) -> bool| {
         for k in &snap {
             if !yield_(k.clone()) {
@@ -73,7 +74,8 @@ where
     K: crate::gomap::GoHash + PartialEq,
     V: Clone + Send + Sync + 'static,
 {
-    let snap: Vec<V> = m.__iter().map(|(_, v)| v.clone()).collect();
+    let mut snap: Vec<V> = Vec::with_capacity(m.Len() as usize);
+    m.__for_each(|_, v| snap.push(v.clone()));
     return move |yield_: &mut dyn FnMut(V) -> bool| {
         for v in &snap {
             if !yield_(v.clone()) {
@@ -90,7 +92,8 @@ where
     K: crate::gomap::GoHash + PartialEq + Clone + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
 {
-    let snap: Vec<(K, V)> = m.__iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let mut snap: Vec<(K, V)> = Vec::with_capacity(m.Len() as usize);
+    m.__for_each(|k, v| snap.push((k.clone(), v.clone())));
     return move |yield_: &mut dyn FnMut(K, V) -> bool| {
         for (k, v) in &snap {
             if !yield_(k.clone(), v.clone()) {

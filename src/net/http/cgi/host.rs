@@ -303,21 +303,23 @@ impl HTTPHandler for Handler {
             env = crate::append!(env, string("HTTPS=on"));
         }
 
-        for (k, v) in req.Header.__inner().__iter() {
+        // `continue` in Go's loop body is `return` from the visitor.
+        let mut hdrEnv: alloc::vec::Vec<string> = alloc::vec::Vec::new();
+        req.Header.__inner().__for_each(|k, v| {
             let k = strings::Map(upperCaseAndUnderscore, k);
             if k == "PROXY" {
                 // Go: "See Issue 16405" — the httpoxy vulnerability.
-                continue;
+                return;
             }
             let joinStr = if k == "COOKIE" {
                 string("; ")
             } else {
                 string(", ")
             };
-            env = crate::append!(
-                env,
-                string("HTTP_") + k + string("=") + strings::Join(v.clone(), joinStr)
-            );
+            hdrEnv.push(string("HTTP_") + k + string("=") + strings::Join(v.clone(), joinStr));
+        });
+        for e in hdrEnv {
+            env = crate::append!(env, e);
         }
 
         if req.ContentLength > 0 {
