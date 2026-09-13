@@ -667,13 +667,28 @@ Owned iteration would deep-copy every header value slice on every
 request — a regression on the hottest path in the library, in exchange
 for semantics no caller can observe there.
 
+MEASURED how far the closure form actually reaches, because a closure
+cannot `break` its caller's loop:
+
+    map-iteration sites in src        56
+      visit-everything                44   closure-safe
+      break / return / ? in the body  12   need an early exit
+
+The 12 are real and not obscure: a labelled break in `server.rs`'s
+header matching, an early return in `routing_index`, and the `maps`
+package's All / Equal short circuits. Forcing them to snapshot would be
+the deep copy the borrowed form exists to avoid, so there is a third
+shape rather than two.
+
 So `__iter` needs BOTH shapes:
 
     owned `(K, V)`        Go-shaped `range`, for callers that keep the
                           values. Faithful, and cheap once #26 makes a
                           slice clone a header copy.
     borrowed, closure     `__for_each(|&K, &V|)`, guard-scoped, for the
-                          internal hot paths that only read.
+                          44 internal hot paths that only read.
+    borrowed, early exit  `__try_for_each(|&K, &V| -> ControlFlow<B>)`
+                          for the 12 that stop partway.
 
 Issue #7 already says this — "use a guard/closure form only for
 genuinely borrowed internal operations" — so this measurement confirms

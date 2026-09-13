@@ -701,6 +701,61 @@ where
     pub fn __iter(&self) -> MapRefIter<'_, K, V> {
         MapRefIter::new(self)
     }
+
+    // go: none — goish-only: the guard-scoped half of iteration, for
+    // #7's shared-header representation.
+    /// Visit every pair by REFERENCE, with the visit confined to a
+    /// closure.
+    ///
+    /// This exists because `__iter` cannot survive the representation
+    /// change on its own. Once the table lives behind a lock, an
+    /// iterator yielding `(&K, &V)` would have to hold the guard AND
+    /// hand out borrows into it — self-referential, and not expressible
+    /// safely. The two ways out are to snapshot (owned pairs) or to scope
+    /// the borrow to a closure, and issue #7 asks for exactly that split:
+    /// "use a guard/closure form only for genuinely borrowed internal
+    /// operations".
+    ///
+    /// Owned iteration is the Go-shaped one — `range` copies key and
+    /// value — but it is not free here, because `slice<T>::clone` is a
+    /// DEEP copy until #26. 43 of goish's 230 map declarations are
+    /// slice-valued, and they include `http.Header`, which is walked on
+    /// the per-response header-write path. Those are the sites this form
+    /// is for, and they can move to owned iteration once #26 makes a
+    /// slice clone a header copy.
+    ///
+    /// Today it is a plain walk; the lock arrives with the header.
+    #[doc(hidden)]
+    pub fn __for_each<F: FnMut(&K, &V)>(&self, mut f: F) {
+        for (k, v) in self.__iter() {
+            f(k, v);
+        }
+    }
+
+    // go: none — goish-only: `__for_each` for the sites that stop early.
+    /// `__for_each`, but the visitor can stop the walk.
+    ///
+    /// A closure cannot `break` its caller's loop, and 12 of goish's 56
+    /// map-iteration sites do exactly that — a labelled break in
+    /// `server.rs`'s header matching, an early `return` in
+    /// `routing_index`, and the `maps` package's All / Equal short
+    /// circuits. Without this form those 12 would have to snapshot,
+    /// which is the deep copy the borrowed form exists to avoid.
+    ///
+    /// `ControlFlow::Break` stops and its value is returned; running to
+    /// the end returns `None`.
+    #[doc(hidden)]
+    pub fn __try_for_each<B, F>(&self, mut f: F) -> Option<B>
+    where
+        F: FnMut(&K, &V) -> core::ops::ControlFlow<B>,
+    {
+        for (k, v) in self.__iter() {
+            if let core::ops::ControlFlow::Break(b) = f(k, v) {
+                return Some(b);
+            }
+        }
+        return None;
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
