@@ -649,6 +649,42 @@ Go contract that is already owned or no Go counterpart. That is roughly
 90 call sites of mechanical change, and the representation underneath
 can then be a lock without fighting any signature.
 
+BUT `__iter` CANNOT BE OWNED-ONLY, and the reason is a coupling to #26.
+
+Go's `range` copies the value, and for `map[string][]string` that is a
+slice HEADER — O(1). goish's `slice<T>::clone` is a DEEP copy until #26
+lands, so owned iteration copies the bytes. Measured exposure:
+
+    map declarations in src        230
+      slice-valued                  43   deep-copy per entry
+      map-valued                     1
+      scalar / string-valued        81   cheap (string is Arc<[u8]>)
+
+43 of 230 is bad enough; WHICH 43 is worse. `http.Header` is
+`map<string, slice<string>>` and it is iterated on the per-response
+header-write path (server.rs:984) and the request path (server.rs:3674).
+Owned iteration would deep-copy every header value slice on every
+request — a regression on the hottest path in the library, in exchange
+for semantics no caller can observe there.
+
+So `__iter` needs BOTH shapes:
+
+    owned `(K, V)`        Go-shaped `range`, for callers that keep the
+                          values. Faithful, and cheap once #26 makes a
+                          slice clone a header copy.
+    borrowed, closure     `__for_each(|&K, &V|)`, guard-scoped, for the
+                          internal hot paths that only read.
+
+Issue #7 already says this — "use a guard/closure form only for
+genuinely borrowed internal operations" — so this measurement confirms
+its guidance rather than contradicting it, and says which call sites it
+was talking about.
+
+ORDERING CONSEQUENCE: #7's aliasing half does not have to wait for #26,
+but the sites that keep the borrowed form should be revisited when #26
+lands, because most of them exist only to avoid a deep copy that will no
+longer be deep.
+
 DECOMPOSITION. The four gaps do not all need the header:
 
   nil identity   `empty_eq_nil` and the missing write-panic need only an
