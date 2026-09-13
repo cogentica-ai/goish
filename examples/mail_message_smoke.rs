@@ -101,11 +101,8 @@ fn main() {
         let (msg, err) = mail::ReadMessage(src);
         let m = msg.expect("expected message");
         let inner = m.Header.0;
-        let vs = if inner.Has(string("Received")) {
-            inner[string("Received")].clone()
-        } else {
-            goish::goslice::slice::__from_vec(alloc::vec::Vec::new())
-        };
+        // Go: inner["Received"] — a miss yields the zero value.
+        let (vs, _) = inner.Get(string("Received"));
         if err.IsNil()
             && vs.Len() == 2
             && vs[0i64] == string("from a")

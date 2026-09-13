@@ -22,14 +22,15 @@ fn main() {
     sc.Split(bufio::ScanWords);
     while sc.Scan() {
         let word = strings::ToLower(sc.Text());
-        counts[word] += 1;
+        let (n, _) = counts.Get(word.clone());
+        counts.Set(word, n + 1);
     }
 
     let mut keys = counts.Keys();
     slices::Sort!(keys);
 
     for (_, k) in range!(keys) {
-        let n = counts[k.clone()];
+        let n = counts.Get(k.clone()).0;
         fmt::Printf!("%6d %s\n", n, k.clone());
     }
 }

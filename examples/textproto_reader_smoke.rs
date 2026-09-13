@@ -74,16 +74,9 @@ fn main() {
         let br = bufio::NewReader(buf);
         let mut r = textproto::NewReader(br);
         let (h, err) = r.ReadMIMEHeader();
-        let mk_vals = if h.Has(string("My-Key")) {
-            h[string("My-Key")].clone()
-        } else {
-            goish::goslice::slice::__from_vec(alloc::vec::Vec::new())
-        };
-        let lk_vals = if h.Has(string("Long-Key")) {
-            h[string("Long-Key")].clone()
-        } else {
-            goish::goslice::slice::__from_vec(alloc::vec::Vec::new())
-        };
+        // Go: h["My-Key"] — a miss yields the zero value, so no probe.
+        let (mk_vals, _) = h.Get(string("My-Key"));
+        let (lk_vals, _) = h.Get(string("Long-Key"));
         let ok = err.IsNil()
             && mk_vals.Len() == 2
             && mk_vals[0i64] == string("Value 1")

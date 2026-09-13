@@ -34,7 +34,6 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use core::ops::{Index, IndexMut};
 
 use crate::builtin::Len as LenTrait;
 use crate::goslice::slice;
@@ -287,10 +286,11 @@ where
     /// — measured against Go, which panics only on a WRITE. See
     /// ROADMAP §2u.
     nil: bool,
-    /// Sentinel returned from `Index::index` when key is missing.
-    /// `None` for value types that don't impl `Default` (e.g.
-    /// `Box<dyn Trait>` for Go interface-typed maps) — Index/Get/etc.
-    /// panic on missing-key access in that case.
+    /// Go's zero value for V, returned from `Get` when the key is
+    /// missing. `None` for value types that don't impl `Default` (e.g.
+    /// `Box<dyn Trait>` for Go interface-typed maps) — `Get` panics on
+    /// missing-key access in that case, so those maps read through
+    /// `Has` or the guard-scoped `__for_each` / `__try_for_each`.
     zero: Option<Box<V>>,
 }
 
@@ -300,7 +300,7 @@ where
 
 /// Ctors that need no zero-value sentinel. For value types that do not
 /// impl `Default` — `Box<dyn Trait + Send + Sync>` (Go interface-typed
-/// maps), `&Regexp`, etc. Index/Get/IndexMut on a missing key panic.
+/// maps), `&Regexp`, etc. `Get` on a missing key panics.
 impl<K, V> map<K, V>
 where
     K: GoHash + PartialEq,
@@ -551,9 +551,9 @@ where
         }
     }
 
-    /// `m[k] = v` (long form). Use bracket syntax `m[k] = v` for
-    /// idiomatic call sites; this method is here for cases where the
-    /// receiver is awkward to access via `&mut m[k]`.
+    /// `m[k] = v`. This is the only write form: the `IndexMut` impl
+    /// that once spelled it with brackets returned `&mut V`, which a
+    /// shared header cannot hand out, and is gone (ROADMAP §2u).
     ///
     /// Generic over `Into<K>` / `Into<V>` so callers can pass `&str`
     /// literals against `map<string, …>` without wrapping each key.
@@ -871,144 +871,6 @@ where
         if let Some(next) = bucket.overflow.as_mut() {
             Self::delete_from_bucket(next, top, key, count);
         }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// Index / IndexMut
-// ═══════════════════════════════════════════════════════════════════════
-
-impl<K, V> Index<K> for map<K, V>
-where
-    K: GoHash + PartialEq,
-{
-    type Output = V;
-    fn index(&self, key: K) -> &V {
-        if self.count == 0 || self.buckets.is_empty() {
-            return self.zero_value();
-        }
-        let hash = self.hash(&key);
-        let mask = self.bucket_mask();
-        let bucket_idx = (hash as usize) & mask;
-        let top = tophash(hash);
-
-        let mut bucket = &self.buckets[bucket_idx];
-        loop {
-            for i in 0..BUCKET_COUNT {
-                if bucket.tophash[i] != top {
-                    continue;
-                }
-                if let Some(ref k) = bucket.keys[i] {
-                    if k == &key {
-                        return bucket.elems[i].as_ref().unwrap();
-                    }
-                }
-            }
-            match &bucket.overflow {
-                Some(next) => bucket = next,
-                None => return self.zero_value(),
-            }
-        }
-    }
-}
-
-impl<K, V> IndexMut<K> for map<K, V>
-where
-    K: GoHash + PartialEq + Clone,
-    V: Default,
-{
-    fn index_mut(&mut self, key: K) -> &mut V {
-        // `m[k] = v` inserts, so it is a write.
-        // Go: "assignment to entry in nil map". Measured: only a WRITE
-        // panics — reads, len, range, delete and clear are all legal on
-        // a nil map.
-        if self.nil {
-            panic!("assignment to entry in nil map");
-        }
-        if self.buckets.is_empty() {
-            self.buckets.push(Box::new(Bucket::new()));
-        }
-        // Pre-grow if necessary so the returned reference stays valid
-        let count_after = self.count as usize + 1;
-        if count_after > BUCKET_COUNT
-            && count_after > (LOAD_FACTOR_NUM * (1usize << self.b)) / LOAD_FACTOR_DEN
-        {
-            self.grow(false);
-        } else if self.too_many_overflow_buckets() {
-            self.grow(true);
-        }
-
-        let hash = self.hash(&key);
-        let mask = self.bucket_mask();
-        let bucket_idx = (hash as usize) & mask;
-        let top = tophash(hash);
-
-        // Same two-position single-pass as insert_no_grow.
-        let mut first_empty_ptr: *mut Bucket<K, V> = core::ptr::null_mut();
-        let mut first_empty_slot: usize = 0;
-        let mut bucket_ptr: *mut Bucket<K, V> = &mut *self.buckets[bucket_idx];
-
-        'search: loop {
-            let b = unsafe { &mut *bucket_ptr };
-            for i in 0..BUCKET_COUNT {
-                if b.tophash[i] == top {
-                    if let Some(ref k) = b.keys[i] {
-                        if k == &key {
-                            return b.elems[i].as_mut().unwrap();
-                        }
-                    }
-                }
-                if b.tophash[i] < MIN_TOP_HASH && first_empty_ptr.is_null() {
-                    first_empty_ptr = bucket_ptr;
-                    first_empty_slot = i;
-                }
-            }
-            match b.overflow.as_mut() {
-                Some(ovf) => bucket_ptr = ovf.as_mut(),
-                None => break 'search,
-            }
-        }
-
-        // Key not found — insert at first empty slot or append overflow.
-        if !first_empty_ptr.is_null() {
-            let ib = unsafe { &mut *first_empty_ptr };
-            ib.tophash[first_empty_slot] = top;
-            ib.keys[first_empty_slot] = Some(key);
-            ib.elems[first_empty_slot] = Some(V::default());
-            self.count += 1;
-            return unsafe { (*first_empty_ptr).elems[first_empty_slot].as_mut().unwrap() };
-        }
-        let last = unsafe { &mut *bucket_ptr };
-        last.overflow = Some(Box::new(Bucket::new()));
-        self.noverflow += 1;
-        let ovf = last.overflow.as_mut().unwrap();
-        ovf.tophash[0] = top;
-        ovf.keys[0] = Some(key);
-        ovf.elems[0] = Some(V::default());
-        self.count += 1;
-        ovf.elems[0].as_mut().unwrap()
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// &str convenience — lets `m["key"]` work when K = string
-// ═══════════════════════════════════════════════════════════════════════
-
-/// `m["literal"]` read for `map<string, V>` — converts `&str` to `string`
-/// then delegates to `Index<string>`. Mirrors Go's implicit string coercion.
-impl<V> Index<&str> for map<string, V> {
-    type Output = V;
-    #[inline]
-    fn index(&self, key: &str) -> &V {
-        self.index(string::from(key))
-    }
-}
-
-/// `m["literal"] = v` for `map<string, V>`.
-impl<V: Default> IndexMut<&str> for map<string, V> {
-    #[inline]
-    fn index_mut(&mut self, key: &str) -> &mut V {
-        self.index_mut(string::from(key))
     }
 }
 

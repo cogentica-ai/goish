@@ -100,7 +100,7 @@ fn main() {
     mutate(&mut m);
     line(
         "pass-shares",
-        alloc::vec![n(len(&m) as i64), n(m[string("fn")])],
+        alloc::vec![n(len(&m) as i64), n(m.Get(string("fn")).0)],
     );
 
     let (v, ok) = m.Get(string("missing"));
@@ -112,13 +112,13 @@ fn main() {
     delete!(m, string("a"));
     line(
         "delete-present",
-        alloc::vec![n(len(&m) as i64), n(m[string("a")])],
+        alloc::vec![n(len(&m) as i64), n(m.Get(string("a")).0)],
     );
 
     m.Set(string("b"), 20);
     line(
         "overwrite",
-        alloc::vec![n(len(&m) as i64), n(m[string("b")])],
+        alloc::vec![n(len(&m) as i64), n(m.Get(string("b")).0)],
     );
 
     let nilm = make!(map[string]i64);

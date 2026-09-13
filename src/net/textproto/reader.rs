@@ -512,13 +512,10 @@ fn readMIMEHeader<R: io::Reader>(
         }
 
         // Go: m[key] = append(vv, value)
-        let mut cur: Vec<string> = if exists {
-            m[key.clone()].clone().__into_vec()
-        } else {
-            Vec::new()
-        };
+        let (vv, _) = m.Get(key.clone());
+        let mut cur: Vec<string> = vv.__into_vec();
         cur.push(value);
-        m[key] = slice::__from_vec(cur);
+        m.Set(key, slice::__from_vec(cur));
 
         if err != nil {
             return (m, err);

@@ -371,7 +371,7 @@ fn main() {
         chk(
             &mut failed,
             &mut ln,
-            fmt::Sprintf!("dup-map a=%d err=%v", m[s("a")], et(&err)),
+            fmt::Sprintf!("dup-map a=%d err=%v", m.Get(s("a")).0, et(&err)),
         );
     }
     // 6

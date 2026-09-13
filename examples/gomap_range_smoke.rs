@@ -23,11 +23,11 @@ fn check(cond: bool, msg: &[u8]) {
 #[goish::main]
 fn main() {
     let mut m = goish::make!(map[string]int);
-    m["a"] = 1;
-    m["b"] = 2;
-    m["c"] = 3;
-    m["d"] = 4;
-    m["e"] = 5;
+    m.Set("a", 1);
+    m.Set("b", 2);
+    m.Set("c", 3);
+    m.Set("d", 4);
+    m.Set("e", 5);
 
     // ── range!(m) covers all entries exactly once ─────────────────────
     let mut sum: int = 0;
@@ -70,17 +70,17 @@ fn main() {
 
     // ── maps::Equal ───────────────────────────────────────────────────
     let mut m2 = goish::make!(map[string]int);
-    m2["a"] = 1;
-    m2["b"] = 2;
-    m2["c"] = 3;
-    m2["d"] = 4;
-    m2["e"] = 5;
+    m2.Set("a", 1);
+    m2.Set("b", 2);
+    m2.Set("c", 3);
+    m2.Set("d", 4);
+    m2.Set("e", 5);
     check(
         maps::Equal(&m, &m2),
         b"maps::Equal: identical maps not equal\n",
     );
 
-    m2["a"] = 99;
+    m2.Set("a", 99);
     check(
         !maps::Equal(&m, &m2),
         b"maps::Equal: different maps reported equal\n",
@@ -95,33 +95,33 @@ fn main() {
 
     // Mutating the clone must not affect the original.
     let mut c2 = maps::Clone(&m);
-    c2["a"] = 999;
+    c2.Set("a", 999);
     check(
-        m["a"] == 1,
+        m.Get("a").0 == 1,
         b"maps::Clone: mutating clone changed original\n",
     );
 
     // ── maps::Copy ────────────────────────────────────────────────────
     let mut dst = goish::make!(map[string]int);
-    dst["z"] = 100;
+    dst.Set("z", 100);
     maps::Copy(&mut dst, &m);
     check(len(&dst) == 6, b"maps::Copy: len wrong\n");
-    check(dst["z"] == 100, b"maps::Copy: pre-existing key lost\n");
-    check(dst["a"] == 1, b"maps::Copy: copied key wrong\n");
-    check(dst["e"] == 5, b"maps::Copy: copied key wrong\n");
+    check(dst.Get("z").0 == 100, b"maps::Copy: pre-existing key lost\n");
+    check(dst.Get("a").0 == 1, b"maps::Copy: copied key wrong\n");
+    check(dst.Get("e").0 == 5, b"maps::Copy: copied key wrong\n");
 
     // ── maps::EqualFunc ───────────────────────────────────────────────
     // Two maps are "equal" if values are within 1 of each other.
     let mut mf1 = goish::make!(map[string]int);
     let mut mf2 = goish::make!(map[string]int);
-    mf1["x"] = 10;
-    mf2["x"] = 11;
-    mf1["y"] = 20;
-    mf2["y"] = 20;
+    mf1.Set("x", 10);
+    mf2.Set("x", 11);
+    mf1.Set("y", 20);
+    mf2.Set("y", 20);
     let fuzzy_eq = maps::EqualFunc(&mf1, &mf2, |a: &int, b: &int| (a - b).abs() <= 1);
     check(fuzzy_eq, b"maps::EqualFunc: fuzzy equal failed\n");
 
-    mf2["x"] = 15; // now out of range
+    mf2.Set("x", 15); // now out of range
     let fuzzy_ne = maps::EqualFunc(&mf1, &mf2, |a: &int, b: &int| (a - b).abs() <= 1);
     check(
         !fuzzy_ne,
@@ -130,10 +130,10 @@ fn main() {
 
     // ── maps::DeleteFunc ─────────────────────────────────────────────
     let mut df = goish::make!(map[string]int);
-    df["keep1"] = 1;
-    df["drop1"] = -1;
-    df["keep2"] = 2;
-    df["drop2"] = -2;
+    df.Set("keep1", 1);
+    df.Set("drop1", -1);
+    df.Set("keep2", 2);
+    df.Set("drop2", -2);
     maps::DeleteFunc(&mut df, |_k: &string, v: &int| *v < 0);
     check(len(&df) == 2, b"maps::DeleteFunc: len wrong\n");
     check(
@@ -158,7 +158,7 @@ fn main() {
     let n: int = 50;
     let mut i: int = 0;
     while i < n {
-        im[i] = i * 2;
+        im.Set(i, i * 2);
         i += 1;
     }
 

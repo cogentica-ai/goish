@@ -26,16 +26,16 @@ fn main() {
     let mut m = goish::make!(map[string]int);
     check(len(&m) == 0, b"map: initial len != 0\n");
 
-    m["hello"] = 1;
-    m["world"] = 2;
-    m["foo"] = 3;
+    m.Set("hello", 1);
+    m.Set("world", 2);
+    m.Set("foo", 3);
     check(len(&m) == 3, b"map: len after 3 inserts != 3\n");
 
-    // ── bracket read ─────────────────────────────────────────────────
-    check(m["hello"] == 1, b"map: m[hello] != 1\n");
-    check(m["world"] == 2, b"map: m[world] != 2\n");
-    check(m["foo"] == 3, b"map: m[foo] != 3\n");
-    check(m["missing"] == 0, b"map: missing key must return zero\n");
+    // ── read ─────────────────────────────────────────────────────────
+    check(m.Get("hello").0 == 1, b"map: m[hello] != 1\n");
+    check(m.Get("world").0 == 2, b"map: m[world] != 2\n");
+    check(m.Get("foo").0 == 3, b"map: m[foo] != 3\n");
+    check(m.Get("missing").0 == 0, b"map: missing key must return zero\n");
 
     // ── Get (comma-ok) ───────────────────────────────────────────────
     let (v, ok) = m.Get(string::from_static("hello"));
@@ -52,13 +52,13 @@ fn main() {
     );
 
     // ── update via index ─────────────────────────────────────────────
-    m["hello"] = 42;
-    check(m["hello"] == 42, b"map: update hello wrong\n");
+    m.Set("hello", 42);
+    check(m.Get("hello").0 == 42, b"map: update hello wrong\n");
     check(len(&m) == 3, b"map: len after update changed\n");
 
     // ── in-place increment ───────────────────────────────────────────
-    m["foo"] += 10;
-    check(m["foo"] == 13, b"map: in-place increment wrong\n");
+    m.Set("foo", m.Get("foo").0 + 10);
+    check(m.Get("foo").0 == 13, b"map: in-place increment wrong\n");
 
     // ── delete! ──────────────────────────────────────────────────────
     goish::delete!(m, string::from_static("world"));
@@ -67,7 +67,7 @@ fn main() {
         !m.Has(string::from_static("world")),
         b"map: world still in map after delete\n",
     );
-    check(m["world"] == 0, b"map: deleted key must return zero\n");
+    check(m.Get("world").0 == 0, b"map: deleted key must return zero\n");
 
     // ── delete non-existent (no panic) ───────────────────────────────
     goish::delete!(m, string::from_static("neverwas"));
@@ -81,14 +81,14 @@ fn main() {
     let n: int = 200;
     let mut i: int = 0;
     while i < n {
-        big[i] = i * i;
+        big.Set(i, i * i);
         i += 1;
     }
     check(len(&big) == n, b"map: big map len wrong after insert\n");
 
     i = 0;
     while i < n {
-        check(big[i] == i * i, b"map: big map value wrong after growth\n");
+        check(big.Get(i).0 == i * i, b"map: big map value wrong after growth\n");
         i += 1;
     }
 
@@ -101,7 +101,7 @@ fn main() {
     let fill: int = 20; // well past the 8-slot-per-bucket threshold
     i = 0;
     while i < fill {
-        dm[i] = i;
+        dm.Set(i, i);
         i += 1;
     }
     check(len(&dm) == fill, b"map: delete-reinsert setup len wrong\n");
@@ -122,7 +122,7 @@ fn main() {
     // beyond fill/2 and some keys would appear twice in range! output.
     i = 0;
     while i < fill {
-        dm[i] = i * 10; // update existing even key
+        dm.Set(i, i * 10); // update existing even key
         i += 2;
     }
     check(
@@ -132,7 +132,7 @@ fn main() {
 
     i = 0;
     while i < fill {
-        check(dm[i] == i * 10, b"map: updated value wrong\n");
+        check(dm.Get(i).0 == i * 10, b"map: updated value wrong\n");
         i += 2;
     }
 
@@ -152,14 +152,14 @@ fn main() {
 
     // ── int keys ─────────────────────────────────────────────────────
     let mut ints = goish::make!(map[int]string);
-    ints[1] = string::from_static("one");
-    ints[2] = string::from_static("two");
+    ints.Set(1, string::from_static("one"));
+    ints.Set(2, string::from_static("two"));
     check(
-        ints[1] == string::from_static("one"),
+        ints.Get(1).0 == string::from_static("one"),
         b"map: int key 1 wrong\n",
     );
     check(
-        ints[2] == string::from_static("two"),
+        ints.Get(2).0 == string::from_static("two"),
         b"map: int key 2 wrong\n",
     );
 
@@ -167,7 +167,7 @@ fn main() {
     let cloned = maps::Clone(&m);
     check(len(&cloned) == len(&m), b"map: Clone len wrong\n");
     for (k, v) in goish::range!(m) {
-        check(cloned[k.clone()] == *v, b"map: Clone value wrong\n");
+        check(cloned.Get(k.clone()).0 == *v, b"map: Clone value wrong\n");
     }
 
     // ── maps::Equal ───────────────────────────────────────────────────

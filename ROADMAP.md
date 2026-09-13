@@ -637,6 +637,55 @@ taught it (see the note on StartCPUProfile):
              established; Rust's `Index` trait cannot return an owned
              value anyway. The 24 sites become `.Get(k).0`, and the
              `Index` impls go.
+
+DONE. Four notes, because the plan above was wrong about the size and
+silent about the cost.
+
+THE COUNT WAS 81, NOT 24 — 9 in src and 72 in examples. It was taken by
+disabling the four impls with `#[cfg(any())]` and reading the E0608s
+back, which is the only honest census: `m[k]` cannot be grepped apart
+from slice indexing, and `IndexMut` writes look nothing like reads.
+
+AND `cargo check --examples` UNDER-REPORTS: it stops at the first
+failing target, so the first census came back "2 sites in examples"
+and the next build found a third, then a fourth. `--keep-going` gives
+the whole set in one pass. Worth remembering for any tree-wide API
+removal — the first number cargo prints is a lower bound, not a count.
+
+WHAT WENT WITH THE IMPLS IS `m[k] = v` AND `m[k] += n`. There is no
+replacement spelling: those become `m.Set(k, v)` and
+`m.Set(k, m.Get(k).0 + n)`. That is a readability loss against Go on
+about forty call sites and it is not recoverable — Rust's `IndexMut`
+returns `&mut V`, and a lock-backed header cannot produce one. `Set`
+is now documented as the only write form.
+
+The mechanical rewrite has one silent failure mode, and all three
+instances of it made it past the compiler: a line whose assignment is
+followed by a trailing comment does not match an "ends with `;`"
+pattern, so it rewrites as a READ — and `m.Get(k).0 = v` compiles,
+because it assigns to a field of a temporary tuple. It is a no-op.
+`gomap_smoke`, `map_smoke` and `gomap_range_smoke` each caught their
+own; the grep that finds the rest is `\.Get(.*)\.0 *=`.
+
+A REAL DIVERGENCE FELL OUT, in `textproto.MIMEHeader`. Go's `Values` is
+`return h[CanonicalMIMEHeaderKey(key)]`, so a miss yields the zero
+value and the zero slice is NIL. goish had `if !h.Has(k) { return
+slice::__from_vec(Vec::new()) }` — an allocated-empty slice, which
+compared unequal to nil once slices grew a nil flag. Measured against
+Go 1.25.5: `MIMEHeader{}.Values("X") == nil` is true, and so is
+`MIMEHeader(nil).Values("X") == nil`. `textproto_ref_smoke` asserted
+only `len() != 0`, which passes for both, so nothing was watching; it
+now asserts nil, asserts that a PRESENT key is not nil, and covers the
+nil header.
+
+`Add`, `Get` and the two append sites in `mail` and `textproto/reader`
+lost a `Has` probe each on the way — Go writes `h[key] =
+append(h[key], value)` with ONE lookup, and goish was hashing the key
+twice to avoid a missing-key panic that `Get` does not have.
+
+STILL DIVERGENT, and out of scope here: Go's `Values` returns the LIVE
+slice. Measured — mutating the returned slice changes what `Get` reads
+afterwards. goish clones, so it does not. That is #26, not #7.
   `__iter`   Go's `range` yields COPIES of key and value, so an
              owned-yielding iterator is the faithful shape, not a
              concession. It currently yields `(&K, &V)`.

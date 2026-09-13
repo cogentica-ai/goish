@@ -163,14 +163,13 @@ pub fn Add<K: Into<string>, V: Into<string>>(h: &mut MIMEHeader, key: K, value: 
     let key: string = key.into();
     let value: string = value.into();
     let k = CanonicalMIMEHeaderKey(key);
-    let cur = if h.Has(k.clone()) {
-        h[k.clone()].clone()
-    } else {
-        slice::__from_vec(Vec::new())
-    };
+    // Go: h[key] = append(h[key], value) — one lookup, and a miss
+    // yields the nil slice that `append` grows. `Get` is that lookup;
+    // the `Has` probe it replaces was a second hash of the same key.
+    let (cur, _) = h.Get(k.clone());
     let mut v: Vec<string> = cur.__into_vec();
     v.push(value);
-    h[k] = slice::__from_vec(v);
+    h.Set(k, slice::__from_vec(v));
 }
 
 // go: sdk 1.25.5 net/textproto/header.go:21-23 MIMEHeader.Set
@@ -179,7 +178,7 @@ pub fn Set<K: Into<string>, V: Into<string>>(h: &mut MIMEHeader, key: K, value: 
     let key: string = key.into();
     let value: string = value.into();
     let k = CanonicalMIMEHeaderKey(key);
-    h[k] = slice::__from_vec(alloc::vec![value]);
+    h.Set(k, slice::__from_vec(alloc::vec![value]));
 }
 
 // go: sdk 1.25.5 net/textproto/header.go:30-39 MIMEHeader.Get
@@ -187,10 +186,10 @@ pub fn Set<K: Into<string>, V: Into<string>>(h: &mut MIMEHeader, key: K, value: 
 pub fn Get<K: Into<string>>(h: &MIMEHeader, key: K) -> string {
     let key: string = key.into();
     let k = CanonicalMIMEHeaderKey(key);
-    if !h.Has(k.clone()) {
-        return string::new();
-    }
-    let v = h[k].clone();
+    // Go: v := h[CanonicalMIMEHeaderKey(key)]; if len(v) == 0 { return "" }
+    // The missing key and the present-but-empty slice take the same
+    // branch in Go, so the `Has` probe this replaces was never needed.
+    let (v, _) = h.Get(k);
     if v.Len() == 0 {
         return string::new();
     }
@@ -202,10 +201,13 @@ pub fn Get<K: Into<string>>(h: &MIMEHeader, key: K) -> string {
 pub fn Values<K: Into<string>>(h: &MIMEHeader, key: K) -> slice<string> {
     let key: string = key.into();
     let k = CanonicalMIMEHeaderKey(key);
-    if !h.Has(k.clone()) {
-        return slice::__from_vec(Vec::new());
-    }
-    h[k].clone()
+    // Go: return h[CanonicalMIMEHeaderKey(key)] — a miss yields the
+    // zero value, and the zero slice is NIL. Measured against Go 1.25.5:
+    // `MIMEHeader{}.Values("X") == nil` is true. The branch this
+    // replaces returned an allocated-empty slice, which compared
+    // unequal to nil once slices grew a nil flag.
+    let (v, _) = h.Get(k);
+    v
 }
 
 // go: sdk 1.25.5 net/textproto/header.go:54-56 MIMEHeader.Del

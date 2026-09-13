@@ -148,13 +148,10 @@ fn readHeader<R: io::Reader>(r: &mut textproto::Reader<R>) -> (map<string, slice
         let value = strings::TrimLeft(v, string::from_static(" \t"));
 
         // Go: m[key] = append(m[key], value)
-        let mut cur: Vec<string> = if m.Has(key.clone()) {
-            m[key.clone()].clone().__into_vec()
-        } else {
-            Vec::new()
-        };
+        let (prev, _) = m.Get(key.clone());
+        let mut cur: Vec<string> = prev.__into_vec();
         cur.push(value);
-        m[key] = slice::__from_vec(cur);
+        m.Set(key, slice::__from_vec(cur));
 
         if err != nil {
             return (m, err);

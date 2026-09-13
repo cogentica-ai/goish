@@ -42,7 +42,7 @@ fn main() {
 
     // Read-on-miss returns Default::default() — for int that's 0.
     // Read does NOT mutate the map (matches Go).
-    let n = m["zeta"];
+    let n = m.Get("zeta").0;
     check(n == 0, b"map: m[missing] must read as 0\n");
     check(
         !m.Has(string("zeta")),
@@ -50,22 +50,22 @@ fn main() {
     );
 
     // Read existing.
-    let n = m["alpha"];
+    let n = m.Get("alpha").0;
     check(n == 1, b"map: m[\"alpha\"] read wrong\n");
 
     // Write inserts.
-    m["delta"] = 4;
+    m.Set("delta", 4);
     check(m.Has(string("delta")), b"map: m[k]=v must insert\n");
     let (v, _) = m.Get(string("delta"));
     check(v == 4, b"map: m[k]=v value wrong\n");
 
-    // Increment via compound op (read-modify-write through IndexMut).
-    m["alpha"] += 10;
+    // Increment: read-modify-write, Go's `m[k] += n` spelled out.
+    m.Set("alpha", m.Get("alpha").0 + 10);
     let (v, _) = m.Get(string("alpha"));
     check(v == 11, b"map: m[k] += wrong\n");
 
     // Increment a previously-missing key (insert + add).
-    m["epsilon"] += 7;
+    m.Set("epsilon", m.Get("epsilon").0 + 7);
     let (v, _) = m.Get(string("epsilon"));
     check(v == 7, b"map: m[k] += on missing must insert+add\n");
 
@@ -80,9 +80,9 @@ fn main() {
     // ─── Keys / Values (unordered — hash map) ────────────────────────
 
     let mut m2 = make!(map[string]int);
-    m2["c"] = 3;
-    m2["a"] = 1;
-    m2["b"] = 2;
+    m2.Set("c", 3);
+    m2.Set("a", 1);
+    m2.Set("b", 2);
     let mut keys = m2.Keys();
     keys.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
     let want: slice<string> = goish::slice!([]string{ "a", "b", "c" });
@@ -127,14 +127,14 @@ fn main() {
     maps::Copy(&mut empty, &m2);
     check(maps::Equal(&m2, &empty), b"map: Copy result wrong\n");
 
-    // ─── Map<int, V> with bracket syntax ──────────────────────────────
+    // ─── Map<int, V> ─────────────────────────────────────────────────
 
     let mut counter = make!(map[int]int);
-    counter[1] = 100;
-    counter[2] = 200;
-    counter[1] += 5; // 105
-    check(counter[1] == 105, b"map<int,int>: m[k]+= wrong\n");
-    check(counter[99] == 0, b"map<int,int>: m[missing] zero wrong\n");
+    counter.Set(1, 100);
+    counter.Set(2, 200);
+    counter.Set(1, counter.Get(1).0 + 5); // 105
+    check(counter.Get(1).0 == 105, b"map<int,int>: m[k]+= wrong\n");
+    check(counter.Get(99).0 == 0, b"map<int,int>: m[missing] zero wrong\n");
 
     const OK: &[u8] = b"map: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

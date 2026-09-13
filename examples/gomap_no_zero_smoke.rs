@@ -44,6 +44,24 @@ impl Hasher for H42 {
     }
 }
 
+/// Read one value out of an interface-typed map.
+///
+/// There is no owned read for a `Box<dyn Trait>` value: `Get` clones and
+/// `Box<dyn Hasher>` is not Clone. `__try_for_each` hands the value out
+/// by reference for the duration of the call and stops at the first
+/// match, so it is the access path that survives the shared header
+/// issue #7 is heading for — and, unlike the `Index` impl it replaces,
+/// it never returns a reference the caller can outlive.
+fn name_of(m: &goish::map<string, Box<dyn Hasher + Send + Sync>>, key: &'static str) -> Option<int> {
+    return m.__try_for_each(|k, v| {
+        use core::ops::ControlFlow;
+        if k == &string::from_static(key) {
+            return ControlFlow::Break(v.name());
+        }
+        return ControlFlow::Continue(());
+    });
+}
+
 #[goish::main]
 fn main() {
     // Ctor — works without V: Default
@@ -56,9 +74,9 @@ fn main() {
         b"no-zero map: Has(seven) wrong on empty\n",
     );
 
-    // Insert via Set (IndexMut still requires V: Default, so use Set
-    // for non-Default V). Box<dyn Trait> is not Clone either, so the
-    // existing `m["k"] = v` IndexMut path doesn't apply anyway.
+    // Insert via Set — the only write form since the `IndexMut` impl
+    // that spelled `m["k"] = v` was removed (it returned `&mut V`,
+    // which a shared header cannot hand out; ROADMAP §2u).
     hashers.Set(
         string::from_static("seven"),
         Box::new(H7) as Box<dyn Hasher + Send + Sync>,
@@ -82,44 +100,22 @@ fn main() {
         b"no-zero map: Has(forty-two) wrong\n",
     );
 
-    // Read via Index (panics on missing — caller must Has() first)
-    if hashers.Has(string::from_static("seven")) {
-        let h = &hashers[string::from_static("seven")];
-        check(h.name() == 7, b"no-zero map: H7.name() != 7\n");
-    }
-    if hashers.Has(string::from_static("forty-two")) {
-        let h = &hashers[string::from_static("forty-two")];
-        check(h.name() == 42, b"no-zero map: H42.name() != 42\n");
-    }
-
-    // Reading a value out of an interface-typed map. `Get` is not
-    // available here — it clones, and `Box<dyn Hasher>` is not Clone —
-    // so the read goes through the guard-scoped closure form, which
-    // hands the value out by reference for the duration of the call
-    // and so survives the shared header #7 is heading for.
-    let name7 = hashers
-        .__try_for_each(|k, v| {
-            use core::ops::ControlFlow;
-            if k == &string::from_static("seven") {
-                return ControlFlow::Break(v.name());
-            }
-            return ControlFlow::Continue(());
-        });
+    // Reading the VALUE, which `Get` cannot do here: it clones, and
+    // `Box<dyn Hasher>` is not Clone. `Index` used to serve this and is
+    // gone — it returned `&V`, which a shared header cannot hand back.
+    // The guard-scoped closure is what remains, and what will still
+    // work once the header lands.
     check(
-        name7 == Some(7),
-        b"no-zero map: __try_for_each(seven) wrong\n",
+        name_of(&hashers, "seven") == Some(7),
+        b"no-zero map: H7.name() != 7\n",
     );
-
-    let missing = hashers.__try_for_each(|k, v| {
-        use core::ops::ControlFlow;
-        if k == &string::from_static("missing") {
-            return ControlFlow::Break(v.name());
-        }
-        return ControlFlow::Continue(());
-    });
     check(
-        missing == None,
-        b"no-zero map: __try_for_each(missing) must be None\n",
+        name_of(&hashers, "forty-two") == Some(42),
+        b"no-zero map: H42.name() != 42\n",
+    );
+    check(
+        name_of(&hashers, "missing") == None,
+        b"no-zero map: read of a missing key must be None\n",
     );
 
     // Range! — iteration works, no Default required

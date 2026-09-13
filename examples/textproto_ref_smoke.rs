@@ -47,7 +47,7 @@ use goish::bytes;
 use goish::gostring::string;
 use goish::net::textproto;
 use goish::types::int;
-use goish::{fmt, slice, syscall};
+use goish::{fmt, nil, slice, syscall};
 
 fn s(x: &str) -> string {
     return string::from_bytes(x.as_bytes());
@@ -214,7 +214,13 @@ fn main() {
         if vs.len() != 2 || vs[0] != s("a=1") || vs[1] != s("b=2") {
             ok = false;
         }
-        // Go: a missing key is "" and an EMPTY slice, never a panic.
+        // Go: a missing key is "" and a NIL slice, never a panic.
+        // Measured against Go 1.25.5 (net/textproto):
+        //   MIMEHeader{}.Values("X") == nil  ->  true, len 0
+        //   MIMEHeader(nil).Values("X") == nil -> true
+        // `Values` is `return h[key]`, and the zero value of a slice is
+        // nil. The `len() != 0` check alone passed for an allocated
+        // empty slice too, so it did not distinguish the two.
         eq(
             &mut ok,
             "hdr",
@@ -222,7 +228,19 @@ fn main() {
             textproto::Get(&h, "nope"),
             "",
         );
-        if textproto::Values(&h, "nope").len() != 0 {
+        let miss = textproto::Values(&h, "nope");
+        if miss.len() != 0 || miss != nil {
+            ok = false;
+        }
+        // A key that IS present must not be nil, so the row above is
+        // not passing merely because everything is nil.
+        if textproto::Values(&h, "SET-COOKIE") == nil {
+            ok = false;
+        }
+        // And a nil header reads the same way, as Go's `h == nil`
+        // guard does.
+        let nilh: textproto::MIMEHeader = nil.into();
+        if textproto::Values(&nilh, "nope") != nil || textproto::Get(&nilh, "nope") != "" {
             ok = false;
         }
         textproto::Del(&mut h, "CONTENT-TYPE");
