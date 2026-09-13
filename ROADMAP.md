@@ -4225,6 +4225,30 @@ not "goish forgot to reuse a connection". It is: the client half of
 readTransfer's trailer read is unported, and connection reuse for
 chunked is one of the things blocked behind it.
 
+**RE-MEASURED 2026-09-13, and most of the above is now HISTORY.** The
+client does read the trailer section — `client.rs`, the
+`FramedBody::Chunked` arm, calls `transfer::readTrailer` when the
+chunked reader hits EOF and sets `chunk_drained` only on a clean read,
+so a malformed trailer still kills the conn instead of banking a
+desynced one. The reuse numbers that open this entry are stale:
+
+    Go     three chunked requests opened 1 connection
+    goish  three chunked requests opened 1 connection
+
+pinned, along with the trailered case, by
+`examples/http_chunked_reuse_ref_smoke.rs` (6/6).
+
+ONE HALF REMAINS: `resp.Trailer` is still empty. The trailers are read
+into a scratch Header and dropped, and the reason is not laziness —
+`Response.Trailer` is a public field of value-typed `Header`, and
+goish's `map` is a VALUE type where Go's is a reference. Go's `body`
+can write the caller's Trailer because it holds the `*Response` and the
+Header aliases; a goish body holding a `Header` holds a copy. Making it
+work means either a shared handle in `Response` (public API) or making
+`Header` reference-typed (all of net/http, and it is really the map
+design). So this is decision-shaped like §0.D, not a patch — and it is
+the ONLY thing left in this entry.
+
 FIXED in that order — trailers first. The chunked arm of the body
 read now calls `readTrailer` when the reader hits its terminator, and
 only a CLEAN trailer read marks the body drained; a malformed one
