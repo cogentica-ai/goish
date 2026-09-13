@@ -2120,6 +2120,10 @@ name = "flag_var_smoke"
 path = "examples/flag_var_smoke.rs"
 
 [[example]]
+name = "flag_definer_panic_probe"
+path = "examples/flag_definer_panic_probe.rs"
+
+[[example]]
 name = "flag_usage_ref_smoke"
 path = "examples/flag_usage_ref_smoke.rs"
 

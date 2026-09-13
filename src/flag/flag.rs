@@ -8,7 +8,7 @@
 // holds what has been ported verbatim, kept separate because GOISH015
 // forbids anchored code in a module root.
 //
-// goishlint:ignore GOISH018 Func, BoolFunc, TextVar, Args, NArg, Arg, Usage, Init, Output, defaultUsage, sortFlags, newBoolValue, newIntValue, newInt64Value, newUintValue, newUint64Value, newStringValue, newFloat64Value, newDurationValue, newTextValue, newFuncValue, newBoolFuncValue, Get, IsBoolFlag, Float64, Uint64, BoolVar, IntVar, Int64Var, UintVar, Uint64Var, StringVar, Float64Var, DurationVar, failf, panicOnError, sprintf, commandLineUsage, Error— the FlagSet parser is hand-written; these are the declarations of Go's flag.go that goish does not have. Twelve names that WERE on this list — Parse, parseOne, PrintDefaults, UnquoteUsage, isZeroValue, numError, usage, NFlag, Visit, Set, String, SetOutput — are ported AND anchored in this file, so the waiver was suppressing GOISH018 over declarations that exist. Re-checked 2026-09-06. Three MORE came off on 2026-09-13 — NewFlagSet, Name and ErrorHandling — when §2o gave NewFlagSet Go's two parameters; the waiver was again naming declarations that exist. And one MORE on the same day — Var — when §2p opened the kind enum. `IsBoolFlag` stays waived on purpose: Go declares it on a SEPARATE optional interface (`boolFlag`), and Rust has no optional-interface test on a `dyn`, so goish folds it into `Value` as a defaulted method. There is no separate declaration to anchor — only the behaviour, which flag_var_smoke pins. Three separate passes have now found this waiver naming things the file has; it is worth re-deriving rather than trusting.
+// goishlint:ignore GOISH018 Func, BoolFunc, TextVar, Args, NArg, Arg, Usage, Init, Output, defaultUsage, sortFlags, newBoolValue, newIntValue, newInt64Value, newUintValue, newUint64Value, newStringValue, newFloat64Value, newDurationValue, newTextValue, newFuncValue, newBoolFuncValue, Get, IsBoolFlag, Float64, Uint64, BoolVar, IntVar, Int64Var, UintVar, Uint64Var, StringVar, Float64Var, DurationVar, failf, panicOnError, commandLineUsage, Error— the FlagSet parser is hand-written; these are the declarations of Go's flag.go that goish does not have. Twelve names that WERE on this list — Parse, parseOne, PrintDefaults, UnquoteUsage, isZeroValue, numError, usage, NFlag, Visit, Set, String, SetOutput — are ported AND anchored in this file, so the waiver was suppressing GOISH018 over declarations that exist. Re-checked 2026-09-06. Three MORE came off on 2026-09-13 — NewFlagSet, Name and ErrorHandling — when §2o gave NewFlagSet Go's two parameters; the waiver was again naming declarations that exist. And one MORE on the same day — Var — when §2p opened the kind enum. `IsBoolFlag` stays waived on purpose: Go declares it on a SEPARATE optional interface (`boolFlag`), and Rust has no optional-interface test on a `dyn`, so goish folds it into `Value` as a defaulted method. There is no separate declaration to anchor — only the behaviour, which flag_var_smoke pins. Three separate passes have now found this waiver naming things the file has; it is worth re-deriving rather than trusting.
 // goishlint:ignore GOISH021 Getter, ErrorHandling, ContinueOnError, ExitOnError, PanicOnError, FlagSet, boolValue, intValue, int64Value, uintValue, uint64Value, stringValue, float64Value, durationValue, textValue, funcValue, boolFuncValue, errParse, errRange, ErrHelp, Usage, numError, boolFlag, commandLineUsage — same.
 
 #![allow(non_snake_case)]
@@ -42,13 +42,7 @@ impl FlagSet {
         usage: U,
     ) -> FlagHandle<crate::types::int64> {
         let cell = Arc::new(SpinLock::new(default));
-        self.defs.push(FlagDef {
-            name: name.into(),
-            usage: usage.into(),
-            kind: FlagKind::Int64(cell.clone()),
-            defvalue: __defstr(&FlagKind::Int64(cell.clone())),
-            actual: false,
-        });
+        self.__define(name.into(), usage.into(), FlagKind::Int64(cell.clone()));
         return FlagHandle { cell };
     }
 
@@ -66,13 +60,7 @@ impl FlagSet {
         F: Fn(string) -> error + Send + Sync + 'static,
     {
         let f: Arc<dyn Fn(string) -> error + Send + Sync> = Arc::new(fn_);
-        self.defs.push(FlagDef {
-            name: name.into(),
-            usage: usage.into(),
-            kind: FlagKind::Func(f),
-            defvalue: string::new(),
-            actual: false,
-        });
+        self.__define(name.into(), usage.into(), FlagKind::Func(f));
     }
 
     // go: sdk 1.25.5 flag/flag.go:993-995 FlagSet.BoolFunc
@@ -84,13 +72,7 @@ impl FlagSet {
         F: Fn(string) -> error + Send + Sync + 'static,
     {
         let f: Arc<dyn Fn(string) -> error + Send + Sync> = Arc::new(fn_);
-        self.defs.push(FlagDef {
-            name: name.into(),
-            usage: usage.into(),
-            kind: FlagKind::BoolFunc(f),
-            defvalue: string::new(),
-            actual: false,
-        });
+        self.__define(name.into(), usage.into(), FlagKind::BoolFunc(f));
     }
 
     // go: sdk 1.25.5 flag/flag.go:864-868 FlagSet.Uint64
@@ -109,13 +91,7 @@ impl FlagSet {
         usage: U,
     ) -> FlagHandle<crate::types::uint64> {
         let cell = Arc::new(SpinLock::new(default));
-        self.defs.push(FlagDef {
-            name: name.into(),
-            usage: usage.into(),
-            kind: FlagKind::Uint64(cell.clone()),
-            defvalue: __defstr(&FlagKind::Uint64(cell.clone())),
-            actual: false,
-        });
+        self.__define(name.into(), usage.into(), FlagKind::Uint64(cell.clone()));
         return FlagHandle { cell };
     }
 
@@ -129,13 +105,7 @@ impl FlagSet {
         usage: U,
     ) -> FlagHandle<crate::types::uint> {
         let cell = Arc::new(SpinLock::new(default));
-        self.defs.push(FlagDef {
-            name: name.into(),
-            usage: usage.into(),
-            kind: FlagKind::Uint(cell.clone()),
-            defvalue: __defstr(&FlagKind::Uint(cell.clone())),
-            actual: false,
-        });
+        self.__define(name.into(), usage.into(), FlagKind::Uint(cell.clone()));
         return FlagHandle { cell };
     }
 
@@ -150,13 +120,7 @@ impl FlagSet {
         usage: U,
     ) -> FlagHandle<crate::time::Duration> {
         let cell = Arc::new(SpinLock::new(default));
-        self.defs.push(FlagDef {
-            name: name.into(),
-            usage: usage.into(),
-            kind: FlagKind::Duration(cell.clone()),
-            defvalue: __defstr(&FlagKind::Duration(cell.clone())),
-            actual: false,
-        });
+        self.__define(name.into(), usage.into(), FlagKind::Duration(cell.clone()));
         return FlagHandle { cell };
     }
 
@@ -225,6 +189,71 @@ pub(crate) const fn command_line_set() -> FlagSet {
     };
 }
 
+impl FlagSet {
+    // go: sdk 1.25.5 flag/flag.go:1050-1054 FlagSet.sprintf
+    /// Go: "sprintf formats the message, prints it to output, and
+    /// returns it." The printing is not incidental — every definition
+    /// panic below is preceded by the same text on Output, so a user
+    /// sees it even if the panic is recovered.
+    pub(crate) fn __sprintf(&self, msg: string) -> string {
+        let mut line: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+        line.extend_from_slice(msg.as_bytes());
+        line.push(b'\n');
+        self.__write_output(line);
+        return msg;
+    }
+
+    // go: none — goish-only: in Go EVERY definer routes through `Var`,
+    //     so all of them inherit its three panics. goish's ten definers
+    //     each pushed onto `defs` directly and validated nothing, so
+    //     `flag.Bool("-x", …)` and a duplicate name both succeeded
+    //     silently where Go panics. This is the shared path they now
+    //     take. See ROADMAP §2p.
+    /// Register one flag, with Go's definition-time checks.
+    ///
+    /// Measured against Go 1.25.5 — the messages are verbatim, and each
+    /// is written to Output before the panic, as `sprintf` does:
+    ///
+    ///     flag "-x" begins with -
+    ///     flag "a=b" contains =
+    ///     prog flag redefined: dup      (named set)
+    ///     flag redefined: dup           (unnamed set)
+    pub(crate) fn __define(&mut self, name: string, usage: string, kind: FlagKind) {
+        let n: &str = name.as_ref();
+        if n.starts_with('-') {
+            let m = string::from_static("flag \"") + name.clone()
+                + string::from_static("\" begins with -");
+            let m = self.__sprintf(m);
+            panic!("{}", m.as_ref() as &str);
+        }
+        if n.contains('=') {
+            let m = string::from_static("flag \"") + name.clone()
+                + string::from_static("\" contains =");
+            let m = self.__sprintf(m);
+            panic!("{}", m.as_ref() as &str);
+        }
+        if self.find_def(&name).is_some() {
+            // Go prefixes the set's name when it has one.
+            let m = match &self.name {
+                Some(sn) if sn.Len() > 0 => {
+                    sn.clone() + string::from_static(" flag redefined: ") + name.clone()
+                }
+                _ => string::from_static("flag redefined: ") + name.clone(),
+            };
+            let m = self.__sprintf(m);
+            panic!("{}", m.as_ref() as &str);
+        }
+        let defvalue = __defstr(&kind);
+        self.defs.push(FlagDef {
+            name: name,
+            usage: usage,
+            kind: kind,
+            defvalue: defvalue,
+            actual: false,
+        });
+    }
+}
+
 // go: none — goish-only: Go's `Var` takes a POINTER the caller already
 //     holds (`var v MyType; flag.Var(&v, …)`) and keeps using. Rust
 //     ownership does not allow that: the value moves into the FlagSet.
@@ -246,41 +275,21 @@ impl FlagSet {
     /// caller could not add a type of their own. See ROADMAP §2p.
     ///
     /// Go panics on a name that begins with `-`, contains `=`, or is
-    /// already defined; those checks live in `Var` there because every
-    /// other definer routes through it. goish's definers do not, so
-    /// for now only `Var` has them — recorded in §2p rather than
-    /// changed underneath ten call sites in this commit.
+    /// already defined. Those checks live in `Var` there because every
+    /// other definer routes through it; here they live in `__define`,
+    /// which every definer takes.
     pub fn Var<N: Into<string>, U: Into<string>>(
         &mut self,
         value: alloc::boxed::Box<dyn Value>,
         name: N,
         usage: U,
     ) -> ValueHandle {
-        let name: string = name.into();
-        let n: &str = name.as_ref();
-        // Go: `panic(f.sprintf("flag %q begins with -", name))`
-        if n.starts_with('-') {
-            panic!("flag begins with -");
-        }
-        if n.contains('=') {
-            panic!("flag contains =");
-        }
-        if self.find_def(&name).is_some() {
-            // Go: "flag redefined: <name>", prefixed by the set's name
-            // when it has one. Happens only if two flags share a name.
-            panic!("flag redefined");
-        }
-        // Go: "Remember the default value as a string; it won't change."
-        let defvalue = value.String();
         let cell: ValueHandle =
             alloc::sync::Arc::new(crate::runtime::spin::SpinLock::new(value));
-        self.defs.push(FlagDef {
-            name: name,
-            usage: usage.into(),
-            kind: FlagKind::Custom(cell.clone()),
-            defvalue: defvalue,
-            actual: false,
-        });
+        // Go's three checks live in `Var` because every other definer
+        // routes through it; goish's live in `__define`, which every
+        // definer now takes.
+        self.__define(name.into(), usage.into(), FlagKind::Custom(cell.clone()));
         return cell;
     }
 }

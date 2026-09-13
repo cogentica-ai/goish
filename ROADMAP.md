@@ -3176,15 +3176,33 @@ STILL NOT DONE: `TextVar`. `encoding::TextMarshaler` and
 `TextUnmarshaler` both exist, so it is now reachable — it just was not
 part of this change.
 
-AND A SEPARATE GAP FOUND WHILE DOING IT: in Go, every definer routes
-through `Var`, so all of them get its three panics — a name beginning
-with `-`, a name containing `=`, and a redefinition. goish's ten
-definers each push onto `defs` directly and validate NOTHING, so
-`flag.Bool("-x", …)` or a duplicate name silently succeeds where Go
-panics. Only `Var` has the checks today. Fixing it means routing all
-ten through a shared definer, which is a change under ten call sites
-with a panic as the new outcome — deliberately not done as a side
-effect of this one.
+AND A SEPARATE GAP FOUND WHILE DOING IT, **fixed in the next commit**:
+in Go, every definer routes through `Var`, so all of them get its three
+panics — a name beginning with `-`, a name containing `=`, and a
+redefinition. goish's ten definers each pushed onto `defs` directly and
+validated NOTHING, so `flag.Bool("-x", …)` or a duplicate name
+succeeded silently where Go panics.
+
+All eleven now take one path, `FlagSet::__define`. Measured against Go
+1.25.5 — the messages are verbatim, and each is written to Output
+before the panic, which is what Go's `sprintf` does:
+
+    flag "-x" begins with -
+    flag "a=b" contains =
+    prog flag redefined: dup      named set
+    flag redefined: dup           unnamed set
+
+`sprintf` came off the GOISH018 waiver with them — a fourth pass
+finding that waiver naming a declaration the file now has.
+
+The panics run as subprocesses (`flag_definer_panic_probe`), with a
+`ok` case that exits 7 as the CONTROL: "panicked" proves nothing if a
+definer that rejected everything would pass every row.
+
+A duplicate name is now fatal where it used to be silently accepted, so
+the whole declared example suite was run rather than the flag subset —
+a second definition of the same flag anywhere in the tree would now
+take the process down.
 
 ## 2o. `flag` always continues on a parse error — FIXED 2026-09-13
 

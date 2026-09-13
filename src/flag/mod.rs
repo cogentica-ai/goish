@@ -204,13 +204,7 @@ impl FlagSet {
         usage: U,
     ) -> FlagHandle<string> {
         let cell = Arc::new(SpinLock::new(default.into()));
-        self.defs.push(FlagDef {
-            name: name.into(),
-            usage: usage.into(),
-            kind: FlagKind::String(cell.clone()),
-            defvalue: __defstr(&FlagKind::String(cell.clone())),
-            actual: false,
-        });
+        self.__define(name.into(), usage.into(), FlagKind::String(cell.clone()));
         FlagHandle { cell }
     }
 
@@ -221,13 +215,7 @@ impl FlagSet {
         usage: U,
     ) -> FlagHandle<int> {
         let cell = Arc::new(SpinLock::new(default));
-        self.defs.push(FlagDef {
-            name: name.into(),
-            usage: usage.into(),
-            kind: FlagKind::Int(cell.clone()),
-            defvalue: __defstr(&FlagKind::Int(cell.clone())),
-            actual: false,
-        });
+        self.__define(name.into(), usage.into(), FlagKind::Int(cell.clone()));
         FlagHandle { cell }
     }
 
@@ -238,13 +226,7 @@ impl FlagSet {
         usage: U,
     ) -> FlagHandle<bool> {
         let cell = Arc::new(SpinLock::new(default));
-        self.defs.push(FlagDef {
-            name: name.into(),
-            usage: usage.into(),
-            kind: FlagKind::Bool(cell.clone()),
-            defvalue: __defstr(&FlagKind::Bool(cell.clone())),
-            actual: false,
-        });
+        self.__define(name.into(), usage.into(), FlagKind::Bool(cell.clone()));
         FlagHandle { cell }
     }
 
@@ -255,13 +237,7 @@ impl FlagSet {
         usage: U,
     ) -> FlagHandle<float64> {
         let cell = Arc::new(SpinLock::new(default));
-        self.defs.push(FlagDef {
-            name: name.into(),
-            usage: usage.into(),
-            kind: FlagKind::Float64(cell.clone()),
-            defvalue: __defstr(&FlagKind::Float64(cell.clone())),
-            actual: false,
-        });
+        self.__define(name.into(), usage.into(), FlagKind::Float64(cell.clone()));
         FlagHandle { cell }
     }
 
