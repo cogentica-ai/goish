@@ -2305,6 +2305,36 @@ pub fn Shutdown(fd: i32, how: i32) -> i32 {
     unsafe { syscall2(SYS_SHUTDOWN, fd as usize, how as usize) as i32 }
 }
 
+// go: sdk 1.25.5 syscall/syscall.go:48-55 ByteSliceFromString
+/// Go: "ByteSliceFromString returns a NUL-terminated slice of bytes
+/// containing the text of s. If s contains a NUL byte at any location,
+/// it returns (nil, EINVAL)."
+///
+/// THIS IS THE CHOKEPOINT (#29). goish built its C strings by appending
+/// a zero byte inline, at forty sites under `src/os/`, and none of them
+/// looked at what was already in the string — so a path carrying a NUL
+/// truncated at the kernel boundary and the call succeeded against a
+/// DIFFERENT FILE. Measured before the fix: a root holding one file
+/// `f`, asked for `"f\0junk"`, returned `f`'s contents through both
+/// `Root.ReadFile` and `os::ReadFile`.
+///
+/// Go is immune because every syscall wrapper converts its string
+/// here. Note where the protection is NOT: `fs.ValidPath("f\0junk")`
+/// is true in Go as well — it validates path ELEMENTS, not bytes — so
+/// a check modelled on `isValidRootFSPath` would look faithful and stop
+/// nothing.
+#[allow(non_snake_case)]
+pub fn ByteSliceFromString(s: &crate::gostring::string) -> (alloc::vec::Vec<u8>, crate::errors::error) {
+    let raw = s.as_bytes();
+    if raw.contains(&0u8) {
+        return (alloc::vec::Vec::new(), EINVAL.into());
+    }
+    let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(raw.len() + 1);
+    out.extend_from_slice(raw);
+    out.push(0);
+    return (out, crate::errors::nil);
+}
+
 /// `fcntl(2)`. The `arg` form (used for `F_SETFL`); for `F_GETFL`
 /// pass `0`. Returns the result on success, `-errno` on failure.
 #[allow(non_snake_case)]

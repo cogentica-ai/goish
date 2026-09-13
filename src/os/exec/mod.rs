@@ -837,16 +837,33 @@ fn name_has_slash(s: &string) -> bool {
     false
 }
 
+// go: none — goish-only: Go builds this shape inside `os.startProcess`
+//     (os/exec_posix.go:69), which wraps every `syscall.StartProcess`
+//     failure — including the EINVAL from a NUL in the path or in an
+//     argument — as `&PathError{Op: "fork/exec", Path: name}`. goish
+//     refuses before the fork, so it needs the shape here.
+/// `fork/exec <path>: invalid argument`.
+fn forkExecEINVAL(path: &string) -> error {
+    return errors::Wrap(crate::os::PathError {
+        Op: string::from_static("fork/exec"),
+        Path: path.clone(),
+        Err: errors::Wrap(syscall::EINVAL),
+    });
+}
+
 fn file_is_accessible(path: &string) -> bool {
     // Use stat(2) to check existence + executable bit. faccessat(2)
     // would be more honest about X_OK + UID/GID resolution but isn't
     // wired in goish::syscall yet. For v1 a regular-file existence
     // check is enough: $PATH lookups by definition target executables.
-    let mut buf: Vec<u8> = Vec::with_capacity(path.Len() as usize + 1);
-    for &b in path.as_bytes() {
-        buf.push(b);
+    // A NUL would truncate the path and stat a DIFFERENT file, so a
+    // candidate carrying one is simply not accessible. Go reaches the
+    // same answer: `LookPath("ec\x00ho")` reports "executable file not
+    // found in $PATH".
+    let (buf, nul) = syscall::ByteSliceFromString(path);
+    if !nul.IsNil() {
+        return false;
     }
-    buf.push(0);
     let mut st: syscall::Stat_t = Default::default();
     let r = unsafe {
         syscall::syscall4(
@@ -920,52 +937,76 @@ impl Cmd {
             return errors::New("os/exec: already started");
         }
 
-        // ── Build C-string argv ──────────────────────────────────────
-        let mut argv_bufs: Vec<Vec<u8>> = Vec::with_capacity(crate::len(&self.Args) as usize);
-        for_each_arg(&self.Args, |s| {
-            let mut b = Vec::with_capacity(s.Len() as usize + 1);
-            for &x in s.as_bytes() {
-                b.push(x);
+        // ── Build envp ──────────────────────────────────────────────
+        // Go: `env, err := c.environ(); if err != nil { return err }`,
+        // and it comes FIRST — with both a NUL path and a NUL env var,
+        // Go reports the env error.
+        //
+        // goish had `environ()` ported and called it only from the
+        // public `Environ()`, so the child was built from a raw
+        // `self.Env` / `os::Environ()`: the dedup never ran, the
+        // PWD-from-Dir rule never ran, and — the reason this changed —
+        // `dedupEnv`'s NUL rejection never ran, so `Env: ["A=b\0c"]`
+        // reached execve with a variable truncated to `A=b`.
+        let (env_strings, env_err) = self.environ();
+        if !env_err.IsNil() {
+            return env_err;
+        }
+
+        // Go: startProcess double-checks the directory before forking,
+        // "we can make the error clearer this way" — the *PathError
+        // from Stat with its Op rewritten to "chdir". Without it a
+        // missing Dir surfaces as the child's `fork/exec <Path>` errno,
+        // which names the wrong path. Go skips this when SysProcAttr is
+        // set; goish has no SysProcAttr, so it always runs.
+        if self.Dir.Len() > 0 {
+            let (_, derr) = crate::os::Stat(self.Dir.clone());
+            if !derr.IsNil() {
+                return crate::os::__with_op(derr, "chdir");
             }
-            b.push(0);
+        }
+
+        // ── Build C-string argv ──────────────────────────────────────
+        // A NUL in argv[0] would exec a different binary, and one in a
+        // later argument would silently drop the tail. Go's
+        // `SlicePtrFromStrings` refuses both with EINVAL, which
+        // `os.StartProcess` reports as `fork/exec <Path>`.
+        let mut argv_bufs: Vec<Vec<u8>> = Vec::with_capacity(crate::len(&self.Args) as usize);
+        let mut argv_nul = false;
+        for_each_arg(&self.Args, |s| {
+            let (b, nul) = syscall::ByteSliceFromString(s);
+            if !nul.IsNil() {
+                argv_nul = true;
+            }
             argv_bufs.push(b);
         });
+        if argv_nul {
+            return forkExecEINVAL(&self.Path);
+        }
         let mut argv_ptrs: Vec<*const u8> = argv_bufs.iter().map(|b| b.as_ptr()).collect();
         argv_ptrs.push(core::ptr::null());
 
         // ── Path NUL-buffer ─────────────────────────────────────────
-        let mut path_buf = Vec::with_capacity(self.Path.Len() as usize + 1);
-        for &x in self.Path.as_bytes() {
-            path_buf.push(x);
+        let (path_buf, path_nul) = syscall::ByteSliceFromString(&self.Path);
+        if !path_nul.IsNil() {
+            return forkExecEINVAL(&self.Path);
         }
-        path_buf.push(0);
 
         // ── Dir NUL-buffer ──────────────────────────────────────────
         // Prepared BEFORE the fork: allocation after fork is not
         // async-signal-safe, and this is the same rule every other
-        // buffer here follows.
+        // buffer here follows. A NUL here was already caught above, by
+        // the pre-flight Stat.
         let mut dir_buf: Vec<u8> = Vec::new();
         if self.Dir.Len() > 0 {
-            dir_buf.reserve(self.Dir.Len() as usize + 1);
-            for &x in self.Dir.as_bytes() {
-                dir_buf.push(x);
-            }
-            dir_buf.push(0);
+            let (b, _) = syscall::ByteSliceFromString(&self.Dir);
+            dir_buf = b;
         }
 
-        // ── Build envp ──────────────────────────────────────────────
-        let env_strings: slice<string> = if crate::len(&self.Env) > 0 {
-            self.Env.clone()
-        } else {
-            crate::os::Environ()
-        };
         let mut envp_bufs: Vec<Vec<u8>> = Vec::with_capacity(crate::len(&env_strings) as usize);
         for_each_arg(&env_strings, |s| {
-            let mut b = Vec::with_capacity(s.Len() as usize + 1);
-            for &x in s.as_bytes() {
-                b.push(x);
-            }
-            b.push(0);
+            // Any NUL was rejected by `environ()` above.
+            let (b, _) = syscall::ByteSliceFromString(s);
             envp_bufs.push(b);
         });
         let mut envp_ptrs: Vec<*const u8> = envp_bufs.iter().map(|b| b.as_ptr()).collect();

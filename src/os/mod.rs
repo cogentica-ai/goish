@@ -275,6 +275,63 @@ fn pathErr(op: &'static str, path: string, rc: i32) -> error {
     });
 }
 
+// go: none — goish-only: the #29 refusal, in the two shapes this file
+//     reports path errors in. Go needs no equivalent because its
+//     `syscall.BytePtrFromString` returns EINVAL from inside each
+//     wrapper, and the wrapper's own error path formats it.
+/// A path carrying an embedded NUL, refused before the syscall.
+///
+/// Appending a terminator to a string that already contains one gives
+/// the kernel a SHORTER path than the caller wrote, so the call
+/// succeeds against a different file. Measured before this landed:
+/// `os::ReadFile("<dir>/f\0junk")` returned the contents of `f`.
+fn nulPathErr(op: &'static str, path: string) -> error {
+    return pathErr(op, path, -(crate::syscall::EINVAL.0));
+}
+
+// go: none — goish-only: see `nulPathErr`.
+/// The same refusal for the two-name operations, which report a
+/// `LinkError` rather than a `PathError`.
+fn nulLinkErr(op: &'static str, old: string, new: string) -> error {
+    return linkErr(op, old, new, -(crate::syscall::EINVAL.0));
+}
+
+// go: none — goish-only: `Stat`/`Lstat` return a value type, not a
+//     pointer, so an error still needs a `FileInfoData` to sit beside
+//     it. Go returns a nil `FileInfo` there.
+/// The zero `FileInfoData` that accompanies a failed stat.
+fn emptyFileInfo(name: &string) -> FileInfoData {
+    return FileInfoData {
+        name: name.clone(),
+        size: 0,
+        mode: FileMode(0),
+        mod_time: crate::time::Time::default(),
+        is_dir: false,
+        sys: None,
+    };
+}
+
+// go: none — goish-only: Go does this in place, `pe := err.(*PathError);
+//     pe.Op = "chdir"` at os/exec_posix.go line 33, because it holds
+//     the pointer. goish's `error` is opaque, so the rewrite rebuilds.
+/// Re-label a `*PathError`'s operation, leaving path and cause alone.
+///
+/// A non-`PathError` is returned unchanged — Go type-asserts instead,
+/// which would panic; the one caller passes a `Stat` error, which
+/// always is one.
+#[doc(hidden)]
+pub fn __with_op(err: error, op: &'static str) -> error {
+    let pe = match errors::As::<PathError>(err.clone()) {
+        Some(pe) => pe,
+        None => return err,
+    };
+    return errors::Wrap(PathError {
+        Op: string::from(op),
+        Path: pe.Path.clone(),
+        Err: pe.Err.clone(),
+    });
+}
+
 // go: none — goish idiom: goish's syscall wrappers return the raw
 //     kernel value, and its width varies with the call — `i32` from
 //     `Chdir`, `i64` from `Getdents64`, `isize` from `Read`. A negative
@@ -570,10 +627,12 @@ pub fn OpenFile<N: Into<string>, M: Into<FileMode>>(
     let name: string = name.into();
     let perm: FileMode = perm.into();
     // Build a NUL-terminated path for the kernel.
-    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
-    let nb = bytes_of(&name);
-    buf.extend_from_slice(nb);
-    buf.push(0);
+    // A path carrying an embedded NUL would be silently truncated
+    // here, so refuse it the way Go's `syscall` layer does.
+    let (buf, nul) = syscall::ByteSliceFromString(&name);
+    if !nul.IsNil() {
+        return (crate::nilval::nil.into(), nulPathErr("open", name));
+    }
     let fd = syscall::Open(
         buf.as_ptr(),
         (flag as i32) | syscall::O_CLOEXEC,
@@ -612,10 +671,12 @@ pub fn OpenFile<N: Into<string>, M: Into<FileMode>>(
 /// `os.Stat(name)` (os/stat.go:14) — stat a path, following symlinks.
 pub fn Stat<N: Into<string>>(name: N) -> (FileInfoData, error) {
     let name: string = name.into();
-    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
-    let nb = bytes_of(&name);
-    buf.extend_from_slice(nb);
-    buf.push(0);
+    // A path carrying an embedded NUL would be silently truncated
+    // here, so refuse it the way Go's `syscall` layer does.
+    let (buf, nul) = syscall::ByteSliceFromString(&name);
+    if !nul.IsNil() {
+        return (emptyFileInfo(&name), nulPathErr("stat", name));
+    }
     let mut st = syscall::Stat_t::default();
     let rc = syscall::Stat(buf.as_ptr(), &mut st);
     if rc < 0 {
@@ -648,10 +709,12 @@ pub fn Stat<N: Into<string>>(name: N) -> (FileInfoData, error) {
 pub fn Lstat<N: Into<string>>(name: N) -> (FileInfoData, error) {
     let name: string = name.into();
     // Go: return statNolog(name) with AT_SYMLINK_NOFOLLOW.
-    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
-    let nb = bytes_of(&name);
-    buf.extend_from_slice(nb);
-    buf.push(0);
+    // A path carrying an embedded NUL would be silently truncated
+    // here, so refuse it the way Go's `syscall` layer does.
+    let (buf, nul) = syscall::ByteSliceFromString(&name);
+    if !nul.IsNil() {
+        return (emptyFileInfo(&name), nulPathErr("lstat", name));
+    }
     let mut st = syscall::Stat_t::default();
     let rc = syscall::Lstat(buf.as_ptr(), &mut st);
     if rc < 0 {
@@ -1278,9 +1341,12 @@ pub fn Getwd() -> (string, error) {
 pub fn Chdir<N: Into<string>>(name: N) -> error {
     let name: string = name.into();
     // Go: if e := syscall.Chdir(name); e != nil { return &PathError{...} }
-    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
-    buf.extend_from_slice(bytes_of(&name));
-    buf.push(0);
+    // A path carrying an embedded NUL would be silently truncated
+    // here, so refuse it the way Go's `syscall` layer does.
+    let (buf, nul) = syscall::ByteSliceFromString(&name);
+    if !nul.IsNil() {
+        return nulPathErr("chdir", name);
+    }
     let rc = syscall::Chdir(buf.as_ptr());
     if rc < 0 {
         return pathErr("chdir", name, rc);
@@ -1328,9 +1394,12 @@ pub fn Chmod<N: Into<string>, M: Into<FileMode>>(name: N, mode: M) -> error {
     let mode: FileMode = mode.into();
     // Go: longName := fixLongPath(name) — Linux no-op.
     // Go: e := ignoringEINTR(func() error { return syscall.Chmod(longName, syscallMode(mode)) })
-    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
-    buf.extend_from_slice(bytes_of(&name));
-    buf.push(0);
+    // A path carrying an embedded NUL would be silently truncated
+    // here, so refuse it the way Go's `syscall` layer does.
+    let (buf, nul) = syscall::ByteSliceFromString(&name);
+    if !nul.IsNil() {
+        return nulPathErr("chmod", name);
+    }
     let rc = syscall::Chmod(buf.as_ptr(), syscallMode(mode));
     if rc < 0 {
         // Go: return &PathError{Op: "chmod", Path: name, Err: e}
@@ -1351,12 +1420,13 @@ pub fn Symlink<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> erro
     let oldname: string = oldname.into();
     let newname: string = newname.into();
     // Go: e := ignoringEINTR(func() error { return syscall.Symlink(oldname, newname) })
-    let mut old_buf: Vec<u8> = Vec::with_capacity(oldname.Len() as usize + 1);
-    old_buf.extend_from_slice(bytes_of(&oldname));
-    old_buf.push(0);
-    let mut new_buf: Vec<u8> = Vec::with_capacity(newname.Len() as usize + 1);
-    new_buf.extend_from_slice(bytes_of(&newname));
-    new_buf.push(0);
+    // Refuse an embedded NUL in either name before the syscall;
+    // truncation would operate on a different pair of files.
+    let (old_buf, nul_old) = syscall::ByteSliceFromString(&oldname);
+    let (new_buf, nul_new) = syscall::ByteSliceFromString(&newname);
+    if !nul_old.IsNil() || !nul_new.IsNil() {
+        return nulLinkErr("symlink", oldname, newname);
+    }
     let rc = syscall::Symlink(old_buf.as_ptr(), new_buf.as_ptr());
     if rc < 0 {
         // Go: return &LinkError{"symlink", oldname, newname, e}
@@ -1373,9 +1443,12 @@ pub fn Symlink<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> erro
 pub fn Readlink<N: Into<string>>(name: N) -> (string, error) {
     let name: string = name.into();
     // Go: for len := 128; ; len *= 2 { ... }
-    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
-    buf.extend_from_slice(bytes_of(&name));
-    buf.push(0);
+    // A path carrying an embedded NUL would be silently truncated
+    // here, so refuse it the way Go's `syscall` layer does.
+    let (buf, nul) = syscall::ByteSliceFromString(&name);
+    if !nul.IsNil() {
+        return (string::new(), nulPathErr("readlink", name));
+    }
     let mut len_: usize = 128;
     loop {
         // Go: b := make([]byte, len)
@@ -1477,9 +1550,12 @@ pub fn Chtimes<N: Into<string>>(
         }
     };
     let utimes = [set(atime), set(mtime)];
-    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
-    buf.extend_from_slice(bytes_of(&name));
-    buf.push(0);
+    // A path carrying an embedded NUL would be silently truncated
+    // here, so refuse it the way Go's `syscall` layer does.
+    let (buf, nul) = syscall::ByteSliceFromString(&name);
+    if !nul.IsNil() {
+        return nulPathErr("chtimes", name);
+    }
     // Go: if e := syscall.UtimesNano(name, utimes[0:]); e != nil {
     //         return &PathError{Op: "chtimes", Path: name, Err: e} }
     let r = syscall::Utimensat(syscall::AT_FDCWD, buf.as_ptr(), utimes.as_ptr(), 0);
@@ -1551,12 +1627,13 @@ pub fn Rename<O: Into<string>, N: Into<string>>(oldpath: O, newpath: N) -> error
         }
     }
     // Go: err = ignoringEINTR(func() error { return syscall.Rename(oldname, newname) })
-    let mut old_buf: Vec<u8> = Vec::with_capacity(oldpath.Len() as usize + 1);
-    old_buf.extend_from_slice(bytes_of(&oldpath));
-    old_buf.push(0);
-    let mut new_buf: Vec<u8> = Vec::with_capacity(newpath.Len() as usize + 1);
-    new_buf.extend_from_slice(bytes_of(&newpath));
-    new_buf.push(0);
+    // Refuse an embedded NUL in either name before the syscall;
+    // truncation would operate on a different pair of files.
+    let (old_buf, nul_old) = syscall::ByteSliceFromString(&oldpath);
+    let (new_buf, nul_new) = syscall::ByteSliceFromString(&newpath);
+    if !nul_old.IsNil() || !nul_new.IsNil() {
+        return nulLinkErr("rename", oldpath, newpath);
+    }
     let rc = syscall::Rename(old_buf.as_ptr(), new_buf.as_ptr());
     if rc < 0 {
         return linkErr("rename", oldpath, newpath, rc);
@@ -1571,12 +1648,13 @@ pub fn Link<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> error {
     let oldname: string = oldname.into();
     let newname: string = newname.into();
     // Go: e := ignoringEINTR(func() error { return syscall.Link(oldname, newname) })
-    let mut old_buf: Vec<u8> = Vec::with_capacity(oldname.Len() as usize + 1);
-    old_buf.extend_from_slice(bytes_of(&oldname));
-    old_buf.push(0);
-    let mut new_buf: Vec<u8> = Vec::with_capacity(newname.Len() as usize + 1);
-    new_buf.extend_from_slice(bytes_of(&newname));
-    new_buf.push(0);
+    // Refuse an embedded NUL in either name before the syscall;
+    // truncation would operate on a different pair of files.
+    let (old_buf, nul_old) = syscall::ByteSliceFromString(&oldname);
+    let (new_buf, nul_new) = syscall::ByteSliceFromString(&newname);
+    if !nul_old.IsNil() || !nul_new.IsNil() {
+        return nulLinkErr("link", oldname, newname);
+    }
     let rc = syscall::Link(old_buf.as_ptr(), new_buf.as_ptr());
     if rc < 0 {
         return linkErr("link", oldname, newname, rc);
@@ -1590,9 +1668,12 @@ pub fn Link<O: Into<string>, N: Into<string>>(oldname: O, newname: N) -> error {
 pub fn Truncate<N: Into<string>>(name: N, size: int) -> error {
     let name: string = name.into();
     // Go: e := ignoringEINTR(func() error { return syscall.Truncate(name, size) })
-    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
-    buf.extend_from_slice(bytes_of(&name));
-    buf.push(0);
+    // A path carrying an embedded NUL would be silently truncated
+    // here, so refuse it the way Go's `syscall` layer does.
+    let (buf, nul) = syscall::ByteSliceFromString(&name);
+    if !nul.IsNil() {
+        return nulPathErr("truncate", name);
+    }
     let rc = syscall::Truncate(buf.as_ptr(), size);
     if rc < 0 {
         return pathErr("truncate", name, rc);
@@ -1607,9 +1688,12 @@ pub fn Truncate<N: Into<string>>(name: N, size: int) -> error {
 pub fn Chown<N: Into<string>>(name: N, uid: int, gid: int) -> error {
     let name: string = name.into();
     // Go: e := ignoringEINTR(func() error { return syscall.Chown(name, uid, gid) })
-    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
-    buf.extend_from_slice(bytes_of(&name));
-    buf.push(0);
+    // A path carrying an embedded NUL would be silently truncated
+    // here, so refuse it the way Go's `syscall` layer does.
+    let (buf, nul) = syscall::ByteSliceFromString(&name);
+    if !nul.IsNil() {
+        return nulPathErr("chown", name);
+    }
     let rc = syscall::Chown(buf.as_ptr(), uid as i32, gid as i32);
     if rc < 0 {
         return pathErr("chown", name, rc);
@@ -1623,9 +1707,12 @@ pub fn Chown<N: Into<string>>(name: N, uid: int, gid: int) -> error {
 pub fn Lchown<N: Into<string>>(name: N, uid: int, gid: int) -> error {
     let name: string = name.into();
     // Go: e := ignoringEINTR(func() error { return syscall.Lchown(name, uid, gid) })
-    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
-    buf.extend_from_slice(bytes_of(&name));
-    buf.push(0);
+    // A path carrying an embedded NUL would be silently truncated
+    // here, so refuse it the way Go's `syscall` layer does.
+    let (buf, nul) = syscall::ByteSliceFromString(&name);
+    if !nul.IsNil() {
+        return nulPathErr("lchown", name);
+    }
     let rc = syscall::Lchown(buf.as_ptr(), uid as i32, gid as i32);
     if rc < 0 {
         return pathErr("lchown", name, rc);
@@ -1785,9 +1872,12 @@ pub fn Hostname() -> (string, error) {
 pub fn Mkdir<N: Into<string>, M: Into<FileMode>>(name: N, perm: M) -> error {
     let name: string = name.into();
     let perm: FileMode = perm.into();
-    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
-    buf.extend_from_slice(bytes_of(&name));
-    buf.push(0);
+    // A path carrying an embedded NUL would be silently truncated
+    // here, so refuse it the way Go's `syscall` layer does.
+    let (buf, nul) = syscall::ByteSliceFromString(&name);
+    if !nul.IsNil() {
+        return nulPathErr("mkdir", name);
+    }
     // Go: syscall.Mkdir(longName, syscallMode(perm))
     let rc = syscall::Mkdir(buf.as_ptr(), syscallMode(perm));
     if rc < 0 {
@@ -1814,9 +1904,12 @@ pub use path::*;
 /// directory. First tries unlink; falls back to rmdir on EISDIR.
 pub fn Remove<N: Into<string>>(name: N) -> error {
     let name: string = name.into();
-    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
-    buf.extend_from_slice(bytes_of(&name));
-    buf.push(0);
+    // A path carrying an embedded NUL would be silently truncated
+    // here, so refuse it the way Go's `syscall` layer does.
+    let (buf, nul) = syscall::ByteSliceFromString(&name);
+    if !nul.IsNil() {
+        return nulPathErr("remove", name);
+    }
     // Go tries both calls rather than stat-ing first: it is cheaper on
     // average. Which error it reports is deliberate — the rmdir error
     // wins unless it is ENOTDIR, in which case the name was not a

@@ -114,6 +114,26 @@ pub fn RemoveAll<P: Into<string>>(path: P) -> error {
         });
     }
 
+    // Go reaches this answer the long way round: `Remove` fails with
+    // EINVAL, which is not IsNotExist, so it splits the path, opens the
+    // PARENT, and calls `unlinkat(parentfd, base)` — which fails with
+    // EINVAL again, this time as `&PathError{Op: "unlinkat", Path:
+    // base}` with the parent glued back on (os/removeall_at.go lines
+    // 54-58 and 80).
+    //
+    // goish's recursion is path-based rather than parent-fd-based, so
+    // it has no unlinkat to fail: without this it fell through to the
+    // Lstat below and reported `lstat`, naming a call Go never blames.
+    // The structural difference is its own item; this pins the answer.
+    let (_, nul) = crate::syscall::ByteSliceFromString(&path);
+    if !nul.IsNil() {
+        return errors::Wrap(PathError {
+            Op: string::from("unlinkat"),
+            Path: path,
+            Err: nul,
+        });
+    }
+
     // Go: "Simple case: if Remove works, we're done."
     //
     // This ORDER is load-bearing and goish had it backwards. It used to

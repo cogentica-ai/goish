@@ -75,6 +75,10 @@ strip = false
 lto = false
 
 [[example]]
+name = "nul_path_ref_smoke"
+path = "examples/nul_path_ref_smoke.rs"
+
+[[example]]
 name = "hello"
 path = "examples/hello.rs"
 

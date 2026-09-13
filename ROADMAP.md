@@ -4443,6 +4443,43 @@ Reported rather than patched, because a partial fix is worse than none
 here — "NUL is rejected" is exactly what a caller would generalise from
 `Root` to `os`. `Root.FS` should land on top of it, not before it.
 
+**FIXED 2026-09-13.** `syscall::ByteSliceFromString` is the chokepoint;
+every `push(0)` under `src/os/` now goes through it, `os/exec`
+included, and `examples/nul_path_ref_smoke.rs` pins 49 rows against Go
+1.25.5 — every entry point, both error shapes, and the two `.data`
+rows that say the refused read returned nothing.
+
+Writing the reference found FIVE more defects that the fix alone did
+not close, which is the argument for pinning every entry point rather
+than trusting the chokepoint:
+
+  * `Root.Symlink` and `Root.MkdirAll` do not use `__path_op`, so they
+    kept the bug after it was "fixed" — both answered "file exists"
+    about the truncated name.
+  * `Root.Lstat` reported op `lstatat`. Go has one `rootStat` behind
+    Stat and Lstat and it says `statat` for both. Nothing pinned it.
+  * `Root.RemoveAll` reported `statat` from the inner lstat; Go names
+    the op the caller asked for, `RemoveAll`.
+  * `os.RemoveAll` reported `lstat`; Go reaches `unlinkat` by way of
+    the parent fd.
+
+Two came with the fix, both in `os/exec` and both worse than the file
+case because a truncated exec path runs a DIFFERENT BINARY:
+
+  * `Cmd.Start` never called `environ()`. The function was ported —
+    dedup, the PWD-from-Dir rule, and `dedupEnv`'s NUL rejection — and
+    only `Cmd.Environ()` called it, so the child was built from a raw
+    `Env`/`os::Environ()` and `Env: ["A=b\0c"]` reached execve
+    truncated to `A=b`.
+  * Go's `startProcess` pre-flight `Stat` of `Dir`, with the
+    `PathError`'s Op rewritten to `chdir`, was missing. Without it a
+    bad `Dir` surfaced as the child's `fork/exec <Path>` errno, naming
+    the wrong path.
+
+STILL OPEN, filed separately: `os::RemoveAll` recurses by path where
+Go recurses by parent fd (`removeall_at.go`). That is a TOCTOU
+difference, not only an error-string one.
+
 **Two divergences, both deliberate.** `MkdirAll` walks a prefix at a
 time where Go uses one walk with a custom `openDirFunc` that creates
 missing intermediates (root_openat.go:170, the only caller that passes

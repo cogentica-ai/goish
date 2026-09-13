@@ -78,9 +78,18 @@ pub struct Root {
 /// will be of type *PathError."
 pub fn OpenRoot<N: Into<string>>(name: N) -> (nilable<Root>, error) {
     let name: string = name.into();
-    let mut buf: Vec<u8> = Vec::with_capacity(name.Len() as usize + 1);
-    buf.extend_from_slice(super::bytes_of(&name));
-    buf.push(0);
+    // #29: before any walk exists, so this one is its own check.
+    let (buf, nul) = syscall::ByteSliceFromString(&name);
+    if !nul.IsNil() {
+        return (
+            crate::nilval::nil.into(),
+            errors::Wrap(PathError {
+                Op: string::from_static("open"),
+                Path: name,
+                Err: nul,
+            }),
+        );
+    }
     let fd = syscall::Open(
         buf.as_ptr(),
         syscall::O_RDONLY | syscall::O_CLOEXEC | syscall::O_DIRECTORY,
@@ -269,6 +278,23 @@ impl Root {
         T: Default,
         F: FnMut(i32, &string) -> super::root_openat::LastResult<T>,
     {
+        // #29: an embedded NUL truncates the path at the C string
+        // boundary, so the file OPENED would not be the file NAMED.
+        // Every one-name Root operation funnels through here, so this
+        // is the one place it has to be caught for all of them. Go's
+        // equivalent is `syscall.BytePtrFromString` inside each
+        // wrapper; the error is the same EINVAL.
+        let (_, nul) = crate::syscall::ByteSliceFromString(name);
+        if !nul.IsNil() {
+            return (
+                T::default(),
+                errors::Wrap(PathError {
+                    Op: string::from(op),
+                    Path: name.clone(),
+                    Err: nul,
+                }),
+            );
+        }
         let (v, err) = self.doInRoot(name, f);
         if !err.IsNil() {
             return (
@@ -403,7 +429,12 @@ impl Root {
     // `rootStat(r, name, lstat bool)` (os/root_openat.go). Same shape.
     /// The shared body of Stat and Lstat.
     fn __stat(&self, name: string, lstat: bool) -> (super::FileInfoData, error) {
-        let op = if lstat { "lstatat" } else { "statat" };
+        // Both forms report "statat". Go has one `rootStat`
+        // (os/root_unix.go line 143) behind Stat and Lstat and it names
+        // the op once, so `Root.Lstat("nope")` says `statat nope: …`,
+        // not `lstatat`. goish invented the second name.
+        let _ = lstat;
+        let op = "statat";
         let (st, err) = self.__path_op::<syscall::Stat_t, _>(op, &name, |dirfd, comp| {
             let mut cb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
             cb.extend_from_slice(super::bytes_of(comp));
@@ -585,6 +616,16 @@ impl Root {
                 Err: e,
             });
         };
+        // #29, on BOTH names: either one truncating would act on a
+        // file the caller did not name. See `__path_op`.
+        let (_, nul_old) = crate::syscall::ByteSliceFromString(old);
+        if !nul_old.IsNil() {
+            return mkerr(nul_old);
+        }
+        let (_, nul_new) = crate::syscall::ByteSliceFromString(new);
+        if !nul_new.IsNil() {
+            return mkerr(nul_new);
+        }
         // Nested walks, as Go nests doInRoot inside doInRoot: the outer
         // one holds the old parent open while the inner resolves the
         // new name.
@@ -657,9 +698,26 @@ impl Root {
     /// on who resolves it.
     pub fn Symlink<O: Into<string>, N: Into<string>>(&self, oldname: O, newname: N) -> error {
         let (o, n) = (oldname.into(), newname.into());
-        let mut tb: Vec<u8> = Vec::with_capacity(o.Len() as usize + 1);
-        tb.extend_from_slice(super::bytes_of(&o));
-        tb.push(0);
+        // Symlink does not go through `__link_op`, so it needs the NUL
+        // refusal of its own. Without it `Symlink("f", "f\0junk")`
+        // truncated to `f` and answered "file exists" — the caller was
+        // told the wrong thing about the wrong name.
+        let mkerr = |e: error| -> error {
+            errors::Wrap(super::LinkError {
+                Op: string::from_static("symlinkat"),
+                Old: o.clone(),
+                New: n.clone(),
+                Err: e,
+            })
+        };
+        let (tb, nul_old) = crate::syscall::ByteSliceFromString(&o);
+        if !nul_old.IsNil() {
+            return mkerr(nul_old);
+        }
+        let (_, nul_new) = crate::syscall::ByteSliceFromString(&n);
+        if !nul_new.IsNil() {
+            return mkerr(nul_new);
+        }
         let (_, err) = self.doInRoot::<i32, _>(&n, |dirfd, comp| {
             let mut nb: Vec<u8> = Vec::with_capacity(comp.Len() as usize + 1);
             nb.extend_from_slice(super::bytes_of(comp));
@@ -845,6 +903,18 @@ impl Root {
     /// grow a parameter for one caller.
     pub fn MkdirAll<N: Into<string>>(&self, name: N, perm: FileMode) -> error {
         let name: string = name.into();
+        // MkdirAll builds its own prefixes and calls `__mkdir_bare`, so
+        // it never reaches `__path_op`'s NUL refusal. Unguarded,
+        // `MkdirAll("f\0junk")` truncated to `f` and reported "file
+        // exists" about a name the caller never asked for.
+        let (_, nul) = crate::syscall::ByteSliceFromString(&name);
+        if !nul.IsNil() {
+            return errors::Wrap(PathError {
+                Op: string::from_static("mkdirat"),
+                Path: name,
+                Err: nul,
+            });
+        }
         // Refuse the whole path FIRST, so a rejected MkdirAll leaves
         // nothing behind: `../evil/x` must not create `evil`.
         let (parts, _, serr) = splitPathInRoot(&name, &[], &[]);
@@ -903,6 +973,19 @@ impl Root {
     /// outside, sitting in the tree being removed.
     pub fn RemoveAll<N: Into<string>>(&self, name: N) -> error {
         let name: string = name.into();
+        // The refusal has to happen here, not further in: the inner
+        // lstat's `__path_op` does catch the NUL, but reports it as
+        // `statat`. Go answers `RemoveAll` — the operation the caller
+        // named — for every early failure of this function
+        // (os/removeall_at.go line 25).
+        let (_, nul) = crate::syscall::ByteSliceFromString(&name);
+        if !nul.IsNil() {
+            return errors::Wrap(PathError {
+                Op: string::from_static("RemoveAll"),
+                Path: name,
+                Err: nul,
+            });
+        }
         // Resolve the path through the walk BEFORE removing anything.
         //
         // Not belt and braces: without it this failed OPEN. The escape
