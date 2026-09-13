@@ -1,4 +1,4 @@
-// go: file flag/flag.go decls: FlagSet.Uint64, Uint64, Arg, FlagSet.Func, FlagSet.BoolFunc, Func, BoolFunc, FlagSet.sprintf, FlagSet.failf, FlagSet.Int64, FlagSet.Uint, FlagSet.Duration, Parsed, Bool, Int, Int64, Uint, String, Duration, Parse, Set, FlagSet.Lookup, FlagSet.VisitAll, numError, UnquoteUsage, isZeroValue, FlagSet.Parse, FlagSet.parseOne, FlagSet.usage, FlagSet.NFlag, FlagSet.Visit, FlagSet.set, FlagSet.PrintDefaults, FlagSet.SetOutput, NewFlagSet, FlagSet.Name, FlagSet.ErrorHandling
+// go: file flag/flag.go decls: FlagSet.Uint64, Uint64, Arg, FlagSet.Func, FlagSet.BoolFunc, Func, BoolFunc, FlagSet.sprintf, FlagSet.failf, FlagSet.Int64, FlagSet.Uint, FlagSet.Duration, Parsed, Bool, Int, Int64, Uint, String, Duration, Parse, Set, FlagSet.Lookup, FlagSet.VisitAll, numError, UnquoteUsage, isZeroValue, FlagSet.Parse, FlagSet.parseOne, FlagSet.usage, FlagSet.NFlag, FlagSet.Visit, FlagSet.set, FlagSet.PrintDefaults, FlagSet.SetOutput, NewFlagSet, FlagSet.Name, FlagSet.ErrorHandling, FlagSet.Var, Var
 //
 // flag — the package-level CommandLine set, and the flag types goish's
 // hand-written FlagSet did not have.
@@ -8,7 +8,7 @@
 // holds what has been ported verbatim, kept separate because GOISH015
 // forbids anchored code in a module root.
 //
-// goishlint:ignore GOISH018 Var, Func, BoolFunc, TextVar, Args, NArg, Arg, Usage, Init, Output, defaultUsage, sortFlags, newBoolValue, newIntValue, newInt64Value, newUintValue, newUint64Value, newStringValue, newFloat64Value, newDurationValue, newTextValue, newFuncValue, newBoolFuncValue, Get, IsBoolFlag, Float64, Uint64, BoolVar, IntVar, Int64Var, UintVar, Uint64Var, StringVar, Float64Var, DurationVar, failf, panicOnError, sprintf, commandLineUsage, Error— the FlagSet parser is hand-written; these are the declarations of Go's flag.go that goish does not have. Twelve names that WERE on this list — Parse, parseOne, PrintDefaults, UnquoteUsage, isZeroValue, numError, usage, NFlag, Visit, Set, String, SetOutput — are ported AND anchored in this file, so the waiver was suppressing GOISH018 over declarations that exist. Re-checked 2026-09-06. Three MORE came off on 2026-09-13 — NewFlagSet, Name and ErrorHandling — when §2o gave NewFlagSet Go's two parameters; the waiver was again naming declarations that exist.
+// goishlint:ignore GOISH018 Func, BoolFunc, TextVar, Args, NArg, Arg, Usage, Init, Output, defaultUsage, sortFlags, newBoolValue, newIntValue, newInt64Value, newUintValue, newUint64Value, newStringValue, newFloat64Value, newDurationValue, newTextValue, newFuncValue, newBoolFuncValue, Get, IsBoolFlag, Float64, Uint64, BoolVar, IntVar, Int64Var, UintVar, Uint64Var, StringVar, Float64Var, DurationVar, failf, panicOnError, sprintf, commandLineUsage, Error— the FlagSet parser is hand-written; these are the declarations of Go's flag.go that goish does not have. Twelve names that WERE on this list — Parse, parseOne, PrintDefaults, UnquoteUsage, isZeroValue, numError, usage, NFlag, Visit, Set, String, SetOutput — are ported AND anchored in this file, so the waiver was suppressing GOISH018 over declarations that exist. Re-checked 2026-09-06. Three MORE came off on 2026-09-13 — NewFlagSet, Name and ErrorHandling — when §2o gave NewFlagSet Go's two parameters; the waiver was again naming declarations that exist. And one MORE on the same day — Var — when §2p opened the kind enum. `IsBoolFlag` stays waived on purpose: Go declares it on a SEPARATE optional interface (`boolFlag`), and Rust has no optional-interface test on a `dyn`, so goish folds it into `Value` as a defaulted method. There is no separate declaration to anchor — only the behaviour, which flag_var_smoke pins. Three separate passes have now found this waiver naming things the file has; it is worth re-deriving rather than trusting.
 // goishlint:ignore GOISH021 Getter, ErrorHandling, ContinueOnError, ExitOnError, PanicOnError, FlagSet, boolValue, intValue, int64Value, uintValue, uint64Value, stringValue, float64Value, durationValue, textValue, funcValue, boolFuncValue, errParse, errRange, ErrHelp, Usage, numError, boolFlag, commandLineUsage — same.
 
 #![allow(non_snake_case)]
@@ -223,6 +223,77 @@ pub(crate) const fn command_line_set() -> FlagSet {
         errorHandling: ErrorHandling::ExitOnError,
         output: None,
     };
+}
+
+// go: none — goish-only: Go's `Var` takes a POINTER the caller already
+//     holds (`var v MyType; flag.Var(&v, …)`) and keeps using. Rust
+//     ownership does not allow that: the value moves into the FlagSet.
+//     So `Var` hands a handle back, which is the same shape every other
+//     goish definer already uses (`FlagHandle<T>`).
+/// A live handle on a flag defined with [`FlagSet::Var`]. Lock it to
+/// read or inspect the caller's own value after `Parse`.
+pub type ValueHandle = alloc::sync::Arc<crate::runtime::spin::SpinLock<alloc::boxed::Box<dyn Value>>>;
+
+impl FlagSet {
+    // go: sdk 1.25.5 flag/flag.go:1010-1043 FlagSet.Var
+    /// Go: "Var defines a flag with the specified name and usage
+    /// string. The type and value of the flag are represented by the
+    /// first argument, of type [Value], which typically holds a
+    /// user-defined implementation of [Value]."
+    ///
+    /// This is the package's extension point, and goish had no
+    /// counterpart: every flag was one arm of a CLOSED enum, so a
+    /// caller could not add a type of their own. See ROADMAP §2p.
+    ///
+    /// Go panics on a name that begins with `-`, contains `=`, or is
+    /// already defined; those checks live in `Var` there because every
+    /// other definer routes through it. goish's definers do not, so
+    /// for now only `Var` has them — recorded in §2p rather than
+    /// changed underneath ten call sites in this commit.
+    pub fn Var<N: Into<string>, U: Into<string>>(
+        &mut self,
+        value: alloc::boxed::Box<dyn Value>,
+        name: N,
+        usage: U,
+    ) -> ValueHandle {
+        let name: string = name.into();
+        let n: &str = name.as_ref();
+        // Go: `panic(f.sprintf("flag %q begins with -", name))`
+        if n.starts_with('-') {
+            panic!("flag begins with -");
+        }
+        if n.contains('=') {
+            panic!("flag contains =");
+        }
+        if self.find_def(&name).is_some() {
+            // Go: "flag redefined: <name>", prefixed by the set's name
+            // when it has one. Happens only if two flags share a name.
+            panic!("flag redefined");
+        }
+        // Go: "Remember the default value as a string; it won't change."
+        let defvalue = value.String();
+        let cell: ValueHandle =
+            alloc::sync::Arc::new(crate::runtime::spin::SpinLock::new(value));
+        self.defs.push(FlagDef {
+            name: name,
+            usage: usage.into(),
+            kind: FlagKind::Custom(cell.clone()),
+            defvalue: defvalue,
+            actual: false,
+        });
+        return cell;
+    }
+}
+
+// go: sdk 1.25.5 flag/flag.go:1045-1048 Var
+/// Go: "Var defines a flag with the specified name and usage string."
+/// The package-level form, on `CommandLine`.
+pub fn Var<N: Into<string>, U: Into<string>>(
+    value: alloc::boxed::Box<dyn Value>,
+    name: N,
+    usage: U,
+) -> ValueHandle {
+    return CommandLine.Lock().Var(value, name, usage);
 }
 
 // ─── package-level CommandLine ───────────────────────────────────────
@@ -521,6 +592,24 @@ pub fn Set(name: string, value: string) -> error {
 pub trait Value: Send + Sync {
     fn String(&self) -> string;
     fn Set(&mut self, s: string) -> error;
+
+    // go: none — goish-only: Go declares this on a SEPARATE optional
+    //     interface, `boolFlag` (flag.go lines 150-153), which a Value
+    //     may also implement. Rust has no optional-interface test on a
+    //     `dyn`, so the two interfaces fuse and this becomes a
+    //     defaulted method. There is no Go declaration that maps to it
+    //     one-to-one, which is why it stays on the GOISH018 waiver.
+    /// Go: `boolFlag` is a SEPARATE optional interface —
+    /// `if fv, ok := flag.Value.(boolFlag); ok && fv.IsBoolFlag()`.
+    /// Rust has no optional-interface test on a `dyn`, so it is a
+    /// defaulted method here: answering false is what a type that does
+    /// not implement Go's `boolFlag` does.
+    ///
+    /// A true answer is what lets `-v` stand alone without eating the
+    /// next argument.
+    fn IsBoolFlag(&self) -> bool {
+        return false;
+    }
 }
 
 // goishlint:ignore GOISH019 — Go recovers a flag's TYPE by
@@ -576,6 +665,7 @@ impl Value for kindValue {
             FlagKind::Duration(ref c) => (*c.lock()).String(),
             FlagKind::Float64(ref c) => crate::strconv::FormatFloat(*c.lock(), b'g', -1, 64),
             FlagKind::String(ref c) => (*c.lock()).clone(),
+            FlagKind::Custom(ref c) => c.lock().String(),
         };
         return out;
     }
@@ -584,6 +674,11 @@ impl Value for kindValue {
     // adaptation. Mirrors what Go's per-type Values do in their Set.
     fn Set(&mut self, s: string) -> error {
         match self.kind {
+            // The caller's own Value: goish parses nothing, it just
+            // hands the string over, which is exactly Go's `Var`.
+            FlagKind::Custom(ref c) => {
+                return c.lock().Set(s);
+            }
             FlagKind::Bool(ref c) => {
                 let (v, err) = crate::strconv::ParseBool(s);
                 if err != crate::nil {
@@ -662,6 +757,9 @@ impl Flag {
             // boolFuncValue reports "" because it takes none.
             FlagKind::Func(_) => "value",
             FlagKind::BoolFunc(_) => "",
+            // Go's UnquoteUsage falls through to "value" for any Value
+            // it does not recognise, which is every user type.
+            FlagKind::Custom(_) => "value",
         };
     }
 }
@@ -837,6 +935,14 @@ fn isZeroValue(kind: Option<&FlagKind>, value: &string) -> bool {
         // is "".
         Some(FlagKind::Func(_)) | Some(FlagKind::BoolFunc(_)) => "",
         Some(FlagKind::Duration(_)) => "0s",
+        // Go builds a fresh zero of the Value's concrete type and
+        // compares its String(). goish cannot construct the caller's
+        // type, so it asks the same question the only way it can: a
+        // custom flag's default is whatever it rendered at definition
+        // time, and `PrintDefaults` shows it. Reporting false here
+        // means "always show the default", which is the safe answer —
+        // Go omits a default only when it is provably the zero.
+        Some(FlagKind::Custom(_)) => return false,
         None => return false,
     };
     return *value == string::from_static(z);
@@ -956,10 +1062,13 @@ impl FlagSet {
         // fv.IsBoolFlag()`. Both boolValue and boolFuncValue answer
         // true, which is what lets `-v` stand alone without eating the
         // next argument.
-        let isBool = matches!(
-            self.defs[def_idx].kind,
-            FlagKind::Bool(_) | FlagKind::BoolFunc(_)
-        );
+        let isBool = match &self.defs[def_idx].kind {
+            FlagKind::Bool(_) | FlagKind::BoolFunc(_) => true,
+            // Go asks the Value itself, so a user type that implements
+            // `boolFlag` gets the same standalone-flag treatment.
+            FlagKind::Custom(c) => c.lock().IsBoolFlag(),
+            _ => false,
+        };
         if isBool {
             // Special case: a bool flag does not need an argument, and
             // it never CONSUMES the next one. goish consumed it, so
@@ -1165,6 +1274,11 @@ impl FlagSet {
     fn apply_value(&mut self, idx: usize, val: &[byte]) -> error {
         let s = string::from_bytes(val);
         match &self.defs[idx].kind {
+            // The caller's own Value parses its own string, and its
+            // error is returned verbatim — Go's `Var` does no more.
+            FlagKind::Custom(cell) => {
+                return cell.lock().Set(s);
+            }
             FlagKind::String(cell) => {
                 *cell.lock() = s;
                 return nil;

@@ -55,7 +55,7 @@
 
 mod flag;
 pub(crate) use flag::__defstr;
-pub use flag::{ErrorHandling, NewFlagSet};
+pub use flag::{ErrorHandling, NewFlagSet, Var, ValueHandle};
 // `Arg`, `BoolFunc`, `Func` and `Uint64` were ported, anchored and
 // counted, and then left out of this list — so `flag::Arg(0)` did not
 // compile even though the function existed and worked. `port_coverage`
@@ -116,6 +116,11 @@ pub enum FlagKind {
     Duration(Arc<SpinLock<crate::time::Duration>>),
     Float64(Arc<SpinLock<float64>>),
     String(Arc<SpinLock<string>>),
+    /// Go's `Var` — a flag whose value is the CALLER's type, supplied
+    /// as a `flag.Value`. Every other arm here is a type goish chose;
+    /// this is the one that makes the enum open, which is what Go's
+    /// extension point requires. See ROADMAP §2p.
+    Custom(Arc<SpinLock<alloc::boxed::Box<dyn flag::Value>>>),
 }
 
 impl Clone for FlagKind {
@@ -134,6 +139,7 @@ impl Clone for FlagKind {
             FlagKind::Duration(c) => FlagKind::Duration(c.clone()),
             FlagKind::Float64(c) => FlagKind::Float64(c.clone()),
             FlagKind::String(c) => FlagKind::String(c.clone()),
+            FlagKind::Custom(c) => FlagKind::Custom(c.clone()),
         };
         return out;
     }

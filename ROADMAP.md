@@ -3120,7 +3120,7 @@ and control of the peek ordering. The Eager and non-reused paths are
 covered by the client smokes; these two rest on reading Go's rule and
 matching it.
 
-## 2p. `flag` has no Value interface, so no user-defined flag types
+## 2p. `flag` has no Value interface, so no user-defined flag types — FIXED 2026-09-13
 
 Recorded 2026-09-07 while waiving the `*Var` family.
 
@@ -3145,6 +3145,46 @@ fixed. The first is a small change to a hand-written type and belongs
 with section 2o's NewFlagSet work, since both touch the same file for
 the same reason: this FlagSet was written before the port and its
 shape, not its behaviour, is what diverges.
+
+**DONE, with the open trait.** `FlagKind::Custom(Arc<SpinLock<Box<dyn
+Value>>>)` is the arm that makes the enum open, and `Var` /
+`FlagSet::Var` are the extension point. `Value` had been exported all
+along — but only for READING, as `Flag.Value`; there was no way to
+supply one.
+
+ONE FORCED DIVERGENCE. Go takes a pointer the caller keeps
+(`var v myType; flag.Var(&v, …)`); Rust ownership moves the value into
+the FlagSet, so `Var` returns a `ValueHandle` instead. That is the
+shape every other goish definer already uses, so it is consistent
+rather than novel — but it is a signature difference a porter meets
+immediately, which is the good kind.
+
+`IsBoolFlag` is a defaulted method on `Value` rather than a separate
+interface: Go's `boolFlag` is an OPTIONAL interface tested with a type
+assertion, and Rust has no such test on a `dyn`. So the two fuse, and
+`IsBoolFlag` stays on the GOISH018 waiver because there is no Go
+declaration mapping to it one-to-one — the behaviour is pinned by the
+smoke instead.
+
+Measured against Go 1.25.5, and one row was a divergence until it was
+checked: a Value's own `Set` error is WRAPPED as `invalid value %q for
+flag -%s: %v`, not returned raw. goish already wrapped it identically —
+the smoke asserts the whole string rather than a substring, because
+`Contains("empty tag")` would pass on the unwrapped form too.
+
+STILL NOT DONE: `TextVar`. `encoding::TextMarshaler` and
+`TextUnmarshaler` both exist, so it is now reachable — it just was not
+part of this change.
+
+AND A SEPARATE GAP FOUND WHILE DOING IT: in Go, every definer routes
+through `Var`, so all of them get its three panics — a name beginning
+with `-`, a name containing `=`, and a redefinition. goish's ten
+definers each push onto `defs` directly and validate NOTHING, so
+`flag.Bool("-x", …)` or a duplicate name silently succeeds where Go
+panics. Only `Var` has the checks today. Fixing it means routing all
+ten through a shared definer, which is a change under ten call sites
+with a panic as the new outcome — deliberately not done as a side
+effect of this one.
 
 ## 2o. `flag` always continues on a parse error — FIXED 2026-09-13
 
