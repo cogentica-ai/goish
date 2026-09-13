@@ -37,17 +37,21 @@ where
     K: crate::gomap::GoHash + PartialEq,
     V: Default + PartialEq,
 {
-    let a = m1.__iter();
     if m1.Len() != m2.Len() {
         return false;
     }
-    for (k, v1) in a {
+    // Borrowed walk with an early exit: a mismatch stops the comparison.
+    // Owned iteration would clone every key and value only to compare
+    // them, which for a slice-valued map is a deep copy per entry until
+    // #26.
+    let mismatch = m1.__try_for_each(|k, v1| {
+        use core::ops::ControlFlow;
         match find_key(m2, k) {
-            Some(v2) if v2 == v1 => continue,
-            _ => return false,
+            Some(v2) if v2 == v1 => ControlFlow::Continue(()),
+            _ => ControlFlow::Break(()),
         }
-    }
-    return true;
+    });
+    return mismatch.is_none();
 }
 
 // go: sdk 1.25.5 maps/maps.go:50-56 Clone

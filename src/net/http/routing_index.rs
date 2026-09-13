@@ -231,13 +231,21 @@ impl routingIndex {
 
         // Go: "This pattern is all wildcards. Check it against
         // everything."
-        for (_, pats) in self.segments.__iter() {
+        // Borrowed walk with an early exit: the first error stops the
+        // scan. The value is a pattern list, so owned iteration would
+        // clone it per entry until #26.
+        let stopped = self.segments.__try_for_each(|_, pats| {
+            use core::ops::ControlFlow;
             for p in pats.iter() {
-                err = f(p);
-                if !err.IsNil() {
-                    return err;
+                let e = f(p);
+                if !e.IsNil() {
+                    return ControlFlow::Break(e);
                 }
             }
+            return ControlFlow::Continue(());
+        });
+        if let Some(e) = stopped {
+            return e;
         }
         return err;
     }
