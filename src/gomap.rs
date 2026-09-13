@@ -483,43 +483,6 @@ where
         self.count
     }
 
-    /// Borrow-form `v, ok := m[k]` — returns `(Some(&v), true)` on hit
-    /// and `(None, false)` on miss. Unlike `Get`, places no `V: Clone`
-    /// or `V: Default` bounds on the value type, so it works for
-    /// `map<K, Box<dyn Trait>>` and similar interface-typed shapes
-    /// where the value can't be cloned cheaply or has no zero.
-    #[allow(non_snake_case)]
-    pub fn GetRef<KI: Into<K>>(&self, k: KI) -> (Option<&V>, bool) {
-        let k: K = k.into();
-        if self.count == 0 || self.buckets.is_empty() {
-            return (None, false);
-        }
-        let hash = self.hash(&k);
-        let mask = self.bucket_mask();
-        let bucket_idx = (hash as usize) & mask;
-        let top = tophash(hash);
-
-        let mut bucket = &self.buckets[bucket_idx];
-        loop {
-            for i in 0..BUCKET_COUNT {
-                if bucket.tophash[i] != top {
-                    continue;
-                }
-                if let Some(ref key) = bucket.keys[i] {
-                    if key == &k {
-                        if let Some(ref val) = bucket.elems[i] {
-                            return (Some(val), true);
-                        }
-                    }
-                }
-            }
-            match &bucket.overflow {
-                Some(next) => bucket = next,
-                None => return (None, false),
-            }
-        }
-    }
-
     /// `_, ok := m[k]` form — does the key exist?
     #[allow(non_snake_case)]
     pub fn Has<KI: Into<K>>(&self, k: KI) -> bool {

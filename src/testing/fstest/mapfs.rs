@@ -57,8 +57,8 @@ impl MapFS {
     //     goish's `map::Get` returns a tuple; this narrows it to an
     //     `Option` so the callers read the way Go's do.
     fn get(&self, name: &string) -> Option<Arc<MapFile>> {
-        let (v, ok) = self.0.GetRef(name.clone());
-        return if ok { v.cloned() } else { None };
+        let (v, ok) = self.0.Get(name.clone());
+        return if ok { Some(v) } else { None };
     }
 
     // go: sdk 1.25.5 testing/fstest/mapfs.go:48-120 MapFS.Open

@@ -2944,7 +2944,7 @@ impl Server {
     // go: sdk 1.25.5 net/http/server.go:3535-3558 Server.protocols
     /// The effective protocol set. Adaptations, both stated: goish has
     /// no godebug, so Go's `http2server.Value() == "0"` reads as
-    /// unset; and the map probe uses GetRef (presence only), Go's
+    /// unset; and the map probe uses Has (presence only), Go's
     /// comma-ok.
     pub fn protocols(&self) -> super::http::Protocols {
         if let Some(p) = &self.Protocols {
@@ -2954,8 +2954,7 @@ impl Server {
         // TLSNextProto to a non-nil map with no 'h2' entry."
         let mut http2_disabled = false;
         if let Some(m) = &self.TLSNextProto {
-            let (_, has_h2) = m.GetRef(string("h2"));
-            http2_disabled = !has_h2;
+            http2_disabled = !m.Has(string("h2"));
         }
         let mut p = super::http::Protocols::default();
         p.SetHTTP1(true); // Go: "default always includes HTTP/1"
@@ -3042,8 +3041,7 @@ impl Server {
                 return;
             }
             if let Some(m) = &self.TLSNextProto {
-                let (_, ok) = m.GetRef(string("h2"));
-                if ok {
+                if m.Has(string("h2")) {
                     // Go: "TLSNextProto already contains an HTTP/2
                     // implementation" (x/net/http2.ConfigureServer).
                     return;

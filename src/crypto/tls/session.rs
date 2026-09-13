@@ -111,7 +111,7 @@ const maxHosts: usize = 64;
 type CacheMap = crate::map<string, slice<cachedSession>>;
 
 pub static CACHE: Lazy<sync::Mutex<CacheMap>> =
-    Lazy::new(|| sync::Mutex::new(crate::map::new_no_zero()));
+    Lazy::new(|| sync::Mutex::new(crate::map::new()));
 
 /// Append a session for `server_name`. Multiple tickets per host are kept
 /// (servers commonly issue several so the client can resume in parallel).
@@ -121,11 +121,9 @@ pub fn put<S: Into<string>>(server_name: S, state: cachedSession) {
         return;
     }
     let mut m = CACHE.Lock();
-    let (cur_opt, _) = m.GetRef(name.clone());
-    let mut list: slice<cachedSession> = match cur_opt {
-        Some(s) => s.clone(),
-        None => slice::<cachedSession>::__from_vec(Vec::new()),
-    };
+    // Go's `m[k]` on a miss yields the zero value, and the zero slice
+    // is nil, whose `__into_vec` is empty — so the miss needs no branch.
+    let (list, _) = m.Get(name.clone());
     let mut v = list.__into_vec();
     v.push(state);
     // Go's lruSessionCache evicts the least-recently-used entry past
@@ -135,8 +133,7 @@ pub fn put<S: Into<string>>(server_name: S, state: cachedSession) {
     while v.len() > maxTicketsPerHost {
         v.remove(0);
     }
-    list = slice::<cachedSession>::__from_vec(v);
-    m.Set(name, list);
+    m.Set(name, slice::<cachedSession>::__from_vec(v));
 
     // Bound the number of hosts, the way Go bounds the number of keys.
     //
@@ -180,11 +177,10 @@ pub fn take<S: Into<string>>(server_name: S) -> Option<cachedSession> {
         return None;
     }
     let mut m = CACHE.Lock();
-    let (cur_opt, _) = m.GetRef(name.clone());
-    let list = match cur_opt {
-        Some(s) => s.clone(),
-        None => return None,
-    };
+    let (list, ok) = m.Get(name.clone());
+    if !ok {
+        return None;
+    }
     let mut v = list.__into_vec();
     if v.is_empty() {
         return None;

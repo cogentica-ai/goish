@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 7924,
+ "total": 7910,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -273,7 +273,7 @@
    "GOISH005": 2,
    "GOISH014": 40,
    "GOISH016": 1,
-   "GOISH023": 40
+   "GOISH023": 38
   },
   "src/encoding/mod.rs": {
    "GOISH015": 1,
@@ -342,8 +342,8 @@
   },
   "src/gomap.rs": {
    "GOISH005": 5,
-   "GOISH014": 49,
-   "GOISH023": 43
+   "GOISH014": 48,
+   "GOISH023": 37
   },
   "src/gonilable.rs": {
    "GOISH014": 26,
@@ -357,7 +357,7 @@
    "GOISH005": 4,
    "GOISH008": 2,
    "GOISH014": 28,
-   "GOISH023": 27
+   "GOISH023": 22
   },
   "src/gostring.rs": {
    "GOISH005": 3,

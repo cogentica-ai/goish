@@ -25,7 +25,7 @@
 //
 // Aliasing. A copy of a non-nil map is still an independent deep copy,
 // so `clone_aliases` and `return_aliases` remain divergent; those need
-// the shared header and the `__iter` / `Index` / `GetRef` migration that
+// the shared header and the `__iter` / `Index` migration that
 // ROADMAP §2u sizes. The nil flag is independently correct and survives
 // that change unchanged.
 

@@ -644,6 +644,43 @@ taught it (see the note on StartCPUProfile):
              reference into a map. It is a goish-only optimisation, so
              its 7 sites fold into `Get`.
 
+DONE, and the `GetRef` fold was not the mechanical one predicted above.
+Its five src sites went three ways, not one:
+
+  2 (server.rs)  discarded the value and read only `ok`, so they are
+                 `Has` — no owned read at all.
+  3 (session.rs, mapfs.rs)  fold into `Get` as predicted, but session.rs
+                 needed its ctor changed too: `CACHE` was built with
+                 `new_no_zero()`, and `Get`'s miss path reads the zero
+                 sentinel, so the fold alone turns a normal cache miss
+                 into a panic. Its value type is `slice<cachedSession>`,
+                 which has a `Default` — the no-zero ctor was never
+                 needed. `tls_session_expiry_smoke` resets the cache
+                 itself and had the same call, which is how it was
+                 caught: the smoke, not the compiler.
+  0              fold for a non-`Clone` V, and this is the one the plan
+                 above missed.
+
+THE NON-`Clone` V IS THE REAL LIMIT, and it is worth stating before the
+header lands rather than discovering it underneath. For a value type
+that is neither `Clone` nor `Default` — `map<string, Box<dyn Trait>>`,
+goish's spelling of Go's interface-typed map — a shared header behind a
+lock can hand the value out NEITHER by reference (it would outlive the
+guard) NOR by value (nothing to clone). Go has no such problem: reading
+`map[string]Hasher` copies a two-word interface value.
+
+Measured, this is not yet load-bearing: `new_no_zero` /
+`with_capacity_no_zero` have exactly ONE src construction site (the
+session cache above, which did not need them), and the only genuinely
+non-`Clone` map in the tree is in `gomap_no_zero_smoke`. So the header
+is not blocked. The access path for that shape is the guard-scoped
+closure — `__for_each` / `__try_for_each`, which take `&V` for the
+duration of the call and need no bound at all — and the smoke now reads
+its `Box<dyn Hasher>` values that way, so the sanctioned path has a
+user. Should a future port need an interface-typed map with an owned
+read, the answer is `Arc<dyn Trait>` (Go's interface value is a copyable
+pair, and `Arc` is goish's copyable pointer), not a borrowed accessor.
+
 So none of the three needs a new API to be invented; each has either a
 Go contract that is already owned or no Go counterpart. That is roughly
 90 call sites of mechanical change, and the representation underneath

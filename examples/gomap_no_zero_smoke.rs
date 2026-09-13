@@ -92,15 +92,35 @@ fn main() {
         check(h.name() == 42, b"no-zero map: H42.name() != 42\n");
     }
 
-    // GetRef — borrow-form comma-ok, no V: Clone / Default bounds.
-    let (h_opt, ok) = hashers.GetRef(string::from_static("seven"));
+    // Reading a value out of an interface-typed map. `Get` is not
+    // available here — it clones, and `Box<dyn Hasher>` is not Clone —
+    // so the read goes through the guard-scoped closure form, which
+    // hands the value out by reference for the duration of the call
+    // and so survives the shared header #7 is heading for.
+    let name7 = hashers
+        .__try_for_each(|k, v| {
+            use core::ops::ControlFlow;
+            if k == &string::from_static("seven") {
+                return ControlFlow::Break(v.name());
+            }
+            return ControlFlow::Continue(());
+        });
     check(
-        ok && h_opt.unwrap().name() == 7,
-        b"no-zero map: GetRef(seven) wrong\n",
+        name7 == Some(7),
+        b"no-zero map: __try_for_each(seven) wrong\n",
     );
 
-    let (_, ok2) = hashers.GetRef(string::from_static("missing"));
-    check(!ok2, b"no-zero map: GetRef(missing) ok must be false\n");
+    let missing = hashers.__try_for_each(|k, v| {
+        use core::ops::ControlFlow;
+        if k == &string::from_static("missing") {
+            return ControlFlow::Break(v.name());
+        }
+        return ControlFlow::Continue(());
+    });
+    check(
+        missing == None,
+        b"no-zero map: __try_for_each(missing) must be None\n",
+    );
 
     // Range! — iteration works, no Default required
     let mut count: int = 0;

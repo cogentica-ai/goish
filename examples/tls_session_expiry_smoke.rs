@@ -124,7 +124,7 @@ fn main() {
     // One ticket each, so `kept` is also the host count.
     {
         let mut m = session::CACHE.Lock();
-        *m = goish::map::new_no_zero();
+        *m = goish::map::new();
     }
     for i in 0..200u32 {
         let host = fmt::Sprintf!("h%d.example", i as int);
