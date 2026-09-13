@@ -69,7 +69,16 @@ pub use testing::{
     runningList, shouldFailFast, testBinary, testState, testStateCounts, toOutputDir,
     __set_test_binary,
     CleanupHandle, CoverMode, Init, Short, Testing, Verbose,
+    // `RunTests` takes `&[InternalTest]`, so exporting the function
+    // without the type would be a name nobody can call — which is the
+    // same defect this pass is fixing. Both, or neither.
+    InternalTest, RunTests,
 };
+
+/// `testing.B` — Go writes `*testing.B`, not `*testing.benchmark.B`.
+/// The type was only reachable through the submodule, so a benchmark
+/// signature could not be spelled the way Go spells it.
+pub use benchmark::B;
 
 extern crate alloc;
 

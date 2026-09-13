@@ -1,5 +1,9 @@
-// flag_exported_api_smoke — `flag.Arg`, `flag.Func`, `flag.BoolFunc`
-// and `flag.Uint64` must be REACHABLE, not merely present.
+// exported_api_smoke — Go API that is ported must be REACHABLE, not
+// merely present.
+//
+// Started as four `flag` functions and grew: the same sweep across
+// every package found `unicode.CaseRanges`, `testing.RunTests` /
+// `InternalTest`, and `testing.B` in the same state.
 //
 // All four were ported, anchored and counted by port_coverage, and
 // then left out of `flag/mod.rs`'s `pub use` list. `flag::Arg(0)` did
@@ -87,9 +91,49 @@ fn main() {
         string("Lookup(goish_u64) returned nil"),
     );
 
+    // ── the same gap in other packages ──────────────────────────────
+    //
+    // Naming a thing is not the test; USING it is. `testing::MainStart`
+    // is deliberately absent from this list even though it is a `pub
+    // fn` with a Go anchor: its `deps` parameter is a `pub(crate)`
+    // trait, so exporting the name would produce a function no caller
+    // could ever satisfy — the same defect wearing a fix's clothes.
+    // goish's test entry point is the `#[goish::test_main]` attribute,
+    // so `MainStart` being internal is a design decision, not a gap.
+
+    // Go: `var CaseRanges = _CaseRanges` (unicode/tables.go:8624).
+    let cr = goish::unicode::CaseRanges;
+    check(
+        "unicode::CaseRanges is reachable and populated",
+        cr.len() > 100,
+        fmt::Sprintf!("len=%d", cr.len() as int),
+    );
+    check(
+        "and its entries are usable — 'A' maps to lower by +32",
+        cr.iter().any(|r| r.Lo == 0x0041 && r.Hi == 0x005A && r.Delta[1] == 32),
+        string("no A-Z CaseRange with Delta[1]==32"),
+    );
+
+    // Go writes `*testing.B`, not `*testing.benchmark.B`.
+    let _: Option<&goish::testing::B> = None;
+    check("testing::B is spelled the way Go spells it", true, string(""));
+
+    // `RunTests` takes `&[InternalTest]`, so the type has to be
+    // nameable for the function to be callable at all. Constructing one
+    // is the proof; running it is not this smoke's job.
+    let it = goish::testing::InternalTest {
+        Name: string("goish/reachability"),
+        F: |_t| {},
+    };
+    check(
+        "testing::InternalTest can be constructed, so RunTests is callable",
+        it.Name.Len() > 0,
+        string("empty name"),
+    );
+
     let f = unsafe { FAILED };
     if f == 0 {
-        fmt::Printf!("\nok 5/5\n");
+        fmt::Printf!("\nok 9/9\n");
         goish::os::Exit(0);
     }
     fmt::Printf!("\nFAIL %d\n", f);

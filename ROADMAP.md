@@ -3332,8 +3332,37 @@ AND THE SMOKES WERE GREEN. `flag_func_ref_smoke` and
 tested; the package-level surface never was. A smoke proves the unit
 works, not that anything can reach it.
 
-`flag_exported_api_smoke` now calls all four through `goish::flag::`,
-so the failure mode is a compile error rather than a silent absence.
+`exported_api_smoke` now calls all four through `goish::flag::`, so
+the failure mode is a compile error rather than a silent absence.
+
+**THE SWEEP GENERALISED, and found three more.** `dead_code` only
+catches an unreachable item when NOTHING uses it, so anything used once
+inside its own module stays invisible. Comparing each package's
+declarations against its `pub use` list directly finds those too — 9
+private submodules with Go-shaped `pub` items missing from the
+re-export list. Probing each (writing the call, not reading the list)
+left three real:
+
+  `unicode::CaseRanges`   Go's `var CaseRanges = _CaseRanges`. The
+                          table was present with no name to reach it.
+  `testing::B`            only reachable as `testing::benchmark::B`,
+                          where Go writes `*testing.B`.
+  `testing::RunTests`     plus `InternalTest`, its parameter type —
+                          exported TOGETHER, since a function whose
+                          argument type cannot be named is not callable.
+
+The `crypto::cipher` interfaces (AEAD, Block, BlockMode, Stream) came
+up as candidates and are FINE — reachable by another route the sweep's
+regex missed. Probing is what separated them; the list alone would have
+produced four unnecessary edits.
+
+**AND ONE DELIBERATELY NOT FIXED.** `testing::MainStart` is a `pub fn`
+with a Go anchor and is not exported — but its `deps` parameter is a
+`pub(crate) trait`, so exporting the name would produce a function no
+caller could ever satisfy. That is this same defect wearing a fix's
+clothes. goish's test entry point is the `#[goish::test_main]`
+attribute, so `MainStart` being internal is a design decision. The
+smoke says so, at the point where it would otherwise be tempting.
 
 WHAT THE SWEEP COST AND RETURNED, since the same trick paid much better
 one commit earlier: 34 files, 57 dead items, and only 6 were fields or

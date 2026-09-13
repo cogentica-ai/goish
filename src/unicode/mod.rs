@@ -47,6 +47,10 @@ pub use letter::{
     SpecialCase, TitleCase, To, ToLower, ToTitle, ToUpper, UpperCase, UpperLower,
 };
 
+/// `unicode.CaseRanges` — Go's `var CaseRanges = _CaseRanges`, the set
+/// of case mappings. The table was here and had no name a caller could
+/// reach.
+pub use tables::CaseRanges;
 /// `unicode.Mn` — Mark, nonspacing.
 pub use tables::Mn;
 /// `unicode.Zs` — Separator, space.
