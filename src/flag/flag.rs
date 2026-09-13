@@ -1,4 +1,4 @@
-// go: file flag/flag.go decls: FlagSet.Uint64, Uint64, Arg, FlagSet.Func, FlagSet.BoolFunc, Func, BoolFunc, FlagSet.sprintf, FlagSet.failf, FlagSet.Int64, FlagSet.Uint, FlagSet.Duration, Parsed, Bool, Int, Int64, Uint, String, Duration, Parse, Set, FlagSet.Lookup, FlagSet.VisitAll, numError, UnquoteUsage, isZeroValue, FlagSet.Parse, FlagSet.parseOne, FlagSet.usage, FlagSet.NFlag, FlagSet.Visit, FlagSet.set, FlagSet.PrintDefaults, FlagSet.SetOutput, NewFlagSet, FlagSet.Name, FlagSet.ErrorHandling, FlagSet.Var, Var
+// go: file flag/flag.go decls: FlagSet.Uint64, Uint64, Arg, FlagSet.Func, FlagSet.BoolFunc, Func, BoolFunc, FlagSet.sprintf, FlagSet.failf, FlagSet.Int64, FlagSet.Uint, FlagSet.Duration, Parsed, Bool, Int, Int64, Uint, String, Duration, Parse, Set, FlagSet.Lookup, FlagSet.VisitAll, numError, UnquoteUsage, isZeroValue, FlagSet.Parse, FlagSet.parseOne, FlagSet.usage, FlagSet.NFlag, FlagSet.Visit, FlagSet.set, FlagSet.PrintDefaults, FlagSet.SetOutput, NewFlagSet, FlagSet.Name, FlagSet.ErrorHandling, FlagSet.Var, Var, FlagSet.TextVar, TextVar, textValue.String, textValue.Set
 //
 // flag — the package-level CommandLine set, and the flag types goish's
 // hand-written FlagSet did not have.
@@ -8,7 +8,7 @@
 // holds what has been ported verbatim, kept separate because GOISH015
 // forbids anchored code in a module root.
 //
-// goishlint:ignore GOISH018 Func, BoolFunc, TextVar, Args, NArg, Arg, Usage, Init, Output, defaultUsage, sortFlags, newBoolValue, newIntValue, newInt64Value, newUintValue, newUint64Value, newStringValue, newFloat64Value, newDurationValue, newTextValue, newFuncValue, newBoolFuncValue, Get, IsBoolFlag, Float64, Uint64, BoolVar, IntVar, Int64Var, UintVar, Uint64Var, StringVar, Float64Var, DurationVar, failf, panicOnError, commandLineUsage, Error— the FlagSet parser is hand-written; these are the declarations of Go's flag.go that goish does not have. Twelve names that WERE on this list — Parse, parseOne, PrintDefaults, UnquoteUsage, isZeroValue, numError, usage, NFlag, Visit, Set, String, SetOutput — are ported AND anchored in this file, so the waiver was suppressing GOISH018 over declarations that exist. Re-checked 2026-09-06. Three MORE came off on 2026-09-13 — NewFlagSet, Name and ErrorHandling — when §2o gave NewFlagSet Go's two parameters; the waiver was again naming declarations that exist. And one MORE on the same day — Var — when §2p opened the kind enum. `IsBoolFlag` stays waived on purpose: Go declares it on a SEPARATE optional interface (`boolFlag`), and Rust has no optional-interface test on a `dyn`, so goish folds it into `Value` as a defaulted method. There is no separate declaration to anchor — only the behaviour, which flag_var_smoke pins. Three separate passes have now found this waiver naming things the file has; it is worth re-deriving rather than trusting.
+// goishlint:ignore GOISH018 Func, BoolFunc, Args, NArg, Arg, Usage, Init, Output, defaultUsage, sortFlags, newBoolValue, newIntValue, newInt64Value, newUintValue, newUint64Value, newStringValue, newFloat64Value, newDurationValue, newTextValue, newFuncValue, newBoolFuncValue, Get, IsBoolFlag, Float64, Uint64, BoolVar, IntVar, Int64Var, UintVar, Uint64Var, StringVar, Float64Var, DurationVar, failf, panicOnError, commandLineUsage, Error— the FlagSet parser is hand-written; these are the declarations of Go's flag.go that goish does not have. Twelve names that WERE on this list — Parse, parseOne, PrintDefaults, UnquoteUsage, isZeroValue, numError, usage, NFlag, Visit, Set, String, SetOutput — are ported AND anchored in this file, so the waiver was suppressing GOISH018 over declarations that exist. Re-checked 2026-09-06. Three MORE came off on 2026-09-13 — NewFlagSet, Name and ErrorHandling — when §2o gave NewFlagSet Go's two parameters; the waiver was again naming declarations that exist. And one MORE on the same day — Var — when §2p opened the kind enum. `IsBoolFlag` stays waived on purpose: Go declares it on a SEPARATE optional interface (`boolFlag`), and Rust has no optional-interface test on a `dyn`, so goish folds it into `Value` as a defaulted method. There is no separate declaration to anchor — only the behaviour, which flag_var_smoke pins. Three separate passes have now found this waiver naming things the file has; it is worth re-deriving rather than trusting. A fifth: TextVar, when §2p finished. `newTextValue` also went — Go needs it to reflect a pointer and copy a default; goish takes the value already holding its default, so there is nothing to construct.
 // goishlint:ignore GOISH021 Getter, ErrorHandling, ContinueOnError, ExitOnError, PanicOnError, FlagSet, boolValue, intValue, int64Value, uintValue, uint64Value, stringValue, float64Value, durationValue, textValue, funcValue, boolFuncValue, errParse, errRange, ErrHelp, Usage, numError, boolFlag, commandLineUsage — same.
 
 #![allow(non_snake_case)]
@@ -292,6 +292,94 @@ impl FlagSet {
         self.__define(name.into(), usage.into(), FlagKind::Custom(cell.clone()));
         return cell;
     }
+}
+
+// go: none — goish-only: Go's `textValue` wraps a POINTER and reads it
+//     back through reflection. goish shares an `Arc<SpinLock<T>>` with
+//     the caller instead, so the caller keeps a typed handle on their
+//     own value rather than a `dyn Value` they cannot downcast.
+/// A live, TYPED handle on a flag defined with [`FlagSet::TextVar`].
+pub type TextHandle<T> = alloc::sync::Arc<crate::runtime::spin::SpinLock<T>>;
+
+// go: sdk 1.25.5 flag/flag.go:299-299 textValue
+/// Go's `textValue` — the `flag.Value` adapter over an
+/// `encoding.TextUnmarshaler`.
+struct textValue<T> {
+    p: TextHandle<T>,
+}
+
+impl<T> Value for textValue<T>
+where
+    T: crate::encoding::TextMarshaler + crate::encoding::TextUnmarshaler + Send + Sync,
+{
+    // go: sdk 1.25.5 flag/flag.go:325-332 textValue.String
+    /// Go: marshals, and returns "" if the type does not marshal or the
+    /// marshal fails. goish's bound makes the first half unreachable —
+    /// a `T` that cannot marshal will not compile — but the error half
+    /// is real and behaves the same.
+    fn String(&self) -> string {
+        let (b, err) = self.p.lock().MarshalText();
+        if err != crate::errors::nil {
+            return string::new();
+        }
+        return string::from_bytes(b.as_ref());
+    }
+
+    // go: sdk 1.25.5 flag/flag.go:317-319 textValue.Set
+    /// Go: `return v.p.UnmarshalText([]byte(s))` — the caller's own
+    /// parser, and its error verbatim.
+    fn Set(&mut self, s: string) -> error {
+        let bytes = crate::convert::bytes(s);
+        return self.p.lock().UnmarshalText(bytes);
+    }
+}
+
+impl FlagSet {
+    // go: sdk 1.25.5 flag/flag.go:963-965 FlagSet.TextVar
+    /// Go: "TextVar defines a flag with a specified name, default value,
+    /// and usage string. The argument p must be a pointer to a variable
+    /// that will hold the value of the flag, and p must implement
+    /// encoding.TextUnmarshaler."
+    ///
+    /// TWO OF GO'S FOUR PARAMETERS ARE GONE, and both for the same
+    /// reason: they exist to police at runtime what Rust settles at
+    /// compile time.
+    ///
+    /// Go takes a separate `value` default and copies it into `*p` by
+    /// reflection, panicking if the two types differ
+    /// ("default type does not match variable type") or if `p` is not a
+    /// pointer ("variable value type must be a pointer"). goish's
+    /// caller passes a `T` that already holds its default, and a type
+    /// mismatch is a compile error — so there is nothing left to check
+    /// and nothing to copy.
+    ///
+    /// Like [`FlagSet::Var`], the value moves in and a handle comes
+    /// back; here it is TYPED, so the caller reads their own `T` rather
+    /// than the text form.
+    pub fn TextVar<T, N: Into<string>, U: Into<string>>(
+        &mut self,
+        p: T,
+        name: N,
+        usage: U,
+    ) -> TextHandle<T>
+    where
+        T: crate::encoding::TextMarshaler + crate::encoding::TextUnmarshaler + Send + Sync + 'static,
+    {
+        let cell: TextHandle<T> = alloc::sync::Arc::new(crate::runtime::spin::SpinLock::new(p));
+        let adapter = textValue { p: cell.clone() };
+        let _ = self.Var(alloc::boxed::Box::new(adapter), name, usage);
+        return cell;
+    }
+}
+
+// go: sdk 1.25.5 flag/flag.go:972-974 TextVar
+/// Go: "TextVar defines a flag with a specified name, default value,
+/// and usage string." The package-level form, on `CommandLine`.
+pub fn TextVar<T, N: Into<string>, U: Into<string>>(p: T, name: N, usage: U) -> TextHandle<T>
+where
+    T: crate::encoding::TextMarshaler + crate::encoding::TextUnmarshaler + Send + Sync + 'static,
+{
+    return CommandLine.Lock().TextVar(p, name, usage);
 }
 
 // go: sdk 1.25.5 flag/flag.go:1045-1048 Var

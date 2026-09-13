@@ -113,6 +113,37 @@ impl Value for tagList {
     }
 }
 
+/// A type implementing `encoding.TextMarshaler` + `TextUnmarshaler`,
+/// which is what `TextVar` is for: `-level vvv` means verbosity 3.
+struct level {
+    n: int,
+}
+
+impl goish::encoding::TextMarshaler for level {
+    fn MarshalText(&self) -> (goish::slice<goish::types::byte>, goish::error) {
+        let mut out: Vec<goish::types::byte> = Vec::new();
+        let mut i: int = 0;
+        while i < self.n {
+            out.push(b'v');
+            i += 1;
+        }
+        return (goish::slice::__from_vec(out), errors::nil);
+    }
+}
+
+impl goish::encoding::TextUnmarshaler for level {
+    fn UnmarshalText(&mut self, text: goish::slice<goish::types::byte>) -> goish::error {
+        let raw: &[goish::types::byte] = text.as_ref();
+        for b in raw.iter() {
+            if *b != b'v' {
+                return errors::New(string("level must be all v"));
+            }
+        }
+        self.n = raw.len() as int;
+        return errors::nil;
+    }
+}
+
 /// A user type that answers Go's `boolFlag` question, so `-x` may stand
 /// alone without eating the next argument.
 struct counter {
@@ -275,9 +306,58 @@ fn main() {
         fmt::Sprintf!("rc=%d want 7", rc_ok),
     );
 
+    // ── TextVar: a flag over encoding.TextUnmarshaler ───────────────
+    //
+    // Go: `TextVar(p TextUnmarshaler, name string, value TextMarshaler,
+    // usage string)`. TWO of those four parameters are gone here, and
+    // both for the same reason: they police at runtime what Rust
+    // settles at compile time. Go copies `value` into `*p` by
+    // reflection and panics if the types differ ("default type does not
+    // match variable type") or if `p` is not a pointer; goish's caller
+    // passes a `T` already holding its default, and a mismatch will not
+    // compile.
+    //
+    // Measured against Go 1.25.5:
+    //
+    //   DefValue before parse       "vv"
+    //   Value.String() before parse "vv"
+    //   after -level vvvv           n=4, String()="vvvv"
+    //   bad value                   invalid value "xyz" for flag
+    //                               -level: level must be all v
+    //   usage listing               -level value / (default v)
+    let mut fs6 = flag::NewFlagSet("prog", ErrorHandling::ContinueOnError);
+    let lv = fs6.TextVar(level { n: 2 }, "level", "verbosity");
+    match fs6.Lookup(string("level")) {
+        Some(fl) => check(
+            "TextVar captures the default as marshalled text, as Go does",
+            fl.DefValue == "vv" && fl.Value.String() == "vv",
+            fmt::Sprintf!("DefValue=%q String=%q", fl.DefValue.clone(), fl.Value.String()),
+        ),
+        None => check("TextVar defines the flag", false, string("Lookup returned None")),
+    }
+
+    let e6 = fs6.Parse(&goish::slice!([]string{ "-level", "vvvv" }));
+    check(
+        "the caller's UnmarshalText runs, and the typed handle sees it",
+        e6.IsNil() && lv.lock().n == 4,
+        fmt::Sprintf!("err=%v n=%d", e6, lv.lock().n),
+    );
+
+    let mut fs7 = flag::NewFlagSet("prog", ErrorHandling::ContinueOnError);
+    let buf7 = goish::bytes::NewBufferString(string(""));
+    fs7.SetOutput(buf7);
+    let _ = fs7.TextVar(level { n: 1 }, "level", "verbosity");
+    let e7 = fs7.Parse(&goish::slice!([]string{ "-level", "xyz" }));
+    check(
+        "and its UnmarshalText error is wrapped exactly as Go wraps it",
+        !e7.IsNil()
+            && e7.Error() == "invalid value \"xyz\" for flag -level: level must be all v",
+        if e7.IsNil() { string("<nil>") } else { e7.Error() },
+    );
+
     let n = unsafe { FAILED };
     if n == 0 {
-        fmt::Printf!("\nok 13/13\n");
+        fmt::Printf!("\nok 16/16\n");
         os::Exit(0);
     }
     fmt::Printf!("\nFAIL %d\n", n);

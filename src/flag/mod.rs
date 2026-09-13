@@ -55,7 +55,7 @@
 
 mod flag;
 pub(crate) use flag::__defstr;
-pub use flag::{ErrorHandling, NewFlagSet, Var, ValueHandle};
+pub use flag::{ErrorHandling, NewFlagSet, TextHandle, TextVar, ValueHandle, Var};
 // `Arg`, `BoolFunc`, `Func` and `Uint64` were ported, anchored and
 // counted, and then left out of this list — so `flag::Arg(0)` did not
 // compile even though the function existed and worked. `port_coverage`

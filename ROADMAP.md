@@ -3172,9 +3172,29 @@ flag -%s: %v`, not returned raw. goish already wrapped it identically —
 the smoke asserts the whole string rather than a substring, because
 `Contains("empty tag")` would pass on the unwrapped form too.
 
-STILL NOT DONE: `TextVar`. `encoding::TextMarshaler` and
-`TextUnmarshaler` both exist, so it is now reachable — it just was not
-part of this change.
+**`TextVar` DONE too.** Go's is
+`TextVar(p TextUnmarshaler, name string, value TextMarshaler, usage
+string)`; goish's takes two of those four. Both omissions are the same
+one: they police at RUNTIME what Rust settles at compile time. Go
+copies `value` into `*p` by reflection and panics if the types differ
+("default type does not match variable type") or if `p` is not a
+pointer; goish's caller passes a `T` already holding its default, and a
+mismatch does not compile. There is nothing left to check and nothing
+to copy, which is why `newTextValue` stays waived.
+
+The handle is TYPED — `TextHandle<T>` — so a caller reads their own `T`
+back rather than the text form, which is strictly better than the
+`dyn Value` `Var` can offer.
+
+Measured against Go 1.25.5, all matching:
+
+    DefValue before parse        "vv"
+    Value.String() before parse  "vv"
+    after -level vvvv            n=4, String() "vvvv"
+    bad value                    invalid value "xyz" for flag -level:
+                                 level must be all v
+
+That leaves nothing outstanding in §2p.
 
 AND A SEPARATE GAP FOUND WHILE DOING IT, **fixed in the next commit**:
 in Go, every definer routes through `Var`, so all of them get its three
