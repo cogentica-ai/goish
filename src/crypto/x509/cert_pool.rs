@@ -333,8 +333,8 @@ impl CertPool {
         if self.systemPool != other.systemPool || self.haveSum.Len() != other.haveSum.Len() {
             return false;
         }
-        for (h, _) in crate::range!(self.haveSum.clone()) {
-            let (have, _) = other.haveSum.Get(h.clone());
+        for (h, _) in crate::range!(self.haveSum) {
+            let (have, _) = other.haveSum.Get(h);
             if !have {
                 return false;
             }

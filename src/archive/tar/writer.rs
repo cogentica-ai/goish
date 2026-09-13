@@ -227,7 +227,7 @@ impl<W: crate::io::Writer> Writer<W> {
             // Sort keys for deterministic ordering.
             let mut keys: Vec<string> = Vec::new();
             for (k, _) in crate::range!(paxHdrs) {
-                keys.push(k.clone());
+                keys.push(k);
             }
             keys.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
 

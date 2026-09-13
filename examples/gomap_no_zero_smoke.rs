@@ -118,12 +118,15 @@ fn main() {
         b"no-zero map: read of a missing key must be None\n",
     );
 
-    // Range! — iteration works, no Default required
+    // Iteration. `range!` is NOT available here: it yields owned
+    // `(K, V)` the way Go's `range` yields copies, which needs
+    // `V: Clone`, and `Box<dyn Hasher>` is not. Go has no equivalent
+    // problem — an interface value is a copyable two-word pair — so
+    // this is a goish limit, and the guard-scoped walk is the answer
+    // to it, as it is for reading a single value above.
     let mut count: int = 0;
-    for (_, _) in goish::range!(hashers) {
-        count += 1;
-    }
-    check(count == 2, b"no-zero map: range count != 2\n");
+    hashers.__for_each(|_, _| count += 1);
+    check(count == 2, b"no-zero map: __for_each count != 2\n");
 
     const OK: &[u8] = b"gomap_no_zero: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

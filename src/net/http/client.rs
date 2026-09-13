@@ -2610,7 +2610,7 @@ impl headersCopier {
                 || ck == "Proxy-Authorization"
                 || ck == "Proxy-Authenticate";
             if !(sensitive && stripSensitiveHeaders) {
-                req.Header.__set_values(k.clone(), vv.clone());
+                req.Header.__set_values(k, vv);
             }
         }
         return;

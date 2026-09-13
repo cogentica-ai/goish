@@ -1091,14 +1091,20 @@ impl response {
             // trailer whose name it does not know until after the body.
             // goish honoured only the first, so the prefixed form got a
             // Content-Length response and the trailer was dropped.
-            let mut prefixed = false;
-            for (k, _) in crate::range!(&*hdr) {
-                let ks: &str = k.as_ref();
-                if ks.starts_with(super::server::TrailerPrefix) {
-                    prefixed = true;
-                    break;
-                }
-            }
+            // Key-only, on the per-response path: `range!` would
+            // snapshot and deep-copy every value slice for nothing, so
+            // this uses the guard-scoped walk. `break` is `Break`.
+            let prefixed = hdr
+                .__inner()
+                .__try_for_each(|k, _| {
+                    use core::ops::ControlFlow;
+                    let ks: &str = k.as_ref();
+                    if ks.starts_with(super::server::TrailerPrefix) {
+                        return ControlFlow::Break(());
+                    }
+                    return ControlFlow::Continue(());
+                })
+                .is_some();
             let declares = hdr.Values(string("Trailer")).Len() > 0
                 || prefixed
                 || hdr.Get(string("Transfer-Encoding")).as_ref() as &str == "chunked";

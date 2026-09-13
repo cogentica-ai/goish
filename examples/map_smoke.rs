@@ -99,7 +99,7 @@ fn main() {
 
     let mut total = 0;
     for (_, v) in range!(m2) {
-        total += *v;
+        total += v;
     }
     check(total == 6, b"map: range! sum wrong\n");
 

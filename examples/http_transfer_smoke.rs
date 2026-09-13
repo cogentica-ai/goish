@@ -19,7 +19,7 @@ use goish::net::http::transfer::{
     noResponseBodyExpected, parseContentLength, shouldClose, suppressedHeaders, transferReader,
     transferWriter,
 };
-use goish::net::http::Header;
+use goish::net::http::{self as http, Header};
 use goish::{slice, string};
 
 static PASSED: AtomicUsize = AtomicUsize::new(0);
@@ -456,6 +456,98 @@ fn run() {
             "registerOnHitEOF fires exactly once, and bodyRemains goes false",
             !b2.bodyRemains() && HIT.load(Ordering::Relaxed) == 1,
             fmt::Sprintf!("hits=%d", HIT.load(Ordering::Relaxed) as i64),
+        );
+    }
+
+    // ── the Trailer-key check in transferWriter.writeHeader ──────────
+    //
+    // Uncovered until now, which a perturbation proved: deleting the
+    // check outright left every example green. It matters because
+    // rewriting its `return`-inside-a-loop into a `ControlFlow::Break`
+    // for #7 is exactly the kind of edit that can drop a branch.
+    //
+    // Measured against Go 1.25.5, `(*Request).Write` into a buffer:
+    //
+    //   chunked, Trailer key "Transfer-Encoding" -> invalid Trailer key "Transfer-Encoding"
+    //   chunked, Trailer key "Trailer"           -> invalid Trailer key "Trailer"
+    //   chunked, Trailer key "Content-Length"    -> invalid Trailer key "Content-Length"
+    //   chunked, Trailer key "transfer-encoding" -> invalid Trailer key "Transfer-Encoding"
+    //   chunked, Trailer key "content-length"    -> invalid Trailer key "Content-Length"
+    //   chunked, Trailer key "X-Fine"            -> accepted; wire has "Trailer: X-Fine"
+    //   chunked, Trailer key "x-fine"            -> accepted; wire has "Trailer: X-Fine"
+    //   NOT chunked, Trailer key "Content-Length" -> err=<nil>, no Trailer line
+    //
+    // Two things that only measurement shows: the refusal is
+    // case-INSENSITIVE (the key is canonicalised first) and the error
+    // quotes the CANONICAL form, not what the caller wrote; and the
+    // check is unreachable unless the body is chunked, because Go
+    // nils Trailer outright otherwise ("Sanitize Trailer").
+    {
+        let write_with_trailer = |key: &'static str, chunked_body: bool| -> (string, string) {
+            let (mut req, nerr) = http::NewRequest("POST", "http://example.com/", "hi");
+            if !nerr.IsNil() {
+                return (nerr.Error(), string(""));
+            }
+            if chunked_body {
+                // Go's own recipe for reaching the check: chunked plus
+                // an unknown length, which is what "Sanitize Trailer"
+                // requires to leave Trailer in place.
+                req.TransferEncoding = strs(&["chunked"]);
+                req.ContentLength = -1;
+            }
+            let mut tr = Header::new();
+            tr.Add(string(key), string("v"));
+            req.Trailer = tr;
+            let mut buf = goish::bytes::NewBufferString(string(""));
+            let err = req.Write(&mut buf);
+            let msg = if err.IsNil() {
+                string("")
+            } else {
+                err.Error()
+            };
+            return (msg, buf.String());
+        };
+
+        let mut bad = string("");
+        for k in ["Transfer-Encoding", "Trailer", "Content-Length"].iter() {
+            let (msg, _) = write_with_trailer(k, true);
+            let want = string("invalid Trailer key \"") + string(*k) + string("\"");
+            if msg != want {
+                bad = fmt::Sprintf!("%s: got %q want %q", string(*k), msg, want);
+            }
+        }
+        check(
+            "chunked: Transfer-Encoding / Trailer / Content-Length are refused as Trailer keys",
+            bad.Len() == 0,
+            bad,
+        );
+
+        // Case-insensitive, and the CANONICAL spelling in the message.
+        let (lc_te, _) = write_with_trailer("transfer-encoding", true);
+        let (lc_cl, _) = write_with_trailer("content-length", true);
+        check(
+            "the refusal canonicalises first, and quotes the canonical key",
+            lc_te == "invalid Trailer key \"Transfer-Encoding\""
+                && lc_cl == "invalid Trailer key \"Content-Length\"",
+            fmt::Sprintf!("te=%q cl=%q", lc_te, lc_cl),
+        );
+
+        // A legal key is accepted and announced, canonicalised.
+        let (ok_msg, wire) = write_with_trailer("x-fine", true);
+        check(
+            "a legal Trailer key is accepted and announced canonicalised",
+            ok_msg.Len() == 0 && goish::strings::Contains(wire.clone(), string("Trailer: X-Fine")),
+            fmt::Sprintf!("err=%q wire=%q", ok_msg, wire),
+        );
+
+        // Not chunked: Go NILS Trailer, so even an illegal key passes
+        // and no Trailer line is written. Without this row the three
+        // above would still pass if the check ran unconditionally.
+        let (unchunked, wire2) = write_with_trailer("Content-Length", false);
+        check(
+            "not chunked: Trailer is sanitized away, so no key is refused and none announced",
+            unchunked.Len() == 0 && !goish::strings::Contains(wire2.clone(), string("Trailer:")),
+            fmt::Sprintf!("err=%q wire=%q", unchunked, wire2),
         );
     }
 

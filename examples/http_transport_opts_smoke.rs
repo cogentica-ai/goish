@@ -119,6 +119,34 @@ fn run() {
         );
     }
 
+    // validateHeaders: the FIELD NAME branch. Only the value branch
+    // above was covered, so rewriting this function's early `return`
+    // into a `ControlFlow::Break` for #7 could have deleted the name
+    // check outright and every test would still have passed —
+    // confirmed by perturbation, which is why this row exists.
+    //
+    // Go names the field in the error (transport.go, "field name %q")
+    // but hides the value, since a value may be sensitive.
+    {
+        let mk = |k: &'static str, v: &'static str| -> Header {
+            let mut h = Header::new();
+            h.Add(string(k), string(v));
+            h
+        };
+        // `Add` canonicalises, and Go's canonicaliser returns a key
+        // UNCHANGED when it holds a byte that is not a valid header
+        // field byte — which is exactly the case here, so these reach
+        // validateHeaders verbatim.
+        let ok = validateHeaders(&mk("X-Ok", "v")).Len() == 0
+            && validateHeaders(&mk("Bad Name", "v")) == "field name \"Bad Name\""
+            && validateHeaders(&mk("Bad:Name", "v")) == "field name \"Bad:Name\"";
+        check(
+            "validateHeaders rejects a non-token field name and names it",
+            ok,
+            validateHeaders(&mk("Bad Name", "v")),
+        );
+    }
+
     let p = PASSED.load(Ordering::Relaxed);
     let f = FAILED.load(Ordering::Relaxed);
     fmt::Printf!("\n%d passed, %d failed\n", p as i64, f as i64);

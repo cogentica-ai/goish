@@ -739,8 +739,6 @@ impl Reader {
 // go: sdk 1.25.5 archive/tar/reader.go:261-304 mergePAX
 fn mergePAX(hdr: &mut Header, paxHdrs: &map<string, string>) -> error {
     for (k, v) in crate::range!(paxHdrs) {
-        let k = k.clone();
-        let v = v.clone();
         if v == "" {
             continue;
         }

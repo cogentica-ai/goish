@@ -864,17 +864,25 @@ pub fn ProxyURL(fixedURL: URL) -> Arc<dyn Fn(&Request) -> (URL, error) + Send + 
 /// are well-formed. Go deliberately omits the offending VALUE from the
 /// message — "it may be sensitive" — and this port keeps that.
 pub fn validateHeaders(hdrs: &super::header::Header) -> string {
-    for (k, vv) in crate::range!(hdrs) {
+    // Read-only and per request, so the guard-scoped walk rather than
+    // `range!` — the owned form would snapshot and deep-copy every
+    // value slice just to validate it. Go's two `return`s are `Break`.
+    let bad = hdrs.__inner().__try_for_each(|k, vv| {
+        use core::ops::ControlFlow;
         if !super::http::isToken(k) {
-            return crate::fmt::Sprintf!("field name %q", k.clone());
+            return ControlFlow::Break(crate::fmt::Sprintf!("field name %q", k.clone()));
         }
         for i in 0..vv.Len() {
             if !super::http::ValidHeaderFieldValue(&vv[i]) {
                 // Go: "Don't include the value in the error, because
                 // it may be sensitive."
-                return crate::fmt::Sprintf!("field value for %q", k.clone());
+                return ControlFlow::Break(crate::fmt::Sprintf!("field value for %q", k.clone()));
             }
         }
+        return ControlFlow::Continue(());
+    });
+    if let Some(msg) = bad {
+        return msg;
     }
     return string::new();
 }
@@ -2439,7 +2447,7 @@ impl Transport {
             let src = self.__alt_proto.Lock();
             let mut dst = t2.__alt_proto.Lock();
             for (k, v) in crate::range!(&*src) {
-                dst.Set(k.clone(), v.clone());
+                dst.Set(k, v);
             }
         }
         return t2;

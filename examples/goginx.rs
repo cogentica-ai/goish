@@ -593,7 +593,7 @@ fn proxyTo(
         }
         // Copy end-to-end headers; drop hop-by-hop ones (RFC 7230).
         for (k, vs) in range!(&r.Header) {
-            if isHopHeader(k) || *k == "Host" || *k == "Content-Length" {
+            if isHopHeader(&k) || k == "Host" || k == "Content-Length" {
                 continue;
             }
             for (_, v) in range!(vs) {
@@ -625,7 +625,7 @@ fn proxyTo(
             continue;
         }
         for (k, vs) in range!(&resp.Header) {
-            if isHopHeader(k) {
+            if isHopHeader(&k) {
                 continue;
             }
             for (_, v) in range!(vs) {

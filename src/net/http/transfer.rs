@@ -746,13 +746,21 @@ impl transferWriter {
 
         // Go: "Write Trailer header"
         {
+            // Key-only, per request: the guard-scoped walk, so the
+            // value slices are not snapshotted. Go's `return` inside
+            // the loop is `Break` carrying the offending key.
             let mut keys_v: Vec<string> = Vec::new();
-            for (k, _) in crate::range!(&self.Trailer) {
+            let bad = self.Trailer.__inner().__try_for_each(|k, _| {
+                use core::ops::ControlFlow;
                 let k = CanonicalHeaderKey(k.clone());
                 if k == "Transfer-Encoding" || k == "Trailer" || k == "Content-Length" {
-                    return super::request::badStringError(string("invalid Trailer key"), k);
+                    return ControlFlow::Break(k);
                 }
                 keys_v.push(k);
+                return ControlFlow::Continue(());
+            });
+            if let Some(k) = bad {
+                return super::request::badStringError(string("invalid Trailer key"), k);
             }
             if !keys_v.is_empty() {
                 // Go: slices.Sort(keys)
@@ -1487,7 +1495,7 @@ pub fn mergeSetHeader(dst: &mut Header, src: Header) {
         return;
     }
     for (k, v) in crate::range!(&src) {
-        dst.__set_values(k.clone(), v.clone());
+        dst.__set_values(k, v);
     }
     return;
 }

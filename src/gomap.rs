@@ -658,6 +658,36 @@ where
         slice::__from_vec(v)
     }
 
+    // go: none — goish-only: the owned half of iteration, and what
+    //     `range!(m)` walks. See ROADMAP §2u.
+    /// Go's `range` yields COPIES of the key and value, so THIS is the
+    /// faithful shape — `__iter`, which yields `(&K, &V)`, is the
+    /// concession.
+    ///
+    /// It snapshots. Two consequences worth stating:
+    ///
+    /// - A reference into the map cannot outlive a lock guard, so a
+    ///   snapshot is what the shared-header representation (#7) can
+    ///   hand back at all. The `Vec` is the price, and it is why the
+    ///   read-only internal walks use `__for_each` instead.
+    /// - Mutating the map during the loop does not affect the walk.
+    ///   Go's own `range` says the opposite — an entry added during
+    ///   iteration may or may not be produced — so this is stricter
+    ///   than Go rather than looser, and no Go program may rely on
+    ///   the difference.
+    #[doc(hidden)]
+    pub fn __into_iter(&self) -> MapIntoIter<K, V>
+    where
+        K: Clone,
+        V: Clone,
+    {
+        let mut v: Vec<(K, V)> = Vec::with_capacity(self.count as usize);
+        self.__for_each(|k, val| v.push((k.clone(), val.clone())));
+        return MapIntoIter {
+            inner: v.into_iter(),
+        };
+    }
+
     /// Hidden hook used by `maps::Equal`, `maps::Copy`, `maps::Clone`
     /// to walk pairs without exposing implementation details.
     #[doc(hidden)]
@@ -871,6 +901,25 @@ where
         if let Some(next) = bucket.overflow.as_mut() {
             Self::delete_from_bucket(next, top, key, count);
         }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Owned iterator — what `range!(m)` walks (Go's range copies)
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Iterator yielding owned `(K, V)` in the same bucket-walk order as
+/// `MapRefIter`, taken as a snapshot at creation. See `__into_iter`.
+pub struct MapIntoIter<K, V> {
+    inner: alloc::vec::IntoIter<(K, V)>,
+}
+
+impl<K, V> Iterator for MapIntoIter<K, V> {
+    type Item = (K, V);
+
+    // goishlint:ignore GOISH014 — runtime primitive: Go's map range.
+    fn next(&mut self) -> Option<Self::Item> {
+        return self.inner.next();
     }
 }
 

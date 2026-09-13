@@ -3,7 +3,8 @@
 // Different Go types give different shapes:
 //   - slices/arrays  → (int index, &value)
 //   - strings        → (int byte-offset, rune)        ← UTF-8 decode
-//   - maps           → (&key, &value)                 ← M5+
+//   - maps           → (key, value)                   ← owned, as Go's
+//                                                       range copies (#7)
 //   - chans          → value                          ← M16
 //   - int (Go 1.22)  → int                            ← M5+
 //
@@ -222,31 +223,45 @@ impl<'a> RangeIter for &'a &str {
     }
 }
 
-// ─── map<K, V> → (&K, &V) — bucket-walk order (Go randomized) ──────
+// ─── map<K, V> → (K, V) — bucket-walk order (Go randomized) ────────
+//
+// Go's `range` over a map yields COPIES of the key and the value, so
+// owned is the faithful shape. It used to yield `(&K, &V)`; references
+// into a map cannot outlive a lock guard, which is what #7's shared
+// header needs them to do. `__into_iter` snapshots — see its doc for
+// what that costs and where it is stricter than Go.
+//
+// The `Clone` bounds are the visible consequence: a map whose value is
+// not `Clone` — `map<K, Box<dyn Trait>>`, goish's interface-typed map
+// — can no longer be `range!`d, and reads through `__for_each` /
+// `__try_for_each` instead. Go has no such case: an interface value is
+// a copyable two-word pair.
 
-use crate::gomap::{map, MapRefIter};
+use crate::gomap::{map, MapIntoIter};
 
-impl<'a, K, V> RangeIter for &'a map<K, V>
+impl<K, V> RangeIter for &map<K, V>
 where
-    K: crate::gomap::GoHash + PartialEq,
+    K: crate::gomap::GoHash + PartialEq + Clone,
+    V: Clone,
 {
-    type Item = (&'a K, &'a V);
-    type Iter = MapRefIter<'a, K, V>;
+    type Item = (K, V);
+    type Iter = MapIntoIter<K, V>;
     fn range(self) -> Self::Iter {
-        self.__iter()
+        self.__into_iter()
     }
 }
 
 // `range!(&m)` where `m: &map<K,V>` → `&&map<K,V>`.
 // Needed when iterating over a borrowed map handle inside a struct field.
-impl<'a, K, V> RangeIter for &&'a map<K, V>
+impl<K, V> RangeIter for &&map<K, V>
 where
-    K: crate::gomap::GoHash + PartialEq,
+    K: crate::gomap::GoHash + PartialEq + Clone,
+    V: Clone,
 {
-    type Item = (&'a K, &'a V);
-    type Iter = MapRefIter<'a, K, V>;
+    type Item = (K, V);
+    type Iter = MapIntoIter<K, V>;
     fn range(self) -> Self::Iter {
-        (**self).__iter()
+        (**self).__into_iter()
     }
 }
 

@@ -668,7 +668,7 @@ impl Header {
         // Check PAX records — Xattrs.
         if self.Xattrs.Len() > 0 {
             for (k, v) in crate::range!(&self.Xattrs) {
-                paxHdrs.Set(crate::string(paxSchilyXattr) + k.clone(), v.clone());
+                paxHdrs.Set(crate::string(paxSchilyXattr) + k, v);
             }
             whyOnlyPAX = crate::string("only PAX supports Xattrs");
             format.mayOnlyBe(FormatPAX);
@@ -680,16 +680,16 @@ impl Header {
                 if exists {
                     continue;
                 } else if self.Typeflag == TypeXGlobalHeader {
-                    paxHdrs.Set(k.clone(), v.clone());
-                } else if !basicKey(k) && !strings::HasPrefix(k.clone(), "GNU.sparse.") {
-                    paxHdrs.Set(k.clone(), v.clone());
+                    paxHdrs.Set(k, v);
+                } else if !basicKey(&k) && !strings::HasPrefix(k.clone(), "GNU.sparse.") {
+                    paxHdrs.Set(k, v);
                 }
             }
             whyOnlyPAX = crate::string("only PAX supports PAXRecords");
             format.mayOnlyBe(FormatPAX);
         }
         for (k, v) in crate::range!(&paxHdrs) {
-            if !validPAXRecord(k.clone(), v.clone()) {
+            if !validPAXRecord(k, v) {
                 return (
                     FormatUnknown,
                     map::new(),

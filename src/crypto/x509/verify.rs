@@ -2076,8 +2076,8 @@ impl policyGraph {
             return slice::new();
         }
         let mut out: slice<int> = slice::new();
-        for (_, v) in crate::range!(self.strata[(self.depth - 1) as usize].clone()) {
-            out = crate::append!(out, *v);
+        for (_, v) in crate::range!(self.strata[(self.depth - 1) as usize]) {
+            out = crate::append!(out, v);
         }
         return out;
     }
@@ -2107,12 +2107,10 @@ impl policyGraph {
         }
         let parents = self.nodes[n as usize].parents.clone();
         for (p, _) in crate::range!(parents) {
-            let p = *p;
             self.nodes[p as usize].children.Delete(n);
         }
         let children = self.nodes[n as usize].children.clone();
         for (c, _) in crate::range!(children) {
-            let c = *c;
             self.nodes[c as usize].parents.Delete(n);
         }
         let d = self.depth as usize;
@@ -2125,15 +2123,13 @@ impl policyGraph {
         let mut validNodes: slice<int> = slice::new();
         let mut i = self.depth;
         while i >= 0 {
-            for (_, n) in crate::range!(self.strata[i as usize].clone()) {
-                let n = *n;
+            for (_, n) in crate::range!(self.strata[i as usize]) {
                 if self.nodes[n as usize].validPolicy.Equal(&any) {
                     continue;
                 }
 
                 if self.nodes[n as usize].parents.Len() == 1 {
-                    for (p, _) in crate::range!(self.nodes[n as usize].parents.clone()) {
-                        let p = *p;
+                    for (p, _) in crate::range!(self.nodes[n as usize].parents) {
                         if self.nodes[p as usize].validPolicy.Equal(&any) {
                             validNodes = crate::append!(validNodes, n);
                         }
@@ -2153,11 +2149,10 @@ impl policyGraph {
             // permits; goish snapshots the entries first.
             let stratum = self.strata[i as usize].clone();
             for (_, n) in crate::range!(stratum) {
-                let n = *n;
                 if self.nodes[n as usize].children.Len() == 0 {
                     let parents = self.nodes[n as usize].parents.clone();
                     for (p, _) in crate::range!(parents) {
-                        self.nodes[*p as usize].children.Delete(n);
+                        self.nodes[p as usize].children.Delete(n);
                     }
                     let k = derKey(&self.nodes[n as usize].validPolicy);
                     self.strata[i as usize].Delete(k);
@@ -2172,7 +2167,6 @@ impl policyGraph {
         self.parentIndex = map::new();
         let stratum = self.strata[self.depth as usize].clone();
         for (_, n) in crate::range!(stratum) {
-            let n = *n;
             for (_, e) in crate::range!(self.nodes[n as usize].expectedPolicySet.clone()) {
                 let k = derKey(&e);
                 let (cur, _) = self.parentIndex.Get(k.clone());

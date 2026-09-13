@@ -167,7 +167,7 @@ fn main() {
     let cloned = maps::Clone(&m);
     check(len(&cloned) == len(&m), b"map: Clone len wrong\n");
     for (k, v) in goish::range!(m) {
-        check(cloned.Get(k.clone()).0 == *v, b"map: Clone value wrong\n");
+        check(cloned.Get(k).0 == v, b"map: Clone value wrong\n");
     }
 
     // ── maps::Equal ───────────────────────────────────────────────────

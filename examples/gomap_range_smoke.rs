@@ -164,11 +164,80 @@ fn main() {
 
     let mut rsum: int = 0;
     for (k, v) in goish::range!(im) {
-        check(*v == k * 2, b"map range int: k*2 wrong\n");
+        check(v == k * 2, b"map range int: k*2 wrong\n");
         rsum += v;
     }
     // sum of 2*i for i in 0..50 = 2 * (49*50/2) = 2450
     check(rsum == 2450, b"map range int: rsum wrong\n");
+
+    // ── range! yields COPIES, which is Go's contract ─────────────────
+    //
+    // Measured against Go 1.25.5:
+    //
+    //   m := map[string]int{"a":1,"b":2,"c":3}
+    //   for k, v := range m { v = v * 100 }
+    //   -> a=1 b=2 c=3
+    //
+    // goish's `range!` used to yield `(&K, &V)`, so this was not even
+    // expressible; it now yields owned values (#7), so it is.
+    let mut cm = goish::make!(map[string]int);
+    cm.Set("a", 1);
+    cm.Set("b", 2);
+    let mut seen: int = 0;
+    for (_, v) in goish::range!(cm) {
+        let mut v = v;
+        v *= 100;
+        check(v >= 100, b"map range copy: local mutation lost\n");
+        seen += 1;
+    }
+    // Without this the row below passes on an EMPTY walk: "the map did
+    // not change" is trivially true if the body never ran.
+    check(seen == 2, b"map range copy: walk did not yield both entries\n");
+    check(
+        cm.Get("a").0 == 1 && cm.Get("b").0 == 2,
+        b"map range copy: mutating the loop value changed the map\n",
+    );
+
+    // ── and where the copy DIVERGES from Go: slice values ────────────
+    //
+    // Go's copy of a []T value is a slice HEADER, so it shares the
+    // backing array and a write through it lands in the map. Measured:
+    //
+    //   s := map[string][]int{"x": {1,2,3}}
+    //   for _, v := range s { v[0] = 99 }
+    //   -> x=[99 2 3]                      <-- the write LANDS
+    //   for _, v := range s { v = append(v, 4) }
+    //   -> x=[99 2 3] (len 3)              <-- the append does not
+    //
+    // goish's slice clone is a DEEP copy until #26, so the write does
+    // NOT land. This row asserts goish's CURRENT behaviour, not Go's,
+    // so that #26 turns it red and forces the revisit — leaving it
+    // unasserted would make the divergence silent.
+    let mut sm = goish::make!(map[string]goish::slice<int>);
+    sm.Set("x", goish::slice!([]int{ 1, 2, 3 }));
+    let mut seen2: int = 0;
+    for (_, v) in goish::range!(sm) {
+        let mut v = v;
+        v[0i64] = 99;
+        seen2 += 1;
+    }
+    check(seen2 == 1, b"map range copy: slice-valued walk yielded nothing\n");
+    check(
+        sm.Get("x").0[0i64] == 1,
+        b"map range copy: DIVERGENCE FIXED? goish now shares the backing array like Go (see #26)\n",
+    );
+    // The append half already agrees with Go.
+    let mut seen3: int = 0;
+    for (_, v) in goish::range!(sm) {
+        let v = goish::append!(v, 4);
+        check(v.Len() == 4, b"map range copy: append to the copy failed\n");
+        seen3 += 1;
+    }
+    check(seen3 == 1, b"map range copy: append walk yielded nothing\n");
+    check(
+        sm.Get("x").0.Len() == 3,
+        b"map range copy: appending to the copy changed the map\n",
+    );
 
     const OK: &[u8] = b"gomap range: ok\n";
     syscall::Write(syscall::STDOUT, OK.as_ptr(), OK.len());

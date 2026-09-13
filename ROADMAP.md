@@ -695,12 +695,17 @@ m.__iter()` is now `__for_each` or, where Go's body returns or breaks,
 `__try_for_each`. The three that remain are not the same problem as
 each other:
 
-  range.rs (2)   the `range!(m)` impls. These are the OWNED form, and
-                 they are the last mechanical step: `range!` over a map
-                 currently yields `(&K, &V)` where Go yields copies, so
-                 making it owned is a faithfulness fix as well as an
-                 unblock. Left to its own commit because it changes
-                 every `range!(map)` call site in the tree.
+  range.rs (2)   DONE. `range!(m)` now yields owned `(K, V)`, which is
+                 Go's contract — its `range` copies both. 26 callers in
+                 src, censused by disabling the impls; only 8 needed a
+                 change, because a `.clone()` on an owned value still
+                 compiles. That is the hazard: the compiler flags the
+                 derefs (`*v`) and nothing flags a clone that is now
+                 redundant, so the 26 had to be read rather than built.
+                 The snapshot iterator holds no borrow, which also let
+                 FOUR defensive whole-map `.clone()`s go — the ones
+                 written only so the loop body could mutate the map it
+                 was walking (`verify.rs` ×3, `cert_pool.rs`).
   json/mod.rs    NOT mechanical. See below.
 
 THE JSON INDENT ENCODER IS THE ONE STRUCTURAL BLOCKER. `encode_indent`
@@ -716,6 +721,49 @@ what it carries, which means `Value::Object` holding a shareable
 pointer rather than a `map<string, Value>` the encoder borrows into.
 That is a change to `Value` itself, so it is its own commit and its own
 risk, and it is now the thing standing between #7 and the header.
+
+OWNED RANGE MADE A #26 DIVERGENCE OBSERVABLE, which is worth having in
+writing before someone hits it. Measured against Go 1.25.5:
+
+    s := map[string][]int{"x": {1,2,3}}
+    for _, v := range s { v[0] = 99 }
+    -> x=[99 2 3]              the write LANDS
+    for _, v := range s { v = append(v, 4) }
+    -> x=[99 2 3] (len 3)      the append does not
+
+Go's copy of a `[]T` value is a slice HEADER, so it shares the backing
+array: writing through the loop variable reaches the map. goish's slice
+clone is a DEEP copy until #26, so it does not. The append half already
+agrees. `gomap_range_smoke` now asserts goish's CURRENT behaviour with
+the divergence named in the failure message, so #26 turns the row red
+and forces the revisit; leaving it unasserted would have kept it
+silent.
+
+THE OWNED FORM IS NOT RIGHT EVERYWHERE, and going owned by default
+recreated exactly the regression this section predicted. Three
+per-request HTTP paths read only — the trailer-prefix scan in
+`responsewriter.rs`, the `Trailer` key validation in `transfer.rs`, and
+`validateHeaders` in `transport.rs` — and `range!` made each of them
+snapshot the header map and DEEP-COPY every value slice, two of them
+without even looking at the value. They are `__try_for_each` now. The
+rule that falls out: `range!` is for callers that keep the values;
+anything on a per-request path that only reads takes the closure.
+
+PERTURBING THOSE THREE FOUND A COVERAGE HOLE, which is the part worth
+recording. Disabling all three checks left 239 of 241 examples green:
+only the trailer-prefix scan was watched. So two control-flow rewrites
+— a `return` inside a loop becoming a `ControlFlow::Break` — had
+nothing to catch getting them wrong.
+
+`validateHeaders` was covered for its VALUE branch and not its FIELD
+NAME branch, so half the function was untested. And the `Trailer` key
+check had no coverage at all; measuring it needed Go, and Go had two
+surprises: the refusal is case-INSENSITIVE and quotes the CANONICAL
+key back, and the check is unreachable unless the body is chunked,
+because `newTransferWriter` nils Trailer outright otherwise ("Sanitize
+Trailer", transfer.go:145). A first reference test showed every key
+"accepted" for exactly that reason. Both are covered now, and both
+rows turn red under the perturbation that found them.
 
 TWO THINGS FOUND WHILE WALKING THE SITES:
 
