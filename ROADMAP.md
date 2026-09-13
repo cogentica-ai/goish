@@ -988,6 +988,77 @@ but the sites that keep the borrowed form should be revisited when #26
 lands, because most of them exist only to avoid a deep copy that will no
 longer be deep.
 
+    THAT ORDERING IS WRONG, AND SO IS THE THREE-SHAPE DESIGN ABOVE.
+    Measured after the API migration finished; see the next block.
+
+─── THE GUARD-SCOPED CLOSURE DOES NOT SURVIVE THE HEADER ──────────────
+
+The design above gives `__for_each` / `__try_for_each` as the borrowed
+shapes that a shared header CAN serve, on the reasoning that a
+reference confined to a closure never outlives the guard. That is true
+of the reference and false of the guard: holding a lock across a
+user callback deadlocks the moment the callback touches the same
+backing store, and after #7 "the same backing store" is reachable
+through a DIFFERENT HANDLE, which the borrow checker does not stop.
+
+MEASURED, because the whole question is whether Go permits it. Go
+1.25.5, same goroutine:
+
+    m := map[string]int{"a":1,"b":2}
+    for k := range m { m[k+"x"] = 1 }
+    -> survived, visited 2, len now 4
+
+    p := map[string]int{"a":1,"b":2}
+    q := p                      // second header, same backing map
+    for range p { q["z"] = 9 }
+    -> survived, visited 3, len now 3
+
+Both are LEGAL Go. The spec allows it explicitly — an entry created
+during iteration "may be produced during the iteration or may be
+skipped" — and Go's `hashWriting` fatal is about CONCURRENT access from
+another goroutine, not this. So a representation that hangs here is
+refusing something Go accepts, and hanging is the worst way to refuse.
+
+Two call sites reach it today, found by scanning every callback body
+for map operations (45 sites, 2 hits):
+
+  `maps::Equal(&m1, &m2)` walks m1 and calls `key_matches(m2, …)`,
+  which walks m2. Both are `&` of the same type, so `let b = a.clone();
+  maps::Equal(&a, &b)` nests two walks on ONE store — and after #7 that
+  is not a contrived call, it is the ordinary one.
+
+  `copyValues(dst: &mut …, src: &…)` — the borrow checker stops dst and
+  src being one BINDING; it does nothing about two handles.
+
+  (`Header::sortedKeyValues` walks `self.inner` and reads `exclude`,
+  but they are `map<string, slice<string>>` and `map<string, bool>` —
+  different types, so they cannot be the same store. Safe by typing,
+  not by design.)
+
+SO `__for_each` MUST SNAPSHOT: lock, clone the pairs, unlock, then call
+back with references into the snapshot. Same signature, no deadlock,
+and the walk sees the pre-write state — which is one of the two
+outcomes Go's spec permits. The alternatives are worse: a re-entrant
+lock still lets a nested write mutate buckets under a live iterator,
+and detecting re-entry to panic refuses what Go accepts.
+
+WHICH REVERSES THE ORDERING. If every walk snapshots, and a snapshot of
+`map<string, slice<string>>` deep-copies every value slice until #26,
+then landing #7 first puts a deep copy on every header walk on every
+request — the exact regression this section set out to avoid, arrived
+at from the other direction. **#26 should land before #7's header.**
+
+It also collapses the three shapes into one: `__for_each` and
+`__into_iter` both become "snapshot, then walk", differing only in
+whether the caller gets `&K, &V` or `K, V`. The closure forms keep
+their value — they are still the shape that works for a non-`Clone` V,
+and they still express early exit — but not for the reason given above,
+and not as a way to avoid a copy.
+
+None of the API migration is wasted: the borrowed walk had to leave the
+public API either way, and `__iter` is private now. What changes is
+that the header is no longer the next commit.
+
 DECOMPOSITION. The four gaps do not all need the header:
 
   nil identity   `empty_eq_nil` and the missing write-panic need only an
