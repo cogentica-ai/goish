@@ -615,17 +615,24 @@ pub fn reflect(attr: TokenStream, item: TokenStream) -> TokenStream {
         impl_text.push_str("                } else {\n");
         impl_text.push_str("                    __key_seg\n");
         impl_text.push_str("                };\n");
-        impl_text.push_str("                let (__sub, __present) = __obj.Get(__key_str);\n");
-        impl_text.push_str("                if __present {\n");
+        // `__lookup` BORROWS. The `Get` this replaces returned the
+        // value by clone, and `Value`'s clone is deep, so decoding a
+        // struct used to deep-copy every field's subtree — once per
+        // field — only to read it. `Value::Object` owns its pairs now
+        // (#7), so a reference out of it is sound.
+        impl_text.push_str("                match __obj.__lookup(&__key_str) {\n");
+        impl_text.push_str("                    ::core::option::Option::Some(__sub) => {\n");
         let _ = write!(
             impl_text,
-            "                    let (__val, __err) = <{} as ::goish::encoding::json::FromValue>::from_value(&__sub);\n",
+            "                        let (__val, __err) = <{} as ::goish::encoding::json::FromValue>::from_value(__sub);\n",
             f.ty
         );
         impl_text.push_str(
-            "                    if __err != ::goish::errors::nil { return (__out, __err); }\n",
+            "                        if __err != ::goish::errors::nil { return (__out, __err); }\n",
         );
-        let _ = write!(impl_text, "                    __out.{} = __val;\n", f.name);
+        let _ = write!(impl_text, "                        __out.{} = __val;\n", f.name);
+        impl_text.push_str("                    }\n");
+        impl_text.push_str("                    ::core::option::Option::None => {}\n");
         impl_text.push_str("                }\n");
         impl_text.push_str("            }\n");
         impl_text.push_str("        }\n");

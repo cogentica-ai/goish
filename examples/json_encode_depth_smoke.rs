@@ -36,7 +36,7 @@ fn nest(depth: int) -> json::Value {
     let mut v = json::Value::Null;
     let mut i: int = 0;
     while i < depth {
-        let mut m = goish::make!(map[string]json::Value);
+        let mut m = json::Object::new();
         m.Set(string("k"), v);
         v = json::Value::Object(m);
         i += 1;

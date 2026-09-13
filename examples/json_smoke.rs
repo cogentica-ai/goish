@@ -217,7 +217,7 @@ fn main() {
     check(string(b) == "[1,2,3]", b"json: marshal array wrong\n");
 
     // Build object via Set; keys come out sorted.
-    let mut obj: goish::map<string, Value> = goish::make!(map[string]Value);
+    let mut obj = goish::encoding::json::Object::new();
     obj.Set(string("z"), Value::Number(1.0));
     obj.Set(string("a"), Value::Bool(false));
     let (b, _) = json::Marshal(&Value::Object(obj));
@@ -228,7 +228,7 @@ fn main() {
 
     // ─── MarshalIndent ───────────────────────────────────────────────
 
-    let mut obj: goish::map<string, Value> = goish::make!(map[string]Value);
+    let mut obj = goish::encoding::json::Object::new();
     obj.Set(string("k"), Value::Number(1.0));
     obj.Set(
         string("arr"),

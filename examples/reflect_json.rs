@@ -133,7 +133,7 @@ fn main() {
     // post-unification the same call goes through Reflect (json::Value
     // impls Reflect by emitting Map / Slice variants).
     {
-        let mut obj = make!(map[string]json::Value);
+        let mut obj = json::Object::new();
         obj.Set(string("k"), json::Value::String(string("v")));
         obj.Set(string("n"), json::Value::Number(3.5));
         let v = json::Value::Object(obj);

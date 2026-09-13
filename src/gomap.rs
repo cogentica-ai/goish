@@ -689,27 +689,25 @@ where
     }
 
     // go: none — goish-only: the bucket walk itself.
-    /// `pub(crate)` ON PURPOSE (#7). This yields `(&K, &V)`, references
-    /// into the bucket array, which is exactly what a shared header
-    /// behind a lock cannot lend — a reference cannot outlive the guard.
+    /// PRIVATE ON PURPOSE (#7). This yields `(&K, &V)`, references into
+    /// the bucket array — exactly what a shared header behind a lock
+    /// cannot lend, since a reference cannot outlive the guard.
     ///
-    /// It was `pub` (doc-hidden) with 61 callers across the tree. All
-    /// but ONE are gone, to `__for_each` / `__try_for_each` (borrowed,
-    /// guard-scoped) or `__into_iter` (owned, what `range!` walks).
-    /// Narrowing it to `pub(crate)` is what
-    /// stops a new one appearing: the borrowed walk is no longer part
-    /// of the public API, so no downstream caller can be created and no
-    /// in-crate one can appear without editing this crate.
+    /// It had 61 callers across the tree when the migration started.
+    /// All of them are gone: to `__for_each` / `__try_for_each`
+    /// (borrowed, guard-scoped, the reference confined to the call) and
+    /// `__into_iter` (owned, what `range!` walks, matching Go's `range`
+    /// which copies both key and value). The last holdout was
+    /// `encoding/json`'s `encode_value`, and it was not fixed by
+    /// rewriting the encoder — it was fixed by `Value::Object` giving
+    /// up `map` for a type that owns its pairs, since a `map` inside a
+    /// `#[derive(Clone)]` value type stops deep-copying the moment
+    /// copies share backing state.
     ///
-    /// The one survivor is `encoding/json`'s `encode_value`, and it is
-    /// documented at the site. Measured, so the cheap fix is ruled out
-    /// rather than untried: making that stack own its values costs one
-    /// recursive `Value::clone` of the root, which drops the encoder's
-    /// depth ceiling from >100000 to ~12200 — 8x — because `Value`'s
-    /// derived `Clone` recurses one frame per level. That is the same
-    /// regression `Unmarshal` already removed once (see the note on
-    /// `maxNestingDepth`), so it is not the answer.
-    pub(crate) fn __iter(&self) -> MapRefIter<'_, K, V> {
+    /// Private is the guarantee: outside this module the borrowed walk
+    /// does not exist, so the representation swap cannot be undone by
+    /// a new caller appearing.
+    fn __iter(&self) -> MapRefIter<'_, K, V> {
         MapRefIter::new(self)
     }
 

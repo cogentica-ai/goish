@@ -71,7 +71,7 @@ fn pass<S: Into<string>>(name: S) {
 // ─── handlers ────────────────────────────────────────────────────────
 
 fn healthz(w: &(dyn http::ResponseWriter + Send + Sync + 'static), _r: &http::Request) {
-    let mut obj = make!(map[string]json::Value);
+    let mut obj = json::Object::new();
     obj.Set("status", "ok");
     obj.Set("reqs", float64(REQ_COUNT.Load()));
     let (body, e) = json::Marshal(&json::Value::Object(obj));
@@ -90,7 +90,7 @@ fn userGet(w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Req
         http::Error(w, "missing id", http::StatusBadRequest);
         return;
     }
-    let mut obj = make!(map[string]json::Value);
+    let mut obj = json::Object::new();
     obj.Set("id", id);
     obj.Set("name", "Alice");
     let (body, err) = json::Marshal(&json::Value::Object(obj));
@@ -144,7 +144,7 @@ fn apiEcho(w: &(dyn http::ResponseWriter + Send + Sync + 'static), r: &http::Req
     }
     let items = items_v.AsArray().unwrap().clone();
     // out := map[string]any{ "name": name, "item_count": …, "items": items, "received_at_unix": … }
-    let mut out = make!(map[string]json::Value);
+    let mut out = json::Object::new();
     out.Set("name", name);
     out.Set("item_count", float64(items.Len()));
     out.Set("items", json::Value::Array(items));
@@ -170,14 +170,14 @@ fn apiStats(w: &(dyn http::ResponseWriter + Send + Sync + 'static), _r: &http::R
     // for i := 0; i < 4; i++ { shards = append(shards, map[string]any{…}) }
     let mut shards = make!([]json::Value, 0);
     for i in 0..int64(4) {
-        let mut s = make!(map[string]json::Value);
+        let mut s = json::Object::new();
         s.Set("id", float64(i));
         s.Set("reqs", float64(REQ_COUNT.Load() / 4));
         s.Set("healthy", json::Value::Bool(true));
         shards = append!(shards, json::Value::Object(s));
     }
     // root := map[string]any{ "service": …, "shards": shards, … }
-    let mut root = make!(map[string]json::Value);
+    let mut root = json::Object::new();
     root.Set("service", "production_http_server");
     root.Set("uptime_unix", float64(time::Now().Unix()));
     root.Set("total_reqs", float64(REQ_COUNT.Load()));

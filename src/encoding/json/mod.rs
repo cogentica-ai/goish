@@ -77,7 +77,120 @@ pub enum Value {
     Number(float64),
     String(string),
     Array(slice<Value>),
-    Object(map<string, Value>),
+    Object(Object),
+}
+
+// go: none — goish-only: Go's encoding/json has no `Value` type at all,
+//     it decodes into `any` and `map[string]any`. `Object` is the
+//     payload of goish's own DOM, so its representation is a free
+//     choice.
+/// A JSON object: key/value pairs, in insertion order.
+///
+/// NOT a `map<string, Value>`, and the reason is #7. Two things go
+/// wrong if it is one:
+///
+/// - CORRECTNESS. Once a map copy shares backing state — which is what
+///   #7 is for, because that is Go's semantics — a `map` inside a
+///   `#[derive(Clone)]` type stops deep-copying. Two `Value`s cloned
+///   from one another would then SHARE their objects, and `Unmarshal`
+///   relies on the clone being independent. Go has no such hazard here
+///   because Go's DOM is `map[string]any` and its users already expect
+///   reference semantics; goish's `Value` is a value type.
+///
+/// - The encoder. `encode_value` walks an explicit work stack holding
+///   `&Value` borrowed out of the object, and the stack outlives the
+///   walk that fills it. A reference cannot outlive a lock guard, so a
+///   shared header cannot lend one; a `Vec` can, because it is owned
+///   outright by the `Value` that contains it.
+///
+/// Nothing here wanted Go map semantics anyway: the encoder sorts the
+/// keys before emitting, so the hash order was never observable.
+///
+/// The cost is that lookup is a scan rather than a hash. For a JSON
+/// object that is the right trade — objects are small, and the scan
+/// replaces a `map::Get` that DEEP-CLONED the value it returned, which
+/// the struct decoder paid once per field.
+#[derive(Clone, Default)]
+pub struct Object {
+    pairs: Vec<(string, Value)>,
+}
+
+impl Object {
+    // go: none — goish-only: `Value` has no Go counterpart, so neither
+    //     does its object type. Go writes `map[string]any{}`.
+    /// An empty object.
+    pub fn new() -> Object {
+        return Object { pairs: Vec::new() };
+    }
+
+    // go: none — goish-only: see `new`.
+    /// `len(o)`.
+    #[allow(non_snake_case)]
+    pub fn Len(&self) -> int {
+        return crate::convert::int(self.pairs.len());
+    }
+
+    // go: none — goish-only: see `new`.
+    /// `o[k] = v`. Replaces in place when the key is present, so a
+    /// repeated key takes the LAST value — which is what Go's decode
+    /// into `any` does, measured on `{"b":1,"a":2,"a":3,"b":9}`: Go
+    /// re-marshals it as `{"a":3,"b":9}`, and so does this. Position is
+    /// not observable either way, since the encoder sorts.
+    #[allow(non_snake_case)]
+    pub fn Set<K: Into<string>, V: Into<Value>>(&mut self, k: K, v: V) {
+        let k: string = k.into();
+        let v: Value = v.into();
+        for slot in self.pairs.iter_mut() {
+            if slot.0 == k {
+                slot.1 = v;
+                return;
+            }
+        }
+        self.pairs.push((k, v));
+    }
+
+    // go: none — goish-only: see `new`.
+    /// `v, ok := o[k]`. Clones, like `map::Get` did; prefer `__lookup`
+    /// on an internal path that only reads.
+    #[allow(non_snake_case)]
+    pub fn Get<K: Into<string>>(&self, k: K) -> (Value, bool) {
+        let k: string = k.into();
+        match self.__lookup(&k) {
+            Some(v) => return (v.clone(), true),
+            None => return (Value::Null, false),
+        };
+    }
+
+    // go: none — goish-only: see `new`.
+    /// Borrowing lookup — no clone. Sound for as long as the `Object`
+    /// lives, which is the whole point of not being a shared map: the
+    /// struct decoder reads every field through this, and used to pay a
+    /// deep `Value` clone per field for the same answer.
+    #[doc(hidden)]
+    pub fn __lookup(&self, k: &string) -> Option<&Value> {
+        for (key, v) in self.pairs.iter() {
+            if key == k {
+                return Some(v);
+            }
+        }
+        return None;
+    }
+
+    // go: none — goish-only: see `new`.
+    /// `delete(o, k)`.
+    #[allow(non_snake_case)]
+    pub fn Delete<K: Into<string>>(&mut self, k: K) {
+        let k: string = k.into();
+        self.pairs.retain(|(key, _)| key != &k);
+    }
+
+    // go: none — goish-only: see `new`.
+    /// The pairs, in insertion order. A caller that needs Go's sorted
+    /// marshal order sorts for itself — `encode_value` does.
+    #[doc(hidden)]
+    pub fn __pairs(&self) -> &[(string, Value)] {
+        return &self.pairs;
+    }
 }
 
 impl Value {
@@ -117,7 +230,7 @@ impl Value {
         }
     }
 
-    pub fn AsObject(&self) -> Option<&map<string, Value>> {
+    pub fn AsObject(&self) -> Option<&Object> {
         if let Value::Object(o) = self {
             Some(o)
         } else {
@@ -190,18 +303,13 @@ impl PartialEq for Value {
                 if a.Len() != b.Len() {
                     return false;
                 }
-                // Go's loop returns early; the walk needs the
-                // early-exit form.
-                return a
-                    .__try_for_each(|k, va| {
-                        use core::ops::ControlFlow;
-                        let (vb, ok) = b.Get(k.clone());
-                        if !ok || vb != *va {
-                            return ControlFlow::Break(());
-                        }
-                        return ControlFlow::Continue(());
-                    })
-                    .is_none();
+                for (k, va) in a.__pairs() {
+                    match b.__lookup(k) {
+                        Some(vb) if vb == va => {}
+                        _ => return false,
+                    }
+                }
+                true
             }
             _ => false,
         }
@@ -606,19 +714,12 @@ impl<V: FromValue + Default + Clone> FromValue for map<string, V> {
                 let mut out = map::<string, V>::new();
                 let mut decoded: alloc::vec::Vec<(string, V)> =
                     alloc::vec::Vec::with_capacity(o.Len() as usize);
-                // Go returns on the first element error, so the walk
-                // needs the early-exit form.
-                let failed = o.__try_for_each(|k, val| {
-                    use core::ops::ControlFlow;
+                for (k, val) in o.__pairs() {
                     let (vv, err) = V::from_value(val);
                     if err != nil {
-                        return ControlFlow::Break(err);
+                        return (out, err);
                     }
                     decoded.push((k.clone(), vv));
-                    return ControlFlow::Continue(());
-                });
-                if let Some(err) = failed {
-                    return (out, err);
                 }
                 for (k, vv) in decoded {
                     out.Set(k, vv);
@@ -691,12 +792,12 @@ impl crate::reflect::Reflect for Value {
             }
             Value::Object(o) => {
                 let mut entries: Vec<(RV, RV)> = Vec::with_capacity(o.Len() as usize);
-                o.__for_each(|k, v| {
+                for (k, v) in o.__pairs() {
                     entries.push((
                         RV::String(k.clone()),
                         <Value as crate::reflect::Reflect>::__reflect_value(v),
                     ));
-                });
+                }
                 RV::Map {
                     key_type: <string as crate::reflect::Reflect>::__reflect_type,
                     value_type: <Value as crate::reflect::Reflect>::__reflect_type,
@@ -769,9 +870,28 @@ pub fn Compact(dst: slice<byte>, src: slice<byte>) -> (slice<byte>, error) {
 /// nor any indentation, to make it easier to embed inside other
 /// formatted JSON data.
 ///
-/// Slim: parse to a `Value` then re-encode through the existing
-/// indent-aware encoder. Faithful for valid input; returns
-/// `(dst, ErrSyntax)` on parse error.
+/// Slim: parse to a `Value` then re-encode through the indent-aware
+/// encoder. Returns `(dst, ErrSyntax)` on parse error.
+///
+/// NOT FAITHFUL, and the previous line here claimed it was ("Faithful
+/// for valid input"). Go's `Indent` is a TEXTUAL transform: it walks the
+/// bytes and inserts whitespace, so it preserves key order and keeps
+/// duplicate keys. Going through the DOM does neither. Measured against
+/// Go 1.25.5 on `{"b":1,"a":2,"a":3,"b":9}`:
+///
+///   Go's json.Indent      b, a, a, b   — order kept, duplicates kept
+///   this, via the DOM     a, b         — sorted, last value wins
+///
+/// The DOM result is what Go's `Unmarshal` into `any` then
+/// `MarshalIndent` produces, so it is a correct re-encoding of the
+/// document's MEANING — but `Indent` does not promise that, it promises
+/// the same bytes with whitespace added. `Compact` has the same gap for
+/// the same reason.
+///
+/// Fixing it means a byte-level indenter that never builds a `Value`,
+/// which is also the only version that can round-trip a document with
+/// duplicate keys. Until then a caller who needs Go's exact output must
+/// not use this.
 pub fn Indent(
     dst: slice<byte>,
     src: slice<byte>,
@@ -1148,65 +1268,32 @@ fn encode_value(out: &mut Vec<byte>, v: &Value, cfg: Option<&IndentCfg>, _: &str
                         out.extend_from_slice(b"{}");
                         continue;
                     }
-                    // Go's encoding/json marshals map keys in sorted order.
+                    // Go's encoding/json marshals map keys in sorted
+                    // order, so this sort is what makes the output
+                    // deterministic — the pair order underneath is not
+                    // observable.
                     //
-                    // THE LAST BORROWED MAP WALK IN THE TREE (#7), and
-                    // the one that is not a mechanical rewrite. `Task`
-                    // holds `&'a Value` and `&'a string` borrowed out of
-                    // this map, and the work stack outlives the
-                    // iteration that fills it — so a guard-scoped
-                    // closure cannot serve it and a shared header cannot
-                    // lend the references at all.
+                    // This WAS the last borrowed map walk in the tree
+                    // (#7): `Task` holds `&Value` and `&string`
+                    // borrowed out of the object and the work stack
+                    // outlives the walk that fills it, which is exactly
+                    // what a shared header behind a lock cannot lend.
                     //
-                    // MAKING THE STACK OWN ITS VALUES WAS TRIED AND
-                    // MEASURED, and it is the wrong answer. With
-                    // `Task::Val(Value, usize)` the root must be cloned
-                    // once; a consuming drain on the map, plus
-                    // `slice::__into_vec`, then moves every deeper level,
-                    // so the cost is ONE clone and not the O(n·d) a
-                    // per-level snapshot would cost. But `Value`'s derived `Clone` RECURSES, one
-                    // frame per level, and that single clone drops this
-                    // encoder's depth ceiling from >100000 to ~12200.
-                    // Measured with examples/json_encode_depth_probe,
-                    // debug build: baseline encodes depth 100000; the
-                    // owned stack faults between 12000 and 12500.
-                    //
-                    // An 8x loss, and it is the SAME regression
-                    // `Unmarshal` already removed once — see the note on
-                    // `maxNestingDepth`, "CLONE — avoided … one frame
-                    // per level over the whole tree". Reintroducing it
-                    // here to satisfy #7 would trade a representation
-                    // problem for a denial-of-service one.
-                    //
-                    // So the fix has to remove the recursion, not the
-                    // borrow. Two candidates, neither cheap:
-                    //
-                    //   `Value::Object(map<string, Arc<Value>>)` — the
-                    //   clone becomes O(width) and FLAT, since cloning
-                    //   an `Arc` does not descend. `Array` needs the
-                    //   same treatment or a deep array chain still
-                    //   recurses on clone.
-                    //
-                    //   Drop `gomap` from `Value::Object` entirely, for
-                    //   a `slice<(string, Value)>`. `Value` is a
-                    //   goish-only DOM — Go's encoding/json has no
-                    //   `Value` type, it uses `map[string]any` — so
-                    //   nothing requires Go map semantics here, and the
-                    //   encoder sorts the keys anyway, so the hash
-                    //   ordering buys nothing. This removes the #7
-                    //   problem rather than working around it.
-                    //
-                    // Both change a public payload type, so both get
-                    // their own commit with their own call-site sweep.
-                    // `__iter` is `pub(crate)` so that this stays the
-                    // only such walk while that is decided.
-                    let mut pairs: alloc::vec::Vec<(&string, &Value)> = o.__iter().collect();
-                    pairs.sort_by(|(a, _), (b, _)| a.as_bytes().cmp(b.as_bytes()));
+                    // It is sound now not because the encoder changed
+                    // but because `Value::Object` did: an `Object` owns
+                    // its pairs outright, so a reference into it lives
+                    // as long as the `Value` does. Making the stack own
+                    // its values instead was tried and measured — one
+                    // recursive `Value::clone` of the root drops this
+                    // encoder's ceiling from >100000 to ~12200 — see
+                    // `json_encode_depth_smoke`.
+                    let mut pairs: alloc::vec::Vec<&(string, Value)> = o.__pairs().iter().collect();
+                    pairs.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
                     out.push(b'{');
                     let inner = d + 1;
                     stack.push(Task::Lit(b"}"));
                     stack.push(Task::Indent(d));
-                    for (i, (k, val)) in pairs.iter().enumerate().rev() {
+                    for (i, (k, val)) in pairs.iter().map(|p| (&p.0, &p.1)).enumerate().rev() {
                         stack.push(Task::Val(val, inner));
                         stack.push(Task::Key(k));
                         stack.push(Task::Indent(inner));
@@ -1564,7 +1651,7 @@ impl<'a> Parser<'a> {
     fn parse_value(&mut self) -> (Value, error) {
         enum Frame {
             Arr(Vec<Value>),
-            Obj(map<string, Value>, string),
+            Obj(Object, string),
         }
         let mut stack: Vec<Frame> = Vec::new();
         let mut done: Value;
@@ -1593,13 +1680,13 @@ impl<'a> Parser<'a> {
                         }
                     } else if self.peek() == Some(b'}') {
                         self.pos += 1;
-                        done = Value::Object(map::new());
+                        done = Value::Object(Object::new());
                     } else {
                         let (k, err) = self.read_object_key();
                         if err != nil {
                             return (Value::Null, err);
                         }
-                        stack.push(Frame::Obj(map::new(), k));
+                        stack.push(Frame::Obj(Object::new(), k));
                         continue 'outer;
                     }
                 }
@@ -2589,19 +2676,12 @@ impl FromValue for crate::Any {
                 let mut out: map<string, crate::Any> = map::new();
                 let mut decoded: alloc::vec::Vec<(string, crate::Any)> =
                     alloc::vec::Vec::with_capacity(o.Len() as usize);
-                // Go returns on the first element error, so the walk
-                // needs the early-exit form.
-                let failed = o.__try_for_each(|k, val| {
-                    use core::ops::ControlFlow;
+                for (k, val) in o.__pairs() {
                     let (item, err) = crate::Any::from_value(val);
                     if err != crate::errors::nil {
-                        return ControlFlow::Break(err);
+                        return (crate::Any::default(), err);
                     }
                     decoded.push((k.clone(), item));
-                    return ControlFlow::Continue(());
-                });
-                if let Some(err) = failed {
-                    return (crate::Any::default(), err);
                 }
                 for (k, item) in decoded {
                     out.Set(k, item);
