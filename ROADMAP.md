@@ -1448,6 +1448,59 @@ A smoke for this cannot pin the error text verbatim — it contains the
 resolver's address, which differs per machine — but the three flags and
 the message suffix are stable and are what to compare.
 
+**Still live, re-checked 2026-09-13.** Ten methods take
+`ctx: &Arc<dyn context::Context>` and the file contains ZERO calls to
+`ctx.Done()`, `ctx.Err()` or `ctx.Deadline()`. Nothing has drifted.
+
+RE-MEASURED against Go 1.25.5 rather than trusting the note above,
+`(&net.Resolver{PreferGo: true}).LookupHost`:
+
+    cancelled ctx      DNSError Err="dial udp [ns]:53: operation was canceled"
+                       IsTimeout=false IsTemporary=true IsNotFound=false
+    expired deadline   DNSError Err="dial udp [ns]:53: i/o timeout"
+                       IsTimeout=true  IsTemporary=true IsNotFound=false
+    1ms deadline       nil — the lookup BEAT the deadline
+
+The rendered form is `lookup <name> on <ns>:53: dial udp <ns>:53: …`.
+The third row is the reason a smoke must not use a short deadline
+against a real resolver: it is a race, and it resolved in under a
+millisecond here.
+
+HOW TO TEST IT DETERMINISTICALLY, which is the part that was missing.
+`DnsConfig` is public and so are `servers` and `timeout_secs`, and
+`dnsclient::lookup` takes `&DnsConfig` — so a smoke can point the
+resolver at a UDP socket it bound itself and never reads from. That is
+a true blackhole: no egress, no real DNS, no ICMP-unreachable race (an
+unbound 127.0.0.1 port would give ECONNREFUSED immediately, which is
+not the case under test). `syscall::Socket` / `Bind` are enough to make
+one. The assertion is then: with a 1-second context the call returns in
+roughly a second, not `attempts × servers × timeout_secs`.
+
+THE PLUMBING, since the chain is not obvious from the entry point:
+
+    lookup.rs (10 methods, have ctx)
+      -> dnsclient::lookup / go_lookup_ip_cname_order / lookup_host
+        -> try_one_name
+          -> exchange(server, q, timeout_secs, use_tcp, ad)
+            -> dns_packet_round_trip  (UDP)   SO_RCVTIMEO from timeout_secs
+            -> dns_stream_round_trip  (TCP)   SO_RCVTIMEO + SO_SNDTIMEO
+
+`dnsclient` is `pub mod`, so the four `pub fn` in that chain want
+`_ctx` variants with the existing names delegating on
+`context::Background()` — non-breaking, and it keeps the no-deadline
+path byte-identical, which is what every internal caller uses today.
+
+Both round trips take `timeout_secs: u64`, so the smallest honest unit
+is SUB-SECOND granularity plus a deadline: a 1-second context cannot be
+expressed at all right now. For CANCELLATION rather than a deadline the
+socket timeout has to be SLICED — set SO_RCVTIMEO to
+`min(remaining, ~100ms)` and loop, checking `ctx.Err()` each time round
+— because a cancel arriving mid-`recvfrom` is otherwise invisible until
+the full timeout expires. The recv loop already loops (for EINTR), so
+the shape is there; what it lacks is distinguishing EAGAIN
+(`syscall::EAGAIN`, 11) from a real error, which it currently folds
+into one "recvfrom: timeout".
+
 All three now carry a "What has been diffed against Go" block listing
 what was checked CLEAN as well as what was fixed, so the next reader
 starts where this left off rather than repeating it.
