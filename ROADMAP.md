@@ -4408,6 +4408,41 @@ STILL UNPORTED: `Root.FS` and the `rootFS` adapter, which want io/fs
 plumbing rather than syscalls, and the `dirFS.Lstat`/`dirFS.ReadLink`
 pair Go 1.25 added for io/fs.ReadLinkFS.
 
+**AND A DEFECT FOUND WHILE PREPARING THAT PORT, 2026-09-13 — issue
+#29.** `Root.FS`'s guard in Go is `isValidRootFSPath`, which is
+`fs.ValidPath` plus a Windows check. Reading it raised the question of
+whether `fs.ValidPath` is enough, because `dirFS.join` in this tree
+already answers no — its comment records that ValidPath checks path
+ELEMENTS, not bytes, so `"f\0junk"` passes and then truncates at the C
+string boundary.
+
+Measured, and it is worse than a `Root.FS` concern: the whole `os`
+surface has it.
+
+    fs::ValidPath("f\0junk")        true
+    Root.ReadFile("f\0junk")        err=<nil> data="SECRET"
+    os::ReadFile("<dir>/f\0junk")   err=<nil> data="SECRET"
+
+Go 1.25.5 refuses all of them with `openat f\x00junk: invalid
+argument`, and `fs.ValidPath` is true THERE TOO — so Go's protection is
+not the path check. It is `syscall.BytePtrFromString` at the syscall
+boundary, which every wrapper goes through and which returns EINVAL for
+an embedded NUL.
+
+Not a containment escape: the truncated path stays inside the root. It
+is a name/identity mismatch, which matters most for `Root` precisely
+because `Root` exists to be a validated boundary — a caller that checks
+a name and passes it in does not get the file it checked.
+
+The fix is Go's chokepoint, not scattered checks: one checked
+string→C-string helper returning EINVAL, with the 41 inline `push(0)`
+sites under `src/os/` routed through it. The construction is uniform
+and scriptable; what is not is the `PathError` Op each site returns.
+
+Reported rather than patched, because a partial fix is worse than none
+here — "NUL is rejected" is exactly what a caller would generalise from
+`Root` to `os`. `Root.FS` should land on top of it, not before it.
+
 **Two divergences, both deliberate.** `MkdirAll` walks a prefix at a
 time where Go uses one walk with a custom `openDirFunc` that creates
 missing intermediates (root_openat.go:170, the only caller that passes
