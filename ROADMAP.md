@@ -1343,8 +1343,21 @@ that comment is the whole defect in one line.
 Found by sweeping `#![allow(unused_variables)]`, which is how the
 `net/lookup.rs` context defect had just been found. The suppression
 here was a benign no-op three lines below the bug — it did not hide it,
-it pointed at it. Both suppressions in that sweep sat on top of a real
-defect; only `dnsmessage/mod.rs` is left unexamined.
+it pointed at it.
+
+THE SWEEP FINISHED 2026-09-13, and it is worth recording what it cost
+and returned. Three files carried `#![allow(unused_variables)]`. Two
+sat on a real defect (the dead `ctx` in `net/lookup.rs`, this one).
+The third, `dnsmessage/mod.rs`, was hiding NOTHING — removing it
+produced zero warnings, so it was stale. Widening to that file's
+sibling allows found one unused import and nothing else; widening to
+`lookup.rs`'s siblings found a dead `ERR_MALFORMED_DNS`, which turned
+out to be a fourth defect of its own (see below). All four suppressions
+that hid nothing are gone, so the signal is back for those files.
+
+Yield: 3 files swept, 2 defects, 1 stale suppression, and one more
+defect from the follow-on `dead_code` sweep. A blanket `allow` at the
+top of a ported file is worth reading as a to-do list.
 
 The decision is now `cert_verify_decision`, extracted so the refusal is
 testable, with a `__cert_verify_decision` hook and
@@ -1486,6 +1499,39 @@ header means by "the underlying dnsclient is context-free in this port".
 A smoke for this cannot pin the error text verbatim — it contains the
 resolver's address, which differs per machine — but the three flags and
 the message suffix are stable and are what to compare.
+
+**A THIRD DEFECT IN THIS FILE, 2026-09-13: malformed records were
+filtered SILENTLY.** Go drops records whose names are not valid domain
+names and returns an error ALONGSIDE the survivors, at five sites —
+LookupCNAME, LookupSRV, LookupMX, LookupNS, LookupAddr. Its doc is
+explicit that a caller must be able to tell: "those records are
+filtered out and an error will be returned alongside the remaining
+results, if any."
+
+goish filtered — every `is_domain_name` check was present — and
+returned `errors::nil`. A partly-malformed response is a signal about
+the resolver, and swallowing it makes a broken or hostile one look
+clean. `LookupCNAME` did report, with "invalid CNAME", which is not
+Go's text; its inner path reported `errors::New(host)`, so the error
+TEXT was the hostname.
+
+The evidence it was intended and abandoned: `ERR_MALFORMED_DNS`, Go's
+exact string, was declared in the file and never used. It surfaced only
+when `#![allow(dead_code)]` came off.
+
+Measured against Go 1.25.5: `Err` is the constant verbatim, the
+rendered form is `lookup 192.0.2.42: DNS response contained records
+which contain invalid names`, and IsTimeout / IsTemporary / IsNotFound
+are all FALSE — so a caller branching on `IsTemporary` must not retry
+this.
+
+`dns_malformed_records_smoke` pins the predicate against Go's
+`isDomainName` on the five inputs Go was actually asked about, and pins
+the error's text, flags and rendering. It does NOT cover the five call
+sites end to end, and says so: every `Resolver` method reads
+`get_system_dns_config()` directly, so pointing one at a fake
+nameserver needs an injection point that does not exist. That is the
+gap to close if this area is revisited.
 
 **FIXED 2026-09-13, and wiring the context is not the headline.**
 Going to thread the context turned up a defect underneath it: goish's

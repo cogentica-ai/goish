@@ -23,16 +23,12 @@
 // (message.go + svcb.go combined)
 #![allow(non_snake_case)]
 #![allow(dead_code)]
-#![allow(unused_variables)]
-#![allow(unused_mut)]
-#![allow(unused_imports)]
 
 extern crate alloc;
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
-use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::errors::{self, error};

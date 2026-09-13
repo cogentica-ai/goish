@@ -22,8 +22,6 @@
 // `context.Background()` forms.
 
 #![allow(non_snake_case)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
 
 extern crate alloc;
 use alloc::string::String;
@@ -159,7 +157,52 @@ fn new_dns_error<M: Into<string>>(msg: M, name: &str) -> error {
     errors::New(b.String())
 }
 
+// go: sdk 1.25.5 net/lookup.go:679-683 errMalformedDNSRecordsDetail
+/// Go: "the DNSError detail which is returned when a Resolver.Lookup…
+/// method receives DNS records which contain invalid DNS names."
 const ERR_MALFORMED_DNS: &str = "DNS response contained records which contain invalid names";
+
+// go: none — goish-only: Go writes the `&DNSError{…}` literal inline at
+// each of its five filter sites; this names the composition once.
+/// The error Go returns ALONGSIDE the surviving records when a response
+/// held names that are not valid domain names.
+///
+/// This constant sat here unused. goish filtered the bad records — the
+/// `is_domain_name` checks were all present — and then returned
+/// `errors::nil`, so a caller could not tell that anything had been
+/// dropped. Go's doc is explicit that it must be able to: "If the
+/// response contains invalid names, those records are filtered out and
+/// an error will be returned alongside the remaining results, if any."
+/// A partly-malformed response is a signal about the resolver, and
+/// swallowing it makes a broken or hostile one look clean.
+fn malformed_records_error(name: &str) -> error {
+    return errors::Wrap(super::net::DNSError {
+        UnwrapErr: errors::nil,
+        Err: string::from_static(ERR_MALFORMED_DNS),
+        Name: string::from_bytes(name.as_bytes()),
+        Server: string::from_static(""),
+        IsTimeout: false,
+        IsTemporary: false,
+        IsNotFound: false,
+    });
+}
+
+// go: none — goish-only: test hooks. `is_domain_name` is the predicate
+//     the five filter sites depend on, and the error is the Go-visible
+//     half of what they report; both are private, so a smoke needs a
+//     way in.
+/// See `is_domain_name`.
+#[doc(hidden)]
+pub fn __is_domain_name(s: &str) -> bool {
+    return is_domain_name(s);
+}
+
+// go: none — goish-only: see `__is_domain_name`.
+/// See `malformed_records_error`.
+#[doc(hidden)]
+pub fn __malformed_records_error(name: &str) -> error {
+    return malformed_records_error(name);
+}
 
 // ─── Resolver methods ────────────────────────────────────────────────────────
 
@@ -283,10 +326,11 @@ impl Resolver {
                 }
                 let cname = r.CNAME.String();
                 if !is_domain_name(cname.as_ref()) {
-                    return (
-                        string::from_static(""),
-                        errors::New(string::from_bytes(h.as_bytes())),
-                    );
+                    // Was `errors::New(h)` — the error TEXT was the
+                    // hostname, which tells a caller nothing about what
+                    // went wrong. Go reports the malformed-records
+                    // detail with the host in `Name` at lookup.go line 474.
+                    return (string::from_static(""), malformed_records_error(h));
                 }
                 return (cname, errors::nil);
             }
@@ -299,8 +343,11 @@ impl Resolver {
             cname_str.push('.');
         }
         let cname = string::from_bytes(cname_str.as_bytes());
+        // Go: `if !isDomainName(cname) { return "", &DNSError{Err:
+        // errMalformedDNSRecordsDetail, Name: host} }` at lookup.go line 474.
+        // The text was "invalid CNAME", which is not Go's.
         if !is_domain_name(cname.as_ref()) {
-            return (string::from_static(""), new_dns_error("invalid CNAME", h));
+            return (string::from_static(""), malformed_records_error(h));
         }
         (cname, errors::nil)
     }
@@ -327,6 +374,7 @@ impl Resolver {
             return (slice::<string>::new(), e);
         }
         let mut names: Vec<String> = Vec::new();
+        let mut seen: usize = 0;
         loop {
             let (hdr, e2) = p.AnswerHeader();
             if e2 == dns::ErrSectionDone {
@@ -349,6 +397,8 @@ impl Resolver {
                 ns.push_str(s.as_ref());
                 ns
             };
+            // Go: filters, and REPORTS that it filtered at lookup.go line 668.
+            seen += 1;
             if is_domain_name(&name_str) {
                 names.push(name_str);
             }
@@ -356,6 +406,9 @@ impl Resolver {
         let mut out = slice::<string>::new();
         for n in &names {
             out = crate::append!(out, string::from_bytes(n.as_bytes()));
+        }
+        if names.len() != seen {
+            return (out, malformed_records_error(a));
         }
         (out, errors::nil)
     }
@@ -420,6 +473,7 @@ impl Resolver {
             return (slice::<nilable<NS>>::new(), e);
         }
         let mut nss: Vec<NS> = Vec::new();
+        let mut seen: usize = 0;
         loop {
             let (hdr, e2) = p.AnswerHeader();
             if e2 == dns::ErrSectionDone {
@@ -437,13 +491,19 @@ impl Resolver {
                 break;
             }
             let host = r.NS.String();
+            // Go: filters, and REPORTS that it filtered at lookup.go line 610.
+            seen += 1;
             if is_domain_name(host.as_ref()) {
                 nss.push(NS { Host: host });
             }
         }
+        let dropped = nss.len() != seen;
         let mut out = slice::<nilable<NS>>::new();
         for ns in nss {
             out = crate::append!(out, nilable::new(ns));
+        }
+        if dropped {
+            return (out, malformed_records_error(n));
         }
         (out, errors::nil)
     }
@@ -463,6 +523,7 @@ impl Resolver {
             return (slice::<nilable<MX>>::new(), e);
         }
         let mut mxs: Vec<MX> = Vec::new();
+        let mut seen: usize = 0;
         loop {
             let (hdr, e2) = p.AnswerHeader();
             if e2 == dns::ErrSectionDone {
@@ -482,6 +543,8 @@ impl Resolver {
             let host = r.MX.String();
             let pref = r.Pref;
             let host_str: &str = host.as_ref();
+            // Go: filters, and REPORTS that it filtered at lookup.go line 570.
+            seen += 1;
             if is_domain_name(host_str) {
                 mxs.push(MX {
                     Host: host,
@@ -491,9 +554,13 @@ impl Resolver {
         }
         // Sort by preference (ascending)
         mxs.sort_by_key(|m| m.Pref);
+        let dropped = mxs.len() != seen;
         let mut out = slice::<nilable<MX>>::new();
         for mx in mxs {
             out = crate::append!(out, nilable::new(mx));
+        }
+        if dropped {
+            return (out, malformed_records_error(n));
         }
         (out, errors::nil)
     }
@@ -538,6 +605,7 @@ impl Resolver {
         }
 
         let mut srvs: Vec<SRV> = Vec::new();
+        let mut seen: usize = 0;
         let mut cname_name = dns::Name::default();
 
         loop {
@@ -568,6 +636,8 @@ impl Resolver {
                 );
             }
             let tgt = r.Target.String();
+            // Go: filters, and REPORTS that it filtered at lookup.go line 525.
+            seen += 1;
             if is_domain_name(tgt.as_ref()) {
                 srvs.push(SRV {
                     Target: tgt,
@@ -595,9 +665,14 @@ impl Resolver {
             );
         }
 
+        let dropped = srvs.len() != seen;
         let mut out = slice::<nilable<SRV>>::new();
         for srv in srvs {
             out = crate::append!(out, nilable::new(srv));
+        }
+        if dropped {
+            // Go names the QUERY here, not the target at lookup.go line 531.
+            return (cname_str, out, malformed_records_error(name_ref));
         }
         (cname_str, out, errors::nil)
     }
