@@ -3363,6 +3363,39 @@ Two cheaper fixes have been considered and neither works:
   so even Go does not treat memoized backtracking as the general
   answer.
 
+**STAGE 1 LANDED 2026-09-13.** `src/regexp/syntax/` exists, with
+`prog.rs` — `Prog`, `Inst`, `InstOp`, `EmptyOp`, `EmptyOpContext`,
+`IsWordChar`, `MatchRune`/`MatchRunePos`/`MatchEmptyWidth`, `Prefix`,
+`StartCond` and the dump — and `parse.rs` carrying parse.go's `Flags`,
+which `Inst.Arg` holds. `examples/regexp_prog_ref_smoke.rs` pins 214
+rows from `scripts/goref.sh regexp/syntax
+tools/gen_regexp_prog_ref.go`.
+
+Nothing is wired to the live matcher. That is deliberate: each stage is
+inert until the last one swaps, so the tree never carries two live
+engines — the drift §0.B exists to warn about.
+
+The remaining stages, and the reason for this order:
+
+| stage | files | Go lines |
+|---|---|---|
+| 2 | `syntax/regexp.rs` (the AST), `syntax/parse.rs` (the parser) | ~2,700 |
+| 3 | `syntax/simplify.rs`, `syntax/compile.rs` | ~450 |
+| 4 | `regexp/exec.rs` (the NFA) and the swap | ~1,900 |
+
+`parse.rs` opens with GOISH018 and GOISH021 lines naming all 100 of
+parse.go's other declarations, in the shape `root_openat.rs`
+established: **unported, NOT waived**. That list is stage 2's
+checklist, and it shrinks as the port advances rather than sitting
+there as a permanent excuse.
+
+One thing the reference already earned. The first probe table used
+sparse values and a REAL binary-search bug — `c <= r` written as
+`c < r`, which differs only when the subject equals a range START —
+turned exactly one row red. Reprobing every range start and end, plus
+one either side, took that to thirteen. A perturbation that barely
+fails is a table that barely tests.
+
 ## 2d. Three recursions stand between the JSON limit and Go's
 
 **Worked 2026-09-06.** This section used to say the fix was Go's

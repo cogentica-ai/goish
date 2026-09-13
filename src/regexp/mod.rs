@@ -104,6 +104,11 @@
 #![allow(non_snake_case)]
 
 extern crate alloc;
+// §2c stage 1: the RE2 construction lands beside this matcher, not on
+// top of it. Nothing below uses `syntax` yet — see its module header
+// for the stages.
+pub mod syntax;
+
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec;
