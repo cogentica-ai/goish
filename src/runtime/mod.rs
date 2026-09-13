@@ -889,7 +889,17 @@ pub extern "C" fn __goish_rt0(argc: i32, argv: *const *const u8) -> ! {
 // no_std crates must define exactly one #[panic_handler]. Since goish is
 // built `panic = "abort"`, this only fires on explicit `panic!()` /
 // unrecoverable conditions; we print a short marker and exit(2).
-
+//
+// `cfg(not(test))` mirrors the `cfg_attr(not(test), no_main)` in lib.rs
+// and is required, not cosmetic (#27). `cargo test` builds the lib test
+// target against the standard harness, which pulls in `std` — and `std`
+// supplies its own `panic_impl`, so an unconditional handler here is a
+// duplicate lang item and the target will not compile at all. That took
+// `cargo check --all-targets` away from every downstream crate, which
+// then had to enumerate `--bins --examples` instead. The normal
+// `no_std` / `no_main` build is unaffected: `test` is never set there,
+// so the handler below is the only one.
+#[cfg(not(test))]
 #[panic_handler]
 fn on_panic(info: &core::panic::PanicInfo) -> ! {
     const MSG: &[u8] = b"goish: panic\n";
@@ -1068,5 +1078,14 @@ fn on_panic(info: &core::panic::PanicInfo) -> ! {
 // even though we build with `panic = "abort"`. It's never actually
 // invoked at runtime — provide an empty no-mangle stub so the linker
 // is satisfied.
+//
+// `cfg(not(test))` for the same reason as the panic handler above, and
+// found only by going past the issue's acceptance criteria (#27). Those
+// ask for `cargo check --lib --tests`, and `check` does not LINK — the
+// duplicate `panic_impl` is a lang-item conflict the front end catches,
+// but this one is a duplicate SYMBOL that only `cargo test --lib`
+// reaches, where `std` supplies its own `rust_eh_personality`. Gating
+// the handler alone left the target still unable to link.
+#[cfg(not(test))]
 #[no_mangle]
 pub extern "C" fn rust_eh_personality() {}

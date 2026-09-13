@@ -65,6 +65,7 @@ build:
 # of unrelated static binaries. With no FILTER, the full build is unchanged.
 e2e-build:
 	@bash scripts/e2e_build_test.sh
+	@bash scripts/check_lib_test_target.sh $(CARGO)
 	@FILTER='$(FILTER)' bash scripts/e2e_build.sh $(CARGO)
 
 e2e: e2e-build
