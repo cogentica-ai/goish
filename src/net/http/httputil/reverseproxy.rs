@@ -258,9 +258,9 @@ impl super::super::server::Handler for reverseProxyHandler {
         let announced = resp.Trailer.__inner().Len();
         if announced > 0 {
             let mut keys: alloc::vec::Vec<string> = alloc::vec::Vec::new();
-            for (k, _) in resp.Trailer.__inner().__iter() {
+            resp.Trailer.__inner().__for_each(|k, _| {
                 keys.push(k.clone());
-            }
+            });
             keys.sort_by(|a, b| crate::strings::Compare(a.clone(), b.clone()).cmp(&0));
             let mut joined = string::new();
             for (i, k) in keys.iter().enumerate() {
@@ -438,11 +438,11 @@ impl super::super::server::Handler for ReverseProxy {
         // Set, so a key present in both keeps BOTH sets of values.
         {
             let inner = res.Header.__inner();
-            for (k, vs) in inner.__iter() {
+            inner.__for_each(|k, vs| {
                 for i in 0..vs.Len() {
                     rw.Header().Add(k.clone(), vs[i].clone());
                 }
-            }
+            });
         }
 
         // Go: "The Trailer header isn't included in the Transport's
@@ -450,9 +450,9 @@ impl super::super::server::Handler for ReverseProxy {
         let announced = res.Trailer.__inner().Len();
         if announced > 0 {
             let mut keys: alloc::vec::Vec<string> = alloc::vec::Vec::new();
-            for (k, _) in res.Trailer.__inner().__iter() {
+            res.Trailer.__inner().__for_each(|k, _| {
                 keys.push(k.clone());
-            }
+            });
             keys.sort_by(|a, b| crate::strings::Compare(a.clone(), b.clone()).cmp(&0));
             let mut joined = string::new();
             for (i, k) in keys.iter().enumerate() {
@@ -529,14 +529,14 @@ pub fn singleJoiningSlash<A: Into<string>, B: Into<string>>(a: A, b: B) -> strin
 /// not `Set`, so a key present in both ends up with BOTH sets of
 /// values rather than dst's being replaced.
 pub fn copyHeader(dst: &mut super::super::header::Header, src: &super::super::header::Header) {
-    for (k, vv) in src.__inner().__iter() {
+    src.__inner().__for_each(|k, vv| {
         let n = crate::len(vv);
         let mut i: crate::types::int = 0;
         while i < n {
             dst.Add(k.clone(), vv[i].clone());
             i += 1;
         }
-    }
+    });
 }
 
 // go: sdk 1.25.5 net/http/httputil/reverseproxy.go:877-887 ishex

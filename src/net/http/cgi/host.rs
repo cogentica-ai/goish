@@ -525,11 +525,11 @@ impl HTTPHandler for Handler {
         // Go: "Copy headers to rw's headers, after we've decided not to
         // go into handleInternalRedirect, which won't want its rw
         // headers to have been touched."
-        for (k, vv) in headers.__inner().__iter() {
-            for i in 0..crate::len(&vv) {
+        headers.__inner().__for_each(|k, vv| {
+            for i in 0..crate::len(vv) {
                 rw.Header().Add(k.clone(), vv[i].clone());
             }
-        }
+        });
 
         rw.WriteHeader(statusCode);
 

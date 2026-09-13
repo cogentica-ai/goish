@@ -251,9 +251,11 @@ impl ResponseRecorder {
             i += 1;
         }
         let live = self.hdr.snapshot();
-        for (k, vv) in live.__inner().__iter() {
+        // `continue` becomes an early `return` from the visitor, which
+        // is the same thing: skip to the next pair.
+        live.__inner().__for_each(|k, vv| {
             if !strings::HasPrefix(k.clone(), string::from_static(TrailerPrefix)) {
-                continue;
+                return;
             }
             let name = strings::TrimPrefix(k.clone(), string::from_static(TrailerPrefix));
             let mut j: int = 0;
@@ -261,7 +263,7 @@ impl ResponseRecorder {
                 trailer.Add(name.clone(), vv[j].clone());
                 j += 1;
             }
-        }
+        });
         res.Trailer = trailer;
 
         self.st.Lock().result = Some(res.clone());

@@ -2100,12 +2100,14 @@ pub fn copyValues(
     dst: &mut crate::gomap::map<string, slice<string>>,
     src: &crate::gomap::map<string, slice<string>>,
 ) {
-    for (k, v) in src.__iter() {
+    // `dst` is a different map from `src`, so the visitor may mutate it
+    // while the walk borrows `src`.
+    src.__for_each(|k, v| {
         let (existing, _) = dst.Get(k.clone());
         let mut merged = existing;
         for i in 0..v.Len() {
             merged = crate::append!(merged, v[i].clone());
         }
         dst.Set(k.clone(), merged);
-    }
+    });
 }

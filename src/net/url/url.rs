@@ -1538,9 +1538,9 @@ pub fn ValuesHas(v: &Values, key: string) -> bool {
 pub fn ValuesEncode(v: &Values) -> string {
     let mut buf = strings::Builder::new();
     let mut keys: Vec<string> = Vec::new();
-    for (k, _) in v.__iter() {
+    v.__for_each(|k, _| {
         keys.push(k.clone());
-    }
+    });
     keys.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
 
     let mut first = true;

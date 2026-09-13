@@ -406,9 +406,9 @@ impl ServeMux {
         }
         if methodSet.Len() > 0 {
             let mut allow: Vec<string> = Vec::new();
-            for (m, _) in methodSet.__iter() {
+            methodSet.__for_each(|m, _| {
                 allow.push(m.clone());
-            }
+            });
             allow.sort_by(|a, b| strings::Compare(a.clone(), b.clone()).cmp(&0));
             let joined = strings::Join(crate::goslice::slice::__from_vec(allow), string(", "));
             return (
