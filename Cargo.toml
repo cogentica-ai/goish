@@ -75,6 +75,10 @@ strip = false
 lto = false
 
 [[example]]
+name = "tls13_psk_pairing_smoke"
+path = "examples/tls13_psk_pairing_smoke.rs"
+
+[[example]]
 name = "tls_lucky13_smoke"
 path = "examples/tls_lucky13_smoke.rs"
 

@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 7834,
+ "total": 7833,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -181,7 +181,7 @@
    "GOISH023": 50
   },
   "src/crypto/tls/handshake_client.rs": {
-   "GOISH005": 81,
+   "GOISH005": 80,
    "GOISH008": 1,
    "GOISH014": 18,
    "GOISH023": 17

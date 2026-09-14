@@ -210,6 +210,36 @@ mod handshake_messages;
 pub mod key_schedule;
 pub mod session;
 
+// go: none — goish-only: reach `psk_acceptance_decision` from an
+// example. Returns (accepted, error text) — "" when accepted or when
+// no PSK was in play, which the `offered` flag separates.
+#[doc(hidden)]
+pub fn handshake_client_pskDecision(
+    selected_identity: crate::types::int,
+    has_selected: bool,
+    offered_suite_id: crate::types::int,
+    server_suite_id: crate::types::int,
+) -> (crate::gostring::string, bool) {
+    let sel = if has_selected {
+        Some(crate::uint16(selected_identity))
+    } else {
+        None
+    };
+    let off = if offered_suite_id == 0 {
+        None
+    } else {
+        Some(crate::uint16(offered_suite_id))
+    };
+    let d = handshake_client::psk_acceptance_decision(sel, off, crate::uint16(server_suite_id));
+    return match d {
+        handshake_client::PskDecision::Accept => (crate::gostring::string::from_static(""), true),
+        handshake_client::PskDecision::NotOffered => {
+            (crate::gostring::string::from_static("<none>"), false)
+        }
+        handshake_client::PskDecision::Refuse(m) => (crate::gostring::string::from_bytes(m.as_bytes()), false),
+    };
+}
+
 // go: none — goish-only: the handshake message types are unexported in
 // Go, where the tests are in-package. See the `defaults_*` shims below.
 #[doc(hidden)]

@@ -4448,7 +4448,56 @@ be repointed at the ported `lruSessionCache` rather than dropped, since
 its expiry rows are the only thing pinning that behaviour anywhere.
 Deliberately not done in the same pass that found it: it is a
 subtraction from the invented client, and §1 sequences those behind the
-retirement, not ahead of it. Three of its hand-rolled
+retirement, not ahead of it.
+
+### A SIXTH in the invented client: the PSK/suite pairing check
+
+Having established that nothing exercises the `pre_shared_key` branch,
+the obvious next question is whether it is right. It is not, and the
+gap is precisely the shape the section keeps finding: Go's guards, the
+copy without them.
+
+Go's `clientHandshakeStateTLS13.processServerHello`
+(handshake_client_tls13.go:445-466) gates a server's PSK acceptance on
+three things:
+
+| Go | goish, before |
+|---|---|
+| `selectedIdentity >= len(pskIdentities)` → alertIllegalParameter, ABORT | logged "server selected unknown identity" and continued with a FULL HANDSHAKE |
+| `len(pskIdentities) != 1 \|\| session == nil` → alertInternalError | folded away; goish offers exactly one |
+| `pskSuite.hash != hs.suite.hash` → alertIllegalParameter, ABORT | **absent** |
+
+The third is the one that matters. Without it the server's chosen suite
+is used with the offered PSK whatever hash that PSK was bound to, so a
+SHA-256 resumption secret can be fed into a SHA-384 key schedule. In
+practice the Finished MAC then diverges and the handshake fails — which
+is why this is a spec violation rather than an exploit. Go does not
+lean on that: it calls the pair illegal and says so. "Fails closed by
+accident, two steps later" is not a guarantee, and it is the third time
+this week a copy has been missing a guard the original states outright
+(`ExpandLabel`'s length check, `tls10MAC`'s Lucky13 write, this).
+
+The first row is worth its own line: a server naming identity 7 when
+one identity was offered got a working connection, where Go aborts.
+
+**Extraction was not optional here.** The branch is unreachable in any
+goish-only program, so a guard added inline could never be driven and a
+wrong one would look exactly like a right one. The decision is
+`psk_acceptance_decision`; the handshake calls it, and
+`tls13_psk_pairing_smoke` drives the same function over twelve rows
+asserting FIVE DISTINCT refusal reasons — a decision that refused
+everything would otherwise pass.
+
+One row exists purely to catch the plausible wrong fix: **different
+suite, same hash must be ACCEPTED.** Go compares `pskSuite.hash`, not
+the suite id, so an AES-128-GCM PSK resumed under ChaCha20-Poly1305 is
+legal — both are SHA-256. Perturbing the check to compare suite ids
+turns exactly that row red; dropping the identity-range check turns the
+two identity rows red.
+
+The handshake fails rather than sending alertIllegalParameter, because
+this code path has no alert channel wired. Same answer, minus the
+alert, and noted at the site. Three of its hand-rolled
 crypto primitives are gone this week — the SPKI walk, the TLS 1.2 PRF,
 the padding check — and each left a Go-generated table behind.
 

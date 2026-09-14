@@ -901,23 +901,27 @@ pub fn do_client_handshake(
             }
         };
 
-        // Determine if PSK was accepted by the server
-        let accepted_psk: Option<Vec<byte>> = if sh_selected_psk_identity == Some(0) {
-            // Server selected identity index 0 — use the PSK we offered
-            if let Some(ref sess) = offered_psk_session {
+        // Determine if PSK was accepted by the server. The decision is
+        // `psk_acceptance_decision` so it can be tested without a
+        // server; see the note there for what it used to do.
+        let offered_suite_id = offered_psk_session.as_ref().map(|s| s.suite_id);
+        let decision = psk_acceptance_decision(
+            sh_selected_psk_identity,
+            offered_suite_id,
+            tls13_suite_id,
+        );
+        let accepted_psk: Option<Vec<byte>> = match decision {
+            PskDecision::NotOffered => None,
+            PskDecision::Refuse(msg) => {
+                // Go sends alertIllegalParameter and ABORTS. This
+                // handshake has no alert channel wired, so it fails the
+                // handshake, which is the same answer minus the alert.
+                return (KeyMaterial::default(), errors::New(msg));
+            }
+            PskDecision::Accept => {
                 tls_debug!("[tls-debug] PSK accepted by server — using PSK for handshake\n");
-                Some(sess.resumption_psk.clone())
-            } else {
-                None
+                offered_psk_session.as_ref().map(|s| s.resumption_psk.clone())
             }
-        } else {
-            if sh_selected_psk_identity.is_some() {
-                tls_debug!(
-                    "[tls-debug] PSK: server selected unknown identity %d, ignoring\n",
-                    sh_selected_psk_identity.unwrap() as i64
-                ); // goishlint:ignore GOISH005
-            }
-            None
         };
 
         let (tls13_keys, err) = if let Some(psk) = accepted_psk {
@@ -1825,6 +1829,97 @@ fn build_handshake_msg(msg_type: byte, body: &[byte]) -> Vec<byte> {
 /// Build the raw ext_data bytes (identities + binders placeholder) for one PSK.
 /// Returns (ext_data, binders_list_len) where binders_list_len is the total byte
 /// count of the binders list INCLUDING the u16 outer length prefix.
+// go: none — goish-only: the decision Go writes inline in
+// `clientHandshakeStateTLS13.processServerHello`
+// (handshake_client_tls13.go:445-466), extracted so it is testable
+// without standing up a hostile server. The invented client this
+// serves has never been exercised end to end — nothing in the tree
+// writes the session cache it reads from — so a guard here that is
+// merely present, and not driven, would be worth very little.
+//
+// Go's three gates, and what this used to do instead:
+//
+//   * `selectedIdentity >= len(pskIdentities)` → alertIllegalParameter
+//     and ABORT. goish logged "server selected unknown identity" and
+//     carried on with a full handshake, so a server naming identity 7
+//     when one was offered got a connection instead of an error.
+//   * `len(pskIdentities) != 1 || session == nil` → alertInternalError.
+//     goish offers exactly one identity, so this is folded into
+//     NotOffered.
+//   * `pskSuite.hash != hs.suite.hash` → alertIllegalParameter and
+//     ABORT: "server selected an invalid PSK and cipher suite pair".
+//     THIS WAS ABSENT. The server's chosen suite was used with the
+//     offered PSK whatever hash the PSK was bound to, so a
+//     SHA-256-bound resumption secret could be fed into a SHA-384 key
+//     schedule. In practice the Finished MAC then diverges and the
+//     handshake fails, which is why this is a spec violation rather
+//     than an exploit — but Go calls it an illegal parameter, and
+//     "fails closed by accident two steps later" is not a guarantee.
+//
+// Hash equality is by output size, which is exactly Go's
+// `pskSuite.hash != hs.suite.hash` for the three TLS 1.3 suites: 0x1301
+// and 0x1303 are SHA-256, 0x1302 is SHA-384.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum PskDecision {
+    /// No PSK was offered, or the server did not select one.
+    NotOffered,
+    /// Go sends alertIllegalParameter and aborts.
+    Refuse(&'static str),
+    /// Use the offered PSK for this handshake.
+    Accept,
+}
+
+// go: none — goish-only: see the note on `PskDecision` above for the
+// three Go gates this collapses into one decision, and for why it is a
+// free function rather than inline in the handshake.
+/// Whether the server's `selected_identity` may be honoured.
+///
+/// `offered_suite_id` is `None` when no PSK was offered at all.
+/// `server_suite_id` is the suite from the ServerHello.
+pub fn psk_acceptance_decision(
+    selected_identity: Option<u16>,
+    offered_suite_id: Option<u16>,
+    server_suite_id: u16,
+) -> PskDecision {
+    // Go: if !hs.serverHello.selectedIdentityPresent { return nil }
+    let selected = match selected_identity {
+        None => return PskDecision::NotOffered,
+        Some(i) => i,
+    };
+    // Go: if len(hs.hello.pskIdentities) != 1 || hs.session == nil {
+    //         return c.sendAlert(alertInternalError) }
+    //
+    // goish only ever offers one identity, so "the server selected one
+    // and we offered none" is the whole of that arm.
+    let psk_suite = match offered_suite_id {
+        None => return PskDecision::Refuse("tls: server selected a PSK we did not offer"),
+        Some(id) => id,
+    };
+    // Go: if int(hs.serverHello.selectedIdentity) >= len(hs.hello.pskIdentities) {
+    //         c.sendAlert(alertIllegalParameter)
+    //         return errors.New("tls: server selected an invalid PSK") }
+    if selected != 0 {
+        return PskDecision::Refuse("tls: server selected an invalid PSK");
+    }
+    // Go: pskSuite := cipherSuiteTLS13ByID(hs.session.cipherSuite)
+    //     if pskSuite == nil { return c.sendAlert(alertInternalError) }
+    let psk_hash = match crate::crypto::tls::key_schedule::cipher_suite_tls13(psk_suite) {
+        None => return PskDecision::Refuse("tls: cached session has an unknown cipher suite"),
+        Some(cs) => cs.hash_size,
+    };
+    let server_hash = match crate::crypto::tls::key_schedule::cipher_suite_tls13(server_suite_id) {
+        None => return PskDecision::Refuse("tls: server selected an unknown cipher suite"),
+        Some(cs) => cs.hash_size,
+    };
+    // Go: if pskSuite.hash != hs.suite.hash {
+    //         c.sendAlert(alertIllegalParameter)
+    //         return errors.New("tls: server selected an invalid PSK and cipher suite pair") }
+    if psk_hash != server_hash {
+        return PskDecision::Refuse("tls: server selected an invalid PSK and cipher suite pair");
+    }
+    return PskDecision::Accept;
+}
+
 fn build_psk_extension_data(
     ticket: &[byte],
     obfuscated_ticket_age: u32,
