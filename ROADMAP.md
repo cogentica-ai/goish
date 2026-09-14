@@ -145,13 +145,67 @@ and the only one that is purely an API choice.
 
 ### Not blocked on anything
 
-2c and 2d are their own work. (2i, response header order, is fixed —
-see below.) 2f is no longer a worklist: every FIPS CAST is inert
-because `Enabled_` is a `const false`, so the twelve unported files are
-a structural-fidelity decision, not twelve fixes.
-### §2v — runtime/pprof protobuf profiles (issue #9): what is missing
+2c and 2d are their own work — both CLOSED 2026-09-14 (regexp's
+backtracker replaced by the RE2 NFA; the quadratic reflect clones in
+json, fmt and Unmarshal). (2i, response header order, is fixed — see
+below.) 2f is no longer a worklist: every FIPS CAST is inert because
+`Enabled_` is a `const false`, so the twelve unported files are a
+structural-fidelity decision, not twelve fixes.
 
-The largest remaining issue, and the inventory decides how it is staged.
+**What actually remains in §2, checked against the code 2026-09-14
+rather than read off these headings.** Four of the six items this
+section tracks are finished, and three of them still read as open
+somewhere in the text:
+
+| item | real status |
+|---|---|
+| §2v pprof protobuf (#9) | **DONE** — corrected below; was written up as the largest open issue |
+| §2w sync.Cond (#…) | DONE, notifyList ported, ablation-verified |
+| §2s `Any` JSON v2 (#15) | DONE, marshal and unmarshal, 10 + 27 pinned rows |
+| §2t nil vs empty slice (#14) | SETTLED — goish's `[]` is already v2's contract; the issue's criterion is v1's |
+| §2v1 slice aliasing (#26) | PARTIAL — `slice_alias_ref_smoke` reports 7/7 matching with **6 pinned divergences** |
+| §2u map value semantics (#7) | **OPEN, and now the largest** — `map<K, V>` is still an owning struct (`count`, `b`, buckets), so two handles diverge where Go's alias |
+
+So the honest ordering of remaining work is: §2u, then §2v1's six
+divergences, then §1's retirement of `record.rs`, `session.rs` and the
+invented client. §2u and §2v1 are core-type semantics rather than
+ordinary porting — changing `map`/`slice` from owning to aliasing
+touches everything built on them — which is why they belong beside §0's
+decisions rather than on a task list.
+### §2v — runtime/pprof protobuf profiles (issue #9): DONE
+
+**STATUS CORRECTED 2026-09-14. This section described the work as
+blocked on an API decision and called it "the largest remaining issue".
+Both are stale — it is implemented and passing.** Verified rather than
+assumed:
+
+    StartCPUProfile<W: io::Writer + Send + 'static>(w: W) -> error
+        arms the sampler and stores the writer; returns Go's exact
+        "cpu profiling already in use" on re-entry
+    StopCPUProfile()
+        disarms, then encodes and writes, growing the stack around the
+        encode because net/http/pprof calls it from a 64 KiB handler
+        goroutine
+
+    pprof_cpu_ref_smoke      ok 17/17
+    pprof_proto_ref_smoke    ok
+    http_pprof_smoke         HTTP_PPROF_SMOKE_OK
+
+The decision the text below calls unmade WAS made: the parameter is a
+generic `W: Writer + Send + 'static` boxed into the profile state,
+which is the `Box<dyn Writer + Send>` option rather than the raw
+pointer. That diverges from Go's `io.Writer` in type but not in
+contract, and it avoids the unsafe.
+
+This is the third already-met condition found this week by reading a
+status line against the code, and the most expensive one: it is written
+up as the LARGEST open issue, so anyone picking up the ROADMAP would
+have started here and found the work finished. A previous commit of
+mine repeated the claim before checking.
+
+The inventory below is kept because it is accurate about what was
+needed and in what order.
+
 What already exists:
 
   compress/gzip        ported (gzip.rs, gunzip.rs) — the outer envelope
