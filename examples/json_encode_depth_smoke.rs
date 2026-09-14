@@ -1,9 +1,11 @@
-// json_encode_depth_smoke — BOTH encoders' depth ceilings, pinned.
+// json_encode_depth_smoke — all THREE deep walks, pinned.
 //
 // `encode_value` serves Compact, Indent and Value::MarshalJSON;
 // `encode_reflect` serves Marshal and is a different walk that this
 // file did not cover until 2026-09-14 — which is how it came to be
-// quadratic unnoticed. See the second half.
+// quadratic unnoticed. And `fmt`'s reflect printer is a third
+// walk over the same tree, which had no deep coverage at all. See
+// the second and third halves.
 //
 // `encode_value` is the encoder behind `Compact`, `Indent` and
 // `Value::MarshalJSON`. It uses an EXPLICIT work stack rather than
@@ -173,10 +175,51 @@ fn main() {
     // cloning accessor comes back into the walk.
     marshal_check("Marshal past the clone ceiling", 10000);
 
+    // ── and the THIRD walk over the same tree ───────────────────────
+    //
+    // `fmt`'s reflect printer — what `%v` and `%+v` reach for a type
+    // that derives Reflect — is a third recursive walk using the same
+    // three cloning accessors, and it had NO deep-value coverage at
+    // all, because `FmtBuf` is private so no example could reach it.
+    //
+    // It was quadratic too. Measured 2026-09-14, release build, on the
+    // same nested value:
+    //
+    //     depth  200    8.5 ms -> 299 µs
+    //     depth  400   42.1 ms -> 556 µs
+    //     depth  800  143.2 ms -> 1.0 ms
+    //     depth 1600  583.7 ms -> 1.8 ms      (320x)
+    //     depth 20000       —  -> 28.2 ms
+    //
+    // So `fmt.Printf("%v", v)` on a deep structure — logging one, say —
+    // cost half a second for 11 KB of output. Same cause, same fix.
+    //
+    // The length is checked, not just the absence of a fault: a walk
+    // that silently truncated would be linear too.
+    let mut fmt_check = |name: &'static str, depth: int, want: usize| {
+        let v = nest(depth);
+        let out = goish::fmt::__reflect_fmt_bytes(&v, b'v');
+        if out.len() == want {
+            fmt::Printf!("[ok] %s depth=%d len=%d\n", name, depth, out.len() as int);
+        } else {
+            failed += 1;
+            fmt::Printf!(
+                "[!!] %s depth=%d len=%d want=%d\n",
+                name,
+                depth,
+                out.len() as int,
+                want as int
+            );
+        }
+    };
+    // `map[k:map[k:…<nil>…]]` — 7 bytes per level plus `<nil>`.
+    fmt_check("reflect printer round-trip reachable", 2000, 2000 * 7 + 5);
+    fmt_check("reflect printer past the clone ceiling", 10000, 10000 * 7 + 5);
+
     if failed == 0 {
-        fmt::Printf!("\nok 4/4\n");
+        fmt::Printf!("\nok 6/6\n");
         os::Exit(0);
     }
-    fmt::Printf!("\nFAIL %d of 4\n", failed);
+    fmt::Printf!("\nFAIL %d of 6\n", failed);
     os::Exit(1);
 }

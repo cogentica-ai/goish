@@ -3838,6 +3838,37 @@ clone). A cloning accessor inside a tree walk is evidently the shape
 this codebase reaches for, and only the third one was quadratic rather
 than linear.
 
+**So the fix was followed by a directed sweep, and it found a FOURTH —
+in `fmt`.** `write_reflect_value` is what `%v` and `%+v` reach for any
+type deriving Reflect, and it is a third recursive walk over the same
+tree using the same three cloning accessors. Also quadratic:
+
+| depth | before | after |
+|--:|--:|--:|
+| 200 | 8.5 ms | 299 µs |
+| 400 | 42.1 ms | 556 µs |
+| 800 | 143.2 ms | 1.0 ms |
+| 1600 | **583.7 ms** | **1.8 ms** |
+| 20000 | — | 28.2 ms |
+
+`fmt.Printf("%v", v)` on a deep structure — logging one — cost half a
+second for 11 KB of output.
+
+It had NO deep-value coverage at all, and the reason is worth keeping:
+`FmtBuf` is private, so no example could reach the reflect printer.
+`fmt::__reflect_fmt_bytes` is the hook that makes it testable, and
+`json_encode_depth_smoke` now pins all THREE walks — `encode_value`,
+`encode_reflect` and the printer — because they are three different
+routes over one tree and covering one covered neither of the others.
+
+The lesson for the next one: when a bug turns out to have three
+instances, the sweep for the fourth is worth doing IMMEDIATELY, while
+the pattern is exact enough to grep for. `Index`, `MapIndex` and
+`Field` are the names; any recursive walk calling them is a candidate.
+The remaining callers are flat field reads on small structs
+(`crypto/x509`'s ASN.1 decoders), which is the same call in a shape
+where it costs nothing.
+
 Where that leaves the limit. `encode_reflect`'s ceiling is now
 12000..13000 in a debug build — a 4.7x improvement, and the failure is
 the stack again, where this entry expected it. Go's `maxNestingDepth`

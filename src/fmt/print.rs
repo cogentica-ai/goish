@@ -1966,6 +1966,20 @@ pub fn reflect_fmt_to<T: crate::reflect::Reflect + ?Sized>(v: &T, verb: byte, f:
     write_reflect_value(&rv, verb == b'V', f);
 }
 
+// go: none — goish-only: `FmtBuf` is private, so nothing outside this
+//     crate can reach the reflect printer — which is why its behaviour
+//     on a deep value was never pinned. This hands the bytes back.
+/// Format `v` with `verb` and return the result. For references only.
+#[doc(hidden)]
+pub fn __reflect_fmt_bytes<T: crate::reflect::Reflect + ?Sized>(
+    v: &T,
+    verb: byte,
+) -> alloc::vec::Vec<u8> {
+    let mut f = FmtBuf::new();
+    reflect_fmt_to(v, verb, &mut f);
+    return f.as_slice().to_vec();
+}
+
 // go: none — goish idiom: Go's `(*pp).printValue` (print.go:766) walks a
 //     `reflect.Value`; goish's reflect exposes a `Value` enum instead of
 //     a kind-plus-accessors interface, so the walk is a match on it.
@@ -1993,7 +2007,13 @@ fn write_reflect_value(v: &crate::reflect::Value, plus: bool, f: &mut FmtBuf) {
                 if i > 0 {
                     f.push(b' ');
                 }
-                write_reflect_value(&v.Index(i), plus, f);
+                // `Index` CLONES the element's whole subtree, which
+                // makes this walk quadratic on a deep value. Borrow —
+                // see `reflect::Value::__index_ref`.
+                match v.__index_ref(i) {
+                    Some(e) => write_reflect_value(e, plus, f),
+                    None => f.extend(b"<nil>"),
+                }
             }
             f.push(b']');
         }
@@ -2003,7 +2023,7 @@ fn write_reflect_value(v: &crate::reflect::Value, plus: bool, f: &mut FmtBuf) {
             // (since Go 1.12). Sort the goish reflect-MapKeys output by
             // formatted-key bytes so output matches Go semantics regardless
             // of gomap's randomized iteration order.
-            let keys = v.MapKeys();
+            let keys = v.__map_keys_ref();
             let mut key_strs: alloc::vec::Vec<(usize, FmtBuf)> = keys
                 .iter()
                 .enumerate()
@@ -2020,8 +2040,11 @@ fn write_reflect_value(v: &crate::reflect::Value, plus: bool, f: &mut FmtBuf) {
                 }
                 f.extend(key_buf.as_slice());
                 f.push(b':');
-                let val = v.MapIndex(&keys[*orig_idx]);
-                write_reflect_value(&val, plus, f);
+                // `MapIndex` clones the value's whole subtree too.
+                match v.__map_index_ref(keys[*orig_idx]) {
+                    Some(val) => write_reflect_value(val, plus, f),
+                    None => f.extend(b"<nil>"),
+                }
             }
             f.push(b']');
         }
@@ -2037,7 +2060,11 @@ fn write_reflect_value(v: &crate::reflect::Value, plus: bool, f: &mut FmtBuf) {
                     f.extend(ty.Field(i).Name.as_bytes());
                     f.push(b':');
                 }
-                write_reflect_value(&v.Field(i), plus, f);
+                // And `Field`.
+                match v.__field_ref(i) {
+                    Some(fv) => write_reflect_value(fv, plus, f),
+                    None => f.extend(b"<nil>"),
+                }
             }
             f.push(b'}');
         }
