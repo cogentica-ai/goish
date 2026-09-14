@@ -1,0 +1,582 @@
+chr 0 false
+chr 8 false
+chr 9 true
+chr 10 true
+chr 11 false
+chr 12 false
+chr 13 true
+chr 14 false
+chr 31 false
+chr 32 true
+chr 33 true
+chr 55295 true
+chr 55296 false
+chr 57343 false
+chr 57344 true
+chr 65533 true
+chr 65534 false
+chr 65535 false
+chr 65536 true
+chr 1114111 true
+chr 1114112 false
+nb 0 false
+nb 1 false
+nb 2 false
+nb 3 false
+nb 4 false
+nb 5 false
+nb 6 false
+nb 7 false
+nb 8 false
+nb 9 false
+nb 10 false
+nb 11 false
+nb 12 false
+nb 13 false
+nb 14 false
+nb 15 false
+nb 16 false
+nb 17 false
+nb 18 false
+nb 19 false
+nb 20 false
+nb 21 false
+nb 22 false
+nb 23 false
+nb 24 false
+nb 25 false
+nb 26 false
+nb 27 false
+nb 28 false
+nb 29 false
+nb 30 false
+nb 31 false
+nb 32 false
+nb 33 false
+nb 34 false
+nb 35 false
+nb 36 false
+nb 37 false
+nb 38 false
+nb 39 false
+nb 40 false
+nb 41 false
+nb 42 false
+nb 43 false
+nb 44 false
+nb 45 true
+nb 46 true
+nb 47 false
+nb 48 true
+nb 49 true
+nb 50 true
+nb 51 true
+nb 52 true
+nb 53 true
+nb 54 true
+nb 55 true
+nb 56 true
+nb 57 true
+nb 58 true
+nb 59 false
+nb 60 false
+nb 61 false
+nb 62 false
+nb 63 false
+nb 64 false
+nb 65 true
+nb 66 true
+nb 67 true
+nb 68 true
+nb 69 true
+nb 70 true
+nb 71 true
+nb 72 true
+nb 73 true
+nb 74 true
+nb 75 true
+nb 76 true
+nb 77 true
+nb 78 true
+nb 79 true
+nb 80 true
+nb 81 true
+nb 82 true
+nb 83 true
+nb 84 true
+nb 85 true
+nb 86 true
+nb 87 true
+nb 88 true
+nb 89 true
+nb 90 true
+nb 91 false
+nb 92 false
+nb 93 false
+nb 94 false
+nb 95 true
+nb 96 false
+nb 97 true
+nb 98 true
+nb 99 true
+nb 100 true
+nb 101 true
+nb 102 true
+nb 103 true
+nb 104 true
+nb 105 true
+nb 106 true
+nb 107 true
+nb 108 true
+nb 109 true
+nb 110 true
+nb 111 true
+nb 112 true
+nb 113 true
+nb 114 true
+nb 115 true
+nb 116 true
+nb 117 true
+nb 118 true
+nb 119 true
+nb 120 true
+nb 121 true
+nb 122 true
+nb 123 false
+nb 124 false
+nb 125 false
+nb 126 false
+nb 127 false
+nb 128 false
+nb 129 false
+nb 130 false
+nb 131 false
+nb 132 false
+nb 133 false
+nb 134 false
+nb 135 false
+nb 136 false
+nb 137 false
+nb 138 false
+nb 139 false
+nb 140 false
+nb 141 false
+nb 142 false
+nb 143 false
+nb 144 false
+nb 145 false
+nb 146 false
+nb 147 false
+nb 148 false
+nb 149 false
+nb 150 false
+nb 151 false
+nb 152 false
+nb 153 false
+nb 154 false
+nb 155 false
+nb 156 false
+nb 157 false
+nb 158 false
+nb 159 false
+nb 160 false
+nb 161 false
+nb 162 false
+nb 163 false
+nb 164 false
+nb 165 false
+nb 166 false
+nb 167 false
+nb 168 false
+nb 169 false
+nb 170 false
+nb 171 false
+nb 172 false
+nb 173 false
+nb 174 false
+nb 175 false
+nb 176 false
+nb 177 false
+nb 178 false
+nb 179 false
+nb 180 false
+nb 181 false
+nb 182 false
+nb 183 false
+nb 184 false
+nb 185 false
+nb 186 false
+nb 187 false
+nb 188 false
+nb 189 false
+nb 190 false
+nb 191 false
+nb 192 false
+nb 193 false
+nb 194 false
+nb 195 false
+nb 196 false
+nb 197 false
+nb 198 false
+nb 199 false
+nb 200 false
+nb 201 false
+nb 202 false
+nb 203 false
+nb 204 false
+nb 205 false
+nb 206 false
+nb 207 false
+nb 208 false
+nb 209 false
+nb 210 false
+nb 211 false
+nb 212 false
+nb 213 false
+nb 214 false
+nb 215 false
+nb 216 false
+nb 217 false
+nb 218 false
+nb 219 false
+nb 220 false
+nb 221 false
+nb 222 false
+nb 223 false
+nb 224 false
+nb 225 false
+nb 226 false
+nb 227 false
+nb 228 false
+nb 229 false
+nb 230 false
+nb 231 false
+nb 232 false
+nb 233 false
+nb 234 false
+nb 235 false
+nb 236 false
+nb 237 false
+nb 238 false
+nb 239 false
+nb 240 false
+nb 241 false
+nb 242 false
+nb 243 false
+nb 244 false
+nb 245 false
+nb 246 false
+nb 247 false
+nb 248 false
+nb 249 false
+nb 250 false
+nb 251 false
+nb 252 false
+nb 253 false
+nb 254 false
+nb 255 false
+esc1 0 "�" true
+esc1 1 "�" true
+esc1 2 "�" true
+esc1 3 "�" true
+esc1 4 "�" true
+esc1 5 "�" true
+esc1 6 "�" true
+esc1 7 "�" true
+esc1 8 "�" true
+esc1 9 "&#x9;" true
+esc1 10 "&#xA;" true
+esc1 11 "�" true
+esc1 12 "�" true
+esc1 13 "&#xD;" true
+esc1 14 "�" true
+esc1 15 "�" true
+esc1 16 "�" true
+esc1 17 "�" true
+esc1 18 "�" true
+esc1 19 "�" true
+esc1 20 "�" true
+esc1 21 "�" true
+esc1 22 "�" true
+esc1 23 "�" true
+esc1 24 "�" true
+esc1 25 "�" true
+esc1 26 "�" true
+esc1 27 "�" true
+esc1 28 "�" true
+esc1 29 "�" true
+esc1 30 "�" true
+esc1 31 "�" true
+esc1 32 " " true
+esc1 33 "!" true
+esc1 34 "&#34;" true
+esc1 35 "#" true
+esc1 36 "$" true
+esc1 37 "%" true
+esc1 38 "&amp;" true
+esc1 39 "&#39;" true
+esc1 40 "(" true
+esc1 41 ")" true
+esc1 42 "*" true
+esc1 43 "+" true
+esc1 44 "," true
+esc1 45 "-" true
+esc1 46 "." true
+esc1 47 "/" true
+esc1 48 "0" true
+esc1 49 "1" true
+esc1 50 "2" true
+esc1 51 "3" true
+esc1 52 "4" true
+esc1 53 "5" true
+esc1 54 "6" true
+esc1 55 "7" true
+esc1 56 "8" true
+esc1 57 "9" true
+esc1 58 ":" true
+esc1 59 ";" true
+esc1 60 "&lt;" true
+esc1 61 "=" true
+esc1 62 "&gt;" true
+esc1 63 "?" true
+esc1 64 "@" true
+esc1 65 "A" true
+esc1 66 "B" true
+esc1 67 "C" true
+esc1 68 "D" true
+esc1 69 "E" true
+esc1 70 "F" true
+esc1 71 "G" true
+esc1 72 "H" true
+esc1 73 "I" true
+esc1 74 "J" true
+esc1 75 "K" true
+esc1 76 "L" true
+esc1 77 "M" true
+esc1 78 "N" true
+esc1 79 "O" true
+esc1 80 "P" true
+esc1 81 "Q" true
+esc1 82 "R" true
+esc1 83 "S" true
+esc1 84 "T" true
+esc1 85 "U" true
+esc1 86 "V" true
+esc1 87 "W" true
+esc1 88 "X" true
+esc1 89 "Y" true
+esc1 90 "Z" true
+esc1 91 "[" true
+esc1 92 "\\" true
+esc1 93 "]" true
+esc1 94 "^" true
+esc1 95 "_" true
+esc1 96 "`" true
+esc1 97 "a" true
+esc1 98 "b" true
+esc1 99 "c" true
+esc1 100 "d" true
+esc1 101 "e" true
+esc1 102 "f" true
+esc1 103 "g" true
+esc1 104 "h" true
+esc1 105 "i" true
+esc1 106 "j" true
+esc1 107 "k" true
+esc1 108 "l" true
+esc1 109 "m" true
+esc1 110 "n" true
+esc1 111 "o" true
+esc1 112 "p" true
+esc1 113 "q" true
+esc1 114 "r" true
+esc1 115 "s" true
+esc1 116 "t" true
+esc1 117 "u" true
+esc1 118 "v" true
+esc1 119 "w" true
+esc1 120 "x" true
+esc1 121 "y" true
+esc1 122 "z" true
+esc1 123 "{" true
+esc1 124 "|" true
+esc1 125 "}" true
+esc1 126 "~" true
+esc1 127 "\x7f" true
+esc1 128 "�" true
+esc1 129 "�" true
+esc1 130 "�" true
+esc1 131 "�" true
+esc1 132 "�" true
+esc1 133 "�" true
+esc1 134 "�" true
+esc1 135 "�" true
+esc1 136 "�" true
+esc1 137 "�" true
+esc1 138 "�" true
+esc1 139 "�" true
+esc1 140 "�" true
+esc1 141 "�" true
+esc1 142 "�" true
+esc1 143 "�" true
+esc1 144 "�" true
+esc1 145 "�" true
+esc1 146 "�" true
+esc1 147 "�" true
+esc1 148 "�" true
+esc1 149 "�" true
+esc1 150 "�" true
+esc1 151 "�" true
+esc1 152 "�" true
+esc1 153 "�" true
+esc1 154 "�" true
+esc1 155 "�" true
+esc1 156 "�" true
+esc1 157 "�" true
+esc1 158 "�" true
+esc1 159 "�" true
+esc1 160 "�" true
+esc1 161 "�" true
+esc1 162 "�" true
+esc1 163 "�" true
+esc1 164 "�" true
+esc1 165 "�" true
+esc1 166 "�" true
+esc1 167 "�" true
+esc1 168 "�" true
+esc1 169 "�" true
+esc1 170 "�" true
+esc1 171 "�" true
+esc1 172 "�" true
+esc1 173 "�" true
+esc1 174 "�" true
+esc1 175 "�" true
+esc1 176 "�" true
+esc1 177 "�" true
+esc1 178 "�" true
+esc1 179 "�" true
+esc1 180 "�" true
+esc1 181 "�" true
+esc1 182 "�" true
+esc1 183 "�" true
+esc1 184 "�" true
+esc1 185 "�" true
+esc1 186 "�" true
+esc1 187 "�" true
+esc1 188 "�" true
+esc1 189 "�" true
+esc1 190 "�" true
+esc1 191 "�" true
+esc1 192 "�" true
+esc1 193 "�" true
+esc1 194 "�" true
+esc1 195 "�" true
+esc1 196 "�" true
+esc1 197 "�" true
+esc1 198 "�" true
+esc1 199 "�" true
+esc1 200 "�" true
+esc1 201 "�" true
+esc1 202 "�" true
+esc1 203 "�" true
+esc1 204 "�" true
+esc1 205 "�" true
+esc1 206 "�" true
+esc1 207 "�" true
+esc1 208 "�" true
+esc1 209 "�" true
+esc1 210 "�" true
+esc1 211 "�" true
+esc1 212 "�" true
+esc1 213 "�" true
+esc1 214 "�" true
+esc1 215 "�" true
+esc1 216 "�" true
+esc1 217 "�" true
+esc1 218 "�" true
+esc1 219 "�" true
+esc1 220 "�" true
+esc1 221 "�" true
+esc1 222 "�" true
+esc1 223 "�" true
+esc1 224 "�" true
+esc1 225 "�" true
+esc1 226 "�" true
+esc1 227 "�" true
+esc1 228 "�" true
+esc1 229 "�" true
+esc1 230 "�" true
+esc1 231 "�" true
+esc1 232 "�" true
+esc1 233 "�" true
+esc1 234 "�" true
+esc1 235 "�" true
+esc1 236 "�" true
+esc1 237 "�" true
+esc1 238 "�" true
+esc1 239 "�" true
+esc1 240 "�" true
+esc1 241 "�" true
+esc1 242 "�" true
+esc1 243 "�" true
+esc1 244 "�" true
+esc1 245 "�" true
+esc1 246 "�" true
+esc1 247 "�" true
+esc1 248 "�" true
+esc1 249 "�" true
+esc1 250 "�" true
+esc1 251 "�" true
+esc1 252 "�" true
+esc1 253 "�" true
+esc1 254 "�" true
+esc1 255 "�" true
+esc "" ""
+esc "plain" "plain"
+esc "a<b>c&d\"e'f" "a&lt;b&gt;c&amp;d&#34;e&#39;f"
+esc "tab\there" "tab&#x9;here"
+esc "nl\nhere" "nl&#xA;here"
+esc "cr\rhere" "cr&#xD;here"
+esc "é" "é"
+esc "世界" "世界"
+esc "😀" "😀"
+esc "�" "�"
+esc "ok�ok" "ok�ok"
+esc "]]>" "]]&gt;"
+esc "a]]>b" "a]]&gt;b"
+escnl "nl\nhere" "nl\nhere"
+escnl "a\n\n b" "a\n\n b"
+escnl "\r\n" "&#xD;\n"
+escraw 80 "�"
+escraw c3 "�"
+escraw c328 "�("
+escraw eda080 "���"
+escraw f4908080 "����"
+pi "version" "version=\"1.0\"" "1.0"
+pi "version" "version='1.0'" "1.0"
+pi "version" "version=\"1.0\" encoding=\"UTF-8\"" "1.0"
+pi "version" "encoding=\"UTF-8\"" ""
+pi "version" "" ""
+pi "version" "version=" ""
+pi "version" "version=\"unterminated" ""
+pi "encoding" "version=\"1.0\"" ""
+pi "encoding" "version='1.0'" ""
+pi "encoding" "version=\"1.0\" encoding=\"UTF-8\"" "UTF-8"
+pi "encoding" "encoding=\"UTF-8\"" "UTF-8"
+pi "encoding" "" ""
+pi "encoding" "version=" ""
+pi "encoding" "version=\"unterminated" ""
+pi "standalone" "version=\"1.0\"" ""
+pi "standalone" "version='1.0'" ""
+pi "standalone" "version=\"1.0\" encoding=\"UTF-8\"" ""
+pi "standalone" "encoding=\"UTF-8\"" ""
+pi "standalone" "" ""
+pi "standalone" "version=" ""
+pi "standalone" "version=\"unterminated" ""
+pi "nope" "version=\"1.0\"" ""
+pi "nope" "version='1.0'" ""
+pi "nope" "version=\"1.0\" encoding=\"UTF-8\"" ""
+pi "nope" "encoding=\"UTF-8\"" ""
+pi "nope" "" ""
+pi "nope" "version=" ""
+pi "nope" "version=\"unterminated" ""

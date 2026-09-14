@@ -27,6 +27,7 @@ pub mod csv;
 pub mod hex;
 pub mod json;
 pub mod pem;
+pub mod xml;
 
 // ─── Marshaler / Unmarshaler interfaces ────────────────────────────────
 //

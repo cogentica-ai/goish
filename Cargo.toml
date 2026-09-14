@@ -77,6 +77,10 @@ lto = false
 
 
 [[example]]
+name = "xml_pure_ref_smoke"
+path = "examples/xml_pure_ref_smoke.rs"
+
+[[example]]
 name = "ssh_host_key_default_smoke"
 path = "examples/ssh_host_key_default_smoke.rs"
 
