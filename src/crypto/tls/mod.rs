@@ -336,7 +336,7 @@ pub fn msg_certificateStatus_unmarshal(
 mod handshake_server_tls13;
 
 pub use record::{
-    decode_x509_rsa_pubkey, decrypt_record, decrypt_record_aead, derive_aead_key_material,
+    __extract_padding, decode_x509_rsa_pubkey, decrypt_record, decrypt_record_aead, derive_aead_key_material,
     derive_key_material, derive_master_secret, encode_record, encrypt_record, encrypt_record_aead,
     prf12, read_record, AeadDirectionKeys, AeadKeyMaterial, DirectionKeys, KeyMaterial,
     RECORD_APPLICATION, RECORD_CHANGE_CIPHER_SPEC, RECORD_HANDSHAKE,

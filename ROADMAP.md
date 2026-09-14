@@ -4232,6 +4232,60 @@ So: 9 candidates, 2 real, and the tool paid for itself on its first
 run. Re-run it after any port that adds a helper — the duplicate is
 cheapest to find while it is still one name.
 
+### The ones the tool cannot see, and the fourth duplicate
+
+`dup_impl_check.py` matches on NAME, so it misses every duplicate that
+was given a goish-flavoured one — which is most of `record.rs`, whose
+functions are called `decrypt_record`, `derive_aead_key_material`,
+`compute_mac`. The same question has to be asked by hand there: for
+each of its fifteen remaining functions, what ported code already does
+this?
+
+The first answer was `extract_padding`. `conn.rs` carries the anchored
+port of `extractPadding` (conn.go:281-314); `record.rs` had a second
+copy — of the CBC padding check, in the file whose 2026-09-04 audit
+found a padding oracle.
+
+They were not even written alike. Go computes `t` in `uint` and
+broadcasts with `byte(int32(^t) >> 31)`, narrowing to 32 bits
+deliberately; `conn.rs` mirrors that. `record.rs` used `i64` and
+`>> 63`. Both are right, because `^t` is either all-high-bits-set or a
+small positive in every reachable case so bits 31 and 63 agree — and
+"happens to agree" is precisely what a second copy leaves you relying
+on.
+
+`tls_extractpadding_dup_smoke` settles it with 1,041 vectors from Go's
+own `extractPadding`, which is unexported — `scripts/goref.sh
+crypto/tls` runs the reference test INSIDE a writable GOROOT copy so it
+can be called at all. The grid is the branch structure, not random
+input: all 256 one-byte payloads, well-formed padding of every length
+1..258, each with a byte corrupted at the front and in the middle,
+paddingLen exceeding the payload, and the exact-fit case.
+
+Two perturbations, and the pair is the interesting part. Dropping a
+step of the `good &= good << 4` fold turns **511** rows red — the table
+is broad. Narrowing the scan bound from 256 to 255 turns **exactly one**
+row red: `bad_first_256`, the only payload where a corrupted byte sits
+at offset 255. That is not a sparse table (cf. §2b's "one red row means
+the probe grid is too thin"); it is the single input that can
+distinguish the two bounds, and the grid contains it because it was
+built from the boundaries rather than sampled. Worth remembering that
+the two diagnoses look identical from one perturbation and different
+from two.
+
+Collapsed, with the cost stated: delegating copies the record payload
+once per record. That is acceptable HERE and nowhere hotter — this is
+the invented handshake's path, not `tls::Dial`'s, the AES decrypt
+beside it dwarfs the memcpy, and §1 has the file slated for retirement.
+Contrast `LEUint64` above, where the same delegation would have
+allocated per call inside scalar multiplication and the copy stays.
+
+`record.rs` is 975 lines now, from 1,145 — and the drop understates it,
+since each collapse traded a hand-rolled body for a longer explanation
+of why it is gone. Three of its hand-rolled
+crypto primitives are gone this week — the SPKI walk, the TLS 1.2 PRF,
+the padding check — and each left a Go-generated table behind.
+
 ## 2e-ii. Written and never READ: the field sweep, 2026-09-14
 
 §2e asks which ported FUNCTIONS nothing calls. The same question about

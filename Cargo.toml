@@ -75,6 +75,10 @@ strip = false
 lto = false
 
 [[example]]
+name = "tls_extractpadding_dup_smoke"
+path = "examples/tls_extractpadding_dup_smoke.rs"
+
+[[example]]
 name = "ed25519_ctbyteeq_smoke"
 path = "examples/ed25519_ctbyteeq_smoke.rs"
 

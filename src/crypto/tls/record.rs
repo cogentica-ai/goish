@@ -171,16 +171,15 @@ pub struct KeyMaterial {
     pub tls13_hash_size: u16,
 }
 
-// ─── TLS 1.2 PRF ─────────────────────────────────────────────────────
+// go: none — goish-only: an array-shaped HMAC-SHA1 for the CBC MAC
+// below. Go writes `hmac.New(sha1.New, key)` inline in
+// cipher_suites.go's macSHA1; this is the same call with the fixed-size
+// result the record codec's arrays want.
 //
-// RFC 5246 §5:
-//   PRF(secret, label, seed) = P_SHA256(secret, label + seed)
-//
-//   P_SHA256(secret, seed) = HMAC_SHA256(secret, A(1) + seed) +
-//                             HMAC_SHA256(secret, A(2) + seed) + ...
-//   where A(0) = seed,  A(i) = HMAC_SHA256(secret, A(i-1))
-
-
+// It lost its anchor for a while by accident: a TLS 1.2 PRF banner sat
+// directly above it, so GOISH014 read that block as the anchor block
+// and reported it malformed. The banner belonged to `p_sha256`, which
+// is gone; it now lives with `prf12`.
 fn hmac_sha1(key: &[byte], data: &[byte]) -> [byte; 20] {
     let key_slice = slice::<byte>::__from_vec(key.to_vec());
     let mut h = hmac::New(sha1::NewHash, key_slice);
@@ -194,6 +193,15 @@ fn hmac_sha1(key: &[byte], data: &[byte]) -> [byte; 20] {
     out
 }
 
+// ─── TLS 1.2 PRF ─────────────────────────────────────────────────────
+//
+// RFC 5246 §5:
+//   PRF(secret, label, seed) = P_SHA256(secret, label + seed)
+//
+//   P_SHA256(secret, seed) = HMAC_SHA256(secret, A(1) + seed) +
+//                             HMAC_SHA256(secret, A(2) + seed) + ...
+//   where A(0) = seed,  A(i) = HMAC_SHA256(secret, A(i-1))
+//
 // P_SHA256 and the TLS 1.2 PRF built on it USED TO LIVE HERE, 42 lines
 // of HMAC ladder. Go declares `prf12` exactly once (prf.go), delegating
 // to crypto/internal/fips140/tls12.PRF; goish declared it twice, and
@@ -424,41 +432,43 @@ pub fn encrypt_record(
 ///     unchecked bytes inside the MAC. Go's comment: "an attacker that
 ///     could distinguish MAC failures from padding failures could mount
 ///     an attack similar to POODLE in SSL 3.0".
+// go: none — goish-only: reach `extract_padding` from an example, so
+// it can be driven over the same Go vectors as conn.rs's port. Private
+// otherwise; see tls_extractpadding_dup_smoke.
+#[doc(hidden)]
+pub fn __extract_padding(payload: &[byte]) -> (usize, byte) {
+    return extract_padding(payload);
+}
+
 fn extract_padding(payload: &[byte]) -> (usize, byte) {
-    if payload.is_empty() {
-        return (0, 0);
-    }
-
-    let mut padding_len = payload[payload.len() - 1];
-    let t = (payload.len() - 1).wrapping_sub(padding_len as usize);  // goishlint:ignore GOISH005 — constant-time sign-bit broadcast; the width is the point
-    // If len(payload)-1 >= paddingLen the MSB of t is zero.
-    let mut good: byte = ((!(t as i64) >> 63) & 0xff) as byte;  // goishlint:ignore GOISH005 — constant-time sign-bit broadcast; the width is the point
-
-    // The maximum possible padding length plus the length field itself.
-    // The length of the padded data is public, so the bound is too.
-    let mut to_check = 256usize;
-    if to_check > payload.len() {
-        to_check = payload.len();
-    }
-
-    for i in 0..to_check {
-        let t = (padding_len as usize).wrapping_sub(i);  // goishlint:ignore GOISH005 — constant-time sign-bit broadcast; the width is the point
-        // If i <= paddingLen the MSB of t is zero.
-        let mask: byte = ((!(t as i64) >> 63) & 0xff) as byte;  // goishlint:ignore GOISH005 — constant-time sign-bit broadcast; the width is the point
-        let b = payload[payload.len() - 1 - i];
-        good &= !(mask & padding_len ^ mask & b);
-    }
-
-    // AND the bits of `good` together and spread the result.
-    good &= good << 4;
-    good &= good << 2;
-    good &= good << 1;
-    good = ((good as i8) >> 7) as byte;  // goishlint:ignore GOISH005 — constant-time sign-bit broadcast; the width is the point
-
-    // Zero the padding length on error, so unchecked bytes stay in the MAC.
-    padding_len &= good;
-
-    return (padding_len as usize + 1, good);  // goishlint:ignore GOISH005 — constant-time sign-bit broadcast; the width is the point
+    // HAND-ROLLED HERE UNTIL 2026-09-14. conn.rs carries the anchored
+    // port of conn.go:281-314, and this was a second copy of the CBC
+    // padding check — the function §1's 2026-09-04 audit found a
+    // padding oracle beside.
+    //
+    // The two were not even written alike. Go computes `t` in `uint`
+    // and broadcasts with `byte(int32(^t) >> 31)`, narrowing to 32 bits
+    // on purpose; conn.rs mirrors that. This used `i64` and `>> 63`.
+    // Both were right, because `^t` is either all-high-bits-set or a
+    // small positive in every reachable case so bits 31 and 63 agree —
+    // "happens to agree" being exactly what a second copy leaves you
+    // relying on.
+    //
+    // `tls_extractpadding_dup_smoke` is the evidence and predates the
+    // change: 1,041 vectors from Go's own (unexported) extractPadding
+    // via `scripts/goref.sh crypto/tls`, run through both. It stays,
+    // and it is sharp — narrowing the 256-byte scan bound to 255 turns
+    // exactly one row red, the only input that can tell the two apart.
+    //
+    // The `to_vec` is a copy of the record payload, once per record.
+    // Acceptable here and nowhere hotter: this path is the invented
+    // handshake's, not `tls::Dial`'s, and ROADMAP §1 has the file slated
+    // for retirement. The alternative — keeping a second constant-time
+    // padding check to save a memcpy the AES decrypt beside it dwarfs —
+    // is the wrong trade.
+    let (to_remove, good) =
+        super::conn::extractPadding(slice::<byte>::__from_vec(payload.to_vec()));
+    return (to_remove as usize, good);  // goishlint:ignore GOISH005 — int -> usize for the caller's slice indexing
 }
 
 // go: none — goish idiom: Go writes the fold as
