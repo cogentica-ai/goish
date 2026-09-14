@@ -38,6 +38,13 @@ Known limits, all of which make it MISS things rather than invent them:
     prose. Searching per-file reported 177 where the package-wide
     answer is 137.
 
+--errors reported 131 as of 2026-09-14, and 130 after the fix below. Triaging its first
+four files found one real defect — net/http wrote the Host header
+without Go's ValidHostHeader check, a header-injection vector — and
+three files of correctly-absent refusals (crypto/tls/auth.go's were all
+%T artefacts, httpcommon and quic are waived). About one in four files
+worth opening; see ROADMAP §2e.
+
 As of 2026-09-14 --alerts reports SIX, and all six sit inside Go's
 `c.quic != nil` blocks — goish ships no QUIC transport and waives those
 declarations. So every non-QUIC refusal Go makes in conn.go,
@@ -61,9 +68,21 @@ TLS_PAIRS = [
 
 MSG = re.compile(r'(?:errors\.New|fmt\.Errorf)\("([^"]{12,})"')
 
+# Go truncates its message at the first verb, and what precedes a `%T`
+# is usually a connective the port has no reason to keep: `expected an
+# ECDSA public key, got %T` becomes `expected an ECDSA public key`.
+# Without this, all six of crypto/tls/auth.go's faithful type checks
+# read as missing. Stripping it took the --errors total from 137 to 131.
+TRAIL = re.compile(r'[\s,:;.\-]+(?:got|is|was|in|for|from|to|of|with|at)?[\s,:;.\-]*$', re.I)
+
 
 def key_of(msg, minlen):
-    k = msg.split('%')[0].strip()
+    k = msg.split('%')[0]
+    prev = None
+    while prev != k:
+        prev = k
+        k = TRAIL.sub('', k)
+    k = k.strip()
     return k if len(k) >= minlen else None
 
 

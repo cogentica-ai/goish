@@ -3717,6 +3717,39 @@ pub fn serialize_request_head(
     if !terr.IsNil() {
         return (slice::<byte>::__from_vec(Vec::new()), tw, terr);
     }
+
+    // Go (request.go:621-639): "Validate that the Host header is a
+    // valid header in general, but don't validate the host itself.
+    // This is sufficient to avoid header or request smuggling via the
+    // Host field."
+    //
+    // THIS WAS MISSING. `host` went to the `Host:` line verbatim, so a
+    // Host of "evil.com\r\nX-Injected: yes" — and Request.Host is
+    // public API — put an attacker's header on the wire. Measured, not
+    // theorised: the probe emitted `Host: evil.com` followed by
+    // `X-Injected: yes` as its own line.
+    //
+    // Go's recovery is deliberately NOT truncation. Its comment: "we
+    // would truncate the Host header after '/' or ' ' ... We don't
+    // preserve the truncation, because sending an altered header field
+    // opens a smuggling vector. Instead, zero out the Host header
+    // entirely if it isn't valid. (An empty Host is valid; see RFC 9112
+    // Section 3.2.) Return an error if we're sending to a proxy, since
+    // the proxy probably can't do anything useful with an empty Host
+    // header."
+    let mut host = host.clone();
+    if !super::http::ValidHostHeader(&host) {
+        if !using_proxy {
+            host = crate::gostring::string::from_static("");
+        } else {
+            return (
+                slice::<byte>::__from_vec(Vec::new()),
+                tw,
+                errors::New("http: invalid Host header"),
+            );
+        }
+    }
+    let host = &host;
     // Go: var b strings.Builder
     let mut b = strings::Builder::new();
     b.Grow(256);

@@ -74,6 +74,12 @@ debug = "full"
 strip = false
 lto = false
 
+
+
+[[example]]
+name = "http_valid_host_header_smoke"
+path = "examples/http_valid_host_header_smoke.rs"
+
 [[example]]
 name = "tls13_psk_pairing_smoke"
 path = "examples/tls13_psk_pairing_smoke.rs"

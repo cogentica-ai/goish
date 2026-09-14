@@ -481,6 +481,68 @@ pub fn ValidTrailerHeader(name: &crate::gostring::string) -> bool {
     return true;
 }
 
+// go: none — goish-only: `httpguts.ValidHostHeader` (httplex.go:322),
+// relocated like the other httpguts helpers here. goish has no
+// httpguts package — Go vendors it from golang.org/x/net.
+//
+// THIS WAS ABSENT, and its absence was a header-injection vector on
+// the live client path. Go's `Request.write` runs the Host through it
+// before writing the `Host:` line, and says outright why: "Validate
+// that the Host header is a valid header in general, but don't
+// validate the host itself. This is sufficient to avoid header or
+// request smuggling via the Host field." goish wrote `req.Host`
+// verbatim, so a Host of "evil.com\r\nX-Injected: yes" put
+//
+//     Host: evil.com
+//     X-Injected: yes
+//
+// on the wire. `Request.Host` is public API, so any caller taking a
+// hostname from untrusted input injected arbitrary headers.
+//
+// The accepted set is Go's `validHostByte` table, derived from Go's
+// own answers for all 256 bytes rather than transcribed
+// (scripts/goref.sh net/http). 81 bytes: alphanumerics, the RFC 3986
+// sub-delims and unreserved punctuation, ":" for the port, and "[" "]"
+// for IPv6 literals. Note what is NOT in it and might look like it
+// should be: "/", "?", "#", "@", "\"", "<", ">", "\\", "^", "`", "{",
+// "|", "}", space, and every byte >= 0x80 — so an internationalised
+// host must already be punycode by this point.
+/// Go: "ValidHostHeader reports whether h is a valid host header."
+pub fn ValidHostHeader(h: &crate::gostring::string) -> bool {
+    let b = h.as_bytes();
+    let mut i: usize = 0;
+    while i < b.len() {
+        let c = b[i];
+        let ok = (c >= b'0' && c <= b'9')
+            || (c >= b'a' && c <= b'z')
+            || (c >= b'A' && c <= b'Z')
+            || c == b'!'
+            || c == b'$'
+            || c == b'%'
+            || c == b'&'
+            || c == b'\''
+            || c == b'('
+            || c == b')'
+            || c == b'*'
+            || c == b'+'
+            || c == b','
+            || c == b'-'
+            || c == b'.'
+            || c == b':'
+            || c == b';'
+            || c == b'='
+            || c == b'['
+            || c == b']'
+            || c == b'_'
+            || c == b'~';
+        if !ok {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
 // go: none — goish-only: `httpguts.ValidHeaderFieldValue`
 // (httplex.go:303), relocated like the other httpguts helpers here.
 // Go: reject any CTL byte that is not linear whitespace, i.e. every

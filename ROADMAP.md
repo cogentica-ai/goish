@@ -4545,13 +4545,86 @@ dropping the `sendAlert` looks fine.
 
 A second mode, `--errors`, asks the same question of every package
 rather than crypto/tls — each `errors.New` literal in a ported Go file
-against the whole goish package. It reports **137**, untriaged, led by
-`httpcommon.go` (12), `crypto/tls/quic.go` (7, waived), `request.go`
-(7), `transport.go` (7) and `auth.go` (6). Do not gate on it; the
+against the whole goish package. After normalising away Go's `%T`/`%v`
+suffixes it reported **131**, and **130** once the defect below was
+fixed — the count is a work queue, not a score. Do not gate on it; the
 per-file version of the same question reported 177, and the difference
 was entirely goish splitting one Go file across several `.rs` and
-citing some only in prose. That list is a starting point for whoever
-wants the next pass. Three of its hand-rolled
+citing some only in prose.
+
+**Triaging it found a header-injection vector in the HTTP client.** The
+first four files, opened rather than pattern-matched:
+
+  * `crypto/tls/auth.go` (6) — all FALSE POSITIVES. Go writes
+    `fmt.Errorf("expected an ECDSA public key, got %T", …)` and goish
+    drops the `%T`, so the key included a trailing ", got" that no port
+    would contain. `verifyHandshakeSignature` is faithful: all four
+    type checks present, all four arms and the `default` failing
+    closed. The normalisation now strips trailing connectives, which is
+    what took 137 to 131.
+  * `net/http/internal/httpcommon/httpcommon.go` (12) — waived, and
+    documented per-declaration. Its only Go importer is `h2_bundle.go`,
+    which is `//go:build !nethttpomithttp2` — the side goish does not
+    take. Nothing in goish's build can reach the package.
+  * `crypto/tls/quic.go` (7) — waived, no QUIC transport.
+  * `net/http/request.go` (7) — **one of these was real.**
+
+### The Host header went to the wire unvalidated
+
+Go's `Request.write` runs the Host through `httpguts.ValidHostHeader`
+before writing the `Host:` line, and says why in its own comment:
+
+> Validate that the Host header is a valid header in general, but don't
+> validate the host itself. This is sufficient to avoid header or
+> request smuggling via the Host field.
+
+goish wrote `req.Host` verbatim. Measured with a throwaway example, not
+argued: a Host of `"evil.com\r\nX-Injected: yes"` produced
+
+    GET /p HTTP/1.1
+    Host: evil.com
+    X-Injected: yes
+    User-Agent: Go-http-client/1.1
+
+`Request.Host` is public API, so any caller taking a hostname from
+untrusted input — a proxy, a multi-tenant router, a redirect target —
+injected arbitrary headers into its own request. This is the same class
+as the double-written body fixed earlier in the very same function, and
+it is on the LIVE client path, not the invented one.
+
+Go's recovery is deliberately not truncation, and its comment explains
+that too: it used to truncate at `/` or space, and stopped, because
+"sending an altered header field opens a smuggling vector". Instead the
+Host is zeroed — an empty Host is legal, RFC 9112 §3.2 — except when
+proxying, where it returns an error because a proxy can do nothing with
+an empty Host. goish now does both, and both arms are pinned.
+
+`ValidHostHeader` is ported into `net/http/http.rs` beside the other
+relocated httpguts helpers. The accepted byte set was derived from Go's
+own answers for all 256 bytes rather than transcribed — the package is
+vendored and cannot be imported from outside, so the reference runs
+inside a writable GOROOT copy (`scripts/goref.sh net/http`). 81 bytes.
+Worth noting what is NOT accepted and might look like it should be:
+`/`, `?`, `#`, `@`, quote, `<`, `>`, backslash, `^`, backtick, `{`,
+`|`, `}`, space, and every byte >= 0x80 — an internationalised host
+must already be punycode by this point.
+
+`http_valid_host_header_smoke` carries 284 checks in two independent
+halves, and the split is the point. 280 rows pin the PREDICATE against
+Go: every byte alone, plus 24 real Host shapes including `[::1]`,
+`[fe80::1%25eth0]:80`, `under_score.example` and
+`a!b$c&d'e(f)g*h+i,j;k=l`, all of which must still be ACCEPTED — a
+validator that rejected everything would stop the injection and break
+every request. Four more rows pin the WIRING by driving
+`serialize_request_head` and reading the bytes back, because 280 green
+predicate rows say nothing about whether the writer calls it, which is
+the half that was broken. Bypassing the validation turns exactly those
+four red and leaves the 280 green.
+
+Still absent, and recorded rather than patched: Go calls
+`httpguts.PunycodeHostPort` first. goish has no IDNA, so a non-ASCII
+Host is now rejected where Go would have encoded it. Rejecting is the
+safe direction, and it is the same gap `idnaASCII` already documents. Three of its hand-rolled
 crypto primitives are gone this week — the SPKI walk, the TLS 1.2 PRF,
 the padding check — and each left a Go-generated table behind.
 
