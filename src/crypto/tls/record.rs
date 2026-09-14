@@ -117,6 +117,31 @@ pub const RECORD_HANDSHAKE: byte = 22;
 pub const RECORD_APPLICATION: byte = 23;
 
 // TLS 1.2 version bytes
+// THE RECORD HEADER'S VERSION FIELD IS A CONSTANT HERE, and that is a
+// divergence worth knowing about before trusting this file. Go handles
+// it in two places, and this path does neither:
+//
+//   * `readRecordOrCCS` CHECKS it against connection state — `if
+//     c.haveVers && vers != expectedVers` → alertProtocolVersion. Our
+//     `read_record` takes a bare `io::Reader`, has no `c.vers` to
+//     compare against, and drops hdr[1] and hdr[2] on the floor.
+//   * the crypto paths AUTHENTICATE the wire bytes: Go's MAC input and
+//     AEAD additionalData both splice in `record[:3]`, the actual
+//     header. `compute_mac` and `decrypt_record_aead` splice in these
+//     two constants instead, because they are handed the fragment and
+//     never see the header at all.
+//
+// Together: on this path an attacker may flip the version bytes of a
+// record header and nothing notices. The field is legacy in TLS 1.2 and
+// nothing downstream reads it, so this is a spec deviation rather than
+// an exploitable one — but Go authenticates it and this does not, and
+// the asymmetry is the kind that stops being harmless when someone
+// later adds a reader for it.
+//
+// Fixing it properly means connection state and the whole record, which
+// is `conn.rs`'s `readRecordOrCCS` — the anchored port this file exists
+// to be replaced by. Recorded rather than patched, because a
+// half-stateful version check here would be a third behaviour.
 pub const TLS_VERSION_MAJOR: byte = 3;
 pub const TLS_VERSION_MINOR: byte = 3;
 
@@ -262,6 +287,22 @@ pub fn derive_master_secret(
 ///   [56..72]  server_write_key
 ///   [72..88]  client_write_IV
 ///   [88..104] server_write_IV
+// go: none — goish-only: `keysFromMasterSecret` (prf.go:131-161) with
+// the parameters of TLS_RSA_WITH_AES_128_CBC_SHA fixed — macLen 20,
+// keyLen 16, ivLen 16 — and the six spans returned as one struct
+// instead of six slices.
+//
+// The layout is Go's, checked against it rather than assumed. Go slices
+// the key block in the order clientMAC, serverMAC, clientKey,
+// serverKey, clientIV, serverIV, so with those lengths the offsets are
+// 0/20/40/56/72/88 and the block is 104 bytes. The seed is
+// serverRandom||clientRandom — the reverse of the master secret's
+// order, which is a real asymmetry in RFC 5246 and not a transcription
+// slip.
+//
+// prf.rs carries the parameterised port; this is the specialisation the
+// array-shaped callers here need, and it does not duplicate the PRF
+// itself any more — `prf12` above delegates.
 pub fn derive_key_material(
     master: &[byte; 48],
     client_random: &[byte; 32],
@@ -760,6 +801,11 @@ pub struct AeadKeyMaterial {
 }
 
 /// Derive 40-byte key block for AES-128-GCM and split into AeadKeyMaterial.
+// go: none — goish-only: `keysFromMasterSecret` again, with the
+// parameters of TLS_ECDHE_*_WITH_AES_128_GCM_SHA256 — macLen 0 (the
+// AEAD is the MAC), keyLen 16, ivLen 4 for the GCM fixed nonce.
+// Go's ordering with macLen 0 puts the two empty MAC spans first, so
+// the offsets collapse to 0/16/32/36 and the block is 40 bytes.
 pub fn derive_aead_key_material(
     master: &[byte; 48],
     client_random: &[byte; 32],

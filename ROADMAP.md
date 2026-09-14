@@ -4349,7 +4349,60 @@ guarantee too.
 
 `record.rs` is 975 lines now, from 1,145 — and the drop understates it,
 since each collapse traded a hand-rolled body for a longer explanation
-of why it is gone. Three of its hand-rolled
+of why it is gone.
+
+### record.rs, all fifteen functions: the sweep is finished
+
+Every function in the file has now had the same question put to it. The
+answers, so the next reader does not redo it:
+
+**Collapsed onto the anchored port** (each behind a Go-generated table,
+written before the deletion): `decode_x509_rsa_pubkey`, `prf12`,
+`extract_padding`, `compute_mac`. The last two were defects, not just
+duplication — the padding check was fine but unverified, and
+`compute_mac` was missing Lucky13 entirely.
+
+**Verified equivalent and KEPT, because they are specialisations rather
+than copies**: `derive_master_secret`, `derive_key_material`,
+`derive_aead_key_material`. These are `keysFromMasterSecret` with one
+cipher suite's parameters fixed, and the PRF underneath them now
+delegates, so what remains is the RFC 5246 §6.3 span layout. Checked
+against Go's slicing order rather than assumed — clientMAC, serverMAC,
+clientKey, serverKey, clientIV, serverIV, which with (20,16,16) gives
+0/20/40/56/72/88 over 104 bytes and with (0,16,4) collapses to
+0/16/32/36 over 40. The seed for the key block is
+serverRandom||clientRandom, the reverse of the master secret's order;
+that asymmetry is real in the RFC and not a transcription slip.
+
+**Checked clean**: `encode_record`, `hmac_sha1`, `ctEq` (a documented
+255/0 adapter over the ported `subtle` primitive, not a rival to
+bigmod's `ctEq`), `encrypt_record`, `encrypt_record_aead`,
+`decrypt_record_aead`, `read_record`. Two details in the AEAD path are
+worth not re-deriving: the nonce comes from the wire while the AAD's
+sequence number comes from local state — which is Go's arrangement
+exactly, and is what makes a replayed record fail its tag — and
+`plain_len = len(ct_and_tag) - 16` is Go's `len(payload) -
+c.Overhead()`.
+
+**One deviation found and RECORDED rather than patched.** The record
+header's version field is neither checked nor authenticated on this
+path. `read_record` drops hdr[1] and hdr[2] — it takes a bare
+`io::Reader` and has no `c.vers` to compare against, the same
+statelessness that already limits its length bound — and `compute_mac`
+and `decrypt_record_aead` splice a constant `3,3` where Go splices
+`record[:3]` into the MAC input and the AEAD additionalData. So an
+attacker may flip those two bytes and nothing notices, where Go raises
+alertProtocolVersion and would fail the tag.
+
+Spec deviation rather than an exploitable one: the field is legacy in
+TLS 1.2 and nothing downstream reads it. Not patched, because fixing it
+properly needs connection state and the whole record — which is
+`conn.rs`'s `readRecordOrCCS`, the port this file exists to be replaced
+by, and a half-stateful check here would be a third behaviour to
+maintain. The constants now carry the explanation.
+
+That closes record.rs as an audit target. What is left is the
+retirement, which §1 already sequences. Three of its hand-rolled
 crypto primitives are gone this week — the SPKI walk, the TLS 1.2 PRF,
 the padding check — and each left a Go-generated table behind.
 
