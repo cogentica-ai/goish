@@ -75,6 +75,10 @@ strip = false
 lto = false
 
 [[example]]
+name = "regexp_exec_ref_smoke"
+path = "examples/regexp_exec_ref_smoke.rs"
+
+[[example]]
 name = "regexp_compile_ref_smoke"
 path = "examples/regexp_compile_ref_smoke.rs"
 

@@ -122,6 +122,14 @@ impl core::ops::BitXorAssign for EmptyOp {
     }
 }
 
+impl core::ops::BitAnd for EmptyOp {
+    type Output = EmptyOp;
+    // go: none — goish idiom: see the note on `BitOr`.
+    fn bitand(self, o: EmptyOp) -> EmptyOp {
+        return EmptyOp(self.0 & o.0);
+    }
+}
+
 impl core::ops::Not for EmptyOp {
     type Output = EmptyOp;
     // go: none — goish idiom: see the note above this impl.

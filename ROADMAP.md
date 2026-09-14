@@ -3385,7 +3385,8 @@ The remaining stages, and the reason for this order:
 | 2b-iii | `syntax/parse.rs` — the node arena and stack machinery | ~750 | **done** |
 | 2b-iv | `syntax/parse.rs` — `Parse` and the text sub-parsers | ~1,100 | **done** |
 | 3 | `syntax/simplify.rs`, `syntax/compile.rs` | ~450 | **done** |
-| 4 | `regexp/exec.rs` (the NFA) and the swap | ~1,900 | next |
+| 4a | `regexp/exec.rs` — the NFA machine | ~400 | **done** |
+| 4b | the swap: `Regexp`'s public surface onto the NFA | ~200 | next |
 
 `parse.rs` opens with GOISH018 and GOISH021 lines naming all 100 of
 parse.go's other declarations, in the shape `root_openat.rs`
@@ -3634,6 +3635,52 @@ than one shape (`(a|)*`, `((a)?)*`, `(a*b*)*`); a rune with NO fold
 orbit under `(?i)`, since only then is the flag cleared and `InstRune1`
 chosen; and a non-greedy quantifier over something other than a bare
 literal. In each case the first number was the corpus's fault.
+
+**STAGE 4a LANDED 2026-09-14 — THE ENGINE RUNS, AND THE DoS IS GONE.**
+`queue`, `entry`, `thread`, `machine`, `lazyFlag`, `add`, `step`,
+`match`. `examples/regexp_exec_ref_smoke.rs` runs 73 (pattern, subject)
+pairs END TO END — parse, simplify, compile, execute — under both match
+semantics, against Go's PUBLIC `FindStringSubmatchIndex`. 151 rows.
+
+Measured, on the pattern this section opened with:
+
+| n | backtracker (release) | NFA (release) |
+|--:|--:|--:|
+| 14 | 90 ms | — |
+| 18 | 1,467 ms | — |
+| 20 | 6,194 ms | — |
+| 22 | ~27,000 ms | **42 µs** |
+| 200 | ~2 × 10^57 ms | **334 µs** |
+
+**The bound is ASSERTED, not timed.** A wall-clock assertion is a flake
+waiting to happen on shared CI, so the machine counts its `add` calls
+instead and the smoke checks a RATIO: doubling the input may at most
+triple the work. The counts come out 154, 304, 604, 1204, 2404 for n =
+25, 50, 100, 200, 400 — exactly `6n + 4`. A backtracker fails that
+assertion by a factor of 2^100.
+
+And the guarantee is one line of `add`: it refuses to enqueue a pc
+already on the queue. So each queue holds at most one entry per
+instruction, each position does at most O(len(prog)) work, and no input
+can push past it. Deleting that refusal does not merely slow the smoke
+down — the perturbed build BLOWS THE STACK.
+
+Not ported, and safe not to be: Go's `onepass` and `backtrack` engines
+and its literal-prefix fast path. All three are optimisations over this
+one, which is why Go falls back to it; they change how fast an answer
+arrives, not what it is, and the smoke compares answers.
+
+Five perturbations:
+
+  add's pc dedup                   stack overflow (the blowup itself)
+  step's first-match truncation    7 red
+  lazyFlag's word-boundary sense   4 red
+  step's longest-mode cutoff       2 red
+  (and the REDOS ratio assertion, which the first one also fails)
+
+WHAT REMAINS is 4b: `Regexp`'s public surface still calls the old
+backtracker. The engine is complete and pinned; the swap is a separate
+change because it touches every caller in the tree.
 
 Stage 2a repeated the lesson twice, which is why it is written down
 here rather than left in a commit message. `sub.Op > OpCapture` → `>=`
