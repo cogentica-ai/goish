@@ -36,15 +36,24 @@ Known limits, all of which make it MISS things rather than invent them:
     one Go file across several .rs (server.go -> server.rs +
     responsewriter.rs + server_tls.rs) and cites some of them only in
     prose. Searching per-file reported 177 where the package-wide
-    answer is 137.
+    answer was 137;
+  * a long Go message is usually wrapped in the Rust port with a
+    backslash string continuation, which breaks a substring match down the
+    middle. Continuations are joined before matching — ed25519's
+    "expected opts.HashFunc() zero ..." guard IS ported and read as
+    missing for exactly this reason.
 
---errors reported 131 as of 2026-09-14, 128 after that day's fixes.
-Five files and 39 entries triaged: ONE real defect (net/http wrote the
-Host header without Go's ValidHostHeader check — a header-injection
-vector), two error-text divergences, one stale comment, 29 correctly
-absent, six artefacts of this checker's own %T handling. Roughly one
-defect per 39 entries and one file in five worth opening. ROADMAP §2e
-carries the per-entry verdicts so they are not re-triaged.
+--errors reported 131 as of 2026-09-14 and 126 by the end of it. Ten
+files and 57 entries triaged: ONE real defect (net/http wrote the Host
+header without Go's ValidHostHeader check — a header-injection vector),
+two error-text divergences, one stale comment, 45 correctly absent, and
+EIGHT artefacts of this checker's own matching — which is the number
+worth remembering. ROADMAP §2e carries the per-entry verdicts so they
+are not re-triaged.
+
+The yield fell to ZERO on the crypto packages (18 entries, no defects),
+so the list is not being worked further as a backlog. Run it after a
+port lands, not through to the end.
 
 As of 2026-09-14 --alerts reports SIX, and all six sit inside Go's
 `c.quic != nil` blocks — goish ships no QUIC transport and waives those
@@ -76,6 +85,12 @@ MSG = re.compile(r'(?:errors\.New|fmt\.Errorf)\("([^"]{12,})"')
 # read as missing. Stripping it took the --errors total from 137 to 131.
 TRAIL = re.compile(r'[\s,:;.\-]+(?:got|is|was|in|for|from|to|of|with|at)?[\s,:;.\-]*$', re.I)
 
+# A long Go message is usually wrapped in the Rust port with a `\`
+# string continuation, which breaks a substring match down the middle.
+# ed25519's "expected opts.HashFunc() zero ..." guard IS ported and read
+# as missing for exactly this reason. Join continuations before matching.
+CONT = re.compile(r'\\\n\s*')
+
 
 def key_of(msg, minlen):
     k = msg.split('%')[0]
@@ -94,7 +109,7 @@ def alerts():
         if not os.path.isfile(g) or not os.path.isfile(rsf):
             continue
         glines = open(g).read().split('\n')
-        rsrc = open(rsf).read()
+        rsrc = CONT.sub('', open(rsf).read())
         for i, l in enumerate(glines):
             if 'sendAlert(' not in l or l.strip().startswith('//'):
                 continue
@@ -134,6 +149,7 @@ def errors_mode():
         if os.path.isdir(d):
             b = '\n'.join(open(os.path.join(d, f)).read()
                           for f in sorted(os.listdir(d)) if f.endswith('.rs'))
+            b = CONT.sub('', b)
         blobs[pkg] = b
         return b
 

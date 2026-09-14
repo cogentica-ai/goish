@@ -4666,14 +4666,41 @@ body", a different message for the same refusal. Adding the sentinel
 means a tri-state on `multipart_form`, a data-structure change for an
 API-misuse path. Recorded at the site instead.
 
-**Running yield for `--errors`, counted rather than estimated:** five
-files opened, 39 entries. One real defect (the Host header), two text
-fixes, one stale reason, 29 correctly absent (19 waived — httpcommon
-and quic — plus structural impossibilities and §0.B sentinels), six
-checker artefacts. So roughly **1 defect per 39 entries**, and **1 file
-in 5** worth opening. The count stands at 128 after this commit's two
-fixes; treat it as a work queue, and expect most of it to be
-explainable rather than broken. Three of its hand-rolled
+### The crypto cluster: eighteen entries, no defects, and a third artefact
+
+`crypto/cipher/gcm.go` (4), `crypto/ed25519/ed25519.go` (4),
+`crypto/rsa/rsa.go` (3), `crypto/x509/x509.go` (3) and
+`crypto/ecdsa/ecdsa.go` (0). Higher consequence per entry than pprof or
+json, which is why they went first. Nothing:
+
+  * **Seven are FIPS 140-only mode** — `fips140only.Enabled` branches in
+    GCM's arbitrary-IV and non-AES paths, Ed25519ctx, and RSA's
+    rand-reader restriction. goish has the `fips140only` package but no
+    FIPS 140-3 mode, and `rc4.rs`, `hmac.rs`, `pbkdf2.rs` and `hkdf.rs`
+    each already say so at the site. Consistent, documented, correctly
+    absent.
+  * **Two are structurally impossible** — `x509: template can not be
+    nil` and `issuer can not be nil` guard `CreateRevocationList`'s
+    pointer parameters; goish takes `&RevocationList` and
+    `&Certificate`, which have no nil.
+  * **Two were this checker's fault**, and that is the useful part.
+    Ed25519's `default:` arm — "expected opts.HashFunc() zero (unhashed
+    message, for standard Ed25519) or SHA-512 (for Ed25519ph)" — IS
+    ported, and read as missing because the Rust port wraps the long
+    string with a `\` continuation, so the text is not contiguous in
+    the source. A THIRD false-positive class, after Go's `%T` suffixes
+    and per-file scoping. Continuations are now joined before matching;
+    128 became 126.
+  * The rest are internal robustness checks in `GenerateKey` (exponent
+    size, prime count) and one `internal error:` arm.
+
+**Running yield, counted:** ten files opened, 57 entries. One real
+defect (the Host header), two text fixes, one stale reason, 45
+correctly absent, eight artefacts of the checker itself. **The yield on
+crypto was zero**, so this list is not being worked further as a
+backlog — run it after a port lands, not through to the end. 126
+remain, and the honest expectation from the sample is that most are
+waivers, structural impossibilities, or artefacts. Three of its hand-rolled
 crypto primitives are gone this week — the SPKI walk, the TLS 1.2 PRF,
 the padding check — and each left a Go-generated table behind.
 
