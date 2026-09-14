@@ -1,6 +1,6 @@
-// goishlint:ignore GOISH018 EscapeString, NewTokenDecoder, RawToken, Token, attrval, autoClose, emitCDATA, name, nsname, pop, popEOF, popElement, push, pushEOF, pushElement, pushNs, rawToken, readName, switchToReader, text, translate,  — the Decoder state machine and the two name predicates, deliberately not in this first slice. The Decoder ones cannot be pinned a function at a time (they share a bufio reader, a name-space stack and an error latch), so they land together with their own ref smoke; isName/isNameString need Go's `first` and `second` unicode.RangeTables, 310 lines of xml.go that should be GENERATED from Go rather than transcribed, which is its own commit. emitCDATA and EscapeString are printer-side and belong with marshal.go. See the file header and ROADMAP §2.
+// goishlint:ignore GOISH018 EscapeString, NewTokenDecoder, RawToken, Token, attrval, autoClose, emitCDATA, name, nsname, pop, popEOF, popElement, push, pushEOF, pushElement, pushNs, rawToken, switchToReader, translate,  — the Decoder state machine and the two name predicates, deliberately not in this first slice. The Decoder ones cannot be pinned a function at a time (they share a bufio reader, a name-space stack and an error latch), so they land together with their own ref smoke; isName/isNameString need Go's `first` and `second` unicode.RangeTables, 310 lines of xml.go that should be GENERATED from Go rather than transcribed, which is its own commit. emitCDATA and EscapeString are printer-side and belong with marshal.go. See the file header and ROADMAP §2.
 // goishlint:ignore GOISH021 stkEOF, stkNs, stkStart, xmlPrefix, xmlURL, xmlnsPrefix, entity, errRawToken, HTMLEntity, HTMLAutoClose, TokenReader, stack — the Decoder's own stack kinds, its name-space constants and its types; all of them exist only for the state machine waived above and would be dead declarations without it. `entity`, `HTMLEntity` and `HTMLAutoClose` are the decoder's entity tables and only `rawToken` reads them; `errRawToken` is the sentinel `Token()` returns when a TokenReader is in use.
-// go: file encoding/xml/xml.go decls: SyntaxError.Error, StartElement.Copy, StartElement.End, CharData.Copy, Comment.Copy, ProcInst.Copy, Directive.Copy, CopyToken, isInCharacterRange, isNameByte, isName, isNameString, EscapeText, escapeText, Escape, procInst, Decoder.getc, Decoder.InputOffset, Decoder.InputPos, Decoder.savedOffset, Decoder.mustgetc, Decoder.ungetc, Decoder.space, Decoder.syntaxError, NewDecoder
+// go: file encoding/xml/xml.go decls: SyntaxError.Error, StartElement.Copy, StartElement.End, CharData.Copy, Comment.Copy, ProcInst.Copy, Directive.Copy, CopyToken, isInCharacterRange, isNameByte, isName, isNameString, EscapeText, escapeText, Escape, procInst, Decoder.text, Decoder.readName, Decoder.getc, Decoder.InputOffset, Decoder.InputPos, Decoder.savedOffset, Decoder.mustgetc, Decoder.ungetc, Decoder.space, Decoder.syntaxError, NewDecoder
 //
 // encoding/xml/xml.rs — the pure half of Go's xml.go.
 //
@@ -287,7 +287,16 @@ pub struct Decoder {
     /// element containing the attribute xmlns='...'."
     pub DefaultSpace: string,
 
+    /// Go: "Entity can be used to map non-standard entity names to
+    /// string replacements. The parser behaves as if these standard
+    /// mappings are present in the map, regardless of the actual map
+    /// content: lt, gt, amp, apos, quot."
+    pub Entity: Option<crate::gomap::map<string, string>>,
+
     r: alloc::boxed::Box<dyn crate::io::ByteReader>,
+    /// Go's `buf bytes.Buffer` — the scratch every token body is built
+    /// in. Reused, so `text` and `readName` both start with a Reset.
+    buf: crate::bytes::Buffer,
     /// Go's `saved *bytes.Buffer` — non-nil only while `rawToken` is
     /// recording raw input for a directive.
     saved: Option<crate::bytes::Buffer>,
@@ -314,7 +323,9 @@ pub fn NewDecoder<R: crate::io::Reader + 'static>(r: R) -> Decoder {
     return Decoder {
         Strict: true,
         DefaultSpace: string::from_static(""),
+        Entity: None,
         r: alloc::boxed::Box::new(crate::bufio::NewReader(r)),
+        buf: crate::bytes::Buffer::new(),
         saved: None,
         nextByte: -1,
         err: crate::errors::nil,
@@ -439,6 +450,302 @@ impl Decoder {
         }
     }
 
+    // go: sdk 1.25.5 encoding/xml/xml.go:1205-1227 Decoder.readName
+    /// Go: "Read a name and append its bytes to d.buf. The name is
+    /// delimited by any single-byte character not valid in names. All
+    /// multi-byte characters are accepted; the caller must check their
+    /// validity."
+    ///
+    /// That last sentence is the contract `isName` exists to satisfy —
+    /// this stops only at ASCII bytes it knows are not name bytes, so
+    /// any non-ASCII byte is taken and validated later.
+    pub(crate) fn readName(&mut self) -> bool {
+        let (mut b, mut ok) = self.mustgetc();
+        if !ok {
+            return false;
+        }
+        if b < 0x80 && !isNameByte(b) {
+            self.ungetc(b);
+            return false;
+        }
+        let _ = self.buf.WriteByte(b);
+        loop {
+            let g = self.mustgetc();
+            b = g.0;
+            ok = g.1;
+            if !ok {
+                return false;
+            }
+            if b < 0x80 && !isNameByte(b) {
+                self.ungetc(b);
+                break;
+            }
+            let _ = self.buf.WriteByte(b);
+        }
+        return true;
+    }
+
+    // go: sdk 1.25.5 encoding/xml/xml.go:989-1151 Decoder.text
+    /// Go: "Read plain text section (XML calls it character data). If
+    /// quote >= 0, we are in a quoted string and need to find the
+    /// matching quote. If cdata == true, we are in a `<![CDATA[`
+    /// section and need to find `]]>`. On failure return nil and leave
+    /// the error in d.err."
+    ///
+    /// Three things in here are worth knowing before changing it:
+    ///
+    ///   * `&#x` is hex, `&#X` is NOT — Go tests `b == 'x'` only, so
+    ///     `&#X4a;` is read as a decimal entity with no digits and
+    ///     fails with "(no semicolon)". Pinned.
+    ///   * `\r` and `\r\n` both become a single `\n`, and the
+    ///     two-byte history (`b0`, `b1`) exists for that and for
+    ///     spotting `]]>`. An entity expansion RESETS that history, so
+    ///     `]]` followed by `&gt;` is not a `]]>`.
+    ///   * the character-range sweep happens at the END over the whole
+    ///     buffer, not per byte, because an entity may have produced a
+    ///     rune the input never contained.
+    pub(crate) fn text(&mut self, quote: int, cdata: bool) -> Option<slice<byte>> {
+        let mut b0: byte = 0;
+        let mut b1: byte = 0;
+        let mut trunc: int = 0;
+        self.buf.Reset();
+        'input: loop {
+            let (b, ok) = self.getc();
+            if !ok {
+                if cdata {
+                    if crate::errors::Is(self.err.clone(), crate::io::EOF) {
+                        self.err = self.syntaxError("unexpected EOF in CDATA section");
+                    }
+                    return None;
+                }
+                break 'input;
+            }
+
+            // Go: "<![CDATA[ section ends with ]]>. It is an error for
+            // ]]> to appear in ordinary text, but it is allowed in
+            // quoted strings."
+            if quote < 0 && b0 == b']' && b1 == b']' && b == b'>' {
+                if cdata {
+                    trunc = 2;
+                    break 'input;
+                }
+                self.err = self.syntaxError("unescaped ]]> not in CDATA section");
+                return None;
+            }
+
+            // Go: "Stop reading text if we see a <."
+            if b == b'<' && !cdata {
+                if quote >= 0 {
+                    self.err = self.syntaxError("unescaped < inside quoted string");
+                    return None;
+                }
+                self.ungetc(b'<');
+                break 'input;
+            }
+            if quote >= 0 && b == crate::byte(quote) {
+                break 'input;
+            }
+            if b == b'&' && !cdata {
+                // Go: "Read escaped character expression up to
+                // semicolon. ... Parsers are required to recognize lt,
+                // gt, amp, apos, and quot even if they have not been
+                // declared."
+                let before = self.buf.Len();
+                let _ = self.buf.WriteByte(b'&');
+                let mut text = string::from_static("");
+                let mut haveText = false;
+                let (mut b, mut ok) = self.mustgetc();
+                if !ok {
+                    return None;
+                }
+                if b == b'#' {
+                    let _ = self.buf.WriteByte(b);
+                    let g = self.mustgetc();
+                    b = g.0;
+                    ok = g.1;
+                    if !ok {
+                        return None;
+                    }
+                    let mut base: int = 10;
+                    // Go tests 'x' and not 'X'. `&#X41;` is therefore a
+                    // DECIMAL entity with no digits.
+                    if b == b'x' {
+                        base = 16;
+                        let _ = self.buf.WriteByte(b);
+                        let g = self.mustgetc();
+                        b = g.0;
+                        ok = g.1;
+                        if !ok {
+                            return None;
+                        }
+                    }
+                    let start = self.buf.Len();
+                    while (b >= b'0' && b <= b'9')
+                        || (base == 16 && b >= b'a' && b <= b'f')
+                        || (base == 16 && b >= b'A' && b <= b'F')
+                    {
+                        let _ = self.buf.WriteByte(b);
+                        let g = self.mustgetc();
+                        b = g.0;
+                        ok = g.1;
+                        if !ok {
+                            return None;
+                        }
+                    }
+                    if b != b';' {
+                        self.ungetc(b);
+                    } else {
+                        let all = self.buf.Bytes();
+                        let raw: &[byte] = &all;
+                        let sdigits = string::from_bytes(&raw[start as usize..]);
+                        let _ = self.buf.WriteByte(b';');
+                        let (n, err) = crate::strconv::ParseUint(sdigits, base, 64);
+                        if err.IsNil() && n <= 0x10FFFF {
+                            text = string::from_rune(crate::rune(n));
+                            haveText = true;
+                        }
+                    }
+                } else {
+                    self.ungetc(b);
+                    if !self.readName() && !self.err.IsNil() {
+                        return None;
+                    }
+                    let g = self.mustgetc();
+                    b = g.0;
+                    ok = g.1;
+                    if !ok {
+                        return None;
+                    }
+                    if b != b';' {
+                        self.ungetc(b);
+                    } else {
+                        let all = self.buf.Bytes();
+                        let raw: &[byte] = &all;
+                        let name: Vec<byte> = raw[(before + 1) as usize..].to_vec();
+                        let _ = self.buf.WriteByte(b';');
+                        if isName(&name) {
+                            let key = string::from_bytes(&name);
+                            let k: &str = key.as_ref();
+                            // Go's `entity` map, the five XML requires.
+                            let builtin = match k {
+                                "lt" => Some('<'),
+                                "gt" => Some('>'),
+                                "amp" => Some('&'),
+                                "apos" => Some('\''),
+                                "quot" => Some('"'),
+                                _ => None,
+                            };
+                            match builtin {
+                                Some(r) => {
+                                    text = string::from_rune(crate::rune(r));
+                                    haveText = true;
+                                }
+                                None => {
+                                    if let Some(m) = self.Entity.as_ref() {
+                                        let (v, found) = m.Get(key.clone());
+                                        if found {
+                                            text = v;
+                                            haveText = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if haveText {
+                    self.buf.Truncate(before);
+                    let _ = self.buf.WriteString(text);
+                    b0 = 0;
+                    b1 = 0;
+                    continue 'input;
+                }
+                if !self.Strict {
+                    b0 = 0;
+                    b1 = 0;
+                    continue 'input;
+                }
+                let all = self.buf.Bytes();
+                let raw: &[byte] = &all;
+                let mut ent = string::from_bytes(&raw[before as usize..]);
+                let eb = ent.as_bytes();
+                if eb.is_empty() || eb[eb.len() - 1] != b';' {
+                    ent = ent + string::from_static(" (no semicolon)");
+                }
+                self.err = self.syntaxErrorString(
+                    string::from_static("invalid character entity ") + ent,
+                );
+                return None;
+            }
+
+            // Go: "We must rewrite unescaped \r and \r\n into \n."
+            if b == b'\r' {
+                let _ = self.buf.WriteByte(b'\n');
+            } else if b1 == b'\r' && b == b'\n' {
+                // Skip \r\n — we already wrote \n.
+            } else {
+                let _ = self.buf.WriteByte(b);
+            }
+
+            b0 = b1;
+            b1 = b;
+        }
+        // Go: `data := d.buf.Bytes()`. A bytes.Buffer that was never
+        // written returns a NIL slice, and `rawToken` tests that nil to
+        // decide whether a token was produced — so an empty result is
+        // not the same as no result. goish's `slice` has no nil, so the
+        // distinction is carried by Option, and the test has to be on
+        // the buffer BEFORE trunc: Go's re-slice of a non-nil slice
+        // stays non-nil even at length 0.
+        if self.buf.Len() == 0 {
+            return None;
+        }
+        let data = self.buf.Bytes();
+        let dv: &[byte] = &data;
+        let dv = &dv[..dv.len() - trunc as usize];
+
+        // Go: "Inspect each rune for being a disallowed character."
+        // Deliberately over the FINAL buffer: an entity may have
+        // produced a rune the input never contained.
+        let mut off: usize = 0;
+        while off < dv.len() {
+            let (r, size) = crate::unicode::utf8::DecodeRune(&dv[off..]);
+            if r == crate::unicode::utf8::RuneError && size == 1 {
+                self.err = self.syntaxError("invalid UTF-8");
+                return None;
+            }
+            off += size as usize;
+            if !isInCharacterRange(r) {
+                // Go formats this with %U, which is "U+" followed by
+                // AT LEAST four uppercase hex digits — U+0000, not
+                // U+0. Getting that wrong makes every such message
+                // differ from Go's on exactly the characters most
+                // likely to appear in a bug report.
+                let mut hex = crate::strings::ToUpper(crate::strconv::FormatInt(
+                    crate::int64(r),
+                    16,
+                ));
+                while hex.Len() < 4 {
+                    hex = string::from_static("0") + hex;
+                }
+                self.err = self
+                    .syntaxErrorString(string::from_static("illegal character code U+") + hex);
+                return None;
+            }
+        }
+        return Some(slice::<byte>::__from_vec(dv.to_vec()));
+    }
+
+    // go: none — goish-only: `syntaxError` takes a &str, and two call
+    // sites in `text` build their message at runtime. Same struct.
+    pub(crate) fn syntaxErrorString(&self, msg: string) -> crate::error {
+        return crate::errors::Wrap(SyntaxError {
+            Msg: msg,
+            Line: self.line,
+        });
+    }
+
     // go: sdk 1.25.5 encoding/xml/xml.go:468-476 Decoder.syntaxError
     /// Go: `&SyntaxError{Msg: msg, Line: d.line}`.
     pub(crate) fn syntaxError(&self, msg: &str) -> crate::error {
@@ -496,6 +803,50 @@ pub fn __byte_script(input: &[byte], script: &str) -> string {
         }
     }
     return out;
+}
+
+// go: none — goish-only: drive `text` from an example. Go's is
+// unexported and takes the Decoder's whole state, so the smoke builds a
+// decoder over `input`, sets Strict and any custom entities, calls
+// text(quote, cdata) and reports what Go's reference generator reports:
+// the bytes, the latched error, and the offset.
+#[doc(hidden)]
+pub fn __text_script(
+    input: &[byte],
+    quote: int,
+    cdata: bool,
+    strict: bool,
+    entities: &[(&str, &str)],
+) -> string {
+    let mut d = NewDecoder(crate::bytes::NewReader(slice::<byte>::__from_vec(input.to_vec())));
+    d.Strict = strict;
+    if !entities.is_empty() {
+        let mut m = crate::gomap::map::<string, string>::new();
+        for (k, v) in entities.iter() {
+            m.Set(
+                string::from_bytes(k.as_bytes()),
+                string::from_bytes(v.as_bytes()),
+            );
+        }
+        d.Entity = Some(m);
+    }
+    let out = d.text(quote, cdata);
+    let errs = if d.err.IsNil() {
+        string::from_static("<nil>")
+    } else {
+        d.err.Error()
+    };
+    return match out {
+        None => crate::fmt::Sprintf!("nil err=%s", errs),
+        Some(b) => {
+            let raw: &[byte] = &b;
+            let mut hex = string::from_static("");
+            for &x in raw.iter() {
+                hex = hex + crate::fmt::Sprintf!("%02x", crate::int(x));
+            }
+            crate::fmt::Sprintf!("%s err=%s off=%v", hex, errs, d.InputOffset())
+        }
+    };
 }
 
 // ─── the XML name character tables ────────────────────────────────────

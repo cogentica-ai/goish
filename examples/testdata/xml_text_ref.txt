@@ -1,0 +1,41 @@
+text "hello" q=-1 cdata=false strict=true ents=plain -> "hello" err="EOF" off=5
+text "" q=-1 cdata=false strict=true ents=plain -> nil err="EOF"
+text "a<b" q=-1 cdata=false strict=true ents=plain -> "a" err="<nil>" off=1
+text "a&lt;b" q=-1 cdata=false strict=true ents=plain -> "a<b" err="EOF" off=6
+text "&lt;&gt;&amp;&apos;&quot;" q=-1 cdata=false strict=true ents=plain -> "<>&'\"" err="EOF" off=25
+text "&#65;" q=-1 cdata=false strict=true ents=plain -> "A" err="EOF" off=5
+text "&#x41;" q=-1 cdata=false strict=true ents=plain -> "A" err="EOF" off=6
+text "&#x4a;&#X4a;" q=-1 cdata=false strict=true ents=plain -> nil err="XML syntax error on line 1: invalid character entity &# (no semicolon)"
+text "&#0;" q=-1 cdata=false strict=true ents=plain -> nil err="XML syntax error on line 1: illegal character code U+0000"
+text "&#xD7FF;&#xD800;" q=-1 cdata=false strict=true ents=plain -> "\ud7ff�" err="EOF" off=16
+text "&#1114112;" q=-1 cdata=false strict=true ents=plain -> nil err="XML syntax error on line 1: invalid character entity &#1114112;"
+text "&unknown;" q=-1 cdata=false strict=true ents=plain -> nil err="XML syntax error on line 1: invalid character entity &unknown;"
+text "&unknown;" q=-1 cdata=false strict=false ents=plain -> "&unknown;" err="EOF" off=9
+text "&foo;" q=-1 cdata=false strict=true ents=custom -> "FOO" err="EOF" off=5
+text "&nl;" q=-1 cdata=false strict=true ents=custom -> "\n" err="EOF" off=4
+text "&bar;" q=-1 cdata=false strict=true ents=custom -> nil err="XML syntax error on line 1: invalid character entity &bar;"
+text "&amp" q=-1 cdata=false strict=true ents=plain -> nil err="XML syntax error on line 1: unexpected EOF"
+text "&amp x" q=-1 cdata=false strict=true ents=plain -> nil err="XML syntax error on line 1: invalid character entity &amp (no semicolon)"
+text "&;" q=-1 cdata=false strict=true ents=plain -> nil err="XML syntax error on line 1: invalid character entity &;"
+text "&#;" q=-1 cdata=false strict=true ents=plain -> nil err="XML syntax error on line 1: invalid character entity &#;"
+text "a]]>b" q=-1 cdata=false strict=true ents=plain -> nil err="XML syntax error on line 1: unescaped ]]> not in CDATA section"
+text "]]&#32;>" q=-1 cdata=false strict=true ents=plain -> "]] >" err="EOF" off=8
+text "]]&#93;>" q=-1 cdata=false strict=true ents=plain -> "]]]>" err="EOF" off=8
+text "]]&gt;" q=-1 cdata=false strict=true ents=plain -> "]]>" err="EOF" off=6
+text "a]]>b" q=-1 cdata=true strict=true ents=plain -> "a" err="<nil>" off=4
+text "a]]>b" q=34 cdata=false strict=true ents=plain -> "a]]>b" err="EOF" off=5
+text "abc" q=-1 cdata=true strict=true ents=plain -> nil err="XML syntax error on line 1: unexpected EOF in CDATA section"
+text "ab]]>" q=-1 cdata=true strict=true ents=plain -> "ab" err="<nil>" off=5
+text "say \"hi\"" q=34 cdata=false strict=true ents=plain -> "say " err="<nil>" off=5
+text "hi\" rest" q=34 cdata=false strict=true ents=plain -> "hi" err="<nil>" off=3
+text "hi<there" q=34 cdata=false strict=true ents=plain -> nil err="XML syntax error on line 1: unescaped < inside quoted string"
+text "a\rb" q=-1 cdata=false strict=true ents=plain -> "a\nb" err="EOF" off=3
+text "a\r\nb" q=-1 cdata=false strict=true ents=plain -> "a\nb" err="EOF" off=4
+text "a\n\rb" q=-1 cdata=false strict=true ents=plain -> "a\n\nb" err="EOF" off=4
+text "a\r\r\nb" q=-1 cdata=false strict=true ents=plain -> "a\n\nb" err="EOF" off=5
+text "\v" q=-1 cdata=false strict=true ents=plain -> nil err="XML syntax error on line 1: illegal character code U+000B"
+text "\x00" q=-1 cdata=false strict=true ents=plain -> nil err="XML syntax error on line 1: illegal character code U+0000"
+text "é世界" q=-1 cdata=false strict=true ents=plain -> "é世界" err="EOF" off=8
+textraw 80 -> nil err="XML syntax error on line 1: invalid UTF-8"
+textraw 61c3 -> nil err="XML syntax error on line 1: invalid UTF-8"
+textraw 61c32862 -> nil err="XML syntax error on line 1: invalid UTF-8"

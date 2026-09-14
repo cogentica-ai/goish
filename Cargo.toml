@@ -77,6 +77,10 @@ lto = false
 
 
 [[example]]
+name = "xml_text_ref_smoke"
+path = "examples/xml_text_ref_smoke.rs"
+
+[[example]]
 name = "xml_decoder_bytes_ref_smoke"
 path = "examples/xml_decoder_bytes_ref_smoke.rs"
 
