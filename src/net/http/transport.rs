@@ -381,6 +381,22 @@ impl connectMethod {
     // go: sdk 1.25.5 net/http/transport.go:2039-2046 connectMethod.tlsHost
     /// Go: "tlsHost returns the host name to match against the peer's
     /// TLS certificate."
+    ///
+    /// UNCALLED, and the reason is structural rather than an oversight.
+    /// Go's `dialConn` takes the `connectMethod`, so it can ask it;
+    /// goish's takes the `connectMethodKey` and reaches the same string
+    /// through `host_without_port(key.addr)`.
+    ///
+    /// Those agree exactly on the branch that matters. `key()` copies
+    /// `targetAddr` into `addr` and only blanks it when a proxy is in
+    /// use AND `targetScheme == "http"` — and the two call sites are
+    /// both guarded by `key.scheme == "https"`, where the blanking
+    /// cannot apply. So `key.addr == cm.targetAddr` there, and both
+    /// strip the port with the same `hasPort` (one definition now; see
+    /// the note on `client::has_port`).
+    ///
+    /// Wiring this properly means giving `dialConn` the whole
+    /// `connectMethod`, which is a signature change and not a fix.
     pub fn tlsHost(&self) -> string {
         let h = self.targetAddr.clone();
         if super::http::hasPort(&h) {

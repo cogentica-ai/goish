@@ -3653,22 +3653,21 @@ fn ensure_default_port(host: &string, port: int) -> string {
     b.String()
 }
 
-/// Detect a `:port` suffix in `host`. Walk from end; `:` before `]`
-/// counts. Mirrors Go's `hasPort` shape (net/url/url.go).
+// go: none — goish idiom: this WAS a fourth `hasPort`, hand-written as
+//     a backwards scan. Go has two — `net/http.hasPort` and
+//     `net/http/cookiejar.hasPort` — and goish faithfully carries both,
+//     plus `httpproxy`'s. A third one inside net/http itself was
+//     goish's own, and it decides which host name the TLS handshake is
+//     given as SNI, so a drift between it and the anchored one would
+//     be a drift in what certificate the client accepts.
+//
+//     They agreed on every input traced — `[::1]`, `[::1]:443`,
+//     `example.com`, `example.com:443`, `""` — which is why this is a
+//     de-duplication and not a fix. One definition means the next
+//     reader cannot make them disagree.
+/// Detect a `:port` suffix in `host`, via the anchored `http::hasPort`.
 fn has_port(host: &string) -> bool {
-    // Go: for i := len(host) - 1; i >= 0; i-- { switch host[i] { case ':': return true; case ']': return false } }
-    let mut i = host.Len() - 1;
-    while i >= 0 {
-        let c = host[i];
-        if c == b':' {
-            return true;
-        }
-        if c == b']' {
-            return false;
-        }
-        i -= 1;
-    }
-    false
+    return super::http::hasPort(host);
 }
 
 /// Serialize a Request onto the wire as HTTP/1.1. Returns the bytes

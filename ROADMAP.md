@@ -4065,6 +4065,52 @@ all already reasoned about in the tree:
     the method and proto. The two agree on every input I traced,
     including a line with three spaces.
 
+**Eight more read 2026-09-14, no defect, one de-duplication.** Chosen
+for consequence — a function that is unwired in a security path is
+worth more than one that is unwired in `math/bits`. Recorded by name so
+the next pass does not re-read them:
+
+  - `http.rs`'s `isNotToken` — uncalled in GO TOO in 1.25.5. The only
+    reference is its own definition. Faithful.
+  - `http.rs`'s `aLongTimeAgo` — Go's single caller is
+    `connReader.abortPendingRead`, which goish diverges from
+    deliberately: goish disarms the poller watch where Go pokes a
+    deadline into the past, because goish's background read is a watch
+    and not a blocked goroutine. Documented at the site.
+  - `clone.rs`'s `cloneURL` and `cloneMultipartForm` — `Request.Clone`
+    relies on derived `Clone` being deep, and that CHECKS OUT:
+    `slice<T>` wraps a `Vec` and `map` is a value type, so goish's
+    clone is at least as isolating as Go's.
+  - `transfer.rs`'s `didEarlyClose`, `bodyRemains` and
+    `registerOnHitEOF` — all three trace to §0.A. The server's eager
+    body read makes `requestBodyRemains` false for every request, so
+    only the drained arm can run; `closedRequestBodyEarly` is CALLED
+    and returns false unconditionally for the same reason. The seam
+    where the branch returns is marked in `server.rs`.
+  - `transport.rs`'s `tlsHost` — the one worth the time, because it
+    picks the name the peer's certificate is matched against. Not a
+    defect: Go's `dialConn` takes the `connectMethod` and asks it,
+    goish's takes the `connectMethodKey` and reaches the same string
+    via `host_without_port(key.addr)`. `key()` only blanks `addr` when
+    a proxy is in use AND the target scheme is `http`, and both call
+    sites are guarded by `scheme == "https"`, so the two agree exactly
+    there.
+
+**The de-duplication.** Chasing `tlsHost` turned up a FOURTH `hasPort`
+in the tree. Go has two — `net/http.hasPort` and
+`net/http/cookiejar.hasPort` — and goish carries both plus
+`httpproxy`'s, all faithful. The fourth was goish's own, a
+hand-written backwards scan in `client.rs`, and it is what decides the
+SNI the TLS handshake is given. It agreed with the anchored one on
+every input traced, so this is not a fix; it is removing the
+possibility that a later edit makes them disagree about which
+certificate the client accepts. It now delegates.
+
+That is the same shape §2e recorded for `checkRedirect`: a rule
+written in two places with the anchored one unwired. The rate holds at
+roughly one defect per ten entries, and the defect that motivated the
+section remains the only one found.
+
 **Three more, chosen for consequence rather than order, all fine.**
 
   - `transport.rs`'s `writeBufferSize` is uncalled and the field it
