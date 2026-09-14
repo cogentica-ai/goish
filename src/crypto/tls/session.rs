@@ -10,10 +10,27 @@
 // go: none — goish-only legacy: a hand-written global session cache
 // predating the verbatim port. Go's equivalent surface is
 // ClientSessionCache + lruSessionCache (common.go) with
-// Conn.loadSession / saveSessionTicket, which are being ported; once
-// the remaining client-handshake declarations land and the dial path
-// moves onto them, this file is slated for deletion. Nothing in here
-// corresponds to a Go declaration — names are goish-invented.
+// Conn.loadSession / saveSessionTicket. Nothing in here corresponds to
+// a Go declaration — names are goish-invented.
+//
+// THAT CONDITION IS MET, checked 2026-09-14. `Conn.loadSession` is
+// ported and called from the live `clientHandshake`
+// (handshake_client.rs:5105); `Conn.handleNewSessionTicket` is ported
+// and reached from conn.rs's post-handshake dispatch, and stores into
+// `config.ClientSessionCache`. The dial path has moved.
+//
+// And `put` BELOW HAS NO CALLER under `src/` — the only calls in the
+// tree are in examples/tls_session_expiry_smoke.rs. Nothing in the
+// library ever writes this cache, so `take` returns None in any
+// goish-only program, and the ~80-line pre_shared_key branch it feeds
+// at handshake_client.rs:179 has never run end to end. That branch is
+// not dead — `put` is public, so an embedder can reach it — it is
+// untested, which is worse for a PSK binder.
+//
+// ROADMAP §1 sizes the deletion: it is this file PLUS that branch,
+// `build_client_hello_with_psk`, `patch_psk_binder`, the
+// `offered_psk_session` thread, and repointing the expiry smoke at the
+// ported lruSessionCache.
 //
 // Holds NewSessionTicket-derived resumption state keyed by server_name so
 // that a subsequent Dial to the same host can resume via pre_shared_key.

@@ -1275,7 +1275,7 @@ What is left of the demolition:
 | file | LOC | anchors | state |
 |---|--:|--:|---|
 | `record.rs` | 975 | 1 | invented. `conn.rs` is Go's record layer, ported with 55 anchors, and both are live. **Diffing it against conn.rs has produced five security defects** — three on 2026-09-04, two more on 2026-09-14 (the SPKI walk that skipped the algorithm OID, and the absent Lucky13 countermeasure) — each fixed with a smoke. One more was reported and then RETRACTED — a discarded RNG error: `crypto::rand::Read` calls `fatal` on failure, so the `let _ =` could not leave a zero IV. The file header carries the retraction and lists what was checked clean. Three of its hand-rolled crypto primitives were deleted on 2026-09-14 (the SPKI walk, the TLS 1.2 PRF, the CBC padding check), each delegating to the anchored port behind a Go-generated table. Retiring it is still the goal; until then it is no longer unexamined. |
-| `session.rs` | 261 | 0 | invented. Diffed 2026-09-06 against Go's lruSessionCache: it bounded tickets PER HOST and nothing bounded the host count, where Go bounds keys. Fixed, and the smoke's existing capacity row could not have caught it — 200 tickets on one host was already bounded. |
+| `session.rs` | 258 | 0 | invented. Diffed 2026-09-06 against Go's lruSessionCache: it bounded tickets PER HOST and nothing bounded the host count, where Go bounds keys. Fixed, and the smoke's existing capacity row could not have caught it — 200 tickets on one host was already bounded. **Its removal condition is now MET (2026-09-14)** — see §1's note below — and its cache has no writer. |
 
 ### The invented CLIENT handshake, audited 2026-09-06
 
@@ -4402,7 +4402,53 @@ by, and a half-stateful check here would be a third behaviour to
 maintain. The constants now carry the explanation.
 
 That closes record.rs as an audit target. What is left is the
-retirement, which §1 already sequences. Three of its hand-rolled
+retirement, which §1 already sequences.
+
+### session.rs: the removal condition is met, and the cache has no writer
+
+`session.rs`'s own header says it is "slated for deletion once the
+ported ClientSessionCache path takes over". Checked 2026-09-14, both
+halves of that path are ported AND wired:
+
+  * `Conn.handleNewSessionTicket` — anchored to
+    handshake_client_tls13.go:857-912, and reached from `conn.rs`'s
+    post-handshake dispatch. It stores into `config.ClientSessionCache`.
+  * `Conn.loadSession` — anchored, and called from the live
+    `clientHandshake` (handshake_client.rs:5105).
+
+So the condition holds. But the sharper fact is the one that makes
+deleting it safe rather than merely tidy: **`session::put` has no caller
+anywhere under `src/`.** The only calls in the tree are five lines of
+`examples/tls_session_expiry_smoke.rs`. Nothing in the library ever
+writes this cache.
+
+The consequence runs downstream. `session::take` IS called, at
+handshake_client.rs:179, by the invented client — which then has about
+eighty lines deciding whether to offer a `pre_shared_key`, computing
+the obfuscated ticket age, and calling `build_client_hello_with_psk` and
+`patch_psk_binder`. Those two functions have exactly one call site each,
+inside that branch. In any program built only from goish, `take`
+returns `None` every time and none of it runs.
+
+Be precise about what that is and is not. It is not dead code: `put` is
+`pub` in a `pub mod`, so an embedder can populate the cache and reach
+the whole path. It is code that **nothing in this tree has ever
+exercised end to end** — no example reaches
+`build_client_hello_with_psk`, and `tls_session_expiry_smoke` tests
+`put`/`take` in isolation, which is the "green smoke on machinery
+nothing calls" shape. A PSK binder computed wrongly would pass every
+test goish has.
+
+**Sizing the deletion, since "slated" has not been actionable.** It is
+not the 258 lines of `session.rs`. It is those plus the ~80-line PSK
+branch in `do_client_handshake`, `build_client_hello_with_psk`,
+`patch_psk_binder`, the `offered_psk_session` thread through to
+handshake_client.rs:907, and `tls_session_expiry_smoke` — which should
+be repointed at the ported `lruSessionCache` rather than dropped, since
+its expiry rows are the only thing pinning that behaviour anywhere.
+Deliberately not done in the same pass that found it: it is a
+subtraction from the invented client, and §1 sequences those behind the
+retirement, not ahead of it. Three of its hand-rolled
 crypto primitives are gone this week — the SPKI walk, the TLS 1.2 PRF,
 the padding check — and each left a Go-generated table behind.
 
