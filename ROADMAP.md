@@ -1620,6 +1620,56 @@ defects, in three separate packages:
 | `crypto/tls/session.rs` | 145 | cached tickets never expired; the cache was unbounded, so the peer decided how much it held |
 | `net/dnsclient.rs` | 1143 | a xorshift transaction ID where Go uses the OS-seeded generator; a truncated answer returned as success |
 
+**`src/crypto/ssh/mod.rs` — the client did not verify host keys by
+default, found 2026-09-14.** Re-running §2b's criterion turned up 97
+unanchored files of 120+ lines. Most of the large ones are generated
+tables. One is 1,292 lines of hand-written SSH-2.0 client, whose own
+header says it best: "there is no Go source to anchor against and no
+tier that can compare this file to anything … Nothing here has been
+diffed for protocol conformance, because there is no reference to diff
+against."
+
+`ClientConfig::new()` set `HostKeyCallback: InsecureIgnoreHostKey()`.
+
+The handshake DOES verify the server's signature over the exchange hash
+— that part is present and correctly ordered, before the callback. But
+a signature only proves the peer holds the private key for the host key
+it SENT. Whether that host key is the one you meant to reach is exactly
+and only what the callback decides, and the default threw the question
+away without saying so.
+
+This is the shape of CVE-2017-3204, for which golang.org/x/crypto/ssh
+made `HostKeyCallback` a REQUIRED field — a nil one is an error there
+rather than a permissive default. goish has no nil for a `Box<dyn
+Fn>`, so the same semantics are now a default that FAILS:
+`RequireHostKeyCallback`, whose message names both escape hatches.
+`InsecureIgnoreHostKey` still exists, as it does in x/crypto/ssh; what
+changed is that a caller has to say it.
+
+Nothing under `src/` or `examples/` constructs an `ssh::ClientConfig`,
+so this is pure public API and the change breaks no caller — which is
+also why no test would ever have caught it.
+
+`ssh_host_key_default_smoke` has nine rows. Four pin the default
+refusing — including that it refuses a SECOND key and the empty key,
+since a default that happened to accept some particular blob would be
+worse than one that accepted all — four pin `FixedHostKey` accepting
+only the key it was given and rejecting a truncated or empty one, and
+one keeps the escape hatch working. Restoring the old default turns
+exactly the four default rows red and leaves the other five green.
+
+Worth recording about the smoke rather than the defect: its second row
+called `e.Error()` unguarded, so under the perturbation it PANICKED on
+the nil error from the first failing row and exited 2, reporting one
+bit where it could report eight. A smoke that dies on its own first
+failure is a worse instrument than one that reports all its rows.
+
+What is NOT done here: the rest of the file. Key derivation, the
+exchange-hash construction, the DH shared-secret bounds, packet framing
+and the MAC comparison are all still undiffed, and there is no
+reference in the tree to diff them against. This entry fixed the one
+defect that needs no reference to see.
+
 **`src/net/lookup.rs` — context accepted and ignored, found 2026-09-06.**
 Nine public methods take `ctx: &Arc<dyn context::Context>` —
 `Resolver::LookupHost`, `LookupIPAddr`, `LookupIP`, `LookupCNAME`,

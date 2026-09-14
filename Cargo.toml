@@ -77,6 +77,10 @@ lto = false
 
 
 [[example]]
+name = "ssh_host_key_default_smoke"
+path = "examples/ssh_host_key_default_smoke.rs"
+
+[[example]]
 name = "http_valid_host_header_smoke"
 path = "examples/http_valid_host_header_smoke.rs"
 

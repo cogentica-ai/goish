@@ -634,6 +634,43 @@ impl AuthMethod for PublicKeyAuth {
 
 pub type HostKeyCallback = Box<dyn Fn(&str, &[byte]) -> error + Send + Sync>;
 
+/// The default. REFUSES, and that is the point.
+///
+/// An SSH client that does not verify the server's host key is
+/// man-in-the-middleable by anyone on the path: the signature check
+/// above proves the peer holds the private key for the host key it
+/// SENT, not that the host key is the one you meant to talk to. Only
+/// the callback closes that gap.
+///
+/// `ClientConfig::new()` used to default to `InsecureIgnoreHostKey`,
+/// so a caller who never thought about host keys got no verification
+/// and no indication of it. That is the shape of CVE-2017-3204, for
+/// which golang.org/x/crypto/ssh made `HostKeyCallback` a required
+/// field — a nil one is an error there rather than a permissive
+/// default. goish has no nil for a `Box<dyn Fn>`, so the same
+/// semantics are spelled as a default that fails.
+///
+/// `InsecureIgnoreHostKey()` is still available for callers who mean
+/// it, exactly as it is in x/crypto/ssh. The difference is that they
+/// now have to say so.
+// go: none — INVENTED, like the rest of this file. The nearest thing
+// in Go is x/crypto/ssh making ClientConfig.HostKeyCallback a required
+// field; there is no declaration to anchor to.
+pub fn RequireHostKeyCallback() -> HostKeyCallback {
+    return Box::new(|_addr, _key_blob| {
+        return ssh_err(
+            "ssh: no HostKeyCallback set: refusing to connect without host key verification \
+             (use ssh::FixedHostKey, or ssh::InsecureIgnoreHostKey if you really mean it)",
+        );
+    });
+}
+
+// go: none — INVENTED, like the rest of this file. x/crypto/ssh has a
+// function of this name and intent; there is no Go stdlib declaration
+// to anchor to. It was bare until 2026-09-14, which is why giving it a
+// doc comment is what made GOISH014 notice it.
+/// Accept any host key. Named to be hard to use by accident, and no
+/// longer the default — see `RequireHostKeyCallback`.
 pub fn InsecureIgnoreHostKey() -> HostKeyCallback {
     Box::new(|_addr, _key_blob| errors::nil)
 }
@@ -662,7 +699,8 @@ impl ClientConfig {
         ClientConfig {
             User: string::from_static(""),
             Auth: Vec::new(),
-            HostKeyCallback: InsecureIgnoreHostKey(),
+            // NOT InsecureIgnoreHostKey — see RequireHostKeyCallback.
+            HostKeyCallback: RequireHostKeyCallback(),
         }
     }
 }
