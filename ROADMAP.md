@@ -1620,6 +1620,44 @@ defects, in three separate packages:
 | `crypto/tls/session.rs` | 145 | cached tickets never expired; the cache was unbounded, so the peer decided how much it held |
 | `net/dnsclient.rs` | 1143 | a xorshift transaction ID where Go uses the OS-seeded generator; a truncated answer returned as success |
 
+**The rest of §2b's large entries, checked 2026-09-14 — and the list is
+in better shape than its age suggests.** Re-running the criterion gives
+97 unanchored files of 120+ lines. Sharpening it to "unanchored AND no
+example mentions the module" gives 29, and that intersection turns out
+to be dominated by generated tables (`p256_table`, the four unicode and
+language table files), runtime internals exercised through their
+parents (`sched/*`, `symbolize/*`), and the macro files. Nothing new.
+
+Two entries were read properly because they parse untrusted input,
+which is the shape that matters here:
+
+  * **`net/dnsmessage/mod.rs`** (2,013 lines) — CLEAN. The compression
+    pointer loop is bounded at 10 hops exactly as Go's is, every read
+    is bounds-checked, and the name-length check sits before the copy
+    into the fixed array. Structurally identical to Go's
+    `unpackCompressed`, including accumulating the name and bounding it
+    at the end. And `dnsmessage_ref_smoke` already drives the HOSTILE
+    cases against a running Go — self-pointer, forward pointer,
+    past-end, both reserved prefixes, truncated label, no terminator,
+    label-too-long — so the decoder is pinned despite zero anchors. Its
+    header's claim that the provenance is unanchorable against the
+    pinned SDK (it came from a newer x/net, with SVCB) is accurate and
+    already recorded.
+  * **`mime/multipart/reader.rs`** (600 lines) — CLEAN, and already
+    worked by this discipline: its header records that two of the
+    thirteen waived streaming declarations turned out to be defects
+    (the boundary scanner truncating a part at data that merely STARTED
+    like the boundary, and the header parser rejecting folded lines),
+    both fixed with smokes. Five examples cover it, two of them ref
+    smokes.
+
+So §2b's high-value surface is now largely worked: `record.rs` and
+`session.rs` closed out above, `crypto/ssh` yielded the host-key
+default, and these three are clean with the verdicts recorded so the
+next reader does not re-open them. What is left on the list is
+generated data and internals, where the criterion no longer
+discriminates.
+
 **`src/net/http/server_tls.rs` — checked 2026-09-14, CLEAN on every
 dimension looked at.** 829 unanchored lines running a dedicated HTTPS
 serve loop, because goish's `serve_conn` is specialised to the concrete
