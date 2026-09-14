@@ -72,12 +72,33 @@ pub fn cipher_suite_tls13(id: u16) -> Option<CipherSuiteTls13> {
 
 // ─── ExpandLabel (RFC 8446, Section 7.1) ──────────────────────────────
 //
-// HKDF-Expand-Label(Secret, Label, Context, Length) =
-//     HKDF-Expand(Secret, HkdfLabel, Length)
+// HAND-ROLLED HERE UNTIL 2026-09-14, and Go has no such function: Go's
+// key_schedule.go calls `tls13.ExpandLabel`, declared once in
+// crypto/internal/fips140/tls13. goish had two, and this was the
+// second — every TLS 1.3 traffic key, IV and Finished key on the
+// invented handshake came out of it.
 //
-// HkdfLabel = uint16(length) || (len("tls13 " + Label) as u8)
-//             || "tls13 " || Label || (len(Context) as u8) || Context
+// Found mechanically by scripts/dup_impl_check.py, the same sweep that
+// turned up the duplicate TLS 1.2 PRF in record.rs.
+//
+// The two agreed on every input the protocol can produce, and NOT on
+// every input. Go refuses `len("tls13 ")+len(label) > 255` and
+// `len(context) > 255`, with a comment explaining why it chose a panic
+// over a randomized return; this copy wrote both lengths with `as
+// byte`, so a 250-byte label silently wrapped its length prefix into an
+// HkdfLabel no peer would agree on. Unreachable through the protocol —
+// labels are fixed constants and context is a transcript hash — which
+// is why this is duplication and not a vulnerability. Losing the guard
+// is what a second copy does.
+//
+// `tls13_expandlabel_dup_smoke` is the evidence, and it predates the
+// deletion on purpose: 648 vectors from Go 1.25.5's own
+// tls13.ExpandLabel over SHA-256 and SHA-384, each run through BOTH
+// implementations so neither was graded against the other. It stays,
+// now pinning this adapter's shape conversion.
 
+/// `tls13.ExpandLabel` in the array-shaped spelling this file's
+/// callers use. The derivation itself is the anchored port.
 pub fn ExpandLabel(
     hash_fn: fn() -> Box<dyn HashTrait + Send + Sync>,
     secret: &[byte],
@@ -85,28 +106,14 @@ pub fn ExpandLabel(
     context: &[byte],
     length: usize,
 ) -> Vec<byte> {
-    // Build hkdfLabel: length(2) || label_length(1) || "tls13 " || label || context_length(1) || context
-    const PREFIX: &[u8] = b"tls13 ";
-    let label_bytes = label.as_bytes();
-    let full_label_len = PREFIX.len() + label_bytes.len();
-
-    let mut hkdf_label: Vec<byte> = Vec::new();
-    let len_u16 = length as u16;
-    hkdf_label.push((len_u16 >> 8) as byte);
-    hkdf_label.push((len_u16 & 0xFF) as byte);
-    hkdf_label.push(full_label_len as byte);
-    hkdf_label.extend_from_slice(PREFIX);
-    hkdf_label.extend_from_slice(label_bytes);
-    hkdf_label.push(context.len() as byte);
-    hkdf_label.extend_from_slice(context);
-
-    // HKDF-Expand
-    let secret_s = slice::__from_vec(secret.to_vec());
-    // info must be a goish string for hkdf::Expand
-    use crate::gostring::string as gostring;
-    let info = gostring::from_bytes(&hkdf_label);
-    let (out, _) = hkdf::Expand(hash_fn, secret_s, info, length as int);
-    out.__into_vec()
+    return crate::crypto::internal::fips140::tls13::ExpandLabel(
+        hash_fn,
+        slice::__from_vec(secret.to_vec()),
+        label,
+        slice::__from_vec(context.to_vec()),
+        crate::int(crate::int64(length)),
+    )
+    .__into_vec();
 }
 
 // ─── DeriveSecret (RFC 8446, Section 7.1) ─────────────────────────────

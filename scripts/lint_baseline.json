@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 7846,
+ "total": 7835,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -110,7 +110,7 @@
   },
   "src/crypto/internal/fips140/edwards25519/edwards25519.rs": {
    "GOISH014": 21,
-   "GOISH023": 40
+   "GOISH023": 39
   },
   "src/crypto/internal/fips140/edwards25519/field/fe.rs": {
    "GOISH023": 25
@@ -200,10 +200,9 @@
    "GOISH023": 15
   },
   "src/crypto/tls/key_schedule.rs": {
-   "GOISH005": 6,
    "GOISH008": 10,
    "GOISH014": 16,
-   "GOISH023": 16
+   "GOISH023": 15
   },
   "src/crypto/tls/mod.rs": {
    "GOISH014": 31,
@@ -211,8 +210,8 @@
    "GOISH023": 22
   },
   "src/crypto/tls/record.rs": {
-   "GOISH014": 15,
-   "GOISH023": 13
+   "GOISH014": 13,
+   "GOISH023": 12
   },
   "src/crypto/tls/session.rs": {
    "GOISH005": 1,

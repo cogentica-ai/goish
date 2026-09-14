@@ -180,18 +180,6 @@ pub struct KeyMaterial {
 //                             HMAC_SHA256(secret, A(2) + seed) + ...
 //   where A(0) = seed,  A(i) = HMAC_SHA256(secret, A(i-1))
 
-fn hmac_sha256(key: &[byte], data: &[byte]) -> [byte; 32] {
-    let key_slice = slice::<byte>::__from_vec(key.to_vec());
-    let mut h = hmac::New(crate::crypto::sha256::NewHash, key_slice);
-    let data_slice = slice::<byte>::__from_vec(data.to_vec());
-    let _ = WriterTrait::Write(&mut h, data_slice);
-    let result = HashTrait::Sum(&h, slice::<byte>::__from_vec(Vec::new()));
-    let v = result.__into_vec();
-    let mut out = [0u8; 32];
-    let n = core::cmp::min(v.len(), 32);
-    out[..n].copy_from_slice(&v[..n]);
-    out
-}
 
 fn hmac_sha1(key: &[byte], data: &[byte]) -> [byte; 20] {
     let key_slice = slice::<byte>::__from_vec(key.to_vec());
@@ -206,36 +194,40 @@ fn hmac_sha1(key: &[byte], data: &[byte]) -> [byte; 20] {
     out
 }
 
-/// P_SHA256(secret, seed) — fills `out` with pseudorandom bytes.
-pub fn p_sha256(out: &mut [byte], secret: &[byte], seed: &[byte]) {
-    let want = out.len();
-    let mut written = 0usize;
-    // A(0) = seed
-    let mut a: Vec<byte> = seed.to_vec();
-
-    while written < want {
-        // A(i) = HMAC_SHA256(secret, A(i-1))
-        let ai = hmac_sha256(secret, &a);
-        a = ai.to_vec();
-
-        // output_i = HMAC_SHA256(secret, A(i) || seed)
-        let mut input: Vec<byte> = Vec::with_capacity(32 + seed.len());
-        input.extend_from_slice(&a);
-        input.extend_from_slice(seed);
-        let block = hmac_sha256(secret, &input);
-
-        let copy_len = core::cmp::min(block.len(), want - written);
-        out[written..written + copy_len].copy_from_slice(&block[..copy_len]);
-        written += copy_len;
-    }
-}
+// P_SHA256 and the TLS 1.2 PRF built on it USED TO LIVE HERE, 42 lines
+// of HMAC ladder. Go declares `prf12` exactly once (prf.go), delegating
+// to crypto/internal/fips140/tls12.PRF; goish declared it twice, and
+// this was the second — hand-rolled, SHA-256 only, deriving the master
+// secret and the key block for the invented TLS 1.2 handshake.
+//
+// Found mechanically, by asking which free functions goish defines more
+// often than Go does. That question had already turned up a fourth
+// `hasPort` and a third SubjectPublicKeyInfo walk; this was its third
+// answer, and the first one in key derivation.
+//
+// The two agreed. `tls_prf_dup_smoke` is the proof and it predates the
+// deletion deliberately: 315 vectors from Go 1.25.5's own tls12.PRF
+// (scripts/goref.sh crypto/internal/fips140/tls12, committed as
+// examples/testdata/tls12_prf_ref.txt), each run through BOTH
+// implementations, so neither could be graded against the other. 630
+// green checks are what made removing this safe rather than hopeful.
+//
+// The table stays. It now pins this adapter — the label||seed splice
+// and the keyLen handling — against Go, which is where the last
+// remaining chance of divergence lives.
 
 /// TLS 1.2 PRF(secret, label, seed) → fills out.
 pub fn prf12(out: &mut [byte], secret: &[byte], label: &[byte], seed: &[byte]) {
-    let mut label_seed: Vec<byte> = Vec::with_capacity(label.len() + seed.len());
-    label_seed.extend_from_slice(label);
-    label_seed.extend_from_slice(seed);
-    p_sha256(out, secret, &label_seed);
+    let derived = super::prf::prf12(
+        crate::crypto::sha256::NewHash
+            as fn() -> alloc::boxed::Box<dyn crate::hash::Hash + Send + Sync>,
+        slice::<byte>::__from_vec(secret.to_vec()),
+        crate::gostring::string::from_bytes(label),
+        slice::<byte>::__from_vec(seed.to_vec()),
+        crate::int(crate::int64(out.len())),
+    );
+    let d: &[byte] = &derived;
+    out.copy_from_slice(d);
 }
 
 /// Derive master secret (RFC 5246 §8.1):

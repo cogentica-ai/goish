@@ -75,6 +75,18 @@ strip = false
 lto = false
 
 [[example]]
+name = "ed25519_ctbyteeq_smoke"
+path = "examples/ed25519_ctbyteeq_smoke.rs"
+
+[[example]]
+name = "tls13_expandlabel_dup_smoke"
+path = "examples/tls13_expandlabel_dup_smoke.rs"
+
+[[example]]
+name = "tls_prf_dup_smoke"
+path = "examples/tls_prf_dup_smoke.rs"
+
+[[example]]
 name = "dns_strict_errors_smoke"
 path = "examples/dns_strict_errors_smoke.rs"
 

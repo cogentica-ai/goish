@@ -49,6 +49,8 @@ use crate::crypto::internal::fips140::check as _check;
 // go: none — Go calls byteorder.LEUint64; the fips140deps shim is not
 // reachable from this module, so the helper is local.
 /// LEUint64 — decode a little-endian uint64 from an 8-byte window.
+// go: none — goish-only: see the note on field/fe.rs's LEUint64. Same
+// `&[byte]`-versus-owned-`slice<byte>` reason, same from_le_bytes body.
 pub(super) fn LEUint64(b: &[byte]) -> u64 {
     let mut arr = [0u8; 8];
     arr.copy_from_slice(&b[0..8]);

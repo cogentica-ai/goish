@@ -4122,6 +4122,116 @@ consumers not yet written — which is the opposite of
 `allow(unused_variables)`, where two of three files sat on a real bug.
 Worth knowing before the next sweep.
 
+## 2e-iii. Declared twice where Go declares it once, 2026-09-14
+
+Three findings in two days had the same shape and each was found by
+hand: a fourth `hasPort` deciding the SNI a TLS client sends, a third
+walk down to a certificate's SubjectPublicKeyInfo, and — once those
+were fixed — the question of what else. `scripts/dup_impl_check.py`
+asks it mechanically: **which free functions does goish declare more
+often than Go does?**
+
+The comparison has to be against Go's own count, because plenty of
+names are legitimately per-package — `GenerateKey` exists once per
+algorithm in both trees. Two false-positive classes were worth fixing
+before the tool was worth running, and both are recorded in it:
+
+  * Go generics. `func pHash[H hash.Hash](` did not match a `^func
+    NAME(` regex, so `pHash` read as a goish duplicate when Go declares
+    it twice.
+  * Go's `vendor/`. The stdlib genuinely vendors golang.org/x/net,
+    goish ports those files, and their anchors point at them. Skipping
+    it reported `hasPort`, `canonicalAddr`, `idnaASCII` and `isASCII` as
+    duplicates when every copy is an anchored port — including the
+    `hasPort` that had just been FIXED.
+
+With both fixed the list is 9, and two of them are key derivation.
+
+### Two TLS 1.2 PRFs, and two HKDF-Expand-Labels
+
+| Go declares | goish declared |
+|---|---|
+| `prf12` once, in `crypto/tls/prf.go`, delegating to `tls12.PRF` | `prf.rs::prf12` (the port) **and** `record.rs::prf12`, hand-rolled, SHA-256 only |
+| `ExpandLabel` once, in `crypto/internal/fips140/tls13` — `key_schedule.go` has no such function | `fips140/tls13::ExpandLabel` (the port) **and** `key_schedule.rs::ExpandLabel`, hand-rolled |
+
+Between them these derive the TLS 1.2 master secret and key block, and
+every TLS 1.3 traffic key, IV and Finished key. A disagreement is a
+handshake that negotiates different keys depending on which half of the
+library got there first.
+
+**They agreed.** That is the ordinary outcome for this finding — all
+three of the earlier duplicates agreed with their originals too — and
+it is why the value here is the guarantee rather than a fix. Two
+implementations of one rule drift, and the copy a later edit corrects
+may not be the copy the live path calls.
+
+**Except in one place, where the copy had already lost something.** Go's
+`ExpandLabel` refuses `len("tls13 ")+len(label) > 255` and
+`len(context) > 255`, with a comment explaining at length why it chose
+a panic over a randomized return. `key_schedule.rs`'s copy wrote both
+lengths with `as byte`, so a 250-byte label silently wrapped its length
+prefix and produced an HkdfLabel no peer would agree on. Not reachable
+through the protocol — labels are fixed constants and context is a
+transcript hash — so duplication, not a vulnerability. But that guard
+is exactly the kind of thing a second copy loses, and nothing would
+have told anyone.
+
+**How they were retired.** Both smokes PREDATE the deletions, which is
+the point:
+
+  * `tls_prf_dup_smoke` — 315 vectors from Go's own `tls12.PRF`, via
+    `scripts/goref.sh crypto/internal/fips140/tls12`, run through both
+    implementations. 630 green checks.
+  * `tls13_expandlabel_dup_smoke` — 648 vectors from Go's own
+    `tls13.ExpandLabel` over SHA-256 and SHA-384, same method. 1,296
+    green checks.
+
+Neither table grades one goish copy against the other; both are graded
+against Go, because two copies wrong the same way would otherwise pass.
+Perturbations: swapping the `label||seed` order in record.rs turns 120
+of its 315 rows red, and xor-ing the context-length byte in
+key_schedule.rs turns all 648 of its rows red.
+
+Both hand-rolled bodies are gone, along with a now-dead `hmac_sha256`
+helper; what remains at each site is a shape adapter, and the tables
+stay to pin those.
+
+### The rest of the list, and why it is quiet
+
+`ctEq` in `record.rs` looks like the same thing and is not: Go's single
+`ctEq` is bigmod's, over `uint`, and record.rs's is a documented
+byte-wise 255/0 adapter over the ported `subtle` primitive — Go writes
+the same fold inline as `subtle.ConstantTimeCompare(...) & int(...)`.
+`LEUint64`/`LEPutUint64` are the same edwards25519 shape as
+`ConstantTimeByteEq` — Go's `scalar.go` and `fe.go` call
+`byteorder.LEUint64` and goish has two private copies — and here the
+copies are RIGHT. The ported `LEUint64` takes an owned `slice<byte>`,
+so delegating from the `&[byte]` these hold would allocate on every
+call, inside field-element decoding and scalar multiplication. The body
+is `u64::from_le_bytes`, which cannot drift from
+`binary.LittleEndian.Uint64`. Both now say so at the site, so the next
+run of the tool does not re-chase them — which is the other thing this
+kind of list needs: a recorded answer, not just a recorded finding.
+`ParseBool`, `NewScanner`, `needsEncoding` are unrelated functions that
+share a name.
+
+`ConstantTimeByteEq` I first wrote off as another shim, and it was not
+— which is worth recording, because the check that caught it was
+opening the third file rather than trusting the pattern. goish's two
+`subtle` copies are Go's two; the extra was a PRIVATE hand-rolled body
+in `edwards25519.rs`, where Go's `tables.go` calls
+`subtle.ConstantTimeByteEq`. Its two callers select a point from the
+precomputed table during scalar multiplication, so constant time there
+is what stops the private scalar leaking through timing. The body was
+the same expression, so no defect — a third copy of a constant-time
+primitive is still the last place to keep one. It now delegates, with
+an exhaustive 65,536-pair table (every `(x, y)` byte pair, all three
+implementations) rather than a sample.
+
+So: 9 candidates, 2 real, and the tool paid for itself on its first
+run. Re-run it after any port that adds a helper — the duplicate is
+cheapest to find while it is still one name.
+
 ## 2e-ii. Written and never READ: the field sweep, 2026-09-14
 
 §2e asks which ported FUNCTIONS nothing calls. The same question about

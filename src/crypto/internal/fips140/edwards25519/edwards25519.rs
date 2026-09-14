@@ -49,12 +49,23 @@ use crate::types::{byte, int};
 use field::Element;
 
 // ─── ConstantTimeByteEq (Go: crypto/internal/fips140/subtle) ──────────
-// edwards25519 needs only this one subtle primitive; ported inline.
+//
+// This used to be a private copy of the body, under the note
+// "edwards25519 needs only this one subtle primitive; ported inline".
+// Go's tables.go does not inline it — it calls
+// `subtle.ConstantTimeByteEq`, and goish has that ported. A third copy
+// of a constant-time primitive is the last kind to keep: the two
+// callers below pick a point out of the precomputed table during
+// scalar multiplication, which is where a timing difference would leak
+// the private scalar.
+//
+// The bodies were the same expression, so this changed nothing —
+// `ed25519_ctbyteeq_smoke` says so exhaustively, over all 65,536 byte
+// pairs rather than a sample. Found by scripts/dup_impl_check.py.
 
 /// `ConstantTimeByteEq` returns 1 if x == y and 0 otherwise.
 fn ConstantTimeByteEq(x: u8, y: u8) -> int {
-    let v = u32::from(x ^ y).wrapping_sub(1) >> 31;
-    int::from(v)
+    return crate::crypto::internal::fips140::subtle::ConstantTimeByteEq(x, y);
 }
 
 // ─── coordinate types ─────────────────────────────────────────────────

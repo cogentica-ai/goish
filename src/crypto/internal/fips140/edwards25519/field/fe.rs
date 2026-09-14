@@ -50,6 +50,19 @@ use crate::crypto::internal::fips140::check as _check;
 // go: none — Go calls byteorder.LEUint64; the fips140deps shim is
 // not reachable from this module, so the two-line helper is local.
 /// LEUint64 — decode a little-endian uint64 from an 8-byte window.
+// go: none — goish-only: a `&[byte]` spelling of
+// fips140deps/byteorder's LEUint64, which Go's fe.go calls directly.
+//
+// KEPT ON PURPOSE, and the reason is the signature: the ported
+// `LEUint64` takes an owned `slice<byte>`, so calling it from here
+// would allocate on every invocation — inside field-element decoding
+// and scalar multiplication, which run per point per scalar bit. The
+// body is `u64::from_le_bytes`, which cannot drift from Go's
+// `binary.LittleEndian.Uint64`.
+//
+// scripts/dup_impl_check.py flags this and its sibling in
+// scalar_fiat.rs; this note is the answer, so the next run does not
+// re-chase them.
 fn LEUint64(b: &[byte]) -> u64 {
     let mut arr = [0u8; 8];
     arr.copy_from_slice(&b[0..8]);
