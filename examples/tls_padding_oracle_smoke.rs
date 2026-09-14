@@ -29,9 +29,15 @@
 //
 // What this does NOT establish is constant TIME. `extract_padding` is
 // Go's, examining a fixed 256 bytes rather than stopping at the claimed
-// length, but the MAC is still computed over a variable-length payload,
-// which is the other half of Lucky13. conn.rs is the anchored port that
-// should replace this file.
+// length. The other half of Lucky13 — the MAC computed over a
+// variable-length payload — used to be named here as an open problem
+// and stayed open for ten days. It is closed: `compute_mac` now calls
+// the anchored `tls10MAC` and passes the stripped padding as Go's
+// `extra`, so the hash sees a constant number of bytes. The structural
+// property is pinned by `tls_lucky13_smoke`; neither smoke measures
+// time, and neither claims to.
+//
+// conn.rs is the anchored port that should replace this file.
 #![no_std]
 #![no_main]
 #![allow(non_snake_case)]

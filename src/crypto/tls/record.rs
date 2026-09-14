@@ -291,24 +291,82 @@ pub fn derive_key_material(
 //       TLSCompressed.version || TLSCompressed.length ||
 //       TLSCompressed.fragment)
 
+// go: none — goish-only: the two lengths conn.go computes inline as
+// `payload[:n]` and `payload[n+macSize:]`, extracted so the Lucky13
+// property is testable. What Lucky13 needs is that their SUM does not
+// move with the padding length — the hash then sees the same number of
+// bytes, and so does the same number of compression-function blocks,
+// whatever padding was stripped.
+//
+// `decrypt_record` calls this rather than repeating the arithmetic, so
+// `tls_lucky13_smoke` is testing the live expressions and not a copy
+// of them.
+/// `(mac_start, extra_start)` for a decrypted block of `total` bytes
+/// from which `to_remove` padding bytes were stripped.
+///
+/// PRECONDITION: `total - to_remove >= SHA1_SIZE`, i.e. what is left
+/// after the padding still holds a MAC. `decrypt_record` checks that
+/// and returns "bad record MAC" first; this panics rather than
+/// returning a wrapped length, because a caller that has not checked
+/// is about to index a slice with it.
+#[doc(hidden)]
+pub fn __mac_split(total: usize, to_remove: usize) -> (usize, usize) {
+    let without_pad = total - to_remove;
+    let mac_start = without_pad - SHA1_SIZE;
+    return (mac_start, mac_start + SHA1_SIZE);
+}
+
 fn compute_mac(
     mac_key: &[byte; 20],
     seq: u64,
     record_type: byte,
     plaintext: &[byte],
+    extra: &[byte],
 ) -> [byte; SHA1_SIZE] {
-    let seq_bytes = seq.to_be_bytes();
-    let len_be = (plaintext.len() as u16).to_be_bytes(); // goishlint:ignore GOISH005
-
-    let mut input: Vec<byte> = Vec::with_capacity(8 + 1 + 2 + 2 + plaintext.len());
-    input.extend_from_slice(&seq_bytes);
-    input.push(record_type);
-    input.push(TLS_VERSION_MAJOR);
-    input.push(TLS_VERSION_MINOR);
-    input.extend_from_slice(&len_be);
-    input.extend_from_slice(plaintext);
-
-    hmac_sha1(mac_key, &input)
+    // DELEGATES SINCE 2026-09-14, and gained a parameter doing it.
+    //
+    // This was a hand-rolled second copy of cipher_suites.go's
+    // `tls10MAC`, and it had no `extra` at all. That argument is Go's
+    // Lucky13 countermeasure: after taking the Sum it writes the
+    // stripped PADDING into the same hash, so the number of
+    // compression-function blocks is the same whatever the padding
+    // length was. Without it the MAC's cost tracks how much padding was
+    // removed, which is the timing signal Lucky13 reads.
+    //
+    // conn.rs — the record layer `tls::Dial` actually runs — passes it
+    // (conn.rs, mirroring conn.go:443). This copy did not, and §1's
+    // 2026-09-04 audit of record.rs fixed the padding ORACLE two lines
+    // below without noticing the padding TIMING here. Auditing a
+    // function is not auditing the one beside it.
+    //
+    // Not reachable from `tls::Dial`: the only non-example caller is
+    // the invented TLS 1.2 handshake, which refuses outright unless the
+    // caller passes skip_verify.
+    let mut h = super::cipher_suites::macSHA1(slice::<byte>::__from_vec(mac_key.to_vec()));
+    // Go's `record[:recordHeaderLen]`, with the length field holding
+    // the PLAINTEXT length — conn.go rewrites record[3:5] to n before
+    // the call.
+    let len_be = (crate::uint16(plaintext.len())).to_be_bytes();
+    let header = alloc::vec![
+        record_type,
+        TLS_VERSION_MAJOR,
+        TLS_VERSION_MINOR,
+        len_be[0],
+        len_be[1],
+    ];
+    let res = super::cipher_suites::tls10MAC(
+        &mut *h,
+        slice::<byte>::new(),
+        slice::<byte>::__from_vec(seq.to_be_bytes().to_vec()),
+        slice::<byte>::__from_vec(header),
+        slice::<byte>::__from_vec(plaintext.to_vec()),
+        slice::<byte>::__from_vec(extra.to_vec()),
+    );
+    let v: &[byte] = &res;
+    let mut out = [0u8; SHA1_SIZE];
+    let n = core::cmp::min(v.len(), SHA1_SIZE);
+    out[..n].copy_from_slice(&v[..n]);
+    return out;
 }
 
 // ─── encrypt_record ───────────────────────────────────────────────────
@@ -322,7 +380,8 @@ pub fn encrypt_record(
     plaintext: &[byte],
 ) -> (slice<byte>, error) {
     // 1. Compute MAC
-    let mac = compute_mac(&dir.mac_key, seq, record_type, plaintext);
+    // Go: tls10MAC(..., payload, nil) — nothing to pad over yet.
+    let mac = compute_mac(&dir.mac_key, seq, record_type, plaintext, &[]);
 
     // 2. Build content = plaintext || MAC || PKCS7-padding
     let pt_len = plaintext.len();
@@ -548,11 +607,15 @@ pub fn decrypt_record(
             errors::New("tls: bad record MAC"),
         );
     }
-    let mac_start = without_pad.len() - SHA1_SIZE;
+    let (mac_start, extra_start) = __mac_split(dst_vec.len(), to_remove);
     let plaintext = &without_pad[..mac_start];
     let their_mac = &without_pad[mac_start..];
 
-    let expected_mac = compute_mac(&dir.mac_key, seq, record_type, plaintext);
+    // Go: tls10MAC(..., payload[:n], payload[n+macSize:]) — the trailing
+    // argument is the PADDING that was just stripped, hashed after the
+    // Sum so the block count does not track the padding length.
+    let extra = &dst_vec[extra_start..];
+    let expected_mac = compute_mac(&dir.mac_key, seq, record_type, plaintext, extra);
 
     // Go: conn.go:452 — `macAndPaddingGood :=
     //     subtle.ConstantTimeCompare(localMAC, remoteMAC) & int(paddingGood)`,

@@ -1274,7 +1274,7 @@ What is left of the demolition:
 
 | file | LOC | anchors | state |
 |---|--:|--:|---|
-| `record.rs` | 1145 | 1 | invented. `conn.rs` is Go's record layer, ported with 55 anchors, and both are live. **Diffing it against conn.rs on 2026-09-04 produced three security defects** — two missing length bounds and a padding oracle — each fixed with a smoke. A fourth, a discarded RNG error, was reported and then retracted: `crypto::rand::Read` calls `fatal` on failure, so the `let _ =` could not leave a zero IV. The file header carries the retraction and lists what was checked clean. Retiring it is still the goal; until then it is no longer unexamined. |
+| `record.rs` | 975 | 1 | invented. `conn.rs` is Go's record layer, ported with 55 anchors, and both are live. **Diffing it against conn.rs has produced five security defects** — three on 2026-09-04, two more on 2026-09-14 (the SPKI walk that skipped the algorithm OID, and the absent Lucky13 countermeasure) — each fixed with a smoke. One more was reported and then RETRACTED — a discarded RNG error: `crypto::rand::Read` calls `fatal` on failure, so the `let _ =` could not leave a zero IV. The file header carries the retraction and lists what was checked clean. Three of its hand-rolled crypto primitives were deleted on 2026-09-14 (the SPKI walk, the TLS 1.2 PRF, the CBC padding check), each delegating to the anchored port behind a Go-generated table. Retiring it is still the goal; until then it is no longer unexamined. |
 | `session.rs` | 261 | 0 | invented. Diffed 2026-09-06 against Go's lruSessionCache: it bounded tickets PER HOST and nothing bounded the host count, where Go bounds keys. Fixed, and the smoke's existing capacity row could not have caught it — 200 tickets on one host was already bounded. |
 
 ### The invented CLIENT handshake, audited 2026-09-06
@@ -4279,6 +4279,73 @@ the invented handshake's path, not `tls::Dial`'s, the AES decrypt
 beside it dwarfs the memcpy, and §1 has the file slated for retirement.
 Contrast `LEUint64` above, where the same delegation would have
 allocated per call inside scalar multiplication and the copy stays.
+
+### A FIFTH defect in record.rs: the Lucky13 countermeasure was absent
+
+Continuing the same per-function question found `compute_mac`, a second
+copy of `cipher_suites.go`'s `tls10MAC` — and this one had lost
+something, the way `ExpandLabel`'s copy had lost its length guard.
+
+Go's `tls10MAC` ends:
+
+    res := h.Sum(out)
+    if extra != nil { h.Write(extra) }
+
+`conn.go:443` passes the stripped PADDING as `extra`, so the hash is fed
+the same number of bytes — and does the same number of
+compression-function blocks — whatever padding length was removed.
+Without it the MAC's cost tracks the padding, which is the timing
+signal Lucky13 reads to turn CBC decryption into a padding oracle.
+
+`record.rs`'s `compute_mac` had **no `extra` parameter at all**. It
+hashed only the plaintext, whose length is exactly what the attacker is
+trying to learn.
+
+Two things make this worth writing down beyond the fix.
+
+**It was already written down, in the smoke the same audit produced.**
+§1's 2026-09-04 pass fixed the padding ORACLE in `decrypt_record` —
+three distinguishable errors folded into one constant-time branch — and
+its `tls_padding_oracle_smoke` (514ff76, the same day) closes with:
+
+> What this does NOT establish is constant TIME. `extract_padding` is
+> Go's, examining a fixed 256 bytes rather than stopping at the claimed
+> length, but the MAC is still computed over a variable-length payload,
+> which is the other half of Lucky13.
+
+So nobody missed it. It was named, in the right file, on the right day,
+and left — which is §2b's REMOVAL-CONDITION pattern and not an audit
+gap at all: a comment that states exactly what would make it false, and
+then outlives the ten minutes it would have taken. Grepping for
+sentences of that shape has now paid twice.
+
+**`conn.rs` had it right all along.** The record layer `tls::Dial`
+actually runs passes `payload.slice(n + macSize, payload.Len())`,
+mirroring Go. So this is a divergence between goish's two record
+layers, and it is the fourth finding this week whose whole content is
+"there were two of these". Scope is the same as §1's other invented-client
+findings: the only non-example caller is the invented TLS 1.2
+handshake, which refuses outright unless the caller passes
+`skip_verify`.
+
+Fixed by deleting the copy — `compute_mac` now builds `macSHA1` and
+calls the anchored `tls10MAC`, gaining the `extra` parameter in the
+process, and `decrypt_record` passes the padding exactly where Go does.
+
+**What pins it, and what does not.** No timing measurement: a timing
+test on a shared machine is a coin flip, and this tree does not run
+stress tests. `tls_lucky13_smoke` pins the STRUCTURAL property the
+countermeasure rests on — that the number of bytes handed to the hash
+does not move with the padding length — over every padding length from
+1 to 236 (beyond which the block cannot still hold a MAC, which is
+`__mac_split`'s stated precondition). The two spans are the live
+expressions: `decrypt_record` calls `__mac_split` rather than repeating
+the arithmetic, so the test is not grading a copy. Perturbing the extra
+span to empty turns all 474 checks red.
+
+It cannot see someone changing `tls10MAC` itself to ignore its `extra`
+argument — but that is one anchored function, and it is conn.rs's
+guarantee too.
 
 `record.rs` is 975 lines now, from 1,145 — and the drop understates it,
 since each collapse traded a hand-rolled body for a longer explanation

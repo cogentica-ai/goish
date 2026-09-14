@@ -75,6 +75,10 @@ strip = false
 lto = false
 
 [[example]]
+name = "tls_lucky13_smoke"
+path = "examples/tls_lucky13_smoke.rs"
+
+[[example]]
 name = "tls_extractpadding_dup_smoke"
 path = "examples/tls_extractpadding_dup_smoke.rs"
 
