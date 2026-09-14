@@ -86,16 +86,6 @@ const SIG_RSA_PSS_RSAE_SHA512: u16 = 0x0806;
 /// ed25519 = 0x0807
 const SIG_ED25519: u16 = 0x0807;
 
-// ─── SPKI AlgorithmIdentifier OID bytes ───────────────────────────────
-// These are the VALUE bytes of the OID TLV (after the 06 xx header).
-
-/// rsaEncryption: 1.2.840.113549.1.1.1
-const OID_RSA: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
-/// ecPublicKey: 1.2.840.10045.2.1
-const OID_EC_PUBLIC_KEY: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];
-/// Ed25519: 1.3.101.112
-const OID_ED25519: &[u8] = &[0x2b, 0x65, 0x70];
-
 // ─── TLS 1.3 signedMessage (RFC 8446 §4.4.3) ──────────────────────────
 //
 // signed = 64 × 0x20 || context_string || 0x00 || transcript_hash
@@ -132,87 +122,48 @@ enum ServerPubKey {
 
 /// Parse the server's public key type from a DER-encoded leaf certificate.
 /// Returns the key type enum.
+///
+/// This used to be a fourth hand-rolled walk to the
+/// SubjectPublicKeyInfo — outer SEQUENCE, TBSCertificate,
+/// `find_spki_in_tbs`, then the AlgorithmIdentifier's OID compared
+/// against three constants. crypto/x509 reports exactly that as
+/// `PublicKeyAlgorithm`, and validates the key while it is there, so
+/// the walk and its OID table are gone.
 fn parse_server_pubkey(cert_der: &[u8]) -> ServerPubKey {
-    use crate::encoding::asn1;
-
-    let der_slice = slice::__from_vec(cert_der.to_vec());
-
-    // outer Certificate SEQUENCE
-    let (cert_rv, _, err) = asn1::ParseRaw(der_slice);
+    let (cert, err) =
+        crate::crypto::x509::ParseCertificate(slice::__from_vec(cert_der.to_vec()));
     if !err.IsNil() {
         return ServerPubKey::Unknown;
     }
-
-    // TBSCertificate SEQUENCE
-    let (tbs_rv, _, err) = asn1::ParseRaw(cert_rv.Bytes.clone());
-    if !err.IsNil() {
-        return ServerPubKey::Unknown;
-    }
-
-    // Find SPKI
-    let (spki_bytes, spki_err) = crate::crypto::tls::legacy_p256::find_spki_in_tbs(&tbs_rv.Bytes);
-    if !spki_err.IsNil() {
-        return ServerPubKey::Unknown;
-    }
-
-    let (spki_rv, _, err) = asn1::ParseRaw(spki_bytes.clone());
-    if !err.IsNil() {
-        return ServerPubKey::Unknown;
-    }
-
-    // AlgorithmIdentifier SEQUENCE → get OID
-    let (alg_rv, rest_after_alg, err) = asn1::ParseRaw(spki_rv.Bytes.clone());
-    if !err.IsNil() {
-        return ServerPubKey::Unknown;
-    }
-
-    // Parse OID from AlgorithmIdentifier
-    let (oid_rv, _, err) = asn1::ParseRaw(alg_rv.Bytes.clone());
-    if !err.IsNil() {
-        return ServerPubKey::Unknown;
-    }
-
-    let oid_bytes: &[u8] = &oid_rv.Bytes;
-
-    if oid_bytes == OID_ED25519 {
-        // Ed25519: SPKI BIT STRING contains the 32-byte public key directly
-        let (bits_rv, _, err) = asn1::ParseRaw(rest_after_alg.clone());
-        if !err.IsNil() {
-            return ServerPubKey::Unknown;
+    if cert.PublicKeyAlgorithm == crate::crypto::x509::Ed25519 {
+        match cert
+            .PublicKey
+            .as_any()
+            .downcast_ref::<crate::crypto::ed25519::PublicKey>()
+        {
+            Some(k) => {
+                return ServerPubKey::Ed25519(k.clone());
+            }
+            None => {
+                return ServerPubKey::Unknown;
+            }
         }
-        let bs: &[u8] = &bits_rv.Bytes;
-        if bs.len() < 33 {
-            return ServerPubKey::Unknown;
-        }
-        // bs[0] = unused bits (0), bs[1..33] = key
-        let key_bytes = &bs[1..];
-        if key_bytes.len() < 32 {
-            return ServerPubKey::Unknown;
-        }
-        let key_s = slice::__from_vec(key_bytes[..32].to_vec());
-        let pk = crate::crypto::ed25519::PublicKey(key_s);
-        return ServerPubKey::Ed25519(pk);
     }
-
-    if oid_bytes == OID_EC_PUBLIC_KEY {
-        // Try ECDSA P256
+    if cert.PublicKeyAlgorithm == crate::crypto::x509::ECDSA {
         let (pk, err) = crate::crypto::tls::legacy_p256::decode_x509_ec_p256_pubkey(cert_der);
         if err.IsNil() {
             return ServerPubKey::EcdsaP256(pk);
         }
         return ServerPubKey::Unknown;
     }
-
-    if oid_bytes == OID_RSA {
-        // RSA
+    if cert.PublicKeyAlgorithm == crate::crypto::x509::RSA {
         let (pk, err) = crate::crypto::tls::record::decode_x509_rsa_pubkey(cert_der);
         if err.IsNil() {
             return ServerPubKey::Rsa(pk);
         }
         return ServerPubKey::Unknown;
     }
-
-    ServerPubKey::Unknown
+    return ServerPubKey::Unknown;
 }
 
 /// Parse the first leaf certificate DER bytes from a TLS 1.3 Certificate message body.

@@ -75,11 +75,14 @@ rTXGcd5XGWoS0+AF8t1cUw==
 -----END PRIVATE KEY-----
 ";
 
-// A second RSA key, self-signed ECDSA-P256 and Ed25519 pairs, and
-// spare keys of each type, so X509KeyPair's key/cert consistency check
-// can be driven over a full 3x7 matrix. Generated with openssl; every
-// expected result below was read off Go 1.25.5's own
-// crypto/tls.X509KeyPair over the same twenty-one cells, not
+// A second RSA key, self-signed ECDSA-P256, Ed25519 and RSA-PSS pairs,
+// and spare keys of each type, so X509KeyPair's key/cert consistency
+// check can be driven over a full 4x8 matrix. The PSS pair is what
+// reaches Go's `default:` arm: x509 has no parser for that SPKI, so
+// the certificate comes back with PublicKeyAlgorithm 0 and a nil key,
+// and the private key does not parse at all. Generated with openssl;
+// every expected result below was read off Go 1.25.5's own
+// crypto/tls.X509KeyPair over the same thirty-two cells, not
 // transcribed from tls.go.
 const RSA2_KEY_PEM: &[u8] = b"-----BEGIN PRIVATE KEY-----
 MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCI7VhzgutowHft
@@ -159,6 +162,58 @@ MC4CAQAwBQYDK2VwBCIEIEajSmzBNridPqUhPL9zK9uhDxa6GtkytbvAzJP7zPha
 ";
 const ED2_KEY_PEM: &[u8] = b"-----BEGIN PRIVATE KEY-----
 MC4CAQAwBQYDK2VwBCIEIJomJ4E/eW2SVYWbJd2xM2t2Zm4kKqGLHpb7H2UyzRW5
+-----END PRIVATE KEY-----
+";
+const PSS_CERT_PEM: &[u8] = b"-----BEGIN CERTIFICATE-----
+MIIDkzCCAkagAwIBAgIUKPK0RBdKbM+Phf7pGlmRD3IgBqMwQgYJKoZIhvcNAQEK
+MDWgDzANBglghkgBZQMEAgEFAKEcMBoGCSqGSIb3DQEBCDANBglghkgBZQMEAgEF
+AKIEAgIA3jAkMQ4wDAYDVQQKDAVHb2lzaDESMBAGA1UEAwwJbG9jYWxob3N0MCAX
+DTI2MDkxNDA4MTg1NFoYDzIxMjYwODIxMDgxODU0WjAkMQ4wDAYDVQQKDAVHb2lz
+aDESMBAGA1UEAwwJbG9jYWxob3N0MIIBIDALBgkqhkiG9w0BAQoDggEPADCCAQoC
+ggEBAMJvRCHzLpNi7X3HqLSozul341pDwPvA3xmbdwtGnyANpxEkHjlIqkzX0ncL
+DqfD0z8maRjY6XdgAeFLLGEu+Y/h4IxVQwq1tU4ujoeHAe6G71zPhJTsRJUgRCev
++00Qk/TEccUnYdJWmSWrFobAjcp9rG6a1WQqD5mg2mFeXZI9pa2aVJCHGcwf1WoD
+zk6Y7rmorpHYFJPH+Km1HH8dFIZzQz7eo+Mu+2+gXmqEw5F/+x0kowGPcfB4L+ua
+sBVTKrmShAvUz7O2TW5nmmR1cFlMLZtRbEjNwaw3XxOuXXu1vsYTO+kiuzdWaxd3
+1PsizpaXQR3TlK4EcuVn+JbfDncCAwEAAaNTMFEwHQYDVR0OBBYEFLWCkf06IIHJ
+5+HyWRMXAP6G+C1CMB8GA1UdIwQYMBaAFLWCkf06IIHJ5+HyWRMXAP6G+C1CMA8G
+A1UdEwEB/wQFMAMBAf8wQgYJKoZIhvcNAQEKMDWgDzANBglghkgBZQMEAgEFAKEc
+MBoGCSqGSIb3DQEBCDANBglghkgBZQMEAgEFAKIEAgIA3gOCAQEAJFWuFvsKXjp+
+EalY4zLX8SlKmqgAz/LMTmA/D0zrGibzpuzlpcY/NUjR9nCz1oCpPicKArwl8Xko
+zMmOZmJwf7qf1J3keFqJURRFn2h/2qWL1DVSxW4H4lrH7sMkYyKFeLeX6iNZr1vq
+qO2pGouFtN+XD2K4Zl4LslilHg6q4Yc64gGMeONzPCqTEAjmzqcqtJtFElZwDfYo
+9PnjeBbQGPxpJYw62iCe4tDC5ptSM7EU1Je9UvMSP96eS8eF9hhXDaivWu83Vt6A
+xCaTU88D/PbSS4uba71K8z7+DHq9j4vJjnp0PD264Fo9RYuzlA2SsP9Mp4eQSrYP
+lmGRp+qABA==
+-----END CERTIFICATE-----
+";
+const PSS_KEY_PEM: &[u8] = b"-----BEGIN PRIVATE KEY-----
+MIIEuwIBADALBgkqhkiG9w0BAQoEggSnMIIEowIBAAKCAQEAwm9EIfMuk2Ltfceo
+tKjO6XfjWkPA+8DfGZt3C0afIA2nESQeOUiqTNfSdwsOp8PTPyZpGNjpd2AB4Uss
+YS75j+HgjFVDCrW1Ti6Oh4cB7obvXM+ElOxElSBEJ6/7TRCT9MRxxSdh0laZJasW
+hsCNyn2sbprVZCoPmaDaYV5dkj2lrZpUkIcZzB/VagPOTpjuuaiukdgUk8f4qbUc
+fx0UhnNDPt6j4y77b6BeaoTDkX/7HSSjAY9x8Hgv65qwFVMquZKEC9TPs7ZNbmea
+ZHVwWUwtm1FsSM3BrDdfE65de7W+xhM76SK7N1ZrF3fU+yLOlpdBHdOUrgRy5Wf4
+lt8OdwIDAQABAoIBACe6ETs4k08k+u5ksZk8Fo7IYqkqR8+IkG0MgU3J/7BOadDM
+RuqgaL9rp4KQPU3U6qAwCnA7vbQY5zlvoSE4NmCKH9W8hAa3qtRPGesiECh65IRb
+mDTPc5Hetl4/jEKqPPjZfH9ydP/DluYF54Pf6vixJd6xfyFIoMhcf9I+NDMxTzF3
+YifSi2p9QShA4nYoPWPsgSbTMCW8GaNy/0dZKk97cetC1D9hUTFnttFcA9uQQMW8
+MctVf+FTunc/Jcx/Twru+vqTlT34n0dQQEamLh5ls0EyEav+eCQlrYYI27xyLg24
+gEFQDs6+DTQKI77XrlRljuqUUaoIx7fL63QlMrECgYEA3/seAATuvnhLCJxA3gUa
+Hk0Hnj5iquHo8eyEDL7Ub11GVUcGj3TgZqZDNcV3bKzhEHi0UnM26cpjji+R3RgO
+8hQ0pKURO+Ej0Wi39gLkmysz+4tOvEG0cUL2jkemgIHEamRI6QZS3hW20hnvptIv
+8f8e3Eyw6N9p9qK+UL9MgtECgYEA3jrc2GX+5rxJ9kor2D7QaLS0xeSpxKQI2XT/
+1nn3/iIim5M2KNNpU2/YclpXj5/SidQvx/xfwR0++P1bzhyIL2NhX3jWwZv0X6IX
+FBln1DkBO12OfaGjBMmcjNtk8Zbdd0sdhC91sPj2ShQ1fUe/zb67NwReBLVtE0NA
+s9F6/scCgYAUPTrOwaNZLsGI+6WY6lkb19YSZIzB6DwGcFrWVAAaOBF87zgWinck
+j22PVFKgTVbhCCczNBoIMjOgy4egtOXU1iKTph7SjFuSNqY44rYJl3PRDRuGQ2Gs
+wmJJJQxUnGVFP96ev+WJD+k/Pvy61E9kzKrbOUrbICURFk+gOEkPoQKBgEPu9ofo
+Vg2uzWVOsyx9tzPq2cAM8KC+DD59d5/W1SqIwM+SJuJADliFPkNmvpGXJ8MebCTU
+T2k3SYLP4HqXWkIyPRf0VqIEzKVXZXqtcYH8kxXUubRJ7w2NnB+rCaaYmcbX3YQF
+BhM9Z/ypRNixUD7S6WQeH6eM1nUm/+Z4SQMNAoGBAJJI3/LTgpFLckRFfzzooHeh
+HXwd/GxGzk37vC328qzmXSG/bPwTdn0FdBV+aRr4n4j0uwlsRrKZVyb9tI4KYZWS
+JgPQa47RrTXLrANXxypmE+5i/sX+QDYPNAYh2QivnxziAuSs9Cht3yP9N4++m9Kw
+qv7q4tikdy8xUaxeTSL/
 -----END PRIVATE KEY-----
 ";
 
@@ -263,8 +318,8 @@ fn eq(what: &'static str, got: string, want: &'static str) {
 }
 
 
-// One cell of the X509KeyPair matrix. Both halves of Go's outcome —
-// the error and whether Leaf came back parsed — are compared as a
+// One cell of the X509KeyPair matrix. Both halves of Go's outcome --
+// the error and whether Leaf came back parsed -- are compared as a
 // single string, so a cell that rejects for the wrong reason, or
 // accepts and then leaves Leaf nil, is one red row.
 fn kp(what: &'static str, cert_pem: &[u8], key_pem: &[u8], want: &'static str) {
@@ -6348,22 +6403,24 @@ fn main() {
     );
     check_n("the rejected record still bumped the counter", retry, 1);
 
-    // ── X509KeyPair: the key/cert consistency check ────────────────
+    // -- X509KeyPair: the key/cert consistency check -----------------
     //
     // Go switches on the CERTIFICATE's public key, and every arm fails
-    // closed — `default` included. goish used to switch on the PRIVATE
+    // closed -- `default` included. goish used to switch on the PRIVATE
     // key, handle RSA only, and silently accept whenever the leaf's key
-    // would not parse as RSA. Restoring that code and re-running this
-    // table gives 20 red rows out of 21: seventeen of the eighteen
-    // rejecting cells were accepted, the lone survivor being `RSA cert
-    // + a second RSA key`, and all three accepting cells came back with
-    // Leaf nil.
+    // would not parse as RSA. Restoring that code and re-running the
+    // twenty-one cells this table started as gave 20 red rows:
+    // seventeen of the eighteen mismatched pairs were accepted, the
+    // lone survivor being `RSA cert + a second RSA key`, and all three
+    // accepting cells came back with Leaf nil.
     //
-    // Two cells are worth reading twice. `ECDSA P-256 cert + a P-384
+    // Three cells are worth reading twice. `ECDSA P-256 cert + a P-384
     // key` is a MATCH failure, not a type failure: Go compares X and Y
-    // and never looks at the curve here. And the three diagonal cells
-    // pin that the accepting direction still works for each algorithm —
-    // a check that only ever refuses is a check nobody can deploy.
+    // and never looks at the curve here. The `RSA-PSS cert` row is the
+    // only thing that reaches Go's `default:` arm. And the four
+    // diagonal cells pin that the accepting direction still works for
+    // each algorithm -- a check that only ever refuses is a check
+    // nobody can deploy.
     kp(
         "RSA cert + its own key",
         CERT_PEM,
@@ -6405,6 +6462,12 @@ fn main() {
         CERT_PEM,
         ED2_KEY_PEM,
         "err=tls: private key type does not match public key type leaf=nil",
+    );
+    kp(
+        "RSA cert + an RSA-PSS key",
+        CERT_PEM,
+        PSS_KEY_PEM,
+        "err=tls: failed to parse private key leaf=nil",
     );
     kp(
         "ECDSA P-256 cert + an RSA key",
@@ -6449,6 +6512,12 @@ fn main() {
         "err=tls: private key type does not match public key type leaf=nil",
     );
     kp(
+        "ECDSA P-256 cert + an RSA-PSS key",
+        EC_CERT_PEM,
+        PSS_KEY_PEM,
+        "err=tls: failed to parse private key leaf=nil",
+    );
+    kp(
         "Ed25519 cert + an RSA key",
         ED_CERT_PEM,
         KEY_PEM,
@@ -6489,6 +6558,60 @@ fn main() {
         ED_CERT_PEM,
         ED2_KEY_PEM,
         "err=tls: private key does not match public key leaf=nil",
+    );
+    kp(
+        "Ed25519 cert + an RSA-PSS key",
+        ED_CERT_PEM,
+        PSS_KEY_PEM,
+        "err=tls: failed to parse private key leaf=nil",
+    );
+    kp(
+        "RSA-PSS cert + an RSA key",
+        PSS_CERT_PEM,
+        KEY_PEM,
+        "err=tls: unknown public key algorithm leaf=nil",
+    );
+    kp(
+        "RSA-PSS cert + a second RSA key",
+        PSS_CERT_PEM,
+        RSA2_KEY_PEM,
+        "err=tls: unknown public key algorithm leaf=nil",
+    );
+    kp(
+        "RSA-PSS cert + a P-256 key",
+        PSS_CERT_PEM,
+        EC_KEY_PEM,
+        "err=tls: unknown public key algorithm leaf=nil",
+    );
+    kp(
+        "RSA-PSS cert + a second P-256 key",
+        PSS_CERT_PEM,
+        EC2_KEY_PEM,
+        "err=tls: unknown public key algorithm leaf=nil",
+    );
+    kp(
+        "RSA-PSS cert + a P-384 key",
+        PSS_CERT_PEM,
+        EC384_KEY_PEM,
+        "err=tls: unknown public key algorithm leaf=nil",
+    );
+    kp(
+        "RSA-PSS cert + an Ed25519 key",
+        PSS_CERT_PEM,
+        ED_KEY_PEM,
+        "err=tls: unknown public key algorithm leaf=nil",
+    );
+    kp(
+        "RSA-PSS cert + a second Ed25519 key",
+        PSS_CERT_PEM,
+        ED2_KEY_PEM,
+        "err=tls: unknown public key algorithm leaf=nil",
+    );
+    kp(
+        "RSA-PSS cert + its own key",
+        PSS_CERT_PEM,
+        PSS_KEY_PEM,
+        "err=tls: failed to parse private key leaf=nil",
     );
 
     unsafe {

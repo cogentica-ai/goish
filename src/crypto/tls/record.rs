@@ -104,7 +104,6 @@ use crate::crypto::hmac;
 use crate::crypto::rand;
 use crate::crypto::rsa;
 use crate::crypto::sha1;
-use crate::encoding::asn1;
 use crate::errors::{self, error};
 use crate::goslice::slice;
 use crate::hash::Hash as HashTrait;
@@ -609,229 +608,58 @@ pub fn encode_record(record_type: byte, body: &[byte]) -> slice<byte> {
 
 // ─── decode_x509_rsa_pubkey ───────────────────────────────────────────
 //
-// Extract an RSA public key from a DER-encoded X.509 Certificate.
+// Delegates to crypto/x509. This used to be a hand-rolled walk down to
+// the SubjectPublicKeyInfo — outer SEQUENCE, TBSCertificate, count six
+// fields, step over the AlgorithmIdentifier, take the BIT STRING — plus
+// its own RSAPublicKey decoder. That was written when crypto/x509 was
+// not ported. It is, and the file said so: "stays goish-only until
+// crypto/x509 is ported and can supply it".
 //
-// X.509 Certificate ASN.1 structure (RFC 5280):
-//   Certificate ::= SEQUENCE {
-//     tbsCertificate  TBSCertificate,
-//     ...
-//   }
-//   TBSCertificate ::= SEQUENCE {
-//     version         [0] EXPLICIT INTEGER OPTIONAL,
-//     serialNumber    INTEGER,
-//     signature       AlgorithmIdentifier,
-//     issuer          Name,
-//     validity        Validity,
-//     subject         Name,
-//     subjectPublicKeyInfo  SubjectPublicKeyInfo,
-//     ...
-//   }
-//   SubjectPublicKeyInfo ::= SEQUENCE {
-//     algorithm  AlgorithmIdentifier,
-//     subjectPublicKey  BIT STRING
-//   }
-//   RSAPublicKey ::= SEQUENCE {
-//     modulus    INTEGER,
-//     exponent   INTEGER
-//   }
+// The duplicate was not merely redundant. It STEPPED OVER the
+// AlgorithmIdentifier without reading it, so it returned a perfectly
+// good 2048-bit key from an RSASSA-PSS certificate, where the real
+// parser reports PublicKeyAlgorithm 0 and no key at all — an
+// RSA-PSS-only key handed back for PKCS#1 v1.5 use. It also skipped
+// Go's `N.Sign() <= 0` and `E <= 0` checks (x509.go parsePublicKey),
+// so a negative modulus parsed fine.
 //
-// We walk the ASN.1 tree to reach SubjectPublicKeyInfo, then parse
-// the RSA key from the BIT STRING payload.
+// Not a vulnerability: the two callers are the invented client
+// handshakes, which do no certificate verification at all and now
+// refuse unless the caller passes skip_verify. It is one less parser.
 
 /// Parse an RSA public key from a DER-encoded X.509 certificate.
 /// Returns the public key or an error.
 pub fn decode_x509_rsa_pubkey(cert_der: &[byte]) -> (rsa::PublicKey, error) {
-    let der_slice = slice::<byte>::__from_vec(cert_der.to_vec());
     let nil_key = rsa::PublicKey::default();
-
-    // outer Certificate SEQUENCE
-    let (cert_rv, _, err) = asn1::ParseRaw(der_slice);
+    let (cert, err) =
+        crate::crypto::x509::ParseCertificate(slice::<byte>::__from_vec(cert_der.to_vec()));
     if !err.IsNil() {
+        return (nil_key, err);
+    }
+    // Belt and braces, and measured as such: deleting this leaves the
+    // table in x509_ecdsa_smoke fully green, because ParseCertificate
+    // already declines to produce a key for an SPKI it does not
+    // recognise and the downcast below catches that. It stays as the
+    // explicit statement of which algorithm this function is for, so a
+    // future x509 that learns to parse RSA-PSS into an rsa::PublicKey
+    // does not silently widen it.
+    if cert.PublicKeyAlgorithm != crate::crypto::x509::RSA {
         return (
             nil_key,
-            errors::New("tls/x509: failed to parse Certificate SEQUENCE"),
+            errors::New("tls/x509: certificate public key is not RSA"),
         );
     }
-    if cert_rv.Tag != asn1::TagSequence {
-        return (
-            nil_key,
-            errors::New("tls/x509: Certificate is not a SEQUENCE"),
-        );
-    }
-
-    // TBSCertificate SEQUENCE
-    let (tbs_rv, _, err) = asn1::ParseRaw(cert_rv.Bytes.clone());
-    if !err.IsNil() {
-        return (
-            nil_key,
-            errors::New("tls/x509: failed to parse TBSCertificate SEQUENCE"),
-        );
-    }
-    if tbs_rv.Tag != asn1::TagSequence {
-        return (
-            nil_key,
-            errors::New("tls/x509: TBSCertificate is not a SEQUENCE"),
-        );
-    }
-
-    // Walk TBSCertificate fields to find SubjectPublicKeyInfo.
-    // Fields in order: [version], serialNumber, signature, issuer, validity, subject, SPKI, ...
-    // We skip fields until we reach SPKI (a SEQUENCE containing an AlgorithmIdentifier SEQUENCE
-    // followed by a BIT STRING).
-    let (spki_bytes, spki_err) = find_spki_in_tbs(&tbs_rv.Bytes);
-    if !spki_err.IsNil() {
-        return (nil_key, spki_err);
-    }
-
-    // SubjectPublicKeyInfo SEQUENCE
-    let (spki_rv, _, err) = asn1::ParseRaw(spki_bytes.clone());
-    if !err.IsNil() {
-        return (
-            nil_key,
-            errors::New("tls/x509: failed to parse SubjectPublicKeyInfo"),
-        );
-    }
-    if spki_rv.Tag != asn1::TagSequence {
-        return (
-            nil_key,
-            errors::New("tls/x509: SubjectPublicKeyInfo is not a SEQUENCE"),
-        );
-    }
-
-    // AlgorithmIdentifier SEQUENCE (skip it)
-    let (_, rest_after_alg, err) = asn1::ParseRaw(spki_rv.Bytes.clone());
-    if !err.IsNil() {
-        return (
-            nil_key,
-            errors::New("tls/x509: failed to parse AlgorithmIdentifier in SPKI"),
-        );
-    }
-
-    // BIT STRING containing RSAPublicKey
-    let (bits_rv, _, err) = asn1::ParseRaw(rest_after_alg.clone());
-    if !err.IsNil() {
-        return (
-            nil_key,
-            errors::New("tls/x509: failed to parse BIT STRING in SPKI"),
-        );
-    }
-    if bits_rv.Tag != asn1::TagBitString {
-        return (
-            nil_key,
-            errors::New("tls/x509: expected BIT STRING in SPKI"),
-        );
-    }
-    // BIT STRING: first byte is unused-bits count; skip it
-    let bs_bytes = bits_rv.Bytes;
-    let bs_raw: &[byte] = &bs_bytes;
-    if bs_raw.is_empty() {
-        return (nil_key, errors::New("tls/x509: empty BIT STRING in SPKI"));
-    }
-    let rsa_der = slice::<byte>::__from_vec(bs_raw[1..].to_vec());
-
-    // RSAPublicKey ::= SEQUENCE { modulus INTEGER, exponent INTEGER }
-    let (rsa_rv, _, err) = asn1::ParseRaw(rsa_der.clone());
-    if !err.IsNil() {
-        return (
-            nil_key,
-            errors::New("tls/x509: failed to parse RSAPublicKey SEQUENCE"),
-        );
-    }
-    if rsa_rv.Tag != asn1::TagSequence {
-        return (
-            nil_key,
-            errors::New("tls/x509: RSAPublicKey is not a SEQUENCE"),
-        );
-    }
-
-    let (n_rv, rest_rsa, err) = asn1::ParseRaw(rsa_rv.Bytes.clone());
-    if !err.IsNil() || n_rv.Tag != asn1::TagInteger {
-        return (
-            nil_key,
-            errors::New("tls/x509: failed to parse RSA modulus"),
-        );
-    }
-    let (n_int, err) = asn1::ParseBigInt(n_rv.Bytes.clone());
-    if !err.IsNil() {
-        return (
-            nil_key,
-            errors::New("tls/x509: failed to decode RSA modulus"),
-        );
-    }
-
-    let (e_rv, _, err) = asn1::ParseRaw(rest_rsa.clone());
-    if !err.IsNil() || e_rv.Tag != asn1::TagInteger {
-        return (
-            nil_key,
-            errors::New("tls/x509: failed to parse RSA public exponent"),
-        );
-    }
-    let (e_val, err) = asn1::ParseInt64(e_rv.Bytes.clone());
-    if !err.IsNil() {
-        return (
-            nil_key,
-            errors::New("tls/x509: failed to decode RSA public exponent"),
-        );
-    }
-
-    (rsa::PublicKey { N: n_int, E: e_val }, errors::nil)
-}
-
-/// Walk the TBSCertificate body to find the SubjectPublicKeyInfo element.
-/// Returns (SPKI DER bytes, error).
-fn find_spki_in_tbs(tbs_body: &slice<byte>) -> (slice<byte>, error) {
-    let mut rest = tbs_body.clone();
-    let empty = slice::<byte>::__from_vec(Vec::new());
-
-    // Field index: 0=version[optional], 1=serial, 2=signature, 3=issuer, 4=validity, 5=subject, 6=SPKI
-    let mut field = 0usize;
-
-    while rest.Len() > 0 {
-        let (_rv, next_rest, err) = asn1::ParseRaw(rest.clone());
-        if !err.IsNil() {
+    match cert.PublicKey.as_any().downcast_ref::<rsa::PublicKey>() {
+        Some(k) => {
+            return (k.clone(), errors::nil);
+        }
+        None => {
             return (
-                empty,
-                errors::New("tls/x509: error parsing TBSCertificate field"),
+                nil_key,
+                errors::New("tls/x509: certificate public key is not RSA"),
             );
         }
-
-        // version is optional and context-specific [0]
-        // If first field is context-specific class (ClassContextSpecific = 2), it's version
-        // We detect it by checking if the tag byte's class bits == 2 (context-specific)
-        // In raw DER: tag byte for [0] EXPLICIT is 0xA0 (10100000)
-        let is_explicit_version = field == 0 && {
-            let raw: &[byte] = &rest;
-            !raw.is_empty() && (raw[0] & 0xC0) == 0x80
-        };
-
-        if is_explicit_version {
-            // Skip version, don't increment our "effective" field count
-        } else {
-            field += 1;
-        }
-
-        if field == 6 {
-            // This is the SPKI
-            // We need to reconstruct the full TLV bytes for ParseRaw to re-parse
-            // Actually we already have rv.Bytes (the content) and rv.Tag
-            // Let's just reconstruct the full DER element from rest up to next_rest
-            // The element spans rest[0 .. rest.Len() - next_rest.Len()]
-            let rest_raw: &[byte] = &rest;
-            let next_raw: &[byte] = &next_rest;
-            let elem_len = rest_raw.len() - next_raw.len();
-            return (
-                slice::<byte>::__from_vec(rest_raw[..elem_len].to_vec()),
-                errors::nil,
-            );
-        }
-
-        rest = next_rest;
     }
-
-    (
-        empty,
-        errors::New("tls/x509: SubjectPublicKeyInfo not found in TBSCertificate"),
-    )
 }
 
 // ─── AES-128-GCM record layer ─────────────────────────────────────────

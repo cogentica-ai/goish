@@ -11,7 +11,7 @@
 //   p256_ecdh_compute                -> PrivateKey::ECDH
 //   p256_ecdh_generate_and_compute*  -> the two above, composed
 //   VerifyP256                       -> ecdsa::VerifyASN1
-//   decode_x509_ec_p256_pubkey       -> ecdsa::ParseUncompressedPublicKey
+//   decode_x509_ec_p256_pubkey       -> x509::ParseCertificate
 //
 // History
 // -------
@@ -23,9 +23,12 @@
 // fips140/nistec sat unused. 09b32c4 moved it out of the way; this
 // rewrite deletes it. There is now one P-256 implementation in the tree.
 //
-// What is left is the ASN.1 walk from the certificate down to the
-// SubjectPublicKeyInfo. That is X.509 parsing, not curve code, and it
-// stays goish-only until crypto/x509 is ported and can supply it.
+// The ASN.1 walk from the certificate down to the SubjectPublicKeyInfo
+// used to be the one thing left here, "until crypto/x509 is ported and
+// can supply it". It is ported, and it does; the walk and its
+// `find_spki_in_tbs` are gone, along with the copies record.rs and
+// handshake_client_tls13.rs kept. What remains is the shape
+// conversion.
 //
 // The array shapes are kept deliberately: rewriting them to `slice<byte>`
 // would churn the handshake for no behavioural gain, and they are the
@@ -44,7 +47,6 @@ use crate::crypto::ecdh;
 use crate::crypto::ecdsa;
 use crate::crypto::elliptic;
 use crate::crypto::rand::RandReader;
-use crate::encoding::asn1;
 use crate::errors::{self, error, nil};
 use crate::goslice::slice;
 use crate::math::big::Int;
@@ -150,73 +152,57 @@ pub fn VerifyP256(pubkey: &P256PublicKey, digest: &[u8], sig: &[u8]) -> error {
 
 // ─── X.509 SubjectPublicKeyInfo ───────────────────────────────────────
 
-// go: none — goish-only: X.509 parsing that crypto/x509 will supply once
-// ported. The key itself is validated by the real curve code.
+// go: none — goish-only: the array-shaped P-256 key the handshake code
+// stores. crypto/x509 supplies the parse; this converts the shape.
 /// Parse a P-256 public key from a DER-encoded X.509 certificate.
+///
+/// This used to walk the DER by hand down to the SubjectPublicKeyInfo,
+/// with a `find_spki_in_tbs` that record.rs had a second copy of and
+/// handshake_client_tls13.rs a third. crypto/x509 is ported, which was
+/// the stated condition for removing them, and it checks the algorithm
+/// OID and the curve — which the hand walk did not, leaving the
+/// dispatch to whatever the caller had already decided.
 pub fn decode_x509_ec_p256_pubkey(cert_der: &[byte]) -> (P256PublicKey, error) {
     let nil_key = P256PublicKey::default();
-
-    // Certificate SEQUENCE -> TBSCertificate SEQUENCE.
-    let (cert_rv, _, err) = asn1::ParseRaw(s(cert_der));
+    let (cert, err) = crate::crypto::x509::ParseCertificate(s(cert_der));
     if !err.IsNil() {
-        return (
-            nil_key,
-            errors::New("tls/x509: failed to parse Certificate"),
-        );
-    }
-    if cert_rv.Tag != asn1::TagSequence {
-        return (nil_key, errors::New("tls/x509: not a SEQUENCE"));
-    }
-    let (tbs_rv, _, err) = asn1::ParseRaw(cert_rv.Bytes.clone());
-    if !err.IsNil() {
-        return (
-            nil_key,
-            errors::New("tls/x509: failed to parse TBSCertificate"),
-        );
-    }
-
-    let (spki_bytes, spki_err) = find_spki_in_tbs(&tbs_rv.Bytes);
-    if !spki_err.IsNil() {
-        return (nil_key, spki_err);
-    }
-    let (spki_rv, _, err) = asn1::ParseRaw(spki_bytes.clone());
-    if !err.IsNil() {
-        return (nil_key, errors::New("tls/x509: failed to parse SPKI"));
-    }
-
-    // AlgorithmIdentifier is parsed to step over it; the caller has
-    // already matched the OID.
-    let (_alg, rest, err) = asn1::ParseRaw(spki_rv.Bytes.clone());
-    if !err.IsNil() {
-        return (
-            nil_key,
-            errors::New("tls/x509: failed to parse AlgorithmIdentifier"),
-        );
-    }
-    let (bits_rv, _, err) = asn1::ParseRaw(rest.clone());
-    if !err.IsNil() {
-        return (nil_key, errors::New("tls/x509: failed to parse BIT STRING"));
-    }
-    if bits_rv.Tag != asn1::TagBitString {
-        return (nil_key, errors::New("tls/x509: expected BIT STRING"));
-    }
-
-    // BIT STRING: first byte is the unused-bit count, then the point.
-    let bs: &[u8] = &bits_rv.Bytes;
-    if bs.is_empty() {
-        return (nil_key, errors::New("tls/x509: empty BIT STRING"));
-    }
-    let point = &bs[1..];
-
-    // Hand the point to the real parser, which checks the uncompressed
-    // prefix, that the coordinates are reduced, and that it is on the
-    // curve and not the identity. The predecessor here copied 64 bytes out
-    // without validating any of that.
-    let (pk, err) = ecdsa::ParseUncompressedPublicKey(elliptic::P256(), &s(point));
-    if err != nil {
         return (nil_key, err);
     }
-
+    // As in record.rs: redundant against ParseCertificate today, kept
+    // as the explicit statement of intent. The P-256 check below is
+    // NOT redundant — see its own note.
+    if cert.PublicKeyAlgorithm != crate::crypto::x509::ECDSA {
+        return (
+            nil_key,
+            errors::New("tls/x509: certificate public key is not ECDSA"),
+        );
+    }
+    let pk = match cert.PublicKey.as_any().downcast_ref::<ecdsa::PublicKey>() {
+        Some(k) => k.clone(),
+        None => {
+            return (
+                nil_key,
+                errors::New("tls/x509: certificate public key is not ECDSA"),
+            );
+        }
+    };
+    // LOAD-BEARING, and measured. The equality (not `<=`) is deliberate
+    // twice over: this type is P-256 and nothing else, and the two
+    // FillBytes calls below need every coordinate to fit in 32 bytes.
+    // `FillBytes` into a buffer too small to hold the value PANICS. Delete this check, hand the function a P-384
+    // certificate, and the process dies with "math/big: buffer too
+    // small to fit value" — reachable from a server's Certificate
+    // message on the invented ECDSA suite. The predecessor happened to
+    // fail closed by a different route: it passed the raw BIT STRING to
+    // ParseUncompressedPublicKey(P256, ...), which rejected the 97-byte
+    // point on length. Delegating to the real parser gets a valid
+    // P-384 key back instead, so the curve has to be checked here.
+    if pk.Curve.Params().BitSize != elliptic::P256().Params().BitSize {
+        return (
+            nil_key,
+            errors::New("tls/x509: certificate public key is not P-256"),
+        );
+    }
     let mut out = P256PublicKey::default();
     let xb = pk.X.FillBytes(slice::__from_vec(alloc::vec![0u8; 32]));
     let yb = pk.Y.FillBytes(slice::__from_vec(alloc::vec![0u8; 32]));
@@ -224,48 +210,6 @@ pub fn decode_x509_ec_p256_pubkey(cert_der: &[byte]) -> (P256PublicKey, error) {
     out.x.copy_from_slice(xr);
     out.y.copy_from_slice(yr);
     return (out, nil);
-}
-
-// go: none — goish-only: navigate the TBSCertificate SEQUENCE to the
-// SubjectPublicKeyInfo field.
-/// Field order: `[version] serial sigAlg issuer validity subject SPKI
-/// [extensions]`. Counting only the non-version fields, SPKI is field 6.
-pub fn find_spki_in_tbs(tbs_bytes: &slice<byte>) -> (slice<byte>, error) {
-    let mut rest = tbs_bytes.clone();
-    let mut field: usize = 0;
-
-    while rest.Len() > 0 {
-        let (_rv, next_rest, err) = asn1::ParseRaw(rest.clone());
-        if !err.IsNil() {
-            return (
-                empty(),
-                errors::New("tls/x509: error parsing TBSCertificate field"),
-            );
-        }
-        // `version` is optional and context-specific [0] EXPLICIT, whose
-        // raw tag byte is 0xA0 — class bits 10.
-        let is_explicit_version = field == 0 && {
-            let raw: &[u8] = &rest;
-            !raw.is_empty() && (raw[0] & 0xC0) == 0x80
-        };
-        if !is_explicit_version {
-            field += 1;
-        }
-
-        if field == 6 {
-            // The element spans rest[0 .. rest.Len() - next_rest.Len()].
-            let rest_raw: &[u8] = &rest;
-            let next_raw: &[u8] = &next_rest;
-            let elem_len = rest_raw.len() - next_raw.len();
-            return (s(&rest_raw[..elem_len]), nil);
-        }
-
-        rest = next_rest;
-    }
-    return (
-        empty(),
-        errors::New("tls/x509: SubjectPublicKeyInfo not found in TBSCertificate"),
-    );
 }
 
 // ─── array/slice conversions ──────────────────────────────────────────

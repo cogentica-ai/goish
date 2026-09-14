@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 7849,
+ "total": 7846,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -190,7 +190,7 @@
    "GOISH005": 45,
    "GOISH008": 2,
    "GOISH014": 20,
-   "GOISH023": 20
+   "GOISH023": 19
   },
   "src/crypto/tls/handshake_messages.rs": {
    "GOISH005": 21,
@@ -211,8 +211,8 @@
    "GOISH023": 22
   },
   "src/crypto/tls/record.rs": {
-   "GOISH014": 16,
-   "GOISH023": 14
+   "GOISH014": 15,
+   "GOISH023": 13
   },
   "src/crypto/tls/session.rs": {
    "GOISH005": 1,

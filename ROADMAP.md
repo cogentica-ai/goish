@@ -1433,6 +1433,101 @@ P-256 cert + a P-384 key` is a **match** failure, not a type failure.
 Go compares X and Y and never looks at the curve here, so a
 curve-equality shortcut would diverge.
 
+### Three copies of an X.509 parser, and what the third one cost
+
+The X509KeyPair read above turned on one detail: goish extracted the
+leaf's public key with a bespoke `decode_x509_rsa_pubkey` rather than
+the ported parser. Grepping that name found the pattern had three
+instances, not one — three independent hand-rolled walks from the
+certificate DER down to the SubjectPublicKeyInfo:
+
+| where | what it was for |
+|---|---|
+| `record.rs` | `decode_x509_rsa_pubkey` + its own `find_spki_in_tbs` |
+| `legacy_p256.rs` | `decode_x509_ec_p256_pubkey` + a SECOND `find_spki_in_tbs` |
+| `handshake_client_tls13.rs` | `parse_server_pubkey`, sniffing the algorithm OID against a three-entry table |
+
+Each walked the same path — outer SEQUENCE, TBSCertificate, count six
+fields, **step over the AlgorithmIdentifier**, take the BIT STRING —
+and none of them read the algorithm it stepped over. Measured, with a
+throwaway example: an RSASSA-PSS certificate handed to
+`decode_x509_rsa_pubkey` came back as a perfectly good 2048-bit RSA
+key, where `x509::ParseCertificate` on the same bytes reports
+`PublicKeyAlgorithm 0` and produces no key at all — Go does the same.
+They also skipped Go's `N.Sign() <= 0` and `E <= 0` checks, so a
+negative modulus parsed fine.
+
+Not a vulnerability: the callers are the invented client handshakes,
+which do no certificate verification and now refuse outright unless
+the caller passes `skip_verify`. The removal condition was already in
+the file, in `legacy_p256.rs`'s own header — *"stays goish-only until
+crypto/x509 is ported and can supply it"*. crypto/x509 is ported. All
+three now delegate, and the two `find_spki_in_tbs` copies and the OID
+table are gone.
+
+**The delegation moved a hazard, and only a perturbation found it.**
+`P256PublicKey` is two 32-byte arrays, and `big.Int::FillBytes` PANICS
+into a buffer too small for the value. The old code failed closed on a
+P-384 certificate by accident — it passed the raw BIT STRING to
+`ParseUncompressedPublicKey(P256, …)`, which rejected the 97-byte point
+on length. The real parser hands back a valid P-384 key instead, so
+without an explicit curve check the process dies with `math/big: buffer
+too small to fit value`, reachable from a server's Certificate message.
+The check is there, and `x509_ecdsa_smoke` has the row; deleting it is
+how the panic was demonstrated rather than assumed.
+
+Worth separating the two guards the rewrite added, because they are not
+equally real. The `PublicKeyAlgorithm != RSA` / `!= ECDSA` checks are
+**redundant** — removing them leaves the smoke fully green, since
+ParseCertificate already declines to produce a key it cannot name. The
+curve check is **load-bearing**. Both are annotated as such in the
+code; an untested guard that reads as the protection is how the
+original comment (*"the caller has already matched the OID"*) survived
+being true of one caller and false of the other.
+
+### §1's remaining backlog is smaller than this section implied
+
+`crypto/tls/mod.rs` is 9,253 lines with zero `go: sdk` anchors, which
+read as 9,000 lines of unaudited invented code. Counted 2026-09-14:
+**8,553 of those lines are `#[doc(hidden)]` test hooks** — 197 of the
+214 functions — existing because Go's `crypto/tls` tests are in-package
+and goish's examples are not. The production surface is **ten public
+functions and about 676 lines**: `Client`, `Server`, `Dial`,
+`DialChaCha20Only`, `make_dead_conn`, `X509KeyPair`, `LoadX509KeyPair`,
+`NewListener`, `Listen`, `register_tls_impls`, plus the private
+`parsePrivateKey`. All have now been read against Go. One defect
+(`X509KeyPair`, above); the rest are faithful. Two were checked and are
+worth not re-checking:
+
+  * `Dial`'s hostname derivation is `rfind(':')` with a whole-string
+    fallback, which is *exactly* Go's `strings.LastIndex` + `colonPos =
+    len(addr)`. Brackets are not stripped from an IPv6 literal in
+    either. It looks wrong and is not.
+  * Go's `dial` closes `rawConn` when the handshake fails, and goish's
+    `Dial` does not — it returns the Conn alongside the error. That is
+    not a descriptor leak: `net::TCPConn` has a `Drop` that closes, so
+    the caller's early `return` releases it. Go must close explicitly
+    because it returns `nil, err` and the caller cannot.
+  * `Listen` checks only `Certificates.Len() == 0` where Go's condition
+    also spares `GetCertificate` and `GetConfigForClient`. goish's
+    Config has neither field, so the reduction is exact; the error text
+    still names them, as Go's does.
+
+So what is actually left of §1 is `record.rs`'s record layer and
+`session.rs`, both already audited, and the invented client handshake,
+audited across five findings. The demolition, not an audit backlog.
+
+One more stale claim fell out of the same pass, and it is §2b-v's
+pattern rather than §1's: `handshake_messages.rs` carried a GOISH018
+waiver reading *"marshalCertificate takes common.go's Certificate,
+which is not ported yet (mod.rs declares a hand-written one)"*.
+`marshalCertificate` is ported — anchored at
+handshake_messages.go:1484-1518 — and `Certificate` lives in
+`common.rs`, which `mod.rs` re-exports. Deleting the waiver leaves
+port_lint at the same 7,846, so it was suppressing nothing and
+explaining it with something false. Grep the REASON, not just the
+count.
+
 Worth reading before planning the retirement: this section used to
 describe record.rs as a tidiness problem. It was a security backlog.
 Three defects in one afternoon, all of the same shape — invented crypto
