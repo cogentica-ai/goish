@@ -2402,6 +2402,1198 @@ pub(crate) const opLeftParen: super::regexp::Op = super::regexp::Op(128);
 /// The `|` marker.
 pub(crate) const opVerticalBar: super::regexp::Op = super::regexp::Op(129);
 
+// ─── the text sub-parsers (stage 2b-iv) ──────────────────────────────
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:2204-2210 nextRune
+/// Decode one rune, or refuse the input as invalid UTF-8.
+///
+/// The error's `Expr` is the WHOLE remainder from the bad byte, which
+/// is what makes `Parse("a\xffb")` quote `\xffb`.
+fn nextRune(
+    s: &crate::gostring::string,
+) -> (rune, crate::gostring::string, crate::errors::error) {
+    let (c, size) = crate::unicode::utf8::DecodeRune(s.as_bytes());
+    if c == crate::unicode::utf8::RuneError && crate::int64(size) == 1 {
+        return (
+            0,
+            crate::gostring::string::new(),
+            crate::errors::Wrap(Error {
+                Code: ErrInvalidUTF8,
+                Expr: s.clone(),
+            }),
+        );
+    }
+    return (c, s.slice(crate::int::from(crate::int64(size)), s.Len()), crate::errors::nil);
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:2216-2227 unhex
+/// A hex digit's value, or `-1`.
+fn unhex(c: rune) -> rune {
+    if rune('0') <= c && c <= rune('9') {
+        return c - rune('0');
+    }
+    if rune('a') <= c && c <= rune('f') {
+        return c - rune('a') + 10;
+    }
+    if rune('A') <= c && c <= rune('F') {
+        return c - rune('A') + 10;
+    }
+    return -1;
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:1675-1709 canonicalName
+/// Go: fold `_`, `-` and space away, upper-case the first letter and
+/// lower-case the rest — so `\p{han}`, `\p{HAN}` and `\p{Han}` are one
+/// name.
+///
+/// Go returns the input unchanged when nothing needed changing, to
+/// avoid the allocation; the observable result is the same.
+fn canonicalName(name: &crate::gostring::string) -> crate::gostring::string {
+    let src = name.as_bytes();
+    let mut b: Vec<u8> = Vec::with_capacity(src.len());
+    let mut first = true;
+    for i in 0..src.len() {
+        let mut c = src[i];
+        if c == b'_' || c == b'-' || c == b' ' {
+            c = b' ';
+        } else if first {
+            if b'a' <= c && c <= b'z' {
+                c -= b'a' - b'A';
+            }
+            first = false;
+        } else if b'A' <= c && c <= b'Z' {
+            c += b'a' - b'A';
+        }
+        if c == b' ' {
+            continue;
+        }
+        b.push(c);
+    }
+    return crate::gostring::string::from_bytes(&b);
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:1715-1749 unicodeTable
+/// Go: resolve a `\p{Name}` to its table, its fold twin, and a sign.
+///
+/// ─── A REAL GAP, not a shortcut ──────────────────────────────────────
+///
+/// Go answers this out of `unicode.Categories`, `unicode.Scripts`,
+/// `unicode.CategoryAliases` and their Fold twins. goish's `unicode`
+/// does not have those maps — see the GOISH021 waiver at the top of
+/// src/unicode/letter.rs — and the tables behind them are not in the
+/// tree either: `tables.rs` exports `Mn` and `Zs` and nothing else.
+///
+/// So `\p{Han}`, `\p{L}` and every other named group RESOLVE TO
+/// NOTHING here, which Go's own caller turns into
+/// `ErrInvalidCharRange`. `\p{Any}` and `\p{ASCII}` work, because
+/// their tables are built in this file.
+///
+/// That is a refusal, not a wrong answer — `regexp.MustCompile(
+/// "\\p{Han}")` fails to compile instead of silently matching the
+/// wrong runes — and it is a `unicode` item that `regexp` inherits, not
+/// a regexp one. Recorded in ROADMAP §2c.
+fn unicodeTable(
+    name: &crate::gostring::string,
+) -> (
+    Option<&'static crate::unicode::RangeTable>,
+    Option<&'static crate::unicode::RangeTable>,
+    crate::int,
+) {
+    let name = canonicalName(name);
+    // Go: "Special cases: Any, Assigned, and ASCII. Also LC is the only
+    // non-canonical Categories key, so handle it here."
+    if name == "Any" {
+        return (Some(&anyTable), Some(&anyTable), 1);
+    }
+    if name == "Ascii" {
+        return (Some(&asciiTable), Some(&asciiFoldTable), 1);
+    }
+    // Go's "Assigned" (invert unicode.Cn) and "Lc", and then the
+    // Categories, Scripts and CategoryAliases lookups, all need tables
+    // goish's unicode does not carry. See the doc comment.
+    return (None, None, 0);
+}
+
+impl parser {
+    // go: sdk 1.25.5 regexp/syntax/parse.go:1273-1300 parser.parseInt
+    /// A decimal count, refusing a leading zero and clamping overflow
+    /// to `-1` rather than wrapping.
+    fn parseInt(
+        &self,
+        s: &crate::gostring::string,
+    ) -> (crate::int, crate::gostring::string, bool) {
+        let b = s.as_bytes();
+        if b.is_empty() || b[0] < b'0' || b'9' < b[0] {
+            return (0, crate::gostring::string::new(), false);
+        }
+        // Go: disallow leading zeros.
+        if b.len() >= 2 && b[0] == b'0' && b'0' <= b[1] && b[1] <= b'9' {
+            return (0, crate::gostring::string::new(), false);
+        }
+        let mut i = 0usize;
+        while i < b.len() && b'0' <= b[i] && b[i] <= b'9' {
+            i += 1;
+        }
+        let rest = s.slice(crate::int::from(crate::int64(i)), s.Len());
+        let mut n: crate::int = 0;
+        for j in 0..i {
+            // Go: avoid overflow.
+            if n >= 100000000 {
+                n = -1;
+                break;
+            }
+            n = n * 10 + crate::int::from(crate::int64(b[j])) - crate::int::from(48);
+        }
+        return (n, rest, true);
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:1102-1139 parser.parseRepeat
+    /// Go: "parses {min} (max=min) or {min,} (max=-1) or {min,max}. If s
+    /// is not of that form, it returns ok == false. If s has the right
+    /// form but the values are too big, it returns min == -1, ok ==
+    /// true."
+    ///
+    /// The `ok == false` case is why `a{` is a literal brace and not an
+    /// error.
+    fn parseRepeat(
+        &self,
+        s: &crate::gostring::string,
+    ) -> (crate::int, crate::int, crate::gostring::string, bool) {
+        let none = (
+            crate::int::from(0),
+            crate::int::from(0),
+            crate::gostring::string::new(),
+            false,
+        );
+        if s.Len() == 0 || s.as_bytes()[0] != b'{' {
+            return none;
+        }
+        let mut s = s.slice(1, s.Len());
+        let (min, rest, ok1) = self.parseInt(&s);
+        if !ok1 {
+            return (min, crate::int::from(0), crate::gostring::string::new(), false);
+        }
+        s = rest;
+        let mut min = min;
+        let mut max: crate::int;
+        if s.Len() == 0 {
+            return (min, crate::int::from(0), crate::gostring::string::new(), false);
+        }
+        if s.as_bytes()[0] != b',' {
+            max = min;
+        } else {
+            s = s.slice(1, s.Len());
+            if s.Len() == 0 {
+                return (min, crate::int::from(0), crate::gostring::string::new(), false);
+            }
+            if s.as_bytes()[0] == b'}' {
+                max = -1;
+            } else {
+                let (m, rest, ok1) = self.parseInt(&s);
+                max = m;
+                if !ok1 {
+                    return (min, max, crate::gostring::string::new(), false);
+                }
+                s = rest;
+                if max < 0 {
+                    // Go: parseInt found too big a number.
+                    min = -1;
+                }
+            }
+        }
+        if s.Len() == 0 || s.as_bytes()[0] != b'}' {
+            return (min, max, crate::gostring::string::new(), false);
+        }
+        return (min, max, s.slice(1, s.Len()), true);
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:1445-1556 parser.parseEscape
+    /// One backslash escape. Go's comment on the missing `\b` is worth
+    /// keeping: "There is no case 'b', to avoid misparsing the Perl
+    /// word-boundary \b as the C backspace \b when in POSIX mode. In
+    /// Perl, /\b/ means word-boundary but /[\b]/ means backspace. We
+    /// don't support that."
+    fn parseEscape(
+        &self,
+        s: &crate::gostring::string,
+    ) -> (rune, crate::gostring::string, crate::errors::error) {
+        let bad = |t: &crate::gostring::string| -> (rune, crate::gostring::string, crate::errors::error) {
+            (
+                0,
+                crate::gostring::string::new(),
+                crate::errors::Wrap(Error {
+                    Code: ErrInvalidEscape,
+                    Expr: s.slice(0, s.Len() - t.Len()),
+                }),
+            )
+        };
+        let t0 = s.slice(1, s.Len());
+        if t0.Len() == 0 {
+            return (
+                0,
+                crate::gostring::string::new(),
+                crate::errors::Wrap(Error {
+                    Code: ErrTrailingBackslash,
+                    Expr: crate::gostring::string::new(),
+                }),
+            );
+        }
+        let (c, mut t, err) = nextRune(&t0);
+        if !err.IsNil() {
+            return (0, crate::gostring::string::new(), err);
+        }
+
+        // Go: octal escapes. A single non-zero digit is a backreference,
+        // which is not supported, so it falls through to the error.
+        let octal_start = c == rune('0')
+            || (rune('1') <= c
+                && c <= rune('7')
+                && t.Len() > 0
+                && t.as_bytes()[0] >= b'0'
+                && t.as_bytes()[0] <= b'7');
+        if octal_start {
+            // Go: consume up to three octal digits; already have one.
+            let mut r = c - rune('0');
+            let mut i = 1;
+            while i < 3 {
+                if t.Len() == 0 || t.as_bytes()[0] < b'0' || t.as_bytes()[0] > b'7' {
+                    break;
+                }
+                r = r * 8 + crate::int32(crate::uint32(crate::int64(t.as_bytes()[0]))) - rune('0');
+                t = t.slice(1, t.Len());
+                i += 1;
+            }
+            return (r, t, crate::errors::nil);
+        }
+
+        if c == rune('x') {
+            if t.Len() == 0 {
+                return bad(&t);
+            }
+            let (c2, t2, err) = nextRune(&t);
+            if !err.IsNil() {
+                return (0, crate::gostring::string::new(), err);
+            }
+            t = t2;
+            if c2 == rune('{') {
+                // Go: "Any number of digits in braces. Perl accepts any
+                // text at all; it ignores all text after the first
+                // non-hex digit. We require only hex digits, and at
+                // least one."
+                let mut nhex = 0;
+                let mut r: rune = 0;
+                loop {
+                    if t.Len() == 0 {
+                        return bad(&t);
+                    }
+                    let (c3, t3, err) = nextRune(&t);
+                    if !err.IsNil() {
+                        return (0, crate::gostring::string::new(), err);
+                    }
+                    t = t3;
+                    if c3 == rune('}') {
+                        break;
+                    }
+                    let v = unhex(c3);
+                    if v < 0 {
+                        return bad(&t);
+                    }
+                    r = r * 16 + v;
+                    if r > crate::unicode::MaxRune {
+                        return bad(&t);
+                    }
+                    nhex += 1;
+                }
+                if nhex == 0 {
+                    return bad(&t);
+                }
+                return (r, t, crate::errors::nil);
+            }
+
+            // Go: easy case: two hex digits.
+            let x = unhex(c2);
+            let (c3, t3, err) = nextRune(&t);
+            if !err.IsNil() {
+                return (0, crate::gostring::string::new(), err);
+            }
+            t = t3;
+            let y = unhex(c3);
+            if x < 0 || y < 0 {
+                return bad(&t);
+            }
+            return (x * 16 + y, t, crate::errors::nil);
+        }
+
+        // Go's C escapes.
+        if c == rune('a') {
+            return (7, t, crate::errors::nil);
+        }
+        if c == rune('f') {
+            return (12, t, crate::errors::nil);
+        }
+        if c == rune('n') {
+            return (rune('\n'), t, crate::errors::nil);
+        }
+        if c == rune('r') {
+            return (rune('\r'), t, crate::errors::nil);
+        }
+        if c == rune('t') {
+            return (rune('\t'), t, crate::errors::nil);
+        }
+        if c == rune('v') {
+            return (11, t, crate::errors::nil);
+        }
+
+        // Go's default arm, which the octal and hex cases fall past.
+        if c < crate::int32(crate::uint32(crate::int64(crate::unicode::utf8::RuneSelf)))
+            && !isalnum(c)
+        {
+            // Go: "Escaped non-word characters are always themselves.
+            // PCRE is not quite so rigorous: it accepts things like \q,
+            // but we don't. We once rejected \_, but too many programs
+            // and people insist on using it, so allow \_."
+            return (c, t, crate::errors::nil);
+        }
+        return bad(&t);
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:1560-1573 parser.parseClassChar
+    /// One character inside `[...]`, escape or not.
+    fn parseClassChar(
+        &self,
+        s: &crate::gostring::string,
+        wholeClass: &crate::gostring::string,
+    ) -> (rune, crate::gostring::string, crate::errors::error) {
+        if s.Len() == 0 {
+            return (
+                0,
+                crate::gostring::string::new(),
+                crate::errors::Wrap(Error {
+                    Code: ErrMissingBracket,
+                    Expr: wholeClass.clone(),
+                }),
+            );
+        }
+        // Go: "Allow regular escape sequences even though many need not
+        // be escaped in this context."
+        if s.as_bytes()[0] == b'\\' {
+            return self.parseEscape(s);
+        }
+        return nextRune(s);
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:1617-1636 parser.appendGroup
+    /// Append a named group's class, negated and/or folded per the
+    /// group's sign and the parser's flags.
+    fn appendGroup(&mut self, r: Vec<rune>, g: charGroup) -> Vec<rune> {
+        if !self.flags.__has(FoldCase) {
+            if g.sign < 0 {
+                return appendNegatedClass(r, g.class);
+            }
+            return appendClass(r, g.class);
+        }
+        // Go folds into `p.tmpClass` and cleans it there, so the buffer
+        // is reused across groups.
+        let mut tmp = core::mem::take(&mut self.tmpClass);
+        tmp.clear();
+        tmp = appendFoldedClass(tmp, g.class);
+        self.tmpClass = tmp;
+        let mut t = core::mem::take(&mut self.tmpClass);
+        let cleaned = cleanClass(&mut t);
+        self.tmpClass = t;
+        if g.sign < 0 {
+            return appendNegatedClass(r, &cleaned);
+        }
+        return appendClass(r, &cleaned);
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:1585-1597 parser.parsePerlClassEscape
+    /// `\d`, `\s`, `\w` and their negations. `None` means "not one of
+    /// these", which the caller treats as "try the next thing".
+    fn parsePerlClassEscape(
+        &mut self,
+        s: &crate::gostring::string,
+        r: Vec<rune>,
+    ) -> Option<(Vec<rune>, crate::gostring::string)> {
+        if !self.flags.__has(PerlX) || s.Len() < 2 || s.as_bytes()[0] != b'\\' {
+            return None;
+        }
+        let g = super::perl_groups::perlGroup(&s.slice(0, 2))?;
+        return Some((self.appendGroup(r, g), s.slice(2, s.Len())));
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:1599-1615 parser.parseNamedClass
+    /// `[:alpha:]` and friends, inside a class.
+    ///
+    /// Three outcomes, and Go distinguishes all three: not a named
+    /// class at all (`Ok(None)`), a known one (`Ok(Some(..))`), and
+    /// `[:` … `:]` with an unknown name, which is an ERROR rather than
+    /// a fallthrough.
+    fn parseNamedClass(
+        &mut self,
+        s: &crate::gostring::string,
+        r: Vec<rune>,
+    ) -> Result<Option<(Vec<rune>, crate::gostring::string)>, crate::errors::error> {
+        if s.Len() < 2 || s.as_bytes()[0] != b'[' || s.as_bytes()[1] != b':' {
+            return Ok(None);
+        }
+        let i = crate::strings::Index(
+            s.slice(2, s.Len()),
+            crate::gostring::string::from_static(":]"),
+        );
+        if i < 0 {
+            return Ok(None);
+        }
+        let i = i + 2;
+        let name = s.slice(0, i + 2);
+        let rest = s.slice(i + 2, s.Len());
+        let g = match super::perl_groups::posixGroup(&name) {
+            Some(g) => g,
+            None => {
+                return Err(crate::errors::Wrap(Error {
+                    Code: ErrInvalidCharRange,
+                    Expr: name,
+                }))
+            }
+        };
+        return Ok(Some((self.appendGroup(r, g), rest)));
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:1751-1823 parser.parseUnicodeClass
+    /// `\p{Name}` / `\pN` and their `\P` negations.
+    ///
+    /// `\p{^Han} == \P{Han}` and `\P{^Han} == \p{Han}`: the leading
+    /// caret flips the sign a second time.
+    ///
+    /// See [`unicodeTable`] for why every name but `Any` and `ASCII`
+    /// currently resolves to nothing here.
+    fn parseUnicodeClass(
+        &mut self,
+        s: &crate::gostring::string,
+        r: Vec<rune>,
+    ) -> Result<Option<(Vec<rune>, crate::gostring::string)>, crate::errors::error> {
+        let b = s.as_bytes();
+        if !self.flags.__has(UnicodeGroups)
+            || s.Len() < 2
+            || b[0] != b'\\'
+            || (b[1] != b'p' && b[1] != b'P')
+        {
+            return Ok(None);
+        }
+
+        // Go: committed to parse or return error.
+        let mut sign: crate::int = 1;
+        if b[1] == b'P' {
+            sign = -1;
+        }
+        let t0 = s.slice(2, s.Len());
+        let (c, mut t, err) = nextRune(&t0);
+        if !err.IsNil() {
+            return Err(err);
+        }
+        let seq: crate::gostring::string;
+        let mut name: crate::gostring::string;
+        if c != rune('{') {
+            // Go: single-letter name.
+            seq = s.slice(0, s.Len() - t.Len());
+            name = seq.slice(2, seq.Len());
+        } else {
+            // Go: name is in braces.
+            let end = crate::strings::IndexRune(s.clone(), rune('}'));
+            if end < 0 {
+                let e = checkUTF8(s);
+                if !e.IsNil() {
+                    return Err(e);
+                }
+                return Err(crate::errors::Wrap(Error {
+                    Code: ErrInvalidCharRange,
+                    Expr: s.clone(),
+                }));
+            }
+            seq = s.slice(0, end + 1);
+            t = s.slice(end + 1, s.Len());
+            name = s.slice(3, end);
+            let e = checkUTF8(&name);
+            if !e.IsNil() {
+                return Err(e);
+            }
+        }
+
+        // Go: "Group can have leading negation too. \p{^Han} ==
+        // \P{Han}, \P{^Han} == \p{Han}."
+        if name.Len() != 0 && name.as_bytes()[0] == b'^' {
+            sign = -sign;
+            name = name.slice(1, name.Len());
+        }
+
+        let (tab, fold, tsign) = unicodeTable(&name);
+        let tab = match tab {
+            Some(t) => t,
+            None => {
+                return Err(crate::errors::Wrap(Error {
+                    Code: ErrInvalidCharRange,
+                    Expr: seq,
+                }))
+            }
+        };
+        if tsign < 0 {
+            sign = -sign;
+        }
+
+        let mut r = r;
+        if !self.flags.__has(FoldCase) || fold.is_none() {
+            if sign > 0 {
+                r = appendTable(r, tab);
+            } else {
+                r = appendNegatedTable(r, tab);
+            }
+        } else {
+            // Go: "Merge and clean tab and fold in a temporary buffer.
+            // This is necessary for the negative case and just tidy for
+            // the positive case."
+            let mut tmp = core::mem::take(&mut self.tmpClass);
+            tmp.clear();
+            tmp = appendTable(tmp, tab);
+            tmp = appendTable(tmp, fold.unwrap());
+            self.tmpClass = tmp;
+            let mut t2 = core::mem::take(&mut self.tmpClass);
+            let cleaned = cleanClass(&mut t2);
+            self.tmpClass = t2;
+            if sign > 0 {
+                r = appendClass(r, &cleaned);
+            } else {
+                r = appendNegatedClass(r, &cleaned);
+            }
+        }
+        return Ok(Some((r, t)));
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:1827-1919 parser.parseClass
+    /// A whole `[...]`, pushed onto the stack.
+    ///
+    /// The `\n` inserted for a negated class under POSIX semantics is
+    /// Go's, and its comment says why: "If character class does not
+    /// match \n, add it here, so that negation later will do the right
+    /// thing."
+    fn parseClass(
+        &mut self,
+        s: &crate::gostring::string,
+    ) -> Result<crate::gostring::string, crate::errors::error> {
+        let mut t = s.slice(1, s.Len()); // Go: chop [
+        let re = self.newRegexp(super::regexp::OpCharClass);
+        self.nm(re).Flags = self.flags;
+        let mut class: Vec<rune> = Vec::new();
+
+        let mut sign: crate::int = 1;
+        if t.Len() != 0 && t.as_bytes()[0] == b'^' {
+            sign = -1;
+            t = t.slice(1, t.Len());
+            if !self.flags.__has(ClassNL) {
+                class.push(rune('\n'));
+                class.push(rune('\n'));
+            }
+        }
+
+        // Go: ] and - are okay as first char in class.
+        let mut first = true;
+        while t.Len() == 0 || t.as_bytes()[0] != b']' || first {
+            // Go: "POSIX: - is only okay unescaped as first or last in
+            // class. Perl: - is okay anywhere."
+            if t.Len() != 0
+                && t.as_bytes()[0] == b'-'
+                && !self.flags.__has(PerlX)
+                && !first
+                && (t.Len() == 1 || t.as_bytes()[1] != b']')
+            {
+                let (_, size) = crate::unicode::utf8::DecodeRune(t.slice(1, t.Len()).as_bytes());
+                return Err(crate::errors::Wrap(Error {
+                    Code: ErrInvalidCharRange,
+                    Expr: t.slice(0, 1 + crate::int::from(crate::int64(size))),
+                }));
+            }
+            first = false;
+
+            // Go: look for POSIX [:alnum:] etc.
+            if t.Len() > 2 && t.as_bytes()[0] == b'[' && t.as_bytes()[1] == b':' {
+                match self.parseNamedClass(&t, class.clone())? {
+                    Some((nclass, nt)) => {
+                        class = nclass;
+                        t = nt;
+                        continue;
+                    }
+                    None => {}
+                }
+            }
+
+            // Go: look for Unicode character group like \p{Han}.
+            match self.parseUnicodeClass(&t, class.clone())? {
+                Some((nclass, nt)) => {
+                    class = nclass;
+                    t = nt;
+                    continue;
+                }
+                None => {}
+            }
+
+            // Go: look for Perl character class symbols (extension).
+            if let Some((nclass, nt)) = self.parsePerlClassEscape(&t, class.clone()) {
+                class = nclass;
+                t = nt;
+                continue;
+            }
+
+            // Go: single character or simple range.
+            let rng = t.clone();
+            let (lo, t2, err) = self.parseClassChar(&t, s);
+            if !err.IsNil() {
+                return Err(err);
+            }
+            t = t2;
+            let mut hi = lo;
+            // Go: [a-] means (a|-) so check for final ].
+            if t.Len() >= 2 && t.as_bytes()[0] == b'-' && t.as_bytes()[1] != b']' {
+                t = t.slice(1, t.Len());
+                let (h, t3, err) = self.parseClassChar(&t, s);
+                if !err.IsNil() {
+                    return Err(err);
+                }
+                hi = h;
+                t = t3;
+                if hi < lo {
+                    return Err(crate::errors::Wrap(Error {
+                        Code: ErrInvalidCharRange,
+                        Expr: rng.slice(0, rng.Len() - t.Len()),
+                    }));
+                }
+            }
+            if !self.flags.__has(FoldCase) {
+                class = appendRange(class, lo, hi);
+            } else {
+                class = appendFoldedRange(class, lo, hi);
+            }
+        }
+        t = t.slice(1, t.Len()); // Go: chop ]
+
+        let mut class = cleanClass(&mut class);
+        if sign < 0 {
+            class = negateClass(class);
+        }
+        self.nm(re).Rune = class;
+        let _ = self.push(re);
+        return Ok(t);
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:1411-1443 parser.parseRightParen
+    /// Close a group: the same three lines the end of `parse` runs,
+    /// then pop the `(` and either discard it (a non-capturing group)
+    /// or turn it into the `OpCapture`.
+    fn parseRightParen(&mut self) -> crate::errors::error {
+        let _ = self.concat();
+        if self.swapVerticalBar() {
+            // Go: pop vertical bar
+            let n = self.stack.len();
+            self.stack.truncate(n - 1);
+        }
+        let _ = self.alternate();
+
+        let n = self.stack.len();
+        if n < 2 {
+            return crate::errors::Wrap(Error {
+                Code: ErrUnexpectedParen,
+                Expr: self.wholeRegexp.clone(),
+            });
+        }
+        let re1 = self.stack[n - 1];
+        let re2 = self.stack[n - 2];
+        self.stack.truncate(n - 2);
+        if self.n(re2).Op != opLeftParen {
+            return crate::errors::Wrap(Error {
+                Code: ErrUnexpectedParen,
+                Expr: self.wholeRegexp.clone(),
+            });
+        }
+        // Go: restore flags at time of paren.
+        self.flags = self.n(re2).Flags;
+        if self.n(re2).Cap == 0 {
+            // Go: just for grouping.
+            let _ = self.push(re1);
+        } else {
+            self.nm(re2).Op = super::regexp::OpCapture;
+            self.nm(re2).Sub = alloc::vec![re1];
+            let _ = self.push(re2);
+        }
+        return crate::errors::nil;
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:1141-1258 parser.parsePerlFlags
+    /// `(?i)`, `(?i:…)`, `(?:…)` and the three named-capture spellings.
+    ///
+    /// Go supports `(?P<name>…)` and `(?<name>…)` but NOT `(?'name'…)`,
+    /// despite its own comment listing all three — the code only checks
+    /// for `P<` and `<`.
+    fn parsePerlFlags(
+        &mut self,
+        s: &crate::gostring::string,
+    ) -> Result<crate::gostring::string, crate::errors::error> {
+        let mut t = s.clone();
+        let tb = t.as_bytes();
+
+        let startsWithP = t.Len() > 4 && tb[2] == b'P' && tb[3] == b'<';
+        let startsWithName = t.Len() > 3 && tb[2] == b'<';
+
+        if startsWithP || startsWithName {
+            // Go: position of expr start.
+            let exprStartPos: crate::int = if startsWithName { 3 } else { 4 };
+
+            // Go: pull out name.
+            let end = crate::strings::IndexRune(t.clone(), rune('>'));
+            if end < 0 {
+                let e = checkUTF8(&t);
+                if !e.IsNil() {
+                    return Err(e);
+                }
+                return Err(crate::errors::Wrap(Error {
+                    Code: ErrInvalidNamedCapture,
+                    Expr: s.clone(),
+                }));
+            }
+
+            // Go: "(?P<name>" or "(?<name>", then "name".
+            let capture = t.slice(0, end + 1);
+            let name = t.slice(exprStartPos, end);
+            let e = checkUTF8(&name);
+            if !e.IsNil() {
+                return Err(e);
+            }
+            if !isValidCaptureName(&name) {
+                return Err(crate::errors::Wrap(Error {
+                    Code: ErrInvalidNamedCapture,
+                    Expr: capture,
+                }));
+            }
+
+            // Go: like ordinary capture, but named.
+            self.numCap += 1;
+            let (re, _) = self.op(opLeftParen);
+            let cap = self.numCap;
+            self.nm(re).Cap = cap;
+            self.nm(re).Name = name;
+            return Ok(t.slice(end + 1, t.Len()));
+        }
+
+        // Go: non-capturing group. Might also twiddle Perl flags.
+        t = t.slice(2, t.Len()); // Go: skip (?
+        let mut flags = self.flags;
+        let mut sign: crate::int = 1;
+        let mut sawFlag = false;
+        while t.Len() != 0 {
+            let (c, t2, err) = nextRune(&t);
+            if !err.IsNil() {
+                return Err(err);
+            }
+            t = t2;
+            if c == rune('i') {
+                flags |= FoldCase;
+                sawFlag = true;
+            } else if c == rune('m') {
+                flags = Flags(flags.0 & !OneLine.0);
+                sawFlag = true;
+            } else if c == rune('s') {
+                flags |= DotNL;
+                sawFlag = true;
+            } else if c == rune('U') {
+                flags |= NonGreedy;
+                sawFlag = true;
+            } else if c == rune('-') {
+                // Go: switch to negation.
+                if sign < 0 {
+                    break;
+                }
+                sign = -1;
+                // Go: "Invert flags so that | above turn into &^ and
+                // vice versa. We'll invert flags again before using it
+                // below."
+                flags = !flags;
+                sawFlag = false;
+            } else if c == rune(':') || c == rune(')') {
+                // Go: end of flags, starting group or not.
+                if sign < 0 {
+                    if !sawFlag {
+                        break;
+                    }
+                    flags = !flags;
+                }
+                if c == rune(':') {
+                    // Go: open new group.
+                    let _ = self.op(opLeftParen);
+                }
+                self.flags = flags;
+                return Ok(t);
+            } else {
+                break;
+            }
+        }
+
+        return Err(crate::errors::Wrap(Error {
+            Code: ErrInvalidPerlOp,
+            Expr: s.slice(0, s.Len() - t.Len()),
+        }));
+    }
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:887-889 Parse
+/// Go: "Parse parses a regular expression string s, controlled by the
+/// specified Flags, and returns a regular expression parse tree."
+pub fn Parse<S: Into<crate::gostring::string>>(
+    s: S,
+    flags: Flags,
+) -> (
+    crate::gonilable::nilable<super::regexp::Regexp>,
+    crate::errors::error,
+) {
+    return parse(&s.into(), flags);
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:891-1097 parse
+/// The parser proper: one pass over the pattern, driving the stack
+/// machinery.
+///
+/// Go opens with a `defer`/`recover` that turns `panic(ErrLarge)` and
+/// `panic(ErrNestingDepth)` into errors. goish's limit checks RETURN
+/// their code instead — `recover!()` does not resume — so those two
+/// arrive through the same `?`-shaped propagation as every other error
+/// and there is no recover here. The errors a caller sees are the same.
+fn parse(
+    s: &crate::gostring::string,
+    flags: Flags,
+) -> (
+    crate::gonilable::nilable<super::regexp::Regexp>,
+    crate::errors::error,
+) {
+    use super::regexp::*;
+    let fail = |e: crate::errors::error| {
+        (crate::nilval::nil.into(), e)
+    };
+
+    if flags.__has(Literal) {
+        // Go: trivial parser for literal string.
+        let e = checkUTF8(s);
+        if !e.IsNil() {
+            return fail(e);
+        }
+        return (
+            crate::gonilable::nilable::new(literalRegexp(s, flags)),
+            crate::errors::nil,
+        );
+    }
+
+    // Go: otherwise, must do real work.
+    let mut p = parser::__new(s.clone(), flags);
+    let mut t = s.clone();
+    let mut lastRepeat = crate::gostring::string::new();
+
+    while t.Len() != 0 {
+        let mut repeat = crate::gostring::string::new();
+        let b0 = t.as_bytes()[0];
+
+        if b0 == b'(' {
+            if p.flags.__has(PerlX) && t.Len() >= 2 && t.as_bytes()[1] == b'?' {
+                // Go: flag changes and non-capturing groups.
+                match p.parsePerlFlags(&t) {
+                    Ok(nt) => t = nt,
+                    Err(e) => return fail(e),
+                }
+            } else {
+                p.numCap += 1;
+                let (re, le) = p.op(opLeftParen);
+                if let Some(c) = le {
+                    return fail(wrapLimit(c, s));
+                }
+                let cap = p.numCap;
+                p.nm(re).Cap = cap;
+                t = t.slice(1, t.Len());
+            }
+        } else if b0 == b'|' {
+            if let Some(c) = p.parseVerticalBar() {
+                return fail(wrapLimit(c, s));
+            }
+            t = t.slice(1, t.Len());
+        } else if b0 == b')' {
+            let e = p.parseRightParen();
+            if !e.IsNil() {
+                return fail(e);
+            }
+            t = t.slice(1, t.Len());
+        } else if b0 == b'^' {
+            let (_, le) = if p.flags.__has(OneLine) {
+                p.op(OpBeginText)
+            } else {
+                p.op(OpBeginLine)
+            };
+            if let Some(c) = le {
+                return fail(wrapLimit(c, s));
+            }
+            t = t.slice(1, t.Len());
+        } else if b0 == b'$' {
+            if p.flags.__has(OneLine) {
+                let (re, le) = p.op(OpEndText);
+                if let Some(c) = le {
+                    return fail(wrapLimit(c, s));
+                }
+                let f = p.n(re).Flags | WasDollar;
+                p.nm(re).Flags = f;
+            } else {
+                let (_, le) = p.op(OpEndLine);
+                if let Some(c) = le {
+                    return fail(wrapLimit(c, s));
+                }
+            }
+            t = t.slice(1, t.Len());
+        } else if b0 == b'.' {
+            let (_, le) = if p.flags.__has(DotNL) {
+                p.op(OpAnyChar)
+            } else {
+                p.op(OpAnyCharNotNL)
+            };
+            if let Some(c) = le {
+                return fail(wrapLimit(c, s));
+            }
+            t = t.slice(1, t.Len());
+        } else if b0 == b'[' {
+            match p.parseClass(&t) {
+                Ok(nt) => t = nt,
+                Err(e) => return fail(e),
+            }
+        } else if b0 == b'*' || b0 == b'+' || b0 == b'?' {
+            let before = t.clone();
+            let op = if b0 == b'*' {
+                OpStar
+            } else if b0 == b'+' {
+                OpPlus
+            } else {
+                OpQuest
+            };
+            let after = t.slice(1, t.Len());
+            let (after, e) = p.repeat(op, 0, 0, &before, &after, &lastRepeat);
+            if !e.IsNil() {
+                return fail(e);
+            }
+            repeat = before;
+            t = after;
+        } else if b0 == b'{' {
+            let before = t.clone();
+            let (min, max, after, ok) = p.parseRepeat(&t);
+            if !ok {
+                // Go: "If the repeat cannot be parsed, { is a literal."
+                if let Some(c) = p.literal(rune('{')) {
+                    return fail(wrapLimit(c, s));
+                }
+                t = t.slice(1, t.Len());
+            } else if min < 0 || min > 1000 || max > 1000 || max >= 0 && min > max {
+                // Go: "Numbers were too big, or max is present and
+                // min > max."
+                return fail(crate::errors::Wrap(Error {
+                    Code: ErrInvalidRepeatSize,
+                    Expr: before.slice(0, before.Len() - after.Len()),
+                }));
+            } else {
+                let (after, e) = p.repeat(OpRepeat, min, max, &before, &after, &lastRepeat);
+                if !e.IsNil() {
+                    return fail(e);
+                }
+                repeat = before;
+                t = after;
+            }
+        } else if b0 == b'\\' {
+            let mut handled = false;
+            if p.flags.__has(PerlX) && t.Len() >= 2 {
+                let b1 = t.as_bytes()[1];
+                if b1 == b'A' {
+                    let (_, le) = p.op(OpBeginText);
+                    if let Some(c) = le {
+                        return fail(wrapLimit(c, s));
+                    }
+                    t = t.slice(2, t.Len());
+                    handled = true;
+                } else if b1 == b'b' {
+                    let (_, le) = p.op(OpWordBoundary);
+                    if let Some(c) = le {
+                        return fail(wrapLimit(c, s));
+                    }
+                    t = t.slice(2, t.Len());
+                    handled = true;
+                } else if b1 == b'B' {
+                    let (_, le) = p.op(OpNoWordBoundary);
+                    if let Some(c) = le {
+                        return fail(wrapLimit(c, s));
+                    }
+                    t = t.slice(2, t.Len());
+                    handled = true;
+                } else if b1 == b'C' {
+                    // Go: any byte; not supported.
+                    return fail(crate::errors::Wrap(Error {
+                        Code: ErrInvalidEscape,
+                        Expr: t.slice(0, 2),
+                    }));
+                } else if b1 == b'Q' {
+                    // Go: \Q ... \E: the ... is always literals.
+                    let rest = t.slice(2, t.Len());
+                    let idx = crate::strings::Index(
+                        rest.clone(),
+                        crate::gostring::string::from_static("\\E"),
+                    );
+                    let mut lit;
+                    if idx < 0 {
+                        lit = rest.clone();
+                        t = crate::gostring::string::new();
+                    } else {
+                        lit = rest.slice(0, idx);
+                        t = rest.slice(idx + 2, rest.Len());
+                    }
+                    while lit.Len() != 0 {
+                        let (c, next, e) = nextRune(&lit);
+                        if !e.IsNil() {
+                            return fail(e);
+                        }
+                        if let Some(code) = p.literal(c) {
+                            return fail(wrapLimit(code, s));
+                        }
+                        lit = next;
+                    }
+                    handled = true;
+                } else if b1 == b'z' {
+                    let (_, le) = p.op(OpEndText);
+                    if let Some(c) = le {
+                        return fail(wrapLimit(c, s));
+                    }
+                    t = t.slice(2, t.Len());
+                    handled = true;
+                }
+            }
+
+            if !handled {
+                let re = p.newRegexp(OpCharClass);
+                p.nm(re).Flags = p.flags;
+
+                // Go: look for Unicode character group like \p{Han}.
+                let mut pushed = false;
+                if t.Len() >= 2 && (t.as_bytes()[1] == b'p' || t.as_bytes()[1] == b'P') {
+                    match p.parseUnicodeClass(&t, Vec::new()) {
+                        Err(e) => return fail(e),
+                        Ok(Some((r, rest))) => {
+                            p.nm(re).Rune = r;
+                            t = rest;
+                            let (_, le) = p.push(re);
+                            if let Some(c) = le {
+                                return fail(wrapLimit(c, s));
+                            }
+                            pushed = true;
+                        }
+                        Ok(None) => {}
+                    }
+                }
+
+                if !pushed {
+                    // Go: Perl character class escape.
+                    match p.parsePerlClassEscape(&t, Vec::new()) {
+                        Some((r, rest)) => {
+                            p.nm(re).Rune = r;
+                            t = rest;
+                            let (_, le) = p.push(re);
+                            if let Some(c) = le {
+                                return fail(wrapLimit(c, s));
+                            }
+                            pushed = true;
+                        }
+                        None => {
+                            p.reuse(re);
+                        }
+                    }
+                }
+
+                if !pushed {
+                    // Go: ordinary single-character escape.
+                    let (c, rest, e) = p.parseEscape(&t);
+                    if !e.IsNil() {
+                        return fail(e);
+                    }
+                    t = rest;
+                    if let Some(code) = p.literal(c) {
+                        return fail(wrapLimit(code, s));
+                    }
+                }
+            }
+        } else {
+            let (c, rest, e) = nextRune(&t);
+            if !e.IsNil() {
+                return fail(e);
+            }
+            t = rest;
+            if let Some(code) = p.literal(c) {
+                return fail(wrapLimit(code, s));
+            }
+        }
+
+        lastRepeat = repeat;
+    }
+
+    let _ = p.concat();
+    if p.swapVerticalBar() {
+        // Go: pop vertical bar
+        let n = p.stack.len();
+        p.stack.truncate(n - 1);
+    }
+    let _ = p.alternate();
+
+    if p.stack.len() != 1 {
+        return fail(crate::errors::Wrap(Error {
+            Code: ErrMissingParen,
+            Expr: s.clone(),
+        }));
+    }
+    let root = p.stack[0];
+    return (
+        crate::gonilable::nilable::new(p.__materialise(root)),
+        crate::errors::nil,
+    );
+}
+
+// go: none — goish idiom: Go's limit checks `panic(ErrLarge)` and the
+//     `recover` at the top of `parse` attaches the WHOLE pattern as the
+//     Expr. goish returns the code instead, so the wrap happens where
+//     the recover would have.
+/// A limit code, as the error Go's `recover` builds.
+fn wrapLimit(code: ErrorCode, s: &crate::gostring::string) -> crate::errors::error {
+    return crate::errors::Wrap(Error {
+        Code: code,
+        Expr: s.clone(),
+    });
+}
+
+impl parser {
+    // go: none — goish idiom: Go's parser IS building `*Regexp`s, so it
+    //     returns the root and is done. goish's works in an arena, so
+    //     the public tree is built from it once, here.
+    /// The arena subtree at `r`, as a public [`Regexp`].
+    fn __materialise(&self, r: pref) -> super::regexp::Regexp {
+        let n = self.n(r);
+        let mut sub: Vec<alloc::sync::Arc<super::regexp::Regexp>> = Vec::new();
+        for s in n.Sub.iter() {
+            sub.push(alloc::sync::Arc::new(self.__materialise(*s)));
+        }
+        return super::regexp::Regexp {
+            Op: n.Op,
+            Flags: n.Flags,
+            Sub: sub,
+            Rune: n.Rune.clone(),
+            Min: n.Min,
+            Max: n.Max,
+            Cap: n.Cap,
+            Name: n.Name.clone(),
+        };
+    }
+}
+
 // ─── test hooks for the parser machinery ─────────────────────────────
 
 // go: none — goish-only: Go's `parser` is unexported and its own tests

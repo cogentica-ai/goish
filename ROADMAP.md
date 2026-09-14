@@ -3383,7 +3383,7 @@ The remaining stages, and the reason for this order:
 | 2b-i | `syntax/parse.rs` — the character-class layer | ~400 | **done** |
 | 2b-ii | `syntax/parse.rs` — the error type, limits, stateless helpers, group tables | ~450 | **done** |
 | 2b-iii | `syntax/parse.rs` — the node arena and stack machinery | ~750 | **done** |
-| 2b-iv | `syntax/parse.rs` — `Parse` and the text sub-parsers | ~1,100 | next |
+| 2b-iv | `syntax/parse.rs` — `Parse` and the text sub-parsers | ~1,100 | **done** |
 | 3 | `syntax/simplify.rs`, `syntax/compile.rs` | ~450 | |
 | 4 | `regexp/exec.rs` (the NFA) and the swap | ~1,900 | |
 
@@ -3545,6 +3545,57 @@ never saw more than one branch. The fix was to script Go's real closing
 sequence — `concat(); if swapVerticalBar() { pop }; alternate()` —
 which is what `parse`'s end and `parseRightParen` both write out.
 Popping the marker is what leaves the alternatives adjacent.
+
+**STAGE 2b-iv LANDED 2026-09-14 — THE PARSER IS COMPLETE.** `Parse`,
+`parseRepeat`, `parseInt`, `parsePerlFlags`, `parseEscape`,
+`parseClassChar`, `parsePerlClassEscape`, `parseNamedClass`,
+`appendGroup`, `parseUnicodeClass`, `parseClass`, `parseRightParen`,
+`nextRune`, `unhex`, `canonicalName` and `unicodeTable`.
+`examples/regexp_parse_ref_smoke.rs` runs 168 patterns under three flag
+sets — Perl, POSIX and Literal — and compares Go's canonical
+`String()`, the capture count, and the exact error for the ~40 that do
+not parse. 506 rows.
+
+`String()` is the right thing to compare rather than a tree dump: it is
+CANONICAL, so a wrong flag placement, a missed factoring and a
+mis-parsed class all show up in it, and stage 2a pinned it
+independently.
+
+**ONE REAL GAP, and it is `unicode`'s, not regexp's.** `\p{Han}`,
+`\p{L}` and every named group ERROR with `invalid character class
+range` where Go resolves them. `unicodeTable` reads
+`unicode.Categories`, `unicode.Scripts` and their Fold twins, and
+goish's `unicode` has neither those maps nor the tables behind them —
+`tables.rs` exports `Mn` and `Zs` and nothing else. `\p{Any}` and
+`\p{ASCII}` work, because their tables are built in parse.go itself.
+
+It is a refusal, not a wrong match: a pattern using one fails to
+compile rather than silently matching the wrong runes. The smoke
+asserts goish's answer in a GAP block that records Go's beside it, so
+the two rows GO RED the day the unicode tables land — which is the
+reminder to move them back into the shared corpus.
+
+**Go's `recover` has no counterpart.** Go's limit checks
+`panic(ErrLarge)` and a `defer`/`recover` at the top of `parse` turns
+it into an error. goish's `recover!()` does not resume, so the checks
+RETURN their code and it propagates like any other error. Same errors
+reach the caller; what differs is that the propagation is visible.
+
+**A harness bug worth more than the perturbations it hid.** Three of
+five perturbations came back green, and one of those was not a thin
+table at all — the edit had 16 spaces of indentation where the file has
+12, so `str.replace` silently did nothing, the rebuild was a cache hit,
+and the smoke passed. A perturbation that never applies is
+indistinguishable from one that does not bite, and it sends you
+widening a table that was already sufficient. Every perturbation script
+now asserts its match count. With the edit actually applied, that one
+turns 5 rows red.
+
+The other two were genuinely thin, and both wanted inputs the corpus
+had no reason to contain: `a{01}` for `parseInt`'s leading-zero
+refusal, and a twenty-four-digit count for its overflow clamp — because
+`a{99999999999}` exceeds 1000 either way, and only a value long enough
+to WRAP distinguishes the clamp from its absence.
 
 Stage 2a repeated the lesson twice, which is why it is written down
 here rather than left in a commit message. `sub.Op > OpCapture` → `>=`

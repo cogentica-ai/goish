@@ -43,3 +43,4 @@ pub use regexp::{
     OpConcat, OpEmptyMatch, OpEndLine, OpEndText, OpLiteral, OpNoMatch, OpNoWordBoundary, OpPlus,
     OpQuest, OpRepeat, OpStar, OpWordBoundary, Regexp,
 };
+pub use parse::{Error, ErrorCode, Parse};
