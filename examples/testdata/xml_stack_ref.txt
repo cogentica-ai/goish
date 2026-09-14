@@ -1,0 +1,19 @@
+stk 0 [ea pa] strict=true def="" -> e:[S(|a|false)] p:true [] {} err=<nil>
+stk 1 [ea pb] strict=true def="" -> e:[S(|a|false)] p:false [] {} err=XML syntax error on line 1: element <a> closed by </b>
+stk 2 [ea pb] strict=false def="" -> e:[S(|a|false)] p:true [] {} err=<nil>
+stk 3 [pa] strict=true def="" -> p:false [] {} err=XML syntax error on line 1: unexpected end element </a>
+stk 4 [ea eb pb pa] strict=true def="" -> e:[S(|a|false)] e:[S(|b|false) S(|a|false)] p:true [S(|a|false)] {} err=<nil> p:true [] {} err=<nil>
+stk 5 [nx=http://x ea pa] strict=true def="" -> n:[N(http://x|x|true)]{x=http://x} e:[S(|a|false) N(http://x|x|true)] p:true [] {x=http://x} err=<nil>
+stk 6 [ea nx=http://x pa] strict=true def="" -> e:[S(|a|false)] n:[N(http://x|x|true) S(|a|false)]{x=http://x} p:false [S(|a|false)] {x=http://x} err=XML syntax error on line 1: unexpected end element </a>
+stk 7 [ea nx=http://x nx=http://y pa] strict=true def="" -> e:[S(|a|false)] n:[N(http://x|x|true) S(|a|false)]{x=http://x} n:[N(http://y|x|true) N(http://x|x|true) S(|a|false)]{x=http://y} p:false [N(http://x|x|true) S(|a|false)] {x=http://y} err=XML syntax error on line 1: unexpected end element </a>
+stk 8 [nx=old! ea pa] strict=true def="" -> n:[N(old|x|false)]{} e:[S(|a|false) N(old|x|false)] p:true [] {} err=<nil>
+stk 9 [ea F pa f f] strict=true def="" -> e:[S(|a|false)] F:[S(|a|false) E(||false)] p:true [E(||false)] {} err=<nil> f:true [] f:false []
+stk 10 [ea nx=http://x F pa f] strict=true def="" -> e:[S(|a|false)] n:[N(http://x|x|true) S(|a|false)]{x=http://x} F:[N(http://x|x|true) S(|a|false) E(||false)] p:false [S(|a|false) E(||false)] {x=http://x} err=XML syntax error on line 1: unexpected end element </a> f:false [S(|a|false) E(||false)]
+stk 11 [ea eb F pb f pa] strict=true def="" -> e:[S(|a|false)] e:[S(|b|false) S(|a|false)] F:[S(|b|false) E(||false) S(|a|false)] p:true [E(||false) S(|a|false)] {} err=<nil> f:true [S(|a|false)] p:true [] {} err=<nil>
+stk 12 [tx|a|1] strict=true def="" -> t:x|a
+stk 13 [nx=http://x tx|a|1] strict=true def="" -> n:[N(http://x|x|true)]{x=http://x} t:http://x|a
+stk 14 [t|a|1] strict=true def="http://def" -> t:http://def|a
+stk 15 [t|a|0] strict=true def="http://def" -> t:|a
+stk 16 [txml|a|1] strict=true def="" -> t:http://www.w3.org/XML/1998/namespace|a
+stk 17 [txmlns|a|1] strict=true def="" -> t:xmlns|a
+stk 18 [t|xmlns|1] strict=true def="http://def" -> t:|xmlns
