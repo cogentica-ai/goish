@@ -1,6 +1,6 @@
-// goishlint:ignore GOISH018 EscapeString, InputOffset, InputPos, NewDecoder, NewTokenDecoder, RawToken, Token, attrval, autoClose, emitCDATA, getc, isName, isNameString, mustgetc, name, nsname, pop, popEOF, popElement, push, pushEOF, pushElement, pushNs, rawToken, readName, savedOffset, space, switchToReader, syntaxError, text, translate, ungetc — the Decoder state machine and the two name predicates, deliberately not in this first slice. The Decoder ones cannot be pinned a function at a time (they share a bufio reader, a name-space stack and an error latch), so they land together with their own ref smoke; isName/isNameString need Go's `first` and `second` unicode.RangeTables, 310 lines of xml.go that should be GENERATED from Go rather than transcribed, which is its own commit. emitCDATA and EscapeString are printer-side and belong with marshal.go. See the file header and ROADMAP §2.
-// goishlint:ignore GOISH021 stkEOF, stkNs, stkStart, xmlPrefix, xmlURL, xmlnsPrefix, entity, errRawToken, HTMLEntity, HTMLAutoClose, first, second, Decoder, TokenReader, stack — the Decoder's own stack kinds, its name-space constants and its types; all of them exist only for the state machine waived above and would be dead declarations without it. `entity`, `HTMLEntity` and `HTMLAutoClose` are the decoder's entity tables and only `rawToken` reads them; `errRawToken` is the sentinel `Token()` returns when a TokenReader is in use; `first` and `second` are the 310-line name RangeTables that land with isName.
-// go: file encoding/xml/xml.go decls: SyntaxError.Error, StartElement.Copy, StartElement.End, CharData.Copy, Comment.Copy, ProcInst.Copy, Directive.Copy, CopyToken, isInCharacterRange, isNameByte, EscapeText, escapeText, Escape, procInst
+// goishlint:ignore GOISH018 EscapeString, InputOffset, InputPos, NewDecoder, NewTokenDecoder, RawToken, Token, attrval, autoClose, emitCDATA, getc, mustgetc, name, nsname, pop, popEOF, popElement, push, pushEOF, pushElement, pushNs, rawToken, readName, savedOffset, space, switchToReader, syntaxError, text, translate, ungetc — the Decoder state machine and the two name predicates, deliberately not in this first slice. The Decoder ones cannot be pinned a function at a time (they share a bufio reader, a name-space stack and an error latch), so they land together with their own ref smoke; isName/isNameString need Go's `first` and `second` unicode.RangeTables, 310 lines of xml.go that should be GENERATED from Go rather than transcribed, which is its own commit. emitCDATA and EscapeString are printer-side and belong with marshal.go. See the file header and ROADMAP §2.
+// goishlint:ignore GOISH021 stkEOF, stkNs, stkStart, xmlPrefix, xmlURL, xmlnsPrefix, entity, errRawToken, HTMLEntity, HTMLAutoClose, Decoder, TokenReader, stack — the Decoder's own stack kinds, its name-space constants and its types; all of them exist only for the state machine waived above and would be dead declarations without it. `entity`, `HTMLEntity` and `HTMLAutoClose` are the decoder's entity tables and only `rawToken` reads them; `errRawToken` is the sentinel `Token()` returns when a TokenReader is in use.
+// go: file encoding/xml/xml.go decls: SyntaxError.Error, StartElement.Copy, StartElement.End, CharData.Copy, Comment.Copy, ProcInst.Copy, Directive.Copy, CopyToken, isInCharacterRange, isNameByte, isName, isNameString, EscapeText, escapeText, Escape, procInst
 //
 // encoding/xml/xml.rs — the pure half of Go's xml.go.
 //
@@ -33,6 +33,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use crate::goslice::slice;
+use crate::unicode::{Range16, RangeTable};
 use crate::gostring::string;
 use crate::types::{byte, int, rune};
 
@@ -245,6 +246,388 @@ pub fn isNameByte(c: byte) -> bool {
         || c == b':'
         || c == b'.'
         || c == b'-';
+}
+
+// ─── the XML name character tables ────────────────────────────────────
+//
+// go: none — goish idiom: Go declares `first` and `second` as
+// `*unicode.RangeTable` literals, 310 lines of xml.go. These were
+// DUMPED from Go 1.25.5 (scripts/goref.sh encoding/xml, printing every
+// R16 entry) rather than transcribed — 302 ranges is well past the
+// point where retyping introduces a silent one-character error, and a
+// wrong range here would accept or reject XML names for the rest of the
+// package's life.
+//
+// Go's comment on them: "first" is the set of characters that may START
+// an XML name (XML 1.0 §2.3 NameStartChar, roughly), "second" the extra
+// ones legal in later positions — digits, combining marks, extenders.
+// Neither table has any R32 entries, so no name character is above
+// U+FFFF; that is Go's table, not an assumption, and the generator
+// asserts it.
+
+/// Generated from Go 1.25.5's `xml.first` — 190 R16 ranges, no R32,
+/// LatinOffset 0. Dumped by scripts/goref.sh, not transcribed.
+static FIRST_R16: [Range16; 190] = [
+    Range16 { Lo: 0x003a, Hi: 0x003a, Stride: 1 },
+    Range16 { Lo: 0x0041, Hi: 0x005a, Stride: 1 },
+    Range16 { Lo: 0x005f, Hi: 0x005f, Stride: 1 },
+    Range16 { Lo: 0x0061, Hi: 0x007a, Stride: 1 },
+    Range16 { Lo: 0x00c0, Hi: 0x00d6, Stride: 1 },
+    Range16 { Lo: 0x00d8, Hi: 0x00f6, Stride: 1 },
+    Range16 { Lo: 0x00f8, Hi: 0x00ff, Stride: 1 },
+    Range16 { Lo: 0x0100, Hi: 0x0131, Stride: 1 },
+    Range16 { Lo: 0x0134, Hi: 0x013e, Stride: 1 },
+    Range16 { Lo: 0x0141, Hi: 0x0148, Stride: 1 },
+    Range16 { Lo: 0x014a, Hi: 0x017e, Stride: 1 },
+    Range16 { Lo: 0x0180, Hi: 0x01c3, Stride: 1 },
+    Range16 { Lo: 0x01cd, Hi: 0x01f0, Stride: 1 },
+    Range16 { Lo: 0x01f4, Hi: 0x01f5, Stride: 1 },
+    Range16 { Lo: 0x01fa, Hi: 0x0217, Stride: 1 },
+    Range16 { Lo: 0x0250, Hi: 0x02a8, Stride: 1 },
+    Range16 { Lo: 0x02bb, Hi: 0x02c1, Stride: 1 },
+    Range16 { Lo: 0x0386, Hi: 0x0386, Stride: 1 },
+    Range16 { Lo: 0x0388, Hi: 0x038a, Stride: 1 },
+    Range16 { Lo: 0x038c, Hi: 0x038c, Stride: 1 },
+    Range16 { Lo: 0x038e, Hi: 0x03a1, Stride: 1 },
+    Range16 { Lo: 0x03a3, Hi: 0x03ce, Stride: 1 },
+    Range16 { Lo: 0x03d0, Hi: 0x03d6, Stride: 1 },
+    Range16 { Lo: 0x03da, Hi: 0x03e0, Stride: 2 },
+    Range16 { Lo: 0x03e2, Hi: 0x03f3, Stride: 1 },
+    Range16 { Lo: 0x0401, Hi: 0x040c, Stride: 1 },
+    Range16 { Lo: 0x040e, Hi: 0x044f, Stride: 1 },
+    Range16 { Lo: 0x0451, Hi: 0x045c, Stride: 1 },
+    Range16 { Lo: 0x045e, Hi: 0x0481, Stride: 1 },
+    Range16 { Lo: 0x0490, Hi: 0x04c4, Stride: 1 },
+    Range16 { Lo: 0x04c7, Hi: 0x04c8, Stride: 1 },
+    Range16 { Lo: 0x04cb, Hi: 0x04cc, Stride: 1 },
+    Range16 { Lo: 0x04d0, Hi: 0x04eb, Stride: 1 },
+    Range16 { Lo: 0x04ee, Hi: 0x04f5, Stride: 1 },
+    Range16 { Lo: 0x04f8, Hi: 0x04f9, Stride: 1 },
+    Range16 { Lo: 0x0531, Hi: 0x0556, Stride: 1 },
+    Range16 { Lo: 0x0559, Hi: 0x0559, Stride: 1 },
+    Range16 { Lo: 0x0561, Hi: 0x0586, Stride: 1 },
+    Range16 { Lo: 0x05d0, Hi: 0x05ea, Stride: 1 },
+    Range16 { Lo: 0x05f0, Hi: 0x05f2, Stride: 1 },
+    Range16 { Lo: 0x0621, Hi: 0x063a, Stride: 1 },
+    Range16 { Lo: 0x0641, Hi: 0x064a, Stride: 1 },
+    Range16 { Lo: 0x0671, Hi: 0x06b7, Stride: 1 },
+    Range16 { Lo: 0x06ba, Hi: 0x06be, Stride: 1 },
+    Range16 { Lo: 0x06c0, Hi: 0x06ce, Stride: 1 },
+    Range16 { Lo: 0x06d0, Hi: 0x06d3, Stride: 1 },
+    Range16 { Lo: 0x06d5, Hi: 0x06d5, Stride: 1 },
+    Range16 { Lo: 0x06e5, Hi: 0x06e6, Stride: 1 },
+    Range16 { Lo: 0x0905, Hi: 0x0939, Stride: 1 },
+    Range16 { Lo: 0x093d, Hi: 0x093d, Stride: 1 },
+    Range16 { Lo: 0x0958, Hi: 0x0961, Stride: 1 },
+    Range16 { Lo: 0x0985, Hi: 0x098c, Stride: 1 },
+    Range16 { Lo: 0x098f, Hi: 0x0990, Stride: 1 },
+    Range16 { Lo: 0x0993, Hi: 0x09a8, Stride: 1 },
+    Range16 { Lo: 0x09aa, Hi: 0x09b0, Stride: 1 },
+    Range16 { Lo: 0x09b2, Hi: 0x09b2, Stride: 1 },
+    Range16 { Lo: 0x09b6, Hi: 0x09b9, Stride: 1 },
+    Range16 { Lo: 0x09dc, Hi: 0x09dd, Stride: 1 },
+    Range16 { Lo: 0x09df, Hi: 0x09e1, Stride: 1 },
+    Range16 { Lo: 0x09f0, Hi: 0x09f1, Stride: 1 },
+    Range16 { Lo: 0x0a05, Hi: 0x0a0a, Stride: 1 },
+    Range16 { Lo: 0x0a0f, Hi: 0x0a10, Stride: 1 },
+    Range16 { Lo: 0x0a13, Hi: 0x0a28, Stride: 1 },
+    Range16 { Lo: 0x0a2a, Hi: 0x0a30, Stride: 1 },
+    Range16 { Lo: 0x0a32, Hi: 0x0a33, Stride: 1 },
+    Range16 { Lo: 0x0a35, Hi: 0x0a36, Stride: 1 },
+    Range16 { Lo: 0x0a38, Hi: 0x0a39, Stride: 1 },
+    Range16 { Lo: 0x0a59, Hi: 0x0a5c, Stride: 1 },
+    Range16 { Lo: 0x0a5e, Hi: 0x0a5e, Stride: 1 },
+    Range16 { Lo: 0x0a72, Hi: 0x0a74, Stride: 1 },
+    Range16 { Lo: 0x0a85, Hi: 0x0a8b, Stride: 1 },
+    Range16 { Lo: 0x0a8d, Hi: 0x0a8d, Stride: 1 },
+    Range16 { Lo: 0x0a8f, Hi: 0x0a91, Stride: 1 },
+    Range16 { Lo: 0x0a93, Hi: 0x0aa8, Stride: 1 },
+    Range16 { Lo: 0x0aaa, Hi: 0x0ab0, Stride: 1 },
+    Range16 { Lo: 0x0ab2, Hi: 0x0ab3, Stride: 1 },
+    Range16 { Lo: 0x0ab5, Hi: 0x0ab9, Stride: 1 },
+    Range16 { Lo: 0x0abd, Hi: 0x0ae0, Stride: 35 },
+    Range16 { Lo: 0x0b05, Hi: 0x0b0c, Stride: 1 },
+    Range16 { Lo: 0x0b0f, Hi: 0x0b10, Stride: 1 },
+    Range16 { Lo: 0x0b13, Hi: 0x0b28, Stride: 1 },
+    Range16 { Lo: 0x0b2a, Hi: 0x0b30, Stride: 1 },
+    Range16 { Lo: 0x0b32, Hi: 0x0b33, Stride: 1 },
+    Range16 { Lo: 0x0b36, Hi: 0x0b39, Stride: 1 },
+    Range16 { Lo: 0x0b3d, Hi: 0x0b3d, Stride: 1 },
+    Range16 { Lo: 0x0b5c, Hi: 0x0b5d, Stride: 1 },
+    Range16 { Lo: 0x0b5f, Hi: 0x0b61, Stride: 1 },
+    Range16 { Lo: 0x0b85, Hi: 0x0b8a, Stride: 1 },
+    Range16 { Lo: 0x0b8e, Hi: 0x0b90, Stride: 1 },
+    Range16 { Lo: 0x0b92, Hi: 0x0b95, Stride: 1 },
+    Range16 { Lo: 0x0b99, Hi: 0x0b9a, Stride: 1 },
+    Range16 { Lo: 0x0b9c, Hi: 0x0b9c, Stride: 1 },
+    Range16 { Lo: 0x0b9e, Hi: 0x0b9f, Stride: 1 },
+    Range16 { Lo: 0x0ba3, Hi: 0x0ba4, Stride: 1 },
+    Range16 { Lo: 0x0ba8, Hi: 0x0baa, Stride: 1 },
+    Range16 { Lo: 0x0bae, Hi: 0x0bb5, Stride: 1 },
+    Range16 { Lo: 0x0bb7, Hi: 0x0bb9, Stride: 1 },
+    Range16 { Lo: 0x0c05, Hi: 0x0c0c, Stride: 1 },
+    Range16 { Lo: 0x0c0e, Hi: 0x0c10, Stride: 1 },
+    Range16 { Lo: 0x0c12, Hi: 0x0c28, Stride: 1 },
+    Range16 { Lo: 0x0c2a, Hi: 0x0c33, Stride: 1 },
+    Range16 { Lo: 0x0c35, Hi: 0x0c39, Stride: 1 },
+    Range16 { Lo: 0x0c60, Hi: 0x0c61, Stride: 1 },
+    Range16 { Lo: 0x0c85, Hi: 0x0c8c, Stride: 1 },
+    Range16 { Lo: 0x0c8e, Hi: 0x0c90, Stride: 1 },
+    Range16 { Lo: 0x0c92, Hi: 0x0ca8, Stride: 1 },
+    Range16 { Lo: 0x0caa, Hi: 0x0cb3, Stride: 1 },
+    Range16 { Lo: 0x0cb5, Hi: 0x0cb9, Stride: 1 },
+    Range16 { Lo: 0x0cde, Hi: 0x0cde, Stride: 1 },
+    Range16 { Lo: 0x0ce0, Hi: 0x0ce1, Stride: 1 },
+    Range16 { Lo: 0x0d05, Hi: 0x0d0c, Stride: 1 },
+    Range16 { Lo: 0x0d0e, Hi: 0x0d10, Stride: 1 },
+    Range16 { Lo: 0x0d12, Hi: 0x0d28, Stride: 1 },
+    Range16 { Lo: 0x0d2a, Hi: 0x0d39, Stride: 1 },
+    Range16 { Lo: 0x0d60, Hi: 0x0d61, Stride: 1 },
+    Range16 { Lo: 0x0e01, Hi: 0x0e2e, Stride: 1 },
+    Range16 { Lo: 0x0e30, Hi: 0x0e30, Stride: 1 },
+    Range16 { Lo: 0x0e32, Hi: 0x0e33, Stride: 1 },
+    Range16 { Lo: 0x0e40, Hi: 0x0e45, Stride: 1 },
+    Range16 { Lo: 0x0e81, Hi: 0x0e82, Stride: 1 },
+    Range16 { Lo: 0x0e84, Hi: 0x0e84, Stride: 1 },
+    Range16 { Lo: 0x0e87, Hi: 0x0e88, Stride: 1 },
+    Range16 { Lo: 0x0e8a, Hi: 0x0e8d, Stride: 3 },
+    Range16 { Lo: 0x0e94, Hi: 0x0e97, Stride: 1 },
+    Range16 { Lo: 0x0e99, Hi: 0x0e9f, Stride: 1 },
+    Range16 { Lo: 0x0ea1, Hi: 0x0ea3, Stride: 1 },
+    Range16 { Lo: 0x0ea5, Hi: 0x0ea7, Stride: 2 },
+    Range16 { Lo: 0x0eaa, Hi: 0x0eab, Stride: 1 },
+    Range16 { Lo: 0x0ead, Hi: 0x0eae, Stride: 1 },
+    Range16 { Lo: 0x0eb0, Hi: 0x0eb0, Stride: 1 },
+    Range16 { Lo: 0x0eb2, Hi: 0x0eb3, Stride: 1 },
+    Range16 { Lo: 0x0ebd, Hi: 0x0ebd, Stride: 1 },
+    Range16 { Lo: 0x0ec0, Hi: 0x0ec4, Stride: 1 },
+    Range16 { Lo: 0x0f40, Hi: 0x0f47, Stride: 1 },
+    Range16 { Lo: 0x0f49, Hi: 0x0f69, Stride: 1 },
+    Range16 { Lo: 0x10a0, Hi: 0x10c5, Stride: 1 },
+    Range16 { Lo: 0x10d0, Hi: 0x10f6, Stride: 1 },
+    Range16 { Lo: 0x1100, Hi: 0x1100, Stride: 1 },
+    Range16 { Lo: 0x1102, Hi: 0x1103, Stride: 1 },
+    Range16 { Lo: 0x1105, Hi: 0x1107, Stride: 1 },
+    Range16 { Lo: 0x1109, Hi: 0x1109, Stride: 1 },
+    Range16 { Lo: 0x110b, Hi: 0x110c, Stride: 1 },
+    Range16 { Lo: 0x110e, Hi: 0x1112, Stride: 1 },
+    Range16 { Lo: 0x113c, Hi: 0x1140, Stride: 2 },
+    Range16 { Lo: 0x114c, Hi: 0x1150, Stride: 2 },
+    Range16 { Lo: 0x1154, Hi: 0x1155, Stride: 1 },
+    Range16 { Lo: 0x1159, Hi: 0x1159, Stride: 1 },
+    Range16 { Lo: 0x115f, Hi: 0x1161, Stride: 1 },
+    Range16 { Lo: 0x1163, Hi: 0x1169, Stride: 2 },
+    Range16 { Lo: 0x116d, Hi: 0x116e, Stride: 1 },
+    Range16 { Lo: 0x1172, Hi: 0x1173, Stride: 1 },
+    Range16 { Lo: 0x1175, Hi: 0x119e, Stride: 41 },
+    Range16 { Lo: 0x11a8, Hi: 0x11ab, Stride: 3 },
+    Range16 { Lo: 0x11ae, Hi: 0x11af, Stride: 1 },
+    Range16 { Lo: 0x11b7, Hi: 0x11b8, Stride: 1 },
+    Range16 { Lo: 0x11ba, Hi: 0x11ba, Stride: 1 },
+    Range16 { Lo: 0x11bc, Hi: 0x11c2, Stride: 1 },
+    Range16 { Lo: 0x11eb, Hi: 0x11f0, Stride: 5 },
+    Range16 { Lo: 0x11f9, Hi: 0x11f9, Stride: 1 },
+    Range16 { Lo: 0x1e00, Hi: 0x1e9b, Stride: 1 },
+    Range16 { Lo: 0x1ea0, Hi: 0x1ef9, Stride: 1 },
+    Range16 { Lo: 0x1f00, Hi: 0x1f15, Stride: 1 },
+    Range16 { Lo: 0x1f18, Hi: 0x1f1d, Stride: 1 },
+    Range16 { Lo: 0x1f20, Hi: 0x1f45, Stride: 1 },
+    Range16 { Lo: 0x1f48, Hi: 0x1f4d, Stride: 1 },
+    Range16 { Lo: 0x1f50, Hi: 0x1f57, Stride: 1 },
+    Range16 { Lo: 0x1f59, Hi: 0x1f5b, Stride: 2 },
+    Range16 { Lo: 0x1f5d, Hi: 0x1f5d, Stride: 1 },
+    Range16 { Lo: 0x1f5f, Hi: 0x1f7d, Stride: 1 },
+    Range16 { Lo: 0x1f80, Hi: 0x1fb4, Stride: 1 },
+    Range16 { Lo: 0x1fb6, Hi: 0x1fbc, Stride: 1 },
+    Range16 { Lo: 0x1fbe, Hi: 0x1fbe, Stride: 1 },
+    Range16 { Lo: 0x1fc2, Hi: 0x1fc4, Stride: 1 },
+    Range16 { Lo: 0x1fc6, Hi: 0x1fcc, Stride: 1 },
+    Range16 { Lo: 0x1fd0, Hi: 0x1fd3, Stride: 1 },
+    Range16 { Lo: 0x1fd6, Hi: 0x1fdb, Stride: 1 },
+    Range16 { Lo: 0x1fe0, Hi: 0x1fec, Stride: 1 },
+    Range16 { Lo: 0x1ff2, Hi: 0x1ff4, Stride: 1 },
+    Range16 { Lo: 0x1ff6, Hi: 0x1ffc, Stride: 1 },
+    Range16 { Lo: 0x2126, Hi: 0x2126, Stride: 1 },
+    Range16 { Lo: 0x212a, Hi: 0x212b, Stride: 1 },
+    Range16 { Lo: 0x212e, Hi: 0x212e, Stride: 1 },
+    Range16 { Lo: 0x2180, Hi: 0x2182, Stride: 1 },
+    Range16 { Lo: 0x3007, Hi: 0x3007, Stride: 1 },
+    Range16 { Lo: 0x3021, Hi: 0x3029, Stride: 1 },
+    Range16 { Lo: 0x3041, Hi: 0x3094, Stride: 1 },
+    Range16 { Lo: 0x30a1, Hi: 0x30fa, Stride: 1 },
+    Range16 { Lo: 0x3105, Hi: 0x312c, Stride: 1 },
+    Range16 { Lo: 0x4e00, Hi: 0x9fa5, Stride: 1 },
+    Range16 { Lo: 0xac00, Hi: 0xd7a3, Stride: 1 },
+];
+
+pub static FIRST: RangeTable = RangeTable {
+    R16: &FIRST_R16,
+    R32: &[],
+    LatinOffset: 0,
+};
+
+/// Generated from Go 1.25.5's `xml.second` — 112 R16 ranges, no R32,
+/// LatinOffset 0. Dumped by scripts/goref.sh, not transcribed.
+static SECOND_R16: [Range16; 112] = [
+    Range16 { Lo: 0x002d, Hi: 0x002e, Stride: 1 },
+    Range16 { Lo: 0x0030, Hi: 0x0039, Stride: 1 },
+    Range16 { Lo: 0x00b7, Hi: 0x00b7, Stride: 1 },
+    Range16 { Lo: 0x02d0, Hi: 0x02d1, Stride: 1 },
+    Range16 { Lo: 0x0300, Hi: 0x0345, Stride: 1 },
+    Range16 { Lo: 0x0360, Hi: 0x0361, Stride: 1 },
+    Range16 { Lo: 0x0387, Hi: 0x0387, Stride: 1 },
+    Range16 { Lo: 0x0483, Hi: 0x0486, Stride: 1 },
+    Range16 { Lo: 0x0591, Hi: 0x05a1, Stride: 1 },
+    Range16 { Lo: 0x05a3, Hi: 0x05b9, Stride: 1 },
+    Range16 { Lo: 0x05bb, Hi: 0x05bd, Stride: 1 },
+    Range16 { Lo: 0x05bf, Hi: 0x05bf, Stride: 1 },
+    Range16 { Lo: 0x05c1, Hi: 0x05c2, Stride: 1 },
+    Range16 { Lo: 0x05c4, Hi: 0x0640, Stride: 124 },
+    Range16 { Lo: 0x064b, Hi: 0x0652, Stride: 1 },
+    Range16 { Lo: 0x0660, Hi: 0x0669, Stride: 1 },
+    Range16 { Lo: 0x0670, Hi: 0x0670, Stride: 1 },
+    Range16 { Lo: 0x06d6, Hi: 0x06dc, Stride: 1 },
+    Range16 { Lo: 0x06dd, Hi: 0x06df, Stride: 1 },
+    Range16 { Lo: 0x06e0, Hi: 0x06e4, Stride: 1 },
+    Range16 { Lo: 0x06e7, Hi: 0x06e8, Stride: 1 },
+    Range16 { Lo: 0x06ea, Hi: 0x06ed, Stride: 1 },
+    Range16 { Lo: 0x06f0, Hi: 0x06f9, Stride: 1 },
+    Range16 { Lo: 0x0901, Hi: 0x0903, Stride: 1 },
+    Range16 { Lo: 0x093c, Hi: 0x093c, Stride: 1 },
+    Range16 { Lo: 0x093e, Hi: 0x094c, Stride: 1 },
+    Range16 { Lo: 0x094d, Hi: 0x094d, Stride: 1 },
+    Range16 { Lo: 0x0951, Hi: 0x0954, Stride: 1 },
+    Range16 { Lo: 0x0962, Hi: 0x0963, Stride: 1 },
+    Range16 { Lo: 0x0966, Hi: 0x096f, Stride: 1 },
+    Range16 { Lo: 0x0981, Hi: 0x0983, Stride: 1 },
+    Range16 { Lo: 0x09bc, Hi: 0x09bc, Stride: 1 },
+    Range16 { Lo: 0x09be, Hi: 0x09bf, Stride: 1 },
+    Range16 { Lo: 0x09c0, Hi: 0x09c4, Stride: 1 },
+    Range16 { Lo: 0x09c7, Hi: 0x09c8, Stride: 1 },
+    Range16 { Lo: 0x09cb, Hi: 0x09cd, Stride: 1 },
+    Range16 { Lo: 0x09d7, Hi: 0x09d7, Stride: 1 },
+    Range16 { Lo: 0x09e2, Hi: 0x09e3, Stride: 1 },
+    Range16 { Lo: 0x09e6, Hi: 0x09ef, Stride: 1 },
+    Range16 { Lo: 0x0a02, Hi: 0x0a3c, Stride: 58 },
+    Range16 { Lo: 0x0a3e, Hi: 0x0a3f, Stride: 1 },
+    Range16 { Lo: 0x0a40, Hi: 0x0a42, Stride: 1 },
+    Range16 { Lo: 0x0a47, Hi: 0x0a48, Stride: 1 },
+    Range16 { Lo: 0x0a4b, Hi: 0x0a4d, Stride: 1 },
+    Range16 { Lo: 0x0a66, Hi: 0x0a6f, Stride: 1 },
+    Range16 { Lo: 0x0a70, Hi: 0x0a71, Stride: 1 },
+    Range16 { Lo: 0x0a81, Hi: 0x0a83, Stride: 1 },
+    Range16 { Lo: 0x0abc, Hi: 0x0abc, Stride: 1 },
+    Range16 { Lo: 0x0abe, Hi: 0x0ac5, Stride: 1 },
+    Range16 { Lo: 0x0ac7, Hi: 0x0ac9, Stride: 1 },
+    Range16 { Lo: 0x0acb, Hi: 0x0acd, Stride: 1 },
+    Range16 { Lo: 0x0ae6, Hi: 0x0aef, Stride: 1 },
+    Range16 { Lo: 0x0b01, Hi: 0x0b03, Stride: 1 },
+    Range16 { Lo: 0x0b3c, Hi: 0x0b3c, Stride: 1 },
+    Range16 { Lo: 0x0b3e, Hi: 0x0b43, Stride: 1 },
+    Range16 { Lo: 0x0b47, Hi: 0x0b48, Stride: 1 },
+    Range16 { Lo: 0x0b4b, Hi: 0x0b4d, Stride: 1 },
+    Range16 { Lo: 0x0b56, Hi: 0x0b57, Stride: 1 },
+    Range16 { Lo: 0x0b66, Hi: 0x0b6f, Stride: 1 },
+    Range16 { Lo: 0x0b82, Hi: 0x0b83, Stride: 1 },
+    Range16 { Lo: 0x0bbe, Hi: 0x0bc2, Stride: 1 },
+    Range16 { Lo: 0x0bc6, Hi: 0x0bc8, Stride: 1 },
+    Range16 { Lo: 0x0bca, Hi: 0x0bcd, Stride: 1 },
+    Range16 { Lo: 0x0bd7, Hi: 0x0bd7, Stride: 1 },
+    Range16 { Lo: 0x0be7, Hi: 0x0bef, Stride: 1 },
+    Range16 { Lo: 0x0c01, Hi: 0x0c03, Stride: 1 },
+    Range16 { Lo: 0x0c3e, Hi: 0x0c44, Stride: 1 },
+    Range16 { Lo: 0x0c46, Hi: 0x0c48, Stride: 1 },
+    Range16 { Lo: 0x0c4a, Hi: 0x0c4d, Stride: 1 },
+    Range16 { Lo: 0x0c55, Hi: 0x0c56, Stride: 1 },
+    Range16 { Lo: 0x0c66, Hi: 0x0c6f, Stride: 1 },
+    Range16 { Lo: 0x0c82, Hi: 0x0c83, Stride: 1 },
+    Range16 { Lo: 0x0cbe, Hi: 0x0cc4, Stride: 1 },
+    Range16 { Lo: 0x0cc6, Hi: 0x0cc8, Stride: 1 },
+    Range16 { Lo: 0x0cca, Hi: 0x0ccd, Stride: 1 },
+    Range16 { Lo: 0x0cd5, Hi: 0x0cd6, Stride: 1 },
+    Range16 { Lo: 0x0ce6, Hi: 0x0cef, Stride: 1 },
+    Range16 { Lo: 0x0d02, Hi: 0x0d03, Stride: 1 },
+    Range16 { Lo: 0x0d3e, Hi: 0x0d43, Stride: 1 },
+    Range16 { Lo: 0x0d46, Hi: 0x0d48, Stride: 1 },
+    Range16 { Lo: 0x0d4a, Hi: 0x0d4d, Stride: 1 },
+    Range16 { Lo: 0x0d57, Hi: 0x0d57, Stride: 1 },
+    Range16 { Lo: 0x0d66, Hi: 0x0d6f, Stride: 1 },
+    Range16 { Lo: 0x0e31, Hi: 0x0e31, Stride: 1 },
+    Range16 { Lo: 0x0e34, Hi: 0x0e3a, Stride: 1 },
+    Range16 { Lo: 0x0e46, Hi: 0x0e46, Stride: 1 },
+    Range16 { Lo: 0x0e47, Hi: 0x0e4e, Stride: 1 },
+    Range16 { Lo: 0x0e50, Hi: 0x0e59, Stride: 1 },
+    Range16 { Lo: 0x0eb1, Hi: 0x0eb1, Stride: 1 },
+    Range16 { Lo: 0x0eb4, Hi: 0x0eb9, Stride: 1 },
+    Range16 { Lo: 0x0ebb, Hi: 0x0ebc, Stride: 1 },
+    Range16 { Lo: 0x0ec6, Hi: 0x0ec6, Stride: 1 },
+    Range16 { Lo: 0x0ec8, Hi: 0x0ecd, Stride: 1 },
+    Range16 { Lo: 0x0ed0, Hi: 0x0ed9, Stride: 1 },
+    Range16 { Lo: 0x0f18, Hi: 0x0f19, Stride: 1 },
+    Range16 { Lo: 0x0f20, Hi: 0x0f29, Stride: 1 },
+    Range16 { Lo: 0x0f35, Hi: 0x0f39, Stride: 2 },
+    Range16 { Lo: 0x0f3e, Hi: 0x0f3f, Stride: 1 },
+    Range16 { Lo: 0x0f71, Hi: 0x0f84, Stride: 1 },
+    Range16 { Lo: 0x0f86, Hi: 0x0f8b, Stride: 1 },
+    Range16 { Lo: 0x0f90, Hi: 0x0f95, Stride: 1 },
+    Range16 { Lo: 0x0f97, Hi: 0x0f97, Stride: 1 },
+    Range16 { Lo: 0x0f99, Hi: 0x0fad, Stride: 1 },
+    Range16 { Lo: 0x0fb1, Hi: 0x0fb7, Stride: 1 },
+    Range16 { Lo: 0x0fb9, Hi: 0x0fb9, Stride: 1 },
+    Range16 { Lo: 0x20d0, Hi: 0x20dc, Stride: 1 },
+    Range16 { Lo: 0x20e1, Hi: 0x3005, Stride: 3876 },
+    Range16 { Lo: 0x302a, Hi: 0x302f, Stride: 1 },
+    Range16 { Lo: 0x3031, Hi: 0x3035, Stride: 1 },
+    Range16 { Lo: 0x3099, Hi: 0x309a, Stride: 1 },
+    Range16 { Lo: 0x309d, Hi: 0x309e, Stride: 1 },
+    Range16 { Lo: 0x30fc, Hi: 0x30fe, Stride: 1 },
+];
+
+pub static SECOND: RangeTable = RangeTable {
+    R16: &SECOND_R16,
+    R32: &[],
+    LatinOffset: 0,
+};
+
+// go: sdk 1.25.5 encoding/xml/xml.go:1236-1258 isName
+/// Go: whether `s` is a valid XML name — the first rune from `first`,
+/// every later rune from `first` or `second`.
+///
+/// The invalid-UTF-8 rule is the same one `escapeText` uses and is easy
+/// to miss: `DecodeRune` returning (RuneError, 1) means a bad byte, and
+/// that is rejected, while a genuine encoded U+FFFD (width 3) is put to
+/// the tables like any other rune — where it happens to fail anyway.
+pub fn isName(s: &[byte]) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    let (c, n) = crate::unicode::utf8::DecodeRune(s);
+    if c == crate::unicode::utf8::RuneError && n == 1 {
+        return false;
+    }
+    if !crate::unicode::Is(&FIRST, c) {
+        return false;
+    }
+    let mut off = n as usize;
+    while off < s.len() {
+        let (c, n) = crate::unicode::utf8::DecodeRune(&s[off..]);
+        if c == crate::unicode::utf8::RuneError && n == 1 {
+            return false;
+        }
+        if !crate::unicode::Is(&FIRST, c) && !crate::unicode::Is(&SECOND, c) {
+            return false;
+        }
+        off += n as usize;
+    }
+    return true;
+}
+
+// go: sdk 1.25.5 encoding/xml/xml.go:1260-1282 isNameString
+/// Go: `isName` over a string rather than a byte slice. Go keeps both
+/// to avoid a conversion on each call; goish keeps both because Go's
+/// API has both, and this one simply forwards.
+pub fn isNameString(s: &str) -> bool {
+    return isName(s.as_bytes());
 }
 
 // ─── escaping ─────────────────────────────────────────────────────────

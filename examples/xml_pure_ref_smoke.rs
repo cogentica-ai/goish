@@ -95,6 +95,30 @@ fn escnlrow(name: &'static str, input: &[byte], want: &[byte]) {
     );
 }
 
+// One isName row. Both Go predicates are asserted, and Go was checked
+// to agree on every input — the generator asserts isName == isNameString
+// before emitting, so a divergence there is a generator failure rather
+// than a silently one-sided table.
+fn namerow(name: &'static str, input: &[byte], want: bool) {
+    let got = xml::xml::isName(input);
+    let gots = xml::xml::isNameString(
+        core::str::from_utf8(input).unwrap_or("\u{fffd}\u{fffd}invalid\u{fffd}\u{fffd}"),
+    );
+    check(
+        string::from_static("isName ") + string::from_bytes(name.as_bytes()),
+        got == want,
+    );
+    // isNameString only gets a meaningful comparison for valid UTF-8;
+    // for the raw rows the &str conversion cannot represent the input,
+    // so that row asserts isName alone.
+    if core::str::from_utf8(input).is_ok() {
+        check(
+            string::from_static("isNameString ") + string::from_bytes(name.as_bytes()),
+            gots == want,
+        );
+    }
+}
+
 fn pirow(param: &'static str, s: &'static str, want: &'static str) {
     let got = xml::xml::procInst(param, s);
     check(
@@ -210,6 +234,41 @@ fn main() {
     pirow("nope", "version=", "");
     pirow("nope", "version=\"unterminated", "");
 
+    // ── isName / isNameString, over Go's own tables ───────────────
+    namerow("", &[], false);
+    namerow("a", &[0x61], true);
+    namerow("A", &[0x41], true);
+    namerow("_", &[0x5f], true);
+    namerow(":", &[0x3a], true);
+    namerow("-", &[0x2d], false);
+    namerow(".", &[0x2e], false);
+    namerow("0", &[0x30], false);
+    namerow("a0", &[0x61, 0x30], true);
+    namerow("_a", &[0x5f, 0x61], true);
+    namerow(":a", &[0x3a, 0x61], true);
+    namerow("-a", &[0x2d, 0x61], false);
+    namerow(".a", &[0x2e, 0x61], false);
+    namerow("0a", &[0x30, 0x61], false);
+    namerow("xml", &[0x78, 0x6d, 0x6c], true);
+    namerow("xmlns", &[0x78, 0x6d, 0x6c, 0x6e, 0x73], true);
+    namerow("a:b", &[0x61, 0x3a, 0x62], true);
+    namerow("a-b", &[0x61, 0x2d, 0x62], true);
+    namerow("a.b", &[0x61, 0x2e, 0x62], true);
+    namerow("a_b", &[0x61, 0x5f, 0x62], true);
+    namerow("<U+00E9>", &[0xc3, 0xa9], true);
+    namerow("<U+00E9>lan", &[0xc3, 0xa9, 0x6c, 0x61, 0x6e], true);
+    namerow("<U+4E16><U+754C>", &[0xe4, 0xb8, 0x96, 0xe7, 0x95, 0x8c], true);
+    namerow("<U+00B7>", &[0xc2, 0xb7], false);
+    namerow("a<U+00B7>", &[0x61, 0xc2, 0xb7], true);
+    namerow("<U+0301>", &[0xcc, 0x81], false);
+    namerow("a<U+0301>", &[0x61, 0xcc, 0x81], true);
+    namerow("<U+D83D><U+DE00>", &[0xf0, 0x9f, 0x98, 0x80], false);
+    namerow("a<U+D83D><U+DE00>", &[0x61, 0xf0, 0x9f, 0x98, 0x80], false);
+    namerow("raw 80", &[0x80], false);
+    namerow("raw c3", &[0xc3], false);
+    namerow("raw c328", &[0xc3, 0x28], false);
+    namerow("raw 6180", &[0x61, 0x80], false);
+
     // ── the token types ────────────────────────────────────────────
     {
         let n = xml::Name {
@@ -277,8 +336,9 @@ fn main() {
         let (pass, fail) = (PASS, FAIL);
         // 21 chr + 256 nb + 256 esc1 + 13 esc + 3 escnl + 5 escraw
         // + 28 pi + 2 StartElement + 6 CopyToken + 1 count + 1 SyntaxError
-        if pass + fail != 592 {
-            fmt::Printf!("FAIL ran %v checks, expected 592\n", pass + fail);
+        // + 29 isName rows x2 + 4 raw rows x1
+        if pass + fail != 654 {
+            fmt::Printf!("FAIL ran %v checks, expected 654\n", pass + fail);
             FAIL += 1;
         }
         let fail = FAIL;

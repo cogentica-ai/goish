@@ -580,3 +580,36 @@ pi "nope" "encoding=\"UTF-8\"" ""
 pi "nope" "" ""
 pi "nope" "version=" ""
 pi "nope" "version=\"unterminated" ""
+isname "" false false
+isname "a" true true
+isname "A" true true
+isname "_" true true
+isname ":" true true
+isname "-" false false
+isname "." false false
+isname "0" false false
+isname "a0" true true
+isname "_a" true true
+isname ":a" true true
+isname "-a" false false
+isname ".a" false false
+isname "0a" false false
+isname "xml" true true
+isname "xmlns" true true
+isname "a:b" true true
+isname "a-b" true true
+isname "a.b" true true
+isname "a_b" true true
+isname "é" true true
+isname "élan" true true
+isname "世界" true true
+isname "·" false false
+isname "a·" true true
+isname "́" false false
+isname "á" true true
+isname "😀" false false
+isname "a😀" false false
+isnameraw 80 false
+isnameraw c3 false
+isnameraw c328 false
+isnameraw 6180 false
