@@ -4122,6 +4122,102 @@ consumers not yet written — which is the opposite of
 `allow(unused_variables)`, where two of three files sat on a real bug.
 Worth knowing before the next sweep.
 
+## 2e-ii. Written and never READ: the field sweep, 2026-09-14
+
+§2e asks which ported FUNCTIONS nothing calls. The same question about
+struct FIELDS found `Transport.idleConnWait` (item 0 of §2), jsontext's
+`AllowInvalidUTF8` and net/lookup's nine ignored contexts, one at a
+time. Run mechanically it is: 3,750 fields under `src/`, **200 with no
+`.field` read anywhere in `src/` or `examples/`**.
+
+`scripts/write_only_check.py` is that sweep, kept so it can be re-run;
+it is a triage list and deliberately NOT a gate. (It reads 199/41 now,
+because `Resolver.StrictErrors` below is read.)
+
+200 is not a list anyone reads, and most of it is legitimate — an
+ASN.1 marshalling shape is written and handed to `asn1::Marshal`, and a
+field on a public error type exists for the CALLER. The discriminating
+question is §2e's: **does Go read it?** That cuts 200 to 42, and the 42
+sort themselves quickly:
+
+  * `HTTP2Config`'s eleven fields and all of `omithttp2.rs` — HTTP/2 is
+    not ported and these are its config surface. Inert by construction.
+  * `syscall`'s `statfs`, `utsname`, `StackT` — kernel ABI shapes.
+  * `debug.BuildInfo`'s `Deps`/`Settings`/`GoVersion` — read by Go's
+    own `String()`, which goish has.
+
+Four were worth opening, and three of the four were fine for a reason
+worth writing down:
+
+  * `transfer.rs`'s `IsResponse`. Go reads it once, to wrap a chunked
+    body writer in `FlushAfterChunkWriter` — but ONLY when the writer is
+    a `*bufio.Writer`, which on goish's client path it never is.
+    `persistConn` has no buffered writer; that is the same fact
+    §2e already records under `writeBufferSize`. The guarded condition
+    cannot be true, so the field is legitimately unread.
+  * `transfer.rs`'s `bodyReadError`. Go reads it in `Request.write` to
+    re-wrap the error as `requestBodyReadError`, which `writeLoop` uses
+    to call `setError` EARLY — its comment says why: "before sending on
+    the channels below or calling pc.close()". That priority exists to
+    beat a concurrent readLoop. goish is sequential and already calls
+    `treq.setError(werr)` on the write path unconditionally, so there is
+    no race to win. §0.B again.
+  * `conn.rs`'s `peerSigAlg`. All five of Go's WRITE sites are ported
+    faithfully. Go's single read feeds
+    `ConnectionState.testingOnlyPeerSignatureAlgorithm`, one of two
+    `testingOnly*` fields goish deliberately omits — documented at
+    conn.rs and common.rs. Dead state by design.
+  * `lookup.rs`'s **`Resolver.StrictErrors` — the one real finding.**
+    See below.
+
+### Resolver.StrictErrors was accepted and ignored
+
+Go's doc: "For a query composed of multiple sub-queries (such as an
+A+AAAA address lookup, or walking the name server suffix list when
+AbsDomain is not fully qualified), strict errors mean that the query as
+a whole fails when any sub-query fails."
+
+goish declared the field, let callers set it, and read it nowhere. That
+matters here and would not in a simpler resolver: goish's
+`go_lookup_ip_cname_order_ctx` DOES issue both A and AAAA, and DOES
+walk `cfg.name_list`. So a dual-stack host whose A query returned
+SERVFAIL came back **v6-only, with no error at all** — exactly the
+downgrade Go's own comment says the flag exists to prevent: "This
+ensures that network flakiness cannot turn a dualstack hostname
+IPv4/IPv6-only."
+
+The structure was half there already. goish had the `else if lastErr ==
+nil || fqdn == name+"."` arm verbatim; what was missing was the arm
+above it. Now threaded from `Resolver.StrictErrors` through both
+`Resolver` call sites (the package-level `LookupHost`/`LookupIP` pass
+false, as Go's `DefaultResolver` does), with `hit_strict_error` per
+fqdn and `addrs.clear()` before the `!addrs.is_empty()` break — that
+ordering is the point, or a lookup where AAAA answered and A failed
+would still return the v6 half.
+
+**How it is pinned, and what is not pinned.** The whole decision is one
+line of Go (`nerr.Temporary() && r.strictErrors()`), so it is extracted
+as `dnsclient::strict_abort` and driven by
+`dns_strict_errors_smoke` over eight errors × strict on/off. All
+sixteen expected values came out of Go 1.25.5 itself — a `TestGoishRef`
+inside a writable GOROOT copy (`scripts/goref.sh net`), which can name
+the unexported sentinels and run Go's own predicate — transcribed
+programmatically. Two perturbations: ignoring temporariness turns
+exactly the five non-temporary sentinels red, and dropping the strict
+gate turns exactly the three temporary ones red.
+
+The NEGATIVE rows are what the table is for. Aborting on a temporary
+error is the easy half; the half that breaks a resolver is aborting on
+`errNoSuchHost`, because NXDOMAIN is the ordinary answer while walking
+a search list. Five of the eight sentinels must NOT abort and are named.
+
+What is NOT pinned is the loop wiring — that `hit_strict_error` is set
+from this predicate and that `addrs.clear()` runs. Pinning it needs a
+DNS server that answers AAAA and SERVFAILs A, which the tree has no
+fixture for. That is the next step for anyone extending this, and the
+gap is stated rather than papered over: a green `strict_abort` table
+proves the unit, not that the lookup consults it.
+
 ## 2e. Ported, anchored, correct — and never called
 
 The defect shape every tier passes. `anchor_check` sees a well-formed

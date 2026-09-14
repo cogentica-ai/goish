@@ -643,11 +643,14 @@ impl Waiter for Arc<wantConn> {
 /// from `headPos` plus a tail slice, so pushes amortise and the front
 /// pops without shifting.
 ///
-/// The element type is a placeholder until `wantConn` lands with the
-/// dial machinery; the QUEUE DISCIPLINE is what this slice ports, and
-/// it is pure. `Waiter` is the one method the queue calls on its
-/// elements, so `cleanFrontNotWaiting` keeps Go's arity instead of
-/// taking the predicate as an extra parameter.
+/// The element type is generic. It was a placeholder while `wantConn`
+/// was unwritten; `wantConn` is in this file now and both users
+/// instantiate this as `wantConnQueue<Arc<wantConn>>`, so what the
+/// parameter buys today is only that the QUEUE DISCIPLINE — which is
+/// what this slice ports, and is pure — can be tested without a conn.
+/// `Waiter` is the one method the queue calls on its elements, so
+/// `cleanFrontNotWaiting` keeps Go's arity instead of taking the
+/// predicate as an extra parameter.
 ///
 /// This anchor sat above `pub trait Waiter` until 2026-09-06, so the
 /// queue itself carried no provenance. Found by the UNATTACHED report.
@@ -790,7 +793,9 @@ impl<T: Waiter + Clone> wantConnQueue<T> {
 /// order gives the same three operations (add front, remove oldest,
 /// remove by identity) with the same observable ordering.
 ///
-/// Element type is a placeholder until `persistConn` lands.
+/// The element type is generic for the same reason wantConnQueue's is:
+/// it was a placeholder while `persistConn` was unwritten, and it is
+/// not one now — the only user is `idleLRU: connLRU<Arc<persistConn>>`.
 #[derive(Default)]
 pub struct connLRU<T: PartialEq> {
     ll: Vec<T>,
@@ -1085,8 +1090,10 @@ impl PartialEq for persistConn {
 
 impl persistConn {
     // go: none — goish-only: Go zero-values persistConn inside
-    // dialConn; that function is not ported yet, so the pool-facing
-    // state needs an explicit constructor to be testable.
+    // dialConn. dialConn IS ported — errDialNotPorted's comment above
+    // says so, and this claim outlived it — but it builds the conn
+    // through its own path, so the pool-facing state still needs an
+    // explicit constructor to be testable on its own.
     pub fn __new(cacheKey: connectMethodKey) -> persistConn {
         return persistConn {
             cacheKey,
@@ -2659,9 +2666,18 @@ pub(crate) fn rewindBody(req: &Request) -> (Request, error) {
 /// Go: "whether we should retry sending a failed HTTP request on a new
 /// connection."
 ///
-/// Go's receiver is `*persistConn`, which is not ported yet; the only
-/// thing it reads from it is `pc.isReused()`, so that arrives as a
-/// parameter. Every other branch is verbatim.
+/// Go's receiver is `*persistConn`. That IS ported (the struct is in
+/// this file), and the claim that it was not outlived the staging it
+/// described. The signature stays free-standing for a different
+/// reason: the only thing Go reads from the receiver is
+/// `pc.isReused()`, so the flag arrives as a parameter and the
+/// function needs no conn at all. Every other branch is verbatim.
+///
+/// The caller reads `pc.isReused()` once, before the write
+/// (client.rs), where Go reads it at the moment of the error. Same
+/// value: the only `markReused` is in `tryPutIdleConn`, which runs when
+/// the conn goes BACK into the pool, so the flag cannot change while a
+/// request is in flight on it.
 ///
 /// The ordering matters and is not arbitrary. A FRESH connection never
 /// retries — Go's comment: "if we retried now, we could loop forever

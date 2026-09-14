@@ -76,7 +76,30 @@ pub struct NS {
 /// all lookups delegate directly to the dnsclient functions.
 #[derive(Clone, Default)]
 pub struct Resolver {
+    /// Go: "PreferGo controls whether Go's built-in DNS resolver is
+    /// preferred on platforms where it's available."
+    ///
+    /// INERT here, and inert in the direction that cannot surprise
+    /// anyone: goish has no cgo resolver, so the built-in one is the
+    /// only one, and `PreferGo: true` describes what already happens.
+    /// Setting it false does not get you a system resolver — there
+    /// isn't one to get.
     pub PreferGo: bool,
+    /// Go: "StrictErrors controls the behavior of temporary errors
+    /// (including timeout, socket errors, and SERVFAIL) when using
+    /// Go's built-in resolver. For a query composed of multiple
+    /// sub-queries (such as an A+AAAA address lookup, or walking the
+    /// name server suffix list when AbsDomain is not fully qualified),
+    /// strict errors mean that the query as a whole fails when any
+    /// sub-query fails."
+    ///
+    /// HONOURED. It used to be read by nothing, which mattered because
+    /// goish does issue both sub-queries and does walk the suffix list:
+    /// a dual-stack host whose A query hit SERVFAIL came back v6-only
+    /// with no error, which is precisely the downgrade Go's own comment
+    /// (dnsclient_unix.go:783) says the flag exists to prevent. It is
+    /// threaded to `go_lookup_ip_cname_order_ctx`, and the decision it
+    /// gates is `dnsclient::strict_abort`.
     pub StrictErrors: bool,
 }
 
@@ -279,6 +302,7 @@ impl Resolver {
                 net_ref,
                 h,
                 &dnsclient::QueryBound::of(ctx),
+                self.StrictErrors,
             );
         if e != errors::nil {
             return (slice::<super::IP>::new(), e);
@@ -703,7 +727,13 @@ impl Resolver {
             return (r, errors::nil);
         }
         let cfg = dnsclient::get_system_dns_config();
-        let (raw_addrs, _cname, e) = dnsclient::go_lookup_ip_cname_order_ctx(&cfg, network, h, &dnsclient::QueryBound::of(ctx));
+        let (raw_addrs, _cname, e) = dnsclient::go_lookup_ip_cname_order_ctx(
+            &cfg,
+            network,
+            h,
+            &dnsclient::QueryBound::of(ctx),
+            self.StrictErrors,
+        );
         if e != errors::nil {
             return (slice::<IPAddr>::new(), e);
         }

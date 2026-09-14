@@ -4,15 +4,23 @@
 // appending that rendering to a caller's buffer. Go keeps it separate
 // from int.go, so goish does too (GOISH015). The scanning half of the
 // same Go file (`scan`, `Scan`, `scanSign`, `byteReader`) and `Format`
-// depend on `fmt.State` / `fmt.ScanState` and are not ported yet, so
-// this file does not claim to be complete — the manifest above lists
-// exactly what is here.
+// are absent, so this file does not claim to be complete — the
+// manifest above lists exactly what is here.
+//
+// Be precise about why, because the earlier wording ("`fmt.State` /
+// `fmt.ScanState` are not ported yet") reads as a removal condition
+// that is now met: both TRAITS exist, in fmt/print.rs. What does not
+// exist is any implementor. Go's is `*pp`, the printer's per-call
+// state, which goish has no counterpart for — its printer dispatches
+// on a `Format` trait instead. So there is still nothing a caller
+// could pass to `Int.Format`, and porting fmt's `pp` is the actual
+// condition.
 //
 // The digit conversion itself lives in `itoa`, which is Go's and lives
 // in natconv.go; it stays in the module root until that file is split
 // out in turn.
 //
-// goishlint:ignore GOISH018 writeMultiple, Format, scan, Scan, scanSign, ReadByte, UnreadByte — the scanning and fmt.Formatter halves of intconv.go. Both are defined against interfaces goish has not ported: Format takes a fmt.State and Scan a fmt.ScanState, and scan/scanSign/byteReader exist only to feed Scan. Nothing in goish's crypto reaches them; they are a deliberate omission, not an oversight, and this list is the record of exactly what is missing.
+// goishlint:ignore GOISH018 writeMultiple, Format, scan, Scan, scanSign, ReadByte, UnreadByte — the scanning and fmt.Formatter halves of intconv.go. Both are defined against interfaces that exist in fmt/print.rs but have no implementor: Go's is the printer's own *pp, which goish has no counterpart for, so there is nothing to pass to Format or Scan. scan/scanSign/byteReader exist only to feed Scan. Nothing in goish's crypto reaches them; they are a deliberate omission, not an oversight, and this list is the record of exactly what is missing.
 // goishlint:ignore GOISH021 byteReader — the io.ByteScanner adapter that exists only for Scan; see the GOISH018 note above.
 
 #![allow(non_snake_case)]

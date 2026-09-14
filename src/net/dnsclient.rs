@@ -1177,6 +1177,76 @@ impl IPAddr {
 
 // ─── goLookupIPCNAMEOrder ──────────────────────────────────────────────────
 
+// go: none — goish-only: Go writes this decision inline as
+// `nerr.Temporary() && r.strictErrors()` (dnsclient_unix.go:685). It is
+// extracted here because it is the whole of Resolver.StrictErrors, and
+// testing it in place would mean a DNS server that fails the way a
+// flaky one does. See `__strict_abort` and dns_strict_errors_smoke.
+//
+// Go's `Temporary()` on a *DNSError is `IsTimeout || IsTemporary`, and
+// `newDNSError` sets IsTemporary for exactly one sentinel —
+// errServerTemporarilyMisbehaving, which is SERVFAIL — and IsTimeout
+// for a query that ran out of time. Those are the two here. Note what
+// is NOT temporary: errNoSuchHost (NXDOMAIN) is an answer, not a
+// flake, and must never abort the walk, or a strict resolver would
+// fail every lookup that needs the search list.
+/// Whether a failed sub-query should abort the whole lookup and
+/// discard the addresses already collected.
+pub fn strict_abort(e: &error, strict: bool) -> bool {
+    if !strict {
+        return false;
+    }
+    // Identity, not text, and that is load-bearing:
+    // errServerMisbehaving and errServerTemporarilyMisbehaving carry
+    // the SAME message, "server misbehaving" — Go's do too, which is
+    // why Go distinguishes them by type (`&temporaryError{}` versus
+    // `errors.New`). A comparison that fell back to the message would
+    // silently abort on the non-temporary one, and the
+    // `errServerMisbehaving under StrictErrors` row in
+    // dns_strict_errors_smoke is what says it does not.
+    if *e == errServerTemporarilyMisbehaving {
+        return true;
+    }
+    if let Some(d) = crate::errors::AsConcrete::<crate::net::net::DNSError>(e) {
+        return d.IsTimeout || d.IsTemporary;
+    }
+    return false;
+}
+
+// go: none — goish-only: reach `strict_abort` from an example. The
+// sentinels it discriminates are `pub`, but `DNSError` has to be built
+// to test the timeout arm, so the hook takes a tag instead.
+#[doc(hidden)]
+pub fn __strict_abort(which: crate::types::int, strict: bool) -> bool {
+    let e: error = match which {
+        0 => errServerTemporarilyMisbehaving.into(),
+        1 => errNoSuchHost.into(),
+        2 => errServerMisbehaving.into(),
+        3 => errLameReferral.into(),
+        4 => errCannotUnmarshalDNSMessage.into(),
+        5 => crate::errors::Wrap(crate::net::net::DNSError {
+            UnwrapErr: crate::errors::nil,
+            Err: crate::gostring::string::from_static("i/o timeout"),
+            Name: crate::gostring::string::from_static("x"),
+            Server: crate::gostring::string::from_static("s"),
+            IsTimeout: true,
+            IsTemporary: false,
+            IsNotFound: false,
+        }),
+        6 => crate::errors::Wrap(crate::net::net::DNSError {
+            UnwrapErr: crate::errors::nil,
+            Err: crate::gostring::string::from_static("server misbehaving"),
+            Name: crate::gostring::string::from_static("x"),
+            Server: crate::gostring::string::from_static("s"),
+            IsTimeout: false,
+            IsTemporary: true,
+            IsNotFound: false,
+        }),
+        _ => crate::errors::New("some other error"),
+    };
+    return strict_abort(&e, strict);
+}
+
 /// Perform both A and AAAA queries (sequentially; Goish goroutine channel
 /// overhead in no_std is heavier than two sequential syscalls, so we do
 /// them one after the other which mirrors Go's `single_request` path).
@@ -1187,7 +1257,9 @@ pub fn go_lookup_ip_cname_order(
     network: &str,
     name: &str,
 ) -> (Vec<IPAddr>, String, error) {
-    return go_lookup_ip_cname_order_ctx(cfg, network, name, &QueryBound::none());
+    // Go's package-level lookups go through DefaultResolver, whose
+    // StrictErrors is false.
+    return go_lookup_ip_cname_order_ctx(cfg, network, name, &QueryBound::none(), false);
 }
 
 // go: none — goish-only: the context-aware form. See `QueryBound`.
@@ -1197,6 +1269,7 @@ pub fn go_lookup_ip_cname_order_ctx(
     network: &str, // "ip", "ip4", "ip6", or "CNAME"
     name: &str,
     bound: &QueryBound,
+    strict: bool, // Resolver.StrictErrors
 ) -> (Vec<IPAddr>, String, error) {
     // Determine which qtypes to query
     let qtypes: &[dns::Type] = match network_ip_version(network) {
@@ -1212,6 +1285,8 @@ pub fn go_lookup_ip_cname_order_ctx(
     for fqdn_str in cfg.name_list(name) {
         let fqdn = fqdn_str.as_str();
         let mut got_answer = false;
+        // Go: `hitStrictError` (dnsclient_unix.go:681), reset per fqdn.
+        let mut hit_strict_error = false;
 
         for &qtype in qtypes {
             let (mut p, _server, e) = try_one_name_ctx(cfg, fqdn, qtype, bound);
@@ -1222,7 +1297,12 @@ pub fn go_lookup_ip_cname_order_ctx(
                     s.push('.');
                     s
                 };
-                if last_err == errors::nil || fqdn_str == name_dot {
+                if strict_abort(&e, strict) {
+                    // Go: "This error will abort the nameList loop."
+                    hit_strict_error = true;
+                    last_err = e;
+                } else if last_err == errors::nil || fqdn_str == name_dot {
+                    // Go: "Prefer error for original name."
                     last_err = e;
                 }
                 continue;
@@ -1288,6 +1368,18 @@ pub fn go_lookup_ip_cname_order_ctx(
             }
         }
 
+        if hit_strict_error {
+            // Go: "If either family hit an error with StrictErrors
+            // enabled, discard all addresses. This ensures that network
+            // flakiness cannot turn a dualstack hostname IPv4/IPv6-only."
+            //
+            // The clear is the point, and it has to happen before the
+            // `!addrs.is_empty()` break below: a lookup where AAAA
+            // answered and A hit SERVFAIL would otherwise return the
+            // v6-only half and no error at all.
+            addrs.clear();
+            break;
+        }
         if !addrs.is_empty() {
             break;
         }
@@ -1348,7 +1440,8 @@ pub fn lookup_host_ctx(host: &str, bound: &QueryBound) -> (Vec<String>, error) {
         return (vec![s], errors::nil);
     }
     let cfg = get_system_dns_config();
-    let (addrs, _cname, e) = go_lookup_ip_cname_order_ctx(&cfg, "ip", host, bound);
+    // lookup_host is the package-level path; DefaultResolver is not strict.
+    let (addrs, _cname, e) = go_lookup_ip_cname_order_ctx(&cfg, "ip", host, bound, false);
     if e != errors::nil {
         return (Vec::new(), e);
     }

@@ -2132,8 +2132,9 @@ pub(crate) const parallelConflict: &str =
 // `mu`, `running` and
 // `numWaiting` become one Mutex<testStateCounts>: Rust wants the
 // guarded group named, and the two counters are only ever read and
-// written as a pair. `match *matcher` is absent because the matcher is
-// threaded through runTests, which is not ported yet.
+// written as a pair. `match *matcher` IS here — see the `matcher`
+// field below; this line used to say it was absent because runTests
+// was unported, and both halves of that are now false.
 // go: sdk 1.25.5 testing/testing.go:2072-2096 testState
 /// Go: the state shared by every test in one run — the name matcher,
 /// the deadline, and the counters that gate how many tests run in
