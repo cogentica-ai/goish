@@ -3384,8 +3384,8 @@ The remaining stages, and the reason for this order:
 | 2b-ii | `syntax/parse.rs` — the error type, limits, stateless helpers, group tables | ~450 | **done** |
 | 2b-iii | `syntax/parse.rs` — the node arena and stack machinery | ~750 | **done** |
 | 2b-iv | `syntax/parse.rs` — `Parse` and the text sub-parsers | ~1,100 | **done** |
-| 3 | `syntax/simplify.rs`, `syntax/compile.rs` | ~450 | |
-| 4 | `regexp/exec.rs` (the NFA) and the swap | ~1,900 | |
+| 3 | `syntax/simplify.rs`, `syntax/compile.rs` | ~450 | **done** |
+| 4 | `regexp/exec.rs` (the NFA) and the swap | ~1,900 | next |
 
 `parse.rs` opens with GOISH018 and GOISH021 lines naming all 100 of
 parse.go's other declarations, in the shape `root_openat.rs`
@@ -3596,6 +3596,44 @@ had no reason to contain: `a{01}` for `parseInt`'s leading-zero
 refusal, and a twenty-four-digit count for its overflow clamp — because
 `a{99999999999}` exceeds 1000 either way, and only a value long enough
 to WRAP distinguishes the clamp from its absence.
+
+**STAGE 3 LANDED 2026-09-14 — THE AST NOW COMPILES TO A PROG.**
+`Simplify`, `simplify1`, and the whole of compile.go: `patchList`,
+`frag`, `Compile` and the twelve `compiler` methods.
+`examples/regexp_compile_ref_smoke.rs` takes 119 patterns through
+parse → simplify → compile and pins five rows each — the parse, the
+simplification, the program's shape, the prefix and start condition,
+and the full instruction dump. 591 rows.
+
+**Everything §2c needs is now in place except the engine.** A match is
+about to become a walk over integer program counters, which is what
+makes the memo key `(pc, pos)` — two small integers — and leaves the
+backtracker's exponential blowup nowhere to live.
+
+The one piece of cleverness is Go's patch list, and its comment earns
+its place: "Because the pointers haven't been filled in yet, we can
+reuse their storage to hold the list. It's kind of sleazy, but works
+well in practice." A fragment is compiled before its successor exists,
+so the unfilled `Out`/`Arg` fields ARE the worklist, each holding the
+index of the next hole. `head == 0` terminates it, which is safe only
+because every program starts with a `fail` at index 0 — nothing ever
+wants to point at its output.
+
+Six perturbations, and three started thin in the same way: the corpus
+had one shape where the code has two branches.
+
+  simplify1 idempotence, `(?:a+)+` -> `a+`        9 red
+  cap's NumCap high-water mark                   22 red
+  star's nullable `(f1+)?` fix (issue 46123)      4 -> 18
+  rune's FoldCase clearing                        2 -> 11
+  quest's non-greedy Out/Arg swap                 1 -> 11
+  loop's non-greedy Out/Arg swap                  6 red
+
+The three that grew wanted, respectively: a nullable star body in more
+than one shape (`(a|)*`, `((a)?)*`, `(a*b*)*`); a rune with NO fold
+orbit under `(?i)`, since only then is the flag cleared and `InstRune1`
+chosen; and a non-greedy quantifier over something other than a bare
+literal. In each case the first number was the corpus's fault.
 
 Stage 2a repeated the lesson twice, which is why it is written down
 here rather than left in a commit message. `sub.Op > OpCapture` → `>=`

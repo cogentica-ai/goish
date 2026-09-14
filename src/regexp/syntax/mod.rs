@@ -19,14 +19,16 @@
 //                   parse.rs — the Flags bitset it reads
 //   stage 2a (here) regexp.rs, op_string.rs — the AST and Op.String
 //   stage 2b        parse.rs — the parser (and Flags moves back to it)
-//   stage 3         simplify.rs, compile.rs — AST -> Prog
+//   stage 3 (done)  simplify.rs, compile.rs — AST -> Prog
 //   stage 4         regexp/exec.rs — the NFA, and the swap
 
+pub mod compile;
 pub mod op_string;
 pub mod parse;
 pub mod perl_groups;
 pub mod prog;
 pub mod regexp;
+pub mod simplify;
 
 pub use parse::{
     ClassNL, DotNL, Flags, FoldCase, Literal, MatchNL, NonGreedy, OneLine, POSIX, Perl, PerlX,
@@ -44,3 +46,4 @@ pub use regexp::{
     OpQuest, OpRepeat, OpStar, OpWordBoundary, Regexp,
 };
 pub use parse::{Error, ErrorCode, Parse};
+pub use compile::Compile;
