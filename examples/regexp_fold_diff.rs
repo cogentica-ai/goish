@@ -407,18 +407,37 @@ fn main() {
     }
 
     // Compile-time rejection is part of the contract: a `(?...)`
-    // construct the matcher does not implement must fail loudly rather
-    // than silently parsing as something else.
+    // construct GO does not implement must fail loudly rather than
+    // silently parsing as something else.
     //
-    // `(?s)`, `(?m)` and `(?P<name>...)` used to be on this list. They
-    // are implemented now — see examples/regexp_ref_smoke.rs, which
-    // checks all three against a running Go — so asserting that they
-    // are REJECTED would now be asserting a bug.
-    for bad in [r"(?U)a", r"(?)a", r"(?-)a", r"(?=a)"] {
+    // This list keeps shrinking as the port catches up, and every entry
+    // that leaves it does so because asserting the rejection became
+    // asserting a BUG. `(?s)`, `(?m)` and `(?P<name>...)` went when
+    // they were implemented. `(?U)` and `(?)` went on 2026-09-14 with
+    // the RE2 swap: measured against Go 1.25.5, both COMPILE —
+    // `(?U)` is the non-greedy-by-default flag and `(?)` is an empty
+    // flag set — so they are asserted positively below instead.
+    for bad in [r"(?-)a", r"(?=a)"] {
         let (_, err) = regexp::Compile(bad);
         if err == goish::nil {
             die(b"regexp_fold: unsupported (?...) construct compiled\n");
         }
+    }
+    // The two that came off the list, and what `(?U)` actually does:
+    // Go's `(?U)a+` against "aaa" matches "a", because U swaps the
+    // greediness of every quantifier after it.
+    for ok in [r"(?U)a", r"(?)a"] {
+        let (_, err) = regexp::Compile(ok);
+        if err != goish::nil {
+            die(b"regexp_fold: a construct Go accepts was rejected\n");
+        }
+    }
+    if regexp::MustCompile(r"(?U)a+").FindStringSubmatch("aaa").Len() == 0
+        || regexp::MustCompile(r"(?U)a+")
+            .FindStringSubmatch("aaa")[goish::types::int::from(0)]
+            != "a"
+    {
+        die(b"regexp_fold: (?U) did not make a+ non-greedy\n");
     }
     // Go: "missing argument to repetition operator".
     let (_, err) = regexp::Compile(r"(?i)*");

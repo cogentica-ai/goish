@@ -3304,7 +3304,7 @@ things. PrintDefaults was checked byte for byte and the parse errors
 were checked by value; what neither covered was the path that joins
 them.
 
-## 2c. `regexp` does not keep Go's linear-time guarantee
+## 2c. `regexp` does not keep Go's linear-time guarantee — FIXED 2026-09-14
 
 Go's regexp documents that it "is guaranteed to run in time linear in
 the size of the input", and keeps it by simulating an NFA (RE2).
@@ -3386,7 +3386,7 @@ The remaining stages, and the reason for this order:
 | 2b-iv | `syntax/parse.rs` — `Parse` and the text sub-parsers | ~1,100 | **done** |
 | 3 | `syntax/simplify.rs`, `syntax/compile.rs` | ~450 | **done** |
 | 4a | `regexp/exec.rs` — the NFA machine | ~400 | **done** |
-| 4b | the swap: `Regexp`'s public surface onto the NFA | ~200 | next |
+| 4b | the swap: `Regexp`'s public surface onto the NFA | ~200 | **done** |
 
 `parse.rs` opens with GOISH018 and GOISH021 lines naming all 100 of
 parse.go's other declarations, in the shape `root_openat.rs`
@@ -3681,6 +3681,54 @@ Five perturbations:
 WHAT REMAINS is 4b: `Regexp`'s public surface still calls the old
 backtracker. The engine is complete and pinned; the swap is a separate
 change because it touches every caller in the tree.
+
+**STAGE 4b LANDED 2026-09-14 — THE SWAP. §2c IS CLOSED.**
+
+`Regexp` now holds a compiled `Prog` and runs the NFA. `Compile` parses
+with `syntax.Parse`, simplifies, and compiles; `find_from` — the one
+function every search driver in the file routes through — builds a
+machine and runs it. The AST, the recursive-descent parser and the
+continuation-passing backtracker are DELETED: 1,363 lines out, about
+200 in. Two engines is what §0.B exists to warn about, so there is one.
+
+Measured through the PUBLIC api, release build:
+
+| n | before | after |
+|--:|--:|--:|
+| 14 | 90 ms | 46 µs |
+| 18 | 1,467 ms | 35 µs |
+| 22 | 27,338 ms | **41 µs** |
+| 2000 | (heat death) | **3.4 ms** |
+
+**The evidence the swap is CORRECT and not merely fast** is
+`examples/regexp_fold_diff.rs`: 7,254 rows byte-exact against real Go —
+30 patterns × 53 inputs for match and submatch, plus 12 × 14 × 6 for
+FindAll, FindAllIndex, FindAllSubmatch and Split. It covers the `(?i)`
+scope rules, class folding before negation, and the two empty-match
+rules in the successive-match scan. It passed unchanged on the new
+engine.
+
+Three things came free with the swap, because they were Go's parser all
+along and goish's had none of them:
+
+  * Compile's error is now Go's text — `error parsing regexp: <code>:
+    \`<expr>\`` — where goish invented its own.
+  * `Regexp.Longest()` exists. The leftmost-longest branch was in the
+    machine's `step` from stage 4a and unreachable until now.
+  * `(?U)` and `(?)` compile, because Go accepts them.
+
+That last one broke a test, and it is the interesting failure of this
+stage. `regexp_fold_diff` asserted that `(?U)a`, `(?)a`, `(?-)a` and
+`(?=a)` are all REJECTED — an assertion written against the OLD
+parser's limits. Measured against Go 1.25.5: it accepts the first two
+and rejects the last two. The example's own comment had already
+anticipated this once ("`(?s)`, `(?m)` and `(?P<name>...)` used to be
+on this list… asserting that they are REJECTED would now be asserting a
+bug") and it happened again to `(?U)`. The two that Go accepts are now
+asserted POSITIVELY, including what `(?U)` does: `(?U)a+` against
+`"aaa"` matches `"a"`.
+
+Sweep: 133 examples downstream of regexp, all green.
 
 Stage 2a repeated the lesson twice, which is why it is written down
 here rather than left in a commit message. `sub.Op > OpCapture` → `>=`

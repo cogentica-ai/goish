@@ -104,7 +104,7 @@ struct thread {
 /// and no pool; the observable behaviour is identical because the pool
 /// never affects which threads run, only where their memory came from.
 #[allow(non_camel_case_types)] // Go name
-pub(crate) struct machine<'a> {
+pub struct machine<'a> {
     p: &'a Prog,
     /// Go's `q0, q1` — runq and nextq, swapped each step.
     q0: queue,
@@ -229,7 +229,7 @@ impl<'a> machine<'a> {
     //     `init(ncap)`. goish builds one per execution; the pool is an
     //     allocation strategy, not behaviour.
     /// A machine over `p`, with `ncap` capture slots.
-    pub(crate) fn __new(p: &'a Prog, ncap: usize, longest: bool, cond: EmptyOp) -> machine<'a> {
+    pub fn __new(p: &'a Prog, ncap: usize, longest: bool, cond: EmptyOp) -> machine<'a> {
         let n = p.Inst.len();
         let mut m = machine {
             p,
@@ -529,13 +529,21 @@ impl<'a> machine<'a> {
 
     // go: none — goish idiom: Go's caller reads `m.matchcap` directly.
     /// The capture slots after a successful [`machine::match`].
-    pub(crate) fn __matchcap(&self) -> &[int] {
+    pub fn __matchcap(&self) -> &[int] {
         return &self.matchcap;
+    }
+
+    // go: none — goish idiom: `match` is a Rust keyword, so the port
+    //     spells it `r#match`. Call sites outside this file read better
+    //     with a name that is not raw-escaped.
+    /// [`machine::match`], under a callable name.
+    pub fn __run(&mut self, b: &[u8], pos: usize) -> bool {
+        return self.r#match(b, pos);
     }
 
     // go: none — goish-only: see the `steps` field.
     /// How many `add` calls this match took.
-    pub(crate) fn __steps(&self) -> i64 {
+    pub fn __steps(&self) -> i64 {
         return self.steps;
     }
 }
