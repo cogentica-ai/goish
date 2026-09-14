@@ -1,6 +1,6 @@
-// goishlint:ignore GOISH018 EscapeString, NewTokenDecoder, RawToken, Token, attrval, autoClose, emitCDATA, name, nsname, rawToken, switchToReader,  — the Decoder state machine and the two name predicates, deliberately not in this first slice. The Decoder ones cannot be pinned a function at a time (they share a bufio reader, a name-space stack and an error latch), so they land together with their own ref smoke; isName/isNameString need Go's `first` and `second` unicode.RangeTables, 310 lines of xml.go that should be GENERATED from Go rather than transcribed, which is its own commit. emitCDATA and EscapeString are printer-side and belong with marshal.go. See the file header and ROADMAP §2.
+// goishlint:ignore GOISH018 EscapeString, NewTokenDecoder, Token, autoClose, emitCDATA, switchToReader,  — the Decoder state machine and the two name predicates, deliberately not in this first slice. The Decoder ones cannot be pinned a function at a time (they share a bufio reader, a name-space stack and an error latch), so they land together with their own ref smoke; isName/isNameString need Go's `first` and `second` unicode.RangeTables, 310 lines of xml.go that should be GENERATED from Go rather than transcribed, which is its own commit. emitCDATA and EscapeString are printer-side and belong with marshal.go. See the file header and ROADMAP §2.
 // goishlint:ignore GOISH021 entity, errRawToken, HTMLEntity, HTMLAutoClose, TokenReader — the Decoder's own stack kinds, its name-space constants and its types; all of them exist only for the state machine waived above and would be dead declarations without it. `entity`, `HTMLEntity` and `HTMLAutoClose` are the decoder's entity tables and only `rawToken` reads them; `errRawToken` is the sentinel `Token()` returns when a TokenReader is in use.
-// go: file encoding/xml/xml.go decls: SyntaxError.Error, StartElement.Copy, StartElement.End, CharData.Copy, Comment.Copy, ProcInst.Copy, Directive.Copy, CopyToken, isInCharacterRange, isNameByte, isName, isNameString, EscapeText, escapeText, Escape, procInst, Decoder.text, Decoder.readName, Decoder.push, Decoder.pop, Decoder.pushEOF, Decoder.popEOF, Decoder.pushElement, Decoder.pushNs, Decoder.popElement, Decoder.translate, Decoder.getc, Decoder.InputOffset, Decoder.InputPos, Decoder.savedOffset, Decoder.mustgetc, Decoder.ungetc, Decoder.space, Decoder.syntaxError, NewDecoder
+// go: file encoding/xml/xml.go decls: SyntaxError.Error, StartElement.Copy, StartElement.End, CharData.Copy, Comment.Copy, ProcInst.Copy, Directive.Copy, CopyToken, isInCharacterRange, isNameByte, isName, isNameString, EscapeText, escapeText, Escape, procInst, Decoder.text, Decoder.readName, Decoder.rawToken, Decoder.RawToken, Decoder.nsname, Decoder.name, Decoder.attrval, Decoder.push, Decoder.pop, Decoder.pushEOF, Decoder.popEOF, Decoder.pushElement, Decoder.pushNs, Decoder.popElement, Decoder.translate, Decoder.getc, Decoder.InputOffset, Decoder.InputPos, Decoder.savedOffset, Decoder.mustgetc, Decoder.ungetc, Decoder.space, Decoder.syntaxError, NewDecoder
 //
 // encoding/xml/xml.rs — the pure half of Go's xml.go.
 //
@@ -765,6 +765,467 @@ impl Decoder {
         });
     }
 
+    // go: sdk 1.25.5 encoding/xml/xml.go:1168-1185 Decoder.nsname
+    /// Go: "Get name space name: name with a : stuck in the middle. The
+    /// part before the : is the name space identifier."
+    ///
+    /// Two colons is an error; a colon with an empty half is NOT split
+    /// — `:a` and `a:` stay whole as the Local part.
+    fn nsname(&mut self) -> (Name, bool) {
+        let (s, ok) = self.name();
+        if !ok {
+            return (Name::default(), false);
+        }
+        let raw = s.as_bytes();
+        let ncolon = raw.iter().filter(|&&c| c == b':').count();
+        if ncolon > 1 {
+            return (Name::default(), false);
+        }
+        let mut n = Name::default();
+        match raw.iter().position(|&c| c == b':') {
+            Some(i) if i > 0 && i + 1 < raw.len() => {
+                n.Space = string::from_bytes(&raw[..i]);
+                n.Local = string::from_bytes(&raw[i + 1..]);
+            }
+            _ => {
+                n.Local = s;
+            }
+        }
+        return (n, true);
+    }
+
+    // go: sdk 1.25.5 encoding/xml/xml.go:1187-1203 Decoder.name
+    /// Go: "Get name: /first(first|second)*/. Do not set d.err if the
+    /// name is missing (unless unexpected EOF is received): let the
+    /// caller provide better context."
+    fn name(&mut self) -> (string, bool) {
+        self.buf.Reset();
+        if !self.readName() {
+            return (string::from_static(""), false);
+        }
+        let b = self.buf.Bytes();
+        let raw: &[byte] = &b;
+        if !isName(raw) {
+            let bad = string::from_bytes(raw);
+            self.err =
+                self.syntaxErrorString(string::from_static("invalid XML name: ") + bad);
+            return (string::from_static(""), false);
+        }
+        return (string::from_bytes(raw), true);
+    }
+
+    // go: sdk 1.25.5 encoding/xml/xml.go:853-886 Decoder.attrval
+    /// An attribute value: quoted via `text`, or — outside Strict mode —
+    /// a bare run of name bytes.
+    fn attrval(&mut self) -> Option<slice<byte>> {
+        let (b, ok) = self.mustgetc();
+        if !ok {
+            return None;
+        }
+        // Go: "Handle quoted attribute values"
+        if b == b'"' || b == b'\'' {
+            return self.text(crate::int(crate::int64(b)), false);
+        }
+        // Go: "Handle unquoted attribute values for strict parsers"
+        if self.Strict {
+            self.err = self.syntaxError("unquoted or missing attribute value in element");
+            return None;
+        }
+        // Go: "Handle unquoted attribute values for unstrict parsers"
+        self.ungetc(b);
+        self.buf.Reset();
+        loop {
+            let (b, ok) = self.mustgetc();
+            if !ok {
+                return None;
+            }
+            if (b >= b'a' && b <= b'z') || (b >= b'A' && b <= b'Z') || (b >= b'0' && b <= b'9') {
+                let _ = self.buf.WriteByte(b);
+            } else {
+                self.ungetc(b);
+                break;
+            }
+        }
+        return Some(self.buf.Bytes());
+    }
+
+    // go: sdk 1.25.5 encoding/xml/xml.go:544-549 Decoder.RawToken
+    /// Go: "RawToken is like Decoder.Token but does not verify that
+    /// start and end elements match and does not translate name space
+    /// prefixes to their corresponding URLs."
+    pub fn RawToken(&mut self) -> (Option<Token>, crate::error) {
+        return self.rawToken();
+    }
+
+    // go: sdk 1.25.5 encoding/xml/xml.go:551-851 Decoder.rawToken
+    /// One token off the wire, with no element matching and no
+    /// name-space resolution. `Token` layers those on top.
+    ///
+    /// Go returns `(Token, error)` where a nil Token means "look at the
+    /// error"; goish returns `(Option<Token>, error)` so the two cannot
+    /// be confused.
+    fn rawToken(&mut self) -> (Option<Token>, crate::error) {
+        if !self.err.IsNil() {
+            return (None, self.err.clone());
+        }
+        if self.needClose {
+            // Go: "The last element we read was self-closing and we
+            // returned just the StartElement half. Return the
+            // EndElement half now."
+            self.needClose = false;
+            return (
+                Some(Token::EndElement(EndElement {
+                    Name: self.toClose.clone(),
+                })),
+                crate::errors::nil,
+            );
+        }
+
+        let (b, ok) = self.getc();
+        if !ok {
+            return (None, self.err.clone());
+        }
+        if b != b'<' {
+            // Go: "Text section."
+            self.ungetc(b);
+            return match self.text(-1, false) {
+                None => (None, self.err.clone()),
+                Some(data) => (Some(Token::CharData(CharData(data))), crate::errors::nil),
+            };
+        }
+
+        let (b, ok) = self.mustgetc();
+        if !ok {
+            return (None, self.err.clone());
+        }
+        if b == b'/' {
+            // Go: "</: End element"
+            let (name, ok) = self.nsname();
+            if !ok {
+                if self.err.IsNil() {
+                    self.err = self.syntaxError("expected element name after </");
+                }
+                return (None, self.err.clone());
+            }
+            self.space();
+            let (b, ok) = self.mustgetc();
+            if !ok {
+                return (None, self.err.clone());
+            }
+            if b != b'>' {
+                self.err = self.syntaxErrorString(
+                    string::from_static("invalid characters between </")
+                        + name.Local.clone()
+                        + string::from_static(" and >"),
+                );
+                return (None, self.err.clone());
+            }
+            return (
+                Some(Token::EndElement(EndElement { Name: name })),
+                crate::errors::nil,
+            );
+        }
+        if b == b'?' {
+            // Go: "<?: Processing instruction."
+            let (target, ok) = self.name();
+            if !ok {
+                if self.err.IsNil() {
+                    self.err = self.syntaxError("expected target name after <?");
+                }
+                return (None, self.err.clone());
+            }
+            self.space();
+            self.buf.Reset();
+            let mut b0: byte = 0;
+            loop {
+                let (b, ok) = self.mustgetc();
+                if !ok {
+                    return (None, self.err.clone());
+                }
+                let _ = self.buf.WriteByte(b);
+                if b0 == b'?' && b == b'>' {
+                    break;
+                }
+                b0 = b;
+            }
+            let all = self.buf.Bytes();
+            let raw: &[byte] = &all;
+            let data = &raw[..raw.len() - 2]; // chop ?>
+
+            if target == string::from_static("xml") {
+                let content = string::from_bytes(data);
+                let cs: &str = content.as_ref();
+                let ver = procInst("version", cs);
+                if ver.Len() != 0 && ver != string::from_static("1.0") {
+                    self.err = crate::errors::New(
+                        string::from_static("xml: unsupported version \"")
+                            + ver
+                            + string::from_static("\"; only version 1.0 is supported"),
+                    );
+                    return (None, self.err.clone());
+                }
+                let enc = procInst("encoding", cs);
+                let es: &str = enc.as_ref();
+                if enc.Len() != 0 && !es.eq_ignore_ascii_case("utf-8") {
+                    // Go consults CharsetReader here. goish has no
+                    // CharsetReader — it is a `func(string, io.Reader)
+                    // (io.Reader, error)` field, and swapping the
+                    // decoder's reader mid-parse needs the same
+                    // lifetime story `switchToReader` does. Waived with
+                    // the rest of the charset machinery; the refusal is
+                    // Go's own nil-CharsetReader message.
+                    self.err = crate::errors::New(
+                        string::from_static("xml: encoding \"")
+                            + enc
+                            + string::from_static("\" declared but Decoder.CharsetReader is nil"),
+                    );
+                    return (None, self.err.clone());
+                }
+            }
+            return (
+                Some(Token::ProcInst(ProcInst {
+                    Target: target,
+                    Inst: slice::<byte>::__from_vec(data.to_vec()),
+                })),
+                crate::errors::nil,
+            );
+        }
+        if b == b'!' {
+            // Go: "<!: Maybe comment, maybe CDATA."
+            let (b, ok) = self.mustgetc();
+            if !ok {
+                return (None, self.err.clone());
+            }
+            if b == b'-' {
+                // Go: "Probably <!-- for a comment."
+                let (b, ok) = self.mustgetc();
+                if !ok {
+                    return (None, self.err.clone());
+                }
+                if b != b'-' {
+                    self.err = self.syntaxError("invalid sequence <!- not part of <!--");
+                    return (None, self.err.clone());
+                }
+                self.buf.Reset();
+                let mut b0: byte = 0;
+                let mut b1: byte = 0;
+                loop {
+                    let (b, ok) = self.mustgetc();
+                    if !ok {
+                        return (None, self.err.clone());
+                    }
+                    let _ = self.buf.WriteByte(b);
+                    if b0 == b'-' && b1 == b'-' {
+                        if b != b'>' {
+                            self.err = self
+                                .syntaxError("invalid sequence \"--\" not allowed in comments");
+                            return (None, self.err.clone());
+                        }
+                        break;
+                    }
+                    b0 = b1;
+                    b1 = b;
+                }
+                let all = self.buf.Bytes();
+                let raw: &[byte] = &all;
+                let data = &raw[..raw.len() - 3]; // chop -->
+                return (
+                    Some(Token::Comment(Comment(slice::<byte>::__from_vec(
+                        data.to_vec(),
+                    )))),
+                    crate::errors::nil,
+                );
+            }
+            if b == b'[' {
+                // Go: "Probably <![CDATA[."
+                let want = b"CDATA[";
+                for i in 0..6 {
+                    let (b, ok) = self.mustgetc();
+                    if !ok {
+                        return (None, self.err.clone());
+                    }
+                    if b != want[i] {
+                        self.err = self.syntaxError("invalid <![ sequence");
+                        return (None, self.err.clone());
+                    }
+                }
+                return match self.text(-1, true) {
+                    None => (None, self.err.clone()),
+                    Some(data) => (Some(Token::CharData(CharData(data))), crate::errors::nil),
+                };
+            }
+
+            // Go: "Probably a directive: <!DOCTYPE ...>, <!ENTITY ...>,
+            // etc. We don't care, but accumulate for caller. Quoted
+            // angle brackets do not count for nesting."
+            self.buf.Reset();
+            let _ = self.buf.WriteByte(b);
+            let mut inquote: byte = 0;
+            let mut depth: int = 0;
+            let mut b = b;
+            'directive: loop {
+                // Go re-enters the body at HandleB with a byte already
+                // in hand; the `handled` flag is that goto.
+                let mut handled = false;
+                if !handled {
+                    let (nb, ok) = self.mustgetc();
+                    if !ok {
+                        return (None, self.err.clone());
+                    }
+                    b = nb;
+                    if inquote == 0 && b == b'>' && depth == 0 {
+                        break 'directive;
+                    }
+                }
+                loop {
+                    handled = true;
+                    let _ = self.buf.WriteByte(b);
+                    if b == inquote {
+                        inquote = 0;
+                    } else if inquote != 0 {
+                        // in quotes, no special action
+                    } else if b == b'\'' || b == b'"' {
+                        inquote = b;
+                    } else if b == b'>' && inquote == 0 {
+                        depth -= 1;
+                    } else if b == b'<' && inquote == 0 {
+                        // Go: "Look for <!-- to begin comment."
+                        let sgn = b"!--";
+                        let mut mismatch = false;
+                        let mut i = 0usize;
+                        while i < 3 {
+                            let (nb, ok) = self.mustgetc();
+                            if !ok {
+                                return (None, self.err.clone());
+                            }
+                            b = nb;
+                            if b != sgn[i] {
+                                // Go's `goto HandleB`: write back the
+                                // prefix it consumed, bump depth, and
+                                // re-handle the byte in hand.
+                                for j in 0..i {
+                                    let _ = self.buf.WriteByte(sgn[j]);
+                                }
+                                depth += 1;
+                                mismatch = true;
+                                break;
+                            }
+                            i += 1;
+                        }
+                        if mismatch {
+                            continue;
+                        }
+                        // Go: "Remove < that was written above."
+                        let n = self.buf.Len();
+                        self.buf.Truncate(n - 1);
+                        let mut b0: byte = 0;
+                        let mut b1: byte = 0;
+                        loop {
+                            let (nb, ok) = self.mustgetc();
+                            if !ok {
+                                return (None, self.err.clone());
+                            }
+                            if b0 == b'-' && b1 == b'-' && nb == b'>' {
+                                break;
+                            }
+                            b0 = b1;
+                            b1 = nb;
+                        }
+                        // Go: "Replace the comment with a space ... so
+                        // that markup parts that were separated by the
+                        // comment don't get joined when re-encoding."
+                        let _ = self.buf.WriteByte(b' ');
+                    }
+                    break;
+                }
+                let _ = handled;
+            }
+            return (
+                Some(Token::Directive(Directive(self.buf.Bytes()))),
+                crate::errors::nil,
+            );
+        }
+
+        // Go: "Must be an open element like <a href=\"foo\">"
+        self.ungetc(b);
+        let (name, ok) = self.nsname();
+        if !ok {
+            if self.err.IsNil() {
+                self.err = self.syntaxError("expected element name after <");
+            }
+            return (None, self.err.clone());
+        }
+        let mut empty = false;
+        let mut attr: Vec<Attr> = Vec::new();
+        loop {
+            self.space();
+            let (b, ok) = self.mustgetc();
+            if !ok {
+                return (None, self.err.clone());
+            }
+            if b == b'/' {
+                empty = true;
+                let (b, ok) = self.mustgetc();
+                if !ok {
+                    return (None, self.err.clone());
+                }
+                if b != b'>' {
+                    self.err = self.syntaxError("expected /> in element");
+                    return (None, self.err.clone());
+                }
+                break;
+            }
+            if b == b'>' {
+                break;
+            }
+            self.ungetc(b);
+
+            let mut a = Attr::default();
+            let (an, ok) = self.nsname();
+            if !ok {
+                if self.err.IsNil() {
+                    self.err = self.syntaxError("expected attribute name in element");
+                }
+                return (None, self.err.clone());
+            }
+            a.Name = an;
+            self.space();
+            let (b, ok) = self.mustgetc();
+            if !ok {
+                return (None, self.err.clone());
+            }
+            if b != b'=' {
+                if self.Strict {
+                    self.err = self.syntaxError("attribute name without = in element");
+                    return (None, self.err.clone());
+                }
+                self.ungetc(b);
+                a.Value = a.Name.Local.clone();
+            } else {
+                self.space();
+                match self.attrval() {
+                    None => return (None, self.err.clone()),
+                    Some(data) => {
+                        let raw: &[byte] = &data;
+                        a.Value = string::from_bytes(raw);
+                    }
+                }
+            }
+            attr.push(a);
+        }
+        if empty {
+            self.needClose = true;
+            self.toClose = name.clone();
+        }
+        return (
+            Some(Token::StartElement(StartElement {
+                Name: name,
+                Attr: slice::<Attr>::__from_vec(attr),
+            })),
+            crate::errors::nil,
+        );
+    }
+
     // go: sdk 1.25.5 encoding/xml/xml.go:468-476 Decoder.syntaxError
     /// Go: `&SyntaxError{Msg: msg, Line: d.line}`.
     pub(crate) fn syntaxError(&self, msg: &str) -> crate::error {
@@ -1250,6 +1711,95 @@ pub fn __stack_script(ops: &[&str], strict: bool, default_space: &str) -> string
         }
     }
     return out;
+}
+
+// go: none — goish-only: tokenise a whole document and dump each token,
+// in the format the reference generator prints inside GOROOT. This is
+// the first piece of the port testable end-to-end, so it needs no
+// scripting — just a document in and a token stream out.
+#[doc(hidden)]
+pub fn __raw_script(doc: &[byte], strict: bool) -> string {
+    let mut d = NewDecoder(crate::bytes::NewReader(slice::<byte>::__from_vec(doc.to_vec())));
+    d.Strict = strict;
+    let mut out = string::from_static("");
+    let mut first = true;
+    let mut i = 0;
+    while i < 40 {
+        i += 1;
+        let (t, e) = d.RawToken();
+        if !first {
+            out = out + string::from_static(" ");
+        }
+        first = false;
+        match t {
+            None => {
+                out = out + string::from_static("err=") + e.Error();
+                break;
+            }
+            Some(t) => {
+                out = out + __tok_str(&t);
+            }
+        }
+    }
+    return out;
+}
+
+// go: none — goish-only: see `__raw_script`.
+#[doc(hidden)]
+pub fn __tok_str(t: &Token) -> string {
+    // go: none — goish-only: hex for the dump format.
+    fn hexs(b: &[byte]) -> string {
+        let mut s = string::from_static("");
+        for &x in b.iter() {
+            s = s + crate::fmt::Sprintf!("%02x", crate::int(x));
+        }
+        return s;
+    }
+    return match t {
+        Token::StartElement(v) => {
+            let mut as_ = string::from_static("");
+            for i in 0..v.Attr.Len() {
+                if i > 0 {
+                    as_ = as_ + string::from_static(",");
+                }
+                let a = &v.Attr[i as usize];
+                as_ = as_
+                    + crate::fmt::Sprintf!(
+                        "%s|%s=%s",
+                        a.Name.Space.clone(),
+                        a.Name.Local.clone(),
+                        a.Value.clone()
+                    );
+            }
+            crate::fmt::Sprintf!(
+                "S(%s|%s)[%s]",
+                v.Name.Space.clone(),
+                v.Name.Local.clone(),
+                as_
+            )
+        }
+        Token::EndElement(v) => crate::fmt::Sprintf!(
+            "E(%s|%s)",
+            v.Name.Space.clone(),
+            v.Name.Local.clone()
+        ),
+        Token::CharData(v) => {
+            let b: &[byte] = &v.0;
+            crate::fmt::Sprintf!("C(%s)", hexs(b))
+        }
+        Token::Comment(v) => {
+            let b: &[byte] = &v.0;
+            crate::fmt::Sprintf!("M(%s)", hexs(b))
+        }
+        Token::ProcInst(v) => {
+            let b: &[byte] = &v.Inst;
+            crate::fmt::Sprintf!("P(%s|%s)", v.Target.clone(), hexs(b))
+        }
+        Token::Directive(v) => {
+            let b: &[byte] = &v.0;
+            crate::fmt::Sprintf!("D(%s)", hexs(b))
+        }
+    };
 }
 
 // ─── the XML name character tables ────────────────────────────────────

@@ -1,0 +1,31 @@
+raw 0 "<a/>" strict=true -> S(|a)[] E(|a) err=EOF
+raw 1 "<a></a>" strict=true -> S(|a)[] E(|a) err=EOF
+raw 2 "<a>hi</a>" strict=true -> S(|a)[] C(6869) E(|a) err=EOF
+raw 3 "<a b=\"c\"/>" strict=true -> S(|a)[|b=c] E(|a) err=EOF
+raw 4 "<a b=\"c\" d='e'/>" strict=true -> S(|a)[|b=c,|d=e] E(|a) err=EOF
+raw 5 "<a xmlns:x=\"http://x\"><x:b/></a>" strict=true -> S(|a)[xmlns|x=http://x] S(x|b)[] E(x|b) E(|a) err=EOF
+raw 6 "<a>&lt;&amp;</a>" strict=true -> S(|a)[] C(3c26) E(|a) err=EOF
+raw 7 "<!--c-->" strict=true -> M(63) err=EOF
+raw 8 "<!---->" strict=true -> M() err=EOF
+raw 9 "<!--a--b-->" strict=true -> err=XML syntax error on line 1: invalid sequence "--" not allowed in comments
+raw 10 "<?xml version=\"1.0\"?><a/>" strict=true -> P(xml|76657273696f6e3d22312e3022) S(|a)[] E(|a) err=EOF
+raw 11 "<?php echo ?><a/>" strict=true -> P(php|6563686f20) S(|a)[] E(|a) err=EOF
+raw 12 "<![CDATA[x<y]]>" strict=true -> C(783c79) err=EOF
+raw 13 "<![CDATA[]]>" strict=true -> C() err=EOF
+raw 14 "<!DOCTYPE a>" strict=true -> D(444f43545950452061) err=EOF
+raw 15 "<!DOCTYPE a [<!ENTITY b \"c\">]>" strict=true -> D(444f43545950452061205b3c21454e544954592062202263223e5d) err=EOF
+raw 16 "<!DOCTYPE a [<!-- c -->]>" strict=true -> D(444f43545950452061205b205d) err=EOF
+raw 17 "<!DOCTYPE a \"quoted > here\">" strict=true -> D(444f43545950452061202271756f746564203e206865726522) err=EOF
+raw 18 "<a/><b/>" strict=true -> S(|a)[] E(|a) S(|b)[] E(|b) err=EOF
+raw 19 " <a/> " strict=true -> C(20) S(|a)[] E(|a) C(20) err=EOF
+raw 20 "<a" strict=true -> err=XML syntax error on line 1: unexpected EOF
+raw 21 "</" strict=true -> err=XML syntax error on line 1: unexpected EOF
+raw 22 "<a b/>" strict=true -> err=XML syntax error on line 1: attribute name without = in element
+raw 23 "<a b/>" strict=false -> S(|a)[|b=b] E(|a) err=EOF
+raw 24 "<a b=c/>" strict=true -> err=XML syntax error on line 1: unquoted or missing attribute value in element
+raw 25 "<!-" strict=true -> err=XML syntax error on line 1: unexpected EOF
+raw 26 "<![x" strict=true -> err=XML syntax error on line 1: invalid <![ sequence
+raw 27 "<a></b>" strict=true -> S(|a)[] E(|b) err=EOF
+raw 28 "<?xml version=\"9.9\"?>" strict=true -> err=xml: unsupported version "9.9"; only version 1.0 is supported
+raw 29 "<?xml encoding=\"EBCDIC\"?>" strict=true -> err=xml: encoding "EBCDIC" declared but Decoder.CharsetReader is nil
+raw 30 "<a>]]></a>" strict=true -> S(|a)[] err=XML syntax error on line 1: unescaped ]]> not in CDATA section

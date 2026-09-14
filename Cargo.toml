@@ -77,6 +77,10 @@ lto = false
 
 
 [[example]]
+name = "xml_rawtoken_ref_smoke"
+path = "examples/xml_rawtoken_ref_smoke.rs"
+
+[[example]]
 name = "xml_stack_ref_smoke"
 path = "examples/xml_stack_ref_smoke.rs"
 
