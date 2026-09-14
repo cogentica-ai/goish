@@ -1620,6 +1620,40 @@ defects, in three separate packages:
 | `crypto/tls/session.rs` | 145 | cached tickets never expired; the cache was unbounded, so the peer decided how much it held |
 | `net/dnsclient.rs` | 1143 | a xorshift transaction ID where Go uses the OS-seeded generator; a truncated answer returned as success |
 
+**`src/net/http/server_tls.rs` — checked 2026-09-14, CLEAN on every
+dimension looked at.** 829 unanchored lines running a dedicated HTTPS
+serve loop, because goish's `serve_conn` is specialised to the concrete
+`net::TCPConn` and reaches for the raw fd. A second serve loop is the
+shape §2b exists to distrust, so it was read against the TCP path for
+the limits that stop a peer deciding how much the server does:
+
+  * the TLS handshake gets a deadline (Go's server.go:1961 — the
+    smallest positive of ReadHeaderTimeout / ReadTimeout /
+    WriteTimeout);
+  * `MaxHeaderBytes` is threaded into `ReadRequestWithLimit`, the same
+    parser the TCP path uses;
+  * `ReadHeaderTimeout`/`ReadTimeout` arm a read deadline before each
+    request, and `WriteTimeout` arms one for the response;
+  * no default body cap — and Go has none either. `MaxBytesReader` is a
+    handler-applied helper in both trees, not a server default.
+
+The response path is SHARED, not duplicated: both call sites invoke
+`responsewriter::finalizeHeaders` and `responsewriter::build_head`, and
+`build_head` routes the headers through `Header::WriteSubset`, which
+carries the `isToken` name guard and `sanitize_header_value`'s newline
+folding. So HTTPS inherits the response-header injection defence —
+which matters, because that is the mirror of the Host-header vector
+fixed in §2e this same day. `build_head`'s own comment records that it
+once WAS a third hand-rolled `key: value` loop bypassing the guard, and
+that this was fixed; the point here is that the fix covers HTTPS too.
+
+Recorded because a project note of mine still claimed the opposite
+("HTTPS builds its own heads"), which was true before the consolidation
+and would have sent the next reader looking for a divergence that is no
+longer there. The deferrals the file's own header lists — no netpoll
+disconnect watcher, no Shutdown idle-kick for HTTPS conns, no interim
+100-continue write — are unchanged and still accurate.
+
 **`src/crypto/ssh/mod.rs` — the client did not verify host keys by
 default, found 2026-09-14.** Re-running §2b's criterion turned up 97
 unanchored files of 120+ lines. Most of the large ones are generated
