@@ -1695,7 +1695,10 @@ impl RoundTripper for Transport {
         if host.Len() == 0 {
             return (
                 Response::default(),
-                errors::New(string("http: no Host in request")),
+                // Go's text is "http: no Host in request URL"
+                // (transport.go:634); this dropped the last word.
+                // Nothing in the tree matched the shorter form.
+                errors::New(string("http: no Host in request URL")),
             );
         }
 
@@ -3048,7 +3051,7 @@ impl Client {
                     // relative Location parsed with no base at all. The
                     // file transport's directory redirect to "sub/"
                     // became the URL "sub/", and the next hop failed
-                    // with "http: no Host in request" instead of
+                    // with "http: no Host in request URL" instead of
                     // fetching file:///sub/.
                     let loc = resp.Header.Get(string("Location"));
                     if loc.Len() == 0 {

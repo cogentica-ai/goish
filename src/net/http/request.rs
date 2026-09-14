@@ -545,9 +545,27 @@ impl Request {
 
     /// `r.MultipartReader()` (request.go:497) — return a
     /// `mime/multipart::Reader` over the request body, if this is a
-    /// multipart/form-data POST. Slim port: drops the
-    /// "MultipartReader called twice" guard (we don't track
-    /// MultipartForm state) and the multipart/mixed support.
+    /// multipart/form-data POST. Slim port: drops Go's two
+    /// misuse guards, and the multipart/mixed support.
+    ///
+    /// Go refuses a second call ("http: MultipartReader called twice")
+    /// and a call after ParseMultipartForm ("http: multipart handled by
+    /// ParseMultipartForm"), using `r.MultipartForm` as a tri-state
+    /// with a `multipartByReader` sentinel. The old reason given here
+    /// — "we don't track MultipartForm state" — is STALE: it is
+    /// tracked, in `form_state`, and `MultipartForm()` reads it. What
+    /// is missing is the sentinel, since `Option<Form>` has no third
+    /// state.
+    ///
+    /// Not a defect, and checked rather than assumed. On the server
+    /// path the body is Eager (§0.A) and `__bytes_eager` does not
+    /// advance its offset, so a second call returns a fresh working
+    /// Reader over the same bytes where Go returns an error — more
+    /// permissive, not wrong. On a streaming body the second call
+    /// drains nothing and returns "missing form body": a different
+    /// message for the same refusal. Adding the sentinel means a
+    /// tri-state on `multipart_form`, which is a data-structure change
+    /// for an API-misuse path; recorded instead.
     pub fn MultipartReader(&self) -> (super::super::super::mime::multipart::Reader, error) {
         let v = self.Header.Get(string("Content-Type"));
         if v.Len() == 0 {

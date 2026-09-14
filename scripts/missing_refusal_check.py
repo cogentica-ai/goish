@@ -38,12 +38,13 @@ Known limits, all of which make it MISS things rather than invent them:
     prose. Searching per-file reported 177 where the package-wide
     answer is 137.
 
---errors reported 131 as of 2026-09-14, and 130 after the fix below. Triaging its first
-four files found one real defect — net/http wrote the Host header
-without Go's ValidHostHeader check, a header-injection vector — and
-three files of correctly-absent refusals (crypto/tls/auth.go's were all
-%T artefacts, httpcommon and quic are waived). About one in four files
-worth opening; see ROADMAP §2e.
+--errors reported 131 as of 2026-09-14, 128 after that day's fixes.
+Five files and 39 entries triaged: ONE real defect (net/http wrote the
+Host header without Go's ValidHostHeader check — a header-injection
+vector), two error-text divergences, one stale comment, 29 correctly
+absent, six artefacts of this checker's own %T handling. Roughly one
+defect per 39 entries and one file in five worth opening. ROADMAP §2e
+carries the per-entry verdicts so they are not re-triaged.
 
 As of 2026-09-14 --alerts reports SIX, and all six sit inside Go's
 `c.quic != nil` blocks — goish ships no QUIC transport and waives those

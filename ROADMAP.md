@@ -4624,7 +4624,56 @@ four red and leaves the 280 green.
 Still absent, and recorded rather than patched: Go calls
 `httpguts.PunycodeHostPort` first. goish has no IDNA, so a non-ASCII
 Host is now rejected where Go would have encoded it. Rejecting is the
-safe direction, and it is the same gap `idnaASCII` already documents. Three of its hand-rolled
+safe direction, and it is the same gap `idnaASCII` already documents.
+
+### The next thirteen, and what they were
+
+`transport.go` (7) and `request.go` (7, one already fixed above)
+triaged the same way — opened, not pattern-matched. Nothing else real,
+and recording why is the point, since the next reader would otherwise
+repeat it:
+
+  * `http: nil Request.Header` — structurally impossible. goish's
+    `Header` wraps a value-type `map`, which has no nil state.
+  * `unknown status code` — the CONNECT-proxy arm. goish does not port
+    proxy-CONNECT dialling at all; `errDialNotPorted` says so.
+  * `http: Transport does not support unencrypted HTTP/2` — waived
+    with the rest of HTTP/2.
+  * `read loop ending; caller owns writable underlying conn`,
+    `net/http: request canceled while waiting for connection`,
+    `net/http: request completed` — sentinels of the readLoop/writeLoop
+    goroutine pair goish does not start. §0.B, again.
+  * `http: no Host in request URL` — the guard IS there; goish's
+    message just dropped the last word. Fixed; nothing in the tree
+    matched the shorter form.
+  * `net/http: nil Context`, `http: POST too large` — present under
+    goish's own wording.
+  * `http: MultipartReader called twice`, `http: multipart handled by
+    ParseMultipartForm`, `http: multipart handled by MultipartReader`
+    (x2) — Go's API-misuse guards, using `r.MultipartForm` as a
+    tri-state with a `multipartByReader` sentinel. goish's
+    `Option<Form>` has no third state.
+
+That last one carried a STALE REASON, which is the only other thing
+worth the words. `MultipartReader`'s doc said the guard was dropped
+because "we don't track MultipartForm state" — and it is tracked, in
+`form_state`, with `MultipartForm()` reading it. Checked rather than
+assumed what the omission costs: on the server path the body is Eager
+(§0.A) and `__bytes_eager` does not advance its offset, so a second
+call returns a fresh working Reader where Go errors — more permissive,
+not wrong; on a streaming body the second call returns "missing form
+body", a different message for the same refusal. Adding the sentinel
+means a tri-state on `multipart_form`, a data-structure change for an
+API-misuse path. Recorded at the site instead.
+
+**Running yield for `--errors`, counted rather than estimated:** five
+files opened, 39 entries. One real defect (the Host header), two text
+fixes, one stale reason, 29 correctly absent (19 waived — httpcommon
+and quic — plus structural impossibilities and §0.B sentinels), six
+checker artefacts. So roughly **1 defect per 39 entries**, and **1 file
+in 5** worth opening. The count stands at 128 after this commit's two
+fixes; treat it as a work queue, and expect most of it to be
+explainable rather than broken. Three of its hand-rolled
 crypto primitives are gone this week — the SPKI walk, the TLS 1.2 PRF,
 the padding check — and each left a Go-generated table behind.
 
