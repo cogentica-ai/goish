@@ -166,12 +166,46 @@ somewhere in the text:
 | §2v1 slice aliasing (#26) | PARTIAL — `slice_alias_ref_smoke` reports 7/7 matching with **6 pinned divergences** |
 | §2u map value semantics (#7) | **OPEN, and now the largest** — `map<K, V>` is still an owning struct (`count`, `b`, buckets), so two handles diverge where Go's alias |
 
-So the honest ordering of remaining work is: §2u, then §2v1's six
-divergences, then §1's retirement of `record.rs`, `session.rs` and the
-invented client. §2u and §2v1 are core-type semantics rather than
-ordinary porting — changing `map`/`slice` from owning to aliasing
-touches everything built on them — which is why they belong beside §0's
+**§2v1's "six divergences" are ONE change, not six.** Checked
+2026-09-14 against `slice_alias_ref_smoke`'s own list: a reslice's cap,
+writes not reaching the parent, append-within-capacity not overwriting,
+`copy` into overlapping reslices, and slicing-to-zero not keeping
+capacity all follow from the same fact — `slice<T>` owns a `Vec<T>`
+instead of viewing a shared backing array. They cannot be fixed
+individually. An earlier plan of mine to "size the six" was working
+from a wrong reading of that row.
+
+So the honest ordering of remaining work is: §2u and §2v1 — which are
+ONE decision, about whether goish's `map` and `slice` become aliasing
+types — then §1's retirement of `record.rs`, `session.rs` and the
+invented client. Both are core-type semantics rather than ordinary
+porting: changing `map`/`slice` from owning to aliasing touches
+everything built on them, which is why they belong beside §0's
 decisions rather than on a task list.
+
+**A caution about reading `port_coverage.py` as a worklist**, since
+that is the obvious next move for anyone who gets this far. Its
+percentages count NAMES, and goish deliberately restructures, so the
+gap is smallest exactly where you would start:
+
+  * `encoding/binary` reads 27/36 = 75%, and all nine "missing" are
+    Go's `decoder`/`encoder` methods — `bool`, `int8`…`int64`, `skip`,
+    `value`, `GoString`. They are the internals of Go's REFLECTION path
+    for `binary.Read`/`Write`. goish reaches the same behaviour through
+    a `Fixed` trait, which turns Go's runtime "invalid type" error into
+    a compile error. Six siblings (`dataSize`, `encodeFast`, …) are
+    already waived for exactly this reason; these nine belong with them.
+  * `encoding/json*` reads 10–17% across four packages while §2s
+    records v2 marshal AND unmarshal as done with 37 pinned rows. The
+    `json/internal/{jsonwire,jsonflags,jsonopts}` packages read 0%
+    because goish does not have them, not because the behaviour is
+    absent.
+
+The genuinely unported packages in that subtree are `encoding/gob` (0%,
+218 functions, 4,845 Go LOC) and `encoding/xml` (0%, 89 functions,
+4,353 LOC). Those are real, large, and need no decision — which makes
+them the natural next porting work once the aliasing question is
+settled or set aside.
 ### §2v — runtime/pprof protobuf profiles (issue #9): DONE
 
 **STATUS CORRECTED 2026-09-14. This section described the work as
