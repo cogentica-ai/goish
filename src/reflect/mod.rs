@@ -1287,6 +1287,82 @@ impl Value {
         }
     }
 
+    // go: none — goish idiom: Go's `Index`, `MapIndex` and `Field`
+    //     return a `reflect.Value`, which is a HEADER — a type pointer
+    //     and a data pointer — so returning one copies three words.
+    //     goish's `Value` is the tree itself, so the same three methods
+    //     deep-CLONE the subtree.
+    //
+    //     That is invisible on a shallow value and quadratic on a deep
+    //     one: a walk that recurses through `MapIndex` clones the whole
+    //     remaining subtree at every level. Measured 2026-09-14 through
+    //     `json::Marshal`, which does exactly that — a 14 KB document
+    //     nested 2400 deep took 1.1 SECONDS and 2600 deep exhausted the
+    //     allocator, while the same document built and parsed fine at
+    //     10000.
+    //
+    //     These three borrow instead. They are the ones a WALK should
+    //     use; the cloning versions stay because they are Go's
+    //     signatures and a caller that wants an owned value needs them.
+    /// `Index(i)` without copying — the element, borrowed.
+    ///
+    /// `None` when this is not a slice, where [`Value::Index`] panics:
+    /// a walk can test rather than pre-check.
+    pub fn __index_ref(&self, i: int) -> Option<&Value> {
+        if let Value::Named { inner, .. } = self {
+            return inner.__index_ref(i);
+        }
+        return match self {
+            Value::Slice { items, .. } => items.get(i as usize),
+            _ => None,
+        };
+    }
+
+    // go: none — goish idiom: see `__index_ref`.
+    /// `MapIndex(key)` without copying.
+    pub fn __map_index_ref(&self, key: &Value) -> Option<&Value> {
+        if let Value::Named { inner, .. } = self {
+            return inner.__map_index_ref(key);
+        }
+        return match self {
+            Value::Map { entries, .. } => {
+                for (k, v) in entries {
+                    if value_eq(k, key) {
+                        return Some(v);
+                    }
+                }
+                None
+            }
+            _ => None,
+        };
+    }
+
+    // go: none — goish idiom: see `__index_ref`.
+    /// `Field(i)` without copying.
+    pub fn __field_ref(&self, i: int) -> Option<&Value> {
+        if let Value::Named { inner, .. } = self {
+            return inner.__field_ref(i);
+        }
+        return match self {
+            Value::Struct { fields, .. } => fields.get(i as usize),
+            _ => None,
+        };
+    }
+
+    // go: none — goish idiom: see `__index_ref`. `MapKeys` clones every
+    //     key, which for a string-keyed map is cheap but for a
+    //     struct-keyed one is the same trap.
+    /// The map's keys, borrowed and in insertion order.
+    pub fn __map_keys_ref(&self) -> alloc::vec::Vec<&Value> {
+        if let Value::Named { inner, .. } = self {
+            return inner.__map_keys_ref();
+        }
+        return match self {
+            Value::Map { entries, .. } => entries.iter().map(|(k, _)| k).collect(),
+            _ => alloc::vec::Vec::new(),
+        };
+    }
+
     /// `FieldByName(name)` — looks up by name. Returns `Value::Invalid`
     /// if not found.
     pub fn FieldByName(&self, name: &str) -> Value {

@@ -1,4 +1,9 @@
-// json_encode_depth_smoke — `encode_value`'s depth ceiling, pinned.
+// json_encode_depth_smoke — BOTH encoders' depth ceilings, pinned.
+//
+// `encode_value` serves Compact, Indent and Value::MarshalJSON;
+// `encode_reflect` serves Marshal and is a different walk that this
+// file did not cover until 2026-09-14 — which is how it came to be
+// quadratic unnoticed. See the second half.
 //
 // `encode_value` is the encoder behind `Compact`, `Indent` and
 // `Value::MarshalJSON`. It uses an EXPLICIT work stack rather than
@@ -110,10 +115,68 @@ fn main() {
     // brings the encoder back below those is what this row catches.
     check("beyond the clone ceiling", 16000);
 
+    // ── the OTHER encoder ───────────────────────────────────────────
+    //
+    // `Marshal` is generic over `reflect::Reflect` and never calls
+    // `encode_value`. It has its own walk, `encode_reflect`, and
+    // nothing watched it — which is how it came to be QUADRATIC without
+    // anyone noticing. Measured 2026-09-14, release build, the same
+    // nested value:
+    //
+    //     depth  200    7.8 ms      depth 1600    499 ms
+    //     depth  400   30.6 ms      depth 2400  1,127 ms
+    //     depth  800  128.4 ms      depth 2600  allocator exhausted
+    //
+    // Four times the work for twice the depth, on a document 14 KB
+    // long. The cause was `reflect::Value::MapIndex` returning
+    // `v.clone()` — a DEEP copy of the whole remaining subtree, at
+    // every level. Go's `MapIndex` returns a three-word header, so the
+    // same code is linear there.
+    //
+    // With the borrow (`__map_index_ref` and its two siblings) the same
+    // depths are 151 µs, 300 µs, 798 µs, 1.5 ms, 2.4 ms — linear, and
+    // 2400 is 460x faster.
+    //
+    // Why this row is 10000 and the one above is 16000: the ceilings
+    // are different walks. Measured, debug build:
+    //
+    //     encode_reflect   before  faults 2550..2600 (ALLOCATOR, and
+    //                              identically in release — it was
+    //                              never the stack)
+    //                      after   faults 12000..13000 (stack)
+    //
+    // 10000 is Go's `maxNestingDepth`, so this row is also the evidence
+    // for raising goish's from 2000 — which is a separate change,
+    // because the margin at 10000 is 1.2x and §2d wants
+    // `encode_reflect` iterative first.
+    let mut marshal_check = |name: &'static str, depth: int| {
+        let v = nest(depth);
+        let (out, err) = json::Marshal(&v);
+        let ok = err == goish::nil && out.Len() == want_len(depth);
+        if ok {
+            fmt::Printf!("[ok] %s depth=%d len=%d\n", name, depth, out.Len());
+        } else {
+            failed += 1;
+            fmt::Printf!(
+                "[!!] %s depth=%d len=%d want=%d err=%v\n",
+                name,
+                depth,
+                out.Len(),
+                want_len(depth),
+                err
+            );
+        }
+    };
+    // The depth a round trip can reach today.
+    marshal_check("Marshal round-trip reachable", 2000);
+    // Four times the old ceiling. This is the row that fails if a
+    // cloning accessor comes back into the walk.
+    marshal_check("Marshal past the clone ceiling", 10000);
+
     if failed == 0 {
-        fmt::Printf!("\nok 2/2\n");
+        fmt::Printf!("\nok 4/4\n");
         os::Exit(0);
     }
-    fmt::Printf!("\nFAIL %d of 2\n", failed);
+    fmt::Printf!("\nFAIL %d of 4\n", failed);
     os::Exit(1);
 }

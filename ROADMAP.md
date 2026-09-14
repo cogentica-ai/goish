@@ -3790,6 +3790,69 @@ takes a value built deliberately in code, not one that arrived over a
 wire. A fifth pass should make `encode_reflect` iterative — NOT add a
 depth limit Go does not have, which would refuse documents Go
 encodes.
+
+**FIFTH PASS, 2026-09-14: the encoder's ceiling was not the stack at
+all, and the entry above was measuring the wrong failure.**
+
+Re-measured before touching anything, which is the only reason this
+was found. `Marshal` of the nested value did not fault at 4000 as
+recorded — it died at 2550..2600 with `mcentral: span table
+exhausted`, an ALLOCATOR error, and identically in a release build.
+A stack ceiling moves between debug and release; this one did not,
+because it was never the stack.
+
+The cause is `reflect::Value::MapIndex`, which returns `v.clone()` — a
+DEEP copy of the whole remaining subtree — so a walk that recurses
+through it clones the rest of the document at every level. Quadratic.
+Measured, release build, on a document 14 KB long:
+
+| depth | before | after |
+|--:|--:|--:|
+| 200 | 7.8 ms | 151 µs |
+| 400 | 30.6 ms | 300 µs |
+| 800 | 128 ms | 798 µs |
+| 1600 | 499 ms | 1.5 ms |
+| 2400 | **1,127 ms** | **2.4 ms** |
+| 2600 | allocator exhausted | 2.6 ms |
+| 20000 | — | 19.6 ms |
+
+Four times the work for twice the depth, before; linear after, and
+2400 is 460x faster.
+
+**This was reachable from untrusted input.** The parser caps at 2000,
+so a 12 KB document nested 1999 deep parses fine — and marshalling it
+back, which any proxy or re-serialiser does, cost about a second of
+CPU and millions of live allocations. Go's `MapIndex` returns a
+three-word header, so the same code is linear there.
+
+`Index` and `Field` clone the same way. All three now have borrowing
+twins — `__index_ref`, `__map_index_ref`, `__field_ref`, plus
+`__map_keys_ref` — and the encoder uses them. The cloning versions
+stay: they are Go's signatures, and a caller that wants an owned value
+needs them.
+
+**This is the THIRD instance of the same bug.** `Unmarshal`'s
+`T::from_value(&raw)` was the first (fixed with `from_value_owned`),
+`encode_value`'s owned work stack the second (an 8x loss from ONE root
+clone). A cloning accessor inside a tree walk is evidently the shape
+this codebase reaches for, and only the third one was quadratic rather
+than linear.
+
+Where that leaves the limit. `encode_reflect`'s ceiling is now
+12000..13000 in a debug build — a 4.7x improvement, and the failure is
+the stack again, where this entry expected it. Go's `maxNestingDepth`
+is 10000 and goish's is still 2000, so raising it is now POSSIBLE
+without making `encode_reflect` iterative. It is not done here, for
+two reasons: the margin at 10000 would be 1.2x, and doing two things
+at once means a CI failure cannot be attributed. The iterative encoder
+is still the right fifth-and-a-half pass, and it buys the headroom
+that makes 10000 comfortable rather than tight.
+
+`examples/json_encode_depth_smoke.rs` now covers BOTH encoders. It
+only ever covered `encode_value`, and `Marshal` never calls it — which
+is exactly how a quadratic walk sat there unnoticed. The new rows
+marshal at 2000 and 10000; restoring the clone makes them blow the
+stack.
 Verified that it is genuinely the only one left: with parse and clone
 both handled, depth 10000 parses and 10001 is refused, exactly Go's
 behaviour — and then the marshal of that tree faults. Parsing a

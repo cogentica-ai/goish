@@ -39,6 +39,73 @@ fn check(cond: bool, msg: &[u8]) {
     }
 }
 
+/// A `live_slots()` equality, reported with the NUMBERS when it fails.
+///
+/// This exists because of an unreproducible CI failure on 2026-09-14:
+/// `many-classes: not all freed` on a docs-only commit, twice, after
+/// passing the three runs before it and 60 consecutive runs locally.
+/// The bare message said nothing about the MAGNITUDE, and the magnitude
+/// is the whole diagnosis — one slot adrift is background noise from a
+/// P this test does not flush, while a hundred is a real leak.
+///
+/// `live_slots()` sums every span in the heap and `flush_mcache()`
+/// drains only the CALLING P, so anything else in the process that
+/// allocates between the two reads moves the number. That is the
+/// structural reason a strict equality here can fire without a bug.
+/// It is deliberately NOT loosened: a tolerance chosen without a
+/// reproduction would hide the leak this row exists to catch. Making
+/// the failure legible is what can be done honestly today.
+fn check_slots(got: usize, want: usize, label: &[u8]) {
+    if got == want {
+        return;
+    }
+    let mut buf = [0u8; 160];
+    let mut n = 0usize;
+    let mut put = |b: &[u8], n: &mut usize, buf: &mut [u8; 160]| {
+        for &c in b {
+            if *n < buf.len() {
+                buf[*n] = c;
+                *n += 1;
+            }
+        }
+    };
+    let mut num = |v: usize, n: &mut usize, buf: &mut [u8; 160]| {
+        let mut d = [0u8; 20];
+        let mut i = 0usize;
+        let mut x = v;
+        loop {
+            d[i] = b'0' + (x % 10) as u8;
+            x /= 10;
+            i += 1;
+            if x == 0 {
+                break;
+            }
+        }
+        while i > 0 {
+            i -= 1;
+            if *n < buf.len() {
+                buf[*n] = d[i];
+                *n += 1;
+            }
+        }
+    };
+    put(label, &mut n, &mut buf);
+    put(b": live_slots=", &mut n, &mut buf);
+    num(got, &mut n, &mut buf);
+    put(b" want=", &mut n, &mut buf);
+    num(want, &mut n, &mut buf);
+    put(b" drift=", &mut n, &mut buf);
+    if got >= want {
+        put(b"+", &mut n, &mut buf);
+        num(got - want, &mut n, &mut buf);
+    } else {
+        put(b"-", &mut n, &mut buf);
+        num(want - got, &mut n, &mut buf);
+    }
+    put(b"\n", &mut n, &mut buf);
+    die(&buf[..n]);
+}
+
 /// Drain the calling P's per-P mcache so cached-but-unallocated
 /// slots return to mcentral. Required before strict
 /// `live_slots() == baseline` checks because `refill_alloc_cache`
@@ -84,10 +151,7 @@ fn test_one_class() {
     }
     drop(v);
     flush_mcache();
-    check(
-        mcentral::live_slots() == baseline,
-        b"one-class: slot not returned\n",
-    );
+    check_slots(mcentral::live_slots(), baseline, b"one-class: slot not returned");
 }
 
 // ─── Many distinct size classes alive simultaneously ─────────────────
@@ -119,10 +183,7 @@ fn test_many_classes() {
     }
     drop(all);
     flush_mcache();
-    check(
-        mcentral::live_slots() == baseline,
-        b"many-classes: not all freed\n",
-    );
+    check_slots(mcentral::live_slots(), baseline, b"many-classes: not all freed");
 }
 
 // ─── Fill an entire span (class 1 = 1024 slots) and drain it ────────
@@ -158,10 +219,7 @@ fn test_full_span_then_drain() {
     // Drain — should trigger full → partial → empty span return-to-mheap.
     drop(held);
     flush_mcache();
-    check(
-        mcentral::live_slots() == baseline,
-        b"full-span: drain incomplete\n",
-    );
+    check_slots(mcentral::live_slots(), baseline, b"full-span: drain incomplete");
 }
 
 // ─── Cross-class isolation (alloc class A, then class B, verify A) ──

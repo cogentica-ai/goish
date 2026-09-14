@@ -1011,7 +1011,13 @@ fn encode_reflect(out: &mut Vec<byte>, v: &reflect::Value) {
                 if i > 0 {
                     out.push(b',');
                 }
-                encode_reflect(out, &v.Index(i));
+                // `Index` CLONES the element's whole subtree, which
+                // makes a deep walk quadratic. Borrow instead — see
+                // the note on `reflect::Value::__index_ref`.
+                match v.__index_ref(i) {
+                    Some(e) => encode_reflect(out, e),
+                    None => out.extend_from_slice(b"null"),
+                }
             }
             out.push(b']');
         }
@@ -1048,7 +1054,11 @@ fn encode_reflect_indent(out: &mut Vec<byte>, v: &reflect::Value, cfg: &IndentCf
                     out.push(b',');
                 }
                 write_newline_indent(out, cfg, depth + 1);
-                encode_reflect_indent(out, &v.Index(i), cfg, depth + 1);
+                // See the note in `encode_reflect`.
+                match v.__index_ref(i) {
+                    Some(e) => encode_reflect_indent(out, e, cfg, depth + 1),
+                    None => out.extend_from_slice(b"null"),
+                }
             }
             write_newline_indent(out, cfg, depth);
             out.push(b']');
@@ -1066,19 +1076,19 @@ fn encode_reflect_indent(out: &mut Vec<byte>, v: &reflect::Value, cfg: &IndentCf
 }
 
 fn encode_map(out: &mut Vec<byte>, v: &reflect::Value, cfg: Option<&IndentCfg>, depth: usize) {
-    let mut keys = v.MapKeys();
+    let mut keys = v.__map_keys_ref();
     if keys.is_empty() {
         out.extend_from_slice(b"{}");
         return;
     }
     // Go's encoding/json marshals map keys in sorted order.
     keys.sort_by(|a, b| {
-        let as_ = match a {
-            reflect::Value::String(s) => s.as_bytes(),
+        let as_ = match *a {
+            reflect::Value::String(ref s) => s.as_bytes(),
             _ => b"",
         };
-        let bs = match b {
-            reflect::Value::String(s) => s.as_bytes(),
+        let bs = match *b {
+            reflect::Value::String(ref s) => s.as_bytes(),
             _ => b"",
         };
         as_.cmp(bs)
@@ -1105,10 +1115,14 @@ fn encode_map(out: &mut Vec<byte>, v: &reflect::Value, cfg: Option<&IndentCfg>, 
         if cfg.is_some() {
             out.push(b' ');
         }
-        let fv = v.MapIndex(k);
-        match cfg {
-            Some(c) => encode_reflect_indent(out, &fv, c, inner),
-            None => encode_reflect(out, &fv),
+        // `MapIndex` clones the value's whole subtree; borrowing is
+        // what keeps a deep document linear.
+        match v.__map_index_ref(k) {
+            Some(fv) => match cfg {
+                Some(c) => encode_reflect_indent(out, fv, c, inner),
+                None => encode_reflect(out, fv),
+            },
+            None => out.extend_from_slice(b"null"),
         }
     }
     if let Some(c) = cfg {
@@ -1126,7 +1140,7 @@ fn encode_struct(out: &mut Vec<byte>, v: &reflect::Value, cfg: Option<&IndentCfg
 
     // Resolve effective name + omitempty for each field; collect those
     // that should be emitted.
-    let mut keys: Vec<(string, reflect::Value)> = Vec::with_capacity(n as usize);
+    let mut keys: Vec<(string, &reflect::Value)> = Vec::with_capacity(n as usize);
     for i in 0..n {
         let f = ty.Field(i);
         let tag = f.Tag.Get("json");
@@ -1148,7 +1162,12 @@ fn encode_struct(out: &mut Vec<byte>, v: &reflect::Value, cfg: Option<&IndentCfg
         } else {
             string::from_bytes(name_seg)
         };
-        let fv = v.Field(i);
+        // `Field` clones too. The borrow lives as long as `v`, which
+        // outlives this loop and the emit below.
+        let fv = match v.__field_ref(i) {
+            Some(f) => f,
+            None => continue,
+        };
         if omitempty && fv.IsZero() {
             continue;
         }
