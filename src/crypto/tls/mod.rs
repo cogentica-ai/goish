@@ -875,9 +875,10 @@ pub use common::Certificate;
 /// public/private key pair from PEM data. The certificate input may
 /// contain intermediates after the leaf to form a chain.
 ///
-/// Goish deviation: `Certificate.Leaf` is not populated (no full
-/// X.509 parser), and the key/cert consistency check Go performs is
-/// applied for RSA keys only.
+/// The leaf is parsed and stored in `Certificate.Leaf`, and the
+/// key/cert consistency check runs for all three key algorithms, as
+/// Go's does. Both were previously missing; see the comment on the
+/// consistency check below for what that cost.
 pub fn X509KeyPair(
     certPEMBlock: impl AsRef<[byte]>,
     keyPEMBlock: impl AsRef<[byte]>,
@@ -963,27 +964,97 @@ pub fn X509KeyPair(
         return (Certificate::default(), err);
     }
 
-    // Go verifies the private key matches the leaf public key
-    // (tls.go:320). Our X.509 parser extracts RSA public keys only, so
-    // the check runs for RSA and is skipped for Ed25519.
-    if let Some(rsa_key) = private_key.downcast_ref::<crate::crypto::rsa::PrivateKey>() {
-        let leaf: &slice<byte> = &chain[0];
-        let leaf_raw: &[byte] = leaf;
-        let (leaf_pub, perr) = record::decode_x509_rsa_pubkey(leaf_raw);
-        if perr.IsNil() {
-            if leaf_pub.N.Cmp(&rsa_key.PublicKey.N) != 0 || leaf_pub.E != rsa_key.PublicKey.E {
-                return (
-                    Certificate::default(),
-                    errors::New("tls: private key does not match public key"),
-                );
-            }
+    // Go spells this `switch pub := x509Cert.PublicKey.(type)`
+    // (tls.go:320, through line 352).
+    //
+    // Note the direction: Go switches on the CERTIFICATE's key and
+    // every arm — including `default` — FAILS. This used to switch on
+    // the private key, check only RSA, and silently accept when the
+    // leaf's key would not parse as RSA, so three pairs Go rejects were
+    // taken: an RSA key with a non-RSA certificate, an ECDSA or Ed25519
+    // key with any certificate, and a certificate whose key algorithm
+    // is unknown.
+    //
+    // Not a vulnerability — a mismatched pair fails closed at the
+    // handshake, because the peer verifies the signature against the
+    // certificate it was sent. What it cost was the diagnosis: an
+    // operator error that Go names at startup surfaced as an unrelated
+    // handshake failure later.
+    let (x509Cert, cerr) = crate::crypto::x509::ParseCertificate(chain[0].clone());
+    if !cerr.IsNil() {
+        return (Certificate::default(), cerr);
+    }
+    let pubalg = x509Cert.PublicKeyAlgorithm;
+    let pubany = x509Cert.PublicKey.as_any();
+    let mismatch = || -> (Certificate, error) {
+        (
+            Certificate::default(),
+            errors::New("tls: private key does not match public key"),
+        )
+    };
+    let type_mismatch = || -> (Certificate, error) {
+        (
+            Certificate::default(),
+            errors::New("tls: private key type does not match public key type"),
+        )
+    };
+    if pubalg == crate::crypto::x509::RSA {
+        let priv_ = match private_key.downcast_ref::<crate::crypto::rsa::PrivateKey>() {
+            Some(k) => k,
+            None => return type_mismatch(),
+        };
+        let pubk = match pubany.downcast_ref::<crate::crypto::rsa::PublicKey>() {
+            Some(k) => k,
+            None => return type_mismatch(),
+        };
+        // Go compares only N; E is derived from it in practice, and
+        // comparing both would reject nothing Go accepts.
+        if pubk.N.Cmp(&priv_.PublicKey.N) != 0 {
+            return mismatch();
         }
+    } else if pubalg == crate::crypto::x509::ECDSA {
+        let priv_ = match private_key.downcast_ref::<crate::crypto::ecdsa::PrivateKey>() {
+            Some(k) => k,
+            None => return type_mismatch(),
+        };
+        let pubk = match pubany.downcast_ref::<crate::crypto::ecdsa::PublicKey>() {
+            Some(k) => k,
+            None => return type_mismatch(),
+        };
+        if pubk.X.Cmp(&priv_.PublicKey.X) != 0 || pubk.Y.Cmp(&priv_.PublicKey.Y) != 0 {
+            return mismatch();
+        }
+    } else if pubalg == crate::crypto::x509::Ed25519 {
+        let priv_ = match private_key.downcast_ref::<crate::crypto::ed25519::PrivateKey>() {
+            Some(k) => k,
+            None => return type_mismatch(),
+        };
+        let pubk = match pubany.downcast_ref::<crate::crypto::ed25519::PublicKey>() {
+            Some(k) => k,
+            None => return type_mismatch(),
+        };
+        // Go: !bytes.Equal(priv.Public().(ed25519.PublicKey), pub)
+        let want: crate::crypto::PublicKey = alloc::sync::Arc::new(pubk.clone());
+        if !priv_.PublicKey().Equal(&want) {
+            return mismatch();
+        }
+    } else {
+        // Go's `default:` arm.
+        return (
+            Certificate::default(),
+            errors::New("tls: unknown public key algorithm"),
+        );
     }
 
     (
         Certificate {
             Certificate: slice::<slice<byte>>::__from_vec(chain),
             PrivateKey: private_key,
+            // Go sets `cert.Leaf = x509Cert` unless the
+            // x509keypairleaf godebug is "0", and its default is on
+            // (tls.go:314). goish left it nil, so every caller that
+            // would have used the parsed leaf re-parsed the DER.
+            Leaf: Some(x509Cert),
             ..Default::default()
         },
         errors::nil,

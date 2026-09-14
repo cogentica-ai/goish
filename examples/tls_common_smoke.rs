@@ -75,6 +75,93 @@ rTXGcd5XGWoS0+AF8t1cUw==
 -----END PRIVATE KEY-----
 ";
 
+// A second RSA key, self-signed ECDSA-P256 and Ed25519 pairs, and
+// spare keys of each type, so X509KeyPair's key/cert consistency check
+// can be driven over a full 3x7 matrix. Generated with openssl; every
+// expected result below was read off Go 1.25.5's own
+// crypto/tls.X509KeyPair over the same twenty-one cells, not
+// transcribed from tls.go.
+const RSA2_KEY_PEM: &[u8] = b"-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCI7VhzgutowHft
+E/B1N9m4QPfbwr/gGzFJNOQ++LR3Ynp9y+FIpCzouw7It76/ttrKfacmZUOoyx/s
+K6Gt4LtJAib5y1WsdSWcJusThD8gQOQKuZws/+mhwcmU8qVD/73cXelNP9hUonU2
+F4q9BmA437EssA89WelzISl00j1yv/ikAww1RfZT1JYWeDtf1aU030rx5QdDK2mk
+JJcgl/RvPo/Kv4HMXq+CzXhM+1qxNxDFvcwELWMVOB3M2akL1ScGL0YrlGVRtL+S
+TaLFhAxHtWLBE/TO0/SkRja1UbMh9x/Y2Z6jPIBFdhIa3w7PNC59gkcSGTXDkBfa
+lSsX/JebAgMBAAECggEAN252R1TxvhdktVpEFwAEKL5MWO/vQ2devXcnC4Mdc9Mv
+KWv3CLRF5fWMF5+jHfOFgUH6/+Uwzc1lX/ON4VlAGF9BrhAt38IQ9rUep2j7MTBz
+4Q+g9OqpBy3vUFgmpW+LygFOqFI3XpPiBYLkTH+fRobwL9oaYUjb5BrBsKRH8gLD
+oSJEcj1PCbjHfSx/lJku212MpgllMGOdB+NJ4t2hrrSerZ0aZ0nGynCVL5RD4RPa
+/bkUyLkLIHvwQaPni7WBcT3weRbK4usJSzwZpiKZ4Sgslicz8BCMITkO7Q9aDWdC
+2nc2bWf+/i1pzUn1tC0oDdcO71+jTGqaY6gxzjGKaQKBgQC/pLtR3SRIXBFihEgR
+Kpo8O6G28OXCgRE3FnrOhZdJXzyfpW5nl4UjfYFyUiphlNRQ7I0UeA9pOIApWw63
+cHIQCcOBTxkgqNgyecglt2dH9K6rAEAn6/4vfn4y8CcaerfOlyMpyeUlIX1i+DPZ
+Sfgwt679nJBJ71OliBOjXAEKHwKBgQC26L2sO37URj/9uE1bEesu4XsF/hocNIXs
+7iuaykS8vIVOhXFyKezfkfBBJXrv+EqCno1VbXkm11VwrjusG7qnYJ+CmcZZFut3
+c0RvegGOas0TnAIp0FoztYWgp1GvBbMB7Ky2Ppq2Y+l6NBGCP6puvBQkAb/48Q8U
+E74fPZX7BQKBgCOO7TLDVXgXnSIqaTTGMtf6OIc5K2hrikYuZZrsLqXuhdEZYOLX
+ulxbbSlJFZQFiV96hLLHlBRx51XFD3X55zASn7PeeUsWCQdUkU5uOTugqsgPw9ek
+cgVd8wyAgsDnBDPQ1zVpwJqjHCDA7N3kW6iubEmiQyN0xJByLzKgX5EBAoGBAK+6
+Y6A5eNyQsaIdk5RPXtinoP5c5tD6VUEQgawxcGCz7o9F/Xxlc0JIf77XN4mdzlg3
+5CmTB7adY2TiwEnWSjnMxvM+siWds5QLllBTs3MUgPq6BAoQNtk/KKb0mbHBk/3h
+WP2uoA1jaEkUBU5RxHinEeKWG84cKxRq81ooXRPRAoGAK7yCDSKiP/FOUAplYj2B
+oCpmDnw30rvMlYqf75bhvdqc99fkkff6UkNlLKjmKAFQCrnfPFtzE884Ppy5vkjz
+AQTtMdjyF5rvgmfwMMpFMf3Sh+jR6UbSU3Gqz+3+tOpzVGNHOKq7C2JJznPI/dPV
+KboaW+Ve/QOwth7o/mOfUg8=
+-----END PRIVATE KEY-----
+";
+const EC_CERT_PEM: &[u8] = b"-----BEGIN CERTIFICATE-----
+MIIBtTCCAVugAwIBAgIUb0+1Nm80sTqeFDVbs8JctFq/5S0wCgYIKoZIzj0EAwIw
+JDEOMAwGA1UECgwFR29pc2gxEjAQBgNVBAMMCWxvY2FsaG9zdDAgFw0yNjA5MTQw
+NzU4MTNaGA8yMTI2MDgyMTA3NTgxM1owJDEOMAwGA1UECgwFR29pc2gxEjAQBgNV
+BAMMCWxvY2FsaG9zdDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABIatX/Y+nXfY
+of44p5v94kNXq53Q+f1zkejWKN2u6rKsXO1t7630QnPT/UasW/g0K6kYPNx1zqlD
++cCx/AnPCz+jaTBnMB0GA1UdDgQWBBTPXHD2CwaI0lOLvbzQzn5ZSDp39jAfBgNV
+HSMEGDAWgBTPXHD2CwaI0lOLvbzQzn5ZSDp39jAPBgNVHRMBAf8EBTADAQH/MBQG
+A1UdEQQNMAuCCWxvY2FsaG9zdDAKBggqhkjOPQQDAgNIADBFAiAN3rI6gumgQiqF
+hPF+gVh0/NX2Z148p4yDUBMB4WhCTwIhALOFsRtRmRR2NXLKDxuNfQackZokBCsN
+muUI1mb90juf
+-----END CERTIFICATE-----
+";
+const EC_KEY_PEM: &[u8] = b"-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgeoINieBldIktpL2y
+JxotUz4oo1oPkgmDXgXJyjPOATyhRANCAASGrV/2Pp132KH+OKeb/eJDV6ud0Pn9
+c5Ho1ijdruqyrFztbe+t9EJz0/1GrFv4NCupGDzcdc6pQ/nAsfwJzws/
+-----END PRIVATE KEY-----
+";
+const EC2_KEY_PEM: &[u8] = b"-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgUAtLR5B6+k7c6r6S
+RtciIUAGDG4g2myPRzM3ZkDuQdahRANCAARvXDWrqOu+AzhnM/3uXqLAPodRpktu
+Fu6RVnocjulakIM4haNmNSJXT3tJP9gkIGPL5eOEA9OUDOstfdXIb3JC
+-----END PRIVATE KEY-----
+";
+const EC384_KEY_PEM: &[u8] = b"-----BEGIN PRIVATE KEY-----
+MIG2AgEAMBAGByqGSM49AgEGBSuBBAAiBIGeMIGbAgEBBDA77lHox04+nD7WOPmM
+Pc7zk1Wtsk4JgEGq5gO0BF1PLKW4VLZtIU5FAE7fcF8bTFWhZANiAARMyygO13+c
+XV5/rWwunMwpmM7RYvMLPJnh5gkBPA5t2mON+FFbJm35RHoW8clOt8wt7/G5Ld1O
+rF/qXviTfF9wxeGOLiH19MMotpDKO+/s5V36kKrej0kEy0P7vI/P9PA=
+-----END PRIVATE KEY-----
+";
+const ED_CERT_PEM: &[u8] = b"-----BEGIN CERTIFICATE-----
+MIIBdTCCASegAwIBAgIUJDHDc0NTVfG8LeKhaWJWXQYCDqIwBQYDK2VwMCQxDjAM
+BgNVBAoMBUdvaXNoMRIwEAYDVQQDDAlsb2NhbGhvc3QwIBcNMjYwOTE0MDc1ODEz
+WhgPMjEyNjA4MjEwNzU4MTNaMCQxDjAMBgNVBAoMBUdvaXNoMRIwEAYDVQQDDAls
+b2NhbGhvc3QwKjAFBgMrZXADIQCK171Zt8nxumvyyYyafwPNHQIf0XXRKhre/GEp
+i4JdyKNpMGcwHQYDVR0OBBYEFBSAUEYnSpk09Iu262bgr6Td7Kh7MB8GA1UdIwQY
+MBaAFBSAUEYnSpk09Iu262bgr6Td7Kh7MA8GA1UdEwEB/wQFMAMBAf8wFAYDVR0R
+BA0wC4IJbG9jYWxob3N0MAUGAytlcANBAKQNNh4cOnU9NIjuKEy0PkFTXXPc5iUk
+ynOaqJHGfP+zW75JPB9HTp4rDQRVESXl2EDIUa/hMGumlr67rVcrnA4=
+-----END CERTIFICATE-----
+";
+const ED_KEY_PEM: &[u8] = b"-----BEGIN PRIVATE KEY-----
+MC4CAQAwBQYDK2VwBCIEIEajSmzBNridPqUhPL9zK9uhDxa6GtkytbvAzJP7zPha
+-----END PRIVATE KEY-----
+";
+const ED2_KEY_PEM: &[u8] = b"-----BEGIN PRIVATE KEY-----
+MC4CAQAwBQYDK2VwBCIEIJomJ4E/eW2SVYWbJd2xM2t2Zm4kKqGLHpb7H2UyzRW5
+-----END PRIVATE KEY-----
+";
+
 fn unhexOf(h: &str) -> slice<byte> {
     let b = h.as_bytes();
     let mut out: alloc::vec::Vec<byte> = alloc::vec::Vec::new();
@@ -173,6 +260,31 @@ fn eq(what: &'static str, got: string, want: &'static str) {
             fmt::Printf!("FAIL %s: got %s want %s\n", what, got.clone(), want);
         }
     }
+}
+
+
+// One cell of the X509KeyPair matrix. Both halves of Go's outcome —
+// the error and whether Leaf came back parsed — are compared as a
+// single string, so a cell that rejects for the wrong reason, or
+// accepts and then leaves Leaf nil, is one red row.
+fn kp(what: &'static str, cert_pem: &[u8], key_pem: &[u8], want: &'static str) {
+    let (c, e) = tls::X509KeyPair(cert_pem, key_pem);
+    let mut got = string::from_static("err=");
+    if e.IsNil() {
+        got = got + string::from_static("<nil>");
+    } else {
+        got = got + e.Error();
+    }
+    got = got + string::from_static(" leaf=");
+    match c.Leaf {
+        Some(leaf) => {
+            got = got + leaf.Subject.CommonName.clone();
+        }
+        None => {
+            got = got + string::from_static("nil");
+        }
+    }
+    eq(what, got, want);
 }
 
 #[goish::main]
@@ -6235,6 +6347,149 @@ fn main() {
         "1503030002020a",
     );
     check_n("the rejected record still bumped the counter", retry, 1);
+
+    // ── X509KeyPair: the key/cert consistency check ────────────────
+    //
+    // Go switches on the CERTIFICATE's public key, and every arm fails
+    // closed — `default` included. goish used to switch on the PRIVATE
+    // key, handle RSA only, and silently accept whenever the leaf's key
+    // would not parse as RSA. Restoring that code and re-running this
+    // table gives 20 red rows out of 21: seventeen of the eighteen
+    // rejecting cells were accepted, the lone survivor being `RSA cert
+    // + a second RSA key`, and all three accepting cells came back with
+    // Leaf nil.
+    //
+    // Two cells are worth reading twice. `ECDSA P-256 cert + a P-384
+    // key` is a MATCH failure, not a type failure: Go compares X and Y
+    // and never looks at the curve here. And the three diagonal cells
+    // pin that the accepting direction still works for each algorithm —
+    // a check that only ever refuses is a check nobody can deploy.
+    kp(
+        "RSA cert + its own key",
+        CERT_PEM,
+        KEY_PEM,
+        "err=<nil> leaf=localhost",
+    );
+    kp(
+        "RSA cert + a second RSA key",
+        CERT_PEM,
+        RSA2_KEY_PEM,
+        "err=tls: private key does not match public key leaf=nil",
+    );
+    kp(
+        "RSA cert + a P-256 key",
+        CERT_PEM,
+        EC_KEY_PEM,
+        "err=tls: private key type does not match public key type leaf=nil",
+    );
+    kp(
+        "RSA cert + a second P-256 key",
+        CERT_PEM,
+        EC2_KEY_PEM,
+        "err=tls: private key type does not match public key type leaf=nil",
+    );
+    kp(
+        "RSA cert + a P-384 key",
+        CERT_PEM,
+        EC384_KEY_PEM,
+        "err=tls: private key type does not match public key type leaf=nil",
+    );
+    kp(
+        "RSA cert + an Ed25519 key",
+        CERT_PEM,
+        ED_KEY_PEM,
+        "err=tls: private key type does not match public key type leaf=nil",
+    );
+    kp(
+        "RSA cert + a second Ed25519 key",
+        CERT_PEM,
+        ED2_KEY_PEM,
+        "err=tls: private key type does not match public key type leaf=nil",
+    );
+    kp(
+        "ECDSA P-256 cert + an RSA key",
+        EC_CERT_PEM,
+        KEY_PEM,
+        "err=tls: private key type does not match public key type leaf=nil",
+    );
+    kp(
+        "ECDSA P-256 cert + a second RSA key",
+        EC_CERT_PEM,
+        RSA2_KEY_PEM,
+        "err=tls: private key type does not match public key type leaf=nil",
+    );
+    kp(
+        "ECDSA P-256 cert + its own key",
+        EC_CERT_PEM,
+        EC_KEY_PEM,
+        "err=<nil> leaf=localhost",
+    );
+    kp(
+        "ECDSA P-256 cert + a second P-256 key",
+        EC_CERT_PEM,
+        EC2_KEY_PEM,
+        "err=tls: private key does not match public key leaf=nil",
+    );
+    kp(
+        "ECDSA P-256 cert + a P-384 key",
+        EC_CERT_PEM,
+        EC384_KEY_PEM,
+        "err=tls: private key does not match public key leaf=nil",
+    );
+    kp(
+        "ECDSA P-256 cert + an Ed25519 key",
+        EC_CERT_PEM,
+        ED_KEY_PEM,
+        "err=tls: private key type does not match public key type leaf=nil",
+    );
+    kp(
+        "ECDSA P-256 cert + a second Ed25519 key",
+        EC_CERT_PEM,
+        ED2_KEY_PEM,
+        "err=tls: private key type does not match public key type leaf=nil",
+    );
+    kp(
+        "Ed25519 cert + an RSA key",
+        ED_CERT_PEM,
+        KEY_PEM,
+        "err=tls: private key type does not match public key type leaf=nil",
+    );
+    kp(
+        "Ed25519 cert + a second RSA key",
+        ED_CERT_PEM,
+        RSA2_KEY_PEM,
+        "err=tls: private key type does not match public key type leaf=nil",
+    );
+    kp(
+        "Ed25519 cert + a P-256 key",
+        ED_CERT_PEM,
+        EC_KEY_PEM,
+        "err=tls: private key type does not match public key type leaf=nil",
+    );
+    kp(
+        "Ed25519 cert + a second P-256 key",
+        ED_CERT_PEM,
+        EC2_KEY_PEM,
+        "err=tls: private key type does not match public key type leaf=nil",
+    );
+    kp(
+        "Ed25519 cert + a P-384 key",
+        ED_CERT_PEM,
+        EC384_KEY_PEM,
+        "err=tls: private key type does not match public key type leaf=nil",
+    );
+    kp(
+        "Ed25519 cert + its own key",
+        ED_CERT_PEM,
+        ED_KEY_PEM,
+        "err=<nil> leaf=localhost",
+    );
+    kp(
+        "Ed25519 cert + a second Ed25519 key",
+        ED_CERT_PEM,
+        ED2_KEY_PEM,
+        "err=tls: private key does not match public key leaf=nil",
+    );
 
     unsafe {
         // Copy out of the mutable statics before formatting: passing

@@ -1380,6 +1380,59 @@ in neither list. Auditing a function is not auditing its callers.
 `handshake_client.rs` and `handshake_server_tls13.rs` are no longer
 squatters — they carry 22 and 19 anchors.
 
+### A FIFTH, found 2026-09-14: X509KeyPair's consistency check ran backwards
+
+Not in the handshake — in the loader every server calls first.
+`tls.X509KeyPair` verifies that the private key you handed it actually
+belongs to the certificate you handed it. Go's version
+(tls.go:320-352) switches on the **certificate's** public key, and
+every arm fails closed, `default` included:
+
+    switch pub := x509Cert.PublicKey.(type) {
+    case *rsa.PublicKey:      priv, ok := privateKey.(*rsa.PrivateKey); if !ok { … type error }
+    case *ecdsa.PublicKey:    …
+    case ed25519.PublicKey:   …
+    default:                  return fail("tls: unknown public key algorithm")
+    }
+
+goish switched on the **private** key, implemented the RSA arm only,
+and — because it read the leaf's key with a bespoke
+`decode_x509_rsa_pubkey` rather than the real parser — treated "the
+certificate's key is not RSA" as *nothing to check* and returned
+success. A non-RSA private key downcast to nothing and skipped the
+block entirely.
+
+Measured, not argued. `examples/tls_common_smoke.rs` now drives a 3×7
+matrix — RSA, ECDSA P-256 and Ed25519 certificates against seven keys
+— whose twenty-one expected results were read off Go 1.25.5's own
+`X509KeyPair`, not transcribed from tls.go. Restoring the old code
+turns **20 of the 21 cells red**: seventeen of the eighteen mismatched
+pairs were accepted, the only one ever caught being RSA-cert +
+different-RSA-key.
+
+**This is not a vulnerability, and it is worth being precise about
+why.** A mismatched pair fails closed one layer down: the peer verifies
+the handshake signature against the certificate it was sent, and a key
+that does not match cannot produce one. What was lost is the
+*diagnosis*. Go names an operator's mixed-up PEM files at startup, on
+the line that loaded them; goish accepted them and surfaced the problem
+later as an unexplained handshake failure on a different machine.
+
+Two smaller things fell out of the same read:
+
+  * `Certificate.Leaf` was never populated. Go sets it by default
+    (tls.go:314, gated on the `x509keypairleaf` godebug, whose default
+    is on), so every goish caller that wanted the parsed leaf re-parsed
+    the DER. Three of the matrix's cells pin it.
+  * The doc comment said the check "is applied for RSA keys only" —
+    accurate when written, and therefore the thing that stopped anyone
+    looking. Re-measure a documented deviation before trusting it.
+
+One cell is worth keeping in mind for anyone extending this: `ECDSA
+P-256 cert + a P-384 key` is a **match** failure, not a type failure.
+Go compares X and Y and never looks at the curve here, so a
+curve-equality shortcut would diverge.
+
 Worth reading before planning the retirement: this section used to
 describe record.rs as a tidiness problem. It was a security backlog.
 Three defects in one afternoon, all of the same shape — invented crypto
