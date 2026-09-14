@@ -1750,9 +1750,10 @@ All twelve current candidates have now had their banners read. Two were
 wrong and are fixed; the rest are accurate or already tracked here —
 syscall (raw syscalls, no Go contract to cite), json and json/v2
 (documented reimplementations), convert.rs (Go builtins), math (libm
-delegation), regexp (2c; its no-linear-time divergence re-measured and
-still true, and its NFA mentions are citations of Go's reference
-behaviour, not claims about goish's algorithm), record.rs and
+delegation), regexp (2c; the banner's no-linear-time divergence was
+re-measured and still true WHEN THIS WAS WRITTEN — it is false now,
+because §2c landed on 2026-09-14 and the banner was rewritten with it,
+which is the outcome this signal exists to produce), record.rs and
 handshake_client_tls13.rs (1), key_schedule and runtime/mod.rs. Do not
 re-walk them; re-run the signal after work lands instead.
 
@@ -3306,9 +3307,14 @@ them.
 
 ## 2c. `regexp` does not keep Go's linear-time guarantee — FIXED 2026-09-14
 
+**Everything from here to "STAGE 1 LANDED" is the ORIGINAL REPORT,
+kept because the fix is only legible against it. It is history as of
+2026-09-14: goish runs the RE2 construction now, and the numbers below
+are the engine it replaced.**
+
 Go's regexp documents that it "is guaranteed to run in time linear in
 the size of the input", and keeps it by simulating an NFA (RE2).
-goish's is a BACKTRACKING matcher — its own header says so — and is
+goish's was a BACKTRACKING matcher — its own header said so — and was
 therefore exponential on nested quantifiers.
 
 Measured 2026-09-05, `(a+)+$` against n 'a's then '!', where Go answers
@@ -3678,9 +3684,10 @@ Five perturbations:
   step's longest-mode cutoff       2 red
   (and the REDOS ratio assertion, which the first one also fails)
 
-WHAT REMAINS is 4b: `Regexp`'s public surface still calls the old
-backtracker. The engine is complete and pinned; the swap is a separate
-change because it touches every caller in the tree.
+WHAT REMAINED at this point was 4b: `Regexp`'s public surface still
+called the old backtracker. The engine was complete and pinned; the
+swap was a separate change because it touches every caller in the tree.
+It landed the same day — see below.
 
 **STAGE 4b LANDED 2026-09-14 — THE SWAP. §2c IS CLOSED.**
 

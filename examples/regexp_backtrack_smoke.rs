@@ -1,29 +1,35 @@
-// regexp_backtrack_smoke — the nested-quantifier ANSWERS are right,
-// and the cost is not.
+// regexp_backtrack_smoke — the nested-quantifier answers, kept across
+// the RE2 rewrite.
 //
-// goish's regexp is a backtracking matcher where Go's simulates an NFA
-// (RE2). Go's package documentation promises "guaranteed to run in
-// time linear in the size of the input"; this does not keep that
-// promise, and the difference is exponential rather than constant-
-// factor. Measured 2026-09-05 with `(a+)+$` against n 'a's then '!',
-// against a Go that answers every size in under a millisecond:
+// ─── what this file was for, and what it is for now ──────────────────
+//
+// It was written on 2026-09-05 against a BACKTRACKING matcher, to pin
+// the one thing that engine got right. Go's regexp promises "guaranteed
+// to run in time linear in the size of the input"; goish's did not keep
+// it, and the gap was exponential rather than constant-factor. Measured
+// then, `(a+)+$` against n 'a's and a '!', against a Go that answers
+// every size in under a millisecond:
 //
 //     n=10      5 ms          n=20   5,939 ms
 //     n=14     95 ms          n=21  13,124 ms
 //     n=18  1,419 ms          n=22  27,338 ms
 //
-// n=24 did not finish inside a 60-second timeout. Each character
-// roughly doubles the work, so n=30 is about two hours.
+// n=24 did not finish inside a 60-second timeout.
 //
-// This file deliberately does NOT assert on timing — a clock
-// assertion in CI is flaky, and the numbers above belong in a comment
-// where they can be read rather than in a threshold that will one day
-// fail for an unrelated reason. What it asserts is that the ANSWERS
-// match Go, because that is the part a future RE2 rewrite must not
-// change, and it keeps n small enough that this stays a fast test.
+// Its own header said why it asserted answers and not timing: "that is
+// the part a future RE2 rewrite must not change, and it keeps n small
+// enough that this stays a fast test."
 //
-// The divergence itself is recorded in src/regexp/mod.rs and
-// ROADMAP.md 2c.
+// **The rewrite landed on 2026-09-14 (ROADMAP §2c) and this file passed
+// unchanged.** That is exactly what it was for. The same three sizes
+// now run in microseconds, and the sizes it could not reach are
+// asserted in `regexp_exec_ref_smoke` — which counts the machine's work
+// rather than timing it, so the linear bound is a deterministic
+// assertion and not a clock.
+//
+// The n values here stay small on purpose. Raising them would test the
+// new engine's speed, which is that other file's job; what is pinned
+// here is that the ANSWERS did not move.
 #![no_std]
 #![no_main]
 #![allow(non_snake_case)]
