@@ -4497,7 +4497,61 @@ two identity rows red.
 
 The handshake fails rather than sending alertIllegalParameter, because
 this code path has no alert channel wired. Same answer, minus the
-alert, and noted at the site. Three of its hand-rolled
+alert, and noted at the site.
+
+### Then the same question of the LIVE path, and a clean answer
+
+Three of this week's §1 findings share one shape: a guard Go states
+outright, missing from the goish copy — `ExpandLabel` without the
+length check, `tls10MAC` without the Lucky13 write, the PSK/suite
+pairing check absent. All three were in HAND-WRITTEN code. The obvious
+worry is whether the same is true of the PORTED code, which is what
+`tls::Dial` actually runs.
+
+`scripts/missing_refusal_check.py` asks it. A refusal goish never makes
+is invisible to every tier — anchored, counted, body-diffed, silent
+under goishlint, sometimes even tested, and it lets something through.
+`sendAlert` is the densest marker of "Go refuses here" in crypto/tls,
+and the `errors.New` message beside each one makes the match specific
+enough to be worth running.
+
+**The answer is clean.** Six Go refusals have no matching text in the
+port, and all six sit inside `c.quic != nil` blocks:
+
+  * `tls: early_data without pre_shared_key`
+  * `tls: client offered TLS version older than TLS 1.3`
+  * `tls: client did not send a quic_transport_parameters extension`
+  * `tls: server did not send a quic_transport_parameters extension`
+  * `tls: invalid early data for QUIC connection`
+  * `tls: received unexpected key update message`
+
+goish ships no QUIC transport and waives those declarations, so every
+one is correctly absent. Every NON-QUIC refusal Go makes in conn.go,
+handshake_client.go, handshake_server.go, handshake_client_tls13.go,
+handshake_server_tls13.go and ech.go has a counterpart.
+
+That is worth stating next to the six invented-code defects, because it
+says where to spend time: **the ported code keeps its guards; the
+hand-written code loses them.** Which is what a verbatim port is for,
+and an argument for finishing the retirement rather than auditing the
+replacement further.
+
+**The checker is validated by perturbation**, which is the only reason
+to trust one that reports OK. Replacing the text of one real refusal in
+`handshake_server_tls13.rs` takes it from six findings to seven. Its
+limits are in its docstring and they all make it MISS rather than
+invent: it matches by message text, so a port keeping the message and
+dropping the `sendAlert` looks fine.
+
+A second mode, `--errors`, asks the same question of every package
+rather than crypto/tls — each `errors.New` literal in a ported Go file
+against the whole goish package. It reports **137**, untriaged, led by
+`httpcommon.go` (12), `crypto/tls/quic.go` (7, waived), `request.go`
+(7), `transport.go` (7) and `auth.go` (6). Do not gate on it; the
+per-file version of the same question reported 177, and the difference
+was entirely goish splitting one Go file across several `.rs` and
+citing some only in prose. That list is a starting point for whoever
+wants the next pass. Three of its hand-rolled
 crypto primitives are gone this week — the SPKI walk, the TLS 1.2 PRF,
 the padding check — and each left a Go-generated table behind.
 
