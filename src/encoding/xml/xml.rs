@@ -1,6 +1,6 @@
-// goishlint:ignore GOISH018 EscapeString, InputOffset, InputPos, NewDecoder, NewTokenDecoder, RawToken, Token, attrval, autoClose, emitCDATA, getc, mustgetc, name, nsname, pop, popEOF, popElement, push, pushEOF, pushElement, pushNs, rawToken, readName, savedOffset, space, switchToReader, syntaxError, text, translate, ungetc — the Decoder state machine and the two name predicates, deliberately not in this first slice. The Decoder ones cannot be pinned a function at a time (they share a bufio reader, a name-space stack and an error latch), so they land together with their own ref smoke; isName/isNameString need Go's `first` and `second` unicode.RangeTables, 310 lines of xml.go that should be GENERATED from Go rather than transcribed, which is its own commit. emitCDATA and EscapeString are printer-side and belong with marshal.go. See the file header and ROADMAP §2.
-// goishlint:ignore GOISH021 stkEOF, stkNs, stkStart, xmlPrefix, xmlURL, xmlnsPrefix, entity, errRawToken, HTMLEntity, HTMLAutoClose, Decoder, TokenReader, stack — the Decoder's own stack kinds, its name-space constants and its types; all of them exist only for the state machine waived above and would be dead declarations without it. `entity`, `HTMLEntity` and `HTMLAutoClose` are the decoder's entity tables and only `rawToken` reads them; `errRawToken` is the sentinel `Token()` returns when a TokenReader is in use.
-// go: file encoding/xml/xml.go decls: SyntaxError.Error, StartElement.Copy, StartElement.End, CharData.Copy, Comment.Copy, ProcInst.Copy, Directive.Copy, CopyToken, isInCharacterRange, isNameByte, isName, isNameString, EscapeText, escapeText, Escape, procInst
+// goishlint:ignore GOISH018 EscapeString, NewTokenDecoder, RawToken, Token, attrval, autoClose, emitCDATA, name, nsname, pop, popEOF, popElement, push, pushEOF, pushElement, pushNs, rawToken, readName, switchToReader, text, translate,  — the Decoder state machine and the two name predicates, deliberately not in this first slice. The Decoder ones cannot be pinned a function at a time (they share a bufio reader, a name-space stack and an error latch), so they land together with their own ref smoke; isName/isNameString need Go's `first` and `second` unicode.RangeTables, 310 lines of xml.go that should be GENERATED from Go rather than transcribed, which is its own commit. emitCDATA and EscapeString are printer-side and belong with marshal.go. See the file header and ROADMAP §2.
+// goishlint:ignore GOISH021 stkEOF, stkNs, stkStart, xmlPrefix, xmlURL, xmlnsPrefix, entity, errRawToken, HTMLEntity, HTMLAutoClose, TokenReader, stack — the Decoder's own stack kinds, its name-space constants and its types; all of them exist only for the state machine waived above and would be dead declarations without it. `entity`, `HTMLEntity` and `HTMLAutoClose` are the decoder's entity tables and only `rawToken` reads them; `errRawToken` is the sentinel `Token()` returns when a TokenReader is in use.
+// go: file encoding/xml/xml.go decls: SyntaxError.Error, StartElement.Copy, StartElement.End, CharData.Copy, Comment.Copy, ProcInst.Copy, Directive.Copy, CopyToken, isInCharacterRange, isNameByte, isName, isNameString, EscapeText, escapeText, Escape, procInst, Decoder.getc, Decoder.InputOffset, Decoder.InputPos, Decoder.savedOffset, Decoder.mustgetc, Decoder.ungetc, Decoder.space, Decoder.syntaxError, NewDecoder
 //
 // encoding/xml/xml.rs — the pure half of Go's xml.go.
 //
@@ -46,6 +46,16 @@ use crate::types::{byte, int, rune};
 pub struct SyntaxError {
     pub Msg: string,
     pub Line: int,
+}
+
+// go: none — goish idiom: Go's *SyntaxError satisfies `error` by
+// having an Error() method; goish needs the trait impl spelled out so
+// `errors::Wrap` can carry it.
+impl crate::errors::ErrorTrait for SyntaxError {
+    // go: none — goish idiom: see the note above this impl.
+    fn Error(&self) -> string {
+        return SyntaxError::Error(self);
+    }
 }
 
 impl SyntaxError {
@@ -246,6 +256,246 @@ pub fn isNameByte(c: byte) -> bool {
         || c == b':'
         || c == b'.'
         || c == b'-';
+}
+
+// ─── Decoder: the byte layer ──────────────────────────────────────────
+//
+// The state machine lands in pieces, bottom-up, because that is the
+// only way any of it is testable before `rawToken` exists. This is the
+// bottom: the reader, the one-byte pushback, and the offset/line/column
+// bookkeeping every error message and `InputPos` call depends on.
+//
+// Not here yet: the name-space and element stacks, `text`, `rawToken`,
+// `Token` and everything reachable from them. They arrive together —
+// see the GOISH018 waiver at the top of this file.
+
+// goishlint:ignore GOISH019 Decoder — a PARTIAL port: this slice is the byte layer, so only the fields its methods touch are declared (r, saved, nextByte, err, line, linestart, offset) plus the exported knobs. AutoClose, Entity, CharsetReader, t, buf, stk, free, needClose, toClose, nextToken, ns and unmarshalDepth arrive with rawToken and the stacks — the same commit the GOISH018 waiver above describes. Declaring them now would be twelve dead fields.
+// go: sdk 1.25.5 encoding/xml/xml.go:148-216 Decoder
+/// Go: "A Decoder represents an XML parser reading a particular input
+/// stream."
+///
+/// PARTIAL: the fields below are the ones this slice's methods touch,
+/// plus the exported knobs, which are part of the API whether or not
+/// anything reads them yet. `stk`/`free`/`ns`/`t`/`nextToken` and the
+/// rest arrive with `rawToken`.
+pub struct Decoder {
+    /// Go: "Strict defaults to true, enforcing the requirements of the
+    /// XML specification."
+    pub Strict: bool,
+    /// Go: "DefaultSpace sets the default name space used for
+    /// unadorned tags, as if the entire XML stream were wrapped in an
+    /// element containing the attribute xmlns='...'."
+    pub DefaultSpace: string,
+
+    r: alloc::boxed::Box<dyn crate::io::ByteReader>,
+    /// Go's `saved *bytes.Buffer` — non-nil only while `rawToken` is
+    /// recording raw input for a directive.
+    saved: Option<crate::bytes::Buffer>,
+    /// Go's `nextByte int`, -1 when empty. A one-byte pushback, not a
+    /// buffer: `ungetc` overwrites whatever is there, which is safe
+    /// only because every caller ungets at most one byte before the
+    /// next `getc`.
+    nextByte: int,
+    err: crate::error,
+    line: int,
+    linestart: i64,
+    offset: i64,
+}
+
+// go: sdk 1.25.5 encoding/xml/xml.go:221-231 NewDecoder
+/// Go: "NewDecoder creates a new XML parser reading from r. If r does
+/// not implement io.ByteReader, NewDecoder will do its own buffering."
+///
+/// goish always buffers: `io::ByteReader` is a separate trait here and
+/// a generic `R: io::Reader` cannot be tested for it at runtime the way
+/// Go's interface assertion can. Buffering a reader that was already
+/// buffered costs one extra copy and changes no behaviour.
+pub fn NewDecoder<R: crate::io::Reader + 'static>(r: R) -> Decoder {
+    return Decoder {
+        Strict: true,
+        DefaultSpace: string::from_static(""),
+        r: alloc::boxed::Box::new(crate::bufio::NewReader(r)),
+        saved: None,
+        nextByte: -1,
+        err: crate::errors::nil,
+        line: 1,
+        linestart: 0,
+        offset: 0,
+    };
+}
+
+impl Decoder {
+    // go: sdk 1.25.5 encoding/xml/xml.go:907-929 Decoder.getc
+    /// Read one byte, through the pushback slot if it is full.
+    ///
+    /// The line bookkeeping is the part worth reading: `line` counts
+    /// newlines SEEN, and `linestart` is the offset just past the last
+    /// one, so `InputPos`'s column is `offset - linestart + 1`.
+    pub(crate) fn getc(&mut self) -> (byte, bool) {
+        if !self.err.IsNil() {
+            return (0, false);
+        }
+        let b: byte;
+        if self.nextByte >= 0 {
+            b = crate::byte(self.nextByte);
+            self.nextByte = -1;
+        } else {
+            let (rb, e) = self.r.ReadByte();
+            if !e.IsNil() {
+                self.err = e;
+                return (0, false);
+            }
+            b = rb;
+            if let Some(sv) = self.saved.as_mut() {
+                let _ = crate::io::Writer::Write(sv, slice::<byte>::__from_vec(alloc::vec![b]));
+            }
+        }
+        if b == b'\n' {
+            self.line += 1;
+            self.linestart = self.offset + 1;
+        }
+        self.offset += 1;
+        return (b, true);
+    }
+
+    // go: sdk 1.25.5 encoding/xml/xml.go:934-936 Decoder.InputOffset
+    /// Go: "InputOffset returns the input stream byte offset of the
+    /// current decoder position."
+    pub fn InputOffset(&self) -> i64 {
+        return self.offset;
+    }
+
+    // go: sdk 1.25.5 encoding/xml/xml.go:941-943 Decoder.InputPos
+    /// Go: "InputPos returns the line of the current decoder position
+    /// and the 1 based input position of the line."
+    ///
+    /// It can return column 0, which is not a position any input has.
+    /// `ungetc` decrements `offset` and `line` but does NOT restore
+    /// `linestart`, so immediately after ungetting a newline the
+    /// arithmetic gives `offset - linestart + 1` = 0. That is Go's
+    /// behaviour, pinned in xml_decoder_bytes_ref_smoke rather than
+    /// smoothed over — a port that "fixed" it would diverge.
+    pub fn InputPos(&self) -> (int, int) {
+        return (
+            self.line,
+            crate::int(crate::int64(self.offset - self.linestart)) + 1,
+        );
+    }
+
+    // go: sdk 1.25.5 encoding/xml/xml.go:947-953 Decoder.savedOffset
+    /// Go: "Return saved offset. If we did ungetc (nextByte >= 0), have
+    /// to back up one."
+    pub(crate) fn savedOffset(&self) -> int {
+        let mut n = match self.saved.as_ref() {
+            Some(sv) => sv.Len(),
+            None => 0,
+        };
+        if self.nextByte >= 0 {
+            n -= 1;
+        }
+        return n;
+    }
+
+    // go: sdk 1.25.5 encoding/xml/xml.go:959-966 Decoder.mustgetc
+    /// Go: "Must read a single byte. If there is no byte to read, set
+    /// d.err to SyntaxError("unexpected EOF") and return ok==false."
+    pub(crate) fn mustgetc(&mut self) -> (byte, bool) {
+        let (b, ok) = self.getc();
+        if !ok && crate::errors::Is(self.err.clone(), crate::io::EOF) {
+            self.err = self.syntaxError("unexpected EOF");
+        }
+        return (b, ok);
+    }
+
+    // go: sdk 1.25.5 encoding/xml/xml.go:969-975 Decoder.ungetc
+    /// Go: "Unread a single byte."
+    ///
+    /// Note what it does NOT undo: `linestart`. See `InputPos`.
+    pub(crate) fn ungetc(&mut self, b: byte) {
+        if b == b'\n' {
+            self.line -= 1;
+        }
+        self.nextByte = crate::int(crate::int64(b));
+        self.offset -= 1;
+    }
+
+    // go: sdk 1.25.5 encoding/xml/xml.go:888-905 Decoder.space
+    /// Skip spaces if any. Go's loop reads bytes until a non-space, and
+    /// ungets the one it stopped on — so after `space()` the next
+    /// `getc` returns that byte.
+    pub(crate) fn space(&mut self) {
+        loop {
+            let (b, ok) = self.getc();
+            if !ok {
+                return;
+            }
+            match b {
+                b' ' | b'\r' | b'\n' | b'\t' => {}
+                _ => {
+                    self.ungetc(b);
+                    return;
+                }
+            }
+        }
+    }
+
+    // go: sdk 1.25.5 encoding/xml/xml.go:468-476 Decoder.syntaxError
+    /// Go: `&SyntaxError{Msg: msg, Line: d.line}`.
+    pub(crate) fn syntaxError(&self, msg: &str) -> crate::error {
+        return crate::errors::Wrap(SyntaxError {
+            Msg: string::from_bytes(msg.as_bytes()),
+            Line: self.line,
+        });
+    }
+}
+
+// go: none — goish-only: drive the byte layer from an example. `getc`,
+// `ungetc` and `space` are crate-internal (Go's are unexported too), so
+// the smoke scripts them through here — "g" getc, "u" ungetc the last
+// byte read, "s" space — and reads back the observable state after each
+// step. Exactly the shape of the reference generator run inside GOROOT.
+#[doc(hidden)]
+pub fn __byte_script(input: &[byte], script: &str) -> string {
+    let mut d = NewDecoder(crate::bytes::NewReader(slice::<byte>::__from_vec(input.to_vec())));
+    let mut out = string::from_static("");
+    let mut last: byte = 0;
+    let mut first = true;
+    for op in script.chars() {
+        if !first {
+            out = out + string::from_static(" ");
+        }
+        first = false;
+        match op {
+            'g' => {
+                let (b, ok) = d.getc();
+                if ok {
+                    last = b;
+                }
+                let (l, c) = d.InputPos();
+                out = out
+                    + crate::fmt::Sprintf!(
+                        "g(%v,%v)@%v:%v:%v",
+                        crate::int(b),
+                        ok,
+                        d.InputOffset(),
+                        l,
+                        c
+                    );
+            }
+            'u' => {
+                d.ungetc(last);
+                let (l, c) = d.InputPos();
+                out = out + crate::fmt::Sprintf!("u@%v:%v:%v", d.InputOffset(), l, c);
+            }
+            's' => {
+                d.space();
+                let (l, c) = d.InputPos();
+                out = out + crate::fmt::Sprintf!("s@%v:%v:%v", d.InputOffset(), l, c);
+            }
+            _ => {}
+        }
+    }
+    return out;
 }
 
 // ─── the XML name character tables ────────────────────────────────────
