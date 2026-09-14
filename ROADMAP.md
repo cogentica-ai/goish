@@ -3382,7 +3382,8 @@ The remaining stages, and the reason for this order:
 | 2a | `syntax/regexp.rs` (the AST), `syntax/op_string.rs` | ~520 | **done** |
 | 2b-i | `syntax/parse.rs` — the character-class layer | ~400 | **done** |
 | 2b-ii | `syntax/parse.rs` — the error type, limits, stateless helpers, group tables | ~450 | **done** |
-| 2b-iii | `syntax/parse.rs` — `Parse` and the `parser` state machine | ~1,350 | next |
+| 2b-iii | `syntax/parse.rs` — the node arena and stack machinery | ~750 | **done** |
+| 2b-iv | `syntax/parse.rs` — `Parse` and the text sub-parsers | ~1,100 | next |
 | 3 | `syntax/simplify.rs`, `syntax/compile.rs` | ~450 | |
 | 4 | `regexp/exec.rs` (the NFA) and the swap | ~1,900 | |
 
@@ -3498,6 +3499,52 @@ not bytes — "For strings, byte slices and byte arrays … width is
 measured in runes." Padding by byte length puts `"é"` one space short.
 Six rows red, and every earlier smoke got away with it only because
 every input was ASCII.
+
+**STAGE 2b-iii LANDED 2026-09-14.** The half of the parser that builds
+the tree: `push`, `maybeConcat`, `literal`, `op`, `repeat`, `concat`,
+`alternate`, `parseVerticalBar`, `swapVerticalBar`, `collapse`,
+`factor`, `leadingString`/`leadingRegexp` and their removals, over a
+node arena. `examples/regexp_parser_ref_smoke.rs` pins 223 rows.
+
+**Why an arena.** Go's parser works on `*Regexp` and leans on that
+being a pointer three ways: it MUTATES nodes in place while they are
+reachable from the stack and from another node's `Sub`; it keeps a FREE
+LIST and recycles them; and it keys `height` and `size` on the pointer.
+`Arc<Regexp>` gives none of the three, so the parser works in an arena
+where a `u32` index is the pointer, and the public tree is materialised
+from it once at the end.
+
+The free list is not an allocation detail that could be skipped.
+`numRegexp` counts real allocations, and `checkSize`/`checkHeight`
+start tracking only once it crosses a threshold — so a port that never
+recycles counts higher, starts tracking sooner, and can report
+`ErrLarge` on a pattern Go accepts. Every row carries `numRegexp` for
+exactly that reason; deleting the recycling turns 22 rows red.
+
+**Both sides are driven through the same SCRIPT of operations**, with
+the stack dumped after each, so a divergence names the operation that
+caused it rather than the pattern that eventually showed it.
+
+Two perturbations came back green and both were the table, not the
+code — and finding out took building the missing inputs, not assuming:
+
+  * `factor`'s round-2 restriction (factor a common leading regexp only
+    if it is a character class or a FIXED repeat of one) needed an
+    alternation whose branches share a non-class prefix. `a*x|a*y` must
+    NOT factor; `[a-z]{2}x|[a-z]{2}y` must. 0 red -> 5.
+  * `swapVerticalBar`'s `re1.Op > re3.Op` swap needed a literal and a
+    class as adjacent alternatives. Without the swap,
+    `mergeCharClass`'s OpLiteral arm reads `src.Rune[0]` out of a
+    CLASS, where it is a range start and not a rune — the perturbed
+    build PANICS. Green -> panic.
+
+The first attempt at the alternation scripts was worse than thin, it
+was VACUOUS: pushing an `opVerticalBar` marker directly leaves it on
+the stack, and `alternate` scans down and stops at it, so `factor`
+never saw more than one branch. The fix was to script Go's real closing
+sequence — `concat(); if swapVerticalBar() { pop }; alternate()` —
+which is what `parse`'s end and `parseRightParen` both write out.
+Popping the marker is what leaves the alternatives adjacent.
 
 Stage 2a repeated the lesson twice, which is why it is written down
 here rather than left in a commit message. `sub.Op > OpCapture` → `>=`

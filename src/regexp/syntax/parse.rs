@@ -1186,3 +1186,1367 @@ pub fn __tables() -> (
 ) {
     return (&anyTable, &asciiTable, &asciiFoldTable);
 }
+
+// ─── the parser's node arena and stack machinery (stage 2b-iii) ──────
+//
+// Go's parser works on `*Regexp` and leans on that being a pointer in
+// three ways the port has to reproduce, not just imitate:
+//
+//   * It MUTATES nodes in place — `re.Op = OpLiteral`, `re.Sub[0] =
+//     sub`, `re.Rune = re.Rune[:1]` — while the same node is reachable
+//     from the stack and from another node's `Sub`.
+//   * It keeps a FREE LIST (`p.free`, linked through `re.Sub0[0]`) and
+//     recycles nodes. That is not only an allocation trick: `numRegexp`
+//     counts real allocations, and `checkSize`/`checkHeight` start
+//     tracking only once it passes a threshold. A port that never
+//     recycles counts higher, starts tracking sooner, and can report
+//     `ErrLarge` where Go does not.
+//   * It keys `p.height` and `p.size` on the pointer.
+//
+// `Arc<Regexp>` gives none of the three. So the parser works in an
+// ARENA: nodes live in a `Vec`, and a `u32` index is the pointer. Every
+// Go `*Regexp` is a `pref` here, the free list is a chain of indices,
+// and the two maps are keyed on the index — which is the pointer, at
+// the same granularity Go's map is.
+//
+// The public `Regexp` tree (with its `Arc` children) is materialised
+// from the arena once, at the end of `Parse`.
+
+// go: none — goish idiom: Go's `*Regexp` inside the parser. An index
+//     into `parser.node`, so a node can be mutated while others refer
+//     to it and so the free list and the two maps can key on identity.
+/// A node reference: an index into the parser's arena.
+#[allow(non_camel_case_types)] // reads as a type, like Go's *Regexp
+pub(crate) type pref = u32;
+
+// go: none — goish idiom: Go's nil `*Regexp`. `u32::MAX` rather than 0
+//     because 0 is a valid arena index.
+/// The absent node.
+pub(crate) const pnil: pref = u32::MAX;
+
+// go: none — goish idiom: the arena's element — Go's `Regexp` with
+//     `Sub` as indices instead of pointers, plus the free-list link Go
+//     hides in `Sub0[0]`.
+/// One node in the parser's arena.
+#[allow(non_camel_case_types)] // internal, lower-case like Go's parser
+#[derive(Clone, Default)]
+pub(crate) struct pnode {
+    pub Op: super::regexp::Op,
+    pub Flags: Flags,
+    pub Sub: Vec<pref>,
+    pub Rune: Vec<rune>,
+    pub Min: crate::int,
+    pub Max: crate::int,
+    pub Cap: crate::int,
+    pub Name: crate::gostring::string,
+    /// Go threads its free list through `re.Sub0[0]`; an explicit field
+    /// is the same chain without pretending a subexpression slot is a
+    /// pointer.
+    pub free_next: pref,
+}
+
+// goishlint:ignore GOISH019 size_on, height_on, node — `size_on` and
+// `height_on` are Go's `p.size == nil` / `p.height == nil` tests, which
+// a goish `map` cannot answer the same way; `node` is the arena that
+// stands in for Go's `*Regexp` pointers. See the note above `pref`.
+// go: sdk 1.25.5 regexp/syntax/parse.go:127-139 parser
+/// Go: the parse state — flags, the expression stack, the free list,
+/// the counters the limits are checked against, and the two lazily
+/// built maps.
+///
+/// `wholeRegexp` is kept for the error messages: Go slices it to quote
+/// the offending fragment.
+#[allow(non_camel_case_types)] // Go name
+pub(crate) struct parser {
+    /// Parse mode flags.
+    pub flags: Flags,
+    /// Stack of parsed expressions.
+    pub stack: Vec<pref>,
+    pub free: pref,
+    /// Number of capturing groups seen.
+    pub numCap: crate::int,
+    pub wholeRegexp: crate::gostring::string,
+    /// Temporary char class work space.
+    pub tmpClass: Vec<rune>,
+    /// Number of regexps allocated.
+    pub numRegexp: crate::int,
+    /// Number of runes in char classes.
+    pub numRunes: crate::int,
+    /// Product of all repetitions seen.
+    pub repeats: i64,
+    /// Regexp height, for the height limit check.
+    pub height: crate::gomap::map<pref, crate::int>,
+    /// Regexp compiled size, for the size limit check.
+    pub size: crate::gomap::map<pref, i64>,
+    /// Whether `size` tracking has started. Go tests `p.size == nil`;
+    /// a goish `map` has a nil state but the flag reads clearer beside
+    /// `height_on`.
+    pub size_on: bool,
+    /// Whether `height` tracking has started.
+    pub height_on: bool,
+    // go: none — goish idiom: the arena Go does not need.
+    /// Every node ever allocated, live or freed.
+    pub node: Vec<pnode>,
+}
+
+// go: none — goish idiom: Go's `panic(ErrLarge)` unwinds to a
+//     `recover` in `parse`. goish's `recover!()` does not resume, so
+//     the limit checks RETURN the code instead and every caller
+//     propagates it. The observable behaviour is the same error; what
+//     differs is that the propagation is visible.
+/// The error a limit check produces, or `None` when the check passes.
+pub(crate) type limitErr = Option<ErrorCode>;
+
+impl parser {
+    // go: none — goish idiom: Go zero-values a `parser` and lets the
+    //     maps be nil until needed.
+    /// A parser over `whole`, with `flags`.
+    pub(crate) fn __new(whole: crate::gostring::string, flags: Flags) -> parser {
+        return parser {
+            flags,
+            stack: Vec::new(),
+            free: pnil,
+            numCap: 0,
+            wholeRegexp: whole,
+            tmpClass: Vec::new(),
+            numRegexp: 0,
+            numRunes: 0,
+            repeats: 0,
+            height: crate::gomap::map::new(),
+            size: crate::gomap::map::new(),
+            size_on: false,
+            height_on: false,
+            node: Vec::new(),
+        };
+    }
+
+    // go: none — goish idiom: `*re` in Go. Two accessors because Rust
+    //     will not hand out a `&mut` while another borrow of the arena
+    //     is live, so call sites index rather than hold.
+    /// The node at `r`.
+    pub(crate) fn n(&self, r: pref) -> &pnode {
+        return &self.node[r as usize];
+    }
+
+    // go: none — goish idiom: see `n`.
+    /// The node at `r`, mutably.
+    pub(crate) fn nm(&mut self, r: pref) -> &mut pnode {
+        return &mut self.node[r as usize];
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:141-152 parser.newRegexp
+    /// Go: pop the free list if it has one, else allocate and bump
+    /// `numRegexp`.
+    ///
+    /// The counter is why the free list is ported at all: it gates when
+    /// `checkSize` and `checkHeight` start tracking, so a parser that
+    /// never recycles rejects patterns Go accepts.
+    pub(crate) fn newRegexp(&mut self, op: super::regexp::Op) -> pref {
+        let re = self.free;
+        if re != pnil {
+            self.free = self.node[re as usize].free_next;
+            self.node[re as usize] = pnode::default();
+        } else {
+            self.node.push(pnode::default());
+            self.numRegexp += 1;
+        }
+        let re = if re != pnil {
+            re
+        } else {
+            (self.node.len() - 1) as pref
+        };
+        self.node[re as usize].Op = op;
+        self.node[re as usize].free_next = pnil;
+        return re;
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:154-160 parser.reuse
+    /// Return a node to the free list, dropping its height entry.
+    ///
+    /// Go does NOT drop the size entry, only the height one. Ported as
+    /// written: a stale size for a recycled index is what Go carries.
+    pub(crate) fn reuse(&mut self, re: pref) {
+        if self.height_on {
+            self.height.Delete(re);
+        }
+        self.node[re as usize].free_next = self.free;
+        self.free = re;
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:162-168 parser.checkLimits
+    /// The three limits, in Go's order: runes, then size, then height.
+    pub(crate) fn checkLimits(&mut self, re: pref) -> limitErr {
+        if i64::from(self.numRunes) > maxRunes {
+            return Some(ErrLarge);
+        }
+        if let Some(e) = self.checkSize(re) {
+            return Some(e);
+        }
+        return self.checkHeight(re);
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:170-210 parser.checkSize
+    /// Go: "We haven't started tracking size yet. Do a relatively cheap
+    /// check to see if we need to start. Maintain the product of all
+    /// the repeats we've seen and don't track if the total number of
+    /// regexp nodes we've seen times the repeat product is in budget."
+    pub(crate) fn checkSize(&mut self, re: pref) -> limitErr {
+        if !self.size_on {
+            if self.repeats == 0 {
+                self.repeats = 1;
+            }
+            if self.n(re).Op == super::regexp::OpRepeat {
+                let mut n = self.n(re).Max;
+                if n == -1 {
+                    n = self.n(re).Min;
+                }
+                if n <= 0 {
+                    n = 1;
+                }
+                if i64::from(n) > maxSize / self.repeats {
+                    self.repeats = maxSize;
+                } else {
+                    self.repeats *= i64::from(n);
+                }
+            }
+            if i64::from(self.numRegexp) < maxSize / self.repeats {
+                return None;
+            }
+
+            // Go: "We need to start tracking size. Make the map and
+            // belatedly populate it with info about everything we've
+            // constructed so far."
+            self.size_on = true;
+            let stack = self.stack.clone();
+            for r in stack.iter() {
+                if let Some(e) = self.checkSize(*r) {
+                    return Some(e);
+                }
+            }
+        }
+
+        if self.calcSize(re, true) > maxSize {
+            return Some(ErrLarge);
+        }
+        return None;
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:212-256 parser.calcSize
+    /// The number of `Inst`s `re` would compile to, memoised.
+    ///
+    /// Go's `OpStar` arm is pessimistic on purpose — "star can be 1+ or
+    /// 2+; assume 2" — and the `OpRepeat` arm spells out the expansion
+    /// `x{2,5} = xx(x(x(x)?)?)?`, which is where the `Max-Min` term
+    /// comes from.
+    pub(crate) fn calcSize(&mut self, re: pref, force: bool) -> i64 {
+        use super::regexp::*;
+        if !force {
+            let (sz, ok) = self.size.Get(re);
+            if ok {
+                return sz;
+            }
+        }
+
+        let mut size: i64 = 0;
+        let op = self.n(re).Op;
+        if op == OpLiteral {
+            size = crate::int64(self.n(re).Rune.len());
+        } else if op == OpCapture || op == OpStar {
+            // Go: star can be 1+ or 2+; assume 2 pessimistically.
+            let s0 = self.n(re).Sub[0];
+            size = 2 + self.calcSize(s0, false);
+        } else if op == OpPlus || op == OpQuest {
+            let s0 = self.n(re).Sub[0];
+            size = 1 + self.calcSize(s0, false);
+        } else if op == OpConcat {
+            let subs = self.n(re).Sub.clone();
+            for s in subs.iter() {
+                size += self.calcSize(*s, false);
+            }
+        } else if op == OpAlternate {
+            let subs = self.n(re).Sub.clone();
+            for s in subs.iter() {
+                size += self.calcSize(*s, false);
+            }
+            if subs.len() > 1 {
+                size += crate::int64(subs.len()) - 1;
+            }
+        } else if op == OpRepeat {
+            let s0 = self.n(re).Sub[0];
+            let sub = self.calcSize(s0, false);
+            let (mn, mx) = (self.n(re).Min, self.n(re).Max);
+            if mx == -1 {
+                if mn == 0 {
+                    size = 2 + sub; // x*
+                } else {
+                    size = 1 + i64::from(mn) * sub; // xxx+
+                }
+            } else {
+                // Go: x{2,5} = xx(x(x(x)?)?)?
+                size = i64::from(mx) * sub + i64::from(mx - mn);
+            }
+        }
+
+        if size < 1 {
+            size = 1;
+        }
+        self.size.Set(re, size);
+        return size;
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:258-271 parser.checkHeight
+    /// Go: skip entirely until `numRegexp` reaches `maxHeight`, then
+    /// build the map from the whole stack at once.
+    pub(crate) fn checkHeight(&mut self, re: pref) -> limitErr {
+        if self.numRegexp < maxHeight {
+            return None;
+        }
+        if !self.height_on {
+            self.height_on = true;
+            let stack = self.stack.clone();
+            for r in stack.iter() {
+                if let Some(e) = self.checkHeight(*r) {
+                    return Some(e);
+                }
+            }
+        }
+        if self.calcHeight(re, true) > maxHeight {
+            return Some(ErrNestingDepth);
+        }
+        return None;
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:273-291 parser.calcHeight
+    /// One plus the tallest child, memoised.
+    pub(crate) fn calcHeight(&mut self, re: pref, force: bool) -> crate::int {
+        if !force {
+            let (h, ok) = self.height.Get(re);
+            if ok {
+                return h;
+            }
+        }
+        let mut h: crate::int = 1;
+        let subs = self.n(re).Sub.clone();
+        for s in subs.iter() {
+            let hsub = self.calcHeight(*s, false);
+            if h < 1 + hsub {
+                h = 1 + hsub;
+            }
+        }
+        self.height.Set(re, h);
+        return h;
+    }
+}
+
+impl parser {
+    // go: sdk 1.25.5 regexp/syntax/parse.go:293-328 parser.push
+    /// Push `re` and return it — or `pnil` when it was folded into the
+    /// node below instead.
+    ///
+    /// The two recognitions before the push are how a class collapses
+    /// back to a literal: `[a]` is `a`, and `[Aa]` — or `[Δδ]` — is a
+    /// FOLDED `a`. The second is why `(?i)a` and `[Aa]` compile the
+    /// same, and its condition is exact: the two runes must be each
+    /// other's whole fold orbit, so `[Kk]` qualifies but `[Kk\x{212A}]`
+    /// (three runes) does not.
+    pub(crate) fn push(&mut self, re: pref) -> (pref, limitErr) {
+        use super::regexp::*;
+        self.numRunes += self.n(re).Rune.len() as crate::int;
+        let nrune = self.n(re).Rune.len();
+        let op = self.n(re).Op;
+        let single = op == OpCharClass && nrune == 2 && self.n(re).Rune[0] == self.n(re).Rune[1];
+        let folded_pair = op == OpCharClass
+            && nrune == 4
+            && self.n(re).Rune[0] == self.n(re).Rune[1]
+            && self.n(re).Rune[2] == self.n(re).Rune[3]
+            && crate::unicode::SimpleFold(self.n(re).Rune[0]) == self.n(re).Rune[2]
+            && crate::unicode::SimpleFold(self.n(re).Rune[2]) == self.n(re).Rune[0]
+            || op == OpCharClass
+                && nrune == 2
+                && self.n(re).Rune[0] + 1 == self.n(re).Rune[1]
+                && crate::unicode::SimpleFold(self.n(re).Rune[0]) == self.n(re).Rune[1]
+                && crate::unicode::SimpleFold(self.n(re).Rune[1]) == self.n(re).Rune[0];
+
+        if single {
+            // Go: single rune.
+            let r0 = self.n(re).Rune[0];
+            let fl = Flags(self.flags.0 & !FoldCase.0);
+            if self.maybeConcat(r0, fl) {
+                return (pnil, None);
+            }
+            self.nm(re).Op = OpLiteral;
+            self.nm(re).Rune.truncate(1);
+            self.nm(re).Flags = fl;
+        } else if folded_pair {
+            // Go: case-insensitive rune like [Aa] or [Δδ].
+            let r0 = self.n(re).Rune[0];
+            let fl = self.flags | FoldCase;
+            if self.maybeConcat(r0, fl) {
+                return (pnil, None);
+            }
+            // Go: rewrite as (case-insensitive) literal.
+            self.nm(re).Op = OpLiteral;
+            self.nm(re).Rune.truncate(1);
+            self.nm(re).Flags = fl;
+        } else {
+            // Go: incremental concatenation.
+            self.maybeConcat(-1, Flags(0));
+        }
+
+        self.stack.push(re);
+        let e = self.checkLimits(re);
+        return (re, e);
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:330-365 parser.maybeConcat
+    /// Go: "implements incremental concatenation of literal runes into
+    /// string nodes. The parser calls this before each push, so only
+    /// the top fragment of the stack might need processing. Since this
+    /// is called before a push, the topmost literal is no longer
+    /// subject to operators like `*` (Otherwise `ab*` would turn into
+    /// `(ab)*`.)"
+    ///
+    /// Returns whether `r` was pushed — into the node it just emptied,
+    /// which is the reuse that makes this incremental rather than
+    /// quadratic.
+    pub(crate) fn maybeConcat(&mut self, r: rune, flags: Flags) -> bool {
+        use super::regexp::*;
+        let n = self.stack.len();
+        if n < 2 {
+            return false;
+        }
+
+        let re1 = self.stack[n - 1];
+        let re2 = self.stack[n - 2];
+        if self.n(re1).Op != OpLiteral
+            || self.n(re2).Op != OpLiteral
+            || (self.n(re1).Flags & FoldCase) != (self.n(re2).Flags & FoldCase)
+        {
+            return false;
+        }
+
+        // Go: push re1 into re2.
+        let add = self.n(re1).Rune.clone();
+        self.nm(re2).Rune.extend_from_slice(&add);
+
+        // Go: reuse re1 if possible.
+        if r >= 0 {
+            self.nm(re1).Rune.clear();
+            self.nm(re1).Rune.push(r);
+            self.nm(re1).Flags = flags;
+            return true;
+        }
+
+        self.stack.truncate(n - 1);
+        self.reuse(re1);
+        return false; // Go: did not push r
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:367-377 parser.literal
+    /// Push a literal for `r`, canonicalising the fold orbit first so
+    /// `(?i)K`, `(?i)k` and `(?i)\x{212A}` all become the same node.
+    pub(crate) fn literal(&mut self, r: rune) -> limitErr {
+        let re = self.newRegexp(super::regexp::OpLiteral);
+        self.nm(re).Flags = self.flags;
+        let mut r = r;
+        if self.flags.__has(FoldCase) {
+            r = minFoldRune(r);
+        }
+        self.nm(re).Rune.push(r);
+        let (_, e) = self.push(re);
+        return e;
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:392-397 parser.op
+    /// Push a bare node of the given op.
+    pub(crate) fn op(&mut self, op: super::regexp::Op) -> (pref, limitErr) {
+        let re = self.newRegexp(op);
+        self.nm(re).Flags = self.flags;
+        return self.push(re);
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:399-441 parser.repeat
+    /// Replace the top of the stack with itself repeated.
+    ///
+    /// Go's two refusals are both about Perl, not about the tree: a
+    /// stacked operator (`a**`) is a syntax error rather than a doubled
+    /// star, and a count whose product exceeds 1000 copies is refused
+    /// so the compiler cannot be asked to expand it.
+    pub(crate) fn repeat(
+        &mut self,
+        op: super::regexp::Op,
+        min: crate::int,
+        max: crate::int,
+        before: &crate::gostring::string,
+        after: &crate::gostring::string,
+        lastRepeat: &crate::gostring::string,
+    ) -> (crate::gostring::string, crate::errors::error) {
+        use super::regexp::*;
+        let mut flags = self.flags;
+        let mut after = after.clone();
+        if self.flags.__has(PerlX) {
+            if after.Len() > 0 && after.as_bytes()[0] == b'?' {
+                after = after.slice(1, after.Len());
+                flags = Flags(flags.0 ^ NonGreedy.0);
+            }
+            if lastRepeat.Len() != 0 {
+                // Go: "In Perl it is not allowed to stack repetition
+                // operators: a** is a syntax error, not a doubled star,
+                // and a++ means something else entirely, which we don't
+                // support!"
+                return (
+                    crate::gostring::string::new(),
+                    crate::errors::Wrap(Error {
+                        Code: ErrInvalidRepeatOp,
+                        Expr: lastRepeat.slice(0, lastRepeat.Len() - after.Len()),
+                    }),
+                );
+            }
+        }
+        let n = self.stack.len();
+        if n == 0 {
+            return (
+                crate::gostring::string::new(),
+                crate::errors::Wrap(Error {
+                    Code: ErrMissingRepeatArgument,
+                    Expr: before.slice(0, before.Len() - after.Len()),
+                }),
+            );
+        }
+        let sub = self.stack[n - 1];
+        if self.n(sub).Op >= opPseudo {
+            return (
+                crate::gostring::string::new(),
+                crate::errors::Wrap(Error {
+                    Code: ErrMissingRepeatArgument,
+                    Expr: before.slice(0, before.Len() - after.Len()),
+                }),
+            );
+        }
+
+        let re = self.newRegexp(op);
+        self.nm(re).Min = min;
+        self.nm(re).Max = max;
+        self.nm(re).Flags = flags;
+        self.nm(re).Sub = alloc::vec![sub];
+        self.stack[n - 1] = re;
+        if let Some(code) = self.checkLimits(re) {
+            return (
+                crate::gostring::string::new(),
+                crate::errors::Wrap(Error {
+                    Code: code,
+                    Expr: self.wholeRegexp.clone(),
+                }),
+            );
+        }
+
+        if op == OpRepeat && (min >= 2 || max >= 2) && !self.__repeatIsValid(re, 1000) {
+            return (
+                crate::gostring::string::new(),
+                crate::errors::Wrap(Error {
+                    Code: ErrInvalidRepeatSize,
+                    Expr: before.slice(0, before.Len() - after.Len()),
+                }),
+            );
+        }
+
+        return (after, crate::errors::nil);
+    }
+
+    // go: none — goish idiom: `repeatIsValid` over an arena reference.
+    //     Go's takes a `*Regexp`; the free function above takes the
+    //     public tree, which the parser does not have yet.
+    /// See [`repeatIsValid`].
+    fn __repeatIsValid(&self, re: pref, n: crate::int) -> bool {
+        use super::regexp::*;
+        let mut n = n;
+        if self.n(re).Op == OpRepeat {
+            let mut m = self.n(re).Max;
+            if m == 0 {
+                return true;
+            }
+            if m < 0 {
+                m = self.n(re).Min;
+            }
+            if m > n {
+                return false;
+            }
+            if m > 0 {
+                n /= m;
+            }
+        }
+        for s in self.n(re).Sub.iter() {
+            if !self.__repeatIsValid(*s, n) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:477-495 parser.concat
+    /// Collapse everything above the topmost `|` or `(` into a concat.
+    pub(crate) fn concat(&mut self) -> (pref, limitErr) {
+        use super::regexp::*;
+        self.maybeConcat(-1, Flags(0));
+
+        // Go: scan down to find pseudo-operator | or (.
+        let mut i = self.stack.len();
+        while i > 0 && self.n(self.stack[i - 1]).Op < opPseudo {
+            i -= 1;
+        }
+        let subs: Vec<pref> = self.stack[i..].to_vec();
+        self.stack.truncate(i);
+
+        // Go: empty concatenation is special case.
+        if subs.is_empty() {
+            let re = self.newRegexp(OpEmptyMatch);
+            return self.push(re);
+        }
+
+        let c = self.collapse(&subs, OpConcat);
+        return self.push(c);
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:497-520 parser.alternate
+    /// Collapse everything above the topmost `(` into an alternation.
+    ///
+    /// Only the TOP class is cleaned here; Go's comment says the others
+    /// already are, because `swapVerticalBar` cleans each as it is
+    /// buried.
+    pub(crate) fn alternate(&mut self) -> (pref, limitErr) {
+        use super::regexp::*;
+        // Go: scan down to find pseudo-operator (. There are no | above (.
+        let mut i = self.stack.len();
+        while i > 0 && self.n(self.stack[i - 1]).Op < opPseudo {
+            i -= 1;
+        }
+        let subs: Vec<pref> = self.stack[i..].to_vec();
+        self.stack.truncate(i);
+
+        // Go: make sure top class is clean.
+        if !subs.is_empty() {
+            let last = subs[subs.len() - 1];
+            self.__cleanAlt(last);
+        }
+
+        // Go: "Empty alternate is special case (shouldn't happen but
+        // easy to handle)."
+        if subs.is_empty() {
+            let re = self.newRegexp(OpNoMatch);
+            return self.push(re);
+        }
+
+        let c = self.collapse(&subs, OpAlternate);
+        return self.push(c);
+    }
+
+    // go: none — goish idiom: `cleanAlt` over an arena reference.
+    /// See [`cleanAlt`].
+    fn __cleanAlt(&mut self, re: pref) {
+        use super::regexp::*;
+        if self.n(re).Op != OpCharClass {
+            return;
+        }
+        let mut r = core::mem::take(&mut self.nm(re).Rune);
+        r = cleanClass(&mut r);
+        if r.len() == 2 && r[0] == 0 && r[1] == crate::unicode::MaxRune {
+            self.nm(re).Rune = Vec::new();
+            self.nm(re).Op = OpAnyChar;
+            return;
+        }
+        if r.len() == 4
+            && r[0] == 0
+            && r[1] == rune('\n') - 1
+            && r[2] == rune('\n') + 1
+            && r[3] == crate::unicode::MaxRune
+        {
+            self.nm(re).Rune = Vec::new();
+            self.nm(re).Op = OpAnyCharNotNL;
+            return;
+        }
+        self.nm(re).Rune = r;
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:549-587 parser.collapse
+    /// Go: "returns the result of applying op to sub. If sub contains
+    /// op nodes, they all get hoisted up so that there is never a
+    /// concat of a concat or an alternate of an alternate."
+    pub(crate) fn collapse(&mut self, subs: &[pref], op: super::regexp::Op) -> pref {
+        use super::regexp::*;
+        if subs.len() == 1 {
+            return subs[0];
+        }
+        let re = self.newRegexp(op);
+        let mut acc: Vec<pref> = Vec::new();
+        for sub in subs.iter() {
+            if self.n(*sub).Op == op {
+                let inner = self.n(*sub).Sub.clone();
+                acc.extend_from_slice(&inner);
+                self.reuse(*sub);
+            } else {
+                acc.push(*sub);
+            }
+        }
+        self.nm(re).Sub = acc;
+        if op == OpAlternate {
+            let s = self.n(re).Sub.clone();
+            let f = self.factor(s);
+            self.nm(re).Sub = f;
+            if self.n(re).Sub.len() == 1 {
+                let old = re;
+                let only = self.n(re).Sub[0];
+                self.reuse(old);
+                return only;
+            }
+        }
+        return re;
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:589-776 parser.factor
+    /// Go: "factors common prefixes from the alternation list sub."
+    ///
+    /// Go's own worked example, kept because nothing else explains the
+    /// four rounds as well:
+    ///
+    /// ```text
+    ///   ABC|ABD|AEF|BCX|BCY
+    /// simplifies by literal prefix extraction to
+    ///   A(B(C|D)|EF)|BC(X|Y)
+    /// which simplifies by character class introduction to
+    ///   A(B[CD]|EF)|BC[XY]
+    /// ```
+    ///
+    /// Round 2's restriction is a correctness rule, not an
+    /// optimisation: "Complex subexpressions (e.g. involving
+    /// quantifiers) are not safe to factor because that collapses
+    /// their distinct paths through the automaton."
+    fn factor(&mut self, sub: Vec<pref>) -> Vec<pref> {
+        use super::regexp::*;
+        if sub.len() < 2 {
+            return sub;
+        }
+        let mut sub = sub;
+
+        // ── Round 1: factor out common literal prefixes ─────────────
+        let mut str_: Vec<rune> = Vec::new();
+        let mut strflags = Flags(0);
+        let mut start = 0usize;
+        let mut out: Vec<pref> = Vec::new();
+        for i in 0..=sub.len() {
+            // Go's invariant: sub[start:i] consists of regexps that all
+            // begin with str as modified by strflags.
+            let mut istr: Vec<rune> = Vec::new();
+            let mut iflags = Flags(0);
+            if i < sub.len() {
+                let (a, b) = self.leadingString(sub[i]);
+                istr = a;
+                iflags = b;
+                if iflags == strflags {
+                    let mut same = 0usize;
+                    while same < str_.len() && same < istr.len() && str_[same] == istr[same] {
+                        same += 1;
+                    }
+                    if same > 0 {
+                        // Go: "Matches at least one rune in current
+                        // range. Keep going around."
+                        str_.truncate(same);
+                        continue;
+                    }
+                }
+            }
+
+            if i == start {
+                // Go: nothing to do - run of length 0.
+            } else if i == start + 1 {
+                // Go: just one: don't bother factoring.
+                out.push(sub[start]);
+            } else {
+                // Go: construct factored form: prefix(suffix1|suffix2|...)
+                let prefix = self.newRegexp(OpLiteral);
+                self.nm(prefix).Flags = strflags;
+                self.nm(prefix).Rune = str_.clone();
+
+                for j in start..i {
+                    let nn = str_.len() as crate::int;
+                    sub[j] = self.removeLeadingString(sub[j], nn);
+                    let _ = self.checkLimits(sub[j]);
+                }
+                let run: Vec<pref> = sub[start..i].to_vec();
+                let suffix = self.collapse(&run, OpAlternate); // Go: recurse
+
+                let re = self.newRegexp(OpConcat);
+                self.nm(re).Sub = alloc::vec![prefix, suffix];
+                out.push(re);
+            }
+
+            start = i;
+            str_ = istr;
+            strflags = iflags;
+        }
+        sub = out;
+
+        // ── Round 2: factor out common simple prefixes ──────────────
+        start = 0;
+        out = Vec::new();
+        let mut first: pref = pnil;
+        for i in 0..=sub.len() {
+            let mut ifirst: pref = pnil;
+            if i < sub.len() {
+                ifirst = self.leadingRegexp(sub[i]);
+                if first != pnil
+                    && ifirst != pnil
+                    && self.__equal(first, ifirst)
+                    // Go: "first must be a character class OR a fixed
+                    // repeat of a character class."
+                    && (self.__isCharClass(first)
+                        || (self.n(first).Op == OpRepeat
+                            && self.n(first).Min == self.n(first).Max
+                            && self.__isCharClass(self.n(first).Sub[0])))
+                {
+                    continue;
+                }
+            }
+
+            if i == start {
+                // Go: nothing to do.
+            } else if i == start + 1 {
+                out.push(sub[start]);
+            } else {
+                let prefix = first;
+                for j in start..i {
+                    // Go: prefix came from sub[start].
+                    let reuse = j != start;
+                    sub[j] = self.removeLeadingRegexp(sub[j], reuse);
+                    let _ = self.checkLimits(sub[j]);
+                }
+                let run: Vec<pref> = sub[start..i].to_vec();
+                let suffix = self.collapse(&run, OpAlternate); // Go: recurse
+
+                let re = self.newRegexp(OpConcat);
+                self.nm(re).Sub = alloc::vec![prefix, suffix];
+                out.push(re);
+            }
+
+            start = i;
+            first = ifirst;
+        }
+        sub = out;
+
+        // ── Round 3: collapse runs of single literals into classes ──
+        start = 0;
+        out = Vec::new();
+        for i in 0..=sub.len() {
+            if i < sub.len() && self.__isCharClass(sub[i]) {
+                continue;
+            }
+
+            if i == start {
+                // Go: nothing to do.
+            } else if i == start + 1 {
+                out.push(sub[start]);
+            } else {
+                // Go: "Make new char class. Start with most complex
+                // regexp in sub[start]."
+                let mut mx = start;
+                for j in (start + 1)..i {
+                    if self.n(sub[mx]).Op < self.n(sub[j]).Op
+                        || self.n(sub[mx]).Op == self.n(sub[j]).Op
+                            && self.n(sub[mx]).Rune.len() < self.n(sub[j]).Rune.len()
+                    {
+                        mx = j;
+                    }
+                }
+                sub.swap(start, mx);
+
+                for j in (start + 1)..i {
+                    self.__mergeCharClass(sub[start], sub[j]);
+                    self.reuse(sub[j]);
+                }
+                self.__cleanAlt(sub[start]);
+                out.push(sub[start]);
+            }
+
+            // Go: ... and then emit sub[i].
+            if i < sub.len() {
+                out.push(sub[i]);
+            }
+            start = i + 1;
+        }
+        sub = out;
+
+        // ── Round 4: collapse runs of empty matches ─────────────────
+        out = Vec::new();
+        for i in 0..sub.len() {
+            if i + 1 < sub.len()
+                && self.n(sub[i]).Op == OpEmptyMatch
+                && self.n(sub[i + 1]).Op == OpEmptyMatch
+            {
+                continue;
+            }
+            out.push(sub[i]);
+        }
+        sub = out;
+
+        return sub;
+    }
+
+    // go: none — goish idiom: `isCharClass` over an arena reference.
+    /// See [`isCharClass`].
+    fn __isCharClass(&self, re: pref) -> bool {
+        use super::regexp::*;
+        let op = self.n(re).Op;
+        return op == OpLiteral && self.n(re).Rune.len() == 1
+            || op == OpCharClass
+            || op == OpAnyCharNotNL
+            || op == OpAnyChar;
+    }
+
+    // go: none — goish idiom: `Regexp.Equal` over two arena references.
+    /// See [`super::regexp::Regexp::Equal`].
+    fn __equal(&self, x: pref, y: pref) -> bool {
+        use super::regexp::*;
+        if self.n(x).Op != self.n(y).Op {
+            return false;
+        }
+        let op = self.n(x).Op;
+        if op == OpEndText {
+            return (self.n(x).Flags & WasDollar) == (self.n(y).Flags & WasDollar);
+        }
+        if op == OpLiteral || op == OpCharClass {
+            return self.n(x).Rune == self.n(y).Rune;
+        }
+        if op == OpAlternate || op == OpConcat {
+            if self.n(x).Sub.len() != self.n(y).Sub.len() {
+                return false;
+            }
+            for i in 0..self.n(x).Sub.len() {
+                let (a, b) = (self.n(x).Sub[i], self.n(y).Sub[i]);
+                if !self.__equal(a, b) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if op == OpStar || op == OpPlus || op == OpQuest {
+            return (self.n(x).Flags & NonGreedy) == (self.n(y).Flags & NonGreedy)
+                && self.__equal(self.n(x).Sub[0], self.n(y).Sub[0]);
+        }
+        if op == OpRepeat {
+            return (self.n(x).Flags & NonGreedy) == (self.n(y).Flags & NonGreedy)
+                && self.n(x).Min == self.n(y).Min
+                && self.n(x).Max == self.n(y).Max
+                && self.__equal(self.n(x).Sub[0], self.n(y).Sub[0]);
+        }
+        if op == OpCapture {
+            return self.n(x).Cap == self.n(y).Cap
+                && self.n(x).Name == self.n(y).Name
+                && self.__equal(self.n(x).Sub[0], self.n(y).Sub[0]);
+        }
+        return true;
+    }
+
+    // go: none — goish idiom: `mergeCharClass` over arena references.
+    /// See [`mergeCharClass`].
+    fn __mergeCharClass(&mut self, dst: pref, src: pref) {
+        use super::regexp::*;
+        let dop = self.n(dst).Op;
+        if dop == OpAnyChar {
+            return;
+        }
+        if dop == OpAnyCharNotNL {
+            if self.__matchRune(src, rune('\n')) {
+                self.nm(dst).Op = OpAnyChar;
+            }
+            return;
+        }
+        if dop == OpCharClass {
+            let r = core::mem::take(&mut self.nm(dst).Rune);
+            if self.n(src).Op == OpLiteral {
+                let (s0, sf) = (self.n(src).Rune[0], self.n(src).Flags);
+                self.nm(dst).Rune = appendLiteral(r, s0, sf);
+            } else {
+                let sr = self.n(src).Rune.clone();
+                self.nm(dst).Rune = appendClass(r, &sr);
+            }
+            return;
+        }
+        if dop == OpLiteral {
+            if self.n(src).Rune[0] == self.n(dst).Rune[0]
+                && self.n(src).Flags == self.n(dst).Flags
+            {
+                return;
+            }
+            self.nm(dst).Op = OpCharClass;
+            let (d0, df) = (self.n(dst).Rune[0], self.n(dst).Flags);
+            let mut r = appendLiteral(Vec::new(), d0, df);
+            let (s0, sf) = (self.n(src).Rune[0], self.n(src).Flags);
+            r = appendLiteral(r, s0, sf);
+            self.nm(dst).Rune = r;
+        }
+    }
+
+    // go: none — goish idiom: `matchRune` over an arena reference.
+    /// See [`matchRune`].
+    fn __matchRune(&self, re: pref, r: rune) -> bool {
+        use super::regexp::*;
+        let op = self.n(re).Op;
+        if op == OpLiteral {
+            return self.n(re).Rune.len() == 1 && self.n(re).Rune[0] == r;
+        }
+        if op == OpCharClass {
+            let mut i = 0usize;
+            while i < self.n(re).Rune.len() {
+                if self.n(re).Rune[i] <= r && r <= self.n(re).Rune[i + 1] {
+                    return true;
+                }
+                i += 2;
+            }
+            return false;
+        }
+        if op == OpAnyCharNotNL {
+            return r != rune('\n');
+        }
+        if op == OpAnyChar {
+            return true;
+        }
+        return false;
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:778-786 parser.leadingString
+    /// The literal run `re` begins with, and whether it is folded.
+    pub(crate) fn leadingString(&self, re: pref) -> (Vec<rune>, Flags) {
+        use super::regexp::*;
+        let mut re = re;
+        if self.n(re).Op == OpConcat && !self.n(re).Sub.is_empty() {
+            re = self.n(re).Sub[0];
+        }
+        if self.n(re).Op != OpLiteral {
+            return (Vec::new(), Flags(0));
+        }
+        return (self.n(re).Rune.clone(), self.n(re).Flags & FoldCase);
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:788-822 parser.removeLeadingString
+    /// Drop the first `n` runes, returning the replacement for `re`.
+    ///
+    /// The concat arm is where the simplification happens: once the
+    /// leading literal is empty the concat loses a child, and a
+    /// two-child concat becomes its survivor.
+    pub(crate) fn removeLeadingString(&mut self, re: pref, n: crate::int) -> pref {
+        use super::regexp::*;
+        let mut re = re;
+        if self.n(re).Op == OpConcat && !self.n(re).Sub.is_empty() {
+            // Go: "Removing a leading string in a concatenation might
+            // simplify the concatenation."
+            let mut sub = self.n(re).Sub[0];
+            sub = self.removeLeadingString(sub, n);
+            self.nm(re).Sub[0] = sub;
+            if self.n(sub).Op == OpEmptyMatch {
+                self.reuse(sub);
+                let l = self.n(re).Sub.len();
+                if l <= 1 {
+                    // Go: "Impossible but handle."
+                    self.nm(re).Op = OpEmptyMatch;
+                    self.nm(re).Sub = Vec::new();
+                } else if l == 2 {
+                    let old = re;
+                    re = self.n(re).Sub[1];
+                    self.reuse(old);
+                } else {
+                    self.nm(re).Sub.remove(0);
+                }
+            }
+            return re;
+        }
+
+        if self.n(re).Op == OpLiteral {
+            let n = n as usize;
+            let keep: Vec<rune> = self.n(re).Rune[n..].to_vec();
+            self.nm(re).Rune = keep;
+            if self.n(re).Rune.is_empty() {
+                self.nm(re).Op = OpEmptyMatch;
+            }
+        }
+        return re;
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:827-839 parser.leadingRegexp
+    /// The node `re` begins with, or `pnil` when it begins with an
+    /// empty match.
+    pub(crate) fn leadingRegexp(&self, re: pref) -> pref {
+        use super::regexp::*;
+        if self.n(re).Op == OpEmptyMatch {
+            return pnil;
+        }
+        if self.n(re).Op == OpConcat && !self.n(re).Sub.is_empty() {
+            let sub = self.n(re).Sub[0];
+            if self.n(sub).Op == OpEmptyMatch {
+                return pnil;
+            }
+            return sub;
+        }
+        return re;
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:844-865 parser.removeLeadingRegexp
+    /// Drop the leading node, returning the replacement for `re`.
+    ///
+    /// `reuse` is false for the run's first element, because that one's
+    /// leading node BECAME the shared prefix and is still live.
+    pub(crate) fn removeLeadingRegexp(&mut self, re: pref, reuse: bool) -> pref {
+        use super::regexp::*;
+        let mut re = re;
+        if self.n(re).Op == OpConcat && !self.n(re).Sub.is_empty() {
+            if reuse {
+                let s0 = self.n(re).Sub[0];
+                self.reuse(s0);
+            }
+            self.nm(re).Sub.remove(0);
+            let l = self.n(re).Sub.len();
+            if l == 0 {
+                self.nm(re).Op = OpEmptyMatch;
+                self.nm(re).Sub = Vec::new();
+            } else if l == 1 {
+                let old = re;
+                re = self.n(re).Sub[0];
+                self.reuse(old);
+            }
+            return re;
+        }
+        if reuse {
+            self.reuse(re);
+        }
+        return self.newRegexp(OpEmptyMatch);
+    }
+}
+
+impl parser {
+    // go: sdk 1.25.5 regexp/syntax/parse.go:1330-1343 parser.parseVerticalBar
+    /// Go: "The concatenation we just parsed is on top of the stack.
+    /// If it sits above an opVerticalBar, swap it below (things below
+    /// an opVerticalBar become an alternation). Otherwise, push a new
+    /// vertical bar."
+    ///
+    /// This is why `alternate` can say "There are no | above (": the
+    /// marker is kept BELOW the alternatives, one marker for the whole
+    /// group rather than one per `|`.
+    pub(crate) fn parseVerticalBar(&mut self) -> limitErr {
+        let (_, e) = self.concat();
+        if e.is_some() {
+            return e;
+        }
+        if !self.swapVerticalBar() {
+            let (_, e) = self.op(opVerticalBar);
+            return e;
+        }
+        return None;
+    }
+
+    // go: sdk 1.25.5 regexp/syntax/parse.go:1375-1409 parser.swapVerticalBar
+    /// Move the just-parsed alternative below the `|` marker, merging
+    /// it into the previous one when both are single-rune matchers.
+    ///
+    /// The merge is where `a|b|c` becomes `[abc]` incrementally rather
+    /// than waiting for `factor`'s round 3, and the `re1.Op > re3.Op`
+    /// swap keeps the MORE COMPLEX node as the destination so a literal
+    /// is merged into a class and not the other way round.
+    ///
+    /// The `cleanAlt` call is Go's "Now out of reach. Clean
+    /// opportunistically." — the node two below can never be touched
+    /// again, so this is the last chance to normalise it. That is what
+    /// lets `alternate` clean only the top one.
+    pub(crate) fn swapVerticalBar(&mut self) -> bool {
+        let n = self.stack.len();
+        if n >= 3
+            && self.n(self.stack[n - 2]).Op == opVerticalBar
+            && self.__isCharClass(self.stack[n - 1])
+            && self.__isCharClass(self.stack[n - 3])
+        {
+            let mut re1 = self.stack[n - 1];
+            let mut re3 = self.stack[n - 3];
+            // Go: make re3 the more complex of the two.
+            if self.n(re1).Op > self.n(re3).Op {
+                core::mem::swap(&mut re1, &mut re3);
+                self.stack[n - 3] = re3;
+            }
+            self.__mergeCharClass(re3, re1);
+            self.reuse(re1);
+            self.stack.truncate(n - 1);
+            return true;
+        }
+
+        if n >= 2 {
+            let re1 = self.stack[n - 1];
+            let re2 = self.stack[n - 2];
+            if self.n(re2).Op == opVerticalBar {
+                if n >= 3 {
+                    // Go: "Now out of reach. Clean opportunistically."
+                    let r = self.stack[n - 3];
+                    self.__cleanAlt(r);
+                }
+                self.stack[n - 2] = re1;
+                self.stack[n - 1] = re2;
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+// go: sdk 1.25.5 regexp/syntax/parse.go:77-80 opLeftParen
+/// Go: "Pseudo-ops for parsing stack." They sit at and above
+/// `opPseudo`, which is what `concat` and `alternate` scan down to and
+/// what `repeat` refuses to quantify.
+pub(crate) const opLeftParen: super::regexp::Op = super::regexp::Op(128);
+// go: none — goish-only placement: parse.go line 79, same iota block.
+/// The `|` marker.
+pub(crate) const opVerticalBar: super::regexp::Op = super::regexp::Op(129);
+
+// ─── test hooks for the parser machinery ─────────────────────────────
+
+// go: none — goish-only: Go's `parser` is unexported and its own tests
+//     drive it from inside the package. goish's reference is an
+//     EXAMPLE, so the machinery needs a handle. `regexp_parser_ref_smoke`
+//     is the only caller.
+/// An opaque handle to a [`parser`], for driving it from a reference.
+#[doc(hidden)]
+#[allow(non_camel_case_types)]
+pub struct __Parser(parser);
+
+#[doc(hidden)]
+impl __Parser {
+    // go: none — goish-only: see `__Parser`.
+    /// A parser over `whole`, with `flags`.
+    pub fn __new(whole: crate::gostring::string, flags: Flags) -> __Parser {
+        return __Parser(parser::__new(whole, flags));
+    }
+    // go: none — goish-only: see `__Parser`.
+    /// `p.literal(r)`.
+    pub fn __literal(&mut self, r: rune) {
+        let _ = self.0.literal(r);
+    }
+    // go: none — goish-only: see `__Parser`.
+    /// `p.op(op)`.
+    pub fn __op(&mut self, op: super::regexp::Op) {
+        let _ = self.0.op(op);
+    }
+    // go: none — goish-only: see `__Parser`.
+    /// Build an `OpCharClass` over `rs` and push it — the shape the
+    /// class parser hands to `push`.
+    pub fn __class(&mut self, rs: &[rune]) {
+        let re = self.0.newRegexp(super::regexp::OpCharClass);
+        self.0.nm(re).Flags = self.0.flags;
+        self.0.nm(re).Rune.extend_from_slice(rs);
+        let _ = self.0.push(re);
+    }
+    // go: none — goish-only: see `__Parser`.
+    /// `p.concat()`.
+    pub fn __concat(&mut self) {
+        let _ = self.0.concat();
+    }
+    // go: none — goish-only: see `__Parser`.
+    /// `p.alternate()`.
+    pub fn __alternate(&mut self) {
+        let _ = self.0.alternate();
+    }
+    // go: none — goish-only: see `__Parser`.
+    /// `p.parseVerticalBar()`.
+    pub fn __verticalBar(&mut self) {
+        let _ = self.0.parseVerticalBar();
+    }
+    // go: none — goish-only: see `__Parser`.
+    /// The three lines `parse`'s end and `parseRightParen` both write
+    /// out (parse.go lines 1085-1089 and 1412-1416): concat, pop the
+    /// vertical bar if `swapVerticalBar` moved one, then alternate.
+    /// Popping the marker is what leaves the alternatives adjacent for
+    /// `alternate` to take — without it `a|b|c` collapses only `c`.
+    pub fn __closeGroup(&mut self) {
+        let _ = self.0.concat();
+        if self.0.swapVerticalBar() {
+            let n = self.0.stack.len();
+            self.0.stack.truncate(n - 1);
+        }
+        let _ = self.0.alternate();
+    }
+    // go: none — goish-only: see `__Parser`.
+    /// `p.repeat(op, min, max, "x{2}", "", "")`.
+    pub fn __repeat(
+        &mut self,
+        op: super::regexp::Op,
+        min: crate::int,
+        max: crate::int,
+    ) -> crate::errors::error {
+        let (_, e) = self.0.repeat(
+            op,
+            min,
+            max,
+            &crate::gostring::string::from_static("x{2}"),
+            &crate::gostring::string::new(),
+            &crate::gostring::string::new(),
+        );
+        return e;
+    }
+    // go: none — goish-only: see `__Parser`.
+    /// Set `p.flags`.
+    pub fn __setflags(&mut self, f: Flags) {
+        self.0.flags = f;
+    }
+    // go: none — goish-only: see `__Parser`.
+    /// `p.numRegexp`.
+    pub fn __numRegexp(&self) -> crate::int {
+        return self.0.numRegexp;
+    }
+    // go: none — goish-only: see `__Parser`.
+    /// `p.numRunes`.
+    pub fn __numRunes(&self) -> crate::int {
+        return self.0.numRunes;
+    }
+    // go: none — goish-only: see `__Parser`.
+    /// The stack, as the reference's space-separated s-expressions.
+    pub fn __dump(&self) -> crate::gostring::string {
+        let mut b = crate::gostring::string::new();
+        for (i, r) in self.0.stack.iter().enumerate() {
+            if i > 0 {
+                b = b + crate::gostring::string::from_static(" ");
+            }
+            b = b + self.__dump_node(*r);
+        }
+        return b;
+    }
+    // go: none — goish-only: the recursive half of `__dump`.
+    /// One node as the reference's s-expression.
+    fn __dump_node(&self, r: pref) -> crate::gostring::string {
+        let n = self.0.n(r);
+        let mut b = crate::gostring::string::from_static("(")
+            + crate::strconv::Itoa(crate::int::from(crate::int64(n.Op.0)))
+            + crate::gostring::string::from_static(" ")
+            + crate::strconv::Itoa(crate::int::from(crate::int64(n.Flags.0)))
+            + crate::gostring::string::from_static(" ")
+            + crate::strconv::Itoa(n.Min)
+            + crate::gostring::string::from_static(" ")
+            + crate::strconv::Itoa(n.Max)
+            + crate::gostring::string::from_static(" ")
+            + crate::strconv::Itoa(n.Cap)
+            + crate::gostring::string::from_static(" ")
+            + crate::strconv::Quote(n.Name.clone())
+            + crate::gostring::string::from_static(" [");
+        for (i, v) in n.Rune.iter().enumerate() {
+            if i > 0 {
+                b = b + crate::gostring::string::from_static(" ");
+            }
+            b = b + crate::strconv::Itoa(crate::int::from(crate::int64(*v)));
+        }
+        b = b + crate::gostring::string::from_static("]");
+        for s in n.Sub.iter() {
+            b = b + crate::gostring::string::from_static(" ") + self.__dump_node(*s);
+        }
+        return b + crate::gostring::string::from_static(")");
+    }
+}
+
+// go: none — goish-only: the two pseudo-ops, for the reference.
+/// `(opLeftParen, opVerticalBar)`.
+#[doc(hidden)]
+pub fn __pseudoOps() -> (super::regexp::Op, super::regexp::Op) {
+    return (opLeftParen, opVerticalBar);
+}
