@@ -1433,10 +1433,14 @@ pub fn UnixMicro(usec: int) -> Time {
 
 // go: sdk 1.25.5 time/time.go:1730-1768 Date
 /// `time.Date(year, month, day, hour, min, sec, nsec, loc)` — construct
-/// a Time. Slim port of Go's `time.Date` (time.go:1438). v1 has no
-/// real Location support — the `loc` arg is accepted for ABI parity
-/// (matches Go's 8-arg signature) but doesn't affect the output:
-/// every Time is stored in UTC.
+/// a Time. Port of Go's `time.Date`.
+///
+/// Every argument is normalised the way Go normalises it: a month
+/// outside 1..12 rolls the year, and a day, hour, minute or second
+/// outside its range carries into the next unit. That is not a
+/// convenience — `archive/zip` decodes an MS-DOS date by handing the
+/// raw 4-bit month and 5-bit day fields straight in, so a month of 0
+/// MUST mean December of the previous year.
 ///
 /// Accepts either `int` or `Month` for the month parameter via
 /// `impl Into<int>` — Go callers spell `time.January` (a `Month`
@@ -1452,7 +1456,29 @@ pub fn Date<M: __MonthArg>(
     nsec: int,
     loc: Location,
 ) -> Time {
-    let m = month.__as_int();
+    // Go: `m := int(month) - 1; year, m = norm(year, m, 12); month =
+    // Month(m) + 1` — the month is normalised into the year BEFORE any
+    // day arithmetic, so `Date(1980, 15, 1)` is 1981-03-01.
+    //
+    // goish used to hand the raw month straight to `days_from_civil`,
+    // which is Howard Hinnant's civil algorithm and is only defined for
+    // months 1..12. Its year starts in MARCH, so months 13 and 14 —
+    // January and February of the next year — happened to come out
+    // right and 15 did not: `Date(1980, 15, 1)` gave 1981-03-03, two
+    // days out, and the error grew by two per extra year rolled
+    // (`Date(1980, 27, 1)` was four days out). Measured against Go
+    // 2026-09-15 while porting archive/zip, whose msDosTimeToTime feeds
+    // it a raw 4-bit month field and relies on exactly this
+    // normalisation for a month of 0 or 15.
+    let m0 = month.__as_int() - 1;
+    let mut year = year;
+    let mut mm = m0 % 12;
+    year += m0 / 12;
+    if mm < 0 {
+        mm += 12;
+        year -= 1;
+    }
+    let m = mm + 1;
     let days = days_from_civil(year, m, day);
     let total_sec = days
         .wrapping_mul(86_400)

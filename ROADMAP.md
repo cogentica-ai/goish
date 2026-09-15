@@ -278,6 +278,22 @@ So the next move for encoding/xml is a reflect decision, not more xml.
 The minimum that unblocks marshal is a way to register and query
 interface satisfaction for `#[goish::reflect]` types.
 
+**`archive/zip` is the counter-example, and it is where the porting
+work moved on 2026-09-15.** It was 0% of 104 functions and 2,249 Go
+LOC, and NOTHING about it is blocked: it touches no reflect and no
+recover, and every package it imports (bufio, compress/flate,
+encoding/binary, hash/crc32, io/fs, path, path/filepath, strings, sync,
+time) is already here. `struct.go` is ported and pinned:
+
+    zip_struct_ref_smoke     123/123   the MS-DOS time codec, the three
+                                       file-mode mappings, FileHeader.Mode
+                                       and SetMode, isZip64, timeZone,
+                                       every signature and record length
+
+`reader.go`, `writer.go` and `register.go` are next, in that order.
+
+That slice also found a defect in `time.Date` — see below.
+
 **Two reflect defects were found and fixed on the way here**, both by
 the leaf smoke rather than by reading:
 
@@ -1779,6 +1795,38 @@ regression there is an outage rather than a test failure. Dispatch
    **Done** — `impl crypto::Signer for PrivateKey` is in
    `crypto/ecdsa/ecdsa.rs`. It is the one pair `split_brain_check.py`
    still reports, deliberately and with a note saying so.
+
+## 2a-i. `time.Date` did not normalise the month — FIXED 2026-09-15
+
+Go's `Date` normalises every argument: "The month, day, hour, min, sec,
+and nsec values may be outside their usual ranges and will be
+normalized during the conversion."
+
+goish's did not normalise the MONTH. It handed the raw value to
+`days_from_civil`, Howard Hinnant's civil-from-days algorithm, which is
+defined only for 1..12. That algorithm's year starts in MARCH, so
+months 13 and 14 — January and February of the next year — came out
+right BY ACCIDENT and 15 did not:
+
+    Date(1980, 15, 1)    goish 1981-03-03    Go 1981-03-01
+    Date(1980, 27, 1)    goish 1982-03-05    Go 1982-03-01
+    Date(1980, 15, 0)    goish 1981-03-02    Go 1981-02-28
+
+Two days out per year rolled past February, silently. Days, hours,
+minutes and seconds were already fine — they go through linear
+arithmetic on the epoch second — so only the month was wrong, which is
+why nothing in the tree had noticed.
+
+**How it surfaced, and why that matters.** `archive/zip`'s
+`msDosTimeToTime` decodes the MS-DOS date by masking a 4-bit month
+field out of a uint16 and handing it straight to `Date`. Go RELIES on
+the normalisation there: a zeroed date field has to decode to
+1979-11-30, and a hostile or truncated archive can present any value in
+0..15. Three of the ten reference rows were red on the first run, and
+the defect was in `time`, not in the new code.
+
+Pinned by `time_date_norm_ref_smoke` (18/18). Reverting the fix turns 9
+of those 18 red and 3 of `zip_struct_ref_smoke`'s 123.
 
 ## 2b. Unanchored files — the code no tier can check
 
