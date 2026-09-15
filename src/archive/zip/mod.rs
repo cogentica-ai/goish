@@ -10,6 +10,7 @@
 //   reader.rs   archive/zip/reader.go  — the sentinel errors, readBuf, the
 //                                        central-directory header parser and
 //                                        the fs.FS name helpers
+//   register.rs archive/zip/register.go — the decompressor registry
 //   writer.rs   archive/zip/writer.go  — detectUTF8 only, because the READER
 //                                        calls it
 //
@@ -22,9 +23,11 @@
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 
 pub mod reader;
+pub mod register;
 pub mod r#struct;
 pub mod writer;
 
 pub use reader::{ErrAlgorithm, ErrChecksum, ErrFormat, ErrInsecurePath, File};
 pub use r#struct::directoryEnd;
+pub use register::{Decompressor, RegisterDecompressor};
 pub use r#struct::{Deflate, FileHeader, Store};

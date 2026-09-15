@@ -295,20 +295,32 @@ time) is already here. `struct.go` is ported and pinned:
                                        toValidName, split, detectUTF8,
                                        readDirectoryEnd, the two zip64
                                        end records, NewReader over 14
-                                       whole archives, and the local
-                                       header walk — findBodyOffset,
-                                       DataOffset, OpenRaw, dirReader
+                                       whole archives, the local header
+                                       walk, the decompressor registry,
+                                       and File.Open over EIGHT ARCHIVES
+                                       GO WROTE — stored and deflated,
+                                       with CRC verification
 
-What is left of reader.go is `File.Open` with `checksumReader` and the
-DECOMPRESSOR REGISTRY, and the fs.FS surface (`Open`, `openLookup`,
-`openReadDir`, the fileListEntry tree).
+**goish reads real Go-written ZIP archives.** The last eight rows are
+built by Go's own `zip.Writer` — including deflate — and read back
+through goish's `NewReader` + `File.Open`, comparing the decompressed
+bytes and the error. A corrupted body gives ErrChecksum and an
+unregistered method gives ErrAlgorithm, both matching Go.
 
-The registry is the next thing that needs a decision rather than
-typing. Go's `Decompressor` is `func(io.Reader) io.ReadCloser` kept in
-a package-level `sync.Map`, and goish's `sync::Map<K,V>` wants
-`V: Default + Clone + Send`, which a bare `fn` pointer is not. The
-fs.FS surface needs the fs.File / fs.DirEntry interface bridge, the
-same one archive/zip's `FileInfoHeader` is already waived for.
+The registry turned out to need less of a decision than feared. Go's
+`Decompressor` is `func(io.Reader) io.ReadCloser` in a package-level
+`sync.Map`; goish's `sync::Map<K,V>` requires `V: Default`, which a
+bare `fn` pointer lacks, so the value type is `Option<Decompressor>` —
+and that makes `Load`'s miss return `(None, false)`, which reads
+exactly like Go's `di, ok := ...; if !ok { return nil }`. Go's `init()`
+seeding becomes the initialiser of a `Lazy`, so no caller can see the
+map unseeded.
+
+What is left of reader.go is the fs.FS surface (`Open`, `openLookup`,
+`openReadDir`, the fileListEntry tree), which needs the fs.File /
+fs.DirEntry interface bridge — the same one archive/zip's
+`FileInfoHeader` is already waived for — plus `OpenReader` (needs
+os.Open) and the per-Reader decompressor override map. Then writer.go.
 
 **The sharing idiom that unblocked this slice is worth recording.**
 Go's `File` holds `zipr`, the `io.ReaderAt` it shares with its Reader,

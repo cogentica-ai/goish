@@ -1,12 +1,13 @@
-// goishlint:ignore GOISH018 OpenReader, Reader.RegisterDecompressor, Reader.decompressor, ReadCloser.Close, File.Open, checksumReader.Stat, checksumReader.Read, checksumReader.Close, fileListEntry.stat, fileListEntry.Name, fileListEntry.Size, fileListEntry.Mode, fileListEntry.Type, fileListEntry.IsDir, fileListEntry.Sys, fileListEntry.ModTime, fileListEntry.Info, fileListEntry.String, Reader.initFileList, Reader.Open, Reader.openLookup, Reader.openReadDir, openDir.Close, openDir.Stat, openDir.Read, openDir.ReadDir — the Reader itself and its fs.FS surface, ABSENT from this slice. Every one of them needs an io.ReaderAt over a whole archive, a decompressor registry, or the fs.File / fs.DirEntry interface bridge; this slice is the PARSING, which is the half that has to be right about a hostile input and the half a reference can pin byte-for-byte. They land next.
-// goishlint:ignore GOISH021 ReadCloser, checksumReader, fileListEntry, fileInfoDirEntry, openDir, dotFile, zipinsecurepath — the Reader's own types and its fs.FS entry list, absent with the methods above. `zipinsecurepath` is a GODEBUG knob and goish has no godebug package.
+// goishlint:ignore GOISH018 OpenReader, Reader.RegisterDecompressor, ReadCloser.Close, checksumReader.Stat, fileListEntry.stat, fileListEntry.Name, fileListEntry.Size, fileListEntry.Mode, fileListEntry.Type, fileListEntry.IsDir, fileListEntry.Sys, fileListEntry.ModTime, fileListEntry.Info, fileListEntry.String, Reader.initFileList, Reader.Open, Reader.openLookup, Reader.openReadDir, openDir.Close, openDir.Stat, openDir.Read, openDir.ReadDir — the Reader itself and its fs.FS surface, ABSENT from this slice. Every one of them needs an io.ReaderAt over a whole archive, a decompressor registry, or the fs.File / fs.DirEntry interface bridge; this slice is the PARSING, which is the half that has to be right about a hostile input and the half a reference can pin byte-for-byte. They land next.
+// goishlint:ignore GOISH021 ReadCloser, fileListEntry, fileInfoDirEntry, openDir, dotFile, zipinsecurepath — the Reader's own types and its fs.FS entry list, absent with the methods above. `zipinsecurepath` is a GODEBUG knob and goish has no godebug package.
 // goishlint:ignore GOISH019 File — three fields absent: `zip`, `zipr` and `descErr`. `zip` is a back-pointer to the Reader and `zipr` its io.ReaderAt, both of which this slice does not have; neither is read by anything here. The field set comes back whole with the Reader.
 // goishlint:ignore GOISH020 Reader.init — one fewer parameter. Go's `init(rdr, size)` assigns `r.r = rdr` as its first act; goish's Reader OWNS its reader, so `NewReader` has already stored it and `init` reads `self.r`. Nothing else differs.
 // goishlint:ignore GOISH019 Reader — three fields absent: `decompressors`, `fileListOnce` and `fileList`. The first is the per-Reader decompressor override map RegisterDecompressor fills, and the other two are the lazily-built fs.FS entry index; all three belong to methods that are not in this slice, and nothing here reads them.
 // goishlint:ignore GOISH018 init — Reader.init IS ported, as an inherent method on the generic `Reader<R>`; the rule reads the bare Go name `init` (Go's package-level init hook shares the spelling) and does not see the method.
 // goishlint:ignore GOISH020 File.findBodyOffset, File.DataOffset, File.OpenRaw — the receiver moved. In Go these are methods on *File, which carries `zipr`, the io.ReaderAt it SHARES with its Reader — an interface value costs nothing to copy. goish's Reader owns its reader, and a File holding a borrow would tie every File's lifetime to the Reader it came from, so the three move onto the Reader and take the File as a parameter. The bodies are unchanged. A caller who wants Go's spelling passes a shareable reader — `Arc<sync::Mutex<R>>` is an `io::ReaderAt` for exactly this, see the note in io/io.rs.
 // goishlint:ignore GOISH018 findBodyOffset — IS ported, as `Reader::findBodyOffset`; the receiver moved from *File to *Reader for the reason in the GOISH020 waiver above, and the rule matches on the bare Go name against methods declared on a File.
-// go: file archive/zip/reader.go decls: File.findBodyOffset, File.DataOffset, File.OpenRaw, dirReader.Read, dirReader.Close, NewReader, Reader.init, readDirectoryEnd, findDirectory64End, readDirectory64End, readDirectoryHeader, readDataDescriptor, findSignatureInBlock, readBuf.uint8, readBuf.uint16, readBuf.uint32, readBuf.uint64, readBuf.sub, toValidName, fileEntryCompare, split
+// goishlint:ignore GOISH020 File.Open — the receiver moved, same reason as findBodyOffset: Go's *File shares the Reader's io.ReaderAt through its own `zipr` field, and goish's Reader owns it.
+// go: file archive/zip/reader.go decls: File.Open, Reader.decompressor, checksumReader.Read, checksumReader.Close, File.findBodyOffset, File.DataOffset, File.OpenRaw, dirReader.Read, dirReader.Close, NewReader, Reader.init, readDirectoryEnd, findDirectory64End, readDirectory64End, readDirectoryHeader, readDataDescriptor, findSignatureInBlock, readBuf.uint8, readBuf.uint16, readBuf.uint32, readBuf.uint64, readBuf.sub, toValidName, fileEntryCompare, split
 //
 // archive/zip/reader.go — the parsing half.
 //
@@ -51,6 +52,8 @@ use crate::goslice::slice;
 use crate::gostring::string;
 use crate::int;
 use crate::int64;
+use crate::hash::Hash32;
+use crate::io::Writer as __IoWriter;
 use crate::time;
 use crate::uint16;
 use crate::uint32;
@@ -887,6 +890,13 @@ impl crate::io::Reader for dirReader {
     }
 }
 
+impl crate::io::Closer for dirReader {
+    // go: none — goish idiom: see the Reader impl above.
+    fn Close(&mut self) -> crate::error {
+        return dirReader::Close(self);
+    }
+}
+
 impl<R: crate::io::ReaderAt + Clone + 'static> Reader<R> {
     // go: sdk 1.25.5 archive/zip/reader.go:337-351 File.findBodyOffset
     /// Go: "findBodyOffset does the minimum work to verify the file has
@@ -945,5 +955,185 @@ impl<R: crate::io::ReaderAt + Clone + 'static> Reader<R> {
             int64(f.FileHeader.CompressedSize64),
         );
         return (Some(rs), errors::nil);
+    }
+}
+
+// go: sdk 1.25.5 archive/zip/reader.go:282-290 checksumReader
+/// Go: the wrapper `File.Open` returns. It counts what it hands out,
+/// CRC-32s it, and at EOF decides whether the archive told the truth.
+pub struct checksumReader {
+    pub rc: alloc::boxed::Box<dyn crate::io::ReadCloser>,
+    pub hash: crate::hash::crc32::digest,
+    /// Go: "number of bytes read so far"
+    pub nread: uint64,
+    pub f: File,
+    /// Go: "if non-nil, where to read the data descriptor"
+    pub desr: Option<crate::io::SectionReader>,
+    /// Go: "sticky error"
+    pub err: crate::error,
+}
+
+impl checksumReader {
+    // go: sdk 1.25.5 archive/zip/reader.go:293-333 checksumReader.Read
+    /// Go: the three ways an entry can lie, in order. Reading MORE than
+    /// the declared uncompressed size is ErrFormat and is caught before
+    /// EOF; reading fewer bytes and then hitting EOF is
+    /// io.ErrUnexpectedEOF; and a CRC that does not match is
+    /// ErrChecksum.
+    ///
+    /// The last has a wrinkle Go spells out: with no data descriptor the
+    /// CRC is only checked when it "seems like it was set" — a recorded
+    /// CRC of ZERO is taken as absent, so an archive that omits it reads
+    /// clean.
+    pub fn Read(&mut self, b: &mut slice<byte>) -> (int, crate::error) {
+        if self.err != errors::nil {
+            return (0, self.err.clone());
+        }
+        let (n, err) = self.rc.Read(b);
+        let mut err = err;
+        self.hash.Write(b.slice(0, n));
+        self.nread += uint64(n);
+        if self.nread > self.f.FileHeader.UncompressedSize64 {
+            return (0, ErrFormat.clone().into());
+        }
+        if err == errors::nil {
+            return (n, err);
+        }
+        if errors::Is(err.clone(), crate::io::EOF) {
+            if self.nread != self.f.FileHeader.UncompressedSize64 {
+                return (0, crate::io::ErrUnexpectedEOF.into());
+            }
+            match &mut self.desr {
+                Some(desr) => {
+                    let err1 = readDataDescriptor(desr, &self.f);
+                    if err1 != errors::nil {
+                        if errors::Is(err1.clone(), crate::io::EOF) {
+                            err = crate::io::ErrUnexpectedEOF.into();
+                        } else {
+                            err = err1;
+                        }
+                    } else if self.hash.Sum32() != self.f.FileHeader.CRC32 {
+                        err = ErrChecksum.clone().into();
+                    }
+                }
+                None => {
+                    // Go: "If there's not a data descriptor, we still
+                    // compare the CRC32 of what we've read against the
+                    // file header or TOC's CRC32, if it seems like it
+                    // was set."
+                    if self.f.FileHeader.CRC32 != 0
+                        && self.hash.Sum32() != self.f.FileHeader.CRC32
+                    {
+                        err = ErrChecksum.clone().into();
+                    }
+                }
+            }
+        }
+        self.err = err.clone();
+        return (n, err);
+    }
+
+    // go: sdk 1.25.5 archive/zip/reader.go:335-335 checksumReader.Close
+    /// Go: `return r.rc.Close()`.
+    pub fn Close(&mut self) -> crate::error {
+        return self.rc.Close();
+    }
+}
+
+impl crate::io::Reader for checksumReader {
+    // go: none — goish idiom: Go's *checksumReader satisfies
+    // io.ReadCloser by having the methods; Rust needs the trait impls.
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, crate::error) {
+        return checksumReader::Read(self, p);
+    }
+}
+
+impl crate::io::Closer for checksumReader {
+    // go: none — goish idiom: see the Reader impl above.
+    fn Close(&mut self) -> crate::error {
+        return checksumReader::Close(self);
+    }
+}
+
+impl<R: crate::io::ReaderAt + Clone + 'static> Reader<R> {
+    // go: sdk 1.25.5 archive/zip/reader.go:190-196 Reader.decompressor
+    /// Go: the per-Reader override map first, then the package-level
+    /// registry. goish has only the second — see this file's GOISH019
+    /// waiver for the absent `decompressors` field, which arrives with
+    /// Reader.RegisterDecompressor.
+    pub fn decompressor(&self, method: uint16) -> Option<super::register::Decompressor> {
+        return super::register::decompressor(method);
+    }
+
+    // go: sdk 1.25.5 archive/zip/reader.go:215-257 File.Open
+    /// Go: "Open returns a ReadCloser that provides access to the
+    /// File's contents. Multiple files may be read concurrently."
+    ///
+    /// The directory case is worth reading in full, because Go's own
+    /// comment records a bug it had to back out: "We previously tried
+    /// failing here if f.CompressedSize64 != 0, but it turns out that a
+    /// number of implementations (namely, the Java jar tool) don't
+    /// properly set the storage method on directories resulting in a
+    /// file with compressed size > 0 but uncompressed size == 0. We
+    /// still want to fail when a directory has associated uncompressed
+    /// data, but we are tolerant of cases where the uncompressed size
+    /// is zero but compressed size is not." So a directory with a
+    /// non-zero COMPRESSED size opens and reads EOF, and one with a
+    /// non-zero UNCOMPRESSED size opens and reads ErrFormat.
+    pub fn Open(
+        &mut self,
+        f: &File,
+    ) -> (Option<alloc::boxed::Box<dyn crate::io::ReadCloser>>, crate::error) {
+        let (bodyOffset, err) = self.findBodyOffset(f);
+        if err != errors::nil {
+            return (None, err);
+        }
+        if crate::strings::HasSuffix(f.FileHeader.Name.clone(), "/") {
+            if f.FileHeader.UncompressedSize64 != 0 {
+                return (
+                    Some(alloc::boxed::Box::new(dirReader {
+                        err: ErrFormat.clone().into(),
+                    })),
+                    errors::nil,
+                );
+            } else {
+                return (
+                    Some(alloc::boxed::Box::new(dirReader {
+                        err: crate::io::EOF.into(),
+                    })),
+                    errors::nil,
+                );
+            }
+        }
+        let size = int64(f.FileHeader.CompressedSize64);
+        let r = crate::io::NewSectionReader(
+            alloc::boxed::Box::new(self.r.clone()),
+            f.headerOffset + bodyOffset,
+            size,
+        );
+        let dcomp = match self.decompressor(f.FileHeader.Method) {
+            Some(d) => d,
+            None => return (None, ErrAlgorithm.clone().into()),
+        };
+        let rc = dcomp(alloc::boxed::Box::new(r));
+        let mut desr: Option<crate::io::SectionReader> = None;
+        if f.FileHeader.hasDataDescriptor() {
+            desr = Some(crate::io::NewSectionReader(
+                alloc::boxed::Box::new(self.r.clone()),
+                f.headerOffset + bodyOffset + size,
+                dataDescriptorLen,
+            ));
+        }
+        return (
+            Some(alloc::boxed::Box::new(checksumReader {
+                rc,
+                hash: crate::hash::crc32::NewIEEE(),
+                nread: 0,
+                f: f.clone(),
+                desr,
+                err: errors::nil,
+            })),
+            errors::nil,
+        );
     }
 }
