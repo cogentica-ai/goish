@@ -88,10 +88,11 @@ pub struct Name {
 // registry, so the descriptor is spelled out here, next to the struct
 // it describes.
 //
-// The name is the PACKAGE-QUALIFIED "xml.Name" because goish's
-// `Type` has a single name field where Go has both `Name()` and
-// `String()`, and typeinfo.go's error text interpolates the String()
-// form. Nothing reads `Name()` on these descriptors.
+// The package qualifier is carried separately, via `__with_pkg`, so
+// `Name()` is "Name" and `String()` is "xml.Name" — Go has both and
+// uses them for different things (encoding/xml puts `Name()` into an
+// element name and `String()` into error text). goish's `Type` used to
+// have one field for both; the split landed with this port.
 static NAME_FIELDS: [crate::reflect::StructField; 2] = [
     crate::reflect::StructField {
         Name: "Space",
@@ -114,9 +115,10 @@ impl crate::reflect::Reflect for Name {
     fn __reflect_type() -> crate::reflect::Type {
         return crate::reflect::Type::__new(
             crate::reflect::Kind::Struct,
-            "xml.Name",
+            "Name",
             &NAME_FIELDS,
-        );
+        )
+        .__with_pkg("xml");
     }
 
     // go: none — goish-only: see the banner above.

@@ -1,7 +1,9 @@
 // goishlint:ignore GOISH018 Marshal, MarshalIndent, Encoder.Encode, Encoder.EncodeElement, printer.marshalValue, printer.marshalAttr, defaultStart, printer.marshalInterface, printer.marshalTextInterface, printer.marshalSimple, indirect, printer.marshalStruct, isEmptyValue, parentStack.trim, parentStack.push, UnsupportedTypeError.Error — the REFLECT half of marshal.go, deliberately not in this slice. Everything here writes tokens a caller already has; those walk a reflect.Value to produce them, need Marshaler/MarshalerAttr/TextMarshaler interface dispatch, and land together with read.go's matching half so the two can be pinned against Go on the same struct set.
 // goishlint:ignore GOISH021 Marshaler, MarshalerAttr, UnsupportedTypeError, parentStack, marshalerType, marshalerAttrType, textMarshalerType, ddBytes — the types the absent reflect half needs and nothing in this slice references.
 // goishlint:ignore GOISH019 printer — one field absent, `encoder`. Go sets `e.p.encoder = e` so the printer can call back into Encoder.EncodeElement when it meets a Marshaler; that is a self-referential pointer Rust will not form, and its only reader is marshalValue, which is absent above. It comes back as a parameter when the reflect half lands.
-// go: file encoding/xml/marshal.go decls: NewEncoder, Encoder.Indent, Encoder.EncodeToken, isValidDirective, Encoder.Flush, Encoder.Close, printer.createAttrPrefix, printer.deleteAttrPrefix, printer.markPrefix, printer.popPrefix, printer.writeStart, printer.writeEnd, printer.Write, printer.WriteString, printer.WriteByte, printer.Close, printer.cachedWriteError, printer.writeIndent
+// goishlint:ignore GOISH020 parentStack.trim, parentStack.push — one extra parameter each, the printer Go reaches through the `p` field on its parentStack; goish's parentStack carries only the stack, because a struct holding `&mut printer` would tie the stack's lifetime to the printer for no gain.
+// goishlint:ignore GOISH019 parentStack — one field absent, `p`. Same reason as the GOISH020 waiver above: the printer is a parameter here, not a back-pointer.
+// go: file encoding/xml/marshal.go decls: UnsupportedTypeError.Error, isEmptyValue, indirect, defaultStart, parentStack.trim, parentStack.push, printer.marshalSimple, printer.marshalTextInterface, NewEncoder, Encoder.Indent, Encoder.EncodeToken, isValidDirective, Encoder.Flush, Encoder.Close, printer.createAttrPrefix, printer.deleteAttrPrefix, printer.markPrefix, printer.popPrefix, printer.writeStart, printer.writeEnd, printer.Write, printer.WriteString, printer.WriteByte, printer.Close, printer.cachedWriteError, printer.writeIndent
 //
 // encoding/xml/marshal.go — the TOKEN PRINTER half.
 //
@@ -34,6 +36,7 @@
 
 extern crate alloc;
 
+use super::typeinfo::fieldInfo;
 use super::xml::{isName, isNameString, Attr, Name, StartElement, Token};
 use crate::byte;
 use crate::bytes;
@@ -549,5 +552,295 @@ impl<W: io::Writer> io::Writer for printer<W> {
     // escapers (which take a W: io::Writer) can write through it.
     fn Write(&mut self, p: slice<byte>) -> (int, crate::error) {
         return printer::Write(self, p);
+    }
+}
+
+// ─── the leaf half of the reflect side ────────────────────────────────
+//
+// These are the functions marshalValue reaches that do NOT need the
+// reflect capabilities goish lacks. marshalValue itself, marshalStruct,
+// marshalAttr and marshalInterface do; see the GOISH018 waiver at the
+// head of this file and ROADMAP §2.
+
+// go: sdk 1.25.5 encoding/xml/marshal.go:1113-1115 UnsupportedTypeError
+/// Go: "UnsupportedTypeError is returned when [Marshal] encounters a
+/// type that cannot be converted into XML."
+#[derive(Clone)]
+pub struct UnsupportedTypeError {
+    pub Type: crate::reflect::Type,
+}
+
+impl UnsupportedTypeError {
+    // go: sdk 1.25.5 encoding/xml/marshal.go:1117-1119 UnsupportedTypeError.Error
+    /// Go: `"xml: unsupported type: " + e.Type.String()`
+    pub fn Error(&self) -> string {
+        return string::from_static("xml: unsupported type: ") + self.Type.String();
+    }
+}
+
+impl errors::ErrorTrait for UnsupportedTypeError {
+    // go: none — goish idiom: Go satisfies `error` by having the method.
+    fn Error(&self) -> string {
+        return UnsupportedTypeError::Error(self);
+    }
+}
+
+// go: sdk 1.25.5 encoding/xml/marshal.go:818-818 ddBytes
+/// Go: `var ddBytes = []byte("--")` — the comment terminator
+/// marshalStruct writes around a `,comment` field's text.
+pub const ddBytes: &[byte] = b"--";
+
+// go: sdk 1.25.5 encoding/xml/marshal.go:1121-1133 isEmptyValue
+/// Go: the `,omitempty` test. Note what it is NOT: a struct is never
+/// empty, whatever its fields hold, and a non-nil pointer to a zero
+/// value is not empty either.
+pub fn isEmptyValue(v: &crate::reflect::Value) -> bool {
+    use crate::reflect::Kind;
+    match v.Kind() {
+        Kind::Array | Kind::Map | Kind::Slice | Kind::String => {
+            return v.Len() == 0;
+        }
+        Kind::Bool
+        | Kind::Int
+        | Kind::Int8
+        | Kind::Int16
+        | Kind::Int32
+        | Kind::Int64
+        | Kind::Uint
+        | Kind::Uint8
+        | Kind::Uint16
+        | Kind::Uint32
+        | Kind::Uint64
+        | Kind::Uintptr
+        | Kind::Float32
+        | Kind::Float64
+        | Kind::Interface
+        | Kind::Pointer => {
+            return v.IsZero();
+        }
+        _ => {}
+    }
+    return false;
+}
+
+// go: sdk 1.25.5 encoding/xml/marshal.go:824-832 indirect
+/// Go: "indirect drills into interfaces and pointers, returning the
+/// pointed-at value. If it encounters a nil interface or pointer,
+/// indirect returns that nil value. This can turn into an infinite loop
+/// given a cyclic chain, but it matches the Go 1 behavior."
+pub fn indirect(vf: crate::reflect::Value) -> crate::reflect::Value {
+    use crate::reflect::Kind;
+    let mut vf = vf;
+    while vf.Kind() == Kind::Interface || vf.Kind() == Kind::Pointer {
+        if vf.IsNil() {
+            return vf;
+        }
+        vf = vf.Elem();
+    }
+    return vf;
+}
+
+// go: sdk 1.25.5 encoding/xml/marshal.go:665-685 defaultStart
+/// Go: "defaultStart returns the default start element to use, given
+/// the reflect type, field info, and start template."
+///
+/// Go's comment on the precedence: "as above, except that we do not
+/// look inside structs for the first field" — so a template beats a
+/// field tag beats the type's own name, and a pointer falls through to
+/// its element's name because only a pointer can carry the Marshaler
+/// methods that got us here.
+pub fn defaultStart(
+    typ: crate::reflect::Type,
+    finfo: Option<&fieldInfo>,
+    startTemplate: Option<&StartElement>,
+) -> StartElement {
+    let mut start = StartElement::default();
+    match startTemplate {
+        Some(t) => {
+            start.Name = t.Name.clone();
+            start.Attr = crate::append!(start.Attr.clone(), t.Attr.clone()...);
+        }
+        None => match finfo {
+            Some(f) if f.name.Len() != 0 => {
+                start.Name.Local = f.name.clone();
+                start.Name.Space = f.xmlns.clone();
+            }
+            _ => {
+                if typ.Name().Len() != 0 {
+                    start.Name.Local = typ.Name();
+                } else {
+                    // Go: "Must be a pointer to a named type, since it
+                    // has the Marshaler methods."
+                    start.Name.Local = typ.Elem().Name();
+                }
+            }
+        },
+    }
+    return start;
+}
+
+// go: sdk 1.25.5 encoding/xml/marshal.go:1076-1079 parentStack
+/// Go: the `a>b>c` chain marshalStruct keeps open between fields.
+///
+/// Go's struct carries a `p *printer` back-pointer; goish's carries only
+/// the stack and takes the printer as a parameter, because the printer
+/// owns its writer and a struct holding `&mut printer` would tie the
+/// stack's lifetime to it for no gain.
+#[derive(Clone, Default)]
+pub struct parentStack {
+    pub stack: slice<string>,
+}
+
+impl parentStack {
+    // go: sdk 1.25.5 encoding/xml/marshal.go:1084-1098 parentStack.trim
+    /// Go: "trim updates the XML context to match the longest common
+    /// prefix of the stack and the given parents. A closing tag will be
+    /// written for every parent popped. Passing a zero slice or nil
+    /// will close all the elements."
+    pub fn trim<W: io::Writer>(
+        &mut self,
+        p: &mut printer<W>,
+        parents: &slice<string>,
+    ) -> crate::error {
+        let mut split: int = 0;
+        while split < parents.Len() && split < self.stack.Len() {
+            if parents[split] != self.stack[split] {
+                break;
+            }
+            split += 1;
+        }
+        let mut i: int = self.stack.Len() - 1;
+        while i >= split {
+            let err = p.writeEnd(Name {
+                Space: string::from_static(""),
+                Local: self.stack[i].clone(),
+            });
+            if err != errors::nil {
+                return err;
+            }
+            i -= 1;
+        }
+        self.stack = self.stack.slice(0, split);
+        return errors::nil;
+    }
+
+    // go: sdk 1.25.5 encoding/xml/marshal.go:1101-1109 parentStack.push
+    /// Go: "push adds parent elements to the stack and writes open tags."
+    pub fn push<W: io::Writer>(
+        &mut self,
+        p: &mut printer<W>,
+        parents: &slice<string>,
+    ) -> crate::error {
+        let mut i: int = 0;
+        while i < parents.Len() {
+            let err = p.writeStart(&StartElement {
+                Name: Name {
+                    Space: string::from_static(""),
+                    Local: parents[i].clone(),
+                },
+                Attr: crate::slice!([]Attr{}),
+            });
+            if err != errors::nil {
+                return err;
+            }
+            i += 1;
+        }
+        self.stack = crate::append!(self.stack.clone(), parents.clone()...);
+        return errors::nil;
+    }
+}
+
+impl<W: io::Writer> printer<W> {
+    // go: sdk 1.25.5 encoding/xml/marshal.go:783-816 printer.marshalSimple
+    /// Go: renders a scalar (or a byte slice) as the text between a
+    /// start and an end tag. Everything it cannot render is an
+    /// `UnsupportedTypeError`, which is where Marshal's "unsupported
+    /// type" comes from.
+    ///
+    /// goish's `reflect::Value` has no Array variant, so Go's
+    /// `[...]byte` case cannot be reached from here; the `Kind::Array`
+    /// arm is written the way Go writes it and falls through to the
+    /// error, which is what Go does for a non-byte array too.
+    pub fn marshalSimple(
+        &self,
+        typ: crate::reflect::Type,
+        val: &crate::reflect::Value,
+    ) -> (string, slice<byte>, crate::error) {
+        use crate::reflect::Kind;
+        match val.Kind() {
+            Kind::Int | Kind::Int8 | Kind::Int16 | Kind::Int32 | Kind::Int64 => {
+                return (
+                    crate::strconv::FormatInt(val.Int(), 10),
+                    slice::default(),
+                    errors::nil,
+                );
+            }
+            Kind::Uint
+            | Kind::Uint8
+            | Kind::Uint16
+            | Kind::Uint32
+            | Kind::Uint64
+            | Kind::Uintptr => {
+                return (
+                    crate::strconv::FormatUint(val.Uint(), 10),
+                    slice::default(),
+                    errors::nil,
+                );
+            }
+            Kind::Float32 | Kind::Float64 => {
+                // Go: `val.Type().Bits()`. goish's reflect::Type has no
+                // Bits(), and the Kind already carries the width.
+                let bits: int = if val.Kind() == Kind::Float32 { 32 } else { 64 };
+                return (
+                    crate::strconv::FormatFloat(val.Float(), b'g', -1, bits),
+                    slice::default(),
+                    errors::nil,
+                );
+            }
+            Kind::String => {
+                return (val.String(), slice::default(), errors::nil);
+            }
+            Kind::Bool => {
+                return (
+                    crate::strconv::FormatBool(val.Bool()),
+                    slice::default(),
+                    errors::nil,
+                );
+            }
+            Kind::Slice => {
+                if typ.Elem().Kind() == Kind::Uint8 {
+                    // Go: "[]byte"
+                    return (string::from_static(""), val.Bytes(), errors::nil);
+                }
+            }
+            _ => {}
+        }
+        return (
+            string::from_static(""),
+            slice::default(),
+            errors::Wrap(UnsupportedTypeError { Type: typ }),
+        );
+    }
+
+    // go: sdk 1.25.5 encoding/xml/marshal.go:706-718 printer.marshalTextInterface
+    /// Go: "marshalTextInterface marshals a TextMarshaler interface
+    /// value." Start tag, escaped text, end tag — and the escaping is
+    /// EscapeText's, so a newline becomes `&#xA;` here where character
+    /// data through EncodeToken keeps it.
+    pub fn marshalTextInterface<T: crate::encoding::TextMarshaler + ?Sized>(
+        &mut self,
+        val: &T,
+        start: StartElement,
+    ) -> crate::error {
+        let err = self.writeStart(&start);
+        if err != errors::nil {
+            return err;
+        }
+        let (text, err) = val.MarshalText();
+        if err != errors::nil {
+            return err;
+        }
+        super::xml::EscapeText(self, text.as_ref());
+        return self.writeEnd(start.Name);
     }
 }

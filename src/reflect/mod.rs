@@ -391,6 +391,19 @@ pub struct StructField {
 pub struct Type {
     kind: Kind,
     name: &'static str,
+    /// Package qualifier, `""` when unset. Go's `reflect.Type` has BOTH
+    /// `Name()` (unqualified, "Name") and `String()` (qualified,
+    /// "xml.Name"), and they are used for different things — encoding/xml
+    /// puts `Name()` into an ELEMENT NAME and `String()` into error text.
+    /// goish had one field for both, so a descriptor could satisfy one
+    /// caller or the other and not both: naming it "xml.msStruct" for the
+    /// error text made `defaultStart` emit `<xml.msStruct>` where Go
+    /// emits `<msStruct>`. Measured 2026-09-15 against Go's defaultStart.
+    ///
+    /// It is also the missing half of Type's IDENTITY. Eq/Ord/Hash
+    /// compare `(kind, name)`, so two structs named `Name` in different
+    /// packages were the same type; with the qualifier they are not.
+    pkg: &'static str,
     fields: &'static [StructField],
     elem: Option<fn() -> Type>,
     key: Option<fn() -> Type>,
@@ -398,7 +411,7 @@ pub struct Type {
 
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
-        self.kind == other.kind && self.name == other.name
+        self.kind == other.kind && self.name == other.name && self.pkg == other.pkg
     }
 }
 impl Eq for Type {}
@@ -409,12 +422,13 @@ impl PartialOrd for Type {
 }
 impl Ord for Type {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        (self.kind as u8, self.name).cmp(&(other.kind as u8, other.name))
+        (self.kind as u8, self.pkg, self.name).cmp(&(other.kind as u8, other.pkg, other.name))
     }
 }
 impl core::hash::Hash for Type {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         (self.kind as u8).hash(state);
+        self.pkg.hash(state);
         self.name.hash(state);
     }
 }
@@ -432,10 +446,19 @@ impl Type {
         Self {
             kind,
             name,
+            pkg: "",
             fields,
             elem: None,
             key: None,
         }
+    }
+
+    // go: none — goish-only: sets the package qualifier `String()`
+    // prepends. See the `pkg` field. A descriptor that omits it behaves
+    // exactly as before.
+    #[doc(hidden)]
+    pub const fn __with_pkg(self, pkg: &'static str) -> Self {
+        return Self { pkg, ..self };
     }
 
     /// Builder hook for slice/pointer/map element types.
@@ -734,8 +757,13 @@ impl Type {
             _ => {
                 if self.name.is_empty() {
                     self.kind.String()
-                } else {
+                } else if self.pkg.is_empty() {
                     string::from_static(self.name)
+                } else {
+                    // Go's `String()` is the package-qualified name.
+                    string::from_static(self.pkg)
+                        + string::from_static(".")
+                        + string::from_static(self.name)
                 }
             }
         }
@@ -956,7 +984,14 @@ impl Value {
             Value::Slice { items, .. } => items.is_empty(),
             Value::Map { entries, .. } => entries.is_empty(),
             Value::Struct { fields, .. } => fields.iter().all(Value::IsZero),
-            Value::Pointer(_) => false,
+            // Go: `reflect.ValueOf((*int)(nil)).IsZero()` is TRUE — a
+            // nil pointer IS the zero value of its type, and goish
+            // spells nil as `Pointer(Invalid)` (see `IsNil`). This used
+            // to answer `false` for every pointer, which made
+            // encoding/xml's `,omitempty` emit an element for a nil
+            // pointer field. Measured 2026-09-15 against Go's
+            // isEmptyValue.
+            Value::Pointer(inner) => matches!(**inner, Value::Invalid),
         }
     }
 

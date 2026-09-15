@@ -84,7 +84,8 @@ static F_tiPlain: [goish::reflect::StructField; 2] = [
 ];
 // go: none
 fn ty_tiPlain() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiPlain", &F_tiPlain);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiPlain", &F_tiPlain)
+        .__with_pkg("xml");
 }
 
 static F_tiAttr: [goish::reflect::StructField; 2] = [
@@ -105,7 +106,8 @@ static F_tiAttr: [goish::reflect::StructField; 2] = [
 ];
 // go: none
 fn ty_tiAttr() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiAttr", &F_tiAttr);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiAttr", &F_tiAttr)
+        .__with_pkg("xml");
 }
 
 static F_tiNS: [goish::reflect::StructField; 2] = [
@@ -126,7 +128,8 @@ static F_tiNS: [goish::reflect::StructField; 2] = [
 ];
 // go: none
 fn ty_tiNS() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiNS", &F_tiNS);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiNS", &F_tiNS)
+        .__with_pkg("xml");
 }
 
 static F_tiModes: [goish::reflect::StructField; 5] = [
@@ -168,7 +171,8 @@ static F_tiModes: [goish::reflect::StructField; 5] = [
 ];
 // go: none
 fn ty_tiModes() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiModes", &F_tiModes);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiModes", &F_tiModes)
+        .__with_pkg("xml");
 }
 
 static F_tiOmit: [goish::reflect::StructField; 2] = [
@@ -189,7 +193,8 @@ static F_tiOmit: [goish::reflect::StructField; 2] = [
 ];
 // go: none
 fn ty_tiOmit() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiOmit", &F_tiOmit);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiOmit", &F_tiOmit)
+        .__with_pkg("xml");
 }
 
 static F_tiOmitBad: [goish::reflect::StructField; 1] = [
@@ -203,7 +208,8 @@ static F_tiOmitBad: [goish::reflect::StructField; 1] = [
 ];
 // go: none
 fn ty_tiOmitBad() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiOmitBad", &F_tiOmitBad);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiOmitBad", &F_tiOmitBad)
+        .__with_pkg("xml");
 }
 
 static F_tiTwoModes: [goish::reflect::StructField; 1] = [
@@ -217,7 +223,8 @@ static F_tiTwoModes: [goish::reflect::StructField; 1] = [
 ];
 // go: none
 fn ty_tiTwoModes() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiTwoModes", &F_tiTwoModes);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiTwoModes", &F_tiTwoModes)
+        .__with_pkg("xml");
 }
 
 static F_tiAnyAttr: [goish::reflect::StructField; 1] = [
@@ -231,7 +238,8 @@ static F_tiAnyAttr: [goish::reflect::StructField; 1] = [
 ];
 // go: none
 fn ty_tiAnyAttr() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiAnyAttr", &F_tiAnyAttr);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiAnyAttr", &F_tiAnyAttr)
+        .__with_pkg("xml");
 }
 
 static F_tiNamedMode: [goish::reflect::StructField; 1] = [
@@ -245,7 +253,8 @@ static F_tiNamedMode: [goish::reflect::StructField; 1] = [
 ];
 // go: none
 fn ty_tiNamedMode() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiNamedMode", &F_tiNamedMode);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiNamedMode", &F_tiNamedMode)
+        .__with_pkg("xml");
 }
 
 static F_tiNamedAttr: [goish::reflect::StructField; 1] = [
@@ -259,7 +268,8 @@ static F_tiNamedAttr: [goish::reflect::StructField; 1] = [
 ];
 // go: none
 fn ty_tiNamedAttr() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiNamedAttr", &F_tiNamedAttr);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiNamedAttr", &F_tiNamedAttr)
+        .__with_pkg("xml");
 }
 
 static F_tiSkip: [goish::reflect::StructField; 2] = [
@@ -280,7 +290,8 @@ static F_tiSkip: [goish::reflect::StructField; 2] = [
 ];
 // go: none
 fn ty_tiSkip() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiSkip", &F_tiSkip);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiSkip", &F_tiSkip)
+        .__with_pkg("xml");
 }
 
 static F_tiPath: [goish::reflect::StructField; 2] = [
@@ -301,7 +312,8 @@ static F_tiPath: [goish::reflect::StructField; 2] = [
 ];
 // go: none
 fn ty_tiPath() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiPath", &F_tiPath);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiPath", &F_tiPath)
+        .__with_pkg("xml");
 }
 
 static F_tiTrailing: [goish::reflect::StructField; 1] = [
@@ -315,7 +327,8 @@ static F_tiTrailing: [goish::reflect::StructField; 1] = [
 ];
 // go: none
 fn ty_tiTrailing() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiTrailing", &F_tiTrailing);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiTrailing", &F_tiTrailing)
+        .__with_pkg("xml");
 }
 
 static F_tiPathMode: [goish::reflect::StructField; 1] = [
@@ -329,7 +342,8 @@ static F_tiPathMode: [goish::reflect::StructField; 1] = [
 ];
 // go: none
 fn ty_tiPathMode() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiPathMode", &F_tiPathMode);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiPathMode", &F_tiPathMode)
+        .__with_pkg("xml");
 }
 
 static F_tiEmptyHead: [goish::reflect::StructField; 1] = [
@@ -343,7 +357,8 @@ static F_tiEmptyHead: [goish::reflect::StructField; 1] = [
 ];
 // go: none
 fn ty_tiEmptyHead() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiEmptyHead", &F_tiEmptyHead);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiEmptyHead", &F_tiEmptyHead)
+        .__with_pkg("xml");
 }
 
 static F_tiNsNoName: [goish::reflect::StructField; 1] = [
@@ -357,7 +372,8 @@ static F_tiNsNoName: [goish::reflect::StructField; 1] = [
 ];
 // go: none
 fn ty_tiNsNoName() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiNsNoName", &F_tiNsNoName);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiNsNoName", &F_tiNsNoName)
+        .__with_pkg("xml");
 }
 
 static F_tiXMLName: [goish::reflect::StructField; 2] = [
@@ -378,7 +394,8 @@ static F_tiXMLName: [goish::reflect::StructField; 2] = [
 ];
 // go: none
 fn ty_tiXMLName() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiXMLName", &F_tiXMLName);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiXMLName", &F_tiXMLName)
+        .__with_pkg("xml");
 }
 
 static F_tiXMLNameNS: [goish::reflect::StructField; 2] = [
@@ -399,7 +416,8 @@ static F_tiXMLNameNS: [goish::reflect::StructField; 2] = [
 ];
 // go: none
 fn ty_tiXMLNameNS() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiXMLNameNS", &F_tiXMLNameNS);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiXMLNameNS", &F_tiXMLNameNS)
+        .__with_pkg("xml");
 }
 
 static F_tiXMLNameBad: [goish::reflect::StructField; 1] = [
@@ -413,7 +431,8 @@ static F_tiXMLNameBad: [goish::reflect::StructField; 1] = [
 ];
 // go: none
 fn ty_tiXMLNameBad() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiXMLNameBad", &F_tiXMLNameBad);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiXMLNameBad", &F_tiXMLNameBad)
+        .__with_pkg("xml");
 }
 
 static F_tiInner: [goish::reflect::StructField; 2] = [
@@ -434,7 +453,8 @@ static F_tiInner: [goish::reflect::StructField; 2] = [
 ];
 // go: none
 fn ty_tiInner() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiInner", &F_tiInner);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiInner", &F_tiInner)
+        .__with_pkg("xml");
 }
 
 static F_tiHasInner: [goish::reflect::StructField; 1] = [
@@ -448,7 +468,8 @@ static F_tiHasInner: [goish::reflect::StructField; 1] = [
 ];
 // go: none
 fn ty_tiHasInner() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiHasInner", &F_tiHasInner);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiHasInner", &F_tiHasInner)
+        .__with_pkg("xml");
 }
 
 static F_tiHasInnerBad: [goish::reflect::StructField; 1] = [
@@ -462,7 +483,8 @@ static F_tiHasInnerBad: [goish::reflect::StructField; 1] = [
 ];
 // go: none
 fn ty_tiHasInnerBad() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiHasInnerBad", &F_tiHasInnerBad);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiHasInnerBad", &F_tiHasInnerBad)
+        .__with_pkg("xml");
 }
 
 static F_tiHasInnerDefault: [goish::reflect::StructField; 1] = [
@@ -476,7 +498,8 @@ static F_tiHasInnerDefault: [goish::reflect::StructField; 1] = [
 ];
 // go: none
 fn ty_tiHasInnerDefault() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiHasInnerDefault", &F_tiHasInnerDefault);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiHasInnerDefault", &F_tiHasInnerDefault)
+        .__with_pkg("xml");
 }
 
 static F_tiConflict: [goish::reflect::StructField; 2] = [
@@ -497,7 +520,8 @@ static F_tiConflict: [goish::reflect::StructField; 2] = [
 ];
 // go: none
 fn ty_tiConflict() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiConflict", &F_tiConflict);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiConflict", &F_tiConflict)
+        .__with_pkg("xml");
 }
 
 static F_tiConflictNS: [goish::reflect::StructField; 2] = [
@@ -518,7 +542,8 @@ static F_tiConflictNS: [goish::reflect::StructField; 2] = [
 ];
 // go: none
 fn ty_tiConflictNS() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiConflictNS", &F_tiConflictNS);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiConflictNS", &F_tiConflictNS)
+        .__with_pkg("xml");
 }
 
 static F_tiPrefixConflict: [goish::reflect::StructField; 2] = [
@@ -539,7 +564,8 @@ static F_tiPrefixConflict: [goish::reflect::StructField; 2] = [
 ];
 // go: none
 fn ty_tiPrefixConflict() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiPrefixConflict", &F_tiPrefixConflict);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiPrefixConflict", &F_tiPrefixConflict)
+        .__with_pkg("xml");
 }
 
 static F_tiNoConflictMode: [goish::reflect::StructField; 2] = [
@@ -560,7 +586,8 @@ static F_tiNoConflictMode: [goish::reflect::StructField; 2] = [
 ];
 // go: none
 fn ty_tiNoConflictMode() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiNoConflictMode", &F_tiNoConflictMode);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiNoConflictMode", &F_tiNoConflictMode)
+        .__with_pkg("xml");
 }
 
 static F_tiPtr: [goish::reflect::StructField; 1] = [
@@ -574,7 +601,8 @@ static F_tiPtr: [goish::reflect::StructField; 1] = [
 ];
 // go: none
 fn ty_tiPtr() -> goish::reflect::Type {
-    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "xml.tiPtr", &F_tiPtr);
+    return goish::reflect::Type::__new(goish::reflect::Kind::Struct, "tiPtr", &F_tiPtr)
+        .__with_pkg("xml");
 }
 
 // go: none

@@ -1,0 +1,71 @@
+MS int0|30||
+MS int|2d3432||
+MS int8|2d313238||
+MS int16|3332373637||
+MS int32|2d32313437343833363438||
+MS uint|3138343436373434303733373039353531363135||
+MS uint8|323535||
+MS uint16|3635353335||
+MS uint32|34323934393637323935||
+MS f64-0|30||
+MS f64-half|302e35||
+MS f64-tenth|302e31||
+MS f64-1e21|31652b3231||
+MS f64-1e20|31652b3230||
+MS f64-1e-7|31652d3037||
+MS f64-neg|2d322e35||
+MS f64-big|312e37393736393331333438363233313537652b333038||
+MS f32-tenth|302e31||
+MS f32-1e21|31652b3231||
+MS f32-max|332e34303238323335652b3338||
+MS str|68693c263e||
+MS str-empty|||
+MS bool-t|74727565||
+MS bool-f|66616c7365||
+MS bytes||0001ff|
+MS bytes-empty|||
+MS slice-int|||xml: unsupported type: []int
+MS map|||xml: unsupported type: map[string]int
+MS struct|||xml: unsupported type: xml.msStruct
+IEV int0|true
+IEV int1|false
+IEV f0|true
+IEV f-neg0|true
+IEV f1|false
+IEV bool-f|true
+IEV bool-t|false
+IEV str-empty|true
+IEV str|false
+IEV slice-nil|true
+IEV slice-empty|true
+IEV slice-one|false
+IEV map-nil|true
+IEV map-empty|true
+IEV map-one|false
+IEV ptr-nil|true
+IEV ptr|false
+IEV struct|false
+IEV struct-set|false
+IND int|int|true
+IND ptr|int|true
+IND ptr-nil|ptr|true
+IND ptrptr|int|true
+IND str|string|true
+DS tmpl|6e73|746d706c|1
+DS finfo|666e73|666e|0
+DS finfo-empty||6d73537472756374|0
+DS typename||6d73537472756374|0
+DS ptr-typename||6d73537472756374|0
+PS push-trim|3c613e3c623e3c2f623e|
+PS push-empty||
+PS push-trim-all|3c613e3c623e3c633e3c2f633e3c2f623e3c2f613e|
+PS push-trim-diverge|3c613e3c623e3c2f623e|
+PS push-trim-longer|3c613e|
+PS push-push|3c613e3c623e|
+MTI plain|3c613e68693c2f613e|
+MTI escape|3c613e78266c743b26616d703b2667743b262333343b262333393b262378393b262378413b262378443b3c2f613e|
+MTI ns|3c6120786d6c6e733d22687474703a2f2f64223e763c2f613e|
+MTI attr|3c61206b3d2231223e763c2f613e|
+MTI noname||xml: start tag with no name
+UTE xml: unsupported type: xml.msStruct
+UTE xml: unsupported type: []int

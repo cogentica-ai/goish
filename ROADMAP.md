@@ -219,11 +219,53 @@ struct-tag interpreter) are ported and pinned against Go 1.25.5:
     xml_typeinfo_ref_smoke   29/29     every tag mode, every tag error, conflicts
     xml_encodetoken_ref      47/47     the token printer, prefixes, indent, directives
 
-What remains is the REFLECT half of both directions: `marshal.go`'s
-Marshal/Encode/marshalValue/marshalStruct and `read.go`'s matching
-Unmarshal side, plus the Marshaler / MarshalerAttr / TextMarshaler
-interface dispatch they share. Those two travel together so they can be
-pinned against Go on the same struct set.
+    xml_marshal_leaf_ref     71/71     marshalSimple, isEmptyValue, indirect, defaultStart, parentStack
+
+What remains is the TRAVERSAL: `marshal.go`'s Marshal / Encode /
+marshalValue / marshalStruct / marshalAttr, and `read.go`'s matching
+Unmarshal side.
+
+**It is blocked, and the blocker is in `reflect`, not in
+`encoding/xml`.** Verified 2026-09-15: Go's `marshalValue` dispatches
+on `typ.Implements(marshalerType)` and on `val.CanAddr()` /
+`val.Addr()`, four calls, and goish's reflect has NONE of `Implements`,
+`CanAddr`, `Addr`, `NumMethod` or `Method`. There is no way to ask a
+`reflect::Value` whether its type satisfies an interface, so
+MarshalXML / MarshalerAttr / MarshalText dispatch cannot be expressed
+at all — and a Marshal shipped without it would silently ignore every
+type that implements them, which is worse than not shipping one.
+`src/encoding/mod.rs` already says this in its own words ("we haven't
+yet wired runtime type-switch dispatch through these traits"); this is
+the first caller that needs it.
+
+`read.go` has the mirror problem one level worse: it WRITES through
+reflect, and goish's `Value` is a read-only deep clone ("Mutation
+requires the pointer-form and is deferred"). goish's answer elsewhere
+is the `FromReflectValue` / `Settable` traits, which is a different
+shape from Go's and would be a structural port rather than a faithful
+one.
+
+So the next move for encoding/xml is a reflect decision, not more xml.
+The minimum that unblocks marshal is a way to register and query
+interface satisfaction for `#[goish::reflect]` types.
+
+**Two reflect defects were found and fixed on the way here**, both by
+the leaf smoke rather than by reading:
+
+  * `Value::IsZero` answered `false` for EVERY pointer, including
+    goish's nil (`Pointer(Invalid)`). Go says a nil pointer IS zero,
+    so `,omitempty` emitted an element for a nil pointer field — and
+    the same accessor backs `encoding/json`'s omitempty at
+    json/mod.rs line 1171.
+  * `Type` had ONE name field serving both Go's `Name()` (unqualified)
+    and `String()` (package-qualified). They are used for different
+    things — `defaultStart` puts `Name()` into an ELEMENT NAME and
+    `UnsupportedTypeError` puts `String()` into error text — so a
+    descriptor could satisfy one caller or the other, and naming it
+    for the error text made Go's `<msStruct>` come out as
+    `<xml.msStruct>`. `Type` now carries the package qualifier
+    separately, and it is part of the type's IDENTITY, so two structs
+    named `Name` in different packages are no longer the same type.
 ### §2v — runtime/pprof protobuf profiles (issue #9): DONE
 
 **STATUS CORRECTED 2026-09-14. This section described the work as
