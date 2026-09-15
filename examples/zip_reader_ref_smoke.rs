@@ -345,6 +345,104 @@ fn negrow(idx: int, wantnil: bool, want: &'static str) {
     );
 }
 
+
+// go: none
+fn fborow(idx: int, name: &'static str, data: &'static str, hoff: i64, csize: u64, want: &'static str) {
+    let raw = unhex(data);
+    let shared = alloc::sync::Arc::new(goish::sync::Mutex::new(goish::bytes::NewReader(
+        goish::slice::__from_vec(raw),
+    )));
+    let (zr_opt, _) = (
+        Some(zr::Reader {
+            r: shared.clone(),
+            File: alloc::vec::Vec::new(),
+            Comment: string::from_static(""),
+            baseOffset: 0,
+        }),
+        0,
+    );
+    let mut z = zr_opt.unwrap();
+    let mut f = zr::File::default();
+    f.headerOffset = hoff;
+    f.FileHeader.CompressedSize64 = csize;
+
+    let (off, err) = z.findBodyOffset(&f);
+    let es = if err == goish::errors::nil {
+        string::from_static("")
+    } else {
+        err.Error()
+    };
+    let (doff, derr) = z.DataOffset(&f);
+    let des = if derr == goish::errors::nil {
+        string::from_static("")
+    } else {
+        derr.Error()
+    };
+    let (rr, rerr) = z.OpenRaw(&f);
+    let res = if rerr == goish::errors::nil {
+        string::from_static("")
+    } else {
+        rerr.Error()
+    };
+    let mut body = string::from_static("");
+    if let Some(mut rs) = rr {
+        let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+        loop {
+            let mut chunk: goish::slice<goish::byte> =
+                goish::slice::__from_vec(alloc::vec![0u8; 64]);
+            let (n, e) = rs.Read(&mut chunk);
+            if n > 0 {
+                out.extend_from_slice(&chunk.as_ref()[..n as usize]);
+            }
+            if e != goish::errors::nil || n == 0 {
+                break;
+            }
+        }
+        body = goish::encoding::hex::EncodeToString(&out);
+    }
+    ck(
+        idx,
+        name,
+        fmt::Sprintf!("%v|%s|%v|%s|%s|%s", off, es, doff, des, body, res),
+        string::from_bytes(want.as_bytes()),
+    );
+}
+
+// go: none
+fn drrow(idx: int, wn1: i64, we1: &'static str, wn2: i64, we2: &'static str) {
+    let mut d1 = zr::dirReader {
+        err: goish::errors::New("zip: not a valid zip file"),
+    };
+    let mut p1: goish::slice<goish::byte> = goish::slice::__from_vec(alloc::vec![0u8; 4]);
+    let (n1, e1) = d1.Read(&mut p1);
+    let mut d2 = zr::dirReader {
+        err: goish::io::EOF.into(),
+    };
+    let mut p2: goish::slice<goish::byte> = goish::slice!([]goish::byte{});
+    let (n2, e2) = d2.Read(&mut p2);
+    let closed = d1.Close();
+    ck(
+        idx,
+        "dirReader",
+        fmt::Sprintf!(
+            "%v|%s|%v|%s|%v",
+            n1,
+            e1.Error(),
+            n2,
+            e2.Error(),
+            closed == goish::errors::nil
+        ),
+        fmt::Sprintf!(
+            "%v|%s|%v|%s|%v",
+            wn1,
+            string::from_bytes(we1.as_bytes()),
+            wn2,
+            string::from_bytes(we2.as_bytes()),
+            true
+        ),
+    );
+}
+
 #[goish::main]
 fn main() {
     utf8row(0, "", true, false);
@@ -491,11 +589,26 @@ fn main() {
     nrrow(141, "count-truncates-to-16-bits", "504b010214031400000008004c5b3d5a00000000010000000200000001000000000000000000000000000000000061504b06062c000000000000002d002d000000000000000000010001000000000001000100000000002f000000000000000000000000000000504b0607000000002f0000000000000001000000504b050600000000ffffffff2f000000ffffffff0000", "|1,,0;61,1,2,0");
     nrrow(142, "count-truncates-mismatch", "504b010214031400000008004c5b3d5a00000000010000000200000001000000000000000000000000000000000061504b06062c000000000000002d002d000000000000000000020001000000000002000100000000002f000000000000000000000000000000504b0607000000002f0000000000000001000000504b050600000000ffffffff2f000000ffffffff0000", "zip: not a valid zip file|nil");
     negrow(143, true, "zip: size cannot be negative");
+    fborow(144, "plain", "504b03041400000000000000000000000000050000000500000005000000612e74787468656c6c6f", 0, 5, "35||35||68656c6c6f|");
+    fborow(145, "with-extra", "504b03041400000000000000000000000000050000000500000005000400612e7478740102030468656c6c6f", 0, 5, "39||39||68656c6c6f|");
+    fborow(146, "empty-name", "504b0304140000000000000000000000000005000000050000000000000068656c6c6f", 0, 5, "30||30||68656c6c6f|");
+    fborow(147, "long-name", "504b03041400000008000000000000000000050000000500000014000000612f766572792f6c6f6e672f6e616d652e74787468656c6c6f", 0, 5, "50||50||68656c6c6f|");
+    fborow(148, "bad-sig", "0403020114000000000000000000000000000500000005000000010000006168656c6c6f", 0, 5, "0|zip: not a valid zip file|0|zip: not a valid zip file||zip: not a valid zip file");
+    fborow(149, "offset", "00000000000000504b030414000000000000000000000000000500000005000000010000006168656c6c6f", 7, 5, "31||38||68656c6c6f|");
+    fborow(150, "short", "504b030414000000000000000000000000000500", 0, 5, "0|EOF|0|EOF||EOF");
+    fborow(151, "offset-past-end", "504b030414000000000000000000000000000500000005000000010000006168656c6c6f", 900, 5, "0|EOF|0|EOF||EOF");
+    fborow(152, "csize-longer-than-body", "504b030414000000000000000000000000000500000005000000010000006168656c6c6f", 0, 99, "31||31||68656c6c6f|");
+    fborow(153, "csize-zero", "504b030414000000000000000000000000000500000005000000010000006168656c6c6f", 0, 0, "31||31|||");
+    fborow(154, "name2-extra7", "504b0304140000000000000000000000000005000000050000000200070061620102030405060768656c6c6f", 0, 5, "39||39||68656c6c6f|");
+    fborow(155, "name0-extra3", "504b0304140000000000000000000000000005000000050000000000030009090968656c6c6f", 0, 5, "33||33||68656c6c6f|");
+    fborow(156, "name300-extra0", "504b0304140000000000000000000000000005000000050000002c0100006e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e68656c6c6f", 0, 5, "330||330||68656c6c6f|");
+    fborow(157, "name1-extra300", "504b03041400000000000000000000000000050000000500000001002c017a07070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070768656c6c6f", 0, 5, "331||331||68656c6c6f|");
+    drrow(158, 0, "zip: not a valid zip file", 0, "EOF");
 
     unsafe {
         let (pass, fail) = (PASS, FAIL);
-        if pass + fail != 144 {
-            fmt::Printf!("FAIL ran %v rows, expected 144\n", pass + fail);
+        if pass + fail != 159 {
+            fmt::Printf!("FAIL ran %v rows, expected 159\n", pass + fail);
             FAIL += 1;
         }
         let fail = FAIL;

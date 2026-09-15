@@ -48,6 +48,23 @@ impl<W: Writer> Writer for alloc::sync::Arc<crate::sync::Mutex<W>> {
     }
 }
 
+/// goish addition: a shareable reader-at. Same shape and same reason as
+/// the `Writer` impl above — Go's `io.ReaderAt` is an interface value,
+/// i.e. a pointer, so handing one to a `Reader` and to each of its
+/// `File`s is handing them all ONE reader. goish's are owned, so
+/// sharing one takes an `Arc` and a mutex, and this is what makes that
+/// pair a `ReaderAt`.
+///
+/// `archive/zip` is the caller that needs it: its `Reader` owns the
+/// archive's reader and every `File.Open` opens an independent section
+/// over the same bytes.
+impl<R: ReaderAt> ReaderAt for alloc::sync::Arc<crate::sync::Mutex<R>> {
+    // go: none — goish idiom: see the note above this impl.
+    fn ReadAt(&mut self, p: &mut slice<byte>, off: i64) -> (int, error) {
+        return self.Lock().ReadAt(p, off);
+    }
+}
+
 // go: sdk 1.25.5 io/io.go:107-109 Closer
 /// Go's `io.Closer`.
 #[goish::interface] // goishlint:ignore GOISH022 - `goish::interface`, not `goish::int`

@@ -1,10 +1,12 @@
-// goishlint:ignore GOISH018 OpenReader, Reader.RegisterDecompressor, Reader.decompressor, ReadCloser.Close, File.DataOffset, File.Open, File.OpenRaw, dirReader.Read, dirReader.Close, checksumReader.Stat, checksumReader.Read, checksumReader.Close, File.findBodyOffset, fileListEntry.stat, fileListEntry.Name, fileListEntry.Size, fileListEntry.Mode, fileListEntry.Type, fileListEntry.IsDir, fileListEntry.Sys, fileListEntry.ModTime, fileListEntry.Info, fileListEntry.String, Reader.initFileList, Reader.Open, Reader.openLookup, Reader.openReadDir, openDir.Close, openDir.Stat, openDir.Read, openDir.ReadDir — the Reader itself and its fs.FS surface, ABSENT from this slice. Every one of them needs an io.ReaderAt over a whole archive, a decompressor registry, or the fs.File / fs.DirEntry interface bridge; this slice is the PARSING, which is the half that has to be right about a hostile input and the half a reference can pin byte-for-byte. They land next.
-// goishlint:ignore GOISH021 ReadCloser, dirReader, checksumReader, fileListEntry, fileInfoDirEntry, openDir, dotFile, zipinsecurepath — the Reader's own types and its fs.FS entry list, absent with the methods above. `zipinsecurepath` is a GODEBUG knob and goish has no godebug package.
+// goishlint:ignore GOISH018 OpenReader, Reader.RegisterDecompressor, Reader.decompressor, ReadCloser.Close, File.Open, checksumReader.Stat, checksumReader.Read, checksumReader.Close, fileListEntry.stat, fileListEntry.Name, fileListEntry.Size, fileListEntry.Mode, fileListEntry.Type, fileListEntry.IsDir, fileListEntry.Sys, fileListEntry.ModTime, fileListEntry.Info, fileListEntry.String, Reader.initFileList, Reader.Open, Reader.openLookup, Reader.openReadDir, openDir.Close, openDir.Stat, openDir.Read, openDir.ReadDir — the Reader itself and its fs.FS surface, ABSENT from this slice. Every one of them needs an io.ReaderAt over a whole archive, a decompressor registry, or the fs.File / fs.DirEntry interface bridge; this slice is the PARSING, which is the half that has to be right about a hostile input and the half a reference can pin byte-for-byte. They land next.
+// goishlint:ignore GOISH021 ReadCloser, checksumReader, fileListEntry, fileInfoDirEntry, openDir, dotFile, zipinsecurepath — the Reader's own types and its fs.FS entry list, absent with the methods above. `zipinsecurepath` is a GODEBUG knob and goish has no godebug package.
 // goishlint:ignore GOISH019 File — three fields absent: `zip`, `zipr` and `descErr`. `zip` is a back-pointer to the Reader and `zipr` its io.ReaderAt, both of which this slice does not have; neither is read by anything here. The field set comes back whole with the Reader.
 // goishlint:ignore GOISH020 Reader.init — one fewer parameter. Go's `init(rdr, size)` assigns `r.r = rdr` as its first act; goish's Reader OWNS its reader, so `NewReader` has already stored it and `init` reads `self.r`. Nothing else differs.
 // goishlint:ignore GOISH019 Reader — three fields absent: `decompressors`, `fileListOnce` and `fileList`. The first is the per-Reader decompressor override map RegisterDecompressor fills, and the other two are the lazily-built fs.FS entry index; all three belong to methods that are not in this slice, and nothing here reads them.
 // goishlint:ignore GOISH018 init — Reader.init IS ported, as an inherent method on the generic `Reader<R>`; the rule reads the bare Go name `init` (Go's package-level init hook shares the spelling) and does not see the method.
-// go: file archive/zip/reader.go decls: NewReader, Reader.init, readDirectoryEnd, findDirectory64End, readDirectory64End, readDirectoryHeader, readDataDescriptor, findSignatureInBlock, readBuf.uint8, readBuf.uint16, readBuf.uint32, readBuf.uint64, readBuf.sub, toValidName, fileEntryCompare, split
+// goishlint:ignore GOISH020 File.findBodyOffset, File.DataOffset, File.OpenRaw — the receiver moved. In Go these are methods on *File, which carries `zipr`, the io.ReaderAt it SHARES with its Reader — an interface value costs nothing to copy. goish's Reader owns its reader, and a File holding a borrow would tie every File's lifetime to the Reader it came from, so the three move onto the Reader and take the File as a parameter. The bodies are unchanged. A caller who wants Go's spelling passes a shareable reader — `Arc<sync::Mutex<R>>` is an `io::ReaderAt` for exactly this, see the note in io/io.rs.
+// goishlint:ignore GOISH018 findBodyOffset — IS ported, as `Reader::findBodyOffset`; the receiver moved from *File to *Reader for the reason in the GOISH020 waiver above, and the rule matches on the bare Go name against methods declared on a File.
+// go: file archive/zip/reader.go decls: File.findBodyOffset, File.DataOffset, File.OpenRaw, dirReader.Read, dirReader.Close, NewReader, Reader.init, readDirectoryEnd, findDirectory64End, readDirectory64End, readDirectoryHeader, readDataDescriptor, findSignatureInBlock, readBuf.uint8, readBuf.uint16, readBuf.uint32, readBuf.uint64, readBuf.sub, toValidName, fileEntryCompare, split
 //
 // archive/zip/reader.go — the parsing half.
 //
@@ -36,7 +38,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use super::r#struct::{
-    dataDescriptorLen, dataDescriptorSignature, directory64EndLen, directory64EndSignature,
+    dataDescriptorLen, fileHeaderLen, fileHeaderSignature, dataDescriptorSignature, directory64EndLen, directory64EndSignature,
     directory64LocLen, directory64LocSignature, directoryEnd, directoryEndLen,
     directoryEndSignature, directoryHeaderLen, directoryHeaderSignature, extTimeExtraID,
     infoZipUnixExtraID, msDosTimeToTime, ntfsExtraID, timeZone, unixExtraID, zip64ExtraID,
@@ -848,5 +850,100 @@ impl<R: crate::io::ReaderAt> Reader<R> {
         // reasoning is recorded at mime/multipart/reader.rs and
         // net/http/fs.rs for their own GODEBUG settings.
         return errors::nil;
+    }
+}
+
+// ─── the per-file body ────────────────────────────────────────────────
+
+// go: sdk 1.25.5 archive/zip/reader.go:270-272 dirReader
+/// Go: "The ZIP specification (APPNOTE.TXT) specifies that directories,
+/// which are technically zero-byte files, must not have any associated
+/// file data." A directory entry opens as this: a reader that only ever
+/// returns its one error.
+#[derive(Clone)]
+pub struct dirReader {
+    pub err: crate::error,
+}
+
+impl dirReader {
+    // go: sdk 1.25.5 archive/zip/reader.go:274-276 dirReader.Read
+    /// Go: `return 0, r.err` — whatever the length of the buffer.
+    pub fn Read(&mut self, _p: &mut slice<byte>) -> (int, crate::error) {
+        return (0, self.err.clone());
+    }
+
+    // go: sdk 1.25.5 archive/zip/reader.go:278-280 dirReader.Close
+    /// Go: `return nil`.
+    pub fn Close(&mut self) -> crate::error {
+        return errors::nil;
+    }
+}
+
+impl crate::io::Reader for dirReader {
+    // go: none — goish idiom: Go's *dirReader satisfies io.ReadCloser by
+    // having the methods; Rust needs the trait impls spelled out.
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, crate::error) {
+        return dirReader::Read(self, p);
+    }
+}
+
+impl<R: crate::io::ReaderAt + Clone + 'static> Reader<R> {
+    // go: sdk 1.25.5 archive/zip/reader.go:337-351 File.findBodyOffset
+    /// Go: "findBodyOffset does the minimum work to verify the file has
+    /// a header and returns the file body offset."
+    ///
+    /// The LOCAL header, not the central-directory one — and its name
+    /// and extra lengths need not match the central directory's, which
+    /// is why the body offset cannot be computed from what init already
+    /// read.
+    pub fn findBodyOffset(&mut self, f: &File) -> (int64, crate::error) {
+        let mut buf: slice<byte> =
+            slice::__from_vec(alloc::vec![0u8; fileHeaderLen as usize]);
+        let (_, err) = self.r.ReadAt(&mut buf, f.headerOffset);
+        if err != errors::nil {
+            return (0, err);
+        }
+        let mut b = readBuf::new(buf);
+        let sig = b.uint32();
+        if sig != fileHeaderSignature {
+            return (0, ErrFormat.clone().into());
+        }
+        // Go: "skip over most of the header"
+        b.0 = b.0.slice(22, b.0.Len());
+        let filenameLen = int(int64(b.uint16()));
+        let extraLen = int(int64(b.uint16()));
+        return (int64(fileHeaderLen + filenameLen + extraLen), errors::nil);
+    }
+
+    // go: sdk 1.25.5 archive/zip/reader.go:206-213 File.DataOffset
+    /// Go: "DataOffset returns the offset of the file's possibly
+    /// compressed data, relative to the beginning of the zip file. Most
+    /// callers should instead use File.Open, which transparently
+    /// decompresses data and verifies checksums."
+    pub fn DataOffset(&mut self, f: &File) -> (int64, crate::error) {
+        let (bodyOffset, err) = self.findBodyOffset(f);
+        if err != errors::nil {
+            return (0, err);
+        }
+        return (f.headerOffset + bodyOffset, errors::nil);
+    }
+
+    // go: sdk 1.25.5 archive/zip/reader.go:259-267 File.OpenRaw
+    /// Go: "OpenRaw returns a Reader that provides access to the File's
+    /// contents without decompression." The window is
+    /// `CompressedSize64` wide wherever the archive says the body is —
+    /// nothing checks that those bytes exist, so a size larger than the
+    /// file simply reads short.
+    pub fn OpenRaw(&mut self, f: &File) -> (Option<crate::io::SectionReader>, crate::error) {
+        let (bodyOffset, err) = self.findBodyOffset(f);
+        if err != errors::nil {
+            return (None, err);
+        }
+        let rs = crate::io::NewSectionReader(
+            alloc::boxed::Box::new(self.r.clone()),
+            f.headerOffset + bodyOffset,
+            int64(f.FileHeader.CompressedSize64),
+        );
+        return (Some(rs), errors::nil);
     }
 }

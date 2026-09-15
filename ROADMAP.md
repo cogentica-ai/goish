@@ -294,15 +294,31 @@ time) is already here. `struct.go` is ported and pinned:
                                        readBuf, findSignatureInBlock,
                                        toValidName, split, detectUTF8,
                                        readDirectoryEnd, the two zip64
-                                       end records, and NewReader over
-                                       14 whole archives
+                                       end records, NewReader over 14
+                                       whole archives, and the local
+                                       header walk — findBodyOffset,
+                                       DataOffset, OpenRaw, dirReader
 
-What is left of reader.go is the per-FILE surface — `File.Open`,
-`File.OpenRaw`, `DataOffset`, `findBodyOffset`, `checksumReader`, the
-decompressor registry — and the fs.FS surface (`Open`, `openLookup`,
-`openReadDir`, the fileListEntry tree). The first needs compress/flate
-wired to a Decompressor registry; the second needs the fs.File /
-fs.DirEntry interface bridge. Then writer.go.
+What is left of reader.go is `File.Open` with `checksumReader` and the
+DECOMPRESSOR REGISTRY, and the fs.FS surface (`Open`, `openLookup`,
+`openReadDir`, the fileListEntry tree).
+
+The registry is the next thing that needs a decision rather than
+typing. Go's `Decompressor` is `func(io.Reader) io.ReadCloser` kept in
+a package-level `sync.Map`, and goish's `sync::Map<K,V>` wants
+`V: Default + Clone + Send`, which a bare `fn` pointer is not. The
+fs.FS surface needs the fs.File / fs.DirEntry interface bridge, the
+same one archive/zip's `FileInfoHeader` is already waived for.
+
+**The sharing idiom that unblocked this slice is worth recording.**
+Go's `File` holds `zipr`, the `io.ReaderAt` it shares with its Reader,
+because an interface value is a pointer. goish's `Reader` OWNS its
+reader, so `io/io.rs` gained
+`impl<R: ReaderAt> ReaderAt for Arc<sync::Mutex<R>>` — the exact shape
+and reasoning of the `Writer` impl that was already there — and the
+three reader-dependent methods moved from `*File` onto `*Reader`,
+taking the File as a parameter. A caller who wants one reader behind
+several handles passes `Arc<Mutex<R>>`.
 
 The parsing came first because it is the half that has to be right
 about a hostile input and the half a reference can pin byte for byte.
