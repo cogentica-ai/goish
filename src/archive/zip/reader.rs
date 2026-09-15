@@ -1,7 +1,10 @@
-// goishlint:ignore GOISH018 OpenReader, NewReader, Reader.init, Reader.RegisterDecompressor, Reader.decompressor, ReadCloser.Close, File.DataOffset, File.Open, File.OpenRaw, dirReader.Read, dirReader.Close, checksumReader.Stat, checksumReader.Read, checksumReader.Close, File.findBodyOffset, fileListEntry.stat, fileListEntry.Name, fileListEntry.Size, fileListEntry.Mode, fileListEntry.Type, fileListEntry.IsDir, fileListEntry.Sys, fileListEntry.ModTime, fileListEntry.Info, fileListEntry.String, Reader.initFileList, Reader.Open, Reader.openLookup, Reader.openReadDir, openDir.Close, openDir.Stat, openDir.Read, openDir.ReadDir — the Reader itself and its fs.FS surface, ABSENT from this slice. Every one of them needs an io.ReaderAt over a whole archive, a decompressor registry, or the fs.File / fs.DirEntry interface bridge; this slice is the PARSING, which is the half that has to be right about a hostile input and the half a reference can pin byte-for-byte. They land next.
-// goishlint:ignore GOISH021 Reader, ReadCloser, dirReader, checksumReader, fileListEntry, fileInfoDirEntry, openDir, dotFile, zipinsecurepath — the Reader's own types and its fs.FS entry list, absent with the methods above. `zipinsecurepath` is a GODEBUG knob and goish has no godebug package.
+// goishlint:ignore GOISH018 OpenReader, Reader.RegisterDecompressor, Reader.decompressor, ReadCloser.Close, File.DataOffset, File.Open, File.OpenRaw, dirReader.Read, dirReader.Close, checksumReader.Stat, checksumReader.Read, checksumReader.Close, File.findBodyOffset, fileListEntry.stat, fileListEntry.Name, fileListEntry.Size, fileListEntry.Mode, fileListEntry.Type, fileListEntry.IsDir, fileListEntry.Sys, fileListEntry.ModTime, fileListEntry.Info, fileListEntry.String, Reader.initFileList, Reader.Open, Reader.openLookup, Reader.openReadDir, openDir.Close, openDir.Stat, openDir.Read, openDir.ReadDir — the Reader itself and its fs.FS surface, ABSENT from this slice. Every one of them needs an io.ReaderAt over a whole archive, a decompressor registry, or the fs.File / fs.DirEntry interface bridge; this slice is the PARSING, which is the half that has to be right about a hostile input and the half a reference can pin byte-for-byte. They land next.
+// goishlint:ignore GOISH021 ReadCloser, dirReader, checksumReader, fileListEntry, fileInfoDirEntry, openDir, dotFile, zipinsecurepath — the Reader's own types and its fs.FS entry list, absent with the methods above. `zipinsecurepath` is a GODEBUG knob and goish has no godebug package.
 // goishlint:ignore GOISH019 File — three fields absent: `zip`, `zipr` and `descErr`. `zip` is a back-pointer to the Reader and `zipr` its io.ReaderAt, both of which this slice does not have; neither is read by anything here. The field set comes back whole with the Reader.
-// go: file archive/zip/reader.go decls: readDirectoryEnd, findDirectory64End, readDirectory64End, ErrFormat, ErrAlgorithm, ErrChecksum, ErrInsecurePath, readDirectoryHeader, readDataDescriptor, findSignatureInBlock, readBuf.uint8, readBuf.uint16, readBuf.uint32, readBuf.uint64, readBuf.sub, toValidName, fileEntryCompare, split
+// goishlint:ignore GOISH020 Reader.init — one fewer parameter. Go's `init(rdr, size)` assigns `r.r = rdr` as its first act; goish's Reader OWNS its reader, so `NewReader` has already stored it and `init` reads `self.r`. Nothing else differs.
+// goishlint:ignore GOISH019 Reader — three fields absent: `decompressors`, `fileListOnce` and `fileList`. The first is the per-Reader decompressor override map RegisterDecompressor fills, and the other two are the lazily-built fs.FS entry index; all three belong to methods that are not in this slice, and nothing here reads them.
+// goishlint:ignore GOISH018 init — Reader.init IS ported, as an inherent method on the generic `Reader<R>`; the rule reads the bare Go name `init` (Go's package-level init hook shares the spelling) and does not see the method.
+// go: file archive/zip/reader.go decls: NewReader, Reader.init, readDirectoryEnd, findDirectory64End, readDirectory64End, readDirectoryHeader, readDataDescriptor, findSignatureInBlock, readBuf.uint8, readBuf.uint16, readBuf.uint32, readBuf.uint64, readBuf.sub, toValidName, fileEntryCompare, split
 //
 // archive/zip/reader.go — the parsing half.
 //
@@ -41,7 +44,7 @@ use super::r#struct::{
 };
 use super::writer::detectUTF8;
 use crate::byte;
-use crate::errors;
+use crate::errors::{self, error};
 use crate::goslice::slice;
 use crate::gostring::string;
 use crate::int;
@@ -52,22 +55,17 @@ use crate::uint32;
 use crate::uint64;
 
 // go: sdk 1.25.5 archive/zip/reader.go:28-33 ErrFormat
-/// Go's four sentinel errors. Functions rather than statics because
-/// goish's `error` is not const-constructible.
-pub fn ErrFormat() -> crate::error {
-    return errors::New("zip: not a valid zip file");
-}
-// go: none — see ErrFormat; Go declares all four in one var block.
-pub fn ErrAlgorithm() -> crate::error {
-    return errors::New("zip: unsupported compression algorithm");
-}
-// go: none — see ErrFormat.
-pub fn ErrChecksum() -> crate::error {
-    return errors::New("zip: checksum error");
-}
-// go: none — see ErrFormat.
-pub fn ErrInsecurePath() -> crate::error {
-    return errors::New("zip: insecure file path");
+/// Go's four sentinel errors, declared in one `var` block.
+///
+/// `crate::var!` and not four `errors::New` calls, because Go compares
+/// them by IDENTITY — `Reader.init`'s header loop stops on
+/// `err == ErrFormat`, not on the text — and a fresh `errors::New` per
+/// call would never match.
+crate::var! {
+    pub ErrFormat: error = "zip: not a valid zip file";
+    pub ErrAlgorithm: error = "zip: unsupported compression algorithm";
+    pub ErrChecksum: error = "zip: checksum error";
+    pub ErrInsecurePath: error = "zip: insecure file path";
 }
 
 // go: sdk 1.25.5 archive/zip/reader.go:59-66 File
@@ -160,7 +158,7 @@ pub fn readDirectoryHeader(f: &mut File, r: &mut dyn crate::io::Reader) -> crate
     let mut b = readBuf::new(buf.clone());
     let sig = b.uint32();
     if sig != directoryHeaderSignature {
-        return ErrFormat();
+        return ErrFormat.clone().into();
     }
     f.FileHeader.CreatorVersion = b.uint16();
     f.FileHeader.ReaderVersion = b.uint16();
@@ -239,21 +237,21 @@ pub fn readDirectoryHeader(f: &mut File, r: &mut dyn crate::io::Reader) -> crate
             if needUSize {
                 needUSize = false;
                 if fieldBuf.Len() < 8 {
-                    return ErrFormat();
+                    return ErrFormat.clone().into();
                 }
                 f.FileHeader.UncompressedSize64 = fieldBuf.uint64();
             }
             if needCSize {
                 needCSize = false;
                 if fieldBuf.Len() < 8 {
-                    return ErrFormat();
+                    return ErrFormat.clone().into();
                 }
                 f.FileHeader.CompressedSize64 = fieldBuf.uint64();
             }
             if needHeaderOffset {
                 needHeaderOffset = false;
                 if fieldBuf.Len() < 8 {
-                    return ErrFormat();
+                    return ErrFormat.clone().into();
                 }
                 f.headerOffset = int64(fieldBuf.uint64());
             }
@@ -331,7 +329,7 @@ pub fn readDirectoryHeader(f: &mut File, r: &mut dyn crate::io::Reader) -> crate
     let _ = needUSize;
 
     if needCSize || needHeaderOffset {
-        return ErrFormat();
+        return ErrFormat.clone().into();
     }
 
     return errors::nil;
@@ -389,7 +387,7 @@ pub fn readDataDescriptor(r: &mut dyn crate::io::Reader, f: &File) -> crate::err
     }
     let mut b = readBuf::new(buf.slice(0, 12));
     if b.uint32() != f.FileHeader.CRC32 {
-        return ErrChecksum();
+        return ErrChecksum.clone().into();
     }
 
     return errors::nil;
@@ -545,12 +543,12 @@ pub fn readDirectoryEnd(
             break;
         }
         if i == 1 || bLen == size {
-            return (None, 0, ErrFormat());
+            return (None, 0, ErrFormat.clone().into());
         }
         i += 1;
     }
     if !found {
-        return (None, 0, ErrFormat());
+        return (None, 0, ErrFormat.clone().into());
     }
 
     // Go: "read header into struct" — `readBuf(buf[4:])`, skipping the
@@ -588,7 +586,7 @@ pub fn readDirectoryEnd(
 
     let maxInt64: uint64 = (1u64 << 63) - 1;
     if d.directorySize > maxInt64 || d.directoryOffset > maxInt64 {
-        return (None, 0, ErrFormat());
+        return (None, 0, ErrFormat.clone().into());
     }
 
     let mut baseOffset =
@@ -597,7 +595,7 @@ pub fn readDirectoryEnd(
     // Go: "Make sure directoryOffset points to somewhere in our file."
     let o = baseOffset + int64(d.directoryOffset);
     if o < 0 || o >= size {
-        return (None, 0, ErrFormat());
+        return (None, 0, ErrFormat.clone().into());
     }
 
     // Go: "If the directory end data tells us to use a non-zero
@@ -685,7 +683,7 @@ pub fn readDirectory64End(
     let mut b = readBuf::new(buf);
     let sig = b.uint32();
     if sig != directory64EndSignature {
-        return ErrFormat();
+        return ErrFormat.clone().into();
     }
 
     // Go: "skip dir size, version and version needed (uint64 + 2x uint16)"
@@ -705,4 +703,150 @@ pub fn readDirectory64End(
     d.directoryOffset = b.uint64();
 
     return errors::nil;
+}
+
+// ─── the Reader ───────────────────────────────────────────────────────
+
+// go: sdk 1.25.5 archive/zip/reader.go:35-50 Reader
+/// Go: "A Reader serves content from a ZIP archive."
+///
+/// Generic over the `io.ReaderAt` rather than holding an interface
+/// value, because goish's traits are not object-safe by default here and
+/// an owned `R` is what `NewReader`'s caller has anyway.
+pub struct Reader<R: crate::io::ReaderAt> {
+    pub r: R,
+    pub File: alloc::vec::Vec<File>,
+    pub Comment: string,
+    /// Go: "Some JAR files are zip files with a prefix that is a bash
+    /// script. The baseOffset field is the start of the zip file
+    /// proper."
+    pub baseOffset: int64,
+}
+
+// go: sdk 1.25.5 archive/zip/reader.go:97-117 NewReader
+/// Go: "NewReader returns a new Reader reading from r, which is assumed
+/// to have the given size in bytes. If any file inside the archive uses
+/// a non-local name ... and the GODEBUG environment variable contains
+/// `zipinsecurepath=0`, NewReader returns the reader with an
+/// ErrInsecurePath error."
+///
+/// Note the shape Go chose: on `ErrInsecurePath` it returns BOTH the
+/// reader and the error, so a caller that wants non-local names can
+/// ignore it. Only a different error suppresses the reader.
+pub fn NewReader<R: crate::io::ReaderAt>(
+    r: R,
+    size: int64,
+) -> (Option<Reader<R>>, crate::error) {
+    if size < 0 {
+        return (None, errors::New("zip: size cannot be negative"));
+    }
+    let mut zr = Reader {
+        r,
+        File: alloc::vec::Vec::new(),
+        Comment: string::from_static(""),
+        baseOffset: 0,
+    };
+    let err = zr.init(size);
+    let insecure: error = ErrInsecurePath.clone().into();
+    if err != errors::nil && err != insecure {
+        return (None, err);
+    }
+    return (Some(zr), err);
+}
+
+impl<R: crate::io::ReaderAt> Reader<R> {
+    // go: sdk 1.25.5 archive/zip/reader.go:119-181 Reader.init
+    /// Go: read the directory end, then walk the central directory
+    /// reading one header per entry.
+    ///
+    /// Two details worth keeping. The entry count is only compared
+    /// MODULO 65536, because "the count of files inside a zip is
+    /// truncated to fit in a uint16" — so the loop reads until a header
+    /// fails to parse and only then decides whether the failure
+    /// mattered. And Go DOES NOT preallocate on the recorded count
+    /// unless the file is large enough to hold that many 30-byte
+    /// headers, because "a malformed archive may indicate it contains
+    /// up to 1 << 128 - 1 files".
+    pub fn init(&mut self, size: int64) -> crate::error {
+        let (end, baseOffset, err) = readDirectoryEnd(&mut self.r, size);
+        if err != errors::nil {
+            return err;
+        }
+        let end = match end {
+            Some(e) => e,
+            // Go cannot reach this: readDirectoryEnd returns a non-nil
+            // *directoryEnd whenever it returns a nil error.
+            None => return ErrFormat.clone().into(),
+        };
+        self.baseOffset = baseOffset;
+        // Go: "Since the number of directory records is not validated,
+        // it is not safe to preallocate r.File without first checking
+        // that the specified number of files is reasonable, since a
+        // malformed archive may indicate it contains up to 1 << 128 - 1
+        // files. Since each file has a header which will be _at least_
+        // 30 bytes we can safely preallocate if (data size / 30) >=
+        // end.directoryRecords."
+        let mut files: alloc::vec::Vec<File> = alloc::vec::Vec::new();
+        if end.directorySize < uint64(size)
+            && (uint64(size) - end.directorySize) / 30 >= end.directoryRecords
+        {
+            files.reserve(end.directoryRecords as usize);
+        }
+        self.Comment = end.comment.clone();
+
+        // Go: `rs := io.NewSectionReader(rdr, 0, size)` then
+        // `rs.Seek(baseOffset+directoryOffset, io.SeekStart)`. The
+        // cursor below starts AT that offset, which is the same thing —
+        // see the note on `sectionCursor` for why goish does not build
+        // an io.SectionReader here.
+        let mut lastErr = errors::nil;
+        {
+            let rs = sectionCursor {
+                r: &mut self.r,
+                off: baseOffset + int64(end.directoryOffset),
+                limit: size,
+            };
+            let mut buf = crate::bufio::NewReader(rs);
+
+            // Go: "The count of files inside a zip is truncated to fit
+            // in a uint16. Gloss over this by reading headers until we
+            // encounter a bad one, and then only report an ErrFormat or
+            // UnexpectedEOF if the file count modulo 65536 is
+            // incorrect."
+            loop {
+                let mut f = File::default();
+                let err = readDirectoryHeader(&mut f, &mut buf);
+                lastErr = err.clone();
+                let fmt_err: error = ErrFormat.clone().into();
+                if err == fmt_err
+                    || errors::Is(err.clone(), crate::io::ErrUnexpectedEOF)
+                {
+                    break;
+                }
+                if err != errors::nil {
+                    return err;
+                }
+                f.headerOffset += baseOffset;
+                files.push(f);
+            }
+        }
+        self.File = files;
+
+        // Go: "only compare 16 bits here"
+        if crate::uint16(crate::int64(self.File.len())) != crate::uint16(end.directoryRecords) {
+            // Go: "Return the readDirectoryHeader error if we read the
+            // wrong number of directory entries."
+            return lastErr;
+        }
+
+        // Go then walks r.File rejecting non-local names when
+        // `zipinsecurepath.Value() == "0"`. goish has no
+        // internal/godebug (it needs internal/bisect and
+        // internal/godebugs, neither ported), so that knob cannot be
+        // set and the loop cannot fire — which is exactly Go's DEFAULT
+        // behaviour, since the setting's default is "1". The same
+        // reasoning is recorded at mime/multipart/reader.rs and
+        // net/http/fs.rs for their own GODEBUG settings.
+        return errors::nil;
+    }
 }

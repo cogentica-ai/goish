@@ -289,18 +289,20 @@ time) is already here. `struct.go` is ported and pinned:
                                        file-mode mappings, FileHeader.Mode
                                        and SetMode, isZip64, timeZone,
                                        every signature and record length
-    zip_reader_ref_smoke     129/129   readDirectoryHeader over 22 crafted
+    zip_reader_ref_smoke     144/144   readDirectoryHeader over 22 crafted
                                        headers, readDataDescriptor,
                                        readBuf, findSignatureInBlock,
                                        toValidName, split, detectUTF8,
-                                       readDirectoryEnd and the two zip64
-                                       end records
+                                       readDirectoryEnd, the two zip64
+                                       end records, and NewReader over
+                                       14 whole archives
 
-What is left of reader.go is `Reader.init` / `NewReader` and the
-fs.FS surface (`Open`, `openLookup`, `openReadDir`, the fileListEntry
-tree). init needs bufio over a section reader and the decompressor
-registry; the fs.FS surface needs the fs.File / fs.DirEntry interface
-bridge. Then writer.go.
+What is left of reader.go is the per-FILE surface — `File.Open`,
+`File.OpenRaw`, `DataOffset`, `findBodyOffset`, `checksumReader`, the
+decompressor registry — and the fs.FS surface (`Open`, `openLookup`,
+`openReadDir`, the fileListEntry tree). The first needs compress/flate
+wired to a Decompressor registry; the second needs the fs.File /
+fs.DirEntry interface bridge. Then writer.go.
 
 The parsing came first because it is the half that has to be right
 about a hostile input and the half a reference can pin byte for byte.
