@@ -177,8 +177,17 @@ pub fn Decode(dst: &mut [u8], src: &[u8]) -> (int, error) {
 /// `hex.DecodeString(s)` — decode a hex string into bytes. Returns
 /// `(slice<byte>, error)` — Go's `[]byte` shape. Mirrors
 /// `DecodeString` (hex.go:138).
-pub fn DecodeString(s: &str) -> (slice<byte>, error) {
-    let src = s.as_bytes();
+///
+/// The parameter is `AsRef<[byte]>` and NOT `&str`. Go's `string` is
+/// arbitrary bytes and `Decode`'s whole job is to reject the ones that
+/// are not hex digits — `InvalidByteError` names the offending byte.
+/// goish's `string: AsRef<str>` TRUNCATES at the first invalid UTF-8
+/// byte, so a `&str` parameter silently decoded a PREFIX and returned
+/// NO error: measured, `DecodeString("41\xff42")` gave one byte and
+/// nil where Go gives one byte and
+/// `encoding/hex: invalid byte: U+00FF 'ÿ'`.
+pub fn DecodeString<S: AsRef<[byte]>>(s: S) -> (slice<byte>, error) {
+    let src: &[byte] = s.as_ref();
     let mut dst: Vec<u8> = vec![0u8; src.len() / 2];
     let (n, err) = Decode(&mut dst, src);
     dst.truncate(n as usize);

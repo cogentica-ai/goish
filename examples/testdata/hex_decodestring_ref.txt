@@ -1,0 +1,24 @@
+||
+3431|41|
+34313432|4142|
+34||encoding/hex: odd length hex string
+343134|41|encoding/hex: odd length hex string
+7a7a||encoding/hex: invalid byte: U+007A 'z'
+347a||encoding/hex: invalid byte: U+007A 'z'
+7a34||encoding/hex: invalid byte: U+007A 'z'
+3431ff3432|41|encoding/hex: invalid byte: U+00FF 'ÿ'
+ff3431||encoding/hex: invalid byte: U+00FF 'ÿ'
+3431ff|41|encoding/hex: invalid byte: U+00FF 'ÿ'
+ff||encoding/hex: invalid byte: U+00FF 'ÿ'
+3431c3|41|encoding/hex: invalid byte: U+00C3 'Ã'
+eda0803431||encoding/hex: invalid byte: U+00ED 'í'
+616263646566|abcdef|
+414243444546|abcdef|
+30313233343536373839|0123456789|
+3447||encoding/hex: invalid byte: U+0047 'G'
+4734||encoding/hex: invalid byte: U+0047 'G'
+2f30||encoding/hex: invalid byte: U+002F '/'
+3a30||encoding/hex: invalid byte: U+003A ':'
+4061||encoding/hex: invalid byte: U+0040 '@'
+6061||encoding/hex: invalid byte: U+0060 '`'
+6730||encoding/hex: invalid byte: U+0067 'g'

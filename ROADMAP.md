@@ -1726,6 +1726,46 @@ defects, in three separate packages:
 | `crypto/tls/session.rs` | 145 | cached tickets never expired; the cache was unbounded, so the peer decided how much it held |
 | `net/dnsclient.rs` | 1143 | a xorshift transaction ID where Go uses the OS-seeded generator; a truncated answer returned as success |
 
+**What the FIRST anchor in `net/dnsclient.rs` exposed, 2026-09-15.**
+That file had no anchors at all, which is the whole point of this
+section. Anchoring two of its functions — `isDomainName` and
+`equalASCIIName` — switched GOISH018 and GOISH021 on for the file and
+they immediately named ten Go declarations it does not have. Three
+(`MX`, `NS`, `SRV`) are a per-file scoping artefact: they live in
+`net/lookup.rs`, same Go package. The other seven are real gaps nobody
+had looked at, and they are now waived at the head of the file with
+what each one is:
+
+  * `absDomainName` — appends the root dot before a name is returned.
+  * `reverseaddr` — builds the `in-addr.arpa` / `ip6.arpa` name
+    `LookupAddr` queries.
+  * `randInt`, `randIntn`, `runtime_rand` — the randomness the
+    shuffles draw on.
+  * `shuffleByWeight`, `byPref.sort`, `byPriorityWeight.sort` — MX
+    preference ordering and SRV priority/weight ordering. goish
+    returns SRV records in whatever order the server sent them; Go
+    sorts by priority and shuffles within a priority in proportion to
+    weight. That is a load-balancing contract, not a cosmetic one.
+
+None is fixed here. They are written down because until 2026-09-15
+nothing in the repo could see them, which is exactly the failure mode
+this section exists to name: **the cheapest way to find what a file is
+missing is to anchor one declaration in it.**
+
+**The other half of the `&str` narrowing in `net/lookup.rs`, NOT fixed
+on 2026-09-15.** The RESPONSE side is fixed — `is_domain_name` now
+takes bytes, its two byte-identical copies are one, and the five filter
+sites plus LookupAddr's and LookupMX's own conversions no longer judge
+a truncated prefix. The QUERY side is not. Twelve sites still spell
+`let h: &str = host.as_ref();` to hand the caller's name to the query
+path, and `string: AsRef<str>` truncates at the first invalid UTF-8
+byte — so `LookupHost(string::from_bytes(b"ex\xffample.com"))` queries
+`ex`, silently, and answers about a different name than it was asked
+about. Fixing it means widening `lookup_ctx`, `build_arpa_name` and the
+dnsmessage name encoder together, which is a refactor of the whole
+query path rather than a signature change, and it is a wrong-answer
+bug rather than the validation bypass the response side was.
+
 **The rest of §2b's large entries, checked 2026-09-14 — and the list is
 in better shape than its age suggests.** Re-running the criterion gives
 97 unanchored files of 120+ lines. Sharpening it to "unanchored AND no

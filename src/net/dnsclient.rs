@@ -1,3 +1,6 @@
+// goishlint:ignore GOISH021 MX, NS, SRV — present, in src/net/lookup.rs. Go declares them in dnsclient.go and goish keeps them with the Lookup functions that return them; the rule is per-FILE, so it reads their absence here as a drop. Same Go package either way.
+// goishlint:ignore GOISH021 byPref, byPriorityWeight — the MX and SRV sort orders, ABSENT and NOT YET EXAMINED. Go sorts MX records by preference and SRV by priority/weight (with the weighted shuffle), and goish's LookupMX/LookupSRV do not obviously do either. Tracked in ROADMAP §2 rather than fixed here, because it needs its own reference: this file only just acquired an anchor, and the whole list below is what that first anchor exposed.
+// goishlint:ignore GOISH018 absDomainName, randInt, randIntn, reverseaddr, runtime_rand, shuffleByWeight, byPref.sort, byPriorityWeight.sort — ABSENT and NOT YET EXAMINED, exposed the moment this file gained its first `// go:` anchor. absDomainName appends the root dot to a name before it is returned; reverseaddr builds the in-addr.arpa/ip6.arpa name LookupAddr needs; randInt/randIntn/runtime_rand are the randomness the shuffles draw on, and shuffleByWeight plus the two sort methods are SRV's priority/weight ordering — so goish returns SRV records in whatever order the server sent them, where Go sorts by priority and shuffles within a priority in proportion to weight. None is a deliberate omission — they were simply never written down. Tracked in ROADMAP §2.
 // Port of net/dnsclient.go + net/dnsclient_unix.go @ Go 1.26.0
 //
 // PROVENANCE WARNING (recorded 2026-09-06): that version is not this
@@ -5,9 +8,17 @@
 // 1.25.5, `go env GOROOT` here is 1.25.5, and `scripts/goref.sh` diffs
 // against exactly that — so the claim above cannot be checked by any
 // tool in the repo, and if it is true this file was ported from a
-// source nobody here can open. This file carries no anchors either, so
-// nothing else pins it. Re-verify against 1.25.5 and correct the line
-// or the code; see ROADMAP.md §2b.
+// source nobody here can open. Re-verify against 1.25.5 and correct the
+// line or the code; see ROADMAP.md §2b.
+//
+// UPDATE 2026-09-15: this file used to carry ZERO anchors, which is
+// what let the paragraph above stand unchecked. It now has two —
+// `isDomainName` and `equalASCIIName`, both read against 1.25.5 — and
+// the moment the first one landed, GOISH018/GOISH021 began measuring
+// the file and named seven Go declarations it does not have. They are
+// waived at the top with what each one is; four (absDomainName,
+// reverseaddr, randInt, randIntn) and two sort orders (byPref,
+// byPriorityWeight) are real gaps nobody has looked at.
 //
 // goishlint:ignore GOISH015 — this file covers TWO Go files and carries
 //     ZERO provenance anchors, so the rule is right and the fix is a
@@ -16,9 +27,9 @@
 //     because the split is a separate change from the defects being
 //     fixed here, and doing both at once would make neither reviewable.
 //
-//     Until then, note what "Port of" above does NOT mean: nothing in
-//     this file is anchored, so no coverage, anchor or body-diff tier
-//     can compare any of it to the Go it names.
+//     Until then, note what "Port of" above does NOT mean: only two
+//     declarations in this file are anchored, so no coverage, anchor or
+//     body-diff tier can compare the REST of it to the Go it names.
 //
 // ─── What has been diffed against Go, 2026-09-04 ─────────────────────
 //
@@ -240,6 +251,10 @@ fn check_response(
     true
 }
 
+// go: sdk 1.25.5 net/dnsclient.go:56-74 equalASCIIName
+/// Go: compares two wire-format names case-insensitively over ASCII
+/// only — a DNS response's question section has to echo the question,
+/// and servers are free to change the case of the letters.
 fn equal_ascii_name(x: &dns::Name, y: &dns::Name) -> bool {
     if x.Length != y.Length {
         return false;
@@ -258,7 +273,7 @@ fn equal_ascii_name(x: &dns::Name, y: &dns::Name) -> bool {
             return false;
         }
     }
-    true
+    return true;
 }
 
 // ─── UDP send/recv helpers ─────────────────────────────────────────────────
@@ -1103,16 +1118,34 @@ pub fn lookup_ctx(
 
 // ─── isDomainName (verbatim from Go) ──────────────────────────────────────
 
-fn is_domain_name(s: &str) -> bool {
-    if s == "." {
+// go: sdk 1.25.5 net/dnsclient.go:89-146 isDomainName
+/// Go: "The root domain name is valid. See golang.org/issue/45715. ...
+/// Presentation format has dots before every label except the first,
+/// and the terminal empty label is optional here because we assume
+/// fully-qualified (absolute) input. ... So our _effective_ maximum is
+/// 253, but 254 is not rejected if the last character is a dot."
+///
+/// The parameter is `AsRef<[byte]>` and NOT `&str`. Go's `string` is
+/// arbitrary bytes and this predicate's `default: return false` arm is
+/// exactly what rejects a byte that is not a letter, digit, hyphen,
+/// underscore or dot — including a byte that is not valid UTF-8.
+/// goish's `string: AsRef<str>` TRUNCATES at the first invalid byte,
+/// so a `&str` parameter made `is_domain_name(cname.clone())` judge a
+/// PREFIX of the name: measured, `"www.example.com\xff\xff"` was
+/// accepted here and rejected by Go. The callers are the CNAME, SRV,
+/// MX and NS filters, whose input comes off the wire.
+pub(crate) fn is_domain_name<S: AsRef<[crate::byte]>>(s: S) -> bool {
+    let s: &[crate::byte] = s.as_ref();
+    // Go: "The root domain name is valid. See golang.org/issue/45715."
+    if s == b"." {
         return true;
     }
     let l = s.len();
-    let s = s.as_bytes();
     if l == 0 || l > 254 || (l == 254 && s[l - 1] != b'.') {
         return false;
     }
     let mut last = b'.';
+    // Go: "true once we've seen a letter or hyphen"
     let mut non_numeric = false;
     let mut part_len = 0usize;
     for i in 0..l {
@@ -1123,9 +1156,11 @@ fn is_domain_name(s: &str) -> bool {
                 part_len += 1;
             }
             b'0'..=b'9' => {
+                // Go: "fine"
                 part_len += 1;
             }
             b'-' => {
+                // Go: "Byte before dash cannot be dot."
                 if last == b'.' {
                     return false;
                 }
@@ -1133,6 +1168,7 @@ fn is_domain_name(s: &str) -> bool {
                 non_numeric = true;
             }
             b'.' => {
+                // Go: "Byte before dot cannot be dot, dash."
                 if last == b'.' || last == b'-' {
                     return false;
                 }
@@ -1148,7 +1184,7 @@ fn is_domain_name(s: &str) -> bool {
     if last == b'-' || part_len > 63 {
         return false;
     }
-    non_numeric
+    return non_numeric;
 }
 
 // ─── IPAddr ────────────────────────────────────────────────────────────────

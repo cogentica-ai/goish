@@ -249,7 +249,7 @@ pub fn DecryptPEMBlock(b: &pem::Block, password: slice<byte>) -> (slice<byte>, e
             );
         }
     };
-    let (iv, err) = hex::DecodeString(hexIV.as_ref());
+    let (iv, err) = hex::DecodeString(hexIV.clone());
     if err != nil {
         return (slice::default(), err);
     }

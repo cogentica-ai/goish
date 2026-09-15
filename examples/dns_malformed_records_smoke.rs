@@ -26,11 +26,21 @@
 //     IsTimeout=false IsTemporary=false IsNotFound=false
 //     survivors ARE returned alongside it
 //
-//   isDomainName("ok.example.com.")   true
-//   isDomainName("bad name")          false
-//   isDomainName("")                  false
-//   isDomainName("a..b")              false
-//   isDomainName("-x.example.")       false
+//   isDomainName over 39 inputs, dumped as hex from Go's own
+//   `isDomainName` under goref — the five it used to carry plus the
+//   label- and total-length boundaries, the hyphen/underscore rules,
+//   the all-numeric cases, and eight inputs that are NOT valid UTF-8.
+//
+// WHY HEX, AND WHY THE INVALID-UTF-8 ROWS. The table used to be
+// `&'static str` and the predicate used to take `&str`. Go's
+// `isDomainName` has a `default: return false` arm that rejects any
+// byte outside [A-Za-z0-9_.-], and a byte that is not valid UTF-8 is
+// squarely in it — but goish's `string: AsRef<str>` TRUNCATES at the
+// first invalid byte, so the five filter sites, which call
+// `is_domain_name(cname.as_ref())` on names that came off the wire,
+// were judging a PREFIX. Measured: "www.example.com\xff\xff" was
+// ACCEPTED here and is rejected by Go. A `&str` table cannot express
+// the failing input, which is why nobody wrote the failing test.
 //
 // WHAT THIS DOES NOT COVER, stated rather than implied: the five call
 // sites are not exercised end to end. Every `Resolver` method reads
@@ -59,6 +69,23 @@ fn check(name: &'static str, ok: bool, detail: goish::string) {
     }
 }
 
+fn unhex(h: &str) -> alloc::vec::Vec<u8> {
+    let b = h.as_bytes();
+    let mut out = alloc::vec::Vec::with_capacity(b.len() / 2);
+    let mut i = 0;
+    while i + 1 < b.len() {
+        fn nib(c: u8) -> u8 {
+            if c >= b'0' && c <= b'9' {
+                return c - b'0';
+            }
+            return c - b'a' + 10;
+        }
+        out.push(nib(b[i]) * 16 + nib(b[i + 1]));
+        i += 2;
+    }
+    return out;
+}
+
 #[goish::main]
 fn main() {
     // ── the predicate the five filter sites depend on ───────────────
@@ -66,24 +93,69 @@ fn main() {
     // Pinned against Go's own `isDomainName`, run under goref. A
     // predicate can be right in the abstract and wrong for the values
     // it actually receives, so these are the values Go was asked about.
-    let cases: [(&'static str, bool); 5] = [
-        ("ok.example.com.", true),
-        ("bad name", false),
+    // Hex because the inputs include bytes a Rust &str cannot hold.
+    let cases: [(&'static str, bool); 39] = [
+        ("6f6b2e6578616d706c652e636f6d2e", true),
+        ("626164206e616d65", false),
         ("", false),
-        ("a..b", false),
-        ("-x.example.", false),
+        ("612e2e62", false),
+        ("2d782e6578616d706c652e", false),
+        ("2e", true),
+        ("2e2e", false),
+        ("7777772e6578616d706c652e636f6dffff", false),
+        ("61ff62", false),
+        ("ff", false),
+        ("ff2e6578616d706c652e636f6d", false),
+        ("6578616d706c652e636f6d80", false),
+        ("6578c3616d706c652e636f6d", false),
+        ("eda0802e636f6d", false),
+        ("6f6b2e6578616d706c652e636f6d2eff", false),
+        ("6161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161612e636f6d", true),
+        ("616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161612e636f6d", false),
+        ("612e616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161", true),
+        ("612e61616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161", false),
+        ("612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e6162", false),
+        ("612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e616263", false),
+        ("612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e", true),
+        ("612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e612e61", false),
+        ("2d612e636f6d", false),
+        ("612d2e636f6d", false),
+        ("612d622e636f6d", true),
+        ("5f612e636f6d", true),
+        ("615f622e636f6d", true),
+        ("312e322e332e34", false),
+        ("312e322e332e342e", false),
+        ("313233", false),
+        ("3132332e", false),
+        ("612e", true),
+        ("2e61", false),
+        ("612e2e", false),
+        ("612e622e", true),
+        ("61c3a92e636f6d", false),
+        ("6109622e636f6d", false),
+        ("6120622e636f6d", false),
     ];
     let mut bad = string("");
-    for (s, want) in cases.iter() {
-        let got = lk::__is_domain_name(s);
+    let mut ran: int = 0;
+    let mut wrong: int = 0;
+    for (h, want) in cases.iter() {
+        let input = unhex(h);
+        let got = lk::__is_domain_name(goish::gostring::string::from_bytes(&input));
+        ran += 1;
         if got != *want {
-            bad = fmt::Sprintf!("%s: got %v want %v", string::from_static(s), got, *want);
+            wrong += 1;
+            if bad.Len() == 0 {
+                bad = fmt::Sprintf!("%s: got %v want %v", string::from_static(h), got, *want);
+            }
         }
     }
+    // The mismatch COUNT is in the detail on purpose: one red row out of
+    // 39 means the table is too thin for the defect, and only the count
+    // says so.
     check(
-        "is_domain_name agrees with Go on all five measured inputs",
-        bad.Len() == 0,
-        bad,
+        "is_domain_name agrees with Go on all 39 measured inputs",
+        wrong == 0 && ran == 39,
+        fmt::Sprintf!("%v of %v rows disagree; first: %s", wrong, ran, bad),
     );
 
     // ── the error the sites now report ──────────────────────────────

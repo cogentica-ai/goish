@@ -119,54 +119,12 @@ fn raw_to_ip(raw: &[u8]) -> super::IP {
     super::IP { bytes: b }
 }
 
-/// Check that a string is a valid domain name (mirrors Go's `isDomainName`).
-fn is_domain_name(s: &str) -> bool {
-    if s == "." {
-        return true;
-    }
-    let l = s.len();
-    let sb = s.as_bytes();
-    if l == 0 || l > 254 || (l == 254 && sb[l - 1] != b'.') {
-        return false;
-    }
-    let mut last = b'.';
-    let mut non_numeric = false;
-    let mut part_len = 0usize;
-    for i in 0..l {
-        let c = sb[i];
-        match c {
-            b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
-                non_numeric = true;
-                part_len += 1;
-            }
-            b'0'..=b'9' => {
-                part_len += 1;
-            }
-            b'-' => {
-                if last == b'.' {
-                    return false;
-                }
-                part_len += 1;
-                non_numeric = true;
-            }
-            b'.' => {
-                if last == b'.' || last == b'-' {
-                    return false;
-                }
-                if part_len > 63 || part_len == 0 {
-                    return false;
-                }
-                part_len = 0;
-            }
-            _ => return false,
-        }
-        last = c;
-    }
-    if last == b'-' || part_len > 63 {
-        return false;
-    }
-    non_numeric
-}
+// go: none — goish idiom: Go has ONE `isDomainName`, in net/dnsclient.go.
+// This file used to carry a second, byte-for-byte identical copy of it;
+// the copy is gone and the anchored implementation lives next to the Go
+// file it came from. Kept as a `use` so the five filter sites below
+// read the same as Go's.
+use super::dnsclient::is_domain_name;
 
 /// Build a new DNS error (simplified — just wraps an `errors::New`).
 fn new_dns_error<M: Into<string>>(msg: M, name: &str) -> error {
@@ -216,7 +174,7 @@ fn malformed_records_error(name: &str) -> error {
 //     way in.
 /// See `is_domain_name`.
 #[doc(hidden)]
-pub fn __is_domain_name(s: &str) -> bool {
+pub fn __is_domain_name<S: AsRef<[crate::byte]>>(s: S) -> bool {
     return is_domain_name(s);
 }
 
@@ -349,7 +307,7 @@ impl Resolver {
                     );
                 }
                 let cname = r.CNAME.String();
-                if !is_domain_name(cname.as_ref()) {
+                if !is_domain_name(cname.clone()) {
                     // Was `errors::New(h)` — the error TEXT was the
                     // hostname, which tells a caller nothing about what
                     // went wrong. Go reports the malformed-records
@@ -370,7 +328,7 @@ impl Resolver {
         // Go: `if !isDomainName(cname) { return "", &DNSError{Err:
         // errMalformedDNSRecordsDetail, Name: host} }` at lookup.go line 474.
         // The text was "invalid CNAME", which is not Go's.
-        if !is_domain_name(cname.as_ref()) {
+        if !is_domain_name(cname.clone()) {
             return (string::from_static(""), malformed_records_error(h));
         }
         (cname, errors::nil)
@@ -397,7 +355,11 @@ impl Resolver {
         if e != errors::nil {
             return (slice::<string>::new(), e);
         }
-        let mut names: Vec<String> = Vec::new();
+        // Was `Vec<String>`, built with `ns.push_str(s.as_ref())`. That
+        // conversion TRUNCATES a goish `string` at the first invalid
+        // UTF-8 byte, so the name was both validated and RETURNED
+        // shorter than the server sent it. Kept as a goish `string`.
+        let mut names: Vec<string> = Vec::new();
         let mut seen: usize = 0;
         loop {
             let (hdr, e2) = p.AnswerHeader();
@@ -415,21 +377,16 @@ impl Resolver {
             if e3 != errors::nil {
                 break;
             }
-            let name_str = {
-                let s = r.PTR.String();
-                let mut ns = String::with_capacity(s.Len() as usize);
-                ns.push_str(s.as_ref());
-                ns
-            };
+            let name_str = r.PTR.String();
             // Go: filters, and REPORTS that it filtered at lookup.go line 668.
             seen += 1;
-            if is_domain_name(&name_str) {
+            if is_domain_name(name_str.clone()) {
                 names.push(name_str);
             }
         }
         let mut out = slice::<string>::new();
         for n in &names {
-            out = crate::append!(out, string::from_bytes(n.as_bytes()));
+            out = crate::append!(out, n.clone());
         }
         if names.len() != seen {
             return (out, malformed_records_error(a));
@@ -517,7 +474,7 @@ impl Resolver {
             let host = r.NS.String();
             // Go: filters, and REPORTS that it filtered at lookup.go line 610.
             seen += 1;
-            if is_domain_name(host.as_ref()) {
+            if is_domain_name(host.clone()) {
                 nss.push(NS { Host: host });
             }
         }
@@ -566,10 +523,13 @@ impl Resolver {
             }
             let host = r.MX.String();
             let pref = r.Pref;
-            let host_str: &str = host.as_ref();
             // Go: filters, and REPORTS that it filtered at lookup.go line 570.
+            // NOT `host.as_ref()` — that hands `is_domain_name` a `&str`
+            // truncated at the first invalid UTF-8 byte, and the FULL
+            // `host` is what gets pushed, so an invalid name passed the
+            // filter and was returned intact.
             seen += 1;
-            if is_domain_name(host_str) {
+            if is_domain_name(host.clone()) {
                 mxs.push(MX {
                     Host: host,
                     Pref: pref,
@@ -662,7 +622,7 @@ impl Resolver {
             let tgt = r.Target.String();
             // Go: filters, and REPORTS that it filtered at lookup.go line 525.
             seen += 1;
-            if is_domain_name(tgt.as_ref()) {
+            if is_domain_name(tgt.clone()) {
                 srvs.push(SRV {
                     Target: tgt,
                     Port: r.Port,
@@ -681,7 +641,7 @@ impl Resolver {
             string::from_bytes(target.as_bytes())
         };
 
-        if cname_str != string::from_static("") && !is_domain_name(cname_str.as_ref()) {
+        if cname_str != string::from_static("") && !is_domain_name(cname_str.clone()) {
             return (
                 string::from_static(""),
                 slice::<nilable<SRV>>::new(),

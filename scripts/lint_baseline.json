@@ -5,7 +5,7 @@
   "--enable-goish017",
   "--enable-goish018"
  ],
- "total": 7833,
+ "total": 7827,
  "counts": {
   "src/archive/mod.rs": {
    "GOISH016": 1
@@ -471,8 +471,8 @@
    "GOISH006": 1,
    "GOISH007": 1,
    "GOISH010": 12,
-   "GOISH014": 25,
-   "GOISH023": 24
+   "GOISH014": 23,
+   "GOISH023": 22
   },
   "src/net/dnsconfig.rs": {
    "GOISH005": 1,
@@ -580,10 +580,10 @@
    "GOISH021": 19
   },
   "src/net/lookup.rs": {
-   "GOISH014": 6,
+   "GOISH014": 5,
    "GOISH018": 16,
    "GOISH021": 5,
-   "GOISH023": 23
+   "GOISH023": 22
   },
   "src/net/mac.rs": {
    "GOISH005": 7,
