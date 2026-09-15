@@ -1,6 +1,6 @@
-// goishlint:ignore GOISH018 EscapeString, NewTokenDecoder, Token, autoClose, emitCDATA, switchToReader,  — the Decoder state machine and the two name predicates, deliberately not in this first slice. The Decoder ones cannot be pinned a function at a time (they share a bufio reader, a name-space stack and an error latch), so they land together with their own ref smoke; isName/isNameString need Go's `first` and `second` unicode.RangeTables, 310 lines of xml.go that should be GENERATED from Go rather than transcribed, which is its own commit. emitCDATA and EscapeString are printer-side and belong with marshal.go. See the file header and ROADMAP §2.
+// goishlint:ignore GOISH018 EscapeString, NewTokenDecoder, emitCDATA, switchToReader — EscapeString and emitCDATA are printer-side and land with marshal.go, which is unported; NewTokenDecoder wraps a TokenReader, an interface this port has no caller for yet, and switchToReader is the io.Reader/bufio adaptor Go's NewDecoder needs and goish's does not, because goish's Decoder reads from a byte slice it already owns. The Decoder's own state machine is now ported; see ROADMAP §2.
 // goishlint:ignore GOISH021 entity, errRawToken, HTMLEntity, HTMLAutoClose, TokenReader — the Decoder's own stack kinds, its name-space constants and its types; all of them exist only for the state machine waived above and would be dead declarations without it. `entity`, `HTMLEntity` and `HTMLAutoClose` are the decoder's entity tables and only `rawToken` reads them; `errRawToken` is the sentinel `Token()` returns when a TokenReader is in use.
-// go: file encoding/xml/xml.go decls: SyntaxError.Error, StartElement.Copy, StartElement.End, CharData.Copy, Comment.Copy, ProcInst.Copy, Directive.Copy, CopyToken, isInCharacterRange, isNameByte, isName, isNameString, EscapeText, escapeText, Escape, procInst, Decoder.text, Decoder.readName, Decoder.rawToken, Decoder.RawToken, Decoder.nsname, Decoder.name, Decoder.attrval, Decoder.push, Decoder.pop, Decoder.pushEOF, Decoder.popEOF, Decoder.pushElement, Decoder.pushNs, Decoder.popElement, Decoder.translate, Decoder.getc, Decoder.InputOffset, Decoder.InputPos, Decoder.savedOffset, Decoder.mustgetc, Decoder.ungetc, Decoder.space, Decoder.syntaxError, NewDecoder
+// go: file encoding/xml/xml.go decls: SyntaxError.Error, StartElement.Copy, StartElement.End, CharData.Copy, Comment.Copy, ProcInst.Copy, Directive.Copy, CopyToken, isInCharacterRange, isNameByte, isName, isNameString, EscapeText, escapeText, Escape, procInst, Decoder.text, Decoder.readName, Decoder.Token, Decoder.autoClose, Decoder.rawToken, Decoder.RawToken, Decoder.nsname, Decoder.name, Decoder.attrval, Decoder.push, Decoder.pop, Decoder.pushEOF, Decoder.popEOF, Decoder.pushElement, Decoder.pushNs, Decoder.popElement, Decoder.translate, Decoder.getc, Decoder.InputOffset, Decoder.InputPos, Decoder.savedOffset, Decoder.mustgetc, Decoder.ungetc, Decoder.space, Decoder.syntaxError, NewDecoder
 //
 // encoding/xml/xml.rs — the pure half of Go's xml.go.
 //
@@ -311,6 +311,9 @@ pub struct Decoder {
     ns: crate::gomap::map<string, string>,
     needClose: bool,
     toClose: Name,
+    /// Go's `nextToken Token` — the one-token pushback `autoClose` uses
+    /// to hold the caller's token while it injects an invented end tag.
+    nextToken: Option<Token>,
     /// Go's `saved *bytes.Buffer` — non-nil only while `rawToken` is
     /// recording raw input for a directive.
     saved: Option<crate::bytes::Buffer>,
@@ -345,6 +348,7 @@ pub fn NewDecoder<R: crate::io::Reader + 'static>(r: R) -> Decoder {
         ns: crate::gomap::map::<string, string>::new(),
         needClose: false,
         toClose: Name::default(),
+        nextToken: None,
         saved: None,
         nextByte: -1,
         err: crate::errors::nil,
@@ -1226,6 +1230,146 @@ impl Decoder {
         );
     }
 
+    // go: sdk 1.25.5 encoding/xml/xml.go:522-537 Decoder.autoClose
+    /// Go: "If the top element on the stack is autoclosing and t is not
+    /// the end tag, invent the end tag."
+    ///
+    /// Only consulted when `Strict` is false. The comparison is
+    /// case-INSENSITIVE on both sides, which is what makes it useful
+    /// for HTML-ish input.
+    fn autoClose(&self, t: &Token) -> Option<Token> {
+        if self.stk.is_empty() {
+            return None;
+        }
+        let top = &self.stk[self.stk.len() - 1];
+        if top.kind != stkStart {
+            return None;
+        }
+        for i in 0..self.AutoClose.Len() {
+            let cand = &self.AutoClose[i as usize];
+            let a: &str = cand.as_ref();
+            let b: &str = top.name.Local.as_ref();
+            if a.eq_ignore_ascii_case(b) {
+                // Go: "This one should be auto closed if t doesn't close it."
+                let closes = match t {
+                    Token::EndElement(et) => {
+                        let e: &str = et.Name.Local.as_ref();
+                        e.eq_ignore_ascii_case(b)
+                    }
+                    _ => false,
+                };
+                if !closes {
+                    return Some(Token::EndElement(EndElement {
+                        Name: top.name.clone(),
+                    }));
+                }
+                break;
+            }
+        }
+        return None;
+    }
+
+    // go: sdk 1.25.5 encoding/xml/xml.go:274-333 Decoder.Token
+    /// Go: "Token returns the next XML token in the input stream ...
+    /// Token guarantees that the StartElement and EndElement tokens it
+    /// returns are properly nested and matched."
+    ///
+    /// The layer over `rawToken`: element matching, name-space
+    /// resolution, and — outside Strict mode — invented end tags.
+    ///
+    /// The ORDER inside the StartElement arm is Go's and is not
+    /// arbitrary. The `xmlns` attributes are processed FIRST, because
+    /// "the translations listed in the attributes apply to the element
+    /// name and to the other attribute names" — a prefix declared on an
+    /// element is in scope for that same element. Then pushElement,
+    /// then translate the element name, then each attribute name.
+    pub fn Token(&mut self) -> (Option<Token>, crate::error) {
+        if !self.stk.is_empty() && self.stk[self.stk.len() - 1].kind == stkEOF {
+            return (None, crate::io::EOF.into());
+        }
+        let mut t: Token;
+        let mut err = crate::errors::nil;
+        match self.nextToken.take() {
+            Some(nt) => {
+                t = nt;
+            }
+            None => {
+                let (rt, e) = self.rawToken();
+                match rt {
+                    None => {
+                        let mut e = e;
+                        if crate::errors::Is(e.clone(), crate::io::EOF)
+                            && !self.stk.is_empty()
+                            && self.stk[self.stk.len() - 1].kind != stkEOF
+                        {
+                            e = self.syntaxError("unexpected EOF");
+                        }
+                        return (None, e);
+                    }
+                    Some(rt) => {
+                        // Go: "We still have a token to process, so
+                        // clear any errors (e.g. EOF) and proceed."
+                        t = rt;
+                        err = crate::errors::nil;
+                    }
+                }
+            }
+        }
+        if !self.Strict {
+            if let Some(t1) = self.autoClose(&t) {
+                self.nextToken = Some(t);
+                t = t1;
+            }
+        }
+        // Go's `switch t1 := t.(type)` with a fallthrough to `return t`
+        // for the other four token kinds; the `other` arm is that.
+        return match t {
+            Token::StartElement(mut t1) => {
+                // Go: "In XML name spaces, the translations listed in
+                // the attributes apply to the element name and to the
+                // other attribute names, so process the translations
+                // first."
+                for i in 0..t1.Attr.Len() {
+                    let a = t1.Attr[i as usize].clone();
+                    if a.Name.Space == string::from_static(xmlnsPrefix) {
+                        let (v, ok) = self.ns.Get(a.Name.Local.clone());
+                        self.pushNs(a.Name.Local.clone(), v, ok);
+                        self.ns.Set(a.Name.Local.clone(), a.Value.clone());
+                    }
+                    if a.Name.Space.Len() == 0
+                        && a.Name.Local == string::from_static(xmlnsPrefix)
+                    {
+                        // Go: "Default space for untagged names"
+                        let (v, ok) = self.ns.Get(string::from_static(""));
+                        self.pushNs(string::from_static(""), v, ok);
+                        self.ns.Set(string::from_static(""), a.Value.clone());
+                    }
+                }
+                self.pushElement(t1.Name.clone());
+                let mut n = t1.Name.clone();
+                self.translate(&mut n, true);
+                t1.Name = n;
+                let mut attrs: Vec<Attr> = Vec::new();
+                for i in 0..t1.Attr.Len() {
+                    let mut a = t1.Attr[i as usize].clone();
+                    let mut an = a.Name.clone();
+                    self.translate(&mut an, false);
+                    a.Name = an;
+                    attrs.push(a);
+                }
+                t1.Attr = slice::<Attr>::__from_vec(attrs);
+                (Some(Token::StartElement(t1)), err)
+            }
+            Token::EndElement(mut t1) => {
+                if !self.popElement(&mut t1) {
+                    return (None, self.err.clone());
+                }
+                (Some(Token::EndElement(t1)), err)
+            }
+            other => (Some(other), err),
+        };
+    }
+
     // go: sdk 1.25.5 encoding/xml/xml.go:468-476 Decoder.syntaxError
     /// Go: `&SyntaxError{Msg: msg, Line: d.line}`.
     pub(crate) fn syntaxError(&self, msg: &str) -> crate::error {
@@ -1800,6 +1944,43 @@ pub fn __tok_str(t: &Token) -> string {
             crate::fmt::Sprintf!("D(%s)", hexs(b))
         }
     };
+}
+
+// go: none — goish-only: tokenise a document through `Token`, the
+// name-space-resolving layer, in the same dump format as `__raw_script`.
+#[doc(hidden)]
+pub fn __tok_script(doc: &[byte], strict: bool, default_space: &str, autoclose: &[&str]) -> string {
+    let mut d = NewDecoder(crate::bytes::NewReader(slice::<byte>::__from_vec(doc.to_vec())));
+    d.Strict = strict;
+    d.DefaultSpace = string::from_bytes(default_space.as_bytes());
+    if !autoclose.is_empty() {
+        let mut v: Vec<string> = Vec::new();
+        for a in autoclose.iter() {
+            v.push(string::from_bytes(a.as_bytes()));
+        }
+        d.AutoClose = slice::<string>::__from_vec(v);
+    }
+    let mut out = string::from_static("");
+    let mut first = true;
+    let mut i = 0;
+    while i < 40 {
+        i += 1;
+        let (t, e) = d.Token();
+        if !first {
+            out = out + string::from_static(" ");
+        }
+        first = false;
+        match t {
+            None => {
+                out = out + string::from_static("err=") + e.Error();
+                break;
+            }
+            Some(t) => {
+                out = out + __tok_str(&t);
+            }
+        }
+    }
+    return out;
 }
 
 // ─── the XML name character tables ────────────────────────────────────

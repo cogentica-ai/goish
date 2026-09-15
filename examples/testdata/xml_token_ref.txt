@@ -1,0 +1,17 @@
+tok 0 "<a/>" strict=true def="" ac=[] -> S(|a)[] E(|a) err=EOF
+tok 1 "<a></a>" strict=true def="" ac=[] -> S(|a)[] E(|a) err=EOF
+tok 2 "<a></b>" strict=true def="" ac=[] -> S(|a)[] err=XML syntax error on line 1: element <a> closed by </b>
+tok 3 "<a>" strict=true def="" ac=[] -> S(|a)[] err=XML syntax error on line 1: unexpected EOF
+tok 4 "</a>" strict=true def="" ac=[] -> err=XML syntax error on line 1: unexpected end element </a>
+tok 5 "<a xmlns=\"http://d\"><b/></a>" strict=true def="" ac=[] -> S(http://d|a)[|xmlns=http://d] S(http://d|b)[] E(http://d|b) E(http://d|a) err=EOF
+tok 6 "<a xmlns:x=\"http://x\"><x:b x:c=\"1\"/></a>" strict=true def="" ac=[] -> S(|a)[xmlns|x=http://x] S(http://x|b)[http://x|c=1] E(http://x|b) E(|a) err=EOF
+tok 7 "<a xmlns:x=\"http://x\" x:c=\"1\"/>" strict=true def="" ac=[] -> S(|a)[xmlns|x=http://x,http://x|c=1] E(|a) err=EOF
+tok 8 "<a b=\"1\"/>" strict=true def="http://def" ac=[] -> S(http://def|a)[|b=1] E(http://def|a) err=EOF
+tok 9 "<a xmlns=\"http://d\"><b xmlns=\"http://e\"/><c/></a>" strict=true def="" ac=[] -> S(http://d|a)[|xmlns=http://d] S(http://e|b)[|xmlns=http://e] E(http://e|b) S(http://d|c)[] E(http://d|c) E(http://d|a) err=EOF
+tok 10 "<a xmlns:x=\"http://x\"><x:b/></a><x:c/>" strict=true def="" ac=[] -> S(|a)[xmlns|x=http://x] S(http://x|b)[] E(http://x|b) E(|a) S(x|c)[] E(x|c) err=EOF
+tok 11 "<a xml:lang=\"en\"/>" strict=true def="" ac=[] -> S(|a)[http://www.w3.org/XML/1998/namespace|lang=en] E(|a) err=EOF
+tok 12 "<a xmlns:x=\"http://x\"><b><x:c/></b></a>" strict=true def="" ac=[] -> S(|a)[xmlns|x=http://x] S(|b)[] S(http://x|c)[] E(http://x|c) E(|b) E(|a) err=EOF
+tok 13 "<p>one<p>two" strict=false def="" ac=[p] -> S(|p)[] E(|p) C(6f6e65) S(|p)[] E(|p) C(74776f) err=EOF
+tok 14 "<p>one</p>" strict=false def="" ac=[p] -> S(|p)[] E(|p) C(6f6e65) err=XML syntax error on line 1: unexpected end element </p>
+tok 15 "<a><b></a>" strict=false def="" ac=[] -> S(|a)[] S(|b)[] E(|b) E(|a) err=EOF
+tok 16 "<a>x</a>trailing" strict=true def="" ac=[] -> S(|a)[] C(78) E(|a) C(747261696c696e67) err=EOF
