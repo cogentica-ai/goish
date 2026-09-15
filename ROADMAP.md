@@ -201,10 +201,39 @@ gap is smallest exactly where you would start:
     because goish does not have them, not because the behaviour is
     absent.
 
-The genuinely unported package in that subtree is `encoding/gob` (0%,
-218 functions, 4,845 Go LOC). It is real, large, and needs no decision
-— which makes it the natural next porting work once the aliasing
-question is settled or set aside.
+`encoding/gob` used to be described here as "real, large, and needs no
+decision — the natural next porting work". **That was wrong, measured
+2026-09-15, and it is blocked TWICE over.**
+
+  1. reflect, same as encoding/xml's marshalValue. gob's encOp and
+     decOp engines walk a `reflect.Value`, and the DECODER writes
+     through it; goish's `reflect::Value` is a read-only deep clone.
+     GobEncoder / GobDecoder dispatch additionally needs `Implements`,
+     which goish's reflect does not have.
+
+  2. recover. gob signals every internal error by PANICKING with a
+     `gobError` and catching it at the top of Encode/Decode
+     (error.go's `error_`/`errorf`/`catchError`). goish's `recover!()`
+     observes a panic but does NOT stop its propagation — the goroutine
+     still dies, and `src/defer.rs` says so in as many words, because
+     resynthesising a normal return needs compiler-emitted unwind
+     tables. So even `decodeUint`, `decodeInt`, `getLength` and
+     `float32FromBits`, which are otherwise pure, cannot be ported
+     faithfully: each calls `error_`. Porting them means turning ~50
+     call sites into explicit error returns, which is a structural port
+     and therefore a decision.
+
+What IS ported, as of 2026-09-15, is everything reachable without
+either — gob's wire primitives:
+
+    gob_wire_ref_smoke       88/88     encodeUint/Int, floatBits,
+                                       decodeUintReader, both buffers,
+                                       toInt, tooBig, the error text
+
+That is `encode.go`'s encBuffer and the two integer encodings,
+`decode.go`'s decBuffer and `decodeUintReader`, and `decoder.go`'s
+`toInt` and `tooBig`. The smoke's header says plainly that nothing in
+the tree calls them yet.
 
 `encoding/xml` was the other one, and as of 2026-09-15 it is no longer
 0%. `xml.go` (the tokeniser and Decoder) and `typeinfo.go` (the

@@ -1,0 +1,85 @@
+EU 0|0|00
+EU 1|1|01
+EU 0x7e|126|7e
+EU 0x7f|127|7f
+EU 0x80|128|ff80
+EU 0xff|255|ffff
+EU 0x100|256|fe0100
+EU 0xffff|65535|feffff
+EU 0x10000|65536|fd010000
+EU 0xffffff|16777215|fdffffff
+EU 0x1000000|16777216|fc01000000
+EU 0xffffffff|4294967295|fcffffffff
+EU 0x100000000|4294967296|fb0100000000
+EU 0xffffffffff|1099511627775|fbffffffffff
+EU 0xffffffffffff|281474976710655|faffffffffffff
+EU 0xffffffffffffff|72057594037927935|f9ffffffffffffff
+EU 0x100000000000000|72057594037927936|f80100000000000000
+EU max|18446744073709551615|f8ffffffffffffffff
+EU 1<<63|9223372036854775808|f88000000000000000
+EI 0|0|00
+EI 1|1|02
+EI -1|-1|01
+EI 63|63|7e
+EI 64|64|ff80
+EI -64|-64|7f
+EI -65|-65|ff81
+EI 127|127|fffe
+EI -128|-128|ffff
+EI 32767|32767|fefffe
+EI -32768|-32768|feffff
+EI maxint32|2147483647|fcfffffffe
+EI minint32|-2147483648|fcffffffff
+EI maxint64|9223372036854775807|f8fffffffffffffffe
+EI minint64|-9223372036854775808|f8ffffffffffffffff
+FB 0|0000000000000000|0000000000000000
+FB -0|0000000000000080|8000000000000000
+FB 1|000000000000f03f|3ff0000000000000
+FB -1|000000000000f0bf|bff0000000000000
+FB 0.5|000000000000e03f|3fe0000000000000
+FB pi|182d4454fb210940|400921fb54442d18
+FB max|ffffffffffffef7f|7fefffffffffffff
+FB smallest|0100000000000000|0000000000000001
+FB inf|000000000000f07f|7ff0000000000000
+FB -inf|000000000000f0ff|fff0000000000000
+FB nan|010000000000f87f|7ff8000000000001
+DUR empty|0|1|EOF
+DUR zero|0|1|
+DUR 0x7f|127|1|
+DUR 0x80|0|1|gob: encoded unsigned integer out of range
+DUR n1|42|2|
+DUR n1-trunc|0|0|unexpected EOF
+DUR n8|72623859790382856|9|
+DUR n8-trunc|0|3|unexpected EOF
+DUR n9|0|1|gob: encoded unsigned integer out of range
+DUR n2|256|3|
+DUR trailing|42|1|
+EB wb|4141|len=1 len=2 
+EB write|010203010203|w=3 len=3 w=3 len=6 
+EB mixed|410102037879|len=1 w=3 len=4 len=6 
+EB reset|41|len=1 w=3 len=4 len=0 len=1 
+DB empty|rb=EOF len=0,bytes= read=0,,EOF len=0,bytes= read0=0,nil len=0,bytes= 
+DB read|rb=1 len=4,bytes=02030405 read=3,020304,nil len=1,bytes=05 rb=5 len=0,bytes= rb=EOF len=0,bytes= 
+DB drop|len=4,bytes=02030405 len=3,bytes=030405 read=3,030405,nil len=0,bytes= 
+DB reset|rb=1 len=2,bytes=0203 len=0,bytes= rb=EOF len=0,bytes= 
+DB read0-nonempty|read0=0,nil len=2,bytes=0102 
+TI 0|0
+TI 1|-1
+TI 2|1
+TI 3|-2
+TI 4|2
+TI 5|-3
+TI 126|63
+TI 127|-64
+TI 128|64
+TI 255|-128
+TI 4294967294|2147483647
+TI 4294967295|-2147483648
+TI 4611686018427387904|2305843009213693952
+TI 9223372036854775808|4611686018427387904
+TI 18446744073709551615|-9223372036854775808
+TI 18446744073709551614|9223372036854775807
+TB 8589934592
+EBC invalid message length
+OV value for "int8" out of range
+ERRS gob: encoded unsigned integer out of range|gob: unknown type id or corrupted data|gob: bad data: field numbers out of bounds|unexpected EOF

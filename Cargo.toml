@@ -81,6 +81,10 @@ name = "hex_decodestring_ref_smoke"
 path = "examples/hex_decodestring_ref_smoke.rs"
 
 [[example]]
+name = "gob_wire_ref_smoke"
+path = "examples/gob_wire_ref_smoke.rs"
+
+[[example]]
 name = "xml_marshal_leaf_ref_smoke"
 path = "examples/xml_marshal_leaf_ref_smoke.rs"
 
