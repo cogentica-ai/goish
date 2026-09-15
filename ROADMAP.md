@@ -210,17 +210,20 @@ question is settled or set aside.
 0%. `xml.go` (the tokeniser and Decoder) and `typeinfo.go` (the
 struct-tag interpreter) are ported and pinned against Go 1.25.5:
 
-    xml_pure_ref_smoke       654/654   character ranges, name predicates, escaping
+    xml_pure_ref_smoke       658/658   character ranges, name predicates, escaping
     xml_decoder_bytes_ref    17/17     getc/ungetc, line and offset accounting
     xml_text_ref_smoke       41/41     character data, CDATA, entities
     xml_stack_ref_smoke      19/19     the parse stack and name-space scoping
     xml_rawtoken_ref_smoke   31/31     whole documents to raw tokens
     xml_token_ref_smoke      17/17     prefix resolution, matched tags, AutoClose
     xml_typeinfo_ref_smoke   29/29     every tag mode, every tag error, conflicts
+    xml_encodetoken_ref      47/47     the token printer, prefixes, indent, directives
 
-What remains is the printer and the reader: `marshal.go` (34 fns),
-`read.go` (12) and the Marshal/Unmarshal surface they carry. Both sit
-on `typeinfo.go`, which is why it came first.
+What remains is the REFLECT half of both directions: `marshal.go`'s
+Marshal/Encode/marshalValue/marshalStruct and `read.go`'s matching
+Unmarshal side, plus the Marshaler / MarshalerAttr / TextMarshaler
+interface dispatch they share. Those two travel together so they can be
+pinned against Go on the same struct set.
 ### §2v — runtime/pprof protobuf profiles (issue #9): DONE
 
 **STATUS CORRECTED 2026-09-14. This section described the work as

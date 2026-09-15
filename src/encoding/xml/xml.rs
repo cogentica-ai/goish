@@ -1,6 +1,6 @@
-// goishlint:ignore GOISH018 EscapeString, NewTokenDecoder, emitCDATA, switchToReader — EscapeString and emitCDATA are printer-side and land with marshal.go, which is unported; NewTokenDecoder wraps a TokenReader, an interface this port has no caller for yet, and switchToReader is the io.Reader/bufio adaptor Go's NewDecoder needs and goish's does not, because goish's Decoder reads from a byte slice it already owns. The Decoder's own state machine is now ported; see ROADMAP §2.
+// goishlint:ignore GOISH018 NewTokenDecoder, switchToReader — NewTokenDecoder wraps a TokenReader, an interface this port has no caller for yet, and switchToReader is the io.Reader/bufio adaptor Go's NewDecoder needs and goish's does not, because goish's Decoder reads from a byte slice it already owns. The Decoder's own state machine is now ported; see ROADMAP §2.
 // goishlint:ignore GOISH021 entity, errRawToken, HTMLEntity, HTMLAutoClose, TokenReader — the Decoder's own stack kinds, its name-space constants and its types; all of them exist only for the state machine waived above and would be dead declarations without it. `entity`, `HTMLEntity` and `HTMLAutoClose` are the decoder's entity tables and only `rawToken` reads them; `errRawToken` is the sentinel `Token()` returns when a TokenReader is in use.
-// go: file encoding/xml/xml.go decls: SyntaxError.Error, StartElement.Copy, StartElement.End, CharData.Copy, Comment.Copy, ProcInst.Copy, Directive.Copy, CopyToken, isInCharacterRange, isNameByte, isName, isNameString, EscapeText, escapeText, Escape, procInst, Decoder.text, Decoder.readName, Decoder.Token, Decoder.autoClose, Decoder.rawToken, Decoder.RawToken, Decoder.nsname, Decoder.name, Decoder.attrval, Decoder.push, Decoder.pop, Decoder.pushEOF, Decoder.popEOF, Decoder.pushElement, Decoder.pushNs, Decoder.popElement, Decoder.translate, Decoder.getc, Decoder.InputOffset, Decoder.InputPos, Decoder.savedOffset, Decoder.mustgetc, Decoder.ungetc, Decoder.space, Decoder.syntaxError, NewDecoder
+// go: file encoding/xml/xml.go decls: SyntaxError.Error, StartElement.Copy, StartElement.End, CharData.Copy, Comment.Copy, ProcInst.Copy, Directive.Copy, CopyToken, isInCharacterRange, isNameByte, isName, isNameString, EscapeText, escapeText, Escape, procInst, Decoder.text, Decoder.readName, Decoder.Token, Decoder.autoClose, Decoder.rawToken, Decoder.RawToken, Decoder.nsname, Decoder.name, Decoder.attrval, Decoder.push, Decoder.pop, Decoder.pushEOF, Decoder.popEOF, Decoder.pushElement, Decoder.pushNs, Decoder.popElement, Decoder.translate, Decoder.getc, Decoder.InputOffset, Decoder.InputPos, Decoder.savedOffset, Decoder.mustgetc, Decoder.ungetc, Decoder.space, Decoder.syntaxError, NewDecoder, printer.EscapeString, emitCDATA
 //
 // encoding/xml/xml.rs — the pure half of Go's xml.go.
 //
@@ -1754,11 +1754,11 @@ impl Decoder {
 
 // go: sdk 1.25.5 encoding/xml/xml.go:338 xmlnsPrefix
 /// Go: the reserved prefixes, which never go through `ns`.
-const xmlnsPrefix: &str = "xmlns";
+pub(super) const xmlnsPrefix: &str = "xmlns";
 // go: none — see xmlnsPrefix; Go declares both in one const block.
-const xmlPrefix: &str = "xml";
+pub(super) const xmlPrefix: &str = "xml";
 // go: none — see xmlnsPrefix.
-const xmlURL: &str = "http://www.w3.org/XML/1998/namespace";
+pub(super) const xmlURL: &str = "http://www.w3.org/XML/1998/namespace";
 
 // go: none — goish-only: drive the parse stack from an example. Go's
 // stack ops are unexported and mutate the whole Decoder, so the smoke
@@ -2412,7 +2412,17 @@ pub fn isName(s: &[byte]) -> bool {
 /// Go: `isName` over a string rather than a byte slice. Go keeps both
 /// to avoid a conversion on each call; goish keeps both because Go's
 /// API has both, and this one simply forwards.
-pub fn isNameString(s: &str) -> bool {
+///
+/// The parameter is `Into<string>` and NOT `&str` on purpose. Go's
+/// `string` is arbitrary bytes, and this predicate's whole job is to
+/// reject bytes that cannot start or continue an XML name — including
+/// bytes that are not valid UTF-8. goish's `string: AsRef<str>`
+/// TRUNCATES at the first invalid byte, so a `&str` parameter would
+/// have made `isNameString("a\xff")` test "a" and answer true where
+/// Go answers false. `EncodeToken` reaches this with a caller-supplied
+/// `ProcInst.Target`, so the difference is observable.
+pub fn isNameString<S: Into<string>>(s: S) -> bool {
+    let s: string = s.into();
     return isName(s.as_bytes());
 }
 
@@ -2509,6 +2519,112 @@ pub fn escapeText<W: crate::io::Writer + ?Sized>(
 /// Go 1.1 or later should use EscapeText."
 pub fn Escape<W: crate::io::Writer + ?Sized>(w: &mut W, s: &[byte]) {
     let _ = EscapeText(w, s);
+}
+
+// go: sdk 1.25.5 encoding/xml/xml.go:1962-1998 printer.EscapeString
+/// Go: "EscapeString writes to p the properly escaped XML equivalent of
+/// the plain text data s."
+///
+/// Not a thin wrapper over `escapeText`: this is the ATTRIBUTE-value
+/// escaper, so it always escapes the newline, and it decodes runes out
+/// of a string rather than a byte slice. Go keeps the two bodies
+/// separate for the same reason, and the divergence is one line — the
+/// missing `escapeNewline` check.
+///
+/// The `printer` it writes to lives in marshal.go; the method lives
+/// here, and so does its anchor.
+impl<W: crate::io::Writer> super::marshal::printer<W> {
+    // go: sdk 1.25.5 encoding/xml/xml.go:1962-1998 printer.EscapeString
+    /// See the banner above this impl.
+    pub fn EscapeString<S: Into<string>>(&mut self, s: S) {
+        let s: string = s.into();
+        let b = s.as_bytes();
+        let mut last: usize = 0;
+        let mut i: usize = 0;
+        while i < b.len() {
+            let (r, w_) = crate::unicode::utf8::DecodeRune(&b[i..]);
+            let width = w_ as usize;
+            i += width;
+            let esc: &[u8] = match r {
+                0x22 => ESC_QUOT,
+                0x27 => ESC_APOS,
+                0x26 => ESC_AMP,
+                0x3C => ESC_LT,
+                0x3E => ESC_GT,
+                0x09 => ESC_TAB,
+                0x0A => ESC_NL,
+                0x0D => ESC_CR,
+                _ => {
+                    if !isInCharacterRange(r) || (r == 0xFFFD && width == 1) {
+                        ESC_FFFD
+                    } else {
+                        continue;
+                    }
+                }
+            };
+            let _ = self.WriteString(string::from_bytes(&b[last..i - width]));
+            let _ = self.Write(slice::<byte>::__from_vec(esc.to_vec()));
+            last = i;
+        }
+        let _ = self.WriteString(string::from_bytes(&b[last..]));
+    }
+}
+
+// go: none — goish idiom: Go declares these as a `var (...)` block of
+// []byte; goish spells them as byte literals.
+const CDATA_START: &[u8] = b"<![CDATA[";
+const CDATA_END: &[u8] = b"]]>";
+/// Go's `cdataEscape`: closes the section, emits a literal `>`, and
+/// reopens — the only way to put `]]>` inside CDATA.
+const CDATA_ESCAPE: &[u8] = b"]]]]><![CDATA[>";
+
+// go: sdk 1.25.5 encoding/xml/xml.go:2014-2045 emitCDATA
+/// Go: "emitCDATA writes to w the CDATA-wrapped plain text data s. It
+/// escapes CDATA directives nested in s."
+pub fn emitCDATA<W: crate::io::Writer + ?Sized>(w: &mut W, s: &[byte]) -> crate::error {
+    if s.len() == 0 {
+        return crate::errors::nil;
+    }
+    let (_, err) = w.Write(slice::<byte>::__from_vec(CDATA_START.to_vec()));
+    if !err.IsNil() {
+        return err;
+    }
+
+    let mut s: &[byte] = s;
+    loop {
+        // Go: `bytes.Cut(s, cdataEnd)`.
+        let mut found: Option<usize> = None;
+        let mut i: usize = 0;
+        while i + CDATA_END.len() <= s.len() {
+            if &s[i..i + CDATA_END.len()] == CDATA_END {
+                found = Some(i);
+                break;
+            }
+            i += 1;
+        }
+        let at = match found {
+            Some(at) => at,
+            None => break,
+        };
+        // Go: "Found a nested CDATA directive end."
+        let (_, err) = w.Write(slice::<byte>::__from_vec(s[..at].to_vec()));
+        if !err.IsNil() {
+            return err;
+        }
+        let (_, err) = w.Write(slice::<byte>::__from_vec(CDATA_ESCAPE.to_vec()));
+        if !err.IsNil() {
+            return err;
+        }
+        s = &s[at + CDATA_END.len()..];
+    }
+
+    let (_, err) = w.Write(slice::<byte>::__from_vec(s.to_vec()));
+    if !err.IsNil() {
+        return err;
+    }
+
+    let (_, err) = w.Write(slice::<byte>::__from_vec(CDATA_END.to_vec()));
+    return err;
 }
 
 // ─── procInst ─────────────────────────────────────────────────────────

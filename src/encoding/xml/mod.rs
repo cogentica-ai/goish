@@ -21,6 +21,7 @@
 
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 
+pub mod marshal;
 pub mod typeinfo;
 pub mod xml;
 
@@ -29,4 +30,5 @@ pub use xml::{
     StartElement, SyntaxError, Token,
 };
 
+pub use marshal::{Encoder, Header, NewEncoder};
 pub use typeinfo::TagPathError;

@@ -101,22 +101,21 @@ fn escnlrow(name: &'static str, input: &[byte], want: &[byte]) {
 // than a silently one-sided table.
 fn namerow(name: &'static str, input: &[byte], want: bool) {
     let got = xml::xml::isName(input);
-    let gots = xml::xml::isNameString(
-        core::str::from_utf8(input).unwrap_or("\u{fffd}\u{fffd}invalid\u{fffd}\u{fffd}"),
-    );
+    // isNameString takes anything that becomes a goish `string`, which
+    // is arbitrary bytes — so every row, INCLUDING the invalid-UTF-8
+    // ones, asserts both predicates. It used to take a `&str`, and the
+    // raw rows had to skip it, because the conversion truncated the
+    // input at the first invalid byte and made the failing case
+    // unrepresentable.
+    let gots = xml::xml::isNameString(string::from_bytes(input));
     check(
         string::from_static("isName ") + string::from_bytes(name.as_bytes()),
         got == want,
     );
-    // isNameString only gets a meaningful comparison for valid UTF-8;
-    // for the raw rows the &str conversion cannot represent the input,
-    // so that row asserts isName alone.
-    if core::str::from_utf8(input).is_ok() {
-        check(
-            string::from_static("isNameString ") + string::from_bytes(name.as_bytes()),
-            gots == want,
-        );
-    }
+    check(
+        string::from_static("isNameString ") + string::from_bytes(name.as_bytes()),
+        gots == want,
+    );
 }
 
 fn pirow(param: &'static str, s: &'static str, want: &'static str) {
@@ -337,8 +336,8 @@ fn main() {
         // 21 chr + 256 nb + 256 esc1 + 13 esc + 3 escnl + 5 escraw
         // + 28 pi + 2 StartElement + 6 CopyToken + 1 count + 1 SyntaxError
         // + 29 isName rows x2 + 4 raw rows x1
-        if pass + fail != 654 {
-            fmt::Printf!("FAIL ran %v checks, expected 654\n", pass + fail);
+        if pass + fail != 658 {
+            fmt::Printf!("FAIL ran %v checks, expected 658\n", pass + fail);
             FAIL += 1;
         }
         let fail = FAIL;
