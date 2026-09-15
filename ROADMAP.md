@@ -201,11 +201,26 @@ gap is smallest exactly where you would start:
     because goish does not have them, not because the behaviour is
     absent.
 
-The genuinely unported packages in that subtree are `encoding/gob` (0%,
-218 functions, 4,845 Go LOC) and `encoding/xml` (0%, 89 functions,
-4,353 LOC). Those are real, large, and need no decision — which makes
-them the natural next porting work once the aliasing question is
-settled or set aside.
+The genuinely unported package in that subtree is `encoding/gob` (0%,
+218 functions, 4,845 Go LOC). It is real, large, and needs no decision
+— which makes it the natural next porting work once the aliasing
+question is settled or set aside.
+
+`encoding/xml` was the other one, and as of 2026-09-15 it is no longer
+0%. `xml.go` (the tokeniser and Decoder) and `typeinfo.go` (the
+struct-tag interpreter) are ported and pinned against Go 1.25.5:
+
+    xml_pure_ref_smoke       654/654   character ranges, name predicates, escaping
+    xml_decoder_bytes_ref    17/17     getc/ungetc, line and offset accounting
+    xml_text_ref_smoke       41/41     character data, CDATA, entities
+    xml_stack_ref_smoke      19/19     the parse stack and name-space scoping
+    xml_rawtoken_ref_smoke   31/31     whole documents to raw tokens
+    xml_token_ref_smoke      17/17     prefix resolution, matched tags, AutoClose
+    xml_typeinfo_ref_smoke   29/29     every tag mode, every tag error, conflicts
+
+What remains is the printer and the reader: `marshal.go` (34 fns),
+`read.go` (12) and the Marshal/Unmarshal surface they carry. Both sit
+on `typeinfo.go`, which is why it came first.
 ### §2v — runtime/pprof protobuf profiles (issue #9): DONE
 
 **STATUS CORRECTED 2026-09-14. This section described the work as

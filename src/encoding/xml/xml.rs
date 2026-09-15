@@ -80,6 +80,57 @@ pub struct Name {
     pub Local: string,
 }
 
+// goishlint:ignore GOISH014 NAME_FIELDS, __reflect_type, __reflect_value — the reflect descriptor for Name, which Go gets from the runtime and goish has to write down; each item carries its own `// go: none` line instead.
+// go: none — goish-only: the reflect descriptor for `Name`. Go's
+// typeinfo.go opens with `var nameType = reflect.TypeFor[Name]()` and
+// compares against it to stop `getTypeInfo` from treating the XMLName
+// carrier as an ordinary struct. goish's reflect has no runtime type
+// registry, so the descriptor is spelled out here, next to the struct
+// it describes.
+//
+// The name is the PACKAGE-QUALIFIED "xml.Name" because goish's
+// `Type` has a single name field where Go has both `Name()` and
+// `String()`, and typeinfo.go's error text interpolates the String()
+// form. Nothing reads `Name()` on these descriptors.
+static NAME_FIELDS: [crate::reflect::StructField; 2] = [
+    crate::reflect::StructField {
+        Name: "Space",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <string as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+    crate::reflect::StructField {
+        Name: "Local",
+        Tag: crate::reflect::StructTag::__new(""),
+        Type: <string as crate::reflect::Reflect>::__reflect_type,
+        PkgPath: "",
+        Anonymous: false,
+    },
+];
+
+impl crate::reflect::Reflect for Name {
+    // go: none — goish-only: see the banner above.
+    fn __reflect_type() -> crate::reflect::Type {
+        return crate::reflect::Type::__new(
+            crate::reflect::Kind::Struct,
+            "xml.Name",
+            &NAME_FIELDS,
+        );
+    }
+
+    // go: none — goish-only: see the banner above.
+    fn __reflect_value(&self) -> crate::reflect::Value {
+        return crate::reflect::Value::Struct {
+            ty: <Name as crate::reflect::Reflect>::__reflect_type(),
+            fields: alloc::vec![
+                crate::reflect::Reflect::__reflect_value(&self.Space),
+                crate::reflect::Reflect::__reflect_value(&self.Local),
+            ],
+        };
+    }
+}
+
 // go: sdk 1.25.5 encoding/xml/xml.go:45-48 Attr
 /// Go: "An Attr represents an attribute in an XML element (Name=Value)."
 #[derive(Clone, Default, PartialEq)]

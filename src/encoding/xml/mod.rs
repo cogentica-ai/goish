@@ -21,9 +21,12 @@
 
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 
+pub mod typeinfo;
 pub mod xml;
 
 pub use xml::{
     Attr, CharData, Comment, CopyToken, Directive, EndElement, Escape, EscapeText, Name, ProcInst,
     StartElement, SyntaxError, Token,
 };
+
+pub use typeinfo::TagPathError;

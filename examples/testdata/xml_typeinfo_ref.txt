@@ -1,0 +1,148 @@
+S tiPlain 2
+  A||string|string|0
+  B||int|int|0
+S tiAttr 2
+  A|a,attr|string|string|0
+  B|b|string|string|0
+S tiNS 2
+  A|http://ns/one a|string|string|0
+  B|http://ns/two b,attr|string|string|0
+S tiModes 5
+  C|,chardata|string|string|0
+  D|,cdata|string|string|0
+  I|,innerxml|string|string|0
+  M|,comment|string|string|0
+  N|,any|string|string|0
+S tiOmit 2
+  A|a,omitempty|string|string|0
+  B|b,attr,omitempty|string|string|0
+S tiOmitBad 1
+  C|,chardata,omitempty|string|string|0
+S tiTwoModes 1
+  A|a,attr,chardata|string|string|0
+S tiAnyAttr 1
+  A|,any,attr|slice||0
+S tiNamedMode 1
+  A|a,chardata|string|string|0
+S tiNamedAttr 1
+  A|a,attr|string|string|0
+S tiSkip 2
+  A|-|string|string|0
+  B|b|string|string|0
+S tiPath 2
+  A|a>b>c|string|string|0
+  D|a>b>d|string|string|0
+S tiTrailing 1
+  A|a>|string|string|0
+S tiPathMode 1
+  A|a>b,attr|string|string|0
+S tiEmptyHead 1
+  A|>b|string|string|0
+S tiNsNoName 1
+  A|http://ns/one |string|string|0
+S tiXMLName 2
+  XMLName|root|struct|Name|0
+  A|a|string|string|0
+S tiXMLNameNS 2
+  XMLName|http://ns/one root|struct|Name|0
+  A|a|string|string|0
+S tiXMLNameBad 1
+  XMLName|root,attr|struct|Name|0
+S tiInner 2
+  XMLName|inner|struct|Name|0
+  V|,chardata|string|string|0
+S tiHasInner 1
+  F|inner|struct|tiInner|0
+S tiHasInnerBad 1
+  F|other|struct|tiInner|0
+S tiHasInnerDefault 1
+  F||struct|tiInner|0
+S tiConflict 2
+  A|x|string|string|0
+  B|x|string|string|0
+S tiConflictNS 2
+  A|http://a x|string|string|0
+  B|http://b x|string|string|0
+S tiPrefixConflict 2
+  A|x|string|string|0
+  B|x>y|string|string|0
+S tiNoConflictMode 2
+  A|x|string|string|0
+  B|x,attr|string|string|0
+S tiPtr 1
+  F|inner|struct|tiInner|1
+S Name 2
+  Space||string|string|0
+  Local||string|string|0
+--
+T tiPlain
+F A||1|0|
+F B||1|1|
+T tiAttr
+F a||2|0|
+F b||1|1|
+T tiNS
+F a|http://ns/one|1|0|
+F b|http://ns/two|2|1|
+T tiModes
+F C||8|0|
+F D||4|1|
+F I||16|2|
+F M||32|3|
+F N||65|4|
+T tiOmit
+F a||129|0|
+F b||130|1|
+T tiOmitBad
+E xml: invalid tag in field C of type xml.tiOmitBad: ",chardata,omitempty"
+T tiTwoModes
+E xml: invalid tag in field A of type xml.tiTwoModes: "a,attr,chardata"
+T tiAnyAttr
+F A||66|0|
+T tiNamedMode
+E xml: invalid tag in field A of type xml.tiNamedMode: "a,chardata"
+T tiNamedAttr
+F a||2|0|
+T tiSkip
+F b||1|1|
+T tiPath
+F c||1|0|a,b
+F d||1|1|a,b
+T tiTrailing
+E xml: trailing '>' in field A of type xml.tiTrailing
+T tiPathMode
+E xml: a>b chain not valid with attr flag
+T tiEmptyHead
+F b||1|0|A
+T tiNsNoName
+E xml: namespace without name in field A of type xml.tiNsNoName: "http://ns/one "
+T tiXMLName
+X root||1|0|
+F a||1|1|
+T tiXMLNameNS
+X root|http://ns/one|1|0|
+F a||1|1|
+T tiXMLNameBad
+E xml: invalid tag in field XMLName of type xml.tiXMLNameBad: "root,attr"
+T tiInner
+X inner||1|0|
+F V||8|1|
+T tiHasInner
+F inner||1|0|
+T tiHasInnerBad
+E xml: name "other" in tag of xml.tiHasInnerBad.F conflicts with name "inner" in xml.tiInner.XMLName
+T tiHasInnerDefault
+F inner||1|0|
+T tiConflict
+E xml.tiConflict field "A" with tag "x" conflicts with field "B" with tag "x"
+T tiConflictNS
+F x|http://a|1|0|
+F x|http://b|1|1|
+T tiPrefixConflict
+E xml.tiPrefixConflict field "A" with tag "x" conflicts with field "B" with tag "x>y"
+T tiNoConflictMode
+F x||1|0|
+F x||2|1|
+T tiPtr
+F inner||1|0|
+T Name
