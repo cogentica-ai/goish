@@ -85,6 +85,10 @@ name = "time_date_norm_ref_smoke"
 path = "examples/time_date_norm_ref_smoke.rs"
 
 [[example]]
+name = "zip_reader_ref_smoke"
+path = "examples/zip_reader_ref_smoke.rs"
+
+[[example]]
 name = "zip_struct_ref_smoke"
 path = "examples/zip_struct_ref_smoke.rs"
 

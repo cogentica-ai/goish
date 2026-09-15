@@ -289,8 +289,14 @@ time) is already here. `struct.go` is ported and pinned:
                                        file-mode mappings, FileHeader.Mode
                                        and SetMode, isZip64, timeZone,
                                        every signature and record length
+    zip_reader_ref_smoke      99/99    readDirectoryHeader over 22 crafted
+                                       headers, readDataDescriptor,
+                                       readBuf, findSignatureInBlock,
+                                       toValidName, split, detectUTF8
 
-`reader.go`, `writer.go` and `register.go` are next, in that order.
+The Reader and Writer themselves are next — the parsing came first
+because it is the half that has to be right about a hostile input and
+the half a reference can pin byte for byte.
 
 That slice also found a defect in `time.Date` — see below.
 
