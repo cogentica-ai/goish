@@ -208,6 +208,85 @@ fn rddrow(idx: int, name: &'static str, raw: &'static str, crc: u32, want: &'sta
     ck(idx, name, es, string::from_bytes(want.as_bytes()));
 }
 
+
+// go: none
+fn rderow(idx: int, name: &'static str, data: &'static str, want: &'static str) {
+    let raw = unhex(data);
+    let mut r = goish::bytes::NewReader(goish::slice::__from_vec(raw.clone()));
+    let (d, base, err) = zr::readDirectoryEnd(&mut r, raw.len() as i64);
+    let es = if err == goish::errors::nil {
+        string::from_static("")
+    } else {
+        err.Error()
+    };
+    let fields = match &d {
+        None => string::from_static("nil"),
+        Some(d) => fmt::Sprintf!(
+            "%v,%v,%v,%v,%v,%v,%v,%s",
+            d.diskNbr,
+            d.dirDiskNbr,
+            d.dirRecordsThisDisk,
+            d.directoryRecords,
+            d.directorySize,
+            d.directoryOffset,
+            d.commentLen,
+            goish::encoding::hex::EncodeToString(d.comment.as_bytes())
+        ),
+    };
+    ck(
+        idx,
+        name,
+        fmt::Sprintf!("%s|%s|%v", es, fields, base),
+        string::from_bytes(want.as_bytes()),
+    );
+}
+
+// go: none
+fn fd64row(idx: int, name: &'static str, data: &'static str, endoff: i64, want: &'static str) {
+    let raw = unhex(data);
+    let mut r = goish::bytes::NewReader(goish::slice::__from_vec(raw));
+    let (p, err) = zr::findDirectory64End(&mut r, endoff);
+    let es = if err == goish::errors::nil {
+        string::from_static("")
+    } else {
+        err.Error()
+    };
+    ck(
+        idx,
+        name,
+        fmt::Sprintf!("%v|%s", p, es),
+        string::from_bytes(want.as_bytes()),
+    );
+}
+
+// go: none
+fn rd64row(idx: int, name: &'static str, data: &'static str, off: i64, want: &'static str) {
+    let raw = unhex(data);
+    let mut r = goish::bytes::NewReader(goish::slice::__from_vec(raw));
+    let mut d = goish::archive::zip::r#struct::directoryEnd::default();
+    let err = zr::readDirectory64End(&mut r, off, &mut d);
+    let es = if err == goish::errors::nil {
+        string::from_static("")
+    } else {
+        err.Error()
+    };
+    ck(
+        idx,
+        name,
+        fmt::Sprintf!(
+            "%s|%v,%v,%v,%v,%v,%v",
+            es,
+            d.diskNbr,
+            d.dirDiskNbr,
+            d.dirRecordsThisDisk,
+            d.directoryRecords,
+            d.directorySize,
+            d.directoryOffset
+        ),
+        string::from_bytes(want.as_bytes()),
+    );
+}
+
 #[goish::main]
 fn main() {
     utf8row(0, "", true, false);
@@ -309,10 +388,41 @@ fn main() {
     rddrow(96, "bad-crc", "504b0708341200000000000000000000", 39321, "zip: checksum error");
     rddrow(97, "short", "504b07083412", 4660, "unexpected EOF");
     rddrow(98, "empty", "", 4660, "EOF");
+    rderow(99, "empty", "", "zip: not a valid zip file|nil|0");
+    rderow(100, "tiny", "010203", "zip: not a valid zip file|nil|0");
+    rderow(101, "nosig", "00000000000000000000000000000000000000000000000000000000000000000000000000000000", "zip: not a valid zip file|nil|0");
+    rderow(102, "minimal", "504b0506000000000000000000000000000000000000", "|0,0,0,0,0,0,0,|0");
+    rderow(103, "comment", "504b050600000000000000000000000000000000050068656c6c6f", "|0,0,0,0,0,0,5,68656c6c6f|0");
+    rderow(104, "bad-comment-len", "504b0506000000000000000000000000000000000900", "zip: not a valid zip file|nil|0");
+    rderow(105, "one-record", "504b010200001400000000000000000000000000000000000000000001000000000000000000000000000000000061504b050600000000010001002f000000000000000000", "|0,0,1,1,47,0,0,|0");
+    rderow(106, "prefixed", "23212f62696e2f73680a504b010200001400000000000000000000000000000000000000000001000000000000000000000000000000000061504b050600000000010001002f0000000a0000000000", "|0,0,1,1,47,10,0,|0");
+    rderow(107, "offset-past-end", "504b05060000000000000000000000000f2700000000", "|0,0,0,0,0,9999,0,|-9999");
+    rderow(108, "size-overflow", "504b05060000000000000000fffffffffeffffff0000", "zip: not a valid zip file|nil|0");
+    rderow(109, "zip64", "504b06062c000000000000002d002d000000000000000000010000000000000001000000000000002e000000000000000000000000000000504b060700000000000000000000000001000000504b050600000000ffffffffffffffffffffffff0000", "zip: not a valid zip file|nil|0");
+    rderow(110, "zip64-badloc-disks", "504b06062c000000000000002d002d000000000000000000010000000000000001000000000000002e000000000000000000000000000000504b060700000000000000000000000002000000504b050600000000ffffffffffffffffffffffff0000", "zip: not a valid zip file|nil|0");
+    rderow(111, "base-offset-survives", "00000000000000000000000000000000504b010200001400000000000000000000000000000000000000000001000000000000000000000000000000000061504b050600000000010001002f000000000000000000", "|0,0,1,1,47,0,0,|16");
+    rderow(112, "base-offset-nonzero-dirooff", "00000000000000000000000000000000504b010200001400000000000000000000000000000000000000000001000000000000000000000000000000000061504b050600000000010001002f000000080000000000", "|0,0,1,1,47,8,0,|8");
+    rderow(113, "records-ffff-no-loc", "504b050600000000ffffffff00000000000000000000", "|0,0,65535,65535,0,0,0,|0");
+    rderow(114, "size-ffff", "504b05060000000001000100ffff0000000000000000", "zip: not a valid zip file|nil|0");
+    rderow(115, "comment-exact-fit", "504b0506000000000000000000000000000000000a006162636465666768696a", "|0,0,0,0,0,0,10,6162636465666768696a|0");
+    fd64row(116, "negative", "00000000000000000000", 5, "-1|");
+    fd64row(117, "no-sig", "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", 40, "-1|");
+    fd64row(118, "good", "00000000000000000000504b060700000000d20400000000000001000000", 30, "1234|");
+    fd64row(119, "wrong-disk", "00000000000000000000504b060707000000d20400000000000001000000", 30, "-1|");
+    fd64row(120, "wrong-total", "00000000000000000000504b060700000000d20400000000000005000000", 30, "-1|");
+    fd64row(121, "zero-total", "00000000000000000000504b060700000000d20400000000000000000000", 30, "-1|");
+    fd64row(122, "zero-disk-zero-total", "00000000000000000000504b060700000000000000000000000000000000", 30, "-1|");
+    fd64row(123, "exact-offset", "504b060700000000630000000000000001000000", 20, "99|");
+    fd64row(124, "short-read", "00000000000000000000000000000000000000000000000000", 25, "-1|");
+    rd64row(125, "good", "504b06062c000000000000002d002d0000000000000000000700000000000000070000000000000008000000000000000900000000000000", 0, "|0,0,7,7,8,9");
+    rd64row(126, "bad-sig", "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", 0, "zip: not a valid zip file|0,0,0,0,0,0");
+    rd64row(127, "short", "00000000000000000000", 0, "EOF|0,0,0,0,0,0");
+    rd64row(128, "offset", "0000000000504b06062c000000000000002d002d0000000000000000000100000000000000010000000000000002000000000000000300000000000000", 5, "|0,0,1,1,2,3");
+
     unsafe {
         let (pass, fail) = (PASS, FAIL);
-        if pass + fail != 99 {
-            fmt::Printf!("FAIL ran %v rows, expected 99\n", pass + fail);
+        if pass + fail != 129 {
+            fmt::Printf!("FAIL ran %v rows, expected 129\n", pass + fail);
             FAIL += 1;
         }
         let fail = FAIL;

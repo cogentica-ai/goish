@@ -1,7 +1,7 @@
-// goishlint:ignore GOISH018 OpenReader, NewReader, Reader.init, Reader.RegisterDecompressor, Reader.decompressor, ReadCloser.Close, File.DataOffset, File.Open, File.OpenRaw, dirReader.Read, dirReader.Close, checksumReader.Stat, checksumReader.Read, checksumReader.Close, File.findBodyOffset, readDirectoryEnd, findDirectory64End, readDirectory64End, fileListEntry.stat, fileListEntry.Name, fileListEntry.Size, fileListEntry.Mode, fileListEntry.Type, fileListEntry.IsDir, fileListEntry.Sys, fileListEntry.ModTime, fileListEntry.Info, fileListEntry.String, Reader.initFileList, Reader.Open, Reader.openLookup, Reader.openReadDir, openDir.Close, openDir.Stat, openDir.Read, openDir.ReadDir — the Reader itself and its fs.FS surface, ABSENT from this slice. Every one of them needs an io.ReaderAt over a whole archive, a decompressor registry, or the fs.File / fs.DirEntry interface bridge; this slice is the PARSING, which is the half that has to be right about a hostile input and the half a reference can pin byte-for-byte. They land next.
+// goishlint:ignore GOISH018 OpenReader, NewReader, Reader.init, Reader.RegisterDecompressor, Reader.decompressor, ReadCloser.Close, File.DataOffset, File.Open, File.OpenRaw, dirReader.Read, dirReader.Close, checksumReader.Stat, checksumReader.Read, checksumReader.Close, File.findBodyOffset, fileListEntry.stat, fileListEntry.Name, fileListEntry.Size, fileListEntry.Mode, fileListEntry.Type, fileListEntry.IsDir, fileListEntry.Sys, fileListEntry.ModTime, fileListEntry.Info, fileListEntry.String, Reader.initFileList, Reader.Open, Reader.openLookup, Reader.openReadDir, openDir.Close, openDir.Stat, openDir.Read, openDir.ReadDir — the Reader itself and its fs.FS surface, ABSENT from this slice. Every one of them needs an io.ReaderAt over a whole archive, a decompressor registry, or the fs.File / fs.DirEntry interface bridge; this slice is the PARSING, which is the half that has to be right about a hostile input and the half a reference can pin byte-for-byte. They land next.
 // goishlint:ignore GOISH021 Reader, ReadCloser, dirReader, checksumReader, fileListEntry, fileInfoDirEntry, openDir, dotFile, zipinsecurepath — the Reader's own types and its fs.FS entry list, absent with the methods above. `zipinsecurepath` is a GODEBUG knob and goish has no godebug package.
 // goishlint:ignore GOISH019 File — three fields absent: `zip`, `zipr` and `descErr`. `zip` is a back-pointer to the Reader and `zipr` its io.ReaderAt, both of which this slice does not have; neither is read by anything here. The field set comes back whole with the Reader.
-// go: file archive/zip/reader.go decls: ErrFormat, ErrAlgorithm, ErrChecksum, ErrInsecurePath, readDirectoryHeader, readDataDescriptor, findSignatureInBlock, readBuf.uint8, readBuf.uint16, readBuf.uint32, readBuf.uint64, readBuf.sub, toValidName, fileEntryCompare, split
+// go: file archive/zip/reader.go decls: readDirectoryEnd, findDirectory64End, readDirectory64End, ErrFormat, ErrAlgorithm, ErrChecksum, ErrInsecurePath, readDirectoryHeader, readDataDescriptor, findSignatureInBlock, readBuf.uint8, readBuf.uint16, readBuf.uint32, readBuf.uint64, readBuf.sub, toValidName, fileEntryCompare, split
 //
 // archive/zip/reader.go — the parsing half.
 //
@@ -33,9 +33,11 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use super::r#struct::{
-    dataDescriptorLen, dataDescriptorSignature, directoryEndLen, directoryEndSignature,
-    directoryHeaderLen, directoryHeaderSignature, extTimeExtraID, infoZipUnixExtraID,
-    msDosTimeToTime, ntfsExtraID, timeZone, unixExtraID, zip64ExtraID, FileHeader,
+    dataDescriptorLen, dataDescriptorSignature, directory64EndLen, directory64EndSignature,
+    directory64LocLen, directory64LocSignature, directoryEnd, directoryEndLen,
+    directoryEndSignature, directoryHeaderLen, directoryHeaderSignature, extTimeExtraID,
+    infoZipUnixExtraID, msDosTimeToTime, ntfsExtraID, timeZone, unixExtraID, zip64ExtraID,
+    FileHeader,
 };
 use super::writer::detectUTF8;
 use crate::byte;
@@ -460,4 +462,247 @@ pub fn split<S: Into<string>>(name: S) -> (string, string, bool) {
         return (string::from_static("."), name, isDir);
     }
     return (name.slice(0, i), name.slice(i + 1, name.Len()), isDir);
+}
+
+// ─── the end-of-central-directory records ─────────────────────────────
+
+// go: none — goish idiom: Go hands `readDirectoryEnd`'s `io.ReaderAt`
+// straight to `io.NewSectionReader`, because an interface value is a
+// pointer and costs nothing to pass on. goish's `NewSectionReader`
+// takes `Box<dyn ReaderAt>` — OWNERSHIP — and `readDirectoryEnd` only
+// has a borrow, so the one place Go builds a section reader is spelled
+// as a borrow-based cursor here. It implements exactly what
+// `readDirectoryHeader` asks of a reader: sequential Read over a
+// window, EOF at the end.
+struct sectionCursor<'a> {
+    r: &'a mut dyn crate::io::ReaderAt,
+    off: int64,
+    limit: int64,
+}
+
+impl crate::io::Reader for sectionCursor<'_> {
+    // go: none — goish idiom: see the note on sectionCursor.
+    fn Read(&mut self, p: &mut slice<byte>) -> (int, crate::error) {
+        if self.off >= self.limit {
+            return (0, crate::io::EOF.into());
+        }
+        let avail = self.limit - self.off;
+        let want = if int64(p.Len()) > avail {
+            int(avail)
+        } else {
+            p.Len()
+        };
+        let mut tmp = p.slice(0, want);
+        let (n, err) = self.r.ReadAt(&mut tmp, self.off);
+        let mut i: int = 0;
+        while i < n {
+            p[i] = tmp[i];
+            i += 1;
+        }
+        self.off += int64(n);
+        return (n, err);
+    }
+}
+
+// go: sdk 1.25.5 archive/zip/reader.go:566-645 readDirectoryEnd
+/// Go: find the end-of-central-directory record "in the last 1k, then
+/// in the last 65k", read it, and — when its fields are maxed out —
+/// replace them from the zip64 record the locator points at.
+///
+/// The `baseOffset` return is the reason this is not just a parse: a
+/// JAR can be a shell script with a zip appended, so the directory's
+/// recorded offset is relative to the zip, not to the file. Go derives
+/// the prefix length and then, per its own comment, THROWS IT AWAY if a
+/// directory header parses at the recorded offset with no prefix at
+/// all — "We've seen files in which the directory end data gives us an
+/// incorrect baseOffset."
+pub fn readDirectoryEnd(
+    r: &mut dyn crate::io::ReaderAt,
+    size: int64,
+) -> (Option<directoryEnd>, int64, crate::error) {
+    // Go: "look for directoryEndSignature in the last 1k, then in the
+    // last 65k"
+    let mut buf: slice<byte> = crate::slice!([]byte{});
+    let mut directoryEndOffset: int64 = 0;
+    let lens: [int64; 2] = [1024, 65 * 1024];
+    let mut i: usize = 0;
+    let mut found = false;
+    while i < 2 {
+        let mut bLen = lens[i];
+        if bLen > size {
+            bLen = size;
+        }
+        buf = slice::__from_vec(alloc::vec![0u8; bLen as usize]);
+        let (_, err) = r.ReadAt(&mut buf, size - bLen);
+        if err != errors::nil && !errors::Is(err.clone(), crate::io::EOF) {
+            return (None, 0, err);
+        }
+        let p = findSignatureInBlock(buf.as_ref());
+        if p >= 0 {
+            buf = buf.slice(p, buf.Len());
+            directoryEndOffset = size - bLen + int64(p);
+            found = true;
+            break;
+        }
+        if i == 1 || bLen == size {
+            return (None, 0, ErrFormat());
+        }
+        i += 1;
+    }
+    if !found {
+        return (None, 0, ErrFormat());
+    }
+
+    // Go: "read header into struct" — `readBuf(buf[4:])`, skipping the
+    // signature.
+    let mut b = readBuf::new(buf.slice(4, buf.Len()));
+    let mut d = directoryEnd {
+        diskNbr: uint32(b.uint16()),
+        dirDiskNbr: uint32(b.uint16()),
+        dirRecordsThisDisk: uint64(b.uint16()),
+        directoryRecords: uint64(b.uint16()),
+        directorySize: uint64(b.uint32()),
+        directoryOffset: uint64(b.uint32()),
+        commentLen: b.uint16(),
+        comment: string::from_static(""),
+    };
+    let l = int(int64(d.commentLen));
+    if l > b.Len() {
+        return (None, 0, errors::New("zip: invalid comment length"));
+    }
+    d.comment = string::from_bytes(b.0.slice(0, l).as_ref());
+
+    // Go: "These values mean that the file can be a zip64 file"
+    if d.directoryRecords == 0xffff || d.directorySize == 0xffff || d.directoryOffset == 0xffffffff
+    {
+        let (p, err) = findDirectory64End(r, directoryEndOffset);
+        let mut err = err;
+        if err == errors::nil && p >= 0 {
+            directoryEndOffset = p;
+            err = readDirectory64End(r, p, &mut d);
+        }
+        if err != errors::nil {
+            return (None, 0, err);
+        }
+    }
+
+    let maxInt64: uint64 = (1u64 << 63) - 1;
+    if d.directorySize > maxInt64 || d.directoryOffset > maxInt64 {
+        return (None, 0, ErrFormat());
+    }
+
+    let mut baseOffset =
+        directoryEndOffset - int64(d.directorySize) - int64(d.directoryOffset);
+
+    // Go: "Make sure directoryOffset points to somewhere in our file."
+    let o = baseOffset + int64(d.directoryOffset);
+    if o < 0 || o >= size {
+        return (None, 0, ErrFormat());
+    }
+
+    // Go: "If the directory end data tells us to use a non-zero
+    // baseOffset, but we would find a valid directory entry if we assume
+    // that the baseOffset is 0, then just use a baseOffset of 0. We've
+    // seen files in which the directory end data gives us an incorrect
+    // baseOffset."
+    if baseOffset > 0 {
+        let off = int64(d.directoryOffset);
+        let mut rs = sectionCursor {
+            r,
+            off,
+            limit: size,
+        };
+        let mut probe = File::default();
+        if readDirectoryHeader(&mut probe, &mut rs) == errors::nil {
+            baseOffset = 0;
+        }
+    }
+
+    return (Some(d), baseOffset, errors::nil);
+}
+
+// go: sdk 1.25.5 archive/zip/reader.go:647-670 findDirectory64End
+/// Go: "findDirectory64End tries to read the zip64 locator just before
+/// the directory end and returns the offset of the zip64 directory end
+/// if found."
+///
+/// Every disagreement returns `(-1, nil)` rather than an error — a
+/// missing signature, a disk number that is not zero, a disk total that
+/// is not one. Go's comment on the last two: "the file is not a valid
+/// zip64-file", and the caller then keeps the 32-bit values it already
+/// read.
+pub fn findDirectory64End(
+    r: &mut dyn crate::io::ReaderAt,
+    directoryEndOffset: int64,
+) -> (int64, crate::error) {
+    let locOffset = directoryEndOffset - directory64LocLen;
+    if locOffset < 0 {
+        // Go: "no need to look for a header outside the file"
+        return (-1, errors::nil);
+    }
+    let mut buf: slice<byte> =
+        slice::__from_vec(alloc::vec![0u8; directory64LocLen as usize]);
+    let (_, err) = r.ReadAt(&mut buf, locOffset);
+    if err != errors::nil {
+        return (-1, err);
+    }
+    let mut b = readBuf::new(buf);
+    let sig = b.uint32();
+    if sig != directory64LocSignature {
+        return (-1, errors::nil);
+    }
+    // Go: "number of the disk with the start of the zip64 end of
+    // central directory"
+    if b.uint32() != 0 {
+        // Go: "the file is not a valid zip64-file"
+        return (-1, errors::nil);
+    }
+    // Go: "relative offset of the zip64 end of central directory record"
+    let p = b.uint64();
+    // Go: "total number of disks"
+    if b.uint32() != 1 {
+        // Go: "the file is not a valid zip64-file"
+        return (-1, errors::nil);
+    }
+    return (int64(p), errors::nil);
+}
+
+// go: sdk 1.25.5 archive/zip/reader.go:675-695 readDirectory64End
+/// Go: "readDirectory64End reads the zip64 directory end and updates
+/// the directory end with the zip64 directory end values."
+pub fn readDirectory64End(
+    r: &mut dyn crate::io::ReaderAt,
+    offset: int64,
+    d: &mut directoryEnd,
+) -> crate::error {
+    let mut buf: slice<byte> =
+        slice::__from_vec(alloc::vec![0u8; directory64EndLen as usize]);
+    let (_, err) = r.ReadAt(&mut buf, offset);
+    if err != errors::nil {
+        return err;
+    }
+
+    let mut b = readBuf::new(buf);
+    let sig = b.uint32();
+    if sig != directory64EndSignature {
+        return ErrFormat();
+    }
+
+    // Go: "skip dir size, version and version needed (uint64 + 2x uint16)"
+    b.0 = b.0.slice(12, b.0.Len());
+    // Go: "number of this disk"
+    d.diskNbr = b.uint32();
+    // Go: "number of the disk with the start of the central directory"
+    d.dirDiskNbr = b.uint32();
+    // Go: "total number of entries in the central directory on this disk"
+    d.dirRecordsThisDisk = b.uint64();
+    // Go: "total number of entries in the central directory"
+    d.directoryRecords = b.uint64();
+    // Go: "size of the central directory"
+    d.directorySize = b.uint64();
+    // Go: "offset of start of central directory with respect to the
+    // starting disk number"
+    d.directoryOffset = b.uint64();
+
+    return errors::nil;
 }

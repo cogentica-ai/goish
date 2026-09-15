@@ -289,14 +289,21 @@ time) is already here. `struct.go` is ported and pinned:
                                        file-mode mappings, FileHeader.Mode
                                        and SetMode, isZip64, timeZone,
                                        every signature and record length
-    zip_reader_ref_smoke      99/99    readDirectoryHeader over 22 crafted
+    zip_reader_ref_smoke     129/129   readDirectoryHeader over 22 crafted
                                        headers, readDataDescriptor,
                                        readBuf, findSignatureInBlock,
-                                       toValidName, split, detectUTF8
+                                       toValidName, split, detectUTF8,
+                                       readDirectoryEnd and the two zip64
+                                       end records
 
-The Reader and Writer themselves are next — the parsing came first
-because it is the half that has to be right about a hostile input and
-the half a reference can pin byte for byte.
+What is left of reader.go is `Reader.init` / `NewReader` and the
+fs.FS surface (`Open`, `openLookup`, `openReadDir`, the fileListEntry
+tree). init needs bufio over a section reader and the decompressor
+registry; the fs.FS surface needs the fs.File / fs.DirEntry interface
+bridge. Then writer.go.
+
+The parsing came first because it is the half that has to be right
+about a hostile input and the half a reference can pin byte for byte.
 
 That slice also found a defect in `time.Date` — see below.
 

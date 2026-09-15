@@ -26,4 +26,5 @@ pub mod r#struct;
 pub mod writer;
 
 pub use reader::{ErrAlgorithm, ErrChecksum, ErrFormat, ErrInsecurePath, File};
+pub use r#struct::directoryEnd;
 pub use r#struct::{Deflate, FileHeader, Store};
