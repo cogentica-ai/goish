@@ -320,7 +320,14 @@ What is left of reader.go is the fs.FS surface (`Open`, `openLookup`,
 `openReadDir`, the fileListEntry tree), which needs the fs.File /
 fs.DirEntry interface bridge — the same one archive/zip's
 `FileInfoHeader` is already waived for — plus `OpenReader` (needs
-os.Open) and the per-Reader decompressor override map. Then writer.go.
+os.Open) and the per-Reader decompressor override map.
+
+`writer.go`'s byte-level half is in as of 2026-09-15: `writeHeader`,
+`writeBuf`, `countWriter`, `dirWriter`, `nopCloser` and the two
+length-limit errors, pinned in the same smoke (183 rows total). The
+Writer that drives them — `NewWriter`, `CreateHeader`, `Close`,
+`fileWriter` — and the compressor registry's write half are next, and
+they finish the interop loop: goish writing archives Go reads.
 
 **The sharing idiom that unblocked this slice is worth recording.**
 Go's `File` holds `zipr`, the `io.ReaderAt` it shares with its Reader,

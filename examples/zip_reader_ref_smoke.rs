@@ -47,6 +47,7 @@
 extern crate alloc;
 extern crate goish;
 
+use goish::archive::zip::r#struct as zs;
 use goish::archive::zip::reader as zr;
 use goish::archive::zip::writer as zw;
 use goish::fmt;
@@ -521,6 +522,145 @@ fn openrow(idx: int, name: &'static str, data: &'static str, want: &'static str)
     );
 }
 
+
+// go: none
+fn __rep(n: usize) -> string {
+    return string::from_bytes(&alloc::vec![b'n'; n]);
+}
+
+// go: none
+fn wbrow(idx: int, want: &'static str) {
+    let buf: goish::slice<goish::byte> = goish::slice::__from_vec(alloc::vec![0u8; 15]);
+    let mut b = zw::writeBuf::new(buf);
+    b.uint8(0xab);
+    b.uint16(0x1234);
+    b.uint32(0xdeadbeef);
+    b.uint64(0x0102030405060708);
+    ck(
+        idx,
+        "writeBuf",
+        goish::encoding::hex::EncodeToString(&b.Bytes()),
+        string::from_static(want),
+    );
+}
+
+// go: none
+fn cwrow(idx: int, want: &'static str) {
+    let sink = alloc::sync::Arc::new(goish::sync::Mutex::new(goish::bytes::Buffer::new()));
+    let mut cw = zw::countWriter {
+        w: sink.clone(),
+        count: 0,
+    };
+    let (n1, _) = cw.Write(goish::slice::__from_vec(b"abc".to_vec()));
+    let (n2, _) = cw.Write(goish::slice!([]goish::byte{}));
+    let (n3, _) = cw.Write(goish::slice::__from_vec(b"defgh".to_vec()));
+    ck(
+        idx,
+        "countWriter",
+        fmt::Sprintf!(
+            "%v,%v,%v,%v,%s",
+            n1,
+            n2,
+            n3,
+            cw.count,
+            goish::encoding::hex::EncodeToString(&sink.Lock().Bytes())
+        ),
+        string::from_static(want),
+    );
+}
+
+// go: none
+fn dwrow(idx: int, want: &'static str) {
+    let mut d = zw::dirWriter::default();
+    let (n1, e1) = d.Write(goish::slice!([]goish::byte{}));
+    let (n2, e2) = d.Write(goish::slice::__from_vec(alloc::vec::Vec::new()));
+    let (n3, e3) = d.Write(goish::slice::__from_vec(b"x".to_vec()));
+    // go: none
+    fn es(e: goish::error) -> string {
+        if e == goish::errors::nil {
+            return string::from_static("");
+        }
+        return e.Error();
+    }
+    ck(
+        idx,
+        "dirWriter",
+        fmt::Sprintf!("%v,%s|%v,%s|%v,%s", n1, es(e1), n2, es(e2), n3, es(e3)),
+        string::from_bytes(want.as_bytes()),
+    );
+}
+
+// go: none
+fn ncrow(idx: int, want: &'static str) {
+    let sink = alloc::sync::Arc::new(goish::sync::Mutex::new(goish::bytes::Buffer::new()));
+    let mut nc = zw::nopCloser { Writer: sink.clone() };
+    let (n, _) = goish::io::Writer::Write(&mut nc, goish::slice::__from_vec(b"hi".to_vec()));
+    let c = nc.Close();
+    ck(
+        idx,
+        "nopCloser",
+        fmt::Sprintf!(
+            "%v,%s,%s",
+            n,
+            goish::encoding::hex::EncodeToString(&sink.Lock().Bytes()),
+            if c == goish::errors::nil {
+                string::from_static("<nil>")
+            } else {
+                c.Error()
+            }
+        ),
+        string::from_bytes(want.as_bytes()),
+    );
+}
+
+// go: none
+fn whrow(
+    idx: int,
+    name: &'static str,
+    fname: string,
+    extralen: usize,
+    method: u16,
+    flags: u16,
+    crc: u32,
+    cs: u64,
+    us: u64,
+    raw: bool,
+    want: &'static str,
+) {
+    let mut h = zw::header::default();
+    h.FileHeader.Name = fname;
+    h.FileHeader.Extra = goish::slice::__from_vec(alloc::vec![7u8; extralen]);
+    h.FileHeader.Method = method;
+    h.FileHeader.Flags = flags;
+    h.FileHeader.CRC32 = crc;
+    h.FileHeader.CompressedSize64 = cs;
+    h.FileHeader.UncompressedSize64 = us;
+    h.FileHeader.ReaderVersion = 20;
+    h.FileHeader.ModifiedTime = 0x5b4c;
+    h.FileHeader.ModifiedDate = 0x5a3d;
+    h.raw = raw;
+    let sink = alloc::sync::Arc::new(goish::sync::Mutex::new(goish::bytes::Buffer::new()));
+    let mut w = sink.clone();
+    let err = zw::writeHeader(&mut w, &h);
+    let bs = sink.Lock().Bytes();
+    let head = if bs.Len() > 64 { bs.slice(0, 64) } else { bs.clone() };
+    ck(
+        idx,
+        name,
+        fmt::Sprintf!(
+            "%s|%v|%s",
+            goish::encoding::hex::EncodeToString(&head),
+            bs.Len(),
+            if err == goish::errors::nil {
+                string::from_static("")
+            } else {
+                err.Error()
+            }
+        ),
+        string::from_bytes(want.as_bytes()),
+    );
+}
+
 #[goish::main]
 fn main() {
     utf8row(0, "", true, false);
@@ -690,11 +830,27 @@ fn main() {
     openrow(164, "three", "504b03041400080000000000000000000000000000000000000001000000316f6e65504b0708f1866c7a0300000003000000504b03041400080008000000000000000000000000000000000001000000322a29cf07040000ffff504b0708668aca110900000003000000504b03041400080000000000000000000000000000000000000001000000337468726565504b0708f5d8c5460500000005000000504b0102140014000800000000000000f1866c7a030000000300000001000000000000000000000000000000000031504b0102140014000800080000000000668aca11090000000300000001000000000000000000000000003200000032504b0102140014000800000000000000f5d8c546050000000500000001000000000000000000000000006a00000033504b050600000000030003008d0000009e0000000000", "|;31,0,6f6e65,,;32,8,74776f,,;33,0,7468726565,,");
     openrow(165, "bad-crc", "504b03041400080000000000000000000000000000000000000005000000612e74787448656c6c6f20776f726c64504b070885114a0d0b0000000b000000504b010214001400080000000000000085114a0d0b0000000b000000050000000000000000000000000000000000612e747874504b05060000000001000100330000003e0000000000", "|;612e747874,0,48656c6c6f20776f726c64,zip: checksum error,");
     openrow(166, "bad-method", "504b03041400080063000000000000000000000000000000000005000000612e7478746869504b0708ac2a93d80200000002000000504b0102140014000800630000000000ac2a93d80200000002000000050000000000000000000000000000000000612e747874504b0506000000000100010033000000350000000000", "|;612e747874,99,,zip: unsupported compression algorithm");
+    wbrow(167, "ab3412efbeadde0807060504030201");
+    cwrow(168, "3,0,5,8,6162636465666768");
+    dwrow(169, "0,|0,|0,zip: write to directory");
+    ncrow(170, "2,6869,<nil>");
+    whrow(171, "plain", string::from_static("a.txt"), 0, zs::Store, 0, 0x11223344, 5, 5, false, "504b03041400000000004c5b3d5a00000000000000000000000005000000612e747874|35|");
+    whrow(172, "raw", string::from_static("a.txt"), 0, zs::Store, 0, 0x11223344, 5, 5, true, "504b03041400000000004c5b3d5a44332211050000000500000005000000612e747874|35|");
+    whrow(173, "raw-with-desc", string::from_static("a.txt"), 0, zs::Store, 0x8, 0x11223344, 5, 5, true, "504b03041400080000004c5b3d5a00000000000000000000000005000000612e747874|35|");
+    whrow(174, "nonraw-with-desc", string::from_static("a.txt"), 0, zs::Store, 0x8, 0x11223344, 5, 5, false, "504b03041400080000004c5b3d5a00000000000000000000000005000000612e747874|35|");
+    whrow(175, "deflate", string::from_static("d.txt"), 0, zs::Deflate, 0, 0, 7, 9, false, "504b03041400000008004c5b3d5a00000000000000000000000005000000642e747874|35|");
+    whrow(176, "extra", string::from_static("e"), 4, zs::Store, 0, 0, 0, 0, false, "504b03041400000000004c5b3d5a000000000000000000000000010004006507070707|35|");
+    whrow(177, "empty-name", string::from_static(""), 0, zs::Store, 0, 0, 0, 0, false, "504b03041400000000004c5b3d5a00000000000000000000000000000000|30|");
+    whrow(178, "raw-zip64-sizes", string::from_static("z"), 0, zs::Store, 0, 0xaabbccdd, 1u64 << 33, 1u64 << 34, true, "504b03041400000000004c5b3d5addccbbaaffffffffffffffff010000007a|31|");
+    whrow(179, "raw-max-sizes", string::from_static("z"), 0, zs::Store, 0, 1, zs::uint32max as u64, zs::uint32max as u64, true, "504b03041400000000004c5b3d5a01000000ffffffffffffffff010000007a|31|");
+    whrow(180, "long-name", __rep(65536), 0, zs::Store, 0, 0, 0, 0, false, "|0|zip: FileHeader.Name too long");
+    whrow(181, "long-extra", string::from_static("x"), 65536, zs::Store, 0, 0, 0, 0, false, "|0|zip: FileHeader.Extra too long");
+    whrow(182, "name-65535", __rep(65535), 0, zs::Store, 0, 0, 0, 0, false, "504b03041400000000004c5b3d5a000000000000000000000000ffff00006e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e|65565|");
 
     unsafe {
         let (pass, fail) = (PASS, FAIL);
-        if pass + fail != 167 {
-            fmt::Printf!("FAIL ran %v rows, expected 167\n", pass + fail);
+        if pass + fail != 183 {
+            fmt::Printf!("FAIL ran %v rows, expected 183\n", pass + fail);
             FAIL += 1;
         }
         let fail = FAIL;
