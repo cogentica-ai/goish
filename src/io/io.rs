@@ -65,6 +65,18 @@ impl<R: ReaderAt> ReaderAt for alloc::sync::Arc<crate::sync::Mutex<R>> {
     }
 }
 
+/// goish addition: the `Closer` half of the shareable pair above, so an
+/// `Arc<sync::Mutex<W>>` satisfies `WriteCloser` wherever Go would have
+/// passed one interface value to two owners. `archive/zip`'s writer
+/// needs it: the compressor writes through a counter that the
+/// fileWriter also has to Close and then read the count of.
+impl<C: Closer> Closer for alloc::sync::Arc<crate::sync::Mutex<C>> {
+    // go: none — goish idiom: see the note on the Writer impl above.
+    fn Close(&mut self) -> error {
+        return self.Lock().Close();
+    }
+}
+
 // go: sdk 1.25.5 io/io.go:107-109 Closer
 /// Go's `io.Closer`.
 #[goish::interface] // goishlint:ignore GOISH022 - `goish::interface`, not `goish::int`

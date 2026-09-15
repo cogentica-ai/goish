@@ -322,12 +322,21 @@ fs.DirEntry interface bridge — the same one archive/zip's
 `FileInfoHeader` is already waived for — plus `OpenReader` (needs
 os.Open) and the per-Reader decompressor override map.
 
-`writer.go`'s byte-level half is in as of 2026-09-15: `writeHeader`,
-`writeBuf`, `countWriter`, `dirWriter`, `nopCloser` and the two
-length-limit errors, pinned in the same smoke (183 rows total). The
-Writer that drives them — `NewWriter`, `CreateHeader`, `Close`,
-`fileWriter` — and the compressor registry's write half are next, and
-they finish the interop loop: goish writing archives Go reads.
+**The interop loop is closed, 2026-09-15.** `writer.go`'s Writer is in
+— NewWriter, SetOffset, Flush, SetComment, prepare, CreateHeader,
+Create, Close, fileWriter and the compressor registry's write half —
+and the smoke's last fourteen rows build archives with GOISH's Writer
+and compare them BYTE FOR BYTE with the ones Go's Writer produced from
+the same entries. Deflate included: goish's compress/flate emits the
+same bytes Go's does at level 5.
+
+    zip_reader_ref_smoke     197/197   both directions
+
+What is left of archive/zip is `CreateRaw` / `Copy` (pre-compressed
+entries — the `raw: true` path that writeHeader and fileWriter already
+handle, with no caller yet), `AddFS`, `OpenReader`, the per-Reader and
+per-Writer decompressor/compressor override maps, and the fs.FS
+surface. The last two need the fs.File / fs.DirEntry interface bridge.
 
 **The sharing idiom that unblocked this slice is worth recording.**
 Go's `File` holds `zipr`, the `io.ReaderAt` it shares with its Reader,

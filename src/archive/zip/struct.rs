@@ -1,5 +1,5 @@
 // goishlint:ignore GOISH018 FileHeader.FileInfo, headerFileInfo.Name, headerFileInfo.Size, headerFileInfo.IsDir, headerFileInfo.ModTime, headerFileInfo.Mode, headerFileInfo.Type, headerFileInfo.Sys, headerFileInfo.Info, headerFileInfo.String, FileInfoHeader — the fs.FileInfo adaptor in both directions, ABSENT from this slice. It is an interface bridge rather than format work: `FileInfo()` wraps a FileHeader in something that satisfies fs.FileInfo, and `FileInfoHeader` goes the other way and additionally reads a *File out of `fi.Sys()` via a type assertion on `any`. Both want the same runtime interface-satisfaction machinery that ROADMAP §2 tracks, and neither is on the path to reading or writing an archive, so they land with reader.go.
-// goishlint:ignore GOISH021 headerFileInfo, zipVersion20, zipVersion45 — headerFileInfo is the adaptor waived above; the two version numbers are written by writer.go, which is unported, and nothing in this file reads them.
+// goishlint:ignore GOISH021 headerFileInfo — the fs.FileInfo adaptor waived above.
 // go: file archive/zip/struct.go decls: timeZone, msDosTimeToTime, timeToMsDosTime, FileHeader.ModTime, FileHeader.SetModTime, FileHeader.Mode, FileHeader.SetMode, FileHeader.isZip64, FileHeader.hasDataDescriptor, msdosModeToFileMode, fileModeToUnixMode, unixModeToFileMode
 //
 // archive/zip/struct.go — the on-disk shapes and the two codecs that sit
@@ -87,6 +87,11 @@ pub const unixExtraID: uint16 = 0x000d;
 pub const extTimeExtraID: uint16 = 0x5455;
 // go: none — Go: "Info-ZIP Unix extension"
 pub const infoZipUnixExtraID: uint16 = 0x5855;
+
+// go: none — Go: "Version numbers."
+pub const zipVersion20: uint16 = 20;
+// go: none — Go: "4.5 (reads and writes zip64 archives)"
+pub const zipVersion45: uint16 = 45;
 
 // go: none — Go: "Constants for the first byte in CreatorVersion."
 pub const creatorFAT: uint16 = 0;
