@@ -1,4 +1,4 @@
-// go: file reflect/value.go decls: New, Value.Set, Value.SetBool, Value.SetInt, Value.SetString
+// go: file reflect/value.go decls: New, Value.Set, Value.SetBool, Value.SetBytes, Value.SetFloat, Value.SetInt, Value.SetString, Value.SetUint
 //
 // The write side of Go's reflect/value.go — the entry points goish did
 // not have.
@@ -133,6 +133,80 @@ impl Value {
                 *v = crate::int32(x);
             }
             _ => panic!("reflect: call of reflect.Value.SetInt on non-integer Value"),
+        }
+    }
+
+    // go: sdk 1.25.5 reflect/value.go:2257-2276 Value.SetUint
+    /// Set the underlying value to `x`.
+    ///
+    /// Go panics if the Value is unaddressable or not of an unsigned
+    /// integer kind; goish has no addressability, so only the kind check
+    /// applies. Like `SetInt`, a value too wide for the kind is truncated.
+    /// `encoding/xml`'s `copyValue` is the caller that motivated it.
+    pub fn SetUint(&mut self, x: crate::types::uint64) {
+        match self {
+            Value::Named { inner, .. } => {
+                inner.SetUint(x);
+            }
+            Value::Uint(v) => {
+                *v = x;
+            }
+            Value::Uint8(v) => {
+                *v = crate::uint8(x);
+            }
+            Value::Uint16(v) => {
+                *v = crate::uint16(x);
+            }
+            Value::Uint32(v) => {
+                *v = crate::uint32(x);
+            }
+            _ => panic!("reflect: call of reflect.Value.SetUint on non-unsigned Value"),
+        }
+    }
+
+    // go: sdk 1.25.5 reflect/value.go:2193-2203 Value.SetFloat
+    /// Set the underlying value to `x`, rounding to float32 for a
+    /// Float32 value.
+    ///
+    /// Go panics if the Value is unaddressable or its Kind is not Float32
+    /// or Float64; goish has no addressability, so only the kind check
+    /// applies.
+    pub fn SetFloat(&mut self, x: crate::types::float64) {
+        match self {
+            Value::Named { inner, .. } => {
+                inner.SetFloat(x);
+            }
+            Value::Float32(v) => {
+                *v = crate::float32(x);
+            }
+            Value::Float64(v) => {
+                *v = x;
+            }
+            _ => panic!("reflect: call of reflect.Value.SetFloat on non-float Value"),
+        }
+    }
+
+    // go: sdk 1.25.5 reflect/value.go:2154-2161 Value.SetBytes
+    /// Set the underlying value, which must be a slice of bytes, to `x`.
+    ///
+    /// goish's `Value::Slice` holds its elements as `Value`s, so the bytes
+    /// are spread into `Uint8` elements; the element type is kept.
+    pub fn SetBytes(&mut self, x: crate::goslice::slice<crate::types::byte>) {
+        match self {
+            Value::Named { inner, .. } => {
+                inner.SetBytes(x);
+            }
+            Value::Slice { elem_type, items } => {
+                if elem_type().Kind() != super::Kind::Uint8 {
+                    panic!("reflect.Value.SetBytes of non-byte slice");
+                }
+                let mut out: alloc::vec::Vec<Value> = alloc::vec::Vec::with_capacity(x.len());
+                for (_, b) in crate::range!(x) {
+                    out.push(Value::Uint8(*b));
+                }
+                *items = out;
+            }
+            _ => panic!("reflect: call of reflect.Value.SetBytes on non-slice Value"),
         }
     }
 }

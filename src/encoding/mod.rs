@@ -5,10 +5,9 @@
 //
 // v1 ships:
 //   ascii85, asn1 (primitive parsers only), base32, base64, binary,
-//   csv, hex, json, pem
+//   csv, hex, json, pem, xml
 //
-// Other subpackages (`encoding/gob`, `encoding/xml`) land later —
-// they require these interface traits as their dispatch surface.
+// `encoding/gob` lands later.
 
 #![allow(non_snake_case)]
 
@@ -27,6 +26,7 @@ pub mod csv;
 pub mod hex;
 pub mod json;
 pub mod pem;
+pub mod xml;
 
 // ─── Marshaler / Unmarshaler interfaces ────────────────────────────────
 //

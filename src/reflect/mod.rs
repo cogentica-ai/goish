@@ -702,6 +702,25 @@ impl Type {
         }
     }
 
+    // go: sdk 1.25.5 reflect/type.go:588-597 rtype.Bits
+    /// `Bits()` — the size of the type in bits. Panics if the kind is not
+    /// one of the sized or unsized Int, Uint, Float, or Complex kinds.
+    ///
+    /// Go reads the runtime's `Size_`; goish's descriptor has no layout,
+    /// so the width comes from the kind. `int`/`uint`/`uintptr` are 64
+    /// bits, which is what they are on every target goish builds for.
+    pub fn Bits(&self) -> int {
+        return match self.kind {
+            Kind::Int8 | Kind::Uint8 => 8,
+            Kind::Int16 | Kind::Uint16 => 16,
+            Kind::Int32 | Kind::Uint32 | Kind::Float32 => 32,
+            Kind::Int | Kind::Int64 | Kind::Uint | Kind::Uint64 | Kind::Uintptr | Kind::Float64
+            | Kind::Complex64 => 64,
+            Kind::Complex128 => 128,
+            _ => panic!("reflect: Bits of non-arithmetic Type {}", self.String()),
+        };
+    }
+
     /// `String()` — readable type name. `[]int`, `map[string]int`,
     /// `*Person`, `Person`, `int`, etc. Mirrors Go's `Type.String()`.
     pub fn String(&self) -> string {

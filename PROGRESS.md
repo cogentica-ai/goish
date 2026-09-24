@@ -239,6 +239,20 @@ ends in white space, which is asymmetric enough that a header comment
 claiming otherwise had to be rewritten twice before it matched what Go
 and the port both do.
 
+`encoding/xml` is new and **98/98 by function, 188 anchors**
+(2026-09-24): the tokenizer, the encoder, and reflective
+Marshal/Unmarshal over `#[goish::reflect]` structs.
+`examples/xml_ref_smoke.rs` pins 79 lines against a running Go:
+name-space translation, text normalisation, every syntax refusal and
+the line it reports, HTML mode, the encoder's generated attribute
+prefixes, the tag grammar in both directions, and Unmarshal's merge and
+fill order. It matched on the first run. One gap is structural rather
+than a bug: goish's `reflect::Value` is a copy with no route back to the
+concrete type, so a user `MarshalXML`/`UnmarshalXML` (or
+`TextMarshaler`) on a nested value is never called. `time.Time` is
+recognised by name. The token API is complete, so a hand-written
+marshaler still works.
+
 `encoding/base64` was 15/21 and is now **21/21 with 32 anchors**. The
 six that were missing were the whole configurable half of the package —
 `NewEncoding` for a runtime alphabet, `WithPadding`, `Strict` — plus

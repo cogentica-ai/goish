@@ -3742,3 +3742,7 @@ path = "examples/alloc_hook_bench.rs"
 [[example]]
 name = "sync_notifylist_smoke"
 path = "examples/sync_notifylist_smoke.rs"
+
+[[example]]
+name = "xml_ref_smoke"
+path = "examples/xml_ref_smoke.rs"
