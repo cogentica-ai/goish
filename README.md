@@ -118,7 +118,7 @@ Active development. The e2e suite runs 856 declared examples at tiered loop coun
 |---|---|---|
 | `x86_64-unknown-linux-gnu` | **Complete.** Everything in this README. | `make e2e` — 417 declared examples at tiered loop counts |
 | `aarch64-unknown-linux-gnu` | **Boots.** Entry stub, args, flags, thread pointer, mheap, mcentral, the P array. No scheduler: `gogo` is unwritten, so `main` runs on `g0` and anything that parks a goroutine fatals. | `make run-arm64` — 1 example |
-| `aarch64-apple-darwin` | **Runs the suite.** Worker Ms and sysmon on pthreads, the kqueue netpoller, signals, async preemption, package init, `file:line` symbolization from the dSYM, `os/exec`. A few examples that exercise Linux-only kernel interfaces (inotify, fanotify, amd64 signal frames) print SKIP. | `make e2e TARGET=aarch64-apple-darwin` — every declared example, native |
+| `aarch64-apple-darwin` | **Runs the suite.** Worker Ms and sysmon on pthreads, the kqueue netpoller, signals, async preemption, package init, `file:line` symbolization from the dSYM, the stack-overflow report, `os/exec`. A few examples that exercise Linux-only kernel interfaces (inotify, fanotify, amd64 signal frames) print SKIP. | `make e2e TARGET=aarch64-apple-darwin` — every declared example, native |
 
 linux/arm64 is an allowlist-driven ratchet (`scripts/linux_arm64_examples.txt`): a milestone
 is not done until its examples are in the list and green. The port plan is [`plan.md`](plan.md).
@@ -311,7 +311,7 @@ side-channel analysis. Read this before trusting goish with anything.
 - **Page allocator** (`mheap`): radix-tree port of Go's `runtime/mpallocbits.go` - leaf summaries, four-level summary tree, demand-paged metadata via raw `mmap`. The arena is a `MAP_NORESERVE` reservation grown on demand, capped at 320 GiB.
 - **Size-class heap** (`mcentral`): 67 size classes from Go's `internal/runtime/gc/sizeclasses.go`. Lock-free hot path via atomic `alloc_bits` + Go-style `allocCache` discipline (`runtime/mcache.go:14`).
 - **Per-P mcache**: cached span per size-class; mcache hot path takes no central lock.
-- **Reserved goroutine stacks** (M29): bare `go!()` gets a 1 MiB `MAP_NORESERVE` virtual reservation with a `PROT_NONE` guard page - the kernel commits physical 4 KiB pages as the goroutine touches them, so nobody sizes a stack and a shallow goroutine costs ~one page. Dead reservations recycle through a pool (`MADV_DONTNEED` drops their pages). Overflow past 1 MiB hits the guard and the SIGSEGV handler prints a spawn-site diagnostic.
+- **Reserved goroutine stacks** (M29): bare `go!()` gets a 1 MiB `MAP_NORESERVE` virtual reservation with a `PROT_NONE` guard page - the kernel commits physical 4 KiB pages as the goroutine touches them, so nobody sizes a stack and a shallow goroutine costs ~one page. Dead reservations recycle through a pool (`MADV_DONTNEED` drops their pages). Overflow past 1 MiB hits the guard and the fault handler (SIGSEGV on Linux, SIGBUS on Darwin) prints a spawn-site diagnostic.
 - **Chunked stack pool**: Go's `stackpoolalloc` (`runtime/stack.go:194`) port - sub-page 2 KiB / 4 KiB / 8 KiB / 16 KiB / 32 KiB stacks carved from 32 KiB spans, opted into via `go!(stack(N), …)`. True 2 GiB virtual at 1M goroutines.
 
 ### Concurrency primitives

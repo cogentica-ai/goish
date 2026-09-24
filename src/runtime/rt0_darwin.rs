@@ -37,11 +37,9 @@
 // returns a mapping at 0x70_0000_0000 for exactly the size
 // `map_arena(MAX_ARENA_CHUNKS)` asks for.
 //
-// ─── What does not run, and what that costs ────────────────────────────
-//
-// Skipped, each with the milestone that turns it on:
-//
-//   `segv::install`       M6
+// After step 7: the boot signal handlers, SIGURG preemption, the
+// symboliser and the SIGSEGV stack-overflow report — the Linux boot's
+// tail, in its order.
 //
 // `symbolize::init` runs, just before the hand-off to `main` as on
 // Linux, but it reads a different container: names from the mapped
@@ -130,6 +128,12 @@ pub extern "C" fn __goish_rt0(
     // (it builds Vecs) and before any user code can call
     // `runtime::Caller` or print a panic backtrace.
     crate::runtime::symbolize::init();
+
+    // The stack-overflow report: a fault within a guard page of the
+    // running G's stack prints its `go!` spawn site and exits 2; any
+    // other fault falls through to the default action. After
+    // `symbolize::init`, whose tables the report's frames read.
+    crate::runtime::segv::install();
 
     // Hand off to the user's `main` on a goroutine, as Go's
     // `runtime.main` does and as the amd64 boot does: an 8 MiB lazily

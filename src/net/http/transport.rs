@@ -1139,6 +1139,41 @@ impl persistConn {
         return *self.watch_parts.Lock();
     }
 
+    // go: none — goish-only: stands in for Go's idle readLoop, which
+    // peeks on every pooled conn and closes it on EOF, an error, or
+    // unsolicited bytes (readLoopPeekFailLocked, transport.go:2420). A
+    // non-blocking MSG_PEEK asks the same question at reuse time: only
+    // EAGAIN — nothing to read, peer still there — means alive.
+    //
+    // Without it, reusing a conn the server had closed wrote a request
+    // into the closed socket, and what the read then saw was the
+    // kernel's choice: the queued EOF on Linux (retryable), or the RST
+    // the write provoked on Darwin, which discards it — a
+    // non-retryable "connection reset" about half the time.
+    pub(crate) fn __peer_gone(&self) -> bool {
+        let (fd, _) = self.__watch_parts();
+        if fd <= 0 {
+            return false;
+        }
+        let mut probe = [0u8; 1];
+        loop {
+            let n = crate::syscall::Recvfrom(
+                fd,
+                probe.as_mut_ptr(),
+                1,
+                crate::syscall::MSG_PEEK | crate::syscall::MSG_DONTWAIT,
+            );
+            if n >= 0 {
+                return true;
+            }
+            let e = (-n) as i32;
+            if e == crate::syscall::EINTR.0 {
+                continue;
+            }
+            return e != crate::syscall::EAGAIN.0;
+        }
+    }
+
     // go: sdk 1.25.5 net/http/transport.go:1684-1731 persistConn.addTLS
     // goishlint:ignore GOISH020 addTLS — Go's ctx (HandshakeContext)
     // and trace params serve machinery goish's handshake doesn't take
@@ -2318,6 +2353,7 @@ impl Transport {
         };
 
         let k = w.__cache_key_for(&pool);
+        let mut dead: alloc::vec::Vec<Arc<persistConn>> = alloc::vec::Vec::new();
         if pool.idleConn.Get(k.clone()).1 {
             let mut list = pool.idleConn.Get(k.clone()).0;
             let mut delivered = false;
@@ -2325,6 +2361,16 @@ impl Transport {
             while !list.is_empty() {
                 let pconn = list[list.len() - 1].clone();
                 let tooOld = old_ns != 0 && pconn.__idle_at() != 0 && pconn.__idle_at() < old_ns;
+                // goish: no readLoop watches an idle conn (the Body hands
+                // the ConnSrc back to the pool), so a server's FIN sits
+                // unread until the conn is reused. Probe for it here —
+                // what Go's idle readLoop would already have seen.
+                if !pconn.isBroken() && !tooOld && pconn.__peer_gone() {
+                    list.pop();
+                    pool.idleLRU.remove(&pconn);
+                    dead.push(pconn);
+                    continue;
+                }
                 if pconn.isBroken() || tooOld {
                     // Go: "If either persistConn.readLoop has marked
                     // the connection broken, but
@@ -2355,6 +2401,10 @@ impl Transport {
                 pool.idleConn.Delete(k.clone());
             }
             if delivered {
+                drop(pool);
+                for pc in dead {
+                    pc.close(errServerClosedIdle.into());
+                }
                 return true;
             }
         }
@@ -2364,6 +2414,12 @@ impl Transport {
         q.cleanFrontNotWaiting();
         q.pushBack(w.clone());
         pool.idleConnWait.Set(k, q);
+        // Closing re-enters the pool (removeIdleConn), so only after
+        // the lock is released.
+        drop(pool);
+        for pc in dead {
+            pc.close(errServerClosedIdle.into());
+        }
         return false;
     }
 

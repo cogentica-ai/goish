@@ -24,8 +24,8 @@
 
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
-use crate::runtime::preempt::{UcontextT, REG_RBP, REG_RIP, REG_RSP};
 use crate::runtime::sched::G;
+use crate::runtime::sigctx;
 use crate::syscall;
 
 /// Width of the "just below the stack" window a fault must land in to
@@ -274,6 +274,10 @@ fn classify(g: &G, fault_addr: usize) -> Region {
 //   [rbp + 0]  → caller's saved RBP
 //   [rbp + 8]  → caller's return PC (the address the next ret will jump to)
 //
+// AAPCS64's frame record is the same shape — `stp x29, x30` puts the
+// caller's x29 at [x29] and the return address (x30) at [x29 + 8] — so
+// on arm64 the walk starts from x29 and nothing below changes.
+//
 // Walking the chain is just `rbp = *rbp` until the value leaves the
 // active stack region (or hits zero). We collect up to MAX_FRAMES PCs
 // into a fixed array — no allocation, async-signal-safe.
@@ -319,12 +323,9 @@ pub(crate) fn walk_frames(
 
 // ─── Handler ──────────────────────────────────────────────────────────
 
-extern "C" fn goish_segv_sigtramp(_sig: i32, info: *const u8, ctx: *mut UcontextT) {
-    // `siginfo_t` for SIGSEGV (Linux x86_64): si_signo (4) + si_errno
-    // (4) + si_code (4) + _pad (4) + 8-byte-aligned _sifields union;
-    // for `_sigfault` the first member is `void *si_addr` at offset
-    // 16. See `include/uapi/asm-generic/siginfo.h`.
-    let fault_addr = unsafe { (info.add(16) as *const usize).read() };
+extern "C" fn goish_segv_sigtramp(sig: i32, info: *const u8, ctx: *mut u8) {
+    // `siginfo_t.si_addr` — its offset is per-OS; see `sigctx`.
+    let fault_addr = unsafe { sigctx::fault_addr(info) };
 
     // Lock-free curg read via the per-M storage. The bootstrap thread
     // (and very early init) has no `curg` — chain to default so the
@@ -332,18 +333,19 @@ extern "C" fn goish_segv_sigtramp(_sig: i32, info: *const u8, ctx: *mut Ucontext
     let g_opt = unsafe { crate::runtime::sched::current_m().data_unchecked().curg };
     let g_ptr = match g_opt {
         Some(g) => g,
-        None => return chain_to_default(),
+        None => return chain_to_default(sig),
     };
     let g = unsafe { g_ptr.as_ref() };
 
     let region = classify(g, fault_addr);
     if matches!(region, Region::Unrelated) {
-        return chain_to_default();
+        return chain_to_default(sig);
     }
 
-    let saved_rip = unsafe { (*ctx).uc_mcontext.gregs[REG_RIP] };
-    let saved_rsp = unsafe { (*ctx).uc_mcontext.gregs[REG_RSP] };
-    let saved_rbp = unsafe { (*ctx).uc_mcontext.gregs[REG_RBP] };
+    // pc / sp / frame pointer (RBP on amd64, x29 on arm64).
+    let saved_rip = unsafe { sigctx::pc(ctx) };
+    let saved_rsp = unsafe { sigctx::sp(ctx) };
+    let saved_rbp = unsafe { sigctx::fp(ctx) };
 
     // Frame-pointer walk. Bound to the region the fault came from so a
     // smashed RBP can't lead us out of the active stack.
@@ -420,7 +422,11 @@ extern "C" fn goish_segv_sigtramp(_sig: i32, info: *const u8, ctx: *mut Ucontext
         }
         Region::Unrelated => {}
     }
-    write_str(b"\tfault: SIGSEGV at ");
+    write_str(if sig == syscall::SIGBUS {
+        b"\tfault: SIGBUS at "
+    } else {
+        b"\tfault: SIGSEGV at "
+    });
     write_hex(fault_addr as u64);
     write_str(b" (PC=");
     write_hex(saved_rip);
@@ -492,9 +498,10 @@ fn write_hex_compact(value: u64) {
 }
 
 #[cold]
-fn chain_to_default() {
-    // Reset SIGSEGV to SIG_DFL and return — the kernel will redeliver
-    // the original fault from its preserved context, dumping core.
+fn chain_to_default(sig: i32) {
+    // Reset the signal to SIG_DFL and return — the kernel will
+    // redeliver the original fault from its preserved context, dumping
+    // core.
     let sa = syscall::Sigaction {
         sa_handler: 0, // SIG_DFL
         sa_flags: 0,
@@ -502,12 +509,25 @@ fn chain_to_default() {
         sa_mask: 0,
     };
     unsafe {
-        let _ = syscall::RtSigaction(syscall::SIGSEGV, &sa as *const _, core::ptr::null_mut());
+        let _ = syscall::RtSigaction(sig, &sa as *const _, core::ptr::null_mut());
     }
+    // A signal sent with kill(2) has no faulting instruction to re-run,
+    // so returning alone would let the process carry on. Send it again,
+    // to the process: whichever thread takes it (this one only once the
+    // handler returns and unblocks it) now gets the default action,
+    // which ends the process — for a real fault just as the re-run
+    // would have.
+    let _ = syscall::Kill(syscall::Getpid(), sig);
 }
 
-/// Install the SIGSEGV handler. Idempotent. Called once from
-/// `__goish_rt0` after `preempt::install`.
+/// Install the fault handler for SIGSEGV and SIGBUS. Idempotent.
+/// Called once from `__goish_rt0` after `symbolize::init`.
+///
+/// Both, as Go's sigtable marks both `_SigPanic`
+/// (`runtime/sigtab_linux_generic.go`, `runtime/signal_darwin.go`):
+/// Linux reports a guard-page hit as SIGSEGV, but Darwin reports it as
+/// SIGBUS — measured on darwin/arm64, a `go!(stack(64 * KB))` overflow
+/// dies with status 138 when only SIGSEGV is caught.
 pub fn install() {
     let sa = syscall::Sigaction {
         sa_handler: goish_segv_sigtramp as *const () as usize,
@@ -517,12 +537,14 @@ pub fn install() {
         sa_restorer: syscall::sigreturn_restorer(),
         sa_mask: 0,
     };
-    unsafe {
-        let r = syscall::RtSigaction(syscall::SIGSEGV, &sa as *const _, core::ptr::null_mut());
-        if r != 0 {
-            const MSG: &[u8] = b"goish: segv: rt_sigaction(SIGSEGV) failed\n";
-            syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
-            syscall::Exit(2);
+    for sig in [syscall::SIGSEGV, syscall::SIGBUS] {
+        unsafe {
+            let r = syscall::RtSigaction(sig, &sa as *const _, core::ptr::null_mut());
+            if r != 0 {
+                const MSG: &[u8] = b"goish: segv: rt_sigaction(SIGSEGV/SIGBUS) failed\n";
+                syscall::Write(syscall::STDERR, MSG.as_ptr(), MSG.len());
+                syscall::Exit(2);
+            }
         }
     }
 }

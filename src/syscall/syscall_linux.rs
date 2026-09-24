@@ -47,6 +47,7 @@ pub const SIGQUIT: i32 = 3;
 pub const SIGILL: i32 = 4;
 pub const SIGTRAP: i32 = 5;
 pub const SIGABRT: i32 = 6;
+pub const SIGBUS: i32 = 7;
 pub const SIGFPE: i32 = 8;
 pub const SIGKILL: i32 = 9;
 pub const SIGUSR1: i32 = 10;

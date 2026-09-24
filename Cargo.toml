@@ -2396,6 +2396,10 @@ name = "grow_smoke"
 path = "examples/grow_smoke.rs"
 
 [[example]]
+name = "stack_grow_ladder_smoke"
+path = "examples/stack_grow_ladder_smoke.rs"
+
+[[example]]
 name = "html_smoke"
 path = "examples/html_smoke.rs"
 

@@ -2,7 +2,7 @@
 // argument of an `SA_SIGINFO` handler.
 //
 // The handlers that need them (the SIGPROF sampler; the SIGURG
-// preemptor) ask the same four questions on every target — where was
+// preemptor; the SIGSEGV stack-overflow report) ask the same four questions on every target — where was
 // it (pc), what is its frame chain (fp), its stack (sp), and on arm64
 // its return address (lr) — but the answer lives somewhere different
 // on each:
@@ -22,6 +22,16 @@
 //
 // All accessors take the raw `ctx` pointer and are async-signal-safe:
 // plain loads and stores into kernel-provided memory.
+//
+// `fault_addr` reads the handler's SECOND argument, `siginfo_t`, for
+// the address a SIGSEGV/SIGBUS faulted on. Its offset differs too:
+//
+//   linux         16 — si_signo, si_errno, si_code, pad, then the
+//                 8-aligned `_sifields` union whose `_sigfault` starts
+//                 with `si_addr` (include/uapi/asm-generic/siginfo.h).
+//   darwin        24 — si_signo, si_errno, si_code, si_pid, si_uid,
+//                 si_status, then `si_addr` (<sys/signal.h>; Go's
+//                 `siginfo` in runtime/defs_darwin_arm64.go).
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod imp {
@@ -45,6 +55,8 @@ mod imp {
     pub unsafe fn sp(ctx: *mut u8) -> u64 { *reg(ctx, SS_SP) }
     #[inline(always)]
     pub unsafe fn lr(ctx: *mut u8) -> u64 { *reg(ctx, SS_LR) }
+    #[inline(always)]
+    pub unsafe fn fault_addr(info: *const u8) -> usize { *(info.add(24) as *const usize) }
     #[inline(always)]
     pub unsafe fn set_pc(ctx: *mut u8, v: u64) { *reg(ctx, SS_PC) = v }
     #[inline(always)]
@@ -95,6 +107,8 @@ mod imp {
     pub unsafe fn fp(ctx: *mut u8) -> u64 { (*(ctx as *mut UcontextT)).uc_mcontext.gregs[REG_RBP] }
     #[inline(always)]
     pub unsafe fn sp(ctx: *mut u8) -> u64 { (*(ctx as *mut UcontextT)).uc_mcontext.gregs[REG_RSP] }
+    #[inline(always)]
+    pub unsafe fn fault_addr(info: *const u8) -> usize { *(info.add(16) as *const usize) }
 }
 
 pub use imp::*;

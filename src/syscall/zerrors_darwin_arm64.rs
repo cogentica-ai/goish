@@ -53,6 +53,9 @@ pub const SIGTRAP: i32 = 5;
 pub const SIGABRT: i32 = 6;
 pub const SIGFPE: i32 = 8;
 pub const SIGKILL: i32 = 9;
+/// **10 on Darwin, 7 on Linux.** Darwin raises it, not SIGSEGV, for
+/// an access to a `PROT_NONE` page — a goroutine stack's guard.
+pub const SIGBUS: i32 = 10;
 pub const SIGSEGV: i32 = 11;
 pub const SIGPIPE: i32 = 13;
 pub const SIGALRM: i32 = 14;
