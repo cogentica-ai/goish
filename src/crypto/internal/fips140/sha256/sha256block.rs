@@ -31,7 +31,7 @@ const _K: [u32; 64] = [
 
 /// `sha256` digest — partial SHA-224/SHA-256 evaluation.
 
-// go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256block.go:80-128
+// go: sdk 1.25.5 crypto/internal/fips140/sha256/sha256block.go:80-128 blockGeneric
 //
 // goish names it `block`: Go's sha256block_noasm[go] defines
 // `block(dig,p) { blockGeneric(dig,p) }` and sha256block_asm[go] defines
