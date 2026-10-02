@@ -87,7 +87,7 @@ pub(crate) fn certificatesToBytesSlice(certs: slice<x509::Certificate>) -> slice
 }
 
 impl SessionState {
-    // go: sdk 1.25.5 crypto/tls/ticket.go:101-176 SessionState.Bytes
+    // go: sdk 1.25.5 crypto/tls/ticket.go:111-176 SessionState.Bytes
     /// Go: "Bytes encodes the session, including any private fields, so
     /// that it can be parsed by [ParseSessionState]. The encoding
     /// contains secret values critical to the security of future and

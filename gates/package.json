@@ -1,0 +1,14 @@
+{
+  "name": "goish-provenance-proofs",
+  "private": true,
+  "description": "Mutation proofs for scripts/anchor_check.py (make provenance-proof)",
+  "type": "module",
+  "scripts": {
+    "describe": "redproof describe",
+    "check": "redproof check",
+    "prove": "redproof prove"
+  },
+  "devDependencies": {
+    "redproof": "0.12.0"
+  }
+}

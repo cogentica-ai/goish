@@ -5,3 +5,4 @@ Cargo.lock
 /scripts/.e2e-artifacts/
 /doc/
 __pycache__/
+/gates/node_modules/

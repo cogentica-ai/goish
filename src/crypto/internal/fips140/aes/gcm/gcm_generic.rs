@@ -113,7 +113,7 @@ fn encryptBlockInto(b: &aes::Block, dst: &mut [byte; 16], src: &[byte; 16]) {
     dst.copy_from_slice(r);
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_generic.go:42-64 deriveCounterGeneric
+// go: sdk 1.25.5 crypto/internal/fips140/aes/gcm/gcm_generic.go:49-64 deriveCounterGeneric
 /// Compute the initial GCM counter state from `nonce` (NIST SP 800-38D
 /// §7.1). Assumes `counter` is zero on entry.
 ///

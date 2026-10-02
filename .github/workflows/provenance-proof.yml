@@ -1,0 +1,61 @@
+name: provenance-proof
+
+# Proves scripts/anchor_check.py can still go red. provenance.yml runs the
+# checker on the tree; this runs the checker on deliberately broken copies
+# of it (gates/crypto-provenance.ts) and fails if any of them slips
+# through, or if the checker stops refusing when its evidence is unusable.
+# Only the checker, its Go helper and the proofs can change that answer,
+# so only they trigger it. About a minute.
+
+on:
+  pull_request:
+    paths:
+      - scripts/anchor_check.py
+      - tools/anchor_decls.go
+      - gates/**
+      - .github/workflows/provenance-proof.yml
+  push:
+    branches: [main, dev]
+    paths:
+      - scripts/anchor_check.py
+      - tools/anchor_decls.go
+      - gates/**
+      - .github/workflows/provenance-proof.yml
+  workflow_dispatch:
+
+concurrency:
+  group: provenance-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.5'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Export GOROOT
+        run: echo "GOROOT=$(go env GOROOT)" >> "$GITHUB_ENV"
+
+      - name: Install the proof runner (pinned in gates/package.json)
+        run: npm ci
+        working-directory: gates
+
+      - name: The checker is green on the tree
+        run: npx redproof check
+        working-directory: gates
+
+      - name: The checker goes red on every planted defect
+        run: npx redproof prove
+        working-directory: gates
+
+      - name: Planted defects were all undone
+        run: git diff --exit-code -- src

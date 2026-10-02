@@ -72,8 +72,21 @@ Usage:
   scripts/anchor_check.py src/crypto      # check a subtree
   scripts/anchor_check.py --fix src/...   # rewrite wrong ranges in place
   scripts/anchor_check.py --strict        # also fail on BARE
+  scripts/anchor_check.py --rule form src/crypto
+                                          # check the form of every sdk line
+
+`--rule resolve` checks that sdk anchors resolve, as above, and counts a
+missing or non-.go cited file as a breach. A single-line anchor, `file.go:N Symbol`, counts as the range N-N.
+`--rule form` instead checks that EVERY `// go: sdk` comment is a
+well-formed anchor naming Go PINNED_SDK, one per line, citing a relative
+.go path without `..`; anything else is MALFORMED. Without it such a line matches no
+anchor pattern and is skipped without a word.
+
+Exit status: 0 ok, 1 a breach of the selected rule, 2 cannot decide - the
+Go tree is missing or is not PINNED_SDK, a scope path is missing, or no
+anchor was found. 2 is not a breach: it says the result means nothing.
 """
-import os, re, sys, collections
+import atexit, collections, json, os, re, shutil, subprocess, sys, tempfile
 
 def _goroot():
     """The directory anchors resolve against, i.e. the one holding `crypto/`.
@@ -96,6 +109,10 @@ def _goroot():
 
 GOROOT = _goroot()
 
+# The only Go version the `// go: sdk` anchors may name, and so the only
+# tree they may be checked against.
+PINNED_SDK = "1.25.5"
+
 # Two source dialects, per ported-crates AGENTS.md §38.1:
 #   // go: sdk 1.25.5 crypto/tls/conn.go:31-46 Symbol
 #   // go: github.com/spf13/pflag@v1.0.10 flag.go:871-880 AddFlag
@@ -104,10 +121,23 @@ GOROOT = _goroot()
 # rewrite splices m.group(1) back verbatim, so a new capturing group here
 # would silently corrupt every anchor it touched.
 ANCHOR = re.compile(
-    r"(//\s*go:\s*(?:sdk\s+\S+|[\w.\-/~]+@\S+)\s+)(\S+):(\d+)-(\d+)(\s+)(\S+)")
+    r"(//[/!]?\s*go:\s*(?:sdk\s+\S+|[\w.\-/~]+@\S+)\s+)(\S+):(\d+)(?:-(\d+))?(\s+)(\S+)",
+    re.ASCII)
+
+# Every claim to be an sdk anchor, in a `//`, `///` or `//!` comment
+# anywhere on a line, whether or not ANCHOR parses it.
+# Unicode `\s` on purpose: `//<NBSP>go: sdk` is a claim ANCHOR will not parse.
+SDK_MARK = re.compile(r"//[/!]?\s*go:\s*sdk\b")
+SDK_VERSION = re.compile(r"//[/!]?\s*go:\s*sdk\s+(\S+)", re.ASCII)
 
 # Pulls the source spec back out of group 1 for root resolution.
-SRC_SPEC = re.compile(r"//\s*go:\s*(sdk\s+\S+|[\w.\-/~]+@\S+)")
+SRC_SPEC = re.compile(r"//[/!]?\s*go:\s*(sdk\s+\S+|[\w.\-/~]+@\S+)")
+
+
+def bad_path(gofile):
+    """A cited path that is not a package-relative .go file."""
+    return (not gofile.endswith(".go") or os.path.isabs(gofile)
+            or ".." in gofile.split("/"))
 
 
 def _modcache():
@@ -260,6 +290,38 @@ def decl_hits(gofile, sym, free_only=False):
     return [i + 1 for i, l in enumerate(src) if any(p.match(l) for p in pats)], bare
 
 
+_helper = None
+
+
+def go_decls(gofile, sym, free):
+    """Go's own answer (tools/anchor_decls.go: go/parser, go/ast) for where
+    `sym` is declared in `gofile`, as a dict with `err`, `hits` and
+    `starts`; see that file. One helper process serves the whole run."""
+    global _helper
+    if _helper is None:
+        tmp = tempfile.mkdtemp()
+        atexit.register(shutil.rmtree, tmp, True)
+        exe = os.path.join(tmp, "anchor_decls")
+        src = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "..", "tools", "anchor_decls.go")
+        goroot = os.path.normpath(os.path.join(GOROOT, ".."))  # GOROOT is its src dir
+        built = subprocess.run([os.path.join(goroot, "bin", "go"), "build", "-o", exe, src],
+                               env=dict(os.environ, GOROOT=goroot, GOTOOLCHAIN="local",
+                                        GOFLAGS="", GOENV="off", GOCACHEPROG=""),
+                               capture_output=True, text=True)
+        if built.returncode:
+            raise RuntimeError(f"cannot build tools/anchor_decls.go: {built.stderr.strip()}")
+        _helper = subprocess.Popen([exe, GOROOT], stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, text=True)
+        atexit.register(_helper.kill)
+    _helper.stdin.write(json.dumps({"file": gofile, "sym": sym, "free": free}) + "\n")
+    _helper.stdin.flush()
+    ans = json.loads(_helper.stdout.readline())
+    if ans.get("err", "").startswith("parse"):
+        raise RuntimeError(f"{gofile}: {ans['err']}")
+    return ans
+
+
 def decl_end(gofile, start):
     """Line of the closing brace of the decl beginning at `start`.
 
@@ -370,8 +432,9 @@ def qualify(roots):
                         left += 1
                         continue
                     ty = hit.group(1)
+                    span = m.group(3) + ("-" + m.group(4) if m.group(4) else "")
                     lines[idx] = line[:m.start()] + m.group(1) + m.group(2) + ":" + \
-                        m.group(3) + "-" + m.group(4) + m.group(5) + f"{ty}.{sym}" + \
+                        span + m.group(5) + f"{ty}.{sym}" + \
                         line[m.end():]
                     changed = True
                     done += 1
@@ -380,15 +443,46 @@ def qualify(roots):
     return done, left
 
 
+def cannot_decide(why):
+    print(f"anchor_check: cannot decide: {why}", file=sys.stderr)
+    return 2
+
+
+def go_tree_problem():
+    """Why GOROOT cannot be trusted to resolve anchors, or None."""
+    if not os.path.isdir(os.path.join(GOROOT, "crypto")):
+        return f"no Go source tree at {GOROOT}"
+    try:
+        with open(os.path.join(GOROOT, "..", "VERSION")) as f:
+            got = f.readline().strip()
+    except OSError:
+        got = "unknown"
+    if got != "go" + PINNED_SDK:
+        return f"{GOROOT} is {got}, anchors name go{PINNED_SDK}"
+    return None
+
+
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    fix = "--fix" in sys.argv
-    if "--qualify" in sys.argv:
+    argv = sys.argv[1:]
+    rule = None  # legacy: resolve, UNVERIFIABLE tolerated, module anchors too
+    if "--rule" in argv:
+        i = argv.index("--rule")
+        rule = argv[i + 1] if i + 1 < len(argv) else ""
+        del argv[i:i + 2]
+        if rule not in ("resolve", "form"):
+            return cannot_decide("--rule takes resolve or form")
+    args = [a for a in argv if not a.startswith("--")]
+    fix = "--fix" in argv
+    if "--qualify" in argv:
         d, l = qualify(args or ["src"])
         print(f"anchor_check: qualified {d} bare anchors, {l} left bare")
         return 0
-    strict = "--strict" in sys.argv
+    strict = "--strict" in argv
     roots = args or ["src"]
+    why = go_tree_problem() or next(
+        (f"scope {r} is not a directory" for r in roots if not os.path.isdir(r)), None)
+    if why:
+        return cannot_decide(why)
 
     stats = collections.Counter()
     problems = []
@@ -409,10 +503,27 @@ def main():
                 changed = False
                 for idx, line in enumerate(lines):
                     m = ANCHOR.search(line)
-                    if not m:
+                    marks = len(SDK_MARK.findall(line))
+                    stats["sdk_lines"] += bool(marks)
+                    if rule == "form":
+                        # Every sdk claim must be one anchor that parses,
+                        # names the pinned version and cites a .go file.
+                        if marks:
+                            v = m and SDK_VERSION.match(m.group(1))
+                            if (marks != 1 or not v or v.group(1) != PINNED_SDK
+                                    or bad_path(m.group(2))):
+                                stats["MALFORMED"] += 1
+                                problems.append(("MALFORMED", p, idx + 1, line.strip(), "", 0, 0, None))
                         continue
-                    gofile, a, b, sym = m.group(2), int(m.group(3)), int(m.group(4)), m.group(6)
+                    if not m or (rule and not SDK_MARK.match(m.group(1))):
+                        continue
+                    gofile, a, sym = m.group(2), int(m.group(3)), m.group(6)
+                    b = int(m.group(4) or m.group(3))
                     stats["total"] += 1
+                    if rule and bad_path(gofile):
+                        stats["MISSING_FILE"] += 1
+                        problems.append(("MISSING_FILE", p, idx + 1, sym, gofile, a, b, None))
+                        continue
                     # `gofile` stays the CITED path — it is what --fix
                     # splices back and what a reader greps for. `gopath`
                     # is where it actually lives, which differs once the
@@ -441,7 +552,13 @@ def main():
                         stats["UNVERIFIABLE"] += 1
                         continue
                     free = "." not in sym and enclosing_impl(lines, idx) is None
-                    hits, bare = decl_hits(gopath, sym, free_only=free)
+                    if rule:
+                        # R1 is Go's own parse, not the line heuristics below.
+                        gd = go_decls(gofile, sym, free)
+                        hits = None if gd.get("err") == "missing" else [h["s"] for h in gd["hits"]]
+                        bare = "." not in sym
+                    else:
+                        hits, bare = decl_hits(gopath, sym, free_only=free)
                     if hits is None:
                         stats["MISSING_FILE"] += 1
                         problems.append(("MISSING_FILE", p, idx + 1, sym, gofile, a, b, None))
@@ -460,8 +577,16 @@ def main():
                         problems.append(("NOT_FOUND", p, idx + 1, sym, gofile, a, b, None))
                         continue
                     inside = [h for h in hits if a <= h <= b]
-                    covered = [d for d in decl_starts(gopath) if a <= d <= b]
-                    if not inside or len(covered) != 1:
+                    covered = [d for d in (gd["starts"] if rule else decl_starts(gopath))
+                               if a <= d <= b]
+                    # With --rule, a range that starts inside the previous
+                    # declaration holds parts of two.
+                    # It may start on that declaration's last line only if
+                    # that line is a bare closing `}` or `)`.
+                    prev = gd["hits"][hits.index(inside[0])]["prev"] if rule and inside else 0
+                    overlap = a < prev or (a == prev and not re.match(
+                        r"\s*[})]+\s*(//.*)?$", go_src(gopath)[prev - 1]))
+                    if not inside or len(covered) != 1 or overlap:
                         kind = "RANGE_WRONG" if not inside else "RANGE_FAT"
                         stats[kind] += 1
                         problems.append((kind, p, idx + 1, sym, gofile, a, b, hits))
@@ -487,7 +612,7 @@ def main():
                                 stats["UNFIXABLE"] += 1
                         continue
                     s = inside[0]
-                    e = decl_end(gopath, s)
+                    e = gd["hits"][hits.index(s)]["e"] if rule else decl_end(gopath, s)
                     if b < e - 1:
                         stats["END_SHORT"] += 1
                         problems.append(("END_SHORT", p, idx + 1, sym, gofile, a, b, [s, e]))
@@ -501,6 +626,17 @@ def main():
                     stats["ok"] += 1
                 if changed:
                     open(p, "w").write("\n".join(lines))
+
+    # Nothing to judge is not a pass.
+    if not stats["sdk_lines"] or (rule != "form" and not stats["total"]):
+        return cannot_decide(f"no anchors found under {', '.join(roots)}")
+
+    if rule == "form":
+        print(f"anchor_check: rule=form: {stats['sdk_lines']} sdk lines under "
+              f"{', '.join(roots)}, {stats['MALFORMED']} MALFORMED")
+        for kind, p, ln, text, *_ in problems:
+            print(f"    {kind:12s} {p}:{ln}  {text}")
+        return 1 if problems else 0
 
     print(f"anchor_check: {stats['total']} anchors under {', '.join(roots)}")
     for k in ("ok", "UNVERIFIABLE", "RANGE_WRONG", "RANGE_FAT", "END_SHORT", "NOT_FOUND",
@@ -538,4 +674,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception as e:  # a crash must not read as a breach
+        sys.exit(cannot_decide(f"{type(e).__name__}: {e}"))
