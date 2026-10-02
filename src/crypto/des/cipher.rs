@@ -192,13 +192,13 @@ pub fn NewTripleDESCipher(key: slice<byte>) -> (Option<TripleDESCipher>, error) 
 }
 
 impl BlockTrait for TripleDESCipher {
-    // go: sdk 1.25.5 crypto/des/cipher.go:95-95
+    // go: sdk 1.25.5 crypto/des/cipher.go:95-95 tripleDESCipher.BlockSize
     // Go: cipher.go:95 — func (c *tripleDESCipher) BlockSize() int { return BlockSize }
     fn BlockSize(&self) -> int {
         BlockSize
     }
 
-    // go: sdk 1.25.5 crypto/des/cipher.go:97-97
+    // go: sdk 1.25.5 crypto/des/cipher.go:97-129 tripleDESCipher.Encrypt
     // Go: cipher.go:97 — Encrypt: 8 rounds c1 forward, 8 rounds c2
     //   reversed, 8 rounds c3 forward.
     fn Encrypt(&self, dst: &mut slice<byte>, src: slice<byte>) {
@@ -265,7 +265,7 @@ impl BlockTrait for TripleDESCipher {
         bePutUint64(dst, permuteFinalBlock(preOutput));
     }
 
-    // go: sdk 1.25.5 crypto/des/cipher.go:132-132
+    // go: sdk 1.25.5 crypto/des/cipher.go:132-164 tripleDESCipher.Decrypt
     // Go: cipher.go:132 — Decrypt: c3 reversed, c2 forward, c1 reversed.
     fn Decrypt(&self, dst: &mut slice<byte>, src: slice<byte>) {
         if src.Len() < BlockSize {
