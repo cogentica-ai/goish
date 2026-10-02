@@ -197,6 +197,19 @@ about the cause: the runner separates `panic`, `timeout` and `fail`,
 and a timeout on an example that does not import the package you
 changed is not your regression.
 
+### Provenance
+
+`provenance.yml` re-opens every `// go: sdk 1.25.5 file.go:a-b Symbol`
+anchor under `src/crypto` against the Go 1.25.5 tree (`scripts/anchor_check.py
+--rule form` and `--rule resolve`; exit 2 means "could not decide", not a bad
+citation). `gates/` proves that checker can fail: it plants a broken anchor
+(range moved, symbol deleted, `.og` typo, a range starting inside the
+declaration above, ...), confirms the checker goes red on it, stays green on
+the clean tree and exits 2 when its evidence is unusable, then undoes every
+change. Run it with `make provenance-proof` (node >= 24; it fetches Go 1.25.5
+through `GOTOOLCHAIN` if you do not have it). Change `anchor_check.py` or
+`tools/anchor_decls.go`? Run it before you push; CI does too.
+
 ### Conventions
 
 - **goish-v1 is a git repo.** All runtime + example changes commit here.

@@ -79,7 +79,7 @@ endif
 
 .PHONY: all build e2e e2e-full e2e-build e2e-quick e2e-clean clean help \
         lint lint-new lint-update anchors manifests ifaces split-brain \
-        build-arm64 run-arm64
+        provenance-proof build-arm64 run-arm64
 
 help:
 	@echo "goish-v1 make targets:"
@@ -92,6 +92,7 @@ help:
 	@echo "  e2e-build     just build all examples (no run)"
 	@echo "  e2e-quick     cargo clean + e2e with LOOPS=5 (smoke check)"
 	@echo "  e2e-clean     remove e2e artifacts"
+	@echo "  provenance-proof  mutation proofs for scripts/anchor_check.py (needs node>=24)"
 	@echo "  lint          goishlint as a ratchet: fails only on NEW findings"
 	@echo "                (SCOPE=src/crypto to narrow; run before every commit)"
 	@echo "  lint-new      findings in files absent from the baseline — a newly"
@@ -197,6 +198,19 @@ e2e-clean:
 # targets let it shrink and never grow. See scripts/port_lint.py.
 lint: anchors manifests ifaces split-brain spin-park
 	@python3 scripts/port_lint.py --check --scope $(SCOPE)
+
+# anchor_check.py is the only thing standing behind the README's "every
+# anchor is machine-checked" claim, so it gets checked too: gates/ plants
+# deliberately broken anchors in src/crypto (range moved, symbol deleted,
+# `.og` typo, range starting inside the declaration above, ...) and
+# confirms the checker goes red on each, stays green on a clean tree, and
+# exits 2 ("cannot decide") when its evidence is unusable. Every mutation
+# is undone afterwards. Needs node >= 24; the Go 1.25.5 toolchain is
+# fetched by GOTOOLCHAIN if absent. See CONTRIBUTING.md, "Provenance".
+provenance-proof:
+	@GOROOT="$$(GOTOOLCHAIN=go1.25.5 go env GOROOT)"; export GOROOT; \
+	test -d gates/node_modules || (cd gates && npm ci); \
+	cd gates && npx redproof check && npx redproof prove
 
 # goishlint resolves an anchored symbol by name and never looks at the
 # line range, so a range can point at a different function - or nothing -
