@@ -198,7 +198,7 @@ impl CBCDecrypter {
     }
 }
 
-// go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:101-130 cryptBlocksDecGeneric
+// go: sdk 1.25.5 crypto/internal/fips140/aes/cbc.go:104-130 cryptBlocksDecGeneric
 /// Go: `func cryptBlocksDecGeneric(b *Block, civ *[BlockSize]byte, dst, src []byte)`
 ///
 /// For each block we need to XOR the decrypted data with the previous

@@ -638,7 +638,7 @@ impl keyAgreement for ecdheKeyAgreement {
         return (preMasterSecret, crate::errors::nil);
     }
 
-    // go: sdk 1.25.5 crypto/tls/key_agreement.go:280-374 ecdheKeyAgreement.processServerKeyExchange
+    // go: sdk 1.25.5 crypto/tls/key_agreement.go:283-374 ecdheKeyAgreement.processServerKeyExchange
     fn processServerKeyExchange(
         &mut self,
         config: &Config,
