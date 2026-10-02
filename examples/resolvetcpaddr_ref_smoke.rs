@@ -15,8 +15,17 @@
 //!     and fails as a lookup — "lookup 256.0.0.1: no such host" — not
 //!     as a malformed address.
 //!
+//! IPv6 literals: Go returns the v6 address for "tcp"/"tcp6" and
+//! "no suitable address found" for "tcp4". goish's TCPAddr holds four
+//! octets, so "tcp4" matches Go and "tcp"/"tcp6" return an error
+//! (pinned in DIVERGENT) instead of a zeroed 0.0.0.0 address.
+//!
+//! Not covered: a zoned literal ("[fe80::1%lo0]:80"). Go parses the zone;
+//! goish's ParseIP does not, so it falls through to a name lookup and
+//! fails "no such host" — an error, never a zeroed address.
+//!
 //! Reference generated with:
-//!   CGO_ENABLED=0 scripts/goref.sh net <resolvetcp_ref_test.go>
+//!   CGO_ENABLED=0 scripts/goref.sh net tools/gen_resolvetcpaddr_ref.go
 //! CGO_ENABLED=0 because goish reads /etc/hosts and /etc/services
 //! itself; with cgo, Go resolves through glibc and answers differently
 //! (see lookupport_ref_smoke, where cgo made " 80" a valid port).
@@ -36,7 +45,7 @@ use goish::net::tcpsock::ResolveTCPAddr;
 use goish::{fmt, string};
 
 /// Go's output, verbatim.
-const GO: [&str; 16] = [
+const GO: [&str; 20] = [
     "\"tcp\"  \"127.0.0.1:80\"         addr=\"127.0.0.1:80\"     net=\"tcp\" err=\"<nil>\"",
     "\"tcp\"  \"127.0.0.1:0\"          addr=\"127.0.0.1:0\"      net=\"tcp\" err=\"<nil>\"",
     "\"tcp4\" \"127.0.0.1:8080\"       addr=\"127.0.0.1:8080\"   net=\"tcp\" err=\"<nil>\"",
@@ -53,6 +62,10 @@ const GO: [&str; 16] = [
     "\"tcp\"  \"127.0.0.1:-1\"         addr=\"<nil>\"            net=\"\"   err=\"address -1: invalid port\"",
     "\"tcp\"  \"256.0.0.1:80\"         addr=\"<nil>\"            net=\"\"   err=\"lookup 256.0.0.1: no such host\"",
     "\"tcp\"  \"\"                     addr=\":0\"               net=\"tcp\" err=\"<nil>\"",
+    "\"tcp6\" \"127.0.0.1:80\"         addr=\"<nil>\"            net=\"\"   err=\"address 127.0.0.1: no suitable address found\"",
+    "\"tcp\"  \"[::1]:80\"             addr=\"[::1]:80\"         net=\"tcp\" err=\"<nil>\"",
+    "\"tcp6\" \"[::1]:80\"             addr=\"[::1]:80\"         net=\"tcp\" err=\"<nil>\"",
+    "\"tcp4\" \"[::1]:80\"             addr=\"<nil>\"            net=\"\"   err=\"address ::1: no suitable address found\"",
 ];
 
 static mut FAILED: i64 = 0;
@@ -71,7 +84,7 @@ static mut LINE: usize = 0;
 /// struct that every literal in the tree constructs — so the current
 /// answer is pinned rather than quietly left to be rediscovered.
 /// These indices expect goish's output; the rest expect Go's.
-const DIVERGENT: [(usize, &str); 3] = [
+const DIVERGENT: [(usize, &str); 5] = [
     (
         4,
         "\"tcp\"  \":80\"                  addr=\"0.0.0.0:80\"       net=\"tcp\" err=\"<nil>\"",
@@ -84,11 +97,23 @@ const DIVERGENT: [(usize, &str); 3] = [
         15,
         "\"tcp\"  \"\"                     addr=\"0.0.0.0:0\"        net=\"tcp\" err=\"<nil>\"",
     ),
+    // IPv6 where Go answers with the v6 address. goish's TCPAddr cannot
+    // hold one, so these are errors rather than a silently zeroed
+    // 0.0.0.0 (which Listen would bind on every interface). The tcp4
+    // rows are NOT here: Go gives the same "no suitable address" error.
+    (
+        17,
+        "\"tcp\"  \"[::1]:80\"             addr=\"<nil>\"            net=\"\"   err=\"address ::1: IPv6 is not supported by TCPAddr\"",
+    ),
+    (
+        18,
+        "\"tcp6\" \"[::1]:80\"             addr=\"<nil>\"            net=\"\"   err=\"address ::1: IPv6 is not supported by TCPAddr\"",
+    ),
 ];
 
 #[goish::main]
 fn main() {
-    let cases: [(&str, &str); 16] = [
+    let cases: [(&str, &str); 20] = [
         ("tcp", "127.0.0.1:80"),
         ("tcp", "127.0.0.1:0"),
         ("tcp4", "127.0.0.1:8080"),
@@ -105,6 +130,10 @@ fn main() {
         ("tcp", "127.0.0.1:-1"),
         ("tcp", "256.0.0.1:80"),
         ("tcp", ""),
+        ("tcp6", "127.0.0.1:80"),
+        ("tcp", "[::1]:80"),
+        ("tcp6", "[::1]:80"),
+        ("tcp4", "[::1]:80"),
     ];
     for (n, a) in cases.iter() {
         let (addr, err) = ResolveTCPAddr(string::from_static(n), string::from_static(a));
@@ -133,9 +162,9 @@ fn main() {
     if failed == 0 {
         fmt::Printf!(
             "ResolveTCPAddr: %d/%d match Go, %d pinned divergences\n",
-            n - 3,
-            n - 3,
-            3i64
+            n - DIVERGENT.len() as i64,
+            n - DIVERGENT.len() as i64,
+            DIVERGENT.len() as i64
         );
         goish::os::Exit(0);
     }

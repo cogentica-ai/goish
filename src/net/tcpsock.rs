@@ -120,6 +120,11 @@ impl TCPConn {
 ///   * "tcp4" and "tcp6" are accepted, but the address that comes back
 ///     still answers "tcp" from Network(): TCPAddr.Network is a
 ///     constant, not a record of the argument.
+///   * An IPv6 result is an ERROR here, not Go's IPv6 address: this
+///     TCPAddr holds four octets, and silently zeroing it would turn
+///     `[::1]:80` into the wildcard 0.0.0.0:80. "tcp4" gets Go's own
+///     "no suitable address found"; "tcp"/"tcp6" get a goish-only
+///     "IPv6 is not supported by TCPAddr".
 ///   * "host:" is port 0 and NOT an error, while a bare "host" is
 ///     "address host: missing port in address". An EMPTY address is
 ///     ":0".
@@ -185,9 +190,13 @@ pub fn ResolveTCPAddr<N: Into<string>, A: Into<string>>(
 
     let ip = crate::net::ParseIP(host.clone());
     if !ip.IsNil() {
+        let (octets, kind) = ipv4_octets(netw, &ip);
+        if kind != NarrowOk {
+            return (crate::nilable::nil(), narrow_error(kind, &host));
+        }
         return (
             crate::nilable::new(crate::net::TCPAddr {
-                IP: ipv4_octets(&ip),
+                IP: octets,
                 Port: port,
                 Unix: None,
             }),
@@ -202,41 +211,85 @@ pub fn ResolveTCPAddr<N: Into<string>, A: Into<string>>(
     if addrs.len() == 0 {
         return (crate::nilable::nil(), crate::net::net::errNoSuchHost.into());
     }
-    let first = addrs.get(0).cloned().unwrap_or(string::from_static(""));
-    let rip = crate::net::ParseIP(first);
-    if rip.IsNil() {
-        return (crate::nilable::nil(), crate::net::net::errNoSuchHost.into());
+    // Go: "tcp"/"tcp4" take the first IPv4 result. Where Go would fall
+    // back to an IPv6 result for "tcp"/"tcp6", this TCPAddr cannot hold
+    // it, so that is reported instead of narrowed.
+    let mut fail = NarrowNoSuitable;
+    for a in addrs.iter() {
+        let rip = crate::net::ParseIP(a.clone());
+        if rip.IsNil() {
+            continue;
+        }
+        let (octets, kind) = ipv4_octets(netw, &rip);
+        if kind == NarrowOk {
+            return (
+                crate::nilable::new(crate::net::TCPAddr {
+                    IP: octets,
+                    Port: port,
+                    Unix: None,
+                }),
+                crate::errors::nil,
+            );
+        }
+        if kind == NarrowIPv6 {
+            fail = NarrowIPv6;
+        }
     }
-    return (
-        crate::nilable::new(crate::net::TCPAddr {
-            IP: ipv4_octets(&rip),
-            Port: port,
-            Unix: None,
-        }),
-        crate::errors::nil,
-    );
+    return (crate::nilable::nil(), narrow_error(fail, &host));
 }
+
+const NarrowOk: u8 = 0;
+const NarrowNoSuitable: u8 = 1;
+const NarrowIPv6: u8 = 2;
 
 // go: none — goish-only: goish's TCPAddr carries four octets where
 // Go's carries an `IP` (a byte slice that may be v4 or v16). This
 // narrows one to the other; an IPv6 address has no representation in
-// this TCPAddr, which is a known limit of the type rather than of
-// this function.
-/// The four IPv4 octets of an `IP`, or zeroes.
-fn ipv4_octets(ip: &crate::net::IP) -> [u8; 4] {
+// this TCPAddr, so it is refused rather than zeroed (a zeroed address
+// is the wildcard, which would make a loopback Listen bind everywhere).
+// `netw` applies Go's address-family filter: "tcp4" and "tcp6" keep
+// only their own family.
+/// The four IPv4 octets of an `IP`, and why not if there are none.
+fn ipv4_octets(netw: &str, ip: &crate::net::IP) -> ([u8; 4], u8) {
     let v4 = ip.To4();
-    if v4.IsNil() {
-        return [0, 0, 0, 0];
+    if v4.IsNil() || v4.bytes.len() < 4 {
+        // An IPv6 address: Go's "tcp4" has no use for it.
+        if netw == "tcp4" {
+            return ([0, 0, 0, 0], NarrowNoSuitable);
+        }
+        return ([0, 0, 0, 0], NarrowIPv6);
     }
-    if v4.bytes.len() < 4 {
-        return [0, 0, 0, 0];
+    // An IPv4 address: Go's "tcp6" has no use for it.
+    if netw == "tcp6" {
+        return ([0, 0, 0, 0], NarrowNoSuitable);
     }
-    return [
-        *v4.bytes.get(0).unwrap_or(&0),
-        *v4.bytes.get(1).unwrap_or(&0),
-        *v4.bytes.get(2).unwrap_or(&0),
-        *v4.bytes.get(3).unwrap_or(&0),
-    ];
+    return (
+        [
+            *v4.bytes.get(0).unwrap_or(&0),
+            *v4.bytes.get(1).unwrap_or(&0),
+            *v4.bytes.get(2).unwrap_or(&0),
+            *v4.bytes.get(3).unwrap_or(&0),
+        ],
+        NarrowOk,
+    );
+}
+
+// go: none — goish-only: the IPv6-refusal error. The "no suitable
+// address found" case is Go's own `&AddrError{Err:
+// errNoSuitableAddress.Error(), Addr: host}` (net/ipsock.go
+// filterAddrList); the IPv6 case has no Go counterpart because Go's
+// TCPAddr can hold the address.
+fn narrow_error(kind: u8, host: &string) -> error {
+    let msg = if kind == NarrowIPv6 {
+        string::from_static("IPv6 is not supported by TCPAddr")
+    } else {
+        let e: error = crate::net::net::errNoSuitableAddress.into();
+        e.Error()
+    };
+    return errors::Wrap(crate::net::net::AddrError {
+        Err: msg,
+        Addr: host.clone(),
+    });
 }
 
 // go: sdk 1.25.5 net/tcpsock.go:443-466 ListenTCP
