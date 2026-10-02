@@ -55,6 +55,22 @@ jobs:
       - name: Anchors resolve against the Go 1.25.5 tree
         run: python3 scripts/anchor_check.py src
 
+      # crypto/ is held to the stricter rules: every `// go: sdk` line is a
+      # well-formed anchor naming 1.25.5, and each one resolves to exactly
+      # its declaration (boundaries from go/parser). Exit 2 means the check
+      # could not decide (no 1.25.5 tree, missing scope, no anchors, helper
+      # did not build); it fails the job, but is not a citation breach.
+      - name: crypto/ anchors are well formed and resolve
+        run: |
+          for rule in form resolve; do
+            rc=0
+            python3 scripts/anchor_check.py --rule "$rule" src/crypto || rc=$?
+            if [ "$rc" -eq 2 ]; then
+              echo "::error::anchor_check --rule $rule could not decide (see above); this is not a citation breach"
+            fi
+            [ "$rc" -eq 0 ] || exit "$rc"
+          done
+
       - name: crypto/ is still 100% by declaration
         run: |
           set -o pipefail
