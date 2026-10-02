@@ -208,7 +208,9 @@ declaration above, ...), confirms the checker goes red on it, stays green on
 the clean tree and exits 2 when its evidence is unusable, then undoes every
 change. Run it with `make provenance-proof` (node >= 24; it fetches Go 1.25.5
 through `GOTOOLCHAIN` if you do not have it). Change `anchor_check.py` or
-`tools/anchor_decls.go`? Run it before you push; CI does too.
+`tools/anchor_decls.go`? Run it before you push; CI does too. To read what
+the gate promises and which failures it proves, run `npm run describe` in
+`gates/`.
 
 ### Conventions
 

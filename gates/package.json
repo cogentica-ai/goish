@@ -4,6 +4,7 @@
   "description": "Mutation proofs for scripts/anchor_check.py (make provenance-proof)",
   "type": "module",
   "scripts": {
+    "describe": "redproof describe",
     "check": "redproof check",
     "prove": "redproof prove"
   },
